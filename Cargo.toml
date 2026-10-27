@@ -20,14 +20,16 @@ todo = "warn"
 unwrap_used = "warn"
 
 # One GPUI source per build: every gpui crate comes from the same gpui-fusion
-# revision. cc05989 is the revision liquid_glass_kit was verified against, and
-# it already ships the gpui_android backend. Bump all of them together.
+# revision. d6c8412 (2026-10-25) ships the gpui_android backend and the
+# gpui_icons Lucide set; liquid_glass_kit was verified on cc05989 and its
+# shader test passes here. Bump all of them together.
 [workspace.dependencies]
-gpui = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552", default-features = false }
-gpui_effects = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552" }
-gpui_platform = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552", features = ["wayland", "x11"] }
-gpui_android = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552" }
-gpui_wgpu = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552" }
+gpui = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5", default-features = false }
+gpui_effects = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5" }
+gpui_platform = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5", features = ["wayland"] }
+gpui_android = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5" }
+gpui_icons = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5", default-features = false, features = ["lucide-common", "lucide-connectivity", "lucide-editing", "lucide-misc"] }
+gpui_wgpu = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5" }
 
 liquid_glass_kit = { path = "crates/liquid_glass_kit" }
 rovsti_core = { path = "crates/rovsti_core" }

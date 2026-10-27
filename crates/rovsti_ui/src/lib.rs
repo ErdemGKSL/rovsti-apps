@@ -5,9 +5,11 @@
 //! flip later.
 
 pub mod components;
+pub mod motion;
 pub mod storage;
 pub mod tab_bar;
 
+pub use gpui_icons::{GpuiIcons as Icon, IconAssets};
 pub use liquid_glass_kit::{glass, motion_tokens, spring, tokens};
 
 /// Phones don't resize freely; rotation and foldables reflow instantly.

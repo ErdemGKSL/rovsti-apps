@@ -173,3 +173,22 @@ pub fn empty_state(
                 .child(body.into()),
         )
 }
+
+/// Screen background with a soft colour wash, so glass chrome has something
+/// to refract and tint (glass over a flat fill reads as a grey plate).
+pub fn backdrop(theme: Theme, accent: Hsla) -> Div {
+    let colors = theme.colors();
+    let wash = Hsla {
+        a: if theme.is_dark() { 0.28 } else { 0.18 },
+        ..accent
+    };
+    div()
+        .absolute()
+        .inset_0()
+        .bg(colors.background)
+        .child(div().absolute().inset_0().bg(gpui::linear_gradient(
+            160.0,
+            gpui::linear_color_stop(wash, 0.0),
+            gpui::linear_color_stop(Hsla { a: 0.0, ..accent }, 0.55),
+        )))
+}

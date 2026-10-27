@@ -8,6 +8,7 @@ description = "Shared liquid-glass components and app shell for the Rovsti apps.
 
 [dependencies]
 gpui.workspace = true
+gpui_icons.workspace = true
 liquid_glass_kit.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]

@@ -5,7 +5,7 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
 
 ## Foundation (done in the scaffold)
 
-- [x] Cargo workspace on gpui-fusion `cc05989` with `gpui_android`
+- [x] Cargo workspace on gpui-fusion `d6c8412` with `gpui_android`
 - [x] Liquid-glass kit, shared tab bar and components
 - [x] Phone number normalisation and matching (`rovsti_core`)
 - [x] Arrival-alarm state machine with adaptive GPS polling (`rovsti_geo`)

@@ -7,7 +7,7 @@
   `[patch.crates-io]` in sync with gpui-fusion's root manifest at that rev. Never
   add `gpui` from crates.io or zed-industries.
 - Never invent GPUI APIs. The fork moves fast, so grep its source at the pinned rev
-  (`~/.cargo/git/checkouts/gpui-fusion-*/cc05989/crates/gpui`).
+  (`~/.cargo/git/checkouts/gpui-fusion-*/d6c8412/crates/gpui`).
 - UI follows `.claude/skills/liquid-glass-gpui` (read its SKILL.md before UI work).
   Product choices are set in `crates/rovsti_ui/src/lib.rs`
   (`ANIMATED_RESIZE = false`, `FOLLOW_SYSTEM_THEME = true`).

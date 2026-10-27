@@ -16,8 +16,9 @@ gpui-fusion, its own Android backend is the only option that gives both. It cove
 touch, inertial scrolling, IME, clipboard, lifecycle, sharing, notifications,
 foreground data sync, accessibility through AccessKit, and Vulkan with a GLES fallback.
 
-The pinned rev is `cc05989` (2026-10-22). It is the rev `liquid_glass_kit` was
-verified against, and it already includes `gpui_android`.
+The pinned rev is `d6c8412` (2026-10-25). It includes `gpui_android` and
+`gpui_icons` (Lucide icons as typed GPUI assets). `liquid_glass_kit` was written
+against `cc05989`, and its shader validation still passes on this rev.
 
 ## Layers
 

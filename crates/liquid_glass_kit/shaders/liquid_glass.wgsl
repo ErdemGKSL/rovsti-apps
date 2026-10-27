@@ -154,7 +154,10 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
         color = color + vec3<f32>(extra.z * (0.08 + 0.15 * spot));
     }
 
-    var coverage = 1.0 - smoothstep(-0.5, 0.5, sd);
+    // Edge anti-aliasing: a linear ramp ~1.5 device px wide centred on the
+    // silhouette. A 1 px smoothstep reads as stair-stepped on curves at 1x
+    // scale; a linear ramp keeps the gradient even across the arc.
+    var coverage = lg_edge_coverage(sd);
     color = clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
 
     // ---- Dark rim: a thin black outline CENTRED on the silhouette (half of it
@@ -167,7 +170,8 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     // and read as a one-sided shadow.
     if (extra.y > 0.0 && rim_w > 0.0) {
         let half_w = rim_w;
-        let stroke = 1.0 - smoothstep(half_w - 0.5, half_w + 0.5, abs(sd));
+        // Both sides of the stroke get the same soft ramp as the silhouette.
+        let stroke = lg_edge_coverage(abs(sd) - half_w);
         let a1 = lg_flank(p, half_size, l);
         let a2 = lg_flank(p, half_size, vec2<f32>(-l.y, l.x));
         let profile = 1.0 - (1.0 - a1) * (1.0 - a2);
@@ -178,6 +182,13 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
         return vec4<f32>(rgb, out_a);
     }
     return vec4<f32>(color, coverage);
+}
+
+// Fraction of a device pixel covered by the shape at signed distance `sd`
+// (device px, negative inside).
+const LG_AA_WIDTH: f32 = 1.5;
+fn lg_edge_coverage(sd: f32) -> f32 {
+    return clamp(0.5 - sd / LG_AA_WIDTH, 0.0, 1.0);
 }
 
 // 0 in the middle of the shape, 1 at the two corners that lie on `axis`.

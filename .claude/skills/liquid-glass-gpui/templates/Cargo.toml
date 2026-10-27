@@ -1,0 +1,41 @@
+[package]
+name = "liquid_glass_kit"
+version = "0.1.0"
+edition = "2024"
+
+# gpui-fusion is a GPUI fork and is not on crates.io. Pin a revision: the fork
+# moves fast and its API is not stable. All three crates must come from the
+# same revision.
+[dependencies]
+gpui = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552", default-features = false }
+gpui_effects = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552" }
+
+[dev-dependencies]
+gpui_platform = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552", features = ["font-kit", "wayland", "x11"] }
+# For tests/shader_validates.rs (same major version as the fork uses).
+naga = { version = "30", features = ["wgsl-in"] }
+# For tests/glass_snapshot.rs (offscreen render to PNG).
+gpui_wgpu = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552" }
+image = "0.25"
+anyhow = "1"
+
+# Opt-in: headless, frame-by-frame screenshots of the demo (tests/headless_frames.rs).
+# Kept behind a feature so `gpui/test-support` never leaks into normal builds.
+[features]
+headless-tests = ["gpui/test-support"]
+
+[[test]]
+name = "headless_frames"
+required-features = ["headless-tests"]
+
+[[example]]
+name = "glass_demo"
+path = "examples/glass_demo.rs"
+
+# gpui-fusion's workspace patches some crates.io dependencies. `[patch]` in a
+# dependency is ignored, so a consuming workspace must repeat these lines.
+[patch.crates-io]
+async-process = { git = "https://github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }
+async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }
+windows-capture = { git = "https://github.com/zed-industries/windows-capture.git", rev = "f0d6c1b6691db75461b732f6d5ff56eed002eeb9" }
+calloop = { git = "https://github.com/zed-industries/calloop" }

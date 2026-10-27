@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cradiy/gpuiforge/main/gpuiforge.schema.json",
+  "app": {
+    "name": "Rovsti Phone"
+  },
+  "platforms": {
+    "android": {
+      "abis": ["arm64-v8a", "x86_64"],
+      "application-id": "dev.rovsti.phone",
+      "features": ["notifications", "audio-routing"],
+      "permissions": [
+        "android.permission.CALL_PHONE",
+        "android.permission.READ_CALL_LOG",
+        "android.permission.WRITE_CALL_LOG",
+        "android.permission.READ_CONTACTS",
+        "android.permission.WRITE_CONTACTS",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.MANAGE_OWN_CALLS",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.USE_FULL_SCREEN_INTENT",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN"
+      ],
+      "url-schemes": ["tel"]
+    },
+    "desktop": {
+      "build": [{ "program": "cargo", "args": ["build", "-p", "rovsti_phone", "--profile", "{{cargo_profile}}"] }],
+      "run": [{ "program": "cargo", "args": ["run", "-p", "rovsti_phone", "--profile", "{{cargo_profile}}"] }]
+    }
+  }
+}

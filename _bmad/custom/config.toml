@@ -1,0 +1,13 @@
+# Team / enterprise overrides for _bmad/config.toml.
+# Committed to the repo — applies to every developer on the project.
+# Tables deep-merge over base config; keyed entries merge by key.
+# Example: override an agent descriptor, or add a new agent.
+#
+# [agents.bmad-agent-pm]
+# description = "Prefers short, bulleted PRDs over narrative drafts."
+
+# Chat with the user in English; every written artifact (docs, specs, stories, code) stays English.
+[core]
+communication_language = "English"
+document_output_language = "English"
+project_name = "rovsti-apps"

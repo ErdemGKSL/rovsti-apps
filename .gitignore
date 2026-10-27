@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+.DS_Store
+*.apk
+*.aab
+local.properties
+.gradle/
+# Personal BMAD overrides
+_bmad/config.user.toml
+_bmad/custom/*.user.toml
+_bmad/render/
+# Local WhatsApp session databases from desktop runs
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cradiy/gpuiforge/main/gpuiforge.schema.json",
+  "app": {
+    "name": "Rovsti Messages"
+  },
+  "platforms": {
+    "android": {
+      "abis": ["arm64-v8a", "x86_64"],
+      "application-id": "dev.rovsti.messages",
+      "features": ["network", "sharing", "notifications", "data-sync"],
+      "permissions": [
+        "android.permission.READ_SMS",
+        "android.permission.SEND_SMS",
+        "android.permission.RECEIVE_SMS",
+        "android.permission.RECEIVE_MMS",
+        "android.permission.RECEIVE_WAP_PUSH",
+        "android.permission.READ_CONTACTS",
+        "android.permission.READ_PHONE_STATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+      ],
+      "share-mime-types": ["text/plain", "image/*"],
+      "url-schemes": ["sms", "smsto"]
+    },
+    "desktop": {
+      "build": [{ "program": "cargo", "args": ["build", "-p", "rovsti_messages", "--profile", "{{cargo_profile}}"] }],
+      "run": [{ "program": "cargo", "args": ["run", "-p", "rovsti_messages", "--profile", "{{cargo_profile}}"] }]
+    }
+  }
+}

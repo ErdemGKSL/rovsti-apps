@@ -1,0 +1,72 @@
+[workspace]
+resolver = "3"
+members = ["apps/*", "crates/*"]
+default-members = ["apps/*", "crates/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "allow"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+# One GPUI source per build: every gpui crate comes from the same gpui-fusion
+# revision. cc05989 is the revision liquid_glass_kit was verified against, and
+# it already ships the gpui_android backend. Bump all of them together.
+[workspace.dependencies]
+gpui = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552", default-features = false }
+gpui_effects = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552" }
+gpui_platform = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552", features = ["wayland", "x11"] }
+gpui_android = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552" }
+gpui_wgpu = { git = "https://github.com/cradiy/gpui-fusion", rev = "cc05989761a2a903f0af0117fddd6537572c0552" }
+
+liquid_glass_kit = { path = "crates/liquid_glass_kit" }
+rovsti_core = { path = "crates/rovsti_core" }
+rovsti_ui = { path = "crates/rovsti_ui" }
+rovsti_android = { path = "crates/rovsti_android" }
+rovsti_geo = { path = "crates/rovsti_geo" }
+rovsti_whatsapp = { path = "crates/rovsti_whatsapp" }
+
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+futures = "0.3"
+jni = "0.21.1"
+qrcode = { version = "0.14", default-features = false, features = ["image"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Default features minus `simd`, which needs nightly (portable_simd).
+whatsapp-rust = { version = "0.7", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native"] }
+naga = { version = "30", features = ["wgsl-in"] }
+
+# gpui-fusion patches some crates.io dependencies. `[patch]` in a dependency is
+# ignored, so the consuming workspace must repeat these lines (keep in sync
+# with gpui-fusion's root Cargo.toml at the pinned revision).
+[patch.crates-io]
+async-process = { git = "https://github.com/zed-industries/async-process.git", rev = "0b6d6713570af61806e1e5cb40e0f757cb93fd9d" }
+async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }
+windows-capture = { git = "https://github.com/zed-industries/windows-capture.git", rev = "f0d6c1b6691db75461b732f6d5ff56eed002eeb9" }
+calloop = { git = "https://github.com/zed-industries/calloop" }
+
+[profile.dev]
+# gpui debug builds are huge; keep dependency debuginfo light.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

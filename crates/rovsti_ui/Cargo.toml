@@ -1,0 +1,17 @@
+[package]
+name = "rovsti_ui"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Shared liquid-glass components and app shell for the Rovsti apps."
+
+[dependencies]
+gpui.workspace = true
+liquid_glass_kit.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+gpui_android.workspace = true
+
+[lints]
+workspace = true

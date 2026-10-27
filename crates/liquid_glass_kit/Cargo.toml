@@ -1,0 +1,30 @@
+[package]
+name = "liquid_glass_kit"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Liquid glass material + spring motion for gpui-fusion (from .claude/skills/liquid-glass-gpui)."
+
+[dependencies]
+gpui.workspace = true
+gpui_effects.workspace = true
+
+[dev-dependencies]
+gpui_platform.workspace = true
+gpui_wgpu.workspace = true
+naga.workspace = true
+image.workspace = true
+anyhow.workspace = true
+
+# Opt-in: headless, frame-by-frame screenshots of the demo (tests/headless_frames.rs).
+[features]
+headless-tests = ["gpui/test-support"]
+
+[[test]]
+name = "headless_frames"
+required-features = ["headless-tests"]
+
+[[example]]
+name = "glass_demo"
+path = "examples/glass_demo.rs"

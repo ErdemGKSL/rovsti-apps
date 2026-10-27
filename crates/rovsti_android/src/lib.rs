@@ -1,0 +1,28 @@
+//! Android system integration shared by the Rovsti apps.
+//!
+//! GPUI (through `gpui_android`) owns the window, input and rendering. What
+//! it does not cover — default dialer/SMS roles, telephony providers, OEM
+//! battery settings — lives in a small Kotlin class, `dev.rovsti.bridge.RovstiBridge`
+//! (`kotlin/` in this crate), which each app copies into its ejected Gradle
+//! project. Rust calls its static methods through [`bridge`].
+//!
+//! Every function also compiles on desktop, where it returns
+//! [`Error::Unsupported`], so the apps run under `cargo run` for UI work.
+
+pub mod bridge;
+pub mod roles;
+pub mod telecom;
+pub mod xiaomi;
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("not available on this platform")]
+    Unsupported,
+    #[error("RovstiBridge.nativeInit has not run; is the Kotlin bridge packaged?")]
+    NotInitialized,
+    #[cfg(target_os = "android")]
+    #[error(transparent)]
+    Jni(#[from] jni::errors::Error),
+}
+
+pub type Result<T, E = Error> = std::result::Result<T, E>;

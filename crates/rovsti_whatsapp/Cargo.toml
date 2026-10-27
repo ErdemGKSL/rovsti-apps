@@ -1,0 +1,20 @@
+[package]
+name = "rovsti_whatsapp"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Local, serverless WhatsApp companion-device session for Rovsti Messages (whatsapp-rust)."
+
+[dependencies]
+rovsti_core.workspace = true
+whatsapp-rust.workspace = true
+tokio.workspace = true
+futures.workspace = true
+qrcode.workspace = true
+image.workspace = true
+log.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

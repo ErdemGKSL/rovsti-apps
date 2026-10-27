@@ -1,0 +1,23 @@
+[package]
+name = "rovsti_messages"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Rovsti Messages: SMS and WhatsApp in one liquid-glass inbox."
+
+[dependencies]
+gpui.workspace = true
+gpui_platform.workspace = true
+futures.workspace = true
+rovsti_android.workspace = true
+rovsti_core.workspace = true
+rovsti_ui.workspace = true
+rovsti_whatsapp.workspace = true
+log.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+gpui_android.workspace = true
+
+[lints]
+workspace = true

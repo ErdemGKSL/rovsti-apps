@@ -83,7 +83,7 @@ impl Backend {
         snapshot.now_ms = now_ms();
         snapshot.keyguard_locked = self.preview_locked;
         edit(&mut snapshot);
-        if self.calls.apply(snapshot) {
+        if self.calls.apply(snapshot).applied {
             cx.notify();
         }
     }

@@ -14,6 +14,7 @@ pub mod lru;
 pub mod perf;
 pub mod phone_number;
 pub mod recents;
+pub mod scene;
 pub mod search;
 pub mod setup;
 pub mod small_text;

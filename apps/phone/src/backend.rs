@@ -704,7 +704,7 @@ impl Backend {
         match event.kind.as_str() {
             kind::CALLS => match serde_json::from_str::<CallSnapshot>(&event.json) {
                 Ok(snapshot) => {
-                    if self.calls.apply(snapshot) {
+                    if self.calls.apply(snapshot).applied {
                         cx.notify();
                     }
                 }

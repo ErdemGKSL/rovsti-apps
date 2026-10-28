@@ -6,6 +6,7 @@
 
 use crate::audio::{Diff, EndpointList, EndpointTracker};
 use crate::phone_number::PhoneNumber;
+use crate::scene::SceneDiff;
 use crate::small_text::SmallText;
 pub use crate::wire::{AudioRoute, DisconnectCause};
 use crate::wire::{AudioState, CallSnapshot, WireCall, WireCallState};
@@ -55,6 +56,9 @@ pub struct CallModel {
     endpoints: EndpointTracker,
     /// `None` until the first snapshot is applied, so seq 0 is accepted.
     held_seq: Option<u64>,
+    /// The last call that ended while the screen was up. Kotlin drops it from
+    /// the next snapshot; the Ended overlay needs it until it has played.
+    ended: Option<WireCall>,
 }
 
 impl CallModel {
@@ -62,20 +66,50 @@ impl CallModel {
         Self::default()
     }
 
-    /// The reducer. A snapshot whose `seq` is lower than the held one is
-    /// ignored; equal or higher replaces the state. Returns whether the
-    /// state was replaced. The snapshot is moved in, so there is no copy.
-    pub fn apply(&mut self, snapshot: CallSnapshot) -> bool {
-        if self.held_seq.is_some_and(|held| snapshot.seq < held) {
-            return false;
+    /// The reducer. A snapshot whose `seq` is equal to or lower than the held
+    /// one is ignored (Kotlin sends a higher `seq` for every change); the
+    /// first snapshot is accepted even at seq 0. The snapshot is moved in, so
+    /// there is no copy. Returns what changed in the scene; `applied` is false
+    /// for an ignored snapshot.
+    ///
+    /// Every snapshot is applied in order even when no frame is drawn, so the
+    /// model never skips a state a view has not seen.
+    pub fn apply(&mut self, snapshot: CallSnapshot) -> SceneDiff {
+        if self.held_seq.is_some_and(|held| snapshot.seq <= held) {
+            return SceneDiff::default();
         }
         self.held_seq = Some(snapshot.seq);
+        let in_call = !snapshot.calls.is_empty();
+        let endpoints_changed = self.endpoints.observe(&snapshot.audio.endpoints, in_call);
+        let diff = SceneDiff::between(&self.snapshot, &snapshot, endpoints_changed);
+        self.keep_ended(&snapshot);
         self.snapshot = snapshot;
-        self.endpoints.observe(
-            &self.snapshot.audio.endpoints,
-            !self.snapshot.calls.is_empty(),
-        );
-        true
+        diff
+    }
+
+    /// Keeps a copy of a call that has just ended (the `ended_call_id` call, or
+    /// a foreground call that is now over) for the Ended overlay.
+    fn keep_ended(&mut self, snapshot: &CallSnapshot) {
+        let over = |id: Option<i32>| {
+            id.and_then(|id| snapshot.calls.iter().find(|c| c.id == id))
+                .filter(|c| c.state == WireCallState::Disconnected)
+        };
+        let found = over(snapshot.ended_call_id).or_else(|| over(snapshot.foreground_call_id));
+        if let Some(call) = found
+            && self.ended.as_ref() != Some(call)
+        {
+            self.ended = Some(call.clone());
+        }
+    }
+
+    /// The call that just ended, kept until [`dismiss_ended`](Self::dismiss_ended).
+    pub fn ended(&self) -> Option<&WireCall> {
+        self.ended.as_ref()
+    }
+
+    /// The Ended overlay has played.
+    pub fn dismiss_ended(&mut self) {
+        self.ended = None;
     }
 
     /// The audio route list, rebuilt only when the endpoint part of a snapshot
@@ -378,7 +412,7 @@ mod tests {
     fn first_snapshot_is_accepted_even_at_seq_zero() {
         let mut m = CallModel::new();
         assert_eq!(m.seq(), None);
-        assert!(m.apply(snap(0)));
+        assert!(m.apply(snap(0)).applied);
         assert_eq!(m.seq(), Some(0));
     }
 
@@ -387,26 +421,79 @@ mod tests {
         let mut m = CallModel::new();
         let mut a = snap(5);
         a.now_ms = 111;
-        assert!(m.apply(a));
+        assert!(m.apply(a).applied);
         let mut stale = snap(4);
         stale.now_ms = 999;
-        assert!(!m.apply(stale));
+        assert!(!m.apply(stale).applied);
         assert_eq!(m.now_ms(), 111);
         assert_eq!(m.seq(), Some(5));
     }
 
     #[test]
-    fn equal_or_higher_seq_replaces() {
+    fn equal_seq_is_ignored_and_higher_replaces() {
         let mut m = CallModel::new();
         m.apply(snap(5));
         let mut same = snap(5);
         same.now_ms = 7;
-        assert!(m.apply(same));
-        assert_eq!(m.now_ms(), 7);
+        assert!(!m.apply(same).applied);
+        assert_eq!(m.now_ms(), 0);
         let mut newer = snap(6);
         newer.now_ms = 8;
-        assert!(m.apply(newer));
+        assert!(m.apply(newer).applied);
         assert_eq!(m.now_ms(), 8);
+    }
+
+    #[test]
+    fn a_timer_tick_snapshot_applies_but_changes_nothing() {
+        let mut m = CallModel::new();
+        let mut a = snap(1);
+        a.calls = vec![call(1, WireCallState::Active)];
+        a.foreground_call_id = Some(1);
+        m.apply(a.clone());
+        a.seq = 2;
+        a.now_ms = 5_000;
+        let diff = m.apply(a);
+        assert!(diff.applied && !diff.changed());
+    }
+
+    #[test]
+    fn snapshots_apply_in_order_without_a_frame() {
+        let mut m = CallModel::new();
+        for seq in 1..=3 {
+            let mut s = snap(seq);
+            s.calls = vec![call(seq as i32, WireCallState::Active)];
+            s.foreground_call_id = Some(seq as i32);
+            assert!(m.apply(s).applied);
+        }
+        assert_eq!(m.foreground().map(|c| c.id), Some(3));
+    }
+
+    #[test]
+    fn the_ended_call_is_kept_for_the_overlay() {
+        let mut m = CallModel::new();
+        let mut live = snap(1);
+        live.calls = vec![
+            call(1, WireCallState::Active),
+            call(2, WireCallState::Disconnected),
+        ];
+        live.foreground_call_id = Some(1);
+        live.ended_call_id = Some(2);
+        assert!(m.apply(live).ended);
+        assert_eq!(m.ended().map(|c| c.id), Some(2));
+        // Kotlin drops it from the next snapshot; the model still has it.
+        let mut next = snap(2);
+        next.calls = vec![call(1, WireCallState::Active)];
+        next.foreground_call_id = Some(1);
+        m.apply(next);
+        assert_eq!(m.ended().map(|c| c.id), Some(2));
+        m.dismiss_ended();
+        assert!(m.ended().is_none());
+        // A foreground call that is over is kept too.
+        let mut over = snap(3);
+        over.calls = vec![call(1, WireCallState::Disconnected)];
+        over.foreground_call_id = Some(1);
+        m.apply(over);
+        assert_eq!(m.ended().map(|c| c.id), Some(1));
     }
 
     #[test]
@@ -414,7 +501,7 @@ mod tests {
         let mut m = CallModel::new();
         m.apply(snap(9));
         m.reset();
-        assert!(m.apply(snap(1)));
+        assert!(m.apply(snap(1)).applied);
     }
 
     #[test]

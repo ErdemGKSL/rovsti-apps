@@ -196,7 +196,7 @@ development_status:
   14-15-manifest-and-permission-additions-check-apk-sh-and-desktop-s: review
   epic-14-retrospective: optional
 
-  epic-15: backlog
+  epic-15: in-progress
   15-1-kotlin-multi-call-model-and-spike-s4-probe: review
   15-2-the-pendingop-machine-and-multi-call-commands: review
   15-3-rust-call-scene-integration-and-commands: review

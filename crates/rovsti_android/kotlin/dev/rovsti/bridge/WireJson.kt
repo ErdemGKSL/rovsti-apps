@@ -12,11 +12,62 @@ import org.json.JSONObject
 
 const val WIRE_VERSION = 1
 
+/** Bit constants shared with `rovsti_core::wire::{caps, props, features}` (AD-24); pinned by tests. */
+object Wire {
+    object Caps {
+        const val HOLD = 1
+        const val SUPPORT_HOLD = 2
+        const val MERGE = 4
+        const val SWAP = 8
+        const val MANAGE = 16
+        const val SPLIT = 32
+        const val DISCONNECT_PARTICIPANT = 64
+        const val RESPOND_VIA_TEXT = 128
+        const val MUTE = 256
+        const val ADD_PARTICIPANT = 512
+        val ALL = intArrayOf(HOLD, SUPPORT_HOLD, MERGE, SWAP, MANAGE, SPLIT, DISCONNECT_PARTICIPANT, RESPOND_VIA_TEXT, MUTE, ADD_PARTICIPANT)
+    }
+
+    object Props {
+        const val CONFERENCE = 1
+        const val HD = 2
+        const val WIFI = 4
+        const val EMERGENCY = 8
+        val ALL = intArrayOf(CONFERENCE, HD, WIFI, EMERGENCY)
+    }
+
+    object Features {
+        const val HD = 1
+        const val WIFI = 2
+        const val VOLTE = 4
+        const val VIDEO = 8
+        val ALL = intArrayOf(HD, WIFI, VOLTE, VIDEO)
+    }
+}
+
+/** One audio output (`audio.endpoints[]`, AD-23). [name] is sent for bluetooth, wired and unknown only. */
+data class EndpointInfo(
+    val id: String,
+    val type: String,
+    val name: String? = null,
+    val selected: Boolean = false,
+    val hint: String? = null,
+)
+
 data class AudioInfo(
     val muted: Boolean = false,
     val route: String = "earpiece",
     val routes: List<String> = emptyList(),
-)
+    val endpoints: List<EndpointInfo> = emptyList(),
+) {
+    companion object {
+        /** `route` and `routes` derived from [endpoints] (AD-23); [fallback] when none is selected. */
+        fun derived(muted: Boolean, endpoints: List<EndpointInfo>, fallback: String = "earpiece"): AudioInfo {
+            val route = endpoints.firstOrNull { it.selected }?.type ?: fallback
+            return AudioInfo(muted, route, endpoints.map { it.type }.distinct(), endpoints)
+        }
+    }
+}
 
 data class CallInfo(
     val id: Int,
@@ -29,7 +80,16 @@ data class CallInfo(
     val canHold: Boolean = false,
     val isIncoming: Boolean = false,
     val disconnectCause: String? = null,
+    val parentId: Int? = null,
+    val children: List<Int> = emptyList(),
+    val caps: Int = 0,
+    val props: Int = 0,
+    val accountKey: String? = null,
+    val displayNameAlt: String? = null,
+    val holdSinceMs: Long? = null,
 )
+
+data class AccountRef(val key: String, val label: String = "")
 
 data class SnapshotData(
     val seq: Long,
@@ -38,6 +98,17 @@ data class SnapshotData(
     val audio: AudioInfo = AudioInfo(),
     val foregroundCallId: Int? = null,
     val waitingCallId: Int? = null,
+    val backgroundCallId: Int? = null,
+    val endedCallId: Int? = null,
+    val canAddCall: Boolean = false,
+    val canMerge: Boolean = false,
+    val canSwap: Boolean = false,
+    val pending: String? = null,
+    val pendingFailed: String? = null,
+    val ringerSilenced: Boolean = false,
+    val silencedBy: String? = null,
+    val selectingAccount: Boolean = false,
+    val accounts: List<AccountRef> = emptyList(),
     val calls: List<CallInfo> = emptyList(),
 )
 
@@ -68,6 +139,11 @@ object SnapshotJson {
             .put("muted", data.audio.muted)
             .put("route", data.audio.route)
             .put("routes", JSONArray(data.audio.routes))
+        if (data.audio.endpoints.isNotEmpty()) {
+            val endpoints = JSONArray()
+            for (e in data.audio.endpoints) endpoints.put(endpointJson(e))
+            audio.put("endpoints", endpoints)
+        }
         val calls = JSONArray()
         for (c in data.calls) calls.put(callJson(c))
         val out = JSONObject()
@@ -78,10 +154,38 @@ object SnapshotJson {
             .put("audio", audio)
         data.foregroundCallId?.let { out.put("foreground_call_id", it) }
         data.waitingCallId?.let { out.put("waiting_call_id", it) }
+        data.backgroundCallId?.let { out.put("background_call_id", it) }
+        data.endedCallId?.let { out.put("ended_call_id", it) }
+        if (data.canAddCall) out.put("can_add_call", true)
+        if (data.canMerge) out.put("can_merge", true)
+        if (data.canSwap) out.put("can_swap", true)
+        data.pending?.let { out.put("pending", it) }
+        data.pendingFailed?.let { out.put("pending_failed", it) }
+        if (data.ringerSilenced) out.put("ringer_silenced", true)
+        data.silencedBy?.let { out.put("silenced_by", it) }
+        if (data.selectingAccount) out.put("selecting_account", true)
+        if (data.accounts.isNotEmpty()) {
+            val accounts = JSONArray()
+            for (a in data.accounts) {
+                accounts.put(JSONObject().put("key", a.key).apply { if (a.label.isNotEmpty()) put("label", a.label) })
+            }
+            out.put("accounts", accounts)
+        }
         return out.put("calls", calls)
     }
 
     fun toJson(data: SnapshotData): String = build(data).toString()
+
+    /** Test-visible alias: the snapshot a structured input produces (story 14.0c). */
+    fun buildSnapshot(data: SnapshotData): JSONObject = build(data)
+
+    private fun endpointJson(e: EndpointInfo): JSONObject {
+        val o = JSONObject().put("id", e.id).put("type", e.type)
+        e.name?.let { o.put("name", it) }
+        if (e.selected) o.put("selected", true)
+        e.hint?.let { o.put("hint", it) }
+        return o
+    }
 
     private fun callJson(c: CallInfo): JSONObject {
         val o = JSONObject()
@@ -95,6 +199,13 @@ object SnapshotJson {
         if (c.canHold) o.put("can_hold", true)
         if (c.isIncoming) o.put("is_incoming", true)
         c.disconnectCause?.let { o.put("disconnect_cause", it) }
+        c.parentId?.let { o.put("parent_id", it) }
+        if (c.children.isNotEmpty()) o.put("children", JSONArray(c.children))
+        if (c.caps != 0) o.put("caps", c.caps)
+        if (c.props != 0) o.put("props", c.props)
+        c.accountKey?.let { o.put("account_key", it) }
+        c.displayNameAlt?.let { o.put("display_name_alt", it) }
+        c.holdSinceMs?.let { o.put("hold_since_ms", it) }
         return o
     }
 
@@ -106,6 +217,18 @@ object SnapshotJson {
             muted = a?.optBoolean("muted", false) ?: false,
             route = a?.optString("route", "earpiece") ?: "earpiece",
             routes = List(routes?.length() ?: 0) { routes!!.getString(it) },
+            endpoints = a?.optJSONArray("endpoints")?.let { arr ->
+                List(arr.length()) { i ->
+                    val e = arr.getJSONObject(i)
+                    EndpointInfo(
+                        id = e.getString("id"),
+                        type = e.optString("type", "unknown"),
+                        name = if (e.has("name")) e.getString("name") else null,
+                        selected = e.optBoolean("selected", false),
+                        hint = if (e.has("hint")) e.getString("hint") else null,
+                    )
+                }
+            } ?: emptyList(),
         )
         val arr = o.optJSONArray("calls")
         val calls = List(arr?.length() ?: 0) { i ->
@@ -121,6 +244,13 @@ object SnapshotJson {
                 canHold = c.optBoolean("can_hold", false),
                 isIncoming = c.optBoolean("is_incoming", false),
                 disconnectCause = if (c.has("disconnect_cause")) c.getString("disconnect_cause") else null,
+                parentId = if (c.has("parent_id")) c.getInt("parent_id") else null,
+                children = c.optJSONArray("children")?.let { ch -> List(ch.length()) { ch.getInt(it) } } ?: emptyList(),
+                caps = c.optInt("caps", 0),
+                props = c.optInt("props", 0),
+                accountKey = if (c.has("account_key")) c.getString("account_key") else null,
+                displayNameAlt = if (c.has("display_name_alt")) c.getString("display_name_alt") else null,
+                holdSinceMs = if (c.has("hold_since_ms")) c.getLong("hold_since_ms") else null,
             )
         }
         return SnapshotData(
@@ -130,6 +260,19 @@ object SnapshotJson {
             audio = audio,
             foregroundCallId = if (o.has("foreground_call_id")) o.getInt("foreground_call_id") else null,
             waitingCallId = if (o.has("waiting_call_id")) o.getInt("waiting_call_id") else null,
+            backgroundCallId = if (o.has("background_call_id")) o.getInt("background_call_id") else null,
+            endedCallId = if (o.has("ended_call_id")) o.getInt("ended_call_id") else null,
+            canAddCall = o.optBoolean("can_add_call", false),
+            canMerge = o.optBoolean("can_merge", false),
+            canSwap = o.optBoolean("can_swap", false),
+            pending = if (o.has("pending")) o.getString("pending") else null,
+            pendingFailed = if (o.has("pending_failed")) o.getString("pending_failed") else null,
+            ringerSilenced = o.optBoolean("ringer_silenced", false),
+            silencedBy = if (o.has("silenced_by")) o.getString("silenced_by") else null,
+            selectingAccount = o.optBoolean("selecting_account", false),
+            accounts = o.optJSONArray("accounts")?.let { arr ->
+                List(arr.length()) { i -> arr.getJSONObject(i).let { AccountRef(it.getString("key"), it.optString("label", "")) } }
+            } ?: emptyList(),
             calls = calls,
         )
     }

@@ -98,7 +98,7 @@ string and never throw.
 | `hearingAidCompatible()` + | 14.8 | Boolean |
 | `diagnostics(probe)` + | 14.0f | one `pass|fail|unknown` line per check |
 
-## 5. Bit constants (Rust `wire::caps|props|features`, Kotlin `Wire.kt`/`WireJson.kt`)
+## 5. Bit constants (Rust `wire::caps|props|features`, Kotlin `WireJson.kt`)
 
 `caps`: hold=1, support_hold=2, merge=4, swap=8, manage=16, split=32,
 disconnect_participant=64, respond_via_text=128, mute=256, add_participant=512.

@@ -187,10 +187,10 @@ development_status:
   14-6-route-popover-its-open-triggers-and-s17-route-bloom: review
   14-7-live-updates-s18-device-arrival-and-the-names-row: review
   14-8-shortcut-footer-hearing-aid-hint-and-compatibility-value: review
-  14-9-provider-and-seam-wire-structs-with-golden-fixtures: backlog
-  14-10-rovsti_core-scene-and-scenediff: backlog
-  14-11-rovsti_core-settings-prefsv2-and-upgrade-chain: backlog
-  14-12-prefs-v2-storage-migration-prefswriter-and-backend-settings: backlog
+  14-9-provider-and-seam-wire-structs-with-golden-fixtures: review
+  14-10-rovsti_core-scene-and-scenediff: review
+  14-11-rovsti_core-settings-prefsv2-and-upgrade-chain: review
+  14-12-prefs-v2-storage-migration-prefswriter-and-backend-settings: review
   14-13-rovsti_core-names-and-blocklist-blockset: backlog
   14-14-t9-index-frequent-and-is_emergency: backlog
   14-15-manifest-and-permission-additions-check-apk-sh-and-desktop-s: backlog

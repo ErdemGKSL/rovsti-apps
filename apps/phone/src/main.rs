@@ -277,6 +277,9 @@ impl PhoneApp {
                 let active = window.is_window_active();
                 if active {
                     this.app_activated(cx);
+                } else {
+                    // The process may be killed while in the background.
+                    this.backend.read(cx).flush_prefs();
                 }
                 this.recents_window_active(active, cx);
             }),
@@ -605,7 +608,7 @@ impl PhoneApp {
             // Remembered for the next launch (written off the UI thread).
             if let Ok(tab) = u8::try_from(index) {
                 self.backend.update(cx, |backend, cx| {
-                    backend.update_prefs(cx, |prefs| prefs.last_tab = Some(tab));
+                    backend.update_prefs(cx, |prefs| prefs.ui.last_tab = Some(tab));
                 });
             }
         } else {

@@ -347,7 +347,7 @@ impl PhoneApp {
         let missed = match &self.recents.log {
             Some(log) => rovsti_core::call_log::missed_badge(
                 &log.entries,
-                self.backend.read(cx).prefs().missed_seen_ms,
+                self.backend.read(cx).prefs().ui.missed_seen_ms,
             ),
             None => 0,
         };

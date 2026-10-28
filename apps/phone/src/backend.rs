@@ -17,7 +17,6 @@
 #![allow(dead_code)]
 
 use std::{
-    path::PathBuf,
     sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -29,6 +28,7 @@ use rovsti_android::{
     events::{self, RawEvent, kind},
     permissions, providers, roles, telecom, xiaomi,
 };
+use rovsti_core::settings::Settings;
 use rovsti_core::{
     call::CallModel,
     call_log::{self, RecentsRow},
@@ -40,7 +40,7 @@ use rovsti_core::{
         FavoritesPayload, WireContact, WireError,
     },
 };
-use rovsti_ui::storage::{self, Prefs};
+use rovsti_ui::storage::{self, Prefs, PrefsWriter};
 use serde::de::DeserializeOwned;
 
 use crate::sample;
@@ -249,10 +249,14 @@ pub struct Backend {
     /// a guess, so the Preview banner stays away).
     permissions_known: bool,
     prefs: Prefs,
+    /// The owner's settings as an immutable snapshot; views clone the `Arc`
+    /// and never read a file (AD-30). Replaced only when a setting changes.
+    settings: Arc<Settings>,
+    /// The one writer of `prefs.json`; present once the data dir is known.
+    writer: Option<PrefsWriter>,
     /// The preferences were read (or could not be): the app may now pick its
     /// first tab.
     prefs_ready: bool,
-    data_dir: Option<PathBuf>,
     /// Newest pull wins: a slow older pull never overwrites a newer one.
     log_pull: u64,
     contacts_pull: u64,
@@ -306,8 +310,9 @@ impl Backend {
                 permissions: PermissionFacts::default(),
                 permissions_known: false,
                 prefs: Prefs::default(),
+                settings: Arc::new(Settings::default()),
+                writer: None,
                 prefs_ready: false,
-                data_dir: None,
                 log_pull: 0,
                 contacts_pull: 0,
                 permissions_pull: 0,
@@ -341,22 +346,26 @@ impl Backend {
                     return;
                 };
                 let load_dir = dir.clone();
-                let mut prefs = cx
+                let loaded = cx
                     .background_executor()
-                    .spawn(async move { Prefs::load(&load_dir) })
+                    .spawn(async move { storage::load_prefs(&load_dir) })
                     .await;
-                let changed = prefs.app_version != APP_VERSION;
+                let mut prefs = loaded.prefs;
+                let changed = prefs.ui.app_version != APP_VERSION;
                 if changed {
                     // Xiaomi confirmations are valid for one app version only.
-                    prefs.xiaomi_confirmed.clear();
-                    prefs.app_version = APP_VERSION.to_owned();
+                    prefs.ui.xiaomi_confirmed.clear();
+                    prefs.ui.app_version = APP_VERSION.to_owned();
                 }
+                // An upgraded file is saved once so it becomes v2 on disk.
+                let upgraded = loaded.origin != storage::Origin::Current;
                 this.update(cx, |this: &mut Backend, cx| {
+                    this.settings = Arc::new(prefs.settings.clone());
                     this.prefs = prefs;
                     this.prefs_ready = true;
-                    this.data_dir = Some(dir);
-                    if changed {
-                        this.save_prefs(cx);
+                    this.writer = Some(PrefsWriter::new(dir, loaded.origin));
+                    if changed || upgraded {
+                        this.save_prefs();
                     }
                     cx.notify();
                 })
@@ -457,7 +466,7 @@ impl Backend {
         };
         let seen = now_ms().max(newest);
         self.update_prefs(cx, |prefs| {
-            prefs.missed_seen_ms = prefs.missed_seen_ms.max(seen)
+            prefs.ui.missed_seen_ms = prefs.ui.missed_seen_ms.max(seen)
         });
         cx.background_executor()
             .spawn(async {
@@ -511,7 +520,7 @@ impl Backend {
             background_popups: Reading::from_option(p.background_popups),
         };
         let mut confirmations = XiaomiConfirmations::default();
-        for (key, version) in &self.prefs.xiaomi_confirmed {
+        for (key, version) in &self.prefs.ui.xiaomi_confirmed {
             if let Some(item) = SetupItem::from_key(key) {
                 confirmations.confirm(item, version);
             }
@@ -533,10 +542,11 @@ impl Backend {
         self.update_prefs(cx, |prefs| {
             if confirmed {
                 prefs
+                    .ui
                     .xiaomi_confirmed
                     .insert(item.key().to_owned(), APP_VERSION.to_owned());
             } else {
-                prefs.xiaomi_confirmed.remove(item.key());
+                prefs.ui.xiaomi_confirmed.remove(item.key());
             }
         });
         cx.notify();
@@ -544,26 +554,51 @@ impl Backend {
 
     // ---- Preferences (written by Rust only, off the main thread) --------
 
+    /// Changes the preferences. Validated, saved through the single writer
+    /// (coalesced to one write per 250 ms) and, when a setting changed, a new
+    /// `Arc<Settings>` is published to the views.
     pub fn update_prefs(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Prefs)) {
         let before = self.prefs.clone();
         f(&mut self.prefs);
-        if self.prefs != before {
-            self.save_prefs(cx);
+        self.prefs.validate();
+        if self.prefs == before {
+            return;
+        }
+        if self.prefs.settings != *self.settings {
+            self.settings = Arc::new(self.prefs.settings.clone());
+            cx.notify();
+        }
+        self.save_prefs();
+    }
+
+    /// Convenience for a settings-only change.
+    pub fn update_settings(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Settings)) {
+        self.update_prefs(cx, |prefs| f(&mut prefs.settings));
+    }
+
+    /// The current settings; cheap to clone and hold across a render.
+    pub fn settings(&self) -> Arc<Settings> {
+        Arc::clone(&self.settings)
+    }
+
+    /// The last save failed: the UI says "Couldn't save setting". The value
+    /// stays in effect for this session.
+    pub fn prefs_save_failed(&self) -> bool {
+        self.writer.as_ref().is_some_and(PrefsWriter::failed)
+    }
+
+    /// Writes any unsaved preference now. Called when the app goes to the
+    /// background, where the process may be killed without notice.
+    pub fn flush_prefs(&self) {
+        if let Some(writer) = &self.writer {
+            writer.flush();
         }
     }
 
-    fn save_prefs(&mut self, cx: &mut Context<Self>) {
-        let Some(dir) = self.data_dir.clone() else {
-            return;
-        };
-        let prefs = self.prefs.clone();
-        cx.background_executor()
-            .spawn(async move {
-                if let Err(error) = prefs.save(&dir) {
-                    log::warn!("saving preferences failed: {error}");
-                }
-            })
-            .detach();
+    fn save_prefs(&self) {
+        if let Some(writer) = &self.writer {
+            writer.submit(self.prefs.clone());
+        }
     }
 
     // ---- Commands -------------------------------------------------------

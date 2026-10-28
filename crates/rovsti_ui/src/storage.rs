@@ -2,14 +2,20 @@
 //! is no Rovsti server.
 
 use std::{
-    collections::BTreeMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
+    sync::{
+        Arc, Condvar, Mutex, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
+    thread::JoinHandle,
+    time::{Duration, Instant},
 };
 
 use gpui::{App, Task};
-use serde::{Deserialize, Serialize};
+use rovsti_core::settings::{PrefsV1, PrefsV2, SCHEMA_VERSION};
+use serde::Deserialize;
 
 /// The app's private data directory, created if missing.
 ///
@@ -52,58 +58,301 @@ pub mod anyhow_like {
     pub type Result<T> = std::result::Result<T, String>;
 }
 
-/// Small local preferences (FR-8, FR-27, FR-36): last tab, the time Recents
-/// was last seen, and which Xiaomi settings the owner confirmed for which
-/// app version. Written by Rust only, as `prefs.json` in the app data dir.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Prefs {
-    /// The tab the owner left the app on; `None` before the first choice.
-    pub last_tab: Option<u8>,
-    pub missed_seen_ms: i64,
-    /// Setup item key to the app version it was confirmed for.
-    pub xiaomi_confirmed: BTreeMap<String, String>,
-    pub app_version: String,
+/// The app's preferences (FR-8, FR-27, FR-36, AD-30): the v2 schema from
+/// `rovsti_core::settings`. Written by Rust only, as `prefs.json` in the app
+/// data dir.
+pub type Prefs = PrefsV2;
+
+/// File name of the preferences.
+pub const PREFS_FILE: &str = "prefs.json";
+
+/// Reads only the version of a prefs file; a missing one counts as 1.
+#[derive(Deserialize)]
+struct Probe {
+    #[serde(default)]
+    schema_version: Option<u32>,
 }
 
-impl Prefs {
-    /// The tab to reopen on: the stored one if it exists among `count` tabs,
-    /// else `default` (first launch, or a corrupt value).
-    pub fn last_tab_or(&self, count: usize, default: usize) -> usize {
-        self.last_tab
-            .map(usize::from)
-            .filter(|tab| *tab < count)
-            .unwrap_or(default)
+/// What `load` found on disk.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Origin {
+    /// No file (first launch) or it could not be read: defaults.
+    Missing,
+    /// A v2 file.
+    Current,
+    /// A v0.1 file converted by `From<PrefsV1>`; the first save keeps a copy.
+    UpgradedFromV1,
+    /// A file from a newer build, read best effort and copied to
+    /// `prefs.json.bak-v{n}`.
+    Newer(u32),
+    /// Not valid JSON for any version: defaults, the file copied to
+    /// `prefs.json.corrupt`.
+    Corrupt,
+}
+
+/// The preferences and how they were found.
+#[derive(Clone, Debug)]
+pub struct Loaded {
+    pub prefs: Prefs,
+    pub origin: Origin,
+}
+
+fn copy_aside(dir: &Path, name: &str, overwrite: bool) {
+    let target = dir.join(name);
+    if !overwrite && target.exists() {
+        return;
+    }
+    if let Err(error) = fs::copy(dir.join(PREFS_FILE), &target) {
+        log::warn!("copying {PREFS_FILE} to {name} failed: {:?}", error.kind());
+    }
+}
+
+/// Reads `dir/prefs.json`, converting older versions. Never fails: a missing,
+/// unreadable or corrupt file yields defaults (a corrupt one is first copied
+/// to `prefs.json.corrupt`), and a half-written file cannot exist because
+/// saves rename.
+pub fn load_prefs(dir: &Path) -> Loaded {
+    let Ok(bytes) = fs::read(dir.join(PREFS_FILE)) else {
+        return Loaded {
+            prefs: Prefs::default(),
+            origin: Origin::Missing,
+        };
+    };
+    let corrupt = || {
+        copy_aside(dir, "prefs.json.corrupt", true);
+        Loaded {
+            prefs: Prefs::default(),
+            origin: Origin::Corrupt,
+        }
+    };
+    let Ok(probe) = serde_json::from_slice::<Probe>(&bytes) else {
+        return corrupt();
+    };
+    let version = probe.schema_version.unwrap_or(1).max(1);
+    let (parsed, origin) = match version {
+        1 => (
+            serde_json::from_slice::<PrefsV1>(&bytes).map(Prefs::from),
+            Origin::UpgradedFromV1,
+        ),
+        SCHEMA_VERSION => (serde_json::from_slice::<Prefs>(&bytes), Origin::Current),
+        newer => {
+            copy_aside(dir, &format!("prefs.json.bak-v{newer}"), false);
+            (
+                serde_json::from_slice::<Prefs>(&bytes),
+                Origin::Newer(newer),
+            )
+        }
+    };
+    match parsed {
+        Ok(mut prefs) => {
+            prefs.validate();
+            Loaded { prefs, origin }
+        }
+        Err(_) => corrupt(),
+    }
+}
+
+/// Atomic save: write a temp file in the same directory, sync it, then
+/// rename over the old file.
+pub fn save_prefs(prefs: &Prefs, dir: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let tmp = dir.join(format!("{PREFS_FILE}.tmp"));
+    let bytes = serde_json::to_vec(prefs).map_err(std::io::Error::other)?;
+    let mut file = fs::File::create(&tmp)?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    drop(file);
+    fs::rename(&tmp, dir.join(PREFS_FILE))
+}
+
+/// Saves closer together than this are coalesced into one.
+pub const SAVE_WINDOW: Duration = Duration::from_millis(250);
+
+struct Pending {
+    latest: Option<Prefs>,
+    /// When the oldest unsaved change arrived.
+    since: Option<Instant>,
+    flush: bool,
+    stop: bool,
+    submitted: u64,
+    written: u64,
+    /// Copy a v1 file to `prefs.json.bak-v1` before the first write.
+    backup_v1: bool,
+}
+
+struct Shared {
+    state: Mutex<Pending>,
+    wake: Condvar,
+    failed: AtomicBool,
+}
+
+/// The single writer of `prefs.json` (AD-30). It keeps the newest snapshot,
+/// writes at most once per [`SAVE_WINDOW`], writes on [`flush`](Self::flush)
+/// (the app pausing) immediately, and is the only user of the `.tmp` file. A
+/// failed save logs the error kind only and sets [`failed`](Self::failed)
+/// until a later save succeeds; the owner's value stays in memory in `Backend`
+/// and the next change saves the whole snapshot again (no retry loop).
+pub struct PrefsWriter {
+    shared: Arc<Shared>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl PrefsWriter {
+    pub fn new(dir: PathBuf, origin: Origin) -> Self {
+        Self::with_window(dir, origin, SAVE_WINDOW)
     }
 
-    pub const FILE: &'static str = "prefs.json";
-
-    /// Reads `dir/prefs.json`. A missing, unreadable or corrupt file yields
-    /// the defaults; a half-written file cannot exist because saves rename.
-    pub fn load(dir: &Path) -> Self {
-        fs::read(dir.join(Self::FILE))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+    fn with_window(dir: PathBuf, origin: Origin, window: Duration) -> Self {
+        let shared = Arc::new(Shared {
+            state: Mutex::new(Pending {
+                latest: None,
+                since: None,
+                flush: false,
+                stop: false,
+                submitted: 0,
+                written: 0,
+                backup_v1: origin == Origin::UpgradedFromV1,
+            }),
+            wake: Condvar::new(),
+            failed: AtomicBool::new(false),
+        });
+        let worker = {
+            let shared = Arc::clone(&shared);
+            std::thread::Builder::new()
+                .name("prefs-writer".into())
+                .spawn(move || worker_loop(&shared, &dir, window))
+                .map_err(|error| log::warn!("prefs writer did not start: {error}"))
+                .ok()
+        };
+        Self { shared, worker }
     }
 
-    /// Atomic save: write a temp file in the same directory, sync it, then
-    /// rename over the old file.
-    pub fn save(&self, dir: &Path) -> std::io::Result<()> {
-        fs::create_dir_all(dir)?;
-        let tmp = dir.join(format!("{}.tmp", Self::FILE));
-        let bytes = serde_json::to_vec(self).map_err(std::io::Error::other)?;
-        let mut file = fs::File::create(&tmp)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&tmp, dir.join(Self::FILE))
+    /// Hands over the newest snapshot; older unsaved ones are replaced.
+    pub fn submit(&self, prefs: Prefs) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        state.latest = Some(prefs);
+        state.since.get_or_insert_with(Instant::now);
+        state.submitted += 1;
+        self.shared.wake.notify_all();
+    }
+
+    /// Writes any unsaved snapshot now and waits (briefly) for it.
+    pub fn flush(&self) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if state.latest.is_none() {
+            return;
+        }
+        state.flush = true;
+        self.shared.wake.notify_all();
+        let deadline = Instant::now() + Duration::from_millis(800);
+        while state.written < state.submitted {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            let (next, _) = self
+                .shared
+                .wake
+                .wait_timeout(state, left)
+                .unwrap_or_else(PoisonError::into_inner);
+            state = next;
+        }
+    }
+
+    /// Whether the last save failed ("Couldn't save setting").
+    pub fn failed(&self) -> bool {
+        self.shared.failed.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for PrefsWriter {
+    fn drop(&mut self) {
+        {
+            let mut state = self
+                .shared
+                .state
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            state.stop = true;
+            state.flush = true;
+            self.shared.wake.notify_all();
+        }
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+fn worker_loop(shared: &Shared, dir: &Path, window: Duration) {
+    let mut state = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
+    loop {
+        if state.latest.is_none() {
+            if state.stop {
+                return;
+            }
+            state = shared
+                .wake
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+            continue;
+        }
+        // A snapshot waits for the end of its window unless a flush or stop
+        // asks for it now; later submissions during the wait replace it.
+        if !(state.flush || state.stop) {
+            let due = state
+                .since
+                .map_or(window, |at| window.saturating_sub(at.elapsed()));
+            if !due.is_zero() {
+                state = shared
+                    .wake
+                    .wait_timeout(state, due)
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .0;
+                continue;
+            }
+        }
+        let Some(prefs) = state.latest.take() else {
+            continue;
+        };
+        let target = state.submitted;
+        let backup = std::mem::take(&mut state.backup_v1);
+        state.since = None;
+        state.flush = false;
+        drop(state);
+
+        if backup {
+            copy_aside(dir, "prefs.json.bak-v1", false);
+        }
+        let result = save_prefs(&prefs, dir);
+        match &result {
+            Ok(()) => shared.failed.store(false, Ordering::Relaxed),
+            Err(error) => {
+                // The kind only: the message may name a path, never content.
+                log::warn!("saving preferences failed: {:?}", error.kind());
+                shared.failed.store(true, Ordering::Relaxed);
+            }
+        }
+        state = shared.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.written = state.written.max(target);
+        shared.wake.notify_all();
+        if state.stop && state.latest.is_none() {
+            return;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rovsti_core::settings::DEFAULT_REPLIES;
+    use rovsti_core::wire::HapticsLevel;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("rovsti-prefs-{name}-{}", std::process::id()));
@@ -111,20 +360,27 @@ mod tests {
         dir
     }
 
+    fn write(dir: &Path, text: &str) {
+        fs::create_dir_all(dir).expect("dir");
+        fs::write(dir.join(PREFS_FILE), text).expect("write");
+    }
+
     #[test]
     fn round_trips() {
         let dir = temp_dir("round");
-        let mut prefs = Prefs {
-            last_tab: Some(2),
-            missed_seen_ms: 1_790_000_000_000,
-            app_version: "0.1.0".into(),
-            ..Prefs::default()
-        };
+        let mut prefs = Prefs::default();
+        prefs.ui.last_tab = Some(2);
+        prefs.ui.missed_seen_ms = 1_790_000_000_000;
+        prefs.ui.app_version = "0.1.0".into();
         prefs
+            .ui
             .xiaomi_confirmed
             .insert("autostart".into(), "0.1.0".into());
-        prefs.save(&dir).expect("save");
-        assert_eq!(Prefs::load(&dir), prefs);
+        prefs.settings.haptics = HapticsLevel::Light;
+        save_prefs(&prefs, &dir).expect("save");
+        let loaded = load_prefs(&dir);
+        assert_eq!(loaded.prefs, prefs);
+        assert_eq!(loaded.origin, Origin::Current);
         assert!(
             !dir.join("prefs.json.tmp").exists(),
             "temp file is renamed away"
@@ -134,26 +390,104 @@ mod tests {
 
     #[test]
     fn missing_file_is_default() {
-        assert_eq!(Prefs::load(&temp_dir("missing")), Prefs::default());
+        let loaded = load_prefs(&temp_dir("missing"));
+        assert_eq!(loaded.prefs, Prefs::default());
+        assert_eq!(loaded.origin, Origin::Missing);
     }
 
     #[test]
-    fn corrupt_file_is_default() {
-        let dir = temp_dir("corrupt");
-        fs::create_dir_all(&dir).expect("dir");
-        fs::write(dir.join(Prefs::FILE), b"{ not json").expect("write");
-        assert_eq!(Prefs::load(&dir), Prefs::default());
+    fn a_v1_file_without_schema_version_is_converted() {
+        let dir = temp_dir("v1");
+        write(
+            &dir,
+            r#"{"last_tab":2,"missed_seen_ms":5,"xiaomi_confirmed":{"autostart":"0.1.0"},"app_version":"0.1.0"}"#,
+        );
+        let loaded = load_prefs(&dir);
+        assert_eq!(loaded.origin, Origin::UpgradedFromV1);
+        assert_eq!(loaded.prefs.ui.last_tab, Some(2));
+        assert_eq!(loaded.prefs.ui.missed_seen_ms, 5);
+        assert_eq!(loaded.prefs.ui.xiaomi_confirmed["autostart"], "0.1.0");
+        assert_eq!(loaded.prefs.quick_replies, DEFAULT_REPLIES);
+        // Loading alone leaves the file as v0.1 wrote it.
+        assert!(!dir.join("prefs.json.bak-v1").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn unknown_and_missing_fields_are_tolerated() {
+    fn an_explicit_version_one_counts_as_v1() {
+        let dir = temp_dir("v1explicit");
+        write(&dir, r#"{"schema_version":1,"last_tab":1}"#);
+        let loaded = load_prefs(&dir);
+        assert_eq!(loaded.origin, Origin::UpgradedFromV1);
+        assert_eq!(loaded.prefs.ui.last_tab, Some(1));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_file_loads_defaults_after_a_copy() {
+        let dir = temp_dir("corrupt");
+        write(&dir, "{ not json");
+        let loaded = load_prefs(&dir);
+        assert_eq!(loaded.prefs, Prefs::default());
+        assert_eq!(loaded.origin, Origin::Corrupt);
+        assert_eq!(
+            fs::read_to_string(dir.join("prefs.json.corrupt")).expect("copy"),
+            "{ not json"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_wrongly_typed_field_is_corrupt_not_a_panic() {
+        let dir = temp_dir("badtab");
+        write(&dir, r#"{"last_tab":"banana"}"#);
+        let loaded = load_prefs(&dir);
+        assert_eq!(loaded.origin, Origin::Corrupt);
+        assert_eq!(loaded.prefs.last_tab_or(4, 3), 3);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_newer_file_loads_best_effort_after_a_copy() {
+        let dir = temp_dir("newer");
+        let text =
+            r#"{"schema_version":3,"ui":{"last_tab":1},"settings":{"proximity":false},"x":1}"#;
+        write(&dir, text);
+        let loaded = load_prefs(&dir);
+        assert_eq!(loaded.origin, Origin::Newer(3));
+        assert_eq!(loaded.prefs.ui.last_tab, Some(1));
+        assert!(!loaded.prefs.settings.proximity);
+        assert_eq!(loaded.prefs.schema_version, 2);
+        assert_eq!(
+            fs::read_to_string(dir.join("prefs.json.bak-v3")).expect("copy"),
+            text
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unknown_fields_are_tolerated() {
         let dir = temp_dir("fields");
-        fs::create_dir_all(&dir).expect("dir");
-        fs::write(dir.join(Prefs::FILE), br#"{"last_tab":3,"future":true}"#).expect("write");
-        let prefs = Prefs::load(&dir);
-        assert_eq!(prefs.last_tab, Some(3));
-        assert_eq!(prefs.missed_seen_ms, 0);
+        write(
+            &dir,
+            r#"{"schema_version":2,"ui":{"last_tab":3},"future":true}"#,
+        );
+        let prefs = load_prefs(&dir).prefs;
+        assert_eq!(prefs.ui.last_tab, Some(3));
+        assert_eq!(prefs.ui.missed_seen_ms, 0);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_clamps_invalid_content() {
+        let dir = temp_dir("clamp");
+        write(
+            &dir,
+            r#"{"schema_version":2,"quick_replies":["a","b","c","d","e","f","g","h"],"favorites_order":["x","x"]}"#,
+        );
+        let prefs = load_prefs(&dir).prefs;
+        assert_eq!(prefs.quick_replies.len(), 6);
+        assert_eq!(prefs.favorites_order, ["x"]);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -161,10 +495,10 @@ mod tests {
     fn save_replaces_the_previous_file() {
         let dir = temp_dir("replace");
         let mut prefs = Prefs::default();
-        prefs.save(&dir).expect("first");
-        prefs.last_tab = Some(1);
-        prefs.save(&dir).expect("second");
-        assert_eq!(Prefs::load(&dir).last_tab, Some(1));
+        save_prefs(&prefs, &dir).expect("first");
+        prefs.ui.last_tab = Some(1);
+        save_prefs(&prefs, &dir).expect("second");
+        assert_eq!(load_prefs(&dir).prefs.ui.last_tab, Some(1));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -172,20 +506,118 @@ mod tests {
     fn last_tab_falls_back_to_the_default() {
         let mut prefs = Prefs::default();
         assert_eq!(prefs.last_tab_or(4, 3), 3, "first launch");
-        prefs.last_tab = Some(0);
+        prefs.ui.last_tab = Some(0);
         assert_eq!(prefs.last_tab_or(4, 3), 0, "Favorites is a real choice");
-        prefs.last_tab = Some(2);
+        prefs.ui.last_tab = Some(2);
         assert_eq!(prefs.last_tab_or(4, 3), 2);
-        prefs.last_tab = Some(9);
+        prefs.ui.last_tab = Some(9);
         assert_eq!(prefs.last_tab_or(4, 3), 3, "out of range");
     }
 
+    // ---- PrefsWriter ---------------------------------------------------
+
+    fn with_tab(tab: u8) -> Prefs {
+        let mut p = Prefs::default();
+        p.ui.last_tab = Some(tab);
+        p
+    }
+
     #[test]
-    fn a_corrupt_tab_value_loads_as_the_default() {
-        let dir = temp_dir("badtab");
-        fs::create_dir_all(&dir).expect("dir");
-        fs::write(dir.join(Prefs::FILE), br#"{"last_tab":"banana"}"#).expect("write");
-        assert_eq!(Prefs::load(&dir).last_tab_or(4, 3), 3);
+    fn the_writer_coalesces_a_burst_into_one_save_of_the_latest() {
+        let dir = temp_dir("burst");
+        let writer =
+            PrefsWriter::with_window(dir.clone(), Origin::Missing, Duration::from_millis(60));
+        for tab in 0..20 {
+            writer.submit(with_tab(tab));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(
+            !dir.join(PREFS_FILE).exists(),
+            "nothing is written inside the window"
+        );
+        writer.flush();
+        assert_eq!(load_prefs(&dir).prefs.ui.last_tab, Some(19));
+        assert!(!writer.failed());
+        drop(writer);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_writer_saves_after_the_window_without_a_flush() {
+        let dir = temp_dir("window");
+        let writer =
+            PrefsWriter::with_window(dir.clone(), Origin::Missing, Duration::from_millis(30));
+        writer.submit(with_tab(1));
+        let start = Instant::now();
+        while !dir.join(PREFS_FILE).exists() && start.elapsed() < Duration::from_secs(3) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(load_prefs(&dir).prefs.ui.last_tab, Some(1));
+        drop(writer);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dropping_the_writer_flushes_what_is_pending() {
+        let dir = temp_dir("drop");
+        let writer =
+            PrefsWriter::with_window(dir.clone(), Origin::Missing, Duration::from_secs(30));
+        writer.submit(with_tab(3));
+        drop(writer);
+        assert_eq!(load_prefs(&dir).prefs.ui.last_tab, Some(3));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_first_v2_save_keeps_the_v1_file() {
+        let dir = temp_dir("bak");
+        let v1 = r#"{"last_tab":2,"app_version":"0.1.0"}"#;
+        write(&dir, v1);
+        let loaded = load_prefs(&dir);
+        let writer =
+            PrefsWriter::with_window(dir.clone(), loaded.origin, Duration::from_millis(10));
+        let mut next = loaded.prefs;
+        next.settings.show_frequent = false;
+        writer.submit(next);
+        writer.flush();
+        assert_eq!(
+            fs::read_to_string(dir.join("prefs.json.bak-v1")).expect("bak"),
+            v1
+        );
+        let now = load_prefs(&dir);
+        assert_eq!(now.origin, Origin::Current);
+        assert!(!now.prefs.settings.show_frequent);
+        // A second save does not overwrite the backup.
+        let mut again = now.prefs;
+        again.ui.last_tab = Some(0);
+        writer.submit(again);
+        writer.flush();
+        assert_eq!(
+            fs::read_to_string(dir.join("prefs.json.bak-v1")).expect("bak"),
+            v1
+        );
+        drop(writer);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_save_sets_the_flag_and_a_later_one_clears_it() {
+        let dir = temp_dir("fail");
+        // A file where the directory should be makes every save fail.
+        fs::create_dir_all(dir.parent().expect("parent")).expect("tmp");
+        fs::write(&dir, b"not a dir").expect("blocker");
+        let writer =
+            PrefsWriter::with_window(dir.clone(), Origin::Missing, Duration::from_millis(5));
+        writer.submit(with_tab(1));
+        writer.flush();
+        assert!(writer.failed());
+        // Fix the path; the kept value is retried with the next submit.
+        fs::remove_file(&dir).expect("unblock");
+        writer.submit(with_tab(2));
+        writer.flush();
+        assert!(!writer.failed());
+        assert_eq!(load_prefs(&dir).prefs.ui.last_tab, Some(2));
+        drop(writer);
         let _ = fs::remove_dir_all(&dir);
     }
 }

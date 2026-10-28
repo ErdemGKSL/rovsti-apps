@@ -61,6 +61,9 @@ android {
             keyPassword = providers.environmentVariable("GPUIFORGE_SIGNING_KEY_PASSWORD").get()
         }
     } else null
+    // The perf build (scripts/perf-build.sh) is the debug type signed with the debug key. It gets
+    // its own application ID so it can sit next to the signed release on the same phone.
+    buildTypes.getByName("debug") { applicationIdSuffix = ".perf" }
     buildTypes.configureEach {
         when (gpuiSigningMode) {
             "debug" -> signingConfig = signingConfigs.getByName("debug")
@@ -73,6 +76,9 @@ android {
     }
 }
 
+// apps/phone, found from the Gradle project (platforms/android) so the repo can move.
+val phoneAppDir = rootProject.projectDir.resolve("../..").canonicalFile
+
 for (profile in listOf("debug", "release")) {
     val variant = profile.replaceFirstChar { it.uppercase() }
     val rustProfile = gpuiRustProfile.getOrElse(if (profile == "debug") "dev" else "release")
@@ -81,10 +87,10 @@ for (profile in listOf("debug", "release")) {
     android.sourceSets[profile].jniLibs.directories.add(output.get().asFile.absolutePath)
     val rustBuilds = gpuiAbis.map { abi ->
         tasks.register<Exec>("buildRust${variant}_${abi.replace('-', '_')}") {
-            workingDir("/home/erdem/Documents/Github/rovsti-apps/apps/phone")
+            workingDir(phoneAppDir)
             commandLine(providers.gradleProperty("gpuiForgeExecutable").getOrElse("gpuiforge"),
                 "build-android-native", "--output", output.get().asFile.absolutePath,
-                "--manifest-path", "/home/erdem/Documents/Github/rovsti-apps/apps/phone/Cargo.toml",
+                "--manifest-path", phoneAppDir.resolve("Cargo.toml").path,
                 "--library", "rovsti_phone", "--abi", abi,
                 "--profile", rustProfile, "--min-sdk", "34")
             if (gpuiStagingRoot.isNotEmpty()) args("--staging-root", gpuiStagingRoot)

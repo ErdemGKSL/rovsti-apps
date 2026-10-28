@@ -79,7 +79,7 @@ The single persona is **Erdem**, the developer and owner, with one Xiaomi phone 
 - **Default Phone App** — the app holding Android's `ROLE_DIALER`. Only the Default Phone App gets the Telecom in-call binding.
 - **Setup Checklist** — the in-app list of Setup Items that must be satisfied for calls to work reliably.
 - **Setup Item** — one checkable requirement: Default Phone App role, a runtime permission group, the full-screen notification permission, or a Xiaomi Setting. Each item is *done*, *not done*, or *unverifiable*. Only Xiaomi Settings can be *unverifiable*: they cannot be read back and stay *unverifiable* until the owner confirms them, after which they are *done*.
-- **Xiaomi Setting** — one of four OEM settings that cannot be read back: Autostart, Battery saver "No restrictions", "Show on lock screen / pop-up while in background", and Floating notifications. Shown only when the device is Xiaomi.
+- **Xiaomi Setting** — one of four OEM settings that cannot be read back: Autostart, Battery saver "No restrictions", "Show on lock screen / pop-up while in background", and Background pop-ups. Shown only when the device is Xiaomi.
 - **Call** — one Telecom call session, outgoing or incoming, from creation to disconnection.
 - **Call State** — one of `Dialing`, `Ringing`, `Active`, `Holding`, `Disconnected`, plus the Mute and Audio Route flags. (Android's transient "select phone account" state is resolved automatically per FR-11 and is never shown.)
 - **Audio Route** — earpiece or speaker in MVP. Wired and Bluetooth headsets are used automatically by Android.
@@ -148,7 +148,7 @@ When the role is not held, the app runs in preview mode. Realizes UJ-1.
 
 #### FR-5: Checklist contents
 
-The owner can see the Setup Checklist with these Setup Items in order: Default Phone App; Phone and call log permissions; Contacts permission; Notifications permission; Full-screen notifications (Android 14+); and, on Xiaomi only, Autostart, Battery saver "No restrictions", Show on lock screen / pop-up, Floating notifications. Realizes UJ-1.
+The owner can see the Setup Checklist with these Setup Items in order: Default Phone App; Phone and call log permissions; Contacts permission; Notifications permission; Full-screen notifications (Android 14+); and, on Xiaomi only, Autostart, Battery saver "No restrictions", Show on lock screen / pop-up, Background pop-ups. Realizes UJ-1.
 
 **Consequences (testable):**
 - On a non-Xiaomi device (or desktop), the four Xiaomi Settings are absent.
@@ -574,7 +574,7 @@ These are personal-project metrics, measured by the owner on their phone.
 - **MIUI role dialog hidden.** Mitigated by FR-2's Settings path.
 - **Older Mali GPUs.** They may need GLES. Check with `adb logcat -s GPUI`.
 - **No automated device test.** Final acceptance is the owner's manual test. Partial mitigation: the `x86_64` ABI is built, so an Android emulator can exercise the role grant and incoming / answer / decline / missed flows (`adb emu gsm call <number>`) before sideloading, if the run has an emulator image available.
-- **MIUI floating notifications.** They may be off by default for sideloaded apps, which silently breaks FR-23. Covered by the Floating notifications Xiaomi Setting; verify on device.
+- **MIUI background pop-ups.** They may be off by default for sideloaded apps, which silently breaks FR-23. Covered by the Background pop-ups Xiaomi Setting; verify on device.
 - **Carrier-dependent call waiting.** FR-20's behavior depends on the network supporting call waiting.
 
 ## 10. Open Questions

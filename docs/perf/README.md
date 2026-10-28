@@ -57,7 +57,8 @@ The signed release APK has none of the recorder: the `perf` feature is off, and
 4. The scripts write `docs/perf/runs/<timestamp>/summary.md`. Copy the numbers into the tables
    below and into `docs/perf/final.md`.
 5. Cold start and incoming times (not scripted):
-   `adb shell am force-stop dev.rovsti.phone; adb shell am start -W -n dev.rovsti.phone/.MainActivity`
+   `adb shell am force-stop dev.rovsti.phone.perf; adb shell am start -W -n dev.rovsti.phone.perf/dev.rovsti.phone.MainActivity`
+   (the perf build has the application ID `dev.rovsti.phone.perf`, so it installs next to the release)
    (`TotalTime` is cold start to first frame); the ring latency is the `RovstiPerf` line the
    Incoming screen already logs (stories 5.6, 5.7), warm and with the app killed.
 6. StrictMode: a debuggable build logs violations under tag `StrictMode`

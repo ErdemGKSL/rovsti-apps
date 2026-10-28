@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Re-writes the absolute paths that `gpuiforge platform eject android` bakes into
-# apps/phone/platforms/android/app/build.gradle.kts, so the repo can move.
+# `gpuiforge platform eject android` bakes absolute paths into
+# apps/phone/platforms/android/app/build.gradle.kts. This rewrites them to be
+# relative to the Gradle project (phoneAppDir), so the repo can move.
 # Safe to re-run.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_DIR="$ROOT/apps/phone"
-GRADLE="$APP_DIR/platforms/android/app/build.gradle.kts"
+GRADLE="$ROOT/apps/phone/platforms/android/app/build.gradle.kts"
 
 [[ -f "$GRADLE" ]] || { echo "Not found: $GRADLE (eject first)." >&2; exit 1; }
 
+if ! grep -q '^val phoneAppDir' "$GRADLE"; then
+  sed -i -E 's|^for \(profile in listOf\("debug", "release"\)\) \{|// apps/phone, found from the Gradle project (platforms/android) so the repo can move.\nval phoneAppDir = rootProject.projectDir.resolve("../..").canonicalFile\n\n&|' "$GRADLE"
+fi
+
 sed -i -E \
-  -e "s|workingDir\(\"[^\"]*\"\)|workingDir(\"$APP_DIR\")|" \
-  -e "s|\"--manifest-path\", \"[^\"]*\"|\"--manifest-path\", \"$APP_DIR/Cargo.toml\"|" \
+  -e 's|workingDir\("[^"]*"\)|workingDir(phoneAppDir)|' \
+  -e 's|"--manifest-path", "[^"]*"|"--manifest-path", phoneAppDir.resolve("Cargo.toml").path|' \
   "$GRADLE"
 
-echo "Updated $GRADLE to use $APP_DIR"
+echo "Updated $GRADLE to use paths relative to the Gradle project"

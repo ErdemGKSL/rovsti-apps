@@ -332,7 +332,7 @@ Behaviour:
 
 ### Incoming Call Notification (FR-23)
 
-Used when the phone is unlocked and in use. A high-priority call-style heads-up notification: caller name (or number), "Incoming call", Answer and Decline actions. Answer answers the Call and opens the In-Call Screen. Decline rejects it without opening the app. Tapping the body opens the full Incoming Call Screen. If Floating notifications are not allowed on Xiaomi, this silently fails: that is why the Setup item 9 exists.
+Used when the phone is unlocked and in use. A high-priority call-style heads-up notification: caller name (or number), "Incoming call", Answer and Decline actions. Answer answers the Call and opens the In-Call Screen. Decline rejects it without opening the app. Tapping the body opens the full Incoming Call Screen. If Background pop-ups are not allowed on Xiaomi, this silently fails: that is why the Setup item 9 exists.
 
 ### Ongoing-call notification (FR-19)
 

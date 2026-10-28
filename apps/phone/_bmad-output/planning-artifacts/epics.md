@@ -37,7 +37,7 @@ FR1: Role eligibility - the APK is eligible for ROLE_DIALER (InCallService with 
 FR2: Request the role from the Setup Checklist; if the dialog cannot show, show the Settings path and a button to Default apps.
 FR3: Handle dial intents - ACTION_DIAL with tel: opens Keypad pre-filled without calling; without data opens Keypad empty.
 FR4: Preview mode without the role - visible banner; calls still go through the system path.
-FR5: Checklist contents in order (Default Phone App; Phone and call log; Contacts; Notifications; Full-screen notifications; on Xiaomi only Autostart, Battery saver, Show on lock screen/pop-up, Floating notifications), each with state and reason.
+FR5: Checklist contents in order (Default Phone App; Phone and call log; Contacts; Notifications; Full-screen notifications; on Xiaomi only Autostart, Battery saver, Show on lock screen/pop-up, Background pop-ups), each with state and reason.
 FR6: Act on a Setup Item (runtime requests, Xiaomi deep links with fallback to app details, AOSP battery dialog).
 FR7: Re-check readable items on launch and resume; collapse to "Setup complete" when all done.
 FR8: Confirm Xiaomi Settings; persisted locally; cleared on app version change.
@@ -427,7 +427,7 @@ Covers: FR22, AD-3, NFR2, review items 6(d)(e), 9. Prio: P0. Verify: DEVICE.
 
 **Acceptance Criteria:**
 
-**Given** the Xiaomi settings (Autostart, lock-screen pop-up, Floating notifications) enabled
+**Given** the Xiaomi settings (Autostart, lock-screen pop-up, Background pop-ups) enabled
 **When** an incoming call arrives locked and unlocked
 **Then** the result with and without each Xiaomi setting is tabulated in `docs/spikes/s2-incoming.md`, identifying which setting breaks which path.
 

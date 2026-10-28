@@ -21,6 +21,7 @@ pub mod search;
 pub mod settings;
 pub mod setup;
 pub mod small_text;
+pub mod t9;
 pub mod thread;
 pub mod wire;
 

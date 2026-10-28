@@ -269,6 +269,126 @@ fn push_short_date(out: &mut RelativeTime, days_since_epoch: i64, order: DateOrd
     }
 }
 
+/// Default look-back for [`frequent`].
+pub const FREQUENT_WINDOW_DAYS: i64 = 90;
+/// Default number of people in the Frequent row.
+pub const FREQUENT_LIMIT: usize = 4;
+
+/// One person (or number) in the Frequent row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Frequent {
+    /// Number as the newest counted call stored it; pass to the dialer unchanged.
+    pub number_raw: String,
+    pub normalized: String,
+    pub name: Option<String>,
+    pub contact_id: Option<i64>,
+    /// Answered, outgoing and missed calls inside the window.
+    pub count: u32,
+    /// Newest counted call.
+    pub last_ms: i64,
+}
+
+/// Who `entries` call most, for the Favorites tab's Frequent row (AD-32).
+///
+/// Counts answered (incoming), outgoing and missed rows newer than
+/// `window_days`; declined, voicemail, unknown and blocked rows count for
+/// nothing, and a private (empty) number has nobody to call back. Rows of one
+/// contact (`contact_id`) or, without a contact, of one line
+/// ([`PhoneNumber::matches`]) are one person. Most calls first, ties by the
+/// latest call, then by number so the order is stable. `is_starred` takes a
+/// contact id; starred contacts live in Favorites already and are left out.
+/// Callers that keep a blocklist drop blocked numbers from the result with
+/// `BlockSet::is_blocked`. Only the newest [`MAX_ENTRIES`] rows are read.
+pub fn frequent(
+    entries: &[CallLogEntry],
+    now_ms: i64,
+    window_days: i64,
+    limit: usize,
+    is_starred: impl Fn(i64) -> bool,
+) -> Vec<Frequent> {
+    let since = now_ms.saturating_sub(window_days.max(0).saturating_mul(SECS_PER_DAY * 1000));
+    let mut people: Vec<(Key, Frequent)> = Vec::new();
+    for entry in entries.iter().take(MAX_ENTRIES) {
+        if !matches!(
+            entry.kind,
+            CallLogKind::Incoming | CallLogKind::Outgoing | CallLogKind::Missed
+        ) || entry.date_ms < since
+        {
+            continue;
+        }
+        if entry.contact_id.is_some_and(&is_starred) {
+            continue;
+        }
+        let key = Key::of(entry);
+        if matches!(key, Key::Private) {
+            continue;
+        }
+        let found = people
+            .iter_mut()
+            .find(|(k, f)| match (entry.contact_id, f.contact_id) {
+                (Some(a), Some(b)) => a == b,
+                (None, None) => k.same_line(&key),
+                _ => false,
+            });
+        match found {
+            Some((_, f)) => {
+                f.count += 1;
+                if entry.date_ms > f.last_ms {
+                    f.last_ms = entry.date_ms;
+                    f.number_raw.clone_from(&entry.number_raw);
+                    f.normalized.clone_from(&entry.normalized);
+                }
+                if f.name.is_none() {
+                    f.name.clone_from(&entry.cached_name);
+                }
+            }
+            None => people.push((
+                key,
+                Frequent {
+                    number_raw: entry.number_raw.clone(),
+                    normalized: entry.normalized.clone(),
+                    name: entry.cached_name.clone(),
+                    contact_id: entry.contact_id,
+                    count: 1,
+                    last_ms: entry.date_ms,
+                },
+            )),
+        }
+    }
+    let mut out: Vec<Frequent> = people.into_iter().map(|(_, f)| f).collect();
+    out.sort_by(|a, b| {
+        b.count
+            .cmp(&a.count)
+            .then(b.last_ms.cmp(&a.last_ms))
+            .then_with(|| a.normalized.cmp(&b.normalized))
+    });
+    out.truncate(limit);
+    out
+}
+
+/// Calls per contact id over the same rows and window as [`frequent`]; feeds
+/// the T9 tie-break (`ContactIndex::set_call_counts`).
+pub fn call_counts(
+    entries: &[CallLogEntry],
+    now_ms: i64,
+    window_days: i64,
+) -> std::collections::HashMap<i64, u32> {
+    let since = now_ms.saturating_sub(window_days.max(0).saturating_mul(SECS_PER_DAY * 1000));
+    let mut counts = std::collections::HashMap::new();
+    for entry in entries.iter().take(MAX_ENTRIES) {
+        if let Some(id) = entry.contact_id
+            && matches!(
+                entry.kind,
+                CallLogKind::Incoming | CallLogKind::Outgoing | CallLogKind::Missed
+            )
+            && entry.date_ms >= since
+        {
+            *counts.entry(id).or_insert(0) += 1;
+        }
+    }
+    counts
+}
+
 /// Days since 1970-01-01 to (year, month, day), proleptic Gregorian
 /// (Howard Hinnant's `civil_from_days`).
 fn civil_from_days(z: i64) -> (i64, u32, u32) {
@@ -618,5 +738,121 @@ mod tests {
     fn negative_epoch_does_not_panic() {
         let t = relative_time(NOW, -86_400_000 * 400, 0, DMY12);
         assert!(!t.is_empty());
+    }
+
+    // ---- frequent ------------------------------------------------------
+
+    fn call(id: i64, number: &str, kind: CallLogKind, days_ago: i64) -> CallLogEntry {
+        CallLogEntry {
+            contact_id: None,
+            ..e(id, number, kind, NOW - days_ago * DAY)
+        }
+    }
+
+    fn known(
+        id: i64,
+        number: &str,
+        kind: CallLogKind,
+        days_ago: i64,
+        contact: i64,
+    ) -> CallLogEntry {
+        CallLogEntry {
+            contact_id: Some(contact),
+            cached_name: Some(format!("C{contact}")),
+            ..call(id, number, kind, days_ago)
+        }
+    }
+
+    fn top(entries: &[CallLogEntry]) -> Vec<Frequent> {
+        frequent(entries, NOW, FREQUENT_WINDOW_DAYS, FREQUENT_LIMIT, |_| {
+            false
+        })
+    }
+
+    #[test]
+    fn frequent_of_nothing_is_nothing() {
+        assert!(top(&[]).is_empty());
+        assert!(frequent(&[], NOW, 90, 4, |_| false).is_empty());
+    }
+
+    #[test]
+    fn one_contact_counts_all_its_numbers_and_kinds() {
+        let rows = [
+            known(5, "05551112233", CallLogKind::Outgoing, 1, 7),
+            known(4, "02125550011", CallLogKind::Incoming, 2, 7),
+            known(3, "05551112233", CallLogKind::Missed, 3, 7),
+            known(2, "05551112233", CallLogKind::Rejected, 4, 7),
+        ];
+        let f = top(&rows);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].count, 3, "declined does not count");
+        assert_eq!(f[0].contact_id, Some(7));
+        assert_eq!(f[0].number_raw, "05551112233", "number of the newest call");
+        assert_eq!(f[0].last_ms, NOW - DAY);
+    }
+
+    #[test]
+    fn most_calls_first_then_the_latest_call() {
+        let rows = [
+            known(9, "0501", CallLogKind::Outgoing, 1, 1),
+            known(8, "0502", CallLogKind::Outgoing, 2, 2),
+            known(7, "0502", CallLogKind::Outgoing, 3, 2),
+            known(6, "0503", CallLogKind::Outgoing, 4, 3),
+            known(5, "0503", CallLogKind::Outgoing, 5, 3),
+            known(4, "0504", CallLogKind::Outgoing, 6, 4),
+        ];
+        let ids: Vec<_> = top(&rows).iter().map(|f| f.contact_id).collect();
+        // 2 and 3 both have two calls: 2's latest is newer. Then 1 (newest
+        // single) before 4.
+        assert_eq!(ids, [Some(2), Some(3), Some(1), Some(4)]);
+    }
+
+    #[test]
+    fn a_complete_tie_is_stable_by_number() {
+        let rows = [
+            call(2, "0502", CallLogKind::Outgoing, 1),
+            call(1, "0501", CallLogKind::Outgoing, 1),
+        ];
+        let f = top(&rows);
+        assert_eq!(f[0].normalized, "0501");
+        assert_eq!(f[1].normalized, "0502");
+    }
+
+    #[test]
+    fn numbers_without_a_contact_group_by_line() {
+        let rows = [
+            call(3, "+905551112233", CallLogKind::Missed, 1),
+            call(2, "05551112233", CallLogKind::Outgoing, 2),
+            call(1, "02125550011", CallLogKind::Outgoing, 3),
+        ];
+        let f = top(&rows);
+        assert_eq!((f[0].count, f[1].count), (2, 1));
+    }
+
+    #[test]
+    fn starred_blocked_private_and_old_rows_are_left_out() {
+        let rows = [
+            known(6, "0501", CallLogKind::Outgoing, 1, 1),
+            known(5, "0502", CallLogKind::Outgoing, 1, 2),
+            call(4, "0503", CallLogKind::Blocked, 1),
+            call(3, "", CallLogKind::Missed, 1),
+            call(2, "0504", CallLogKind::Voicemail, 1),
+            call(1, "0505", CallLogKind::Outgoing, 91),
+        ];
+        let f = frequent(&rows, NOW, 90, 4, |id| id == 1);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].contact_id, Some(2));
+    }
+
+    #[test]
+    fn the_limit_and_window_are_parameters() {
+        let rows: Vec<_> = (0..10)
+            .map(|i| call(i, &format!("05{i:02}"), CallLogKind::Outgoing, i))
+            .collect();
+        assert_eq!(frequent(&rows, NOW, 90, 4, |_| false).len(), 4);
+        assert_eq!(frequent(&rows, NOW, 90, 2, |_| false).len(), 2);
+        // A 3-day window keeps days 0 to 3 (the boundary itself counts).
+        assert_eq!(frequent(&rows, NOW, 3, 10, |_| false).len(), 4);
+        assert!(frequent(&rows, NOW, 90, 0, |_| false).is_empty());
     }
 }

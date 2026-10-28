@@ -9,7 +9,7 @@ use crate::wire::WireContact;
 /// Folds one character for comparison, appending to `out`. Turkish letters
 /// fold to their ASCII base (`ı İ I -> i`, `ş -> s`, `ğ -> g`, `ö -> o`,
 /// `ü -> u`, `ç -> c`), as do common Latin accents. Combining marks vanish.
-fn fold_char(c: char, out: &mut String) {
+pub(crate) fn fold_char(c: char, out: &mut String) {
     match c {
         'ı' | 'İ' | 'I' | 'i' => out.push('i'),
         'ş' | 'Ş' => out.push('s'),
@@ -97,18 +97,27 @@ fn after_country_code(digits: &str, rest: &str) -> bool {
     (0..=3).any(|k| digits.get(k..).is_some_and(|d| d.starts_with(rest)))
 }
 
-struct Entry {
-    contact: WireContact,
+pub(crate) struct Entry {
+    pub(crate) contact: WireContact,
     folded_name: String,
     /// Digits only, per number.
-    digits: Vec<String>,
+    pub(crate) digits: Vec<String>,
     parsed: Vec<Option<PhoneNumber>>,
+    /// T9 codes of the primary name, and of the alternative when it differs.
+    pub(crate) t9: crate::t9::NameCodes,
+    pub(crate) t9_alt: Option<crate::t9::NameCodes>,
+    /// Calls in the Frequent window; breaks T9 ties.
+    pub(crate) calls: u32,
+    /// Position of the folded name among all contacts; breaks T9 ties.
+    pub(crate) name_rank: u32,
 }
 
 /// Immutable search index over one contacts payload, in provider order.
 #[derive(Default)]
 pub struct ContactIndex {
-    entries: Vec<Entry>,
+    pub(crate) entries: Vec<Entry>,
+    /// Unique per built index, so a `T9Scratch` never trusts another index.
+    pub(crate) id: u64,
 }
 
 impl std::fmt::Debug for ContactIndex {
@@ -121,10 +130,17 @@ impl std::fmt::Debug for ContactIndex {
 
 impl ContactIndex {
     pub fn new(contacts: Vec<WireContact>) -> Self {
-        let entries = contacts
+        let mut entries: Vec<Entry> = contacts
             .into_iter()
             .map(|contact| {
                 let folded_name = fold(&contact.display_name);
+                let t9 = crate::t9::NameCodes::build(&contact.display_name);
+                let t9_alt = contact
+                    .display_name_alt
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|alt| !alt.is_empty() && *alt != contact.display_name.trim())
+                    .map(crate::t9::NameCodes::build);
                 let digits = contact
                     .numbers
                     .iter()
@@ -140,10 +156,39 @@ impl ContactIndex {
                     folded_name,
                     digits,
                     parsed,
+                    t9,
+                    t9_alt,
+                    calls: 0,
+                    name_rank: 0,
                 }
             })
             .collect();
-        Self { entries }
+        let mut by_name: Vec<u32> = (0..entries.len() as u32).collect();
+        by_name.sort_by(|a, b| {
+            entries[*a as usize]
+                .folded_name
+                .cmp(&entries[*b as usize].folded_name)
+        });
+        for (rank, i) in by_name.into_iter().enumerate() {
+            entries[i as usize].name_rank = rank as u32;
+        }
+        Self {
+            entries,
+            id: crate::t9::next_index_id(),
+        }
+    }
+
+    /// Call counts per contact id (see `call_log::call_counts`); the T9 strip
+    /// ranks people you call often first. Replaces earlier counts.
+    pub fn set_call_counts(&mut self, counts: &std::collections::HashMap<i64, u32>) {
+        for entry in &mut self.entries {
+            entry.calls = counts.get(&entry.contact.id).copied().unwrap_or(0);
+        }
+    }
+
+    /// The contact at `idx` of a [`T9Hit`](crate::t9::T9Hit).
+    pub fn contact(&self, idx: u32) -> Option<&WireContact> {
+        self.entries.get(idx as usize).map(|e| &e.contact)
     }
 
     pub fn len(&self) -> usize {

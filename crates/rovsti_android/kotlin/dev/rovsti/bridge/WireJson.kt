@@ -197,11 +197,22 @@ object ProviderJson {
         else -> "unknown"
     }
 
-    /** Digits with an optional leading `+`; everything else is dropped. */
+    /**
+     * Digits with an optional leading `+`, like `rovsti_core` reads a number: direction and other
+     * format marks are dropped, a `;ext=` style URI parameter is cut, and the `(0)` after a
+     * country code is not part of the number. A service code (it holds `*` or `#`, e.g. `*#06#`)
+     * keeps those characters so it never collapses into a plain number; Rust leaves it unmatched.
+     */
     fun normalize(raw: String): String {
-        val out = StringBuilder(raw.length)
-        for ((i, ch) in raw.trimStart().withIndex()) {
-            if (ch in '0'..'9' || (i == 0 && ch == '+')) out.append(ch)
+        var text = raw.filterNot { it in '\u200b'..'\u200f' || it in '\u202a'..'\u202e' || it in '\u2066'..'\u2069' || it == '\u2060' || it == '\u061c' || it == '\ufeff' }
+            .trimStart()
+        val param = Regex(";[A-Za-z]").find(text)
+        if (param != null) text = text.substring(0, param.range.first)
+        if (text.startsWith("+")) text = text.replaceFirst("(0)", "")
+        val service = text.any { it == '*' || it == '#' }
+        val out = StringBuilder(text.length)
+        for ((i, ch) in text.withIndex()) {
+            if (ch in '0'..'9' || (i == 0 && ch == '+') || (service && (ch == '*' || ch == '#'))) out.append(ch)
         }
         return out.toString()
     }

@@ -3,7 +3,7 @@
 //! [`ContactIndex`] is built once per contacts payload and then queried with
 //! `&self`, so typing never rebuilds anything.
 
-use crate::phone_number::PhoneNumber;
+use crate::phone_number::{PhoneNumber, is_format_char, search_digits};
 use crate::wire::WireContact;
 
 /// Folds one character for comparison, appending to `out`. Turkish letters
@@ -49,11 +49,17 @@ enum Query {
     Text(String),
     /// Digits and formatting only: digit substring against numbers, plus
     /// folded name match (names can contain digits).
-    Digits { digits: String, folded: String },
+    Digits {
+        digits: String,
+        /// The same query without a trunk `0` or `00` prefix, to find
+        /// `05xx` among numbers stored as `+90 5xx`.
+        national: Option<String>,
+        folded: String,
+    },
 }
 
 fn is_number_punctuation(c: char) -> bool {
-    matches!(c, ' ' | '-' | '.' | '(' | ')' | '/' | '+' | '\u{a0}')
+    matches!(c, ' ' | '-' | '.' | '(' | ')' | '/' | '+' | '\u{a0}') || is_format_char(c)
 }
 
 impl Query {
@@ -65,16 +71,30 @@ impl Query {
         let digit_like = trimmed
             .chars()
             .all(|c| c.is_ascii_digit() || is_number_punctuation(c));
-        let digits: String = trimmed.chars().filter(char::is_ascii_digit).collect();
+        let digits = search_digits(trimmed);
         if digit_like && !digits.is_empty() {
+            // `05..` (trunk 0) and `0090..` (international prefix) also find
+            // numbers stored with a country code. Too short a rest would
+            // match everything.
+            let national = digits
+                .strip_prefix("00")
+                .or_else(|| digits.strip_prefix('0'))
+                .filter(|rest| rest.len() >= 3)
+                .map(str::to_owned);
             Self::Digits {
                 digits,
+                national,
                 folded: fold(trimmed),
             }
         } else {
             Self::Text(fold(trimmed))
         }
     }
+}
+
+/// `rest` follows a country code (1 to 3 digits, or none) at the start of `digits`.
+fn after_country_code(digits: &str, rest: &str) -> bool {
+    (0..=3).any(|k| digits.get(k..).is_some_and(|d| d.starts_with(rest)))
 }
 
 struct Entry {
@@ -108,7 +128,7 @@ impl ContactIndex {
                 let digits = contact
                     .numbers
                     .iter()
-                    .map(|n| n.raw.chars().filter(char::is_ascii_digit).collect())
+                    .map(|n| search_digits(&n.raw))
                     .collect();
                 let parsed = contact
                     .numbers
@@ -150,11 +170,20 @@ impl ContactIndex {
                 .filter(|e| e.folded_name.contains(&folded))
                 .map(|e| &e.contact)
                 .collect(),
-            Query::Digits { digits, folded } => self
+            Query::Digits {
+                digits,
+                national,
+                folded,
+            } => self
                 .entries
                 .iter()
                 .filter(|e| {
-                    e.digits.iter().any(|d| d.contains(&digits)) || e.folded_name.contains(&folded)
+                    e.digits.iter().any(|d| {
+                        d.contains(&digits)
+                            || national
+                                .as_deref()
+                                .is_some_and(|n| after_country_code(d, n))
+                    }) || e.folded_name.contains(&folded)
                 })
                 .map(|e| &e.contact)
                 .collect(),
@@ -272,6 +301,37 @@ mod tests {
         }
         assert_eq!(names(&idx.search("0532")), ["Özgür"]);
         assert!(idx.search("9999").is_empty());
+    }
+
+    #[test]
+    fn trunk_zero_and_international_prefix_find_country_code_numbers() {
+        let idx = turkish();
+        for q in [
+            "0555 111",
+            "05551112233",
+            "0090 555",
+            "00905551112233",
+            "0 555 111",
+        ] {
+            assert_eq!(names(&idx.search(q)), ["Ayşe"], "query {q:?}");
+        }
+        // Anchored after the country code: a 555 in the middle of a national
+        // number is not a trunk-0 hit.
+        let idx = ContactIndex::new(vec![contact(1, "A", &["0532 555 11 22"])]);
+        assert!(idx.search("0555 11").is_empty());
+        assert_eq!(idx.search("0532 555").len(), 1);
+    }
+
+    #[test]
+    fn format_marks_and_optional_trunk_zero_do_not_break_search() {
+        let idx = ContactIndex::new(vec![
+            contact(1, "Ayşe", &["+90 (0) 555 111 22 33"]),
+            contact(2, "Bo", &["\u{202a}+44 20 7946 0018\u{202c}"]),
+        ]);
+        assert_eq!(names(&idx.search("905551112233")), ["Ayşe"]);
+        assert_eq!(names(&idx.search("\u{200e}+90 555")), ["Ayşe"]);
+        assert_eq!(names(&idx.search("442079")), ["Bo"]);
+        assert_eq!(names(&idx.search("\u{202a}2079\u{202c}")), ["Bo"]);
     }
 
     #[test]

@@ -13,6 +13,47 @@ use std::fmt;
 /// uses 7; 9 avoids most false positives on mobile numbers).
 const MATCH_TAIL: usize = 9;
 
+/// Invisible direction and format marks that contact apps paste around
+/// numbers (LRM, RLM, embeddings, isolates, zero-width, BOM). They carry no
+/// digit and are ignored everywhere a number is read.
+pub(crate) fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{061c}'
+            | '\u{feff}'
+    )
+}
+
+/// `+90 (0) 555 ...`: the optional trunk zero written after a country code is
+/// not part of the number. Removes the first `(0)` of an international number.
+pub(crate) fn drop_optional_trunk(raw: &str) -> std::borrow::Cow<'_, str> {
+    let international = raw
+        .trim_start_matches(|c: char| c.is_whitespace() || is_format_char(c))
+        .starts_with('+');
+    match raw.find("(0)") {
+        Some(at) if international => {
+            let mut owned = String::with_capacity(raw.len());
+            owned.push_str(&raw[..at]);
+            owned.push_str(&raw[at + 3..]);
+            std::borrow::Cow::Owned(owned)
+        }
+        _ => std::borrow::Cow::Borrowed(raw),
+    }
+}
+
+/// The ASCII digits of `raw` as search sees them: format marks and a
+/// `(0)` after the country code are ignored.
+pub(crate) fn search_digits(raw: &str) -> String {
+    drop_optional_trunk(raw)
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PhoneNumber {
     /// Digits only, prefixed with `+` when the number is international.
@@ -33,7 +74,8 @@ impl PhoneNumber {
     /// Parses user or provider input such as `+90 (532) 123-45-67`,
     /// `0532 123 45 67` or `00 49 151 2345678`.
     pub fn parse(input: &str) -> Result<Self, PhoneNumberError> {
-        let trimmed = input.trim();
+        let cleaned = drop_optional_trunk(input);
+        let trimmed = cleaned.trim_matches(|c: char| c.is_whitespace() || is_format_char(c));
         let (international, rest) = if let Some(rest) = trimmed.strip_prefix('+') {
             (true, rest)
         } else if let Some(rest) = trimmed.strip_prefix("00") {
@@ -47,6 +89,7 @@ impl PhoneNumber {
             match c {
                 '0'..='9' => digits.push(c),
                 ' ' | '-' | '.' | '(' | ')' | '/' | '\u{a0}' => {}
+                c if is_format_char(c) => {}
                 other => return Err(PhoneNumberError::InvalidCharacter(other)),
             }
         }
@@ -126,6 +169,19 @@ mod tests {
         assert_eq!(n("+90 (532) 123-45-67").as_str(), "+905321234567");
         assert_eq!(n("0532 123 45 67").as_str(), "05321234567");
         assert_eq!(n("00 49 151 2345678").as_str(), "+491512345678");
+    }
+
+    #[test]
+    fn format_marks_and_optional_trunk_zero_are_ignored() {
+        assert_eq!(
+            n("\u{202a}+90 555 111 22 33\u{202c}").as_str(),
+            "+905551112233"
+        );
+        assert_eq!(n("\u{200e}+90\u{200f} 555").as_str(), "+90555");
+        assert_eq!(n("+90 (0) 555 111 22 33").as_str(), "+905551112233");
+        assert_eq!(n("+44 (0)20 7946 0018").as_str(), "+442079460018");
+        // Without a country code the (0) is just a digit group.
+        assert_eq!(n("(0)555").as_str(), "0555");
     }
 
     #[test]

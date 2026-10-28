@@ -37,6 +37,25 @@ fn default_true() -> bool {
     true
 }
 
+/// Kotlin may send `null` for a field Rust models as a plain value: read it
+/// as the field's default instead of failing the whole payload.
+fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// `null` keyguard state still means locked (AD-3).
+fn null_true<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(true))
+}
+
+fn null_version<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    Ok(Option::<u32>::deserialize(deserializer)?.unwrap_or(WIRE_VERSION))
+}
+
 fn is_zero(n: &i64) -> bool {
     *n == 0
 }
@@ -95,11 +114,11 @@ pub enum DisconnectCause {
 /// Audio section of a [`CallSnapshot`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioState {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub muted: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub route: AudioRoute,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub routes: Vec<AudioRoute>,
 }
 
@@ -107,22 +126,34 @@ pub struct AudioState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WireCall {
     pub id: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub state: WireCallState,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub number_raw: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub normalized: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact_id: Option<i64>,
     /// Milliseconds since the epoch; `0` means not connected.
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_zero"
+    )]
     pub connect_time_ms: i64,
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
     pub can_hold: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
     pub is_incoming: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disconnect_cause: Option<DisconnectCause>,
@@ -137,22 +168,22 @@ impl WireCall {
 /// The whole call state, pushed by Kotlin on every change (kind `calls`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallSnapshot {
-    #[serde(default = "default_version")]
+    #[serde(default = "default_version", deserialize_with = "null_version")]
     pub v: u32,
     /// Monotonic per process; the reducer ignores lower values.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub seq: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub now_ms: i64,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", deserialize_with = "null_true")]
     pub keyguard_locked: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub audio: AudioState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub foreground_call_id: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_call_id: Option<i32>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub calls: Vec<WireCall>,
 }
 
@@ -191,14 +222,18 @@ pub enum CallLogKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallLogEntry {
     pub id: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub number_raw: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub normalized: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub kind: CallLogKind,
     pub date_ms: i64,
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_zero"
+    )]
     pub duration_s: i64,
     /// `CallLog.Calls.CACHED_NAME`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -212,7 +247,7 @@ pub struct CallLogEntry {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallLogPayload {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub entries: Vec<CallLogEntry>,
 }
 
@@ -223,7 +258,11 @@ pub struct WireNumber {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     /// The contact's default (super-primary) number.
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
     pub default: bool,
 }
 
@@ -231,11 +270,15 @@ pub struct WireNumber {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WireContact {
     pub id: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub display_name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub numbers: Vec<WireNumber>,
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
     pub starred: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub photo_uri: Option<String>,
@@ -260,13 +303,13 @@ impl From<&WireContact> for crate::Contact {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContactsPayload {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub contacts: Vec<WireContact>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FavoritesPayload {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub contacts: Vec<WireContact>,
 }
 
@@ -288,7 +331,7 @@ pub enum WireError {
 /// `{v, ok, error?, data?}` — every provider pull returns this and never throws.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Envelope<T> {
-    #[serde(default = "default_version")]
+    #[serde(default = "default_version", deserialize_with = "null_version")]
     pub v: u32,
     pub ok: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -316,6 +359,25 @@ pub type FavoritesResponse = Envelope<FavoritesPayload>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn null_plain_fields_read_as_their_defaults() {
+        let s: CallSnapshot = serde_json::from_str(
+            r#"{"v":null,"seq":null,"now_ms":null,"keyguard_locked":null,"audio":null,
+                "calls":[{"id":1,"state":null,"number_raw":null,"normalized":null,
+                          "connect_time_ms":null,"can_hold":null,"is_incoming":null}]}"#,
+        )
+        .expect("nulls are tolerated");
+        assert_eq!(s.v, WIRE_VERSION);
+        assert!(s.keyguard_locked, "null keyguard still means locked");
+        assert_eq!(s.calls[0].number_raw, "");
+        assert_eq!(s.calls[0].state, WireCallState::Unknown);
+        let c: ContactsPayload =
+            serde_json::from_str(r#"{"contacts":[{"id":2,"display_name":null,"numbers":null}]}"#)
+                .expect("parse");
+        assert_eq!(c.contacts[0].display_name, "");
+        assert!(c.contacts[0].numbers.is_empty());
+    }
 
     #[test]
     fn missing_keyguard_locked_means_locked() {

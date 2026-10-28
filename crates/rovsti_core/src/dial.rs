@@ -35,6 +35,24 @@ fn is_key(c: char) -> bool {
     matches!(c, '0'..='9' | '*' | '#' | '+')
 }
 
+/// Cuts RFC 3966 parameters (`;ext=12`, `;phone-context=+90`, `;isub=..`):
+/// a `;` followed by a letter. A pause `;` is followed by a digit or ends the
+/// string, so `1,2;3` is untouched.
+fn cut_uri_params(text: &str) -> &str {
+    let mut chars = text.char_indices().peekable();
+    while let Some((at, c)) = chars.next() {
+        if c == ';' && chars.peek().is_some_and(|(_, n)| n.is_ascii_alphabetic()) {
+            return &text[..at];
+        }
+    }
+    text
+}
+
+/// Drops the optional trunk `(0)` after a leading `+country code`.
+fn drop_trunk_zero(text: &str) -> std::borrow::Cow<'_, str> {
+    crate::phone_number::drop_optional_trunk(text)
+}
+
 /// Cleans pasted text into a dial string: drops a `tel:` scheme, spaces,
 /// dashes, brackets and every other character that cannot be dialled, and
 /// keeps `+ * # , ;` and digits. `tel:%2B90` style escapes for `+`, `#` and
@@ -45,6 +63,9 @@ pub fn normalise_paste(input: &str) -> String {
         Some(scheme) if scheme.eq_ignore_ascii_case("tel:") => &trimmed[4..],
         _ => trimmed,
     };
+    let is_uri = body.len() != trimmed.len();
+    let body = if is_uri { cut_uri_params(body) } else { body };
+    let body = drop_trunk_zero(body);
     let mut out = String::with_capacity(body.len().min(MAX_LEN * 2));
     let mut chars = body.chars();
     while let Some(c) = chars.next() {
@@ -100,6 +121,7 @@ pub fn from_tel_uri(uri: &str) -> String {
         }
     }
     let text = String::from_utf8_lossy(&decoded);
+    let text = drop_trunk_zero(cut_uri_params(&text)).into_owned();
     text.chars()
         .filter(|&c| is_dial_char(c))
         .take(MAX_LEN)
@@ -194,6 +216,33 @@ mod tests {
         for (input, want) in cases {
             assert_eq!(normalise_paste(input), want, "paste {input:?}");
         }
+    }
+
+    #[test]
+    fn uri_parameters_and_optional_trunk_zero_are_cut() {
+        let cases = [
+            ("tel:+90555;ext=12", "+90555"),
+            ("tel:+90555;phone-context=+90", "+90555"),
+            ("tel:0555;isub=12;ext=3", "0555"),
+            ("tel:1,2;3", "1,2;3"),
+            ("tel:123;", "123;"),
+            ("+90 (0) 555 111", "+90555111"),
+            ("tel:+44(0)20 7946", "+44207946"),
+            ("(0)555", "0555"),
+            ("tel:*#06#", "*#06#"),
+            ("tel:*21%23;ext=1", "*21#"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(normalise_paste(input), want, "paste {input:?}");
+            if input.starts_with("tel:") {
+                assert_eq!(from_tel_uri(input), want, "uri {input:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn escaped_uri_parameters_are_cut() {
+        assert_eq!(from_tel_uri("tel:%2B90555%3Bext%3D5"), "+90555");
     }
 
     #[test]

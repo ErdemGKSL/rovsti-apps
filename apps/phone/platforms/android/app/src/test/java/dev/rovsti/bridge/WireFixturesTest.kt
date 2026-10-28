@@ -138,7 +138,12 @@ class WireFixturesTest {
     @Test fun mappings() {
         assertEquals("+905551112233", ProviderJson.normalize(" +90 (555) 111-22 33"))
         assertEquals("0", ProviderJson.normalize("0+"))
-        assertEquals("06", ProviderJson.normalize("*#06#"))
+        assertEquals("*#06#", ProviderJson.normalize("*#06#"))
+        assertEquals("*21#555", ProviderJson.normalize("*21#555"))
+        assertEquals("+905551112233", ProviderJson.normalize("+90 (0) 555 111 22 33"))
+        assertEquals("+905551112233", ProviderJson.normalize("\u202a+90 555 111 22 33\u202c"))
+        assertEquals("+90555", ProviderJson.normalize("+90555;ext=12"))
+        assertEquals("1,2;3".filter { it.isDigit() }, ProviderJson.normalize("1,2;3"))
         assertEquals("missed", ProviderJson.kindName(3))
         assertEquals("incoming", ProviderJson.kindName(7))
         assertEquals("unknown", ProviderJson.kindName(99))

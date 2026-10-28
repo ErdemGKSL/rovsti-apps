@@ -32,28 +32,61 @@ pub struct RawEvent {
 
 pub type Receiver = UnboundedReceiver<RawEvent>;
 
-static SINK: Mutex<Option<UnboundedSender<RawEvent>>> = Mutex::new(None);
+/// The current sink and the generation that installed it.
+struct Slot {
+    generation: u64,
+    tx: Option<UnboundedSender<RawEvent>>,
+}
 
-fn sink() -> std::sync::MutexGuard<'static, Option<UnboundedSender<RawEvent>>> {
+static SINK: Mutex<Slot> = Mutex::new(Slot {
+    generation: 0,
+    tx: None,
+});
+
+fn sink() -> std::sync::MutexGuard<'static, Slot> {
     SINK.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// Which installed sink a session owns; see [`install_sink_owned`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SinkToken(u64);
+
 /// Installs a new sink, replacing (and closing) any previous one.
 pub fn install_sink() -> Receiver {
+    install_sink_owned().0
+}
+
+/// Like [`install_sink`], plus a token so that only this session can clear
+/// its own sink ([`clear_sink_if`]): an old session released after a new one
+/// started must not cut the new one off.
+pub fn install_sink_owned() -> (Receiver, SinkToken) {
     let (tx, rx) = unbounded();
-    *sink() = Some(tx);
-    rx
+    let mut slot = sink();
+    slot.generation += 1;
+    slot.tx = Some(tx);
+    (rx, SinkToken(slot.generation))
 }
 
 /// Removes the sink; later events are dropped.
 pub fn clear_sink() {
-    *sink() = None;
+    sink().tx = None;
+}
+
+/// Removes the sink only if `token` still owns it. Returns whether it did.
+pub fn clear_sink_if(token: SinkToken) -> bool {
+    let mut slot = sink();
+    if slot.generation == token.0 {
+        slot.tx = None;
+        true
+    } else {
+        false
+    }
 }
 
 /// Enqueues an event. Returns whether a live sink accepted it.
 pub fn dispatch(kind: impl Into<String>, json: impl Into<String>) -> bool {
     let guard = sink();
-    let Some(tx) = guard.as_ref() else {
+    let Some(tx) = guard.tx.as_ref() else {
         return false;
     };
     tx.unbounded_send(RawEvent {
@@ -113,6 +146,18 @@ mod tests {
         clear_sink();
         assert!(!dispatch("calls", "{}"));
         assert_eq!(rx.try_recv(), Err(TryRecvError::Closed));
+    }
+
+    #[test]
+    fn a_stale_session_cannot_clear_the_new_sink() {
+        let _g = serial();
+        let (_old_rx, old) = install_sink_owned();
+        let (mut new_rx, new) = install_sink_owned();
+        assert!(!clear_sink_if(old));
+        assert!(dispatch("calls", "{}"));
+        assert_eq!(new_rx.try_recv().expect("event").kind, "calls");
+        assert!(clear_sink_if(new));
+        assert!(!dispatch("calls", "{}"));
     }
 
     #[test]

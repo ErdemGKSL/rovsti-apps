@@ -231,7 +231,7 @@ impl Backend {
         let data_dir = storage::data_dir("phone", cx);
         cx.new(|cx| {
             // (1) the new sink replaces any previous session's.
-            let mut events_rx = events::install_sink();
+            let (mut events_rx, sink_token) = events::install_sink_owned();
             // (2) attach by snapshot, through the same channel.
             let mut first_snapshot = None;
             match calls::snapshot() {
@@ -314,7 +314,10 @@ impl Backend {
             backend._tasks.push(drain);
             backend._tasks.push(prefs);
             // The sink belongs to this session; clear it when the session ends.
-            cx.on_release(|_, _| events::clear_sink()).detach();
+            cx.on_release(move |_, _| {
+                events::clear_sink_if(sink_token);
+            })
+            .detach();
             // (3) permissions and providers.
             backend.refresh_permissions(cx);
             backend.refresh_call_log(cx);

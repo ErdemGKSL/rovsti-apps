@@ -14,6 +14,9 @@ interface CallsApi {
     fun hold(callId: Int, on: Boolean): Boolean
     fun mute(on: Boolean): Boolean
     fun route(name: String): Boolean
+
+    /** Routes call audio to the endpoint with this identifier (AD-23); false for an unknown id. */
+    fun routeEndpoint(id: String): Boolean = false
     /** Starts a tone; it plays until [dtmfStop] (or a safety timeout). */
     fun dtmf(digit: Char): Boolean
     fun dtmfStop(): Boolean

@@ -46,6 +46,12 @@ pub fn route(name: &str) -> Result<bool> {
     bridge::call_bool("callRoute", &[Arg::Str(name)])
 }
 
+/// Routes audio to the endpoint with this identifier (AD-23). `Ok(false)` for
+/// an id Kotlin does not know. Ids are session handles: never persist them.
+pub fn route_endpoint(id: &str) -> Result<bool> {
+    bridge::call_bool("callRouteEndpoint", &[Arg::Str(id)])
+}
+
 /// Starts one DTMF tone on the foreground call; it plays until [`dtmf_stop`]
 /// (Kotlin stops it by itself after a few seconds as a safety net).
 pub fn dtmf(digit: char) -> Result<bool> {
@@ -91,6 +97,7 @@ mod tests {
         assert!(matches!(hold(1, true), Err(Error::Unsupported)));
         assert!(matches!(mute(true), Err(Error::Unsupported)));
         assert!(matches!(route("speaker"), Err(Error::Unsupported)));
+        assert!(matches!(route_endpoint("id"), Err(Error::Unsupported)));
         assert!(matches!(dtmf('5'), Err(Error::Unsupported)));
         assert!(matches!(dtmf_stop(), Err(Error::Unsupported)));
         assert!(matches!(answer_replacing(2), Err(Error::Unsupported)));

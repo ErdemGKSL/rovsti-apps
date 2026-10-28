@@ -53,6 +53,7 @@ object CallRegistry : CallsApi {
 
     private const val ANSWER_REPLACING_TIMEOUT_MS = 2_000L
     private const val DTMF_SAFETY_MS = 4_000L
+    private const val AUDIO_FALLBACK_MS = 1_500L
 
     private class Entry(val id: Int, val call: Call, val callback: Call.Callback) {
         var displayName: String? = null
@@ -80,8 +81,21 @@ object CallRegistry : CallsApi {
     private var nextId = 1
     private var seq = 0L
     private var muted = false
-    private var currentRoute: String? = null
-    private var endpoints: List<CallEndpoint> = emptyList()
+    private var canAddCall = false
+    private val audio = AudioPath()
+    private var firstCallSeen = false
+    private val events = CallEventRing()
+    private val coalescer = RebuildCoalescer(
+        post = { r, delay -> main.postDelayed(r, delay) },
+        cancel = { r -> main.removeCallbacks(r) },
+        rebuild = { rebuildNow() },
+    )
+    private val audioDeadline = Runnable {
+        if (audio.onFallbackDeadline()) {
+            record("audioFallback", -1, "none")
+            rebuild()
+        }
+    }
     private var foregroundId: Int? = null
     private var pending: Pending? = null
     private var keyguardReceiverRegistered = false
@@ -132,13 +146,44 @@ object CallRegistry : CallsApi {
     override fun route(name: String): Boolean {
         if (!hasService) return false
         main.post {
-            val target = endpoints.firstOrNull { SnapshotJson.routeName(it.endpointType) == name } ?: return@post
-            service?.requestCallEndpointChange(target, Executor { it.run() }, object : OutcomeReceiver<Void, CallEndpointException> {
-                override fun onResult(result: Void?) {}
-                override fun onError(error: CallEndpointException) {}
-            })
+            if (audio.legacy) {
+                val mask = AudioPath.legacyRouteMask("${AudioPath.LEGACY_PREFIX}$name")
+                if (mask != 0) service?.setAudioRoute(mask)
+                return@post
+            }
+            val target = audio.target(name) ?: return@post
+            requestEndpoint(target)
         }
         return true
+    }
+
+    /** Routes by endpoint id (AD-23); an unknown id returns false and does nothing. */
+    override fun routeEndpoint(id: String): Boolean {
+        if (!hasService) return false
+        val legacy = id.startsWith(AudioPath.LEGACY_PREFIX)
+        if (!legacy && id !in audio.knownIds) return false
+        main.post {
+            if (legacy) {
+                val mask = AudioPath.legacyRouteMask(id)
+                if (mask != 0) service?.setAudioRoute(mask)
+                return@post
+            }
+            // Re-validated here: the list may have changed since the caller looked.
+            val target = audio.endpoint(id)
+            if (target == null) rebuild() else requestEndpoint(target)
+        }
+        return true
+    }
+
+    private fun requestEndpoint(target: CallEndpoint) {
+        service?.requestCallEndpointChange(target, Executor { it.run() }, object : OutcomeReceiver<Void, CallEndpointException> {
+            override fun onResult(result: Void?) {}
+            override fun onError(error: CallEndpointException) {
+                // The route did not change: tell the UI at once so it reverts its pending look.
+                record("routeFailed", -1, "none")
+                rebuild()
+            }
+        })
     }
 
     /** Starts a tone; [dtmfStop] ends it. A safety timeout stops a tone whose "up" never arrives. */
@@ -238,8 +283,11 @@ object CallRegistry : CallsApi {
             incomingKey = null
         }
         muted = false
-        endpoints = emptyList()
-        currentRoute = null
+        canAddCall = false
+        audio.clear()
+        firstCallSeen = false
+        main.removeCallbacks(audioDeadline)
+        record("onUnbind", -1, "none")
         rebuild()
     }
 
@@ -248,10 +296,21 @@ object CallRegistry : CallsApi {
         val callback = object : Call.Callback() {
             override fun onStateChanged(call: Call, state: Int) {
                 if (state == Call.STATE_SELECT_PHONE_ACCOUNT) selectAccount(call)
+                record("onStateChanged", id, stateName(state))
                 rebuild()
             }
 
-            override fun onDetailsChanged(call: Call, details: Call.Details) = rebuild()
+            override fun onDetailsChanged(call: Call, details: Call.Details) {
+                record("onDetailsChanged", id, stateName(call.state))
+                rebuild()
+            }
+
+            // These feed focus and caps: they rebuild at once, so a merge never shows a transient scene.
+            override fun onParentChanged(call: Call, parent: Call?) = rebuild()
+
+            override fun onChildrenChanged(call: Call, children: List<Call>) = rebuild()
+
+            override fun onConferenceableCallsChanged(call: Call, conferenceableCalls: List<Call>) = rebuild()
         }
         val entry = Entry(id, call, callback)
         entries[id] = entry
@@ -259,12 +318,22 @@ object CallRegistry : CallsApi {
         call.registerCallback(callback, main)
         if (call.state == Call.STATE_SELECT_PHONE_ACCOUNT) selectAccount(call)
         resolveName(entry)
+        record("onCallAdded", id, stateName(call.state))
+        if (!firstCallSeen) {
+            firstCallSeen = true
+            main.postDelayed(audioDeadline, AUDIO_FALLBACK_MS)
+        }
         rebuild()
     }
 
     fun onCallRemoved(call: Call) {
+        if (entries.size <= 1) {
+            firstCallSeen = false
+            main.removeCallbacks(audioDeadline)
+        }
         val entry = entries.values.firstOrNull { it.call === call } ?: return
         entries.remove(entry.id)
+        record("onCallRemoved", entry.id, "none")
         call.unregisterCallback(entry.callback)
         if (pending?.replacedId == entry.id) completePending()
         rebuild()
@@ -272,17 +341,26 @@ object CallRegistry : CallsApi {
 
     fun onMuteChanged(isMuted: Boolean) {
         muted = isMuted
-        rebuild()
+        record("onMuteStateChanged", -1, "none")
+        scheduleRebuild()
     }
 
     fun onEndpointChanged(endpoint: CallEndpoint) {
-        currentRoute = SnapshotJson.routeName(endpoint.endpointType)
-        rebuild()
+        audio.onCurrent(endpoint)
+        record("onCallEndpointChanged", -1, "none")
+        scheduleRebuild()
     }
 
     fun onEndpointsChanged(available: List<CallEndpoint>) {
-        endpoints = available
-        rebuild()
+        audio.onAvailable(available, AudioPath.hearingAidNames(app))
+        record("onAvailableCallEndpointsChanged", -1, "none")
+        scheduleRebuild()
+    }
+
+    fun onCanAddCallChanged(can: Boolean) {
+        canAddCall = can
+        record("onCanAddCallChanged", -1, "none")
+        scheduleRebuild()
     }
 
     /** `MainActivity.onResume`: the lock state may have changed while we were away. */
@@ -377,22 +455,39 @@ object CallRegistry : CallsApi {
         )
     }
 
+    /** Rebuilds at once (cancels a pending scheduled rebuild). Focus, caps and notifications use this. */
+    private fun rebuild() = coalescer.now()
+
+    /** Audio, mute and can-add changes: one rebuild within 12 ms however many callbacks arrive (AD-23). */
+    private fun scheduleRebuild() = coalescer.schedule()
+
+    /** Names are constants and ids are call ids: the ring never holds a number or a name. */
+    private fun record(name: String, id: Int, state: String) {
+        events.record(name, id, state, 0, entries.size, audio.knownIds.size)
+    }
+
+    /** The Diagnostics report's event dump (no numbers, no names). */
+    fun eventDump(): List<String> = events.dump()
+
     /** Builds the snapshot, stores it, and pushes it (AD-4). Main thread only. */
-    private fun rebuild() {
+    private fun rebuildNow() {
         val calls = buildCalls()
         val focus = Focus.of(calls)
         foregroundId = focus.foreground
-        val routes = endpoints.mapNotNull { SnapshotJson.routeName(it.endpointType) }.distinct()
+        val audioInfo = audio.info(muted, if (audio.legacy) service?.callAudioState else null)
         val data = SnapshotData(
             seq = ++seq,
             nowMs = System.currentTimeMillis(),
             keyguardLocked = keyguardLocked(),
-            audio = AudioInfo(muted, currentRoute ?: "earpiece", routes),
+            audio = audioInfo,
             foregroundCallId = focus.foreground,
             waitingCallId = focus.waiting,
+            canAddCall = canAddCall,
             calls = calls,
         )
         val text = SnapshotJson.toJson(data)
+        // Ids and booleans only (spike logs): the burst test counts these lines.
+        Log.d("RovstiSpike", "snapshot seq=$seq calls=${calls.size} endpoints=${audioInfo.endpoints.size} legacy=${audio.legacy}")
         knownIds = calls.mapTo(HashSet()) { it.id }
         ringingIds = calls.filter { it.state == "ringing" }.mapTo(HashSet()) { it.id }
         foregroundIdVolatile = focus.foreground
@@ -472,7 +567,7 @@ object CallRegistry : CallsApi {
         val context = app ?: return
         val controller = proximity ?: ProximityController(context).also { proximity = it }
         controller.update(
-            wanted = ProximityPolicy.wanted(calls, focus, currentRoute ?: "earpiece"),
+            wanted = ProximityPolicy.wanted(calls, focus, audio.routeName() ?: "earpiece"),
             callInProgress = ProximityPolicy.inProgress(calls),
         )
     }

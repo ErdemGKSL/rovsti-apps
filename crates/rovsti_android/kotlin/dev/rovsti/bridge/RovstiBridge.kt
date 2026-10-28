@@ -104,6 +104,7 @@ object RovstiBridge {
     @JvmStatic fun callHold(id: Int, on: Boolean): Boolean = calls?.hold(id, on) ?: false
     @JvmStatic fun callMute(on: Boolean): Boolean = calls?.mute(on) ?: false
     @JvmStatic fun callRoute(name: String): Boolean = calls?.route(name) ?: false
+    @JvmStatic fun callRouteEndpoint(id: String): Boolean = calls?.routeEndpoint(id) ?: false
     @JvmStatic fun callDtmf(digit: Int): Boolean = calls?.dtmf(digit.toChar()) ?: false
     @JvmStatic fun callDtmfStop(): Boolean = calls?.dtmfStop() ?: false
     @JvmStatic fun callAnswerReplacing(id: Int): Boolean = calls?.answerReplacing(id) ?: false

@@ -9,14 +9,17 @@
 //! Every function also compiles on desktop, where it returns
 //! [`Error::Unsupported`], so the apps run under `cargo run` for UI work.
 
+pub mod blocklist;
 pub mod bridge;
 pub mod calls;
 pub mod diagnostics;
+pub mod documents;
 pub mod events;
 pub mod perf;
 pub mod permissions;
 pub mod providers;
 pub mod roles;
+pub mod settings;
 pub mod telecom;
 pub mod window;
 pub mod xiaomi;

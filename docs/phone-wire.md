@@ -79,7 +79,7 @@ brackets.
 | blocklist rows | `BlocklistResponse` (`numbers[{id,number_raw,normalized}]`) | `blocklist.json` | 18.x `WireFixturesTest` |
 | contacts, new fields `lookup_key`, `display_name_alt`, `sort_key`, `sort_key_alt` | `WireContact` | `contacts_v2.json` | 19.x `WireFixturesTest` |
 | call log, new fields `account_key`, `block_reason` (`user|system|unknown`), `features` (details only), kinds `voicemail`, `blocked` | `CallLogEntry` | `call_log_v2.json` | 18.x, 21.x `WireFixturesTest` |
-| `SettingsSync{proximity,flip_to_silence,vibrate_connect,vibrate_end,has_replies,keypad_tones?,haptics,name_format}` (Rust pushes via `syncSettings(json)`) | `SettingsSync` | `settings_sync.json` | 14.12 / 17.x `WireFixturesTest` |
+| `SettingsSync{proximity,flip_to_silence,vibrate_connect,vibrate_end,has_replies,keypad_tones?,haptics,name_format}` (Rust pushes via `settingsSync(json)`) | `SettingsSync` | `settings_sync.json` | 14.12 / 17.x `WireFixturesTest` |
 | envelope errors | `WireError` | `envelope_errors.json` | 18.x `WireFixturesTest` |
 | one-shot payloads | `DocumentResult`, `RingtoneResult`, `UiRequest` | `document_result_*.json`, `ringtone_result.json`, `ui_request.json` | 21.x, 17.x, 16.x |
 
@@ -116,6 +116,9 @@ string and never throw.
 | `addContact(number)` = / changed | 14.4 | `ACTION_INSERT_OR_EDIT` |
 | `hearingAidCompatible()` + | 14.8 | Boolean |
 | `diagnostics(probe)` + | 14.0f | one `pass|fail|unknown` line per check |
+| `pullBlocklist()`, `blockNumber(n)`, `unblockNumber(n)` + | facade 14.15 (`rovsti_android::blocklist`), Kotlin 18.x | envelope / Boolean |
+| `exportDocument(name, json)`, `importDocument()` + | facade 14.15 (`rovsti_android::documents`), Kotlin 21.x | Boolean; the answer is the `document_result` event |
+| `settingsSync(json)`, `systemFacts()` + | facade 14.15 (`rovsti_android::settings`), Kotlin 17.x | Boolean / JSON string |
 
 ## 5. Bit constants (Rust `wire::caps|props|features`, Kotlin `WireJson.kt`)
 
@@ -131,3 +134,41 @@ overlap.
 A field in this table that no later story's Covers names is added to the
 completion notes of the nearest owning story. Story ids marked `x` (15.x,
 17.x, ...) stand for "the story of that epic that first reads the field".
+
+## 6. Landed shapes (Foundation F0, closed by story 14.15)
+
+Every v0.2 shape has its Rust type, a golden fixture and a test. "Kotlin reads
+it" is the story that adds the Kotlin side and the JVM test that opens the same
+fixture file.
+
+| Shape | Rust | Fixture(s) | Kotlin reads it |
+|---|---|---|---|
+| `Envelope<T>` errors `permission|unavailable|refused|not_found|unknown` | `wire::Envelope`, `WireError` | `envelope_errors.json` | 18.x |
+| call snapshot v0.2 fields | `wire::CallSnapshot`, `WireCall` | `two_calls.json`, `conference.json`, `audio_endpoints.json`, `selecting_account.json` | 14.0c (done), 15.1 |
+| call-log row `account_key`, `block_reason`, `features`, kinds `voicemail`/`blocked` | `wire::CallLogEntry` | `call_log_v2.json` | 18.x, 21.x |
+| contact `lookup_key`, `display_name_alt`, `sort_key`, `sort_key_alt` | `wire::WireContact` | `contacts_v2.json` | 19.x |
+| `PhoneAccounts` | `wire::PhoneAccounts` | `phone_accounts.json` | 16.3 |
+| blocklist rows | `wire::BlocklistPayload` | `blocklist.json` | 18.x |
+| `SettingsSync` | `wire::SettingsSync` | `settings_sync.json` | 17.x |
+| `VoicemailInfo`, `EmergencyList` | `wire::VoicemailInfo`, `EmergencyList` | `voicemail_info.json`, `emergency_list.json` | 20.x, 19.x |
+| events `document_result`, `ringtone_result`, `ui_request` | `wire::DocumentResult`, `RingtoneResult`, `UiRequest` | `document_result_*.json`, `ringtone_result.json`, `ui_request.json` | 21.x, 17.x, 16.x |
+| event kinds `blocked_changed`, `sims_changed`, `voicemail_changed` | `rovsti_android::events::kind` | none (no payload) | 18.x, 16.3, 20.x |
+| `prefs.json` v1 and v2, backup file | `settings::PrefsV1`, `PrefsV2`, `BackupFile` | `tests/fixtures/prefs/*.json` | never (Rust-only, AD-30) |
+
+## 7. Manifest facts (story 14.15, AD-34), asserted by `scripts/check-apk.sh`
+
+Declared in the ejected `apps/phone/platforms/android/app/src/main/AndroidManifest.xml`
+(manual management) and mirrored in `apps/phone/gpuiforge.json` where that file
+has a field for it:
+
+- permission `VIBRATE` added (both files);
+- `<queries>`: the intents for `android.telephony.action.EMERGENCY_ASSISTANCE`,
+  `android.settings.HEARING_DEVICES_SETTINGS` and
+  `android.telecom.action.SHOW_CALL_SETTINGS` and nothing else (manifest only;
+  gpuiforge.json has no `queries` field);
+- `.VoicemailReceiver`: `enabled=false`, `exported=true`,
+  `permission=READ_PHONE_STATE`, action `SHOW_VOICEMAIL_NOTIFICATION` (manifest
+  only); its Kotlin class does nothing while disabled;
+- absent: `INTERNET`, `SEND_SMS`, `READ_PHONE_NUMBERS`, `MODIFY_PHONE_STATE`,
+  `QUERY_ALL_PACKAGES`, `BIND_SCREENING_SERVICE`, `READ_EXTERNAL_STORAGE`,
+  `MANAGE_OWN_CALLS`, `BLUETOOTH_SCAN`.

@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 10-27-2026 12:00
-last_updated: 10-28-2026 12:00 (Epics 8, 9, 11 and 12.1-12.6 implemented; DEVICE checks pending)
+last_updated: 10-28-2026 14:00
 project: rovsti-phone
 project_key: NOKEY
 tracking_system: file-system
@@ -80,9 +80,6 @@ development_status:
   4-10-failure-containment: review
   epic-4-retrospective: optional
 
-  # Epic 5 is implemented and compiles on every target; every story awaits DEVICE
-  # acceptance. 5.6 ships the RovstiPerf measurement plus the documented curtain
-  # switch (NativeIncoming.CURTAIN_ENABLED = false until the owner's numbers say otherwise).
   epic-5: in-progress
   5-1-incoming-call-notification-unlocked: review
   5-2-incoming-call-screen-over-the-lock-screen: review
@@ -93,8 +90,6 @@ development_status:
   5-7-proximity-screen-off: review
   epic-5-retrospective: optional
 
-  # Epic 6 is implemented (virtualised Recents list, states, call back, number sheet,
-  # seen-timer + missed-call notification cancel); stories await DEVICE acceptance.
   epic-6: in-progress
   6-1-recents-list: review
   6-2-recents-empty-loading-and-permission-states: review
@@ -102,9 +97,6 @@ development_status:
   6-4-cancel-the-system-missed-call-notification-when-recents-is-v: review
   epic-6-retrospective: optional
 
-  # Epic 7 setup stories are implemented as a header button + glass bottom
-  # sheet (not a page card, owner feedback 2026-10-27). All await DEVICE
-  # acceptance on the Xiaomi/HyperOS phone with the signed release APK.
   epic-7: in-progress
   7-1-setup-checklist-card: review
   7-2-act-on-a-setup-item: review
@@ -114,8 +106,6 @@ development_status:
   7-6-preview-mode: review
   epic-7-retrospective: optional
 
-  # Epic 8 is implemented (virtualised Contacts + Favorites, search field, Contact sheet,
-  # chooser, star/unstar, Recents info/long-press to the sheet); stories await DEVICE acceptance.
   epic-8: in-progress
   8-1-contacts-list: review
   8-2-contact-search: review
@@ -127,8 +117,6 @@ development_status:
   8-8-recents-info-opens-the-contact-sheet: review
   epic-8-retrospective: optional
 
-  # Epic 9: hold/resume verified (already in the In-Call screen), waiting-call banner,
-  # Return-to-call pill and tab behaviour implemented; stories await DEVICE acceptance.
   epic-9: in-progress
   9-1-hold-and-resume: review
   9-2-waiting-call: review
@@ -136,12 +124,6 @@ development_status:
   9-4-tab-navigation-behaviour: review
   epic-9-retrospective: optional
 
-  # Epic 10 is implemented and verified on desktop with sample data; stories await DEVICE
-  # acceptance: keypad match runs off-thread (10.1), Recents tab badge with a pop hook (10.2),
-  # live Recents refresh with fade/glide and scroll preservation (10.3), desktop debug switcher
-  # and "Preview data" caption (10.4), photos via Kotlin ContactPhotos -> cache PNG path ->
-  # off-thread decode into a 64-entry LRU (10.5), last tab remembered (10.6). Also: sticky
-  # Contacts section letters, "Try again" on Unavailable lists, search off-thread above 200.
   epic-10: in-progress
   10-1-keypad-contact-match: review
   10-2-missed-call-badge: review
@@ -151,14 +133,6 @@ development_status:
   10-6-remember-the-last-tab: review
   epic-10-retrospective: optional
 
-  # Epic 11, first half implemented and verified on desktop with sample data (frame crops);
-  # stories await DEVICE acceptance for feel and perf. 11.1 rovsti_ui::moments (Tween, RippleRing,
-  # Fade, Scheduler, SpringBank, Flights, Glide, Anchors; Motion::frame_timed settles springs in
-  # one frame under reduced motion); 11.2 KeyFx view + ghost delete + font spring; 11.3 flight.rs
-  # (Call/Answer circle -> End, list avatar flights and return); 11.4 tab flow; 11.5 avatar_hue,
-  # 135 deg monogram + 1.5 px rim, waiting double pulse, muted dashed ring. 11.6-11.10 implemented (review): S7 completed (reduced-motion button fade, static aura),
-  S9-S11 (tint flood, wobble, control dim), S12-S14, S15 veil melt, S16 sheet rise, slow-frame
-  logging; see docs/phone-motion-audit.md. DEVICE acceptance pending for all of epic 11.
   epic-11: in-progress
   11-1-moment-infrastructure: review
   11-2-s1-drop-key-and-s2-liquid-number-field: review
@@ -172,10 +146,6 @@ development_status:
   11-10-reduced-motion-audit-and-slow-frame-logging: review
   epic-11-retrospective: optional
 
-  # Epic 12, 12.1-12.6 implemented and verified on desktop (cargo tests, headless harness, glass pixel
-  # tests, window crops); DEVICE numbers pending. Evidence: docs/perf/ (README: phone commands and the
-  # table to fill; baseline.md, after-epic-12.md). 12.7 stays in backlog: it needs the phone
-  # (scripts/perf-build.sh, scripts/perf-run.sh, docs/perf/final.md).
   epic-12: in-progress
   12-1-perf-feature-and-rovstiperf-logging: review
   12-2-scripted-perf-scenarios: review
@@ -192,3 +162,117 @@ development_status:
   13-3-final-workspace-checks: done
   13-4-owner-acceptance-checklist: review
   epic-13-retrospective: optional
+
+  # ===== v0.2 (Epics 14-22), appended 2026-10-28 from PRD FR41-FR73 / UX S17-S36 / spine AD-23..AD-36 =====
+  # Build order is numeric order (no story depends on a later one): Epic 14 = Foundation F0 part 1
+  # (14.0a-14.0f, only what audio needs) -> audio routes 14.1-14.8 (owner release 1) -> F0 part 2
+  # (14.9-14.15, invisible plumbing) -> 15 multi-call -> 16 Settings/SIM/backup -> 17 blocking ->
+  # 18 incoming controls -> 19/20 contacts + keypad -> 21 call details -> 22 polish, review, v0.2 release.
+  # Spike stories (14.1 S3, 15.1 S4, 16.3 S5, 16.6 S13, 17.1 S6, 18.1 S7, 18.4 S8, 18.5 S14, 19.2 S11,
+  # 20.3 S9, 20.4 S10, 21.2 S12) ship the safe default and a Diagnostics probe; they never wait for the phone;
+  # results are reconciled in 22.6. 19.7 (in-app contact editor, FR-62) is P3: skip it unless the owner asks.
+  # Every story with DEVICE in Verify is accepted after the owner's check on the signed release APK.
+  epic-14: backlog
+  14-0a-consolidated-wire-field-table-and-bit-constants: backlog
+  14-0b-snapshot-schema-v0-2-and-golden-fixtures: backlog
+  14-0c-kotlin-wire-constants-caps-calleventring-and-jvm-goldens: backlog
+  14-0d-rovsti_core-audio-endpoint-list: backlog
+  14-0e-coalesced-rebuild-in-callregistry: backlog
+  14-0f-diagnostics-page-skeleton-and-report: backlog
+  14-1-audiopath-in-kotlin-and-spike-s3-probe: backlog
+  14-2-endpoint-model-in-the-backend-and-v0-1-controls-kept-working: backlog
+  14-3-notice-pill-s28-shared-component: backlog
+  14-4-system-hand-off-intents: backlog
+  14-5-audio-control-icon-caption-and-phone-speaker-toggle-fr-42: backlog
+  14-6-route-popover-its-open-triggers-and-s17-route-bloom: backlog
+  14-7-live-updates-s18-device-arrival-and-the-names-row: backlog
+  14-8-shortcut-footer-hearing-aid-hint-and-compatibility-value: backlog
+  14-9-provider-and-seam-wire-structs-with-golden-fixtures: backlog
+  14-10-rovsti_core-scene-and-scenediff: backlog
+  14-11-rovsti_core-settings-prefsv2-and-upgrade-chain: backlog
+  14-12-prefs-v2-storage-migration-prefswriter-and-backend-settings: backlog
+  14-13-rovsti_core-names-and-blocklist-blockset: backlog
+  14-14-t9-index-frequent-and-is_emergency: backlog
+  14-15-manifest-and-permission-additions-check-apk-sh-and-desktop-s: backlog
+  epic-14-retrospective: optional
+
+  epic-15: backlog
+  15-1-kotlin-multi-call-model-and-spike-s4-probe: backlog
+  15-2-the-pendingop-machine-and-multi-call-commands: backlog
+  15-3-rust-call-scene-integration-and-commands: backlog
+  15-4-fixed-in-call-control-grid-chip-row-and-disabled-reasons: backlog
+  15-5-add-call-sheet: backlog
+  15-6-two-call-view-held-card-s19-hold-away-and-s20-swap-crossing: backlog
+  15-7-merge-conference-view-s21-merge-weave-and-s22-participant-ej: backlog
+  15-8-waiting-card-s23-waiting-card-drop: backlog
+  15-9-notifications-end-semantics-and-lock-screen-rules-for-severa: backlog
+  epic-15-retrospective: optional
+
+  epic-16: backlog
+  16-1-gear-button-settings-page-shell-and-s24-page-push: backlog
+  16-2-settings-store-wiring-and-kotlin-mirror: backlog
+  16-3-sim-accounts-place_call-account_key-and-spike-s5: backlog
+  16-4-sim-chooser-and-s26-sim-chip-flight: backlog
+  16-5-sim-chips-in-the-in-call-screen-and-recents: backlog
+  16-6-backup-and-restore-of-local-data-and-spike-s13: backlog
+  16-7-settings-controls-s25-toggle-snap-and-the-calls-sounds-and-h: backlog
+  16-8-settings-take-effect-proximity-keypad-tones-vibration-haptic: backlog
+  16-9-name-order-and-sort-across-the-app: backlog
+  16-10-system-shortcuts-section-and-hearing-aid-compatibility-value: backlog
+  epic-16-retrospective: optional
+
+  epic-17: backlog
+  17-1-kotlin-blocklist-block_guard-and-spike-s6: backlog
+  17-2-blocked-state-in-the-app-recents-exclusion-badge-and-pulls: backlog
+  17-3-recents-row-menu-and-the-block-flow-with-s27: backlog
+  17-4-block-from-the-incoming-screen-after-a-call-and-the-blocked: backlog
+  17-5-blocked-numbers-page-in-settings: backlog
+  17-6-blocked-calls-view-and-reasons: backlog
+  epic-17-retrospective: optional
+
+  epic-18: backlog
+  18-1-reject-path-in-kotlin-and-spike-s7: backlog
+  18-2-reply-sheet-and-s31-reply-sent: backlog
+  18-3-quick-replies-editor-in-settings: backlog
+  18-4-silenceringer-flipdetector-and-spike-s8: backlog
+  18-5-answer-and-decline-gestures-s29-and-spike-s14: backlog
+  18-6-silence-control-and-s30-silence-hush: backlog
+  18-7-heads-up-notification-message-action-and-waiting-card-wiring: backlog
+  epic-18-retrospective: optional
+
+  epic-19: backlog
+  19-1-add-to-contacts-on-every-surface: backlog
+  19-2-delete-a-contact-and-spike-s11: backlog
+  19-3-quick-actions-strip-share-and-long-press-copy: backlog
+  19-4-contact-ringtone-row-gated-by-spike-s11: backlog
+  19-5-favorites-reorder-and-s34-reorder-lift: backlog
+  19-6-frequent-row: backlog
+  19-7-in-app-contact-editor-p3-stretch-cut-first: backlog
+  epic-19-retrospective: optional
+
+  epic-20: backlog
+  20-1-t9-strip-results-sheet-and-s32-results-morph: backlog
+  20-2-speed-dial-editor-contact-sheet-row-and-s33-speed-dial-charg: backlog
+  20-3-voicemail-shortcut-and-spike-s9: backlog
+  20-4-emergency-numbers-and-spike-s10: backlog
+  epic-20-retrospective: optional
+
+  epic-21: backlog
+  21-1-call-details-page-with-s35-details-arrival: backlog
+  21-2-delete-call-history-entries-undo-and-spike-s12: backlog
+  21-3-delete-all-call-history-and-s36-hold-to-delete: backlog
+  21-4-call-quality-indicators-live-and-history: backlog
+  epic-21-retrospective: optional
+
+  epic-22: backlog
+  22-1-perf-scenarios-for-the-v0-2-surfaces: backlog
+  22-2-code-optimisation-pass-on-the-v0-2-surfaces: backlog
+  22-3-glass-pass-and-scaled-surface-audit-for-v0-2: backlog
+  22-4-reduced-motion-transparency-font-scale-and-talkback-audit-of: backlog
+  22-5-measured-run-on-the-phone: backlog
+  22-6-spike-reconciliation-and-shipped-constants: backlog
+  22-7-final-workspace-checks-and-audits-for-v0-2: backlog
+  22-8-owner-acceptance-document-for-v0-2: backlog
+  22-9-independent-code-review: backlog
+  22-10-v0-2-signed-release: backlog
+  epic-22-retrospective: optional

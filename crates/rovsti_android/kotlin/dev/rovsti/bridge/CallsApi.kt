@@ -28,6 +28,27 @@ interface CallsApi {
     fun dtmfStop(): Boolean
     fun answerReplacing(callId: Int): Boolean
 
+    /** Swaps the active and the held call (`swapConference()` or `unhold()`); false when there is nothing to swap. */
+    fun swap(): Boolean = false
+
+    /** Merges the two calls into a conference; false when nothing can be merged. */
+    fun merge(): Boolean = false
+
+    /** Splits a conference participant into a private call; false without the split capability. */
+    fun split(childId: Int): Boolean = false
+
+    /** Answers a ringing call and lets the network hold the current one; false when the current call cannot be held. */
+    fun answerHolding(callId: Int): Boolean = false
+
+    /** Ends the held call, then answers [callId] (the relabelled "End held call and answer"). */
+    fun answerEndingHeld(callId: Int): Boolean = false
+
+    /** Ends every non-ringing top-level call. */
+    fun endAll(): Boolean = false
+
+    /** What the registry measured for the S4 probe. */
+    fun multiCallFacts(): MultiCallFacts = MultiCallFacts()
+
     /** Rust drew the first frame of the Incoming Call screen for [callId] (ring-latency log, story 5.6). */
     fun incomingFrame(callId: Int): Boolean = false
 }

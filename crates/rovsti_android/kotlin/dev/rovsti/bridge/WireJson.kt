@@ -87,6 +87,8 @@ data class CallInfo(
     val accountKey: String? = null,
     val displayNameAlt: String? = null,
     val holdSinceMs: Long? = null,
+    /** Not on the wire: this call can be conferenced with another one (`Call.getConferenceableCalls()` is not empty). */
+    val conferenceable: Boolean = false,
 )
 
 data class AccountRef(val key: String, val label: String = "")
@@ -112,20 +114,39 @@ data class SnapshotData(
     val calls: List<CallInfo> = emptyList(),
 )
 
-/** Which call is in front and which one is waiting; Rust validates, never re-selects. */
-data class Focus(val foreground: Int?, val waiting: Int?) {
+/**
+ * Which call is in front, which one is held beside it, which one waits and which one just ended
+ * (AD-24). Rust validates these ids against `calls` and never re-selects.
+ */
+data class Focus(
+    val foreground: Int?,
+    val waiting: Int?,
+    val background: Int? = null,
+    val ended: Int? = null,
+) {
     companion object {
+        private val LIVE = setOf("active", "dialing", "holding")
+
         /**
-         * Foreground: first active, else dialing, else holding, else ringing,
-         * else (a call-ended hold) the first disconnected. Waiting: a ringing
-         * call that is not the foreground one.
+         * Over top-level calls only (a conference is one call). Foreground: first active, else
+         * dialing, else holding (lowest id), else ringing, else a disconnected call (the ended hold,
+         * only when nothing live and not ringing exists). A disconnected call beside a live one is
+         * [ended]; [background] is the other non-ringing, non-disconnected call; [waiting] is the
+         * lowest-id ringing call that is not the foreground. While an operation runs, [keep] (the
+         * previous foreground) stays in front if it is still live.
          */
-        fun of(calls: List<CallInfo>): Focus {
-            fun first(state: String) = calls.firstOrNull { it.state == state }?.id
-            val foreground = first("active") ?: first("dialing") ?: first("holding")
+        fun of(calls: List<CallInfo>, keep: Int? = null): Focus {
+            val top = calls.filter { it.parentId == null }
+            fun first(state: String) = top.firstOrNull { it.state == state }?.id
+            val live = top.filter { it.state in LIVE }
+            val kept = keep?.takeIf { k -> live.any { it.id == k } }
+            val foreground = kept ?: first("active") ?: first("dialing") ?: first("holding")
                 ?: first("ringing") ?: first("disconnected")
-            val waiting = calls.firstOrNull { it.state == "ringing" && it.id != foreground }?.id
-            return Focus(foreground, waiting)
+            val waiting = top.firstOrNull { it.state == "ringing" && it.id != foreground }?.id
+            val background = live.firstOrNull { it.id != foreground }?.id
+            val anyLive = top.any { it.state in LIVE || it.state == "ringing" }
+            val ended = if (anyLive) top.firstOrNull { it.state == "disconnected" && it.id != foreground }?.id else null
+            return Focus(foreground, waiting, background, ended)
         }
     }
 }

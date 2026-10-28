@@ -108,6 +108,12 @@ object RovstiBridge {
     @JvmStatic fun callDtmf(digit: Int): Boolean = calls?.dtmf(digit.toChar()) ?: false
     @JvmStatic fun callDtmfStop(): Boolean = calls?.dtmfStop() ?: false
     @JvmStatic fun callAnswerReplacing(id: Int): Boolean = calls?.answerReplacing(id) ?: false
+    @JvmStatic fun callSwap(): Boolean = calls?.swap() ?: false
+    @JvmStatic fun callMerge(): Boolean = calls?.merge() ?: false
+    @JvmStatic fun callSplit(id: Int): Boolean = calls?.split(id) ?: false
+    @JvmStatic fun callAnswerHolding(id: Int): Boolean = calls?.answerHolding(id) ?: false
+    @JvmStatic fun callAnswerEndingHeld(id: Int): Boolean = calls?.answerEndingHeld(id) ?: false
+    @JvmStatic fun callEndAll(): Boolean = calls?.endAll() ?: false
     @JvmStatic fun callIncomingFrame(id: Int): Boolean = calls?.incomingFrame(id) ?: false
 
     /**

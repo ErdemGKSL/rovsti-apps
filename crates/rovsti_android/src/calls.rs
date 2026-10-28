@@ -70,6 +70,41 @@ pub fn answer_replacing(call_id: i32) -> Result<bool> {
     bridge::call_bool("callAnswerReplacing", &[Arg::Int(call_id)])
 }
 
+/// Swaps the active and the held call (a conference swap, or resuming the held
+/// call). `Ok(false)` when there is nothing to swap. The result arrives as the
+/// next snapshot (`pending: swap` while it runs).
+pub fn swap() -> Result<bool> {
+    bridge::call_bool0("callSwap")
+}
+
+/// Merges the two calls into a conference. `Ok(false)` when nothing can be merged.
+pub fn merge() -> Result<bool> {
+    bridge::call_bool0("callMerge")
+}
+
+/// Splits a conference participant into a private call (needs the child's
+/// split capability); the rest of the conference is held.
+pub fn split(child_id: i32) -> Result<bool> {
+    bridge::call_bool("callSplit", &[Arg::Int(child_id)])
+}
+
+/// Answers a ringing call and lets the network hold the current one (FR-48).
+/// `Ok(false)` when the current call cannot be held or a call is already held.
+pub fn answer_holding(call_id: i32) -> Result<bool> {
+    bridge::call_bool("callAnswerHolding", &[Arg::Int(call_id)])
+}
+
+/// The relabelled "End held call and answer": the held call ends, then
+/// `call_id` is answered and the network holds the active one.
+pub fn answer_ending_held(call_id: i32) -> Result<bool> {
+    bridge::call_bool("callAnswerEndingHeld", &[Arg::Int(call_id)])
+}
+
+/// Ends every non-ringing top-level call.
+pub fn end_all() -> Result<bool> {
+    bridge::call_bool0("callEndAll")
+}
+
 /// Tells Kotlin the Incoming Call screen for `call_id` has drawn its first
 /// frame: Kotlin logs the ring latency (`RovstiPerf`) and lifts the native
 /// curtain if one is up (story 5.6).
@@ -101,6 +136,12 @@ mod tests {
         assert!(matches!(dtmf('5'), Err(Error::Unsupported)));
         assert!(matches!(dtmf_stop(), Err(Error::Unsupported)));
         assert!(matches!(answer_replacing(2), Err(Error::Unsupported)));
+        assert!(matches!(swap(), Err(Error::Unsupported)));
+        assert!(matches!(merge(), Err(Error::Unsupported)));
+        assert!(matches!(split(2), Err(Error::Unsupported)));
+        assert!(matches!(answer_holding(2), Err(Error::Unsupported)));
+        assert!(matches!(answer_ending_held(2), Err(Error::Unsupported)));
+        assert!(matches!(end_all(), Err(Error::Unsupported)));
         assert!(matches!(incoming_frame(2), Err(Error::Unsupported)));
         assert!(matches!(perf_log("x"), Err(Error::Unsupported)));
     }

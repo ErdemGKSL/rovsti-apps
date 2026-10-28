@@ -85,7 +85,7 @@ class WireFixturesTest {
 
     @Test fun focusPrefersActiveThenRinging() {
         fun c(id: Int, state: String) = CallInfo(id, state)
-        assertEquals(Focus(2, 3), Focus.of(listOf(c(1, "holding"), c(2, "active"), c(3, "ringing"))))
+        assertEquals(Focus(2, 3, 1), Focus.of(listOf(c(1, "holding"), c(2, "active"), c(3, "ringing"))))
         assertEquals(Focus(3, null), Focus.of(listOf(c(3, "ringing"))))
         assertEquals(Focus(4, null), Focus.of(listOf(c(4, "disconnected"))))
         assertEquals(Focus(null, null), Focus.of(emptyList()))

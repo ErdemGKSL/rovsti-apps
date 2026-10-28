@@ -25,6 +25,13 @@ import dev.rovsti.bridge.CallInfo
 import dev.rovsti.bridge.CallsApi
 import dev.rovsti.bridge.ContactsQuery
 import dev.rovsti.bridge.Focus
+import dev.rovsti.bridge.MultiCall
+import dev.rovsti.bridge.MultiCallFacts
+import dev.rovsti.bridge.OpResult
+import dev.rovsti.bridge.PendingMachine
+import dev.rovsti.bridge.PendingOp
+import dev.rovsti.bridge.Tick
+import dev.rovsti.bridge.Wire
 import dev.rovsti.bridge.ProviderJson
 import dev.rovsti.bridge.RovstiBridge
 import dev.rovsti.bridge.SnapshotData
@@ -52,16 +59,16 @@ object CallRegistry : CallsApi {
         fun onIncomingChanged(call: IncomingCall?) {}
     }
 
-    private const val ANSWER_REPLACING_TIMEOUT_MS = 2_000L
     private const val DTMF_SAFETY_MS = 4_000L
     private const val AUDIO_FALLBACK_MS = 1_500L
 
     private class Entry(val id: Int, val call: Call, val callback: Call.Callback) {
         var displayName: String? = null
         var contactId: Long? = null
-    }
 
-    private class Pending(val targetId: Int, val replacedId: Int)
+        /** Wall-clock time the call went on hold (null while it is not held). */
+        var holdSince: Long? = null
+    }
 
     private val main = Handler(Looper.getMainLooper())
     private val lookupExecutor: Executor by lazy { Executors.newSingleThreadExecutor() }
@@ -101,7 +108,12 @@ object CallRegistry : CallsApi {
         }
     }
     private var foregroundId: Int? = null
-    private var pending: Pending? = null
+    private val ops = PendingMachine { SystemClock.elapsedRealtime() }
+    private var opStartedAt = 0L
+
+    // Spike S4 measurements (main thread writes, any thread reads).
+    @Volatile private var facts = MultiCallFacts()
+    private var holdAnswerWatch: Int? = null
     private var keyguardReceiverRegistered = false
     private var ongoingKey: String? = null
     private var foregroundStarted = false
@@ -113,7 +125,7 @@ object CallRegistry : CallsApi {
     /** Set by `MainActivity` while it exists; main thread only. */
     var surface: Surface? = null
 
-    private val timeout = Runnable { completePending() }
+    private val opDeadline = Runnable { onOpDeadline() }
     private val dtmfSafetyStop = Runnable { stopDtmfNow() }
     private var dtmfCall: Call? = null
 
@@ -248,12 +260,54 @@ object CallRegistry : CallsApi {
         return true
     }
 
-    /** The ongoing-call notification's End: disconnect every live call, directly (AD-2). */
-    fun endAll() {
+    /**
+     * Ends every non-ringing top-level call, directly (AD-2): the ongoing notification's End and the
+     * lock-screen button. A waiting call is not part of it: rejecting it would send it to voicemail.
+     */
+    override fun endAll(): Boolean {
         main.post {
-            // A waiting call is not part of "End": rejecting it would send it to voicemail.
-            for (e in entries.values.toList()) if (e.call.state != Call.STATE_RINGING) e.call.disconnect()
+            for (e in entries.values.toList()) {
+                if (e.call.state != Call.STATE_RINGING && e.call.parent == null) e.call.disconnect()
+            }
         }
+        return true
+    }
+
+    override fun multiCallFacts(): MultiCallFacts = facts
+
+    // ---- Multi-call commands (AD-24, AD-25) -------------------------------
+
+    /** Swaps by `swapConference()` when the foreground has the capability, else resumes the held call. */
+    override fun swap(): Boolean {
+        if (!hasService || knownIds.isEmpty()) return false
+        main.post { startSwap() }
+        return true
+    }
+
+    /** Merges by `mergeConference()` or `conference(other)`. */
+    override fun merge(): Boolean {
+        if (!hasService || knownIds.isEmpty()) return false
+        main.post { startMerge() }
+        return true
+    }
+
+    /** Splits a participant out; only with the split capability on that child. */
+    override fun split(childId: Int): Boolean = command(childId) {
+        if (it.call.details.can(Call.Details.CAPABILITY_SEPARATE_FROM_CONFERENCE)) it.call.splitFromConference()
+    }
+
+    /** `answer()`, offered only when the current call can be held and no held call exists. */
+    override fun answerHolding(callId: Int): Boolean {
+        if (callId !in knownIds) return false
+        main.post { startAnswerHolding(callId) }
+        return true
+    }
+
+    /** The relabelled "End held call and answer": the held call goes, then the ringing one is answered. */
+    override fun answerEndingHeld(callId: Int): Boolean {
+        if (callId !in knownIds) return false
+        main.post { startAnswerReplacing(callId, preferHeld = true) }
+        return true
     }
 
     fun hasLiveCall(): Boolean = knownIds.isNotEmpty()
@@ -278,8 +332,9 @@ object CallRegistry : CallsApi {
     fun onServiceUnbound() {
         for (e in entries.values) e.call.unregisterCallback(e.callback)
         entries.clear()
-        pending = null
-        main.removeCallbacks(timeout)
+        ops.clear()
+        main.removeCallbacks(opDeadline)
+        holdAnswerWatch = null
         service = null
         hasService = false
         foregroundStarted = false
@@ -303,7 +358,9 @@ object CallRegistry : CallsApi {
         val callback = object : Call.Callback() {
             override fun onStateChanged(call: Call, state: Int) {
                 if (state == Call.STATE_SELECT_PHONE_ACCOUNT) selectAccount(call)
+                entries[id]?.let { it.holdSince = if (state == Call.STATE_HOLDING) (it.holdSince ?: System.currentTimeMillis()) else null }
                 record("onStateChanged", id, stateName(state))
+                observeHoldAnswer(id, state)
                 rebuild()
             }
 
@@ -320,6 +377,7 @@ object CallRegistry : CallsApi {
             override fun onConferenceableCallsChanged(call: Call, conferenceableCalls: List<Call>) = rebuild()
         }
         val entry = Entry(id, call, callback)
+        if (call.state == Call.STATE_HOLDING) entry.holdSince = System.currentTimeMillis()
         entries[id] = entry
         if (call.state == Call.STATE_RINGING) IncomingPerf.onCallAdded(id, keyguardLocked())
         call.registerCallback(callback, main)
@@ -342,7 +400,7 @@ object CallRegistry : CallsApi {
         entries.remove(entry.id)
         record("onCallRemoved", entry.id, "none")
         call.unregisterCallback(entry.callback)
-        if (pending?.replacedId == entry.id) completePending()
+        observeHoldAnswer(entry.id, Call.STATE_DISCONNECTED)
         rebuild()
     }
 
@@ -406,30 +464,155 @@ object CallRegistry : CallsApi {
         }
     }
 
-    private fun startAnswerReplacing(targetId: Int) {
+    private fun liveTop(): List<Entry> =
+        entries.values.filter { it.call.parent == null && it.call.state in LIVE_STATES }
+
+    private fun startAnswerReplacing(targetId: Int, preferHeld: Boolean = false) {
         val target = entries[targetId] ?: return
-        // Prefer the call the user is on (active, then dialing) over a held one.
-        val others = entries.values.filter { it.id != targetId }
+        val others = entries.values.filter { it.id != targetId && it.call.parent == null }
         val active = others.firstOrNull { it.call.state == Call.STATE_ACTIVE }
             ?: others.firstOrNull { it.call.state == Call.STATE_DIALING }
-            ?: others.firstOrNull { it.call.state == Call.STATE_HOLDING }
-        if (active == null) {
+        val held = others.firstOrNull { it.call.state == Call.STATE_HOLDING }
+        // Relabelled case: the held call goes and the network holds the active one.
+        val victim = if (preferHeld && held != null) held else (active ?: held)
+        if (victim == null) {
             target.call.answer(VideoProfile.STATE_AUDIO_ONLY)
             return
         }
-        completePending() // A previous operation never outlives a new one.
-        pending = Pending(targetId, active.id)
-        main.postDelayed(timeout, ANSWER_REPLACING_TIMEOUT_MS)
-        active.call.disconnect()
+        if (!ops.start(PendingOp.AnswerReplacing(targetId, victim.id))) return
+        armOpDeadline()
+        victim.call.disconnect()
+        rebuild() // the wire says `pending: answer` at once
     }
 
-    /** Answers the pending target on the matching `onCallRemoved` or after the timeout. */
-    private fun completePending() {
-        val p = pending ?: return
-        pending = null
-        main.removeCallbacks(timeout)
-        entries[p.targetId]?.call?.answer(VideoProfile.STATE_AUDIO_ONLY)
+    private fun startAnswerHolding(callId: Int) {
+        val target = entries[callId] ?: return
+        val current = liveTop().firstOrNull { it.id != callId }
+        if (current != null) {
+            val canHold = current.call.details.can(Call.Details.CAPABILITY_HOLD)
+            val heldExists = liveTop().any { it.id != callId && it.call.state == Call.STATE_HOLDING }
+            if (!canHold || heldExists) return
+            holdAnswerWatch = current.id
+        }
+        target.call.answer(VideoProfile.STATE_AUDIO_ONLY)
     }
+
+    /** S4 criterion 4: after a hold-and-answer, did the first call end up held or disconnected? */
+    private fun observeHoldAnswer(id: Int, state: Int) {
+        if (holdAnswerWatch != id) return
+        when (state) {
+            Call.STATE_HOLDING -> facts = facts.copy(holdAnswerHeldFirst = true)
+            Call.STATE_DISCONNECTED, Call.STATE_DISCONNECTING -> facts = facts.copy(holdAnswerHeldFirst = false)
+            else -> return
+        }
+        holdAnswerWatch = null
+    }
+
+    private fun startSwap() {
+        val top = liveTop()
+        val fg = top.firstOrNull { it.call.state == Call.STATE_ACTIVE } ?: top.firstOrNull { it.call.state == Call.STATE_DIALING }
+        val held = top.firstOrNull { it.call.state == Call.STATE_HOLDING && it !== fg }
+        if (fg != null && fg.call.details.can(Call.Details.CAPABILITY_SWAP_CONFERENCE)) {
+            if (held == null) {
+                fg.call.swapConference()
+                return
+            }
+            if (!ops.start(PendingOp.Swap(held.id, fg.id))) return
+            opStartedAt = SystemClock.elapsedRealtime()
+            armOpDeadline()
+            fg.call.swapConference()
+            rebuild()
+            return
+        }
+        if (held == null) return
+        if (!ops.start(PendingOp.Swap(held.id, fg?.id))) return
+        opStartedAt = SystemClock.elapsedRealtime()
+        armOpDeadline()
+        held.call.unhold()
+        rebuild()
+    }
+
+    private fun startMerge() {
+        val top = liveTop()
+        val fg = top.firstOrNull { it.call.state == Call.STATE_ACTIVE } ?: top.firstOrNull()
+        val before = conferenceChildCount()
+        fg ?: return
+        val canMergeCap = fg.call.details.can(Call.Details.CAPABILITY_MERGE_CONFERENCE)
+        var host: Entry? = null
+        var other: Entry? = null
+        if (!canMergeCap) {
+            for (t in top) {
+                val c = t.call.conferenceableCalls.firstNotNullOfOrNull { c -> entries.values.firstOrNull { it.call === c } }
+                if (c != null) {
+                    host = t
+                    other = c
+                    break
+                }
+            }
+            if (host == null || other == null) return
+        }
+        if (!ops.start(PendingOp.Merge(before))) return
+        opStartedAt = SystemClock.elapsedRealtime()
+        armOpDeadline()
+        if (canMergeCap) fg.call.mergeConference() else host!!.call.conference(other!!.call)
+        rebuild()
+    }
+
+    private fun conferenceChildCount(): Int =
+        entries.values.filter { it.call.parent == null && it.call.details.hasProperty(Call.Details.PROPERTY_CONFERENCE) }
+            .maxOfOrNull { it.call.children.size } ?: 0
+
+    private fun armOpDeadline() {
+        main.removeCallbacks(opDeadline)
+        ops.nextDeadlineIn()?.let { main.postDelayed(opDeadline, it) }
+    }
+
+    /** The op's deadline passed: one swap retry, else it fails (only an answer still answers). */
+    private fun onOpDeadline() {
+        when (val tick = ops.tick()) {
+            Tick.Idle -> {}
+            is Tick.Retry -> {
+                entries[tick.op.former ?: -1]?.takeIf { it.call.state == Call.STATE_ACTIVE }?.call?.hold()
+                armOpDeadline()
+            }
+            is Tick.Failed -> {
+                record("opFailed", -1, "none")
+                val op = tick.op
+                if (op is PendingOp.AnswerReplacing) entries[op.targetId]?.call?.answer(VideoProfile.STATE_AUDIO_ONLY)
+                rebuild()
+            }
+        }
+    }
+
+    /** Called on every rebuild: finishes the running op as Done when Telecom shows its result. */
+    private fun checkOp() {
+        val op = ops.current ?: return
+        val done = when (op) {
+            is PendingOp.AnswerReplacing -> entries[op.replacedId]?.call?.state.let { it == null || it == Call.STATE_DISCONNECTED }
+            is PendingOp.Swap -> {
+                val resumed = entries[op.toResume]?.call?.state == Call.STATE_ACTIVE
+                val former = op.former?.let { entries[it]?.call?.state }
+                // For a conference swap the roles exchange, so "resumed" is the held side becoming Active.
+                resumed && (op.former == null || op.former == op.toResume || former != Call.STATE_ACTIVE)
+            }
+            is PendingOp.Merge -> conferenceChildCount() > op.childrenBefore
+        }
+        if (!done) return
+        val finished = ops.finish(OpResult.DONE)
+        main.removeCallbacks(opDeadline)
+        val took = SystemClock.elapsedRealtime() - opStartedAt
+        when (finished) {
+            is PendingOp.AnswerReplacing -> entries[finished.targetId]?.call?.answer(VideoProfile.STATE_AUDIO_ONLY)
+            is PendingOp.Swap -> {
+                val both = liveTop().size >= 2 && liveTop().none { it.call.state == Call.STATE_ACTIVE }
+                facts = facts.copy(swapLatencyMs = took, bothHeldSeen = both)
+            }
+            is PendingOp.Merge -> facts = facts.copy(mergeLatencyMs = took, mergeProducedConference = true)
+            null -> {}
+        }
+    }
+
+    private val LIVE_STATES = setOf(Call.STATE_ACTIVE, Call.STATE_DIALING, Call.STATE_HOLDING, Call.STATE_CONNECTING)
 
     private fun stateName(state: Int): String = when (state) {
         Call.STATE_RINGING -> "ringing"
@@ -444,22 +627,69 @@ object CallRegistry : CallsApi {
     private fun keyguardLocked(): Boolean =
         app?.getSystemService(KeyguardManager::class.java)?.isKeyguardLocked ?: true
 
-    private fun buildCalls(): List<CallInfo> = entries.values.map { e ->
-        val d = e.call.details
-        val state = stateName(e.call.state)
-        val raw = d.handle?.schemeSpecificPart ?: ""
-        CallInfo(
-            id = e.id,
-            state = state,
-            numberRaw = raw,
-            normalized = ProviderJson.normalize(raw),
-            displayName = e.displayName,
-            contactId = e.contactId,
-            connectTimeMs = d.connectTimeMillis.coerceAtLeast(0),
-            canHold = d.can(Call.Details.CAPABILITY_HOLD),
-            isIncoming = d.callDirection == Call.Details.DIRECTION_INCOMING,
-            disconnectCause = if (state == "disconnected") SnapshotJson.causeName(d.disconnectCause?.code ?: 0) else null,
-        )
+    private fun buildCalls(): List<CallInfo> {
+        val ids = java.util.IdentityHashMap<Call, Int>(entries.size * 2)
+        for (e in entries.values) ids[e.call] = e.id
+        return entries.values.map { e ->
+            val d = e.call.details
+            val state = stateName(e.call.state)
+            val raw = d.handle?.schemeSpecificPart ?: ""
+            val children = e.call.children.mapNotNull { ids[it] }
+            CallInfo(
+                id = e.id,
+                state = state,
+                numberRaw = raw,
+                normalized = ProviderJson.normalize(raw),
+                displayName = e.displayName,
+                contactId = e.contactId,
+                connectTimeMs = d.connectTimeMillis.coerceAtLeast(0),
+                canHold = d.can(Call.Details.CAPABILITY_HOLD),
+                isIncoming = d.callDirection == Call.Details.DIRECTION_INCOMING,
+                disconnectCause = if (state == "disconnected") SnapshotJson.causeName(d.disconnectCause?.code ?: 0) else null,
+                parentId = e.call.parent?.let { ids[it] },
+                children = children,
+                caps = capsOf(d),
+                props = propsOf(d, raw),
+                accountKey = d.accountHandle?.let { "${it.componentName.flattenToString()}#${it.id}" },
+                holdSinceMs = e.holdSince,
+                conferenceable = e.call.conferenceableCalls.isNotEmpty(),
+            )
+        }
+    }
+
+    /** The `caps` bit positions of AD-24 (docs/phone-wire.md section 5), read from `Call.Details`. */
+    private fun capsOf(d: Call.Details): Int {
+        var mask = 0
+        fun bit(capability: Int, wire: Int) { if (d.can(capability)) mask = mask or wire }
+        bit(Call.Details.CAPABILITY_HOLD, Wire.Caps.HOLD)
+        bit(Call.Details.CAPABILITY_SUPPORT_HOLD, Wire.Caps.SUPPORT_HOLD)
+        bit(Call.Details.CAPABILITY_MERGE_CONFERENCE, Wire.Caps.MERGE)
+        bit(Call.Details.CAPABILITY_SWAP_CONFERENCE, Wire.Caps.SWAP)
+        bit(Call.Details.CAPABILITY_MANAGE_CONFERENCE, Wire.Caps.MANAGE)
+        bit(Call.Details.CAPABILITY_SEPARATE_FROM_CONFERENCE, Wire.Caps.SPLIT)
+        bit(Call.Details.CAPABILITY_DISCONNECT_FROM_CONFERENCE, Wire.Caps.DISCONNECT_PARTICIPANT)
+        bit(Call.Details.CAPABILITY_RESPOND_VIA_TEXT, Wire.Caps.RESPOND_VIA_TEXT)
+        bit(Call.Details.CAPABILITY_MUTE, Wire.Caps.MUTE)
+        bit(Call.Details.CAPABILITY_ADD_PARTICIPANT, Wire.Caps.ADD_PARTICIPANT)
+        return mask
+    }
+
+    private fun propsOf(d: Call.Details, raw: String): Int {
+        var mask = 0
+        if (d.hasProperty(Call.Details.PROPERTY_CONFERENCE)) mask = mask or Wire.Props.CONFERENCE
+        if (d.hasProperty(Call.Details.PROPERTY_HIGH_DEF_AUDIO)) mask = mask or Wire.Props.HD
+        if (d.hasProperty(Call.Details.PROPERTY_WIFI)) mask = mask or Wire.Props.WIFI
+        if (d.hasProperty(Call.Details.PROPERTY_NETWORK_IDENTIFIED_EMERGENCY_CALL) || emergencyNumber(raw)) {
+            mask = mask or Wire.Props.EMERGENCY
+        }
+        return mask
+    }
+
+    /** The Kotlin emergency match for a dialled number (AD-24): the platform's own list, never ours. */
+    private fun emergencyNumber(raw: String): Boolean = raw.isNotEmpty() && try {
+        android.telephony.PhoneNumberUtils.isEmergencyNumber(raw)
+    } catch (_: RuntimeException) {
+        false
     }
 
     /** Rebuilds at once (cancels a pending scheduled rebuild). Focus, caps and notifications use this. */
@@ -480,9 +710,17 @@ object CallRegistry : CallsApi {
 
     /** Builds the snapshot, stores it, and pushes it (AD-4). Main thread only. */
     private fun rebuildNow() {
+        // An op finishes when Telecom shows its result; an answer target that is gone ends it.
+        (ops.current as? PendingOp.AnswerReplacing)?.let {
+            if (entries[it.targetId] == null) { ops.finish(OpResult.DONE); main.removeCallbacks(opDeadline) }
+        }
+        checkOp()
         val calls = buildCalls()
-        val focus = Focus.of(calls)
+        // While an operation runs the previous foreground stays in front (no transient scene).
+        val focus = Focus.of(calls, if (ops.current != null) foregroundId else null)
         foregroundId = focus.foreground
+        val can = MultiCall.canDo(canAddCall, calls, focus)
+        val (pendingNow, pendingFailed) = ops.flags()
         val audioInfo = audio.info(muted, if (audio.legacy) service?.callAudioState else null)
         val data = SnapshotData(
             seq = ++seq,
@@ -491,7 +729,13 @@ object CallRegistry : CallsApi {
             audio = audioInfo,
             foregroundCallId = focus.foreground,
             waitingCallId = focus.waiting,
-            canAddCall = canAddCall,
+            backgroundCallId = focus.background,
+            endedCallId = focus.ended,
+            canAddCall = can.addCall,
+            canMerge = can.merge,
+            canSwap = can.swap,
+            pending = pendingNow,
+            pendingFailed = pendingFailed,
             calls = calls,
         )
         val text = SnapshotJson.toJson(data)
@@ -507,8 +751,7 @@ object CallRegistry : CallsApi {
         ringingIds = calls.filter { it.state == "ringing" }.mapTo(HashSet()) { it.id }
         foregroundIdVolatile = focus.foreground
         json = text
-        // A pending answer-replacing clears on any snapshot where the target is gone.
-        pending?.let { if (it.targetId !in knownIds) { pending = null; main.removeCallbacks(timeout) } }
+        facts = facts.copy(conferenceable = entries.values.filter { it.call.conferenceableCalls.isNotEmpty() }.mapTo(HashSet()) { it.id })
         updateKeyguardReceiver(calls.isNotEmpty())
         // The activity first: its lock-screen flags must be set before the full-screen intent fires.
         syncLiveCall(calls.isNotEmpty())

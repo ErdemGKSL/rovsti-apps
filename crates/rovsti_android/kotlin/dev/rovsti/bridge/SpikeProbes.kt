@@ -15,7 +15,7 @@ object SpikeProbes {
     /** Probe groups the page lists; a group is inert ("Not built yet") until its spike registers it. */
     val GROUPS = listOf("audio", "calls", "sim", "blocking", "reject_text", "silence", "voicemail", "emergency", "contacts", "call_log", "system")
 
-    private val registered = setOf("audio", "header", "events")
+    private val registered = setOf("audio", "calls", "header", "events")
 
     fun isRegistered(probe: String) = probe in registered
 
@@ -23,6 +23,7 @@ object SpikeProbes {
         "header" -> header(context)
         "events" -> (calls?.eventDump() ?: emptyList()).joinToString("\n")
         "audio" -> audio(context, calls)
+        "calls" -> calls(calls)
         else -> "unknown: Not built yet"
     }
 
@@ -45,6 +46,25 @@ object SpikeProbes {
         ""
     } catch (_: RuntimeException) {
         ""
+    }
+
+    // ---- S4: multi-call ------------------------------------------------------------------------
+
+    /** One snapshot read: caps masks, props, conferenceable and child counts, then the four S4 criteria. */
+    private fun calls(calls: CallsApi?): String {
+        if (calls == null) return "unknown: no call registry"
+        val snap = try {
+            SnapshotJson.parse(JSONObject(calls.snapshot()))
+        } catch (_: org.json.JSONException) {
+            return "unknown: no snapshot yet"
+        }
+        val out = ArrayList<String>()
+        if (snap.calls.isEmpty()) out.add("unknown: no calls (start a call first, then run the probe)")
+        val facts = calls.multiCallFacts()
+        out.addAll(MultiCallProbe.masks(snap.calls, facts))
+        out.add("flags can_add=${snap.canAddCall} can_merge=${snap.canMerge} can_swap=${snap.canSwap} pending=${snap.pending ?: "none"} failed=${snap.pendingFailed ?: "none"}")
+        out.addAll(MultiCallProbe.verdicts(snap.calls, facts))
+        return out.joinToString("\n")
     }
 
     // ---- S3: audio endpoints -----------------------------------------------------------

@@ -5,12 +5,14 @@
 
 pub mod audio;
 pub mod avatar;
+pub mod blocklist;
 pub mod call;
 pub mod call_log;
 pub mod contact;
 pub mod contacts_view;
 pub mod dial;
 pub mod lru;
+pub mod names;
 pub mod perf;
 pub mod phone_number;
 pub mod recents;

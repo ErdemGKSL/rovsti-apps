@@ -186,6 +186,53 @@ pub fn font_step(len: usize) -> f32 {
     }
 }
 
+/// Numbers that are emergency numbers on every network we know of, so a
+/// failed or late `emergency_numbers` pull never makes them dialable-as-normal.
+pub const ALWAYS_EMERGENCY: [&str; 2] = ["112", "911"];
+
+/// Longest emergency number (digits) the pure compare considers.
+const EMERGENCY_MAX_DIGITS: usize = 8;
+
+/// Separators ignored when deciding whether a typed string is an emergency
+/// number: space, dash, dot, brackets, slash and invisible format marks.
+fn is_separator(c: char) -> bool {
+    c.is_whitespace()
+        || matches!(c, '-' | '.' | '(' | ')' | '/' | '\u{a0}')
+        || crate::phone_number::is_format_char(c)
+}
+
+/// Whether the typed string is an emergency number: `112` and `911` always,
+/// plus the numbers Android reported for this country. Separators are ignored
+/// (`1 1 2`, `1-1-2`); any other character (`*`, `#`, `+`, `,`, `;`, a letter)
+/// makes it an ordinary dial string, so `*#06#` is false. Pure, allocation
+/// free, meant to run in the key handler.
+pub fn is_emergency(typed: &str, list: &crate::wire::EmergencyList) -> bool {
+    let mut buf = [0u8; EMERGENCY_MAX_DIGITS];
+    let mut len = 0;
+    for c in typed.chars() {
+        if is_separator(c) {
+            continue;
+        }
+        if !c.is_ascii_digit() || len == EMERGENCY_MAX_DIGITS {
+            return false;
+        }
+        buf[len] = c as u8;
+        len += 1;
+    }
+    if len == 0 {
+        return false;
+    }
+    let typed = &buf[..len];
+    let same = |candidate: &str| {
+        let mut digits = candidate.chars().filter(|c| !is_separator(*c));
+        typed
+            .iter()
+            .all(|&d| digits.next().is_some_and(|c| c == char::from(d)))
+            && digits.next().is_none()
+    };
+    ALWAYS_EMERGENCY.iter().any(|n| same(n)) || list.numbers.iter().any(|n| same(n))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,5 +438,65 @@ mod tests {
             push(&mut f, k);
         }
         assert_eq!(validate(&f), Ok("*#06#"));
+    }
+
+    // ---- is_emergency --------------------------------------------------
+
+    fn list(numbers: &[&str]) -> crate::wire::EmergencyList {
+        crate::wire::EmergencyList {
+            numbers: numbers.iter().map(|n| (*n).to_owned()).collect(),
+        }
+    }
+
+    #[test]
+    fn the_always_present_numbers_need_no_list() {
+        let none = list(&[]);
+        assert!(is_emergency("112", &none));
+        assert!(is_emergency("911", &none));
+    }
+
+    #[test]
+    fn the_country_list_extends_it() {
+        let tr = list(&["155", "110", "1 1 2"]);
+        assert!(is_emergency("155", &tr));
+        assert!(is_emergency("110", &tr));
+        assert!(!is_emergency("155", &list(&[])));
+    }
+
+    #[test]
+    fn separators_are_ignored() {
+        let none = list(&[]);
+        for typed in [
+            "1 1 2",
+            "1-1-2",
+            "1.1.2",
+            " 112 ",
+            "(1)12",
+            "1\u{a0}12",
+            "1\u{200e}12",
+        ] {
+            assert!(is_emergency(typed, &none), "{typed:?}");
+        }
+    }
+
+    #[test]
+    fn anything_else_is_an_ordinary_dial_string() {
+        let tr = list(&["155"]);
+        for typed in [
+            "*#06#", "*112#", "+112", "112,", "112;", "1122", "11", "", "   ", "abc", "#112",
+            "0112", "1127",
+        ] {
+            assert!(!is_emergency(typed, &tr), "{typed:?}");
+        }
+        // Longer than any emergency number: no buffer overrun, just false.
+        assert!(!is_emergency("111111111111111111", &tr));
+    }
+
+    #[test]
+    fn a_prefix_of_an_emergency_number_is_not_one_yet() {
+        let none = list(&[]);
+        assert!(!is_emergency("1", &none));
+        assert!(!is_emergency("11", &none));
+        assert!(!is_emergency("91", &none));
     }
 }

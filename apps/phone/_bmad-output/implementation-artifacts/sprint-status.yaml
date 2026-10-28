@@ -191,7 +191,7 @@ development_status:
   14-10-rovsti_core-scene-and-scenediff: review
   14-11-rovsti_core-settings-prefsv2-and-upgrade-chain: review
   14-12-prefs-v2-storage-migration-prefswriter-and-backend-settings: review
-  14-13-rovsti_core-names-and-blocklist-blockset: backlog
+  14-13-rovsti_core-names-and-blocklist-blockset: review
   14-14-t9-index-frequent-and-is_emergency: backlog
   14-15-manifest-and-permission-additions-check-apk-sh-and-desktop-s: backlog
   epic-14-retrospective: optional

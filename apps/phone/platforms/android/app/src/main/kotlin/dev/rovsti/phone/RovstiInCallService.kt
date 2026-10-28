@@ -22,6 +22,8 @@ class RovstiInCallService : InCallService() {
 
     override fun onCallRemoved(call: Call) = CallRegistry.onCallRemoved(call)
 
+    override fun onSilenceRinger() = CallRegistry.onSilenceRinger()
+
     override fun onCanAddCallChanged(canAddCall: Boolean) = CallRegistry.onCanAddCallChanged(canAddCall)
 
     override fun onMuteStateChanged(isMuted: Boolean) = CallRegistry.onMuteChanged(isMuted)

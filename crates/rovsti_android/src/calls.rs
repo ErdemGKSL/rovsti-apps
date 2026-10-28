@@ -26,6 +26,53 @@ pub fn reject(call_id: i32) -> Result<bool> {
     bridge::call_bool("callReject", &[Arg::Int(call_id)])
 }
 
+/// Declines a ringing call with `text` (story 18.1). The result says what
+/// happened: [`Reject::Stale`], [`Reject::Sent`] (through Telecom),
+/// [`Reject::Opened`] (the system SMS app, text typed in) or
+/// [`Reject::RejectedOnly`]. The app never holds an SMS permission.
+pub fn reject_with_message(call_id: i32, text: &str) -> Result<Reject> {
+    let code = bridge::call_int(
+        "callRejectWithMessage",
+        &[Arg::Int(call_id), Arg::Str(text)],
+    )?;
+    Ok(Reject::from_code(code))
+}
+
+/// Declines and opens the system SMS app on the caller with an empty body.
+pub fn reject_and_compose(call_id: i32) -> Result<bool> {
+    bridge::call_bool("callRejectAndCompose", &[Arg::Int(call_id)])
+}
+
+/// Silences the ringer of the ringing call (`TelecomManager.silenceRinger`);
+/// the call stays answerable. `false` when Android refused (story 18.4).
+pub fn silence_ringer() -> Result<bool> {
+    bridge::call_bool("callSilenceRinger", &[])
+}
+
+/// What `reject_with_message` did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reject {
+    /// Nothing: the call was gone or the text was not valid.
+    Stale,
+    /// Telecom sent the text.
+    Sent,
+    /// The system SMS app opened with the text.
+    Opened,
+    /// The call was declined and no text could go out.
+    RejectedOnly,
+}
+
+impl Reject {
+    pub const fn from_code(code: i32) -> Self {
+        match code {
+            1 => Self::Sent,
+            2 => Self::Opened,
+            3 => Self::RejectedOnly,
+            _ => Self::Stale,
+        }
+    }
+}
+
 /// Ends a call in any state.
 pub fn disconnect(call_id: i32) -> Result<bool> {
     bridge::call_bool("callDisconnect", &[Arg::Int(call_id)])
@@ -128,6 +175,12 @@ mod tests {
         assert!(matches!(snapshot(), Err(Error::Unsupported)));
         assert!(matches!(answer(1), Err(Error::Unsupported)));
         assert!(matches!(reject(1), Err(Error::Unsupported)));
+        assert!(matches!(
+            reject_with_message(1, "hi"),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(reject_and_compose(1), Err(Error::Unsupported)));
+        assert!(matches!(silence_ringer(), Err(Error::Unsupported)));
         assert!(matches!(disconnect(1), Err(Error::Unsupported)));
         assert!(matches!(hold(1, true), Err(Error::Unsupported)));
         assert!(matches!(mute(true), Err(Error::Unsupported)));
@@ -144,5 +197,14 @@ mod tests {
         assert!(matches!(end_all(), Err(Error::Unsupported)));
         assert!(matches!(incoming_frame(2), Err(Error::Unsupported)));
         assert!(matches!(perf_log("x"), Err(Error::Unsupported)));
+    }
+
+    #[test]
+    fn reject_codes_map_to_results() {
+        assert_eq!(Reject::from_code(0), Reject::Stale);
+        assert_eq!(Reject::from_code(1), Reject::Sent);
+        assert_eq!(Reject::from_code(2), Reject::Opened);
+        assert_eq!(Reject::from_code(3), Reject::RejectedOnly);
+        assert_eq!(Reject::from_code(9), Reject::Stale);
     }
 }

@@ -23,7 +23,16 @@ use crate::PhoneApp;
 /// Long-press on the Setup title opens the page.
 pub(crate) const OPEN_AFTER_MS: u64 = 800;
 /// Probe groups with a probe behind them; the rest read "Not built yet".
-const REGISTERED: [&str; 5] = ["audio", "calls", "sim", "backup", "system"];
+const REGISTERED: [&str; 8] = [
+    "audio",
+    "calls",
+    "sim",
+    "backup",
+    "system",
+    "blocking",
+    "reject_text",
+    "silence",
+];
 const ROW_H: f32 = 48.0;
 const LOG_H: f32 = 168.0;
 
@@ -509,7 +518,19 @@ mod tests {
 
     #[test]
     fn the_built_groups_so_far() {
-        assert_eq!(REGISTERED, ["audio", "calls", "sim", "backup", "system"]);
+        assert_eq!(
+            REGISTERED,
+            [
+                "audio",
+                "calls",
+                "sim",
+                "backup",
+                "system",
+                "blocking",
+                "reject_text",
+                "silence"
+            ]
+        );
         assert!(GROUPS.iter().any(|(p, _)| *p == "audio"));
         assert!(GROUPS.iter().any(|(p, _)| *p == "calls"));
     }

@@ -46,6 +46,7 @@ use serde::de::DeserializeOwned;
 
 use crate::sample;
 
+mod blocking;
 mod local;
 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
 mod preview;
@@ -54,6 +55,7 @@ mod preview_multi;
 #[cfg(test)]
 pub use preview_multi::SCENES;
 
+pub use blocking::{BlockState, ReplyOutcome};
 pub use local::SystemFacts;
 pub use rovsti_android::{
     permissions::{Access, Group},
@@ -301,6 +303,16 @@ pub struct Backend {
     setting_failed_gen: u64,
     document: Option<rovsti_core::wire::DocumentResult>,
     document_gen: u64,
+    /// The system blocklist (AD-27) and whether this user may use it.
+    blocklist: Load<BlockState>,
+    can_block: bool,
+    block_pull: u64,
+    /// The type-6 rows, pulled only while the Blocked calls view is wanted.
+    blocked_calls: Load<Vec<CallLogEntry>>,
+    blocked_calls_wanted: bool,
+    blocked_pull: u64,
+    /// Android refused `silenceRinger()`: the control stays a blank slot (AD-29).
+    silence_refused: bool,
     /// Desktop preview only: the fake call reports a locked keyguard.
     #[cfg(any(not(target_os = "android"), feature = "perf", test))]
     preview_locked: bool,
@@ -373,6 +385,13 @@ impl Backend {
                 setting_failed_gen: 0,
                 document: None,
                 document_gen: 0,
+                blocklist: Load::Loading,
+                can_block: true,
+                block_pull: 0,
+                blocked_calls: Load::Loading,
+                blocked_calls_wanted: false,
+                blocked_pull: 0,
+                silence_refused: false,
                 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
                 preview_locked: false,
                 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
@@ -443,6 +462,7 @@ impl Backend {
             backend.refresh_contacts(cx);
             backend.refresh_sims(cx);
             backend.refresh_facts(cx);
+            backend.refresh_blocklist(cx);
             // Rust's session is live: Kotlin may now hand over queued one-shot events.
             backend.set_ui_ready(true);
             backend
@@ -862,6 +882,13 @@ impl Backend {
                 self.refresh_facts(cx);
                 self.refresh_call_log(cx);
                 self.refresh_contacts(cx);
+                self.refresh_blocklist(cx);
+            }
+            kind::BLOCKED_CHANGED => {
+                self.refresh_blocklist(cx);
+                if self.blocked_calls_wanted {
+                    self.refresh_blocked_calls(cx);
+                }
             }
             kind::KEYGUARD_DISMISSED => {
                 self.keyguard_gen += 1;
@@ -869,7 +896,12 @@ impl Backend {
             }
             kind::SIMS_CHANGED => self.refresh_sims(cx),
             kind::DOCUMENT_RESULT => self.on_document_result(&event.json, cx),
-            kind::CALL_LOG_CHANGED => self.refresh_call_log(cx),
+            kind::CALL_LOG_CHANGED => {
+                self.refresh_call_log(cx);
+                if self.blocked_calls_wanted {
+                    self.refresh_blocked_calls(cx);
+                }
+            }
             kind::CONTACTS_CHANGED => self.refresh_contacts(cx),
             other => log::debug!("ignoring event {other}"),
         }

@@ -15,7 +15,7 @@ object SpikeProbes {
     /** Probe groups the page lists; a group is inert ("Not built yet") until its spike registers it. */
     val GROUPS = listOf("audio", "calls", "sim", "backup", "blocking", "reject_text", "silence", "voicemail", "emergency", "contacts", "call_log", "system")
 
-    private val registered = setOf("audio", "calls", "sim", "system", "header", "events")
+    private val registered = setOf("audio", "calls", "sim", "system", "blocking", "reject_text", "silence", "header", "events")
 
     fun isRegistered(probe: String) = probe in registered
 
@@ -26,6 +26,9 @@ object SpikeProbes {
         "calls" -> calls(calls)
         "sim" -> sim(context, calls)
         "system" -> system(context)
+        "blocking" -> context?.let { Epic17Probes.blockingLines(Epic17Probes.readBlocking(it, calls?.blockGuardOn() ?: false, calls?.blockGuardHits() ?: 0)).joinToString("\n") } ?: "unknown: no context"
+        "reject_text" -> rejectText(calls)
+        "silence" -> silence(calls)
         else -> "unknown: Not built yet"
     }
 
@@ -118,8 +121,45 @@ object SpikeProbes {
         }
         Thread.sleep(5000)
         val vibrated = Haptics.click(context)
-        return SimProbe.vibrateLines(vibrator?.hasVibrator() == true, values.vibrateConnect, values.vibrateEnd, touch, vibrated).joinToString("\n")
+        val tones = SettingsMirror.systemKeypadTones(context)
+        return (SimProbe.vibrateLines(vibrator?.hasVibrator() == true, values.vibrateConnect, values.vibrateEnd, touch, vibrated) +
+            "info talkback_touch_exploration=$touch dtmf_tone_when_dialing=$tones" +
+            "unknown: announcements and custom actions fire (turn TalkBack on and run the route, conference, reply and reorder flows; note it in docs/spikes/s14-system.md)").joinToString("\n")
     }
+
+    // ---- S7: reject text, S8: silence ------------------------------------------------------------------
+
+    /** Waits up to 40 s for a ringing call, then declines it with "test" through the Telecom path once. */
+    private fun rejectText(calls: CallsApi?): String {
+        if (calls == null) return "unknown: no call registry"
+        return Epic17Probes.rejectLines(calls.probeRejectText(RejectProbeWindowMs)).joinToString("\n")
+    }
+
+    /** Watches up to 75 s and records, per ring, whether and how the ringer was silenced. */
+    private fun silence(calls: CallsApi?): String {
+        if (calls == null) return "unknown: no call registry"
+        val attempts = ArrayList<Epic17Probes.Attempt>()
+        var ringing = false
+        var silenced = false
+        var by: String? = null
+        val end = System.currentTimeMillis() + 75_000
+        while (System.currentTimeMillis() < end && attempts.size < 3) {
+            val snap = try { SnapshotJson.parse(JSONObject(calls.snapshot())) } catch (_: org.json.JSONException) { null }
+            val now = snap?.calls?.any { it.state == "ringing" } == true
+            if (now) {
+                ringing = true
+                if (snap!!.ringerSilenced) { silenced = true; by = snap.silencedBy }
+            } else if (ringing) {
+                attempts.add(Epic17Probes.Attempt(silenced, by))
+                ringing = false; silenced = false; by = null
+            }
+            Thread.sleep(150)
+        }
+        if (ringing) attempts.add(Epic17Probes.Attempt(silenced, by))
+        return Epic17Probes.silenceLines(attempts, calls.silenceCallbacks()).joinToString("\n")
+    }
+
+    private const val RejectProbeWindowMs = 40_000L
 
     // ---- S4: multi-call ------------------------------------------------------------------------
 

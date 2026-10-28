@@ -96,7 +96,8 @@ A v0.1 row (no new field) parses with every new field defaulted
 | `permissions_changed` = | none | 3.4 |
 | `sims_changed` + | none | 16.3 |
 | `voicemail_changed` + | none | 20.x |
-| `blocked_changed` + | none | 18.x |
+| `blocked_changed` + | none | 17.1 |
+| `ui_request` kind `show_reply` + (`call_id`) | the notification's Message action (18.7) | `wire::UiRequestKind::ShowReply` |
 | `document_result` + | `DocumentResult{op,ok,name?,text?,error?}` | 14.9 (shape), 21.x |
 | `ringtone_result` + | `RingtoneResult{ok,title?}` | 14.9 (shape), 17.x |
 | `keyguard_dismissed` + | none | 15.5 |
@@ -117,7 +118,8 @@ string and never throw.
 | `addContact(number)` = / changed | 14.4 | `ACTION_INSERT_OR_EDIT` |
 | `hearingAidCompatible()` + | 14.8 | Boolean |
 | `diagnostics(probe)` + | 14.0f | one `pass|fail|unknown` line per check |
-| `pullBlocklist()`, `blockNumber(n)`, `unblockNumber(n)` + | facade 14.15 (`rovsti_android::blocklist`), Kotlin 18.x | envelope / Boolean |
+| `pullBlocklist()`, `blockNumber(n)`, `unblockNumber(n)`, `canBlockNumbers()`, `isNumberBlocked(n)`, `pullBlockedCalls(limit)` + | facade 14.15 (`rovsti_android::blocklist`), Kotlin `Blocklist` 17.1 | envelope / Boolean |
+| `callRejectWithMessage(id, text)`, `callRejectAndCompose(id)`, `callSilenceRinger()` + | 18.1, 18.4 (`rovsti_android::calls::{reject_with_message, reject_and_compose, silence_ringer}`) | Int (0 stale, 1 sent, 2 opened, 3 rejected only) / Boolean |
 | `exportDocument(name, json)`, `importDocument()` + | facade 14.15 (`rovsti_android::documents`), Kotlin 21.x | Boolean; the answer is the `document_result` event |
 | `callSwap()`, `callMerge()`, `callSplit(id)`, `callAnswerHolding(id)`, `callAnswerEndingHeld(id)`, `callEndAll()` + | 15.2 | Boolean, never block; `rovsti_android::calls::{swap, merge, split, answer_holding, answer_ending_held, end_all}`. Results arrive only as the next snapshot (`pending` / `pending_failed`) |
 | `isKeyguardLocked()`, `requestDismissKeyguard()` + | 15.5 | Boolean; the answer to the second is the `keyguard_dismissed` event (`rovsti_android::window`) |

@@ -54,4 +54,29 @@ interface CallsApi {
 
     /** Rust drew the first frame of the Incoming Call screen for [callId] (ring-latency log, story 5.6). */
     fun incomingFrame(callId: Int): Boolean = false
+
+    /**
+     * Declines a ringing call with [text] (story 18.1): [RejectPolicy] codes, 0 stale, 1 sent, 2 opened
+     * the SMS app, 3 rejected only. The call is rejected exactly once on every path except 0.
+     */
+    fun rejectWithMessage(callId: Int, text: String): Int = RejectPolicy.STALE
+
+    /** Declines and opens the SMS app on the caller with an empty body ("Write your own..."). */
+    fun rejectAndCompose(callId: Int): Boolean = false
+
+    /** `TelecomManager.silenceRinger()` for the ringing call (story 18.4); false when refused. */
+    fun silenceRinger(): Boolean = false
+
+    /** Diagnostics: how many calls the block guard rejected since the process started (spike S6). */
+    fun blockGuardHits(): Int = 0
+    fun blockGuardOn(): Boolean = false
+
+    /** Diagnostics: how many times `InCallService.onSilenceRinger` fired (spike S8). */
+    fun silenceCallbacks(): Int = 0
+
+    /**
+     * Spike S7: waits up to [windowMs] for a ringing call and declines it with "test" through the Telecom
+     * path, whatever `Caps.REJECT_PATH` says. Blocking; runs off the UI thread.
+     */
+    fun probeRejectText(windowMs: Long): Epic17Probes.Reject = Epic17Probes.Reject(false, false, 0, false)
 }

@@ -221,20 +221,20 @@ development_status:
   16-10-system-shortcuts-section-and-hearing-aid-compatibility-value: review
   epic-16-retrospective: optional
 
-  epic-17: backlog
-  17-1-kotlin-blocklist-block_guard-and-spike-s6: backlog
-  17-2-blocked-state-in-the-app-recents-exclusion-badge-and-pulls: backlog
+  epic-17: in-progress
+  17-1-kotlin-blocklist-block_guard-and-spike-s6: review
+  17-2-blocked-state-in-the-app-recents-exclusion-badge-and-pulls: review
   17-3-recents-row-menu-and-the-block-flow-with-s27: backlog
   17-4-block-from-the-incoming-screen-after-a-call-and-the-blocked: backlog
   17-5-blocked-numbers-page-in-settings: backlog
   17-6-blocked-calls-view-and-reasons: backlog
   epic-17-retrospective: optional
 
-  epic-18: backlog
-  18-1-reject-path-in-kotlin-and-spike-s7: backlog
+  epic-18: in-progress
+  18-1-reject-path-in-kotlin-and-spike-s7: review
   18-2-reply-sheet-and-s31-reply-sent: backlog
   18-3-quick-replies-editor-in-settings: backlog
-  18-4-silenceringer-flipdetector-and-spike-s8: backlog
+  18-4-silenceringer-flipdetector-and-spike-s8: review
   18-5-answer-and-decline-gestures-s29-and-spike-s14: backlog
   18-6-silence-control-and-s30-silence-hush: backlog
   18-7-heads-up-notification-message-action-and-waiting-card-wiring: backlog

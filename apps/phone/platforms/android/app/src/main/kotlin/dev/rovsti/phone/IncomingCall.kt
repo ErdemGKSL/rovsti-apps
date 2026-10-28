@@ -13,16 +13,18 @@ data class IncomingCall(
     val title: String,
     /** The number line under a contact's name; null when the title already is the number. */
     val subtitle: String?,
+    /** The heads-up offers "Message" (quick replies exist and the caller has a number; story 18.7). */
+    val canMessage: Boolean = false,
 ) {
     /** The notification is re-posted only when this changes (the name resolves a moment after the call arrives). */
-    val key: String get() = "$callId|$title|$subtitle"
+    val key: String get() = "$callId|$title|$subtitle|$canMessage"
 
     companion object {
-        fun of(calls: List<CallInfo>): IncomingCall? {
+        fun of(calls: List<CallInfo>, hasReplies: Boolean = false): IncomingCall? {
             val call = calls.firstOrNull { it.state == "ringing" } ?: return null
             val name = call.displayName?.trim()?.takeIf { it.isNotEmpty() }
             val number = call.numberRaw.trim().takeIf { it.isNotEmpty() }
-            return IncomingCall(call.id, name ?: number ?: "Unknown", if (name != null) number else null)
+            return IncomingCall(call.id, name ?: number ?: "Unknown", if (name != null) number else null, hasReplies && number != null)
         }
 
         /** True when [calls] holds a ringing call with this id. */

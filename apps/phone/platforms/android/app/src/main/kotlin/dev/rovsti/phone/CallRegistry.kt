@@ -22,6 +22,10 @@ import android.telecom.TelecomManager
 import android.telecom.VideoProfile
 import dev.rovsti.bridge.AccountRef
 import dev.rovsti.bridge.AudioInfo
+import dev.rovsti.bridge.BlockGuard
+import dev.rovsti.bridge.Epic17Probes
+import dev.rovsti.bridge.Blocklist
+import dev.rovsti.bridge.RejectPolicy
 import dev.rovsti.bridge.CallInfo
 import dev.rovsti.bridge.CallsApi
 import dev.rovsti.bridge.ContactsQuery
@@ -80,7 +84,13 @@ object CallRegistry : CallsApi {
 
         /** Wall-clock time the call went on hold (null while it is not held). */
         var holdSince: Long? = null
+
+        /** A reject was issued; a second one (a double tap, a stale intent) does nothing (story 18.1). */
+        var rejected = false
     }
+
+    /** What the any-thread reject path needs about a ringing call, from the last rebuild. */
+    private class RingInfo(val number: String, val respondViaText: Boolean)
 
     private val main = Handler(Looper.getMainLooper())
     private val lookupExecutor: Executor by lazy { Executors.newSingleThreadExecutor() }
@@ -89,6 +99,23 @@ object CallRegistry : CallsApi {
     @Volatile private var json: String = SnapshotJson.toJson(SnapshotJson.empty(0, 0, true))
     @Volatile private var knownIds: Set<Int> = emptySet()
     @Volatile private var ringingIds: Set<Int> = emptySet()
+    @Volatile private var ringInfo: Map<Int, RingInfo> = emptyMap()
+
+    /** Story 18.4: who silenced the ringer of the ringing call ("user", "volume", "flip"); main thread. */
+    private var silencedBy: String? = null
+    @Volatile private var silenceAsk: String? = null
+    @Volatile private var guardHits = 0
+    @Volatile private var silenceCalls = 0
+    /** Spike S7 only: forces the Telecom reject path while the probe runs. */
+    @Volatile private var rejectPathOverride: String? = null
+    private var flip: FlipDetector? = null
+    private val blockGuard by lazy {
+        BlockGuard(
+            lookup = lookupExecutor,
+            main = { r -> main.post(r) },
+            isBlocked = { number -> app?.let { Blocklist.isBlocked(Blocklist.System(it), number) } ?: false },
+        )
+    }
 
     /** The ringing call as the notification shows it; null when nothing rings. */
     @Volatile var incomingNow: IncomingCall? = null
@@ -157,7 +184,133 @@ object CallRegistry : CallsApi {
 
     override fun answer(callId: Int) = command(callId) { it.call.answer(VideoProfile.STATE_AUDIO_ONLY) }
 
-    override fun reject(callId: Int) = command(callId) { it.call.reject(false, null) }
+    override fun reject(callId: Int) = command(callId) { rejectOnce(it) { c -> c.reject(false, null) } }
+
+    /** Rejects a ringing call exactly once, whichever path asked first (story 18.1). */
+    private inline fun rejectOnce(entry: Entry, send: (Call) -> Unit) {
+        if (entry.rejected || entry.call.state != Call.STATE_RINGING) return
+        entry.rejected = true
+        send(entry.call)
+    }
+
+    override fun rejectWithMessage(callId: Int, text: String): Int {
+        val info = ringInfo[callId]
+        val decision = RejectPolicy.decide(
+            text = text,
+            ringing = info != null,
+            telecomPath = (rejectPathOverride ?: Caps.REJECT_PATH) == "TELECOM",
+            respondViaText = info?.respondViaText == true,
+            hasNumber = info?.number?.isNotBlank() == true,
+            // The SMS app is not resolvable without a <queries> entry (check-apk allows three); try and catch.
+            canCompose = true,
+        )
+        val action = decision.action ?: return decision.code
+        val body = text.trim()
+        main.post {
+            val entry = entries[callId] ?: return@post
+            rejectOnce(entry) { call ->
+                when (action) {
+                    RejectPolicy.Action.TELECOM -> try {
+                        call.reject(true, body)
+                    } catch (_: RuntimeException) {
+                        call.reject(false, null)
+                    }
+                    RejectPolicy.Action.HANDOFF -> {
+                        call.reject(false, null)
+                        openMessages(info?.number ?: "", body)
+                    }
+                    RejectPolicy.Action.REJECT_ONLY -> call.reject(false, null)
+                }
+            }
+        }
+        return decision.code
+    }
+
+    override fun rejectAndCompose(callId: Int): Boolean {
+        val info = ringInfo[callId] ?: return false
+        main.post {
+            val entry = entries[callId] ?: return@post
+            rejectOnce(entry) { call ->
+                call.reject(false, null)
+                openMessages(info.number, null)
+            }
+        }
+        return true
+    }
+
+    /** `ACTION_SENDTO smsto:` with the text typed in; the SMS app sends it, never this app (AD-28). */
+    private fun openMessages(number: String, body: String?) {
+        val context = app ?: return
+        try {
+            val intent = Intent(Intent.ACTION_SENDTO, android.net.Uri.fromParts("smsto", number, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (body != null) intent.putExtra("sms_body", body)
+            context.startActivity(intent)
+        } catch (e: RuntimeException) {
+            Log.w("Rovsti", "no app to compose the reply", e)
+        }
+    }
+
+    // ---- Silence the ringer (story 18.4, AD-29) ----------------------------
+
+    override fun silenceRinger(): Boolean = silence("user")
+
+    /** Silences from the app; [by] says who asked. A refusal (no permission) is false and changes nothing. */
+    private fun silence(by: String): Boolean {
+        if (ringingIds.isEmpty()) return false
+        val manager = app?.getSystemService(TelecomManager::class.java) ?: return false
+        silenceAsk = by
+        return try {
+            manager.silenceRinger()
+            main.post {
+                if (silencedBy == null && entries.values.any { it.call.state == Call.STATE_RINGING }) {
+                    silencedBy = by
+                    rebuild()
+                }
+            }
+            true
+        } catch (_: SecurityException) {
+            silenceAsk = null
+            false
+        } catch (_: RuntimeException) {
+            silenceAsk = null
+            false
+        }
+    }
+
+    /** `InCallService.onSilenceRinger()`: the volume key, the flip or our own command. */
+    fun onSilenceRinger() {
+        silenceCalls++
+        if (silencedBy == null && entries.values.any { it.call.state == Call.STATE_RINGING }) {
+            silencedBy = silenceAsk ?: "volume"
+            rebuild()
+        }
+    }
+
+    override fun blockGuardHits(): Int = guardHits
+    override fun blockGuardOn(): Boolean = Caps.BLOCK_GUARD
+    override fun silenceCallbacks(): Int = silenceCalls
+
+    override fun probeRejectText(windowMs: Long): Epic17Probes.Reject {
+        val end = SystemClock.elapsedRealtime() + windowMs
+        while (SystemClock.elapsedRealtime() < end) {
+            val id = ringInfo.keys.firstOrNull()
+            if (id != null) {
+                val info = ringInfo[id]
+                rejectPathOverride = "TELECOM"
+                val code = try { rejectWithMessage(id, "test") } finally { rejectPathOverride = null }
+                return Epic17Probes.Reject(true, info?.respondViaText == true, code, info?.number?.isNotBlank() == true)
+            }
+            Thread.sleep(150)
+        }
+        return Epic17Probes.Reject(false, false, 0, false)
+    }
+
+    /** The flip fired: silence once, with the flip haptic. */
+    private fun onFlipped() {
+        if (silencedBy != null) return
+        if (silence("flip")) app?.let { Haptics.click(it) }
+    }
 
     override fun disconnect(callId: Int) = command(callId) { it.call.disconnect() }
 
@@ -249,7 +402,7 @@ object CallRegistry : CallsApi {
 
     /** The notification's Decline: rejects only a call that is still ringing; no activity, no Rust. */
     fun declineRinging(callId: Int): Boolean = command(callId) {
-        if (it.call.state == Call.STATE_RINGING) it.call.reject(false, null)
+        rejectOnce(it) { c -> c.reject(false, null) }
     }
 
     /** Any call is ringing right now (any thread; from the last snapshot). */
@@ -393,7 +546,10 @@ object CallRegistry : CallsApi {
         val entry = Entry(id, call, callback)
         if (call.state == Call.STATE_HOLDING) entry.holdSince = System.currentTimeMillis()
         entries[id] = entry
-        if (call.state == Call.STATE_RINGING) IncomingPerf.onCallAdded(id, keyguardLocked())
+        if (call.state == Call.STATE_RINGING) {
+            IncomingPerf.onCallAdded(id, keyguardLocked())
+            guardRinging(entry)
+        }
         call.registerCallback(callback, main)
         if (call.state == Call.STATE_SELECT_PHONE_ACCOUNT) selectAccount(call)
         resolveName(entry)
@@ -403,6 +559,23 @@ object CallRegistry : CallsApi {
             main.postDelayed(audioDeadline, AUDIO_FALLBACK_MS)
         }
         rebuild()
+    }
+
+    /**
+     * `Caps.BLOCK_GUARD` (story 17.1): the lookup runs on [lookupExecutor], never the main Looper and
+     * never before the notification; a hit rejects the call and takes the notification down.
+     */
+    private fun guardRinging(entry: Entry) {
+        val number = entry.call.details.handle?.schemeSpecificPart ?: return
+        val id = entry.id
+        blockGuard.onRinging(number, Caps.BLOCK_GUARD) {
+            val e = entries[id] ?: return@onRinging
+            if (e.call.state != Call.STATE_RINGING) return@onRinging
+            record("blockGuard", id, "ringing")
+            guardHits++
+            rejectOnce(e) { c -> c.reject(false, null) }
+            app?.getSystemService(NotificationManager::class.java)?.cancel(CallNotifications.INCOMING_ID)
+        }
     }
 
     fun onCallRemoved(call: Call) {
@@ -796,6 +969,12 @@ object CallRegistry : CallsApi {
         }
         checkOp()
         val calls = buildCalls()
+        val ringing = calls.any { it.state == "ringing" }
+        // The silenced flag lives only while a call rings.
+        if (!ringing) {
+            silencedBy = null
+            silenceAsk = null
+        }
         val selecting = entries.values.firstOrNull { it.selecting }
         // While an operation runs the previous foreground stays in front (no transient scene).
         val focus = Focus.of(calls, if (ops.current != null) foregroundId else null)
@@ -819,6 +998,8 @@ object CallRegistry : CallsApi {
             pendingFailed = pendingFailed,
             selectingAccount = selecting != null,
             accounts = if (selecting != null) selectableAccounts() else emptyList(),
+            ringerSilenced = ringing && silencedBy != null,
+            silencedBy = if (ringing) silencedBy else null,
             calls = calls,
         )
         val text = SnapshotJson.toJson(data)
@@ -832,16 +1013,28 @@ object CallRegistry : CallsApi {
         Log.d("RovstiSpike", "snapshot seq=$seq calls=${calls.size} endpoints=${audioInfo.endpoints.size} legacy=${audio.legacy}")
         knownIds = calls.mapTo(HashSet()) { it.id }
         ringingIds = calls.filter { it.state == "ringing" }.mapTo(HashSet()) { it.id }
+        ringInfo = calls.filter { it.state == "ringing" }.associate {
+            it.id to RingInfo(it.numberRaw, it.caps and Wire.Caps.RESPOND_VIA_TEXT != 0)
+        }
+        syncFlip(ringing && silencedBy == null)
         foregroundIdVolatile = focus.foreground
         json = text
         facts = facts.copy(conferenceable = entries.values.filter { it.call.conferenceableCalls.isNotEmpty() }.mapTo(HashSet()) { it.id })
         updateKeyguardReceiver(calls.isNotEmpty())
         // The activity first: its lock-screen flags must be set before the full-screen intent fires.
         syncLiveCall(calls.isNotEmpty())
-        syncIncoming(IncomingCall.of(calls))
+        syncIncoming(IncomingCall.of(calls, SettingsMirror.values.hasReplies))
         syncOngoing(OngoingCall.of(calls, focus))
         syncProximity(calls, focus)
         RovstiBridge.emit("calls", text)
+    }
+
+    /** The flip listener exists only while a call rings, is not yet silenced and the setting is on (story 18.4, P-22). */
+    private fun syncFlip(wanted: Boolean) {
+        val context = app ?: return
+        val on = wanted && SettingsMirror.values.flipToSilence
+        val detector = flip ?: if (on) FlipDetector(context) { onFlipped() }.also { flip = it } else return
+        if (on) detector.start() else detector.stop()
     }
 
     private fun syncLiveCall(live: Boolean) {

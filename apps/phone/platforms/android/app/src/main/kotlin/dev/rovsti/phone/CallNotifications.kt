@@ -24,6 +24,10 @@ object CallNotifications {
     const val EXTRA_ANSWER_CALL_ID = "answer_call_id"
     const val EXTRA_ANSWER_TOKEN = "answer_token"
 
+    /** The Message action: opens the Incoming screen with the reply sheet already up (story 18.7). */
+    const val EXTRA_REPLY_CALL_ID = "reply_sheet_call_id"
+    const val ACTION_MESSAGE = "dev.rovsti.phone.MESSAGE_CALL"
+
     /**
      * Per-process secret carried by the notification's Answer intent. MainActivity is exported, so
      * without it any app could answer a ringing call by guessing the small sequential call id.
@@ -35,6 +39,7 @@ object CallNotifications {
     private const val REQ_SHOW = 20_000
     private const val REQ_ANSWER = 30_000
     private const val REQ_DECLINE = 40_000
+    private const val REQ_MESSAGE = 50_000
 
     fun ensureChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -101,6 +106,9 @@ object CallNotifications {
             .setAutoCancel(false)
             .setFullScreenIntent(show, true)
         call.subtitle?.let { builder.setContentText(it) }
+        if (call.canMessage) {
+            builder.addAction(Notification.Action.Builder(Icon.createWithResource(context, R.drawable.ic_stat_call), "Message", messageIntent(context, call)).build())
+        }
         return builder.build()
     }
 
@@ -130,6 +138,7 @@ object CallNotifications {
             .setAutoCancel(false)
             .addAction(Notification.Action.Builder(icon, "Decline", decline).build())
             .addAction(Notification.Action.Builder(icon, "Answer", answer).build())
+        if (call.canMessage) builder.addAction(Notification.Action.Builder(icon, "Message", messageIntent(context, call)).build())
         return builder.build()
     }
 
@@ -140,6 +149,18 @@ object CallNotifications {
         Intent(context, MainActivity::class.java)
             .setAction(ACTION_ANSWER)
             .putExtra(EXTRA_ANSWER_CALL_ID, call.callId)
+            .putExtra(EXTRA_ANSWER_TOKEN, answerToken)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    /** Message is an activity PendingIntent, never a broadcast: it must raise the app (story 18.7). */
+    private fun messageIntent(context: Context, call: IncomingCall): PendingIntent = PendingIntent.getActivity(
+        context,
+        REQ_MESSAGE + call.callId,
+        Intent(context, MainActivity::class.java)
+            .setAction(ACTION_MESSAGE)
+            .putExtra(EXTRA_REPLY_CALL_ID, call.callId)
             .putExtra(EXTRA_ANSWER_TOKEN, answerToken)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,

@@ -1,7 +1,9 @@
 //! Sample data for desktop runs (FR-38), where there is no phone to ask.
 //! Nothing here touches Android; `backend.rs` decides when to serve it.
 
-use rovsti_core::wire::{CallLogEntry, CallLogKind, WireContact, WireNumber};
+use rovsti_core::wire::{
+    BlockReason, BlockedNumber, CallLogEntry, CallLogKind, WireContact, WireNumber,
+};
 #[cfg(not(target_os = "android"))]
 use rovsti_core::{
     call_log::{DateOrder, TimeFormat},
@@ -286,6 +288,88 @@ pub fn preview_call_log(now_ms: i64) -> Vec<CallLogEntry> {
         return all;
     }
     log
+}
+
+// ---- The blocklist on desktop (Epic 17) ----------------------------------------------------------
+
+/// The desktop blocklist; seeded on first use, edited by Block and Unblock.
+static BLOCKED: std::sync::Mutex<Option<Vec<BlockedNumber>>> = std::sync::Mutex::new(None);
+
+fn blocked_seed() -> Vec<BlockedNumber> {
+    let row = |id: i64, raw: &str, normalized: &str| BlockedNumber {
+        id,
+        number_raw: raw.to_owned(),
+        normalized: normalized.to_owned(),
+    };
+    vec![
+        row(2, "+90 212 555 01 99", "+902125550199"),
+        row(1, "0850 222 33 44", "08502223344"),
+    ]
+}
+
+/// The desktop blocklist, newest first.
+pub fn blocked_rows() -> Vec<BlockedNumber> {
+    let mut guard = BLOCKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    guard.get_or_insert_with(blocked_seed).clone()
+}
+
+/// Desktop stand-in for `BlockedNumberContract`: a duplicate replaces.
+pub fn block_row(raw: &str) {
+    let mut guard = BLOCKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let rows = guard.get_or_insert_with(blocked_seed);
+    let normalized: String = raw
+        .chars()
+        .enumerate()
+        .filter(|(i, c)| c.is_ascii_digit() || (*i == 0 && *c == '+'))
+        .map(|(_, c)| c)
+        .collect();
+    rows.retain(|r| r.normalized != normalized);
+    let id = rows.iter().map(|r| r.id).max().unwrap_or(0) + 1;
+    rows.insert(
+        0,
+        BlockedNumber {
+            id,
+            number_raw: raw.to_owned(),
+            normalized,
+        },
+    );
+}
+
+pub fn unblock_row(raw: &str) {
+    let mut guard = BLOCKED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(rows) = guard.as_mut() {
+        rows.retain(|r| r.number_raw != raw);
+    }
+}
+
+/// Blocked calls for the desktop page, newest first.
+pub fn blocked_calls(now_ms: i64) -> Vec<CallLogEntry> {
+    let call = |id: i64, raw: &str, ago: i64, reason: BlockReason| CallLogEntry {
+        id: 5000 + id,
+        number_raw: raw.to_owned(),
+        normalized: raw
+            .chars()
+            .enumerate()
+            .filter(|(i, c)| c.is_ascii_digit() || (*i == 0 && *c == '+'))
+            .map(|(_, c)| c)
+            .collect(),
+        kind: CallLogKind::Blocked,
+        date_ms: now_ms - ago,
+        block_reason: Some(reason),
+        ..Default::default()
+    };
+    vec![
+        call(3, "+90 212 555 01 99", 40 * MINUTE, BlockReason::User),
+        call(2, "0850 222 33 44", 5 * HOUR, BlockReason::User),
+        call(1, "0532 000 11 22", 26 * HOUR, BlockReason::System),
+        call(0, "0212 999 88 77", 3 * 24 * HOUR, BlockReason::Unknown),
+    ]
 }
 
 /// Calls added during this desktop run (debug switcher), oldest first.

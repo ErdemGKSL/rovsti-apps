@@ -334,6 +334,8 @@ object ProviderJson {
         val contactId: Long? = null,
         /** Opaque `"{component}#{handle id}"` of the account the call used (AD-26); null when unknown. */
         val accountKey: String? = null,
+        /** `user`, `system` or `unknown` for a blocked row (story 17.2); null for any other. */
+        val blockReason: String? = null,
     )
 
     data class PhoneRow(
@@ -353,7 +355,7 @@ object ProviderJson {
     fun error(code: String): String =
         JSONObject().put("v", WIRE_VERSION).put("ok", false).put("error", code).toString()
 
-    private fun ok(data: JSONObject): String =
+    fun ok(data: JSONObject): String =
         JSONObject().put("v", WIRE_VERSION).put("ok", true).put("data", data).toString()
 
     /** `CallLog.Calls.TYPE` to the wire kind. */
@@ -401,6 +403,7 @@ object ProviderJson {
             r.label?.let { o.put("number_label", it) }
             r.contactId?.let { o.put("contact_id", it) }
             r.accountKey?.let { o.put("account_key", it) }
+            r.blockReason?.let { o.put("block_reason", it) }
             entries.put(o)
         }
         return ok(JSONObject().put("entries", entries))

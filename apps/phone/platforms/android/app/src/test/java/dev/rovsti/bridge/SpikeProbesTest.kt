@@ -44,10 +44,10 @@ class SpikeProbesTest {
     }
 
     @Test fun registeredGroupsSoFar() {
-        for (probe in listOf("audio", "calls", "sim", "system")) assertTrue(SpikeProbes.isRegistered(probe))
-        // Backup runs in Rust (it drives the pickers); Blocking and the rest are not built yet.
+        for (probe in listOf("audio", "calls", "sim", "system", "blocking", "reject_text", "silence")) assertTrue(SpikeProbes.isRegistered(probe))
+        // Backup runs in Rust (it drives the pickers); Voicemail and the rest are not built yet.
         assertTrue(!SpikeProbes.isRegistered("backup"))
-        assertTrue(!SpikeProbes.isRegistered("blocking"))
+        assertTrue(!SpikeProbes.isRegistered("voicemail"))
         assertTrue(SpikeProbes.GROUPS.contains("audio") && SpikeProbes.GROUPS.contains("backup"))
     }
 }

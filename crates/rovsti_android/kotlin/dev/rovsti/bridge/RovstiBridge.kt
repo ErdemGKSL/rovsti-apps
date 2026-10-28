@@ -178,6 +178,11 @@ object RovstiBridge {
     @JvmStatic fun callEndAll(): Boolean = calls?.endAll() ?: false
     @JvmStatic fun callIncomingFrame(id: Int): Boolean = calls?.incomingFrame(id) ?: false
 
+    /** 0 stale, 1 sent, 2 opened Messages, 3 rejected only (story 18.1). */
+    @JvmStatic fun callRejectWithMessage(id: Int, text: String): Int = calls?.rejectWithMessage(id, text) ?: 0
+    @JvmStatic fun callRejectAndCompose(id: Int): Boolean = calls?.rejectAndCompose(id) ?: false
+    @JvmStatic fun callSilenceRinger(): Boolean = calls?.silenceRinger() ?: false
+
     /**
      * Runs a Diagnostics probe (AD-36). Blocking, up to ~20 s: Rust calls it off the UI thread.
      * Never throws; a failure is one `unknown:` line.
@@ -199,6 +204,22 @@ object RovstiBridge {
     @JvmStatic fun pullCallLog(limit: Int): String = CallLogQuery.json(app, limit)
     @JvmStatic fun pullContacts(): String = ContactsQuery.contactsJson(app)
     @JvmStatic fun pullFavorites(): String = ContactsQuery.favoritesJson(app)
+
+    // ---- The system blocklist (AD-27, story 17.1) ----------------------
+
+    private val blocklist by lazy { Blocklist.System(app) }
+    private fun emergency(raw: String): Boolean = try {
+        android.telephony.PhoneNumberUtils.isEmergencyNumber(raw)
+    } catch (_: RuntimeException) {
+        false
+    }
+
+    @JvmStatic fun pullBlocklist(): String = Blocklist.pullJson(blocklist)
+    @JvmStatic fun blockNumber(number: String): Boolean = Blocklist.block(blocklist, number, ::emergency) == Blocklist.Result.OK
+    @JvmStatic fun unblockNumber(number: String): Boolean = Blocklist.unblock(blocklist, number) == Blocklist.Result.OK
+    @JvmStatic fun canBlockNumbers(): Boolean = Blocklist.canBlock(blocklist)
+    @JvmStatic fun isNumberBlocked(number: String): Boolean = Blocklist.isBlocked(blocklist, number)
+    @JvmStatic fun pullBlockedCalls(limit: Int): String = CallLogQuery.blockedJson(app, limit)
 
     /** [contactId] is a decimal string (the bridge passes String, Int and Boolean only). */
     @JvmStatic fun setStarred(contactId: String, starred: Boolean): Boolean =

@@ -134,6 +134,7 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
      * need no handling here: raising the activity is enough, Rust shows the Incoming Call screen.
      */
     private fun handleCallIntent(intent: Intent) {
+        handleReplyIntent(intent)
         val id = intent.getIntExtra(CallNotifications.EXTRA_ANSWER_CALL_ID, -1)
         if (id < 0) return
         val token = intent.getLongExtra(CallNotifications.EXTRA_ANSWER_TOKEN, 0L)
@@ -141,6 +142,21 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
         intent.removeExtra(CallNotifications.EXTRA_ANSWER_TOKEN)
         if (token != CallNotifications.answerToken) return
         if (answerOnce.accept(id, CallRegistry.isRinging(id))) CallRegistry.answerRinging(id)
+    }
+
+    /**
+     * The notification's Message (story 18.7): raises the app and, through the one-shot mailbox, asks
+     * Rust to open the Incoming screen with the reply sheet up. The call keeps ringing. A stale id or
+     * a wrong token does nothing.
+     */
+    private fun handleReplyIntent(intent: Intent) {
+        val id = intent.getIntExtra(CallNotifications.EXTRA_REPLY_CALL_ID, -1)
+        if (id < 0) return
+        val token = intent.getLongExtra(CallNotifications.EXTRA_ANSWER_TOKEN, 0L)
+        intent.removeExtra(CallNotifications.EXTRA_REPLY_CALL_ID)
+        intent.removeExtra(CallNotifications.EXTRA_ANSWER_TOKEN)
+        if (token != CallNotifications.answerToken || !CallRegistry.isRinging(id)) return
+        RovstiBridge.postOneShot("ui_request", "{\"kind\":\"show_reply\",\"call_id\":$id}")
     }
 
     // ---- Back, errors ------------------------------------------------------------

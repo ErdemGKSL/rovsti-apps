@@ -27,6 +27,11 @@ object ProviderObservers {
         } catch (_: SecurityException) {
             registered = false
         }
+        // Only the default dialer may watch the blocklist: refused otherwise, and that is fine (17.1).
+        try {
+            resolver.registerContentObserver(android.provider.BlockedNumberContract.BlockedNumbers.CONTENT_URI, true, Debounced("blocked_changed"))
+        } catch (_: RuntimeException) {
+        }
     }
 
     private class Debounced(private val kind: String) : ContentObserver(handler) {

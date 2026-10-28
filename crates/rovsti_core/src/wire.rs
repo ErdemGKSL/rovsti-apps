@@ -914,6 +914,9 @@ pub enum UiRequestKind {
     ShowCall,
     /// Open Recents (missed-call notification tap).
     ShowRecents,
+    /// The Incoming screen for `call_id` with the reply sheet open (the
+    /// notification's Message action, story 18.7).
+    ShowReply,
     #[default]
     #[serde(other)]
     Unknown,

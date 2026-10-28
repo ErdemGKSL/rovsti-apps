@@ -313,6 +313,10 @@ fn unknown_enum_values_do_not_fail() {
     assert_eq!(d.error, Some(WireError::Unknown));
     let u: UiRequest = serde_json::from_str(r#"{"kind":"warp"}"#).expect("parse");
     assert_eq!(u.kind, UiRequestKind::Unknown);
+    let reply: UiRequest =
+        serde_json::from_str(r#"{"kind":"show_reply","call_id":4}"#).expect("parse");
+    assert_eq!(reply.kind, UiRequestKind::ShowReply);
+    assert_eq!(reply.call_id, Some(4));
     let s: SettingsSync =
         serde_json::from_str(r#"{"haptics":"turbo","name_format":"zzz","new":1}"#).expect("parse");
     assert_eq!(s.haptics, HapticsLevel::Normal);

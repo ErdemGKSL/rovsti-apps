@@ -42,6 +42,26 @@ const FAILED_HOLD: Duration = Duration::from_millis(2000);
 /// A tapped toggle keeps its pressed look at least this long.
 const PENDING_LOOK: Duration = Duration::from_millis(120);
 const DIGIT_LINE: usize = 24;
+/// The in-call digit buffer keeps only the latest keys.
+const DIGIT_BUFFER: usize = 64;
+
+/// Appends a key, dropping the oldest ones past [`DIGIT_BUFFER`]. Keys are ASCII.
+fn push_digit(buf: &mut String, key: char) {
+    buf.push(key);
+    if buf.len() > DIGIT_BUFFER {
+        let extra = buf.len() - DIGIT_BUFFER;
+        buf.drain(..extra);
+    }
+}
+
+/// The keypad's digit line: the whole buffer, or `…` and its last keys.
+fn digit_line(digits: &str) -> String {
+    if digits.len() > DIGIT_LINE {
+        format!("…{}", &digits[digits.len() - (DIGIT_LINE - 1)..])
+    } else {
+        digits.to_owned()
+    }
+}
 const AVATAR: f32 = 96.0;
 const CONTROL: f32 = 76.0;
 const IN_KEY: f32 = 72.0;
@@ -380,6 +400,10 @@ pub struct InCall {
     ending: Option<Ending>,
     keypad_open: bool,
     digits: String,
+    /// Which `clear_pending_later` timer is the latest.
+    pending_gen: u64,
+    /// What the keypad shows of `digits`, rebuilt only when a key is pressed.
+    digit_line: SharedString,
     pub(crate) last_id: Option<i32>,
     /// The call that just ended; a lagging snapshot of it must not reopen the screen.
     pub(crate) done_id: Option<i32>,
@@ -428,6 +452,8 @@ impl InCall {
             ending: None,
             keypad_open: false,
             digits: String::new(),
+            pending_gen: 0,
+            digit_line: SharedString::default(),
             last_id: None,
             done_id: None,
             hidden_for: None,
@@ -610,6 +636,7 @@ impl PhoneApp {
                     ic.keypad_open = false;
                     ic.keypad_t.snap(0.0);
                     ic.digits.clear();
+                    ic.digit_line = SharedString::default();
                     ic.blank = false;
                     ic.end_in.snap(0.0);
                     ic.end_in.set_target(1.0);
@@ -866,7 +893,8 @@ impl PhoneApp {
                     && live
                 {
                     window.perform_haptic_feedback(HapticFeedback::Selection);
-                    self.incall.digits.push(digit);
+                    push_digit(&mut self.incall.digits, digit);
+                    self.incall.digit_line = digit_line(&self.incall.digits).into();
                     self.incall.dtmf_down = true;
                     self.send(CallCommand::Dtmf(digit), cx);
                 }
@@ -890,9 +918,16 @@ impl PhoneApp {
     }
 
     fn clear_pending_later(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Only the latest tap's timer may clear: an earlier one would cut the
+        // second tap's pending look short.
+        self.incall.pending_gen = self.incall.pending_gen.wrapping_add(1);
+        let generation = self.incall.pending_gen;
         cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(PENDING_LOOK).await;
             this.update(cx, |this, cx| {
+                if this.incall.pending_gen != generation {
+                    return;
+                }
                 this.incall.pending = [None; 2];
                 this.presses.release_all();
                 cx.notify();
@@ -1112,12 +1147,7 @@ impl PhoneApp {
 
     fn in_call_keypad(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
-        let digits = &self.incall.digits;
-        let line: SharedString = if digits.len() > DIGIT_LINE {
-            format!("…{}", &digits[digits.len() - (DIGIT_LINE - 1)..]).into()
-        } else {
-            digits.clone().into()
-        };
+        let line = self.incall.digit_line.clone();
         div()
             .flex()
             .flex_col()
@@ -1567,6 +1597,20 @@ mod tests {
         call::CallModel,
         wire::{CallSnapshot, WireCall, WireCallState},
     };
+
+    #[test]
+    fn digit_buffer_keeps_only_the_latest_keys() {
+        let mut buf = String::new();
+        for i in 0..200 {
+            push_digit(&mut buf, char::from(b'0' + (i % 10) as u8));
+        }
+        assert_eq!(buf.len(), DIGIT_BUFFER);
+        assert!(buf.ends_with("789"));
+        assert_eq!(digit_line("123"), "123");
+        let line = digit_line(&buf);
+        assert_eq!(line.chars().count(), DIGIT_LINE);
+        assert!(line.starts_with('…') && line.ends_with("789"));
+    }
 
     #[test]
     fn long_numbers_are_cut_in_the_middle() {

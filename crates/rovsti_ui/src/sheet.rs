@@ -42,6 +42,8 @@ const TOP_GAP: f32 = 56.0;
 const GRABBER_ZONE: f32 = 30.0;
 /// Release velocity (px/s) past which a downward flick dismisses.
 const DISMISS_VELOCITY: f32 = 700.0;
+/// A finger that rested this long before lifting is not flicking.
+const STALE_SAMPLE: Duration = Duration::from_millis(80);
 /// Fraction of the travel past which a slow drag dismisses.
 const DISMISS_DISTANCE: f32 = 0.14;
 /// Scrim alpha when fully open: black at 0.15 leaves the page at 0.85 (S16).
@@ -224,6 +226,13 @@ impl Sheet {
             }
             TouchPhase::Ended | TouchPhase::Cancelled if self.dragging => {
                 self.dragging = false;
+                // A pause before the lift leaves an old flick speed behind.
+                if self
+                    .last_sample
+                    .is_none_or(|(_, at)| now.saturating_duration_since(at) > STALE_SAMPLE)
+                {
+                    self.velocity = 0.0;
+                }
                 self.last_sample = None;
                 let projected = gesture::project(self.drag.value, self.velocity, 0.998);
                 let dismiss = self.velocity > DISMISS_VELOCITY
@@ -449,6 +458,29 @@ mod tests {
         assert!(!sheet.is_open(), "200 px of 800 dismisses");
         run(&mut sheet, 240);
         assert!(!sheet.is_visible());
+    }
+
+    #[test]
+    fn a_pause_before_lifting_cancels_the_flick() {
+        let mut sheet = Sheet::new();
+        sheet.set_viewport(gpui::size(px(400.0), px(800.0)));
+        sheet.open();
+        run(&mut sheet, 240);
+        let t0 = Instant::now();
+        let at = |ms| t0 + Duration::from_millis(ms);
+        // A fast flick of only 30 px, then the finger rests before lifting.
+        sheet.drag_touch_at(TouchPhase::Started, 500.0, at(0));
+        sheet.drag_touch_at(TouchPhase::Moved, 515.0, at(10));
+        sheet.drag_touch_at(TouchPhase::Moved, 530.0, at(20));
+        sheet.drag_touch_at(TouchPhase::Ended, 530.0, at(600));
+        assert!(sheet.is_open(), "a rested finger is not a flick");
+
+        // The same flick lifted at once still dismisses.
+        sheet.drag_touch_at(TouchPhase::Started, 500.0, at(0));
+        sheet.drag_touch_at(TouchPhase::Moved, 515.0, at(10));
+        sheet.drag_touch_at(TouchPhase::Moved, 530.0, at(20));
+        sheet.drag_touch_at(TouchPhase::Ended, 530.0, at(25));
+        assert!(!sheet.is_open());
     }
 
     #[test]

@@ -126,8 +126,8 @@ impl TapGuard {
 
     /// The finger lifted (or the touch was cancelled) at `(x, y)`.
     pub fn finish(&mut self, x: f32, y: f32) {
+        // `start` stays until the click is judged: it holds the scroll offset.
         self.moved(x, y);
-        self.start = None;
     }
 
     /// A press that has become something else (a long press) is not a tap.

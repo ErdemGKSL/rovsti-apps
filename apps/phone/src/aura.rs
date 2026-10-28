@@ -6,10 +6,13 @@
 //! no allocation; it loops only while it is on screen and the window is
 //! active, and holds still under reduced motion.
 
-use std::{f32::consts::TAU, time::Duration};
+use std::{
+    f32::consts::TAU,
+    time::{Duration, Instant},
+};
 
 use gpui::{
-    Bounds, Context, GradientKind, Hsla, IntoElement, Render, Styled, Window, canvas, fill,
+    Bounds, Context, GradientKind, Hsla, IntoElement, Render, Styled, Task, Window, canvas, fill,
     linear_color_stop, linear_gradient, point, px, size,
 };
 use rovsti_ui::{
@@ -33,6 +36,9 @@ const WRAP: f32 = 693.0;
 const BREATH_HZ: f32 = 0.8;
 /// Seconds between the two beats of the waiting-call pulse.
 const WAITING_GAP: f32 = 0.32;
+/// The drift alone repaints at about 30 Hz: it is a 7 to 11 s loop, far too
+/// slow to show the difference, and it halves the cost of a long call.
+const DRIFT_FRAME: Duration = Duration::from_millis(33);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Phase {
@@ -69,6 +75,12 @@ pub struct Aura {
     intro: Spring,
     /// Seconds since a waiting call rang (the double pulse), while it plays.
     waiting: Option<(f32, bool)>,
+    /// When the drift clock was last advanced (`None` while it is not drifting).
+    last_drift: Option<Instant>,
+    /// A springs-moving frame was requested: vsync repaints cover the drift too.
+    animating: bool,
+    /// The next drift-only repaint.
+    drift_timer: Option<Task<()>>,
 }
 
 fn spring(value: f32, params: rovsti_ui::spring::SpringParams) -> Spring {
@@ -94,6 +106,9 @@ impl Aura {
             danger: spring(0.0, motion_tokens::select()),
             intro,
             waiting: None,
+            last_drift: None,
+            animating: false,
+            drift_timer: None,
         }
     }
 
@@ -164,7 +179,7 @@ impl Aura {
         cx.notify();
     }
 
-    fn tick(&mut self, dt: Duration, drift: bool) -> bool {
+    fn tick(&mut self, dt: Duration) -> bool {
         let mut moving = false;
         for s in [
             &mut self.energy,
@@ -191,11 +206,17 @@ impl Aura {
                 self.waiting = None;
             }
         }
-        if drift && self.collapse.value > 0.62 {
-            self.clock = (self.clock + dt.as_secs_f32() * self.speed.value) % WRAP;
-            moving = true;
-        }
         moving
+    }
+
+    /// Advances the drift clock by the real time since it last moved.
+    fn drift(&mut self) {
+        let now = Instant::now();
+        let dt = self
+            .last_drift
+            .map_or(0.0, |t| now.duration_since(t).as_secs_f32().min(0.1));
+        self.last_drift = Some(now);
+        self.clock = (self.clock + dt * self.speed.value) % WRAP;
     }
 
     /// The three blob colours for `theme`, before alpha.
@@ -218,12 +239,35 @@ impl Aura {
 }
 
 impl Render for Aura {
-    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = current_theme(window);
         let drift = !window.prefers_reduced_motion() && window.is_window_active();
         let mut motion = std::mem::take(&mut self.motion);
-        motion.frame(window, |dt| self.tick(dt, drift));
+        let mut animating = false;
+        motion.frame(window, |dt| {
+            animating = self.tick(dt);
+            animating
+        });
         self.motion = motion;
+        self.animating = animating;
+        if drift && self.collapse.value > 0.62 {
+            self.drift();
+            // Springs moving: vsync frames already repaint. Otherwise only the
+            // drift moves, and a ~30 Hz timer is enough.
+            if !animating && self.drift_timer.is_none() {
+                self.drift_timer = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(DRIFT_FRAME).await;
+                    this.update(cx, |this, cx| {
+                        this.drift_timer = None;
+                        cx.notify();
+                    })
+                    .ok();
+                }));
+            }
+        } else {
+            self.last_drift = None;
+            self.drift_timer = None;
+        }
 
         let colors = self.colors(theme);
         let base_alpha = if theme.is_dark() { 0.28 } else { 0.18 };

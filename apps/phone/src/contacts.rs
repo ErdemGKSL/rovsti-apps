@@ -155,7 +155,7 @@ pub(crate) struct ContactsView {
     pub(crate) field: Entity<SearchField>,
     seen_edits: u64,
     /// The field's text as of the last edit.
-    field_text: String,
+    field_text: SharedString,
     touch: Option<Point<Pixels>>,
     tap: TapGuard,
     last_pressed: Option<usize>,
@@ -185,7 +185,7 @@ impl ContactsView {
             query: String::new(),
             field: cx.new(SearchField::new),
             seen_edits: 0,
-            field_text: String::new(),
+            field_text: SharedString::default(),
             touch: None,
             tap: TapGuard::default(),
             last_pressed: None,
@@ -518,7 +518,7 @@ impl PhoneApp {
         let mut changed = false;
         if edits != self.contacts.seen_edits {
             self.contacts.seen_edits = edits;
-            self.contacts.field_text = text;
+            self.contacts.field_text = text.into();
             self.apply_contacts_query(false, cx);
             changed = true;
         }
@@ -1025,7 +1025,7 @@ impl PhoneApp {
         let colors = theme::colors(theme);
         let field = self.contacts.field.clone();
         let focus = field.read(cx).focus_handle();
-        let text = SharedString::from(self.contacts.field_text.clone());
+        let text = self.contacts.field_text.clone();
         let typing = self.contacts.typing;
         let press = self.presses.value("cs-field").clamp(0.0, 1.0);
         let clear_press = self.presses.value("cs-clear").clamp(0.0, 1.0);

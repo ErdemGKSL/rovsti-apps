@@ -42,6 +42,8 @@ const MATCH_MIN: usize = 3;
 pub(crate) struct Found {
     id: i64,
     name: SharedString,
+    /// The spoken label, built once instead of on every render.
+    label: SharedString,
     monogram: Option<SharedString>,
     hue: Option<usize>,
 }
@@ -462,6 +464,7 @@ impl PhoneApp {
                     id,
                     monogram: rovsti_core::avatar::monogram(&name).map(|c| c.to_string().into()),
                     hue: rovsti_core::avatar::hue_index(Some(id)),
+                    label: format!("Dialing {name}").into(),
                     name: name.into(),
                 });
                 if this.dial_match.found != found {
@@ -715,7 +718,7 @@ impl PhoneApp {
             // name appearing never moves the keys.
             None => match &self.dial_match.found {
                 Some(found) => area
-                    .aria_label(SharedString::from(format!("Dialing {}", found.name)))
+                    .aria_label(found.label.clone())
                     .child(person_avatar(
                         theme,
                         found.hue,

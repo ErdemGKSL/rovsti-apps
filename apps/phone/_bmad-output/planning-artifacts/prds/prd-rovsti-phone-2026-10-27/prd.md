@@ -2,16 +2,19 @@
 title: "PRD: Rovsti Phone"
 status: final
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-28
+revisions:
+  - 2026-10-27 MVP (FR-1 to FR-40, NFR-1 to NFR-13)
+  - 2026-10-28 v0.2 additions after the first device test (FR-41 to FR-73, NFR-14 to NFR-18); see section 12
 ---
 
 # PRD: Rovsti Phone
 
 ## 0. Document Purpose
 
-This PRD defines the MVP of Rovsti Phone (`apps/phone`), the Android default dialer in the Rovsti monorepo. Its readers are the owner and the downstream BMAD steps (UX, architecture, epics and stories, and one automated implementation run). It builds on the product brief at `../../briefs/brief-rovsti-phone-2026-10-27/` (`brief.md`, `addendum.md`) and does not repeat the brief's market framing.
+This PRD defines the MVP (v0.1, FR-1 to FR-40) and the v0.2 additions (FR-41 to FR-73, section 4.11) of Rovsti Phone (`apps/phone`), the Android default dialer in the Rovsti monorepo. Its readers are the owner and the downstream BMAD steps (UX, architecture, epics and stories, and one automated implementation run). It builds on the product brief at `../../briefs/brief-rovsti-phone-2026-10-27/` (`brief.md`, `addendum.md`) and does not repeat the brief's market framing.
 
-How the document is organized: §3 Glossary fixes the vocabulary. §4 groups features, each with globally numbered FRs (FR-1 to FR-40) and testable consequences. §5 holds cross-cutting NFRs (NFR-1 to NFR-13). §6.1 sets P0/P1/P2 build priority. Inferences are tagged `[ASSUMPTION]` inline and indexed in §11. Technical "how" (Android components, bridge options, crate placement, toolchain) is kept in `addendum.md` for architecture.
+How the document is organized: §3 Glossary fixes the vocabulary. §4 groups features, each with globally numbered FRs (FR-1 to FR-40 for the MVP, FR-41 to FR-73 for v0.2) and testable consequences. §5 holds cross-cutting NFRs (NFR-1 to NFR-13 for the MVP, NFR-14 to NFR-18 for v0.2). §6.1 sets P0/P1/P2 build priority. Inferences are tagged `[ASSUMPTION]` inline and indexed in §11. Technical "how" (Android components, bridge options, crate placement, toolchain) is kept in `addendum.md` for architecture.
 
 ## 1. Vision
 
@@ -33,8 +36,8 @@ The MVP is narrow on purpose: a debug APK that the owner sideloads, sets as the 
 ### 2.2 Non-Users (v1)
 
 - Users who install from the Play Store, or who need signed releases or localized UI.
-- Dual-SIM power users who switch SIMs per call.
-- Anyone who needs conference calls, call recording, or caller-ID / spam lookup services.
+- ~~Dual-SIM power users who switch SIMs per call.~~ Now served from v0.2 (FR-50, FR-51).
+- ~~Anyone who needs conference calls~~ Now served from v0.2 (FR-44 to FR-48). Still non-users: anyone who needs call recording or caller-ID / spam lookup services (see section 7).
 
 ### 2.3 Key User Journeys
 
@@ -82,7 +85,11 @@ The single persona is **Erdem**, the developer and owner, with one Xiaomi phone 
 - **Xiaomi Setting** — one of four OEM settings that cannot be read back: Autostart, Battery saver "No restrictions", "Show on lock screen / pop-up while in background", and Background pop-ups. Shown only when the device is Xiaomi.
 - **Call** — one Telecom call session, outgoing or incoming, from creation to disconnection.
 - **Call State** — one of `Dialing`, `Ringing`, `Active`, `Holding`, `Disconnected`, plus the Mute and Audio Route flags. (Android's transient "select phone account" state is resolved automatically per FR-11 and is never shown.)
-- **Audio Route** — earpiece or speaker in MVP. Wired and Bluetooth headsets are used automatically by Android.
+- **Audio Route** — where call audio flows. MVP: earpiece or speaker, with headsets used automatically. From v0.2 (FR-41): any Audio Endpoint Android lists.
+- **Audio Endpoint** — one selectable route offered by Android for the Call: earpiece, speaker, wired headset or a named Bluetooth device (hearing aids appear as Bluetooth). Identified by Android's endpoint identifier, not by type.
+- **Conference** — a Call that merges two or more remote parties, with child participants where Android exposes them.
+- **Quick Reply** — a short text the owner can send when declining a Call (FR-56, FR-57).
+- **Blocked Number** — a number in Android's blocked-numbers store, writable because the app is the default phone app.
 - **In-Call Screen** — the GPUI screen shown while a Call is `Dialing`, `Active` or `Holding`. It shows one Call at a time, plus a Waiting Call banner when one exists.
 - **Incoming Call Screen** — the full-screen answer/decline UI for a `Ringing` Call, shown over the lock screen.
 - **Incoming Call Notification** — the heads-up notification with Answer and Decline, shown when the phone is unlocked and in use.
@@ -211,7 +218,7 @@ The owner can place a call from Keypad, a Recents Row, a Contact Sheet number, o
 
 **Consequences (testable):**
 - With the role held, the Call goes through Telecom on the system default SIM and the In-Call Screen appears.
-- If Android asks the dialer to choose a SIM (for example a dual-SIM phone set to "Ask every time"), the app selects the default outgoing account, or else the first suggested account, so the Call never stays stuck before `Dialing` `[ASSUMPTION]`. A real SIM picker stays out of scope.
+- If Android asks the dialer to choose a SIM (for example a dual-SIM phone set to "Ask every time"), the app selects the default outgoing account, or else the first suggested account, so the Call never stays stuck before `Dialing` `[ASSUMPTION]`. A real SIM picker stays out of scope for the MVP; FR-50 supersedes this on dual-SIM phones.
 - If `CALL_PHONE` is missing, the app requests it and places the call after it is granted.
 
 #### FR-12: Match the entered number to a Contact
@@ -222,7 +229,7 @@ While a number is being entered, the Keypad shows the matching Contact's name wh
 - Typing a number stored as "+905551112233" in a Contact, written as "05551112233", shows that Contact's name (using `PhoneNumber::matches`).
 
 **Out of Scope:**
-- T9 name search on the keypad (deferred).
+- T9 name search on the keypad (deferred in the MVP; delivered by FR-65 in v0.2).
 
 ### 4.4 In-Call Screen
 
@@ -252,7 +259,7 @@ The owner can switch the Audio Route between earpiece and speaker. Realizes UJ-2
 
 **Consequences (testable):**
 - The Speaker control reflects the actual route reported by Android.
-- When a wired or Bluetooth headset is connected, the control shows the headset route and the owner can still choose speaker. A full route picker is out of scope.
+- When a wired or Bluetooth headset is connected, the control shows the headset route and the owner can still choose speaker. A full route picker is out of scope for the MVP; FR-41 and FR-42 supersede this.
 
 #### FR-16: In-Call Keypad and DTMF
 
@@ -267,7 +274,7 @@ The owner can open the In-Call Keypad and send DTMF Tones. Realizes UJ-6.
 The owner can put the Call on hold and resume it. Realizes UJ-2.
 
 **Consequences (testable):**
-- Hold is shown only when Android reports the Call supports hold. Its state follows the Call State.
+- Hold is shown only when Android reports the Call supports hold. Its state follows the Call State. (v0.2 refinement, NFR-14: the control keeps its slot and is disabled instead of hidden when hold is unsupported.)
 
 #### FR-18: End
 
@@ -292,10 +299,10 @@ While one Call is `Active`, the owner can answer or decline a Waiting Call. Real
 **Consequences (testable):**
 - The In-Call Screen shows the Waiting Call's caller with Answer and Decline.
 - Decline rejects the Waiting Call and leaves the first Call `Active`.
-- Answer ends the first Call and then answers the Waiting Call, so there is only ever one live Call to manage `[ASSUMPTION]`. This keeps the brief's "answer/decline only" scope.
+- Answer ends the first Call and then answers the Waiting Call, so there is only ever one live Call to manage `[ASSUMPTION]`. This keeps the brief's "answer/decline only" scope. **Superseded by FR-48 (v0.2).**
 
 **Out of Scope:**
-- Answer-and-hold, swap, merge and conference controls.
+- Answer-and-hold, swap, merge and conference controls (MVP only; delivered by FR-44 to FR-48 in v0.2).
 
 ### 4.5 Incoming calls
 
@@ -497,6 +504,317 @@ The APK installs with `adb install` on the owner's phone and launches to the Key
 **Consequences (testable):**
 - `adb logcat -s GPUI` shows the renderer initializing (Vulkan or the GLES fallback) with no crash on launch.
 
+### 4.11 Post-MVP additions (v0.2, from the 2026-10-28 gap analysis)
+
+**Description:** The owner tested v0.1 and found it lacks features a modern dialer has. `../../gap-analysis-2026-10-28.md` compares Google, Samsung, Xiaomi and Apple dialers with the Android Telecom API and sorts the gaps into Epics 14 to 21. This section turns the in-scope gaps into FRs. All of it stays local (NFR-1), needs only the default-dialer role the app already holds, and follows NFR-14 to NFR-18. API facts and effort estimates are in the gap analysis; `[?]` marks facts that must be proven on the owner's phone. Realizes UJ-7 to UJ-10.
+
+**New journeys (captured from the owner's test feedback):**
+
+- **UJ-7. Erdem moves a call to his Bluetooth earbuds.** Mid-call he taps the Audio control. A glass list shows Phone, Speaker, "Erdem's Buds" and "Car kit" by name, with the current one checked. He taps "Erdem's Buds" and the list closes. He switches the buds off; the list and the control update to Phone without him touching it.
+- **UJ-8. Erdem runs a three-way call.** On a call with Ayşe he taps Add call, picks Özgür from Favorites, and Ayşe is held. He taps Merge. The screen shows a conference with both names. He ends Özgür from the list and the call continues with Ayşe.
+- **UJ-9. Erdem declines a call with a message.** In a meeting a call comes in. He swipes the Incoming Call Screen up, taps "Can't talk now. I'll call you back." and the caller is rejected with that text. Later he blocks a spam number from Recents in two taps.
+- **UJ-10. Erdem sets the phone up his way.** In Settings he picks his work SIM as the default, edits the quick replies, assigns speed dial 2 to his sister, reorders Favorites and exports the app's local data to a file.
+
+#### Audio routes and devices (Epic 14)
+
+#### FR-41: Audio route list
+
+The owner can see every audio route Android offers for the Call and choose one. Realizes UJ-7.
+
+**Consequences (testable):**
+- The list shows one row per available endpoint: earpiece, speaker, wired headset, and each Bluetooth device by the name Android reports. Rows have a type icon and a check on the current route.
+- Choosing a row routes the Call to exactly that endpoint (by its identifier, not by type), so two paired Bluetooth devices can be told apart.
+- The list updates while open and while closed when an endpoint appears or disappears (headset plugged, earbuds switched off) within 500 ms (NFR-3). If the current endpoint disappears, the control shows the route Android falls back to.
+- A hearing aid appears as a Bluetooth endpoint with its device name; no special type exists in Android's endpoint API `[?: confirm the name shown for the owner's hearing aid, if any]`.
+
+#### FR-42: Audio control behaviour
+
+The Audio control adapts to the available routes. Realizes UJ-7. Supersedes the "full route picker is out of scope" limit in FR-15.
+
+**Consequences (testable):**
+- With only earpiece and speaker available, one tap toggles between them as in FR-15.
+- With any other endpoint available, one tap opens the FR-41 list. Long-press always opens it.
+- The control shows an icon for the current route and a short label (Phone, Speaker, device name, ellipsised) in a fixed-size slot, so the In-Call layout does not move (NFR-14).
+
+#### FR-43: Bluetooth and hearing-aid shortcuts
+
+The route list offers shortcuts to the system pages that manage devices. Realizes UJ-7.
+
+**Consequences (testable):**
+- The list footer has "Bluetooth settings" and "Hearing aids" (the system accessibility page). Both fall back to the main Settings page when the specific screen is missing.
+- If device names are unavailable because `BLUETOOTH_CONNECT` is not granted, the list asks for it once and shows type names until granted.
+- Settings shows whether the handset reports hearing-aid compatibility (informational).
+
+#### Multi-call and conference (Epic 15)
+
+#### FR-44: Add call
+
+The owner can place a second call while one is active. Realizes UJ-8.
+
+**Consequences (testable):**
+- The In-Call Screen has an Add call control in a fixed slot. Tapping it opens the Keypad, Favorites and Contacts over the Call without ending it.
+- Placing the second call uses the one call path (FR-11) and puts the first on hold, as the network does.
+- The control is disabled, not hidden, when Android reports the Call cannot take another call (the "can add call" state).
+
+#### FR-45: Two calls and swap
+
+While two Calls exist, the owner can see both and switch between them. Realizes UJ-8.
+
+**Consequences (testable):**
+- The screen shows the active Call and the held Call with names and each timer. Tapping the held Call, or the Swap control, makes it active and holds the other.
+- Swap uses the conference swap action when Android reports it, otherwise hold/unhold.
+- Hold and Swap share one fixed slot (NFR-14).
+
+#### FR-46: Merge
+
+The owner can merge two Calls into a conference. Realizes UJ-8.
+
+**Consequences (testable):**
+- The Merge control is enabled only when Android reports the merge capability on a Call and shares the slot rule above. A carrier that does not support three-way calling leaves it disabled with the reason shown on long-press `[?: carrier support]`.
+- After merging, the screen shows the conference state (FR-47).
+
+#### FR-47: Conference participants
+
+The owner can see and manage conference participants where Android allows it. Realizes UJ-8.
+
+**Consequences (testable):**
+- The conference view lists participants (children of the conference Call) with names, and a conference timer.
+- Each row offers End (disconnect that participant) and Split (take them out as a private Call) only when Android reports the matching capability for the conference; otherwise the rows are read-only.
+- If the carrier hides participants, the view shows "Conference" with a count if known, and the End control for the whole conference stays available `[?: IMS conference children on HyperOS]`.
+
+#### FR-48: Waiting Call options
+
+A Waiting Call can be handled in more ways than FR-20 allowed. Realizes UJ-3, UJ-9. Supersedes FR-20's "Answer ends the first Call".
+
+**Consequences (testable):**
+- The Waiting Call banner offers Answer and hold, End and answer, Decline and Decline with message (FR-56).
+- Answer and hold answers the new Call and holds the current one; the two-call view (FR-45) follows.
+- Decline leaves the first Call `Active`, as before.
+
+#### Settings, SIM and local data (Epic 16)
+
+#### FR-49: Settings screen
+
+The owner can open a Settings screen. Realizes UJ-10.
+
+**Consequences (testable):**
+- A header button next to Setup opens one glass page. There is no fifth tab and the Tab Bar does not change.
+- Sections: Calls, Sounds and haptics, Display, SIM, Quick replies, Blocked numbers, Data, System shortcuts. A section appears only when it has something to show (for example SIM with fewer than two SIMs shows the read-only default only).
+- Every setting is stored locally (NFR-17), takes effect without restart, and has a default that reproduces v0.1 behaviour.
+- System shortcuts open: sound/ringtone settings, call forwarding and waiting (the system call settings page), accessibility (TTY/RTT), Default apps. Each falls back to the app's system details page if the intent is missing.
+
+#### FR-50: SIM choice
+
+On a phone with two or more call-capable SIMs, the owner can choose the SIM for a call. Realizes UJ-10. Supersedes FR-11's automatic SIM choice on dual-SIM phones.
+
+**Consequences (testable):**
+- When Android asks the dialer to choose (system default is "ask every time"), a glass chooser lists the accounts by label; the Call proceeds after the choice and never stays stuck before `Dialing`.
+- Long-pressing the Call button, a Recents row's call action or a Contact Sheet number opens the chooser even when a default exists.
+- Settings shows the current default and a button to the system page that changes it. With one SIM none of this is visible and v0.1 behaviour is unchanged.
+
+#### FR-51: SIM label
+
+With two or more SIMs, the owner can see which SIM a Call used. Realizes UJ-10.
+
+**Consequences (testable):**
+- The In-Call Screen and each Recents row show a small SIM chip (label and slot colour) in a fixed slot. A log entry whose account no longer exists shows no chip.
+
+#### Blocking (Epic 17)
+
+#### FR-53: Block and unblock
+
+The owner can block a number and unblock it. Realizes UJ-9.
+
+**Consequences (testable):**
+- Block is offered on a Recents row menu, the number sheet, the Contact Sheet (per number), Call details (FR-69) and the Incoming Call Screen. It writes to Android's blocked-numbers store and shows a confirmation with Undo for 5 seconds.
+- A blocked number's calls are rejected by the system before ringing and appear with the blocked type.
+- If the platform says blocking is unavailable for the current user, the actions are disabled with an explanation.
+
+#### FR-54: Blocked numbers list
+
+The owner can manage blocked numbers. Realizes UJ-9.
+
+**Consequences (testable):**
+- Settings lists blocked numbers (virtualised), each with an Unblock action, and an Add number field using the dial-string rules of FR-9.
+- Numbers blocked in another app on the same store appear here and vice versa `[?: HyperOS's own blocklist may be separate]`.
+
+#### FR-55: Blocked calls
+
+Blocked calls are handled quietly and can be reviewed. Realizes UJ-9. Refines FR-26's "blocked hidden".
+
+**Consequences (testable):**
+- Blocked entries stay out of Recents and the Missed Call Badge.
+- The blocked list has a "Blocked calls" view showing them with time and, where available, the block reason.
+
+#### Incoming call controls (Epic 18)
+
+#### FR-56: Reject with message
+
+The owner can decline a ringing Call and send the caller a text. Realizes UJ-9.
+
+**Consequences (testable):**
+- The Incoming Call Screen, the Waiting Call banner and the Incoming Call Notification offer "Message". It lists the quick replies (FR-57); choosing one rejects the Call with that text.
+- Which component sends the SMS is proven first on the owner's phone `[?]`. If Android does not send it, the app opens the default messaging app with the text prefilled and still rejects the Call. The result is never silent: the screen says "Sent" or "Opened Messages".
+- The app requests no SMS permission unless the proof shows it is required and the owner accepts it (decision recorded in the story).
+
+#### FR-57: Quick replies
+
+The owner can edit the quick replies. Realizes UJ-10.
+
+**Consequences (testable):**
+- Settings holds up to 6 replies, default three, editable, reorderable, resettable. Stored locally.
+- An empty list hides "Message" instead of showing an empty sheet.
+
+#### FR-58: Silence the ringer
+
+The owner can silence a ringing Call without rejecting it. Realizes UJ-3.
+
+**Consequences (testable):**
+- The Incoming Call Screen has a Silence control in a fixed slot. After silencing, the Call stays answerable and rings out as missed if not answered.
+- If Settings "Flip to silence" is on, placing the phone face down while it rings silences it. The sensor runs only while a Call is ringing.
+- The control is hidden only if the platform refuses the action `[?: permission needed for silencing as a sideloaded dialer]`; the volume key (FR-21) always works.
+
+#### FR-59: Answer and decline gestures
+
+The owner can answer and decline by gesture as well as by button. Realizes UJ-3, UJ-9.
+
+**Consequences (testable):**
+- A slide gesture answers, a slide the other way declines, and a slide up opens the reply sheet (FR-56). The thumb tracks the finger with spring release and haptic ticks; a short drag springs back without acting.
+- The Answer and Decline buttons remain and keep their accessible labels (NFR-10).
+- Touch response is within one frame (NFR-15).
+
+#### Contacts management and quick actions (Epic 19)
+
+#### FR-60: Create and edit contacts
+
+The owner can create a contact from a number or from scratch, and edit one, with the system contacts editor. Realizes UJ-5. Refines FR-32's hand-off.
+
+**Consequences (testable):**
+- "Add to contacts" in Recents, the number sheet, Call details and the Keypad opens the system editor with the number prefilled, offering create-new or add-to-existing.
+- On return the app refreshes its lists within 2 seconds (as FR-29).
+
+#### FR-61: Delete a contact
+
+The owner can delete a contact. Realizes UJ-5.
+
+**Consequences (testable):**
+- The Contact Sheet has Delete with a confirmation naming the contact. Deleting removes it from the provider and from Contacts and Favorites immediately.
+
+#### FR-62: In-app contact editor (stretch)
+
+The owner can edit name and numbers inside the app. Realizes UJ-5.
+
+**Consequences (testable):**
+- Applies to contacts with one writable raw contact; others use FR-60's system editor.
+- Saved changes appear in the system Contacts app. A write failure leaves the contact unchanged and says why.
+- This FR may be cut without affecting FR-60 and FR-61 (P3).
+
+#### FR-63: Contact quick actions
+
+The Contact Sheet and the number sheet carry quick actions. Realizes UJ-5, UJ-9.
+
+**Consequences (testable):**
+- Actions: Message (opens the default messaging app to the number), Copy number, Share, Block (FR-53), Call details (FR-69), Favorite (star), Ringtone for this contact (system picker, stored on the contact `[?: needs WRITE_CONTACTS grant]`).
+- Long-press on any displayed number copies it with a haptic tick and a "Copied" notice.
+
+#### FR-64: Favorites order and frequent
+
+The owner can reorder Favorites and see frequently called people. Realizes UJ-10.
+
+**Consequences (testable):**
+- Dragging a tile reorders it with spring displacement of neighbours and persists the order locally keyed by contact; new stars append at the end; unstarred ones drop out.
+- An optional "Frequent" row below Favorites lists the most called non-starred contacts from the call log (pure `rovsti_core` function with tests). A setting hides it.
+
+#### Keypad intelligence (Epic 20)
+
+#### FR-65: T9 search on the Keypad
+
+While digits are entered, the Keypad lists matching contacts by name as well as by number. Realizes UJ-6. Supersedes the "T9 deferred" note in FR-12.
+
+**Consequences (testable):**
+- Typing 2-9 matches names by their T9 letters at the start of the name or of any word ("7 9 2" finds "Ayşe Yılmaz" through diacritic folding as in FR-31). Number matches (FR-12) rank alongside.
+- Results update on every keypress within one frame and never block the UI (NFR-18). Tapping a result fills the number; its call action calls it.
+- The results area has a fixed height so the keys do not move (NFR-14).
+
+#### FR-66: Speed dial
+
+The owner can assign contacts to digit keys. Realizes UJ-10.
+
+**Consequences (testable):**
+- Digits 2 to 9 are assignable from Settings and from a Contact Sheet number. Long-pressing an assigned key on an empty Keypad calls that number via FR-11, with the key popping and a haptic.
+- Digit 1 is reserved for voicemail (FR-67). Assignments are stored locally and included in the backup (FR-73).
+
+#### FR-67: Voicemail shortcut
+
+The owner can reach voicemail quickly. Realizes UJ-10.
+
+**Consequences (testable):**
+- Long-press `1` on an empty Keypad calls the voicemail number of the default (or chosen, FR-50) SIM. If none is configured, the app says so and opens the system call settings.
+- Recents shows the voicemail type icon for voicemail entries. A new-voicemail badge appears only if the device exposes an unread signal `[?]`; otherwise no badge, never a guessed one.
+
+#### FR-68: Emergency numbers
+
+Emergency numbers are recognised and never delayed. Realizes UJ-6. Extends FR-10.
+
+**Consequences (testable):**
+- When the entered number is an emergency number for the current country, the Call button is labelled "Emergency call" and uses no entry animation delay, confirmation, SIM chooser or blocked/setup check.
+- The In-Call Screen disables Add call, Merge and Block for an emergency Call.
+- Settings offers an Emergency information shortcut if the system page resolves `[?: intent on HyperOS]`.
+
+#### Call details and history tools (Epic 21)
+
+#### FR-52: Call quality indicators
+
+The owner can see whether a Call is HD or Wi-Fi. Realizes UJ-2.
+
+**Consequences (testable):**
+- The In-Call Screen shows HD and Wi-Fi calling chips in a fixed slot when Android reports the properties; no layout change when absent.
+- Call details and Recents rows show HD, Wi-Fi and VoLTE from the log features of past calls where recorded.
+
+#### FR-69: Call details
+
+The owner can open a details screen for a number. Realizes UJ-4, UJ-9.
+
+**Consequences (testable):**
+- Opened from a Recents row's info control (replacing the number sheet when no Contact matches) and from the Contact Sheet. Shows name or number, a virtualised history of that number (type, date and time, duration, SIM chip, quality chips) and totals (calls, talk time).
+- Actions: Call, Message, Copy, Share, Block, Add to contacts, Delete history (FR-70).
+- The list loads in under 1 s for 500 entries (NFR-4) and refreshes after a call ends.
+
+#### FR-70: Delete call history
+
+The owner can delete call log entries. Realizes UJ-4.
+
+**Consequences (testable):**
+- Delete one entry (swipe), a grouped row, all entries of a number (details screen) or all history (Settings, double confirmation).
+- Deleted entries disappear from Recents and the Missed Call Badge immediately. Needs the call-log write permission already declared.
+
+#### Settings content (Epic 16, continued)
+
+#### FR-71: Sounds, haptics and call behaviour
+
+The owner can tune how the app feels. Realizes UJ-10.
+
+**Consequences (testable):**
+- Settings has: keypad tones (on/off, follows the system flag by default), haptics (off, light, normal), vibrate when a call connects, vibrate when it ends, proximity screen-off (on by default, FR in §4.4), flip to silence (FR-58), and a shortcut to the system ringtone and sound settings (Telecom plays the ringtone).
+- Theme stays "follows system" (FR-37).
+
+#### FR-72: Display
+
+The owner can choose contact name order. Realizes UJ-10.
+
+**Consequences (testable):**
+- Settings has Sort by (first name or last name) and Name format (first last or last, first), applying to Contacts, Favorites, Recents and the In-Call Screen, taking effect immediately.
+
+#### FR-73: Backup and restore of local data
+
+The owner can export and import the app's own data. Realizes UJ-10.
+
+**Consequences (testable):**
+- Export writes one JSON file (settings, Favorites order, speed dial, quick replies, Xiaomi confirmations excluded) to a location the owner picks with the system file picker. Import restores it after a preview of what changes.
+- No permission is needed beyond the picker; nothing leaves the phone except where the owner saves the file.
+- Contacts, call log and blocked numbers are not exported (their providers are the source of truth).
+
+
 ## 5. Cross-Cutting NFRs
 
 - **NFR-1 Privacy / locality.** The app has no network code path. The manifest does not request `INTERNET` `[ASSUMPTION: GPUiForge's generated host does not add it by default; if it does, it is removed in the ejected host]`. No analytics, crash upload, or sync. The only on-device data the app writes itself is preferences and Xiaomi confirmations in its no-backup data directory.
@@ -512,6 +830,12 @@ The APK installs with `adb install` on the owner's phone and launches to the Key
 - **NFR-11 Single-run buildability.** The MVP scope is sized so one automated implementation run can deliver it, in the priority order of §6.1. Anything that would expand it goes to §6.2.
 - **NFR-12 Glass fidelity.** Glass surfaces (Tab Bar, Setup Checklist card, Contact Sheet, in-call controls) use `liquid_glass_kit`'s backdrop refraction material on Android, not a flat blurred rectangle, falling back only where the kit itself falls back. Motion uses the kit's interruptible springs.
 - **NFR-13 Shared foundation.** New Android plumbing (bridge events, permission checks, Setup Checklist, Xiaomi Settings) goes in `rovsti_android` / `rovsti_ui` in a form that Rovsti Messages and Stops can reuse, not inside `apps/phone`. Phone-specific call logic stays in `rovsti_core` and `apps/phone`.
+
+- **NFR-14 Layout stability (v0.2).** The main layout never shifts. In-Call controls (Mute, Keypad, Audio, Add call, Hold/Swap, Merge) occupy fixed slots and are disabled, never removed, when unsupported. SIM chips, quality chips, the Audio label, the Silence control and the T9 results area have reserved space. Sheets and lists overlay or scroll; they do not push the content they open from.
+- **NFR-15 Touch feedback (v0.2).** Every new control shows press feedback within one frame of the touch and gives a haptic tick where the existing equivalent does (honouring the haptics setting, FR-71). Gestures track the finger directly and release with the kit's interruptible springs.
+- **NFR-16 Fail-soft platform use (v0.2).** Every new Android API call is gated by a capability or availability check and degrades visibly: disabled control with a reason, or a system-page fallback. No new feature may crash, block a Call, or leave the In-Call Screen without End when the platform, carrier or HyperOS refuses. Facts marked `[?]` in section 4.11 are proven on the owner's phone in the story that first needs them; the result is written into that story.
+- **NFR-17 Local-only data (v0.2).** New persistent data (settings, Favorites order, speed dial, quick replies) lives in the app's no-backup directory or in Android's own providers. No `INTERNET` permission and no network code are added. New permissions must be justified in the story; SMS permission only if the Epic 18 spike shows it is needed and the owner accepts it. Export (FR-73) goes only where the owner saves it.
+- **NFR-18 Performance of new surfaces (v0.2).** Audio route changes, conference updates and T9 results apply within one frame of the data arriving; T9 search over 2,000 contacts completes within 8 ms off the UI thread; Blocked numbers, Call details, conference and route lists are virtualised and load within 1 s for 500 rows (NFR-4). Performance comes from code optimisation, never from cutting visual effects (AD-21).
 
 ## 6. MVP Scope
 
@@ -532,17 +856,35 @@ The APK installs with `adb install` on the owner's phone and launches to the Key
 - **P1 (daily-driver completeness):** FR-5 to FR-8, FR-17, FR-20, FR-30 to FR-35, FR-36, FR-37.
 - **P2 (polish):** FR-12, FR-27, FR-29, FR-38 sample data, contact photos on Favorites, remembering the last tab.
 
-### 6.2 Out of Scope for MVP
+### 6.2 Out of Scope for MVP (history)
 
-- Dual-SIM picker and per-SIM badges. MVP uses the system default SIM `[ASSUMPTION: one active SIM or the default is acceptable]`.
-- Blocklist (`BlockedNumberContract`).
-- Swap, merge and conference calls.
-- T9 search, speed dial, long-press `1` for voicemail.
-- Bluetooth / audio route picker beyond earpiece/speaker.
-- Contact creation and editing (handed off to the system contacts app), call notes, call recording.
-- Deleting Call Log Entries. `[NOTE FOR PM]` Cheap once the role works; left out to keep the run small.
-- Play Store release, release signing, localization (English only).
-- Shared people model with Rovsti Messages.
+These were out of the MVP. Each item shows where it went on 2026-10-28.
+
+- Dual-SIM picker and per-SIM badges. -> **v0.2, FR-50, FR-51.**
+- Blocklist (`BlockedNumberContract`). -> **v0.2, FR-53 to FR-55.**
+- Swap, merge and conference calls. -> **v0.2, FR-44 to FR-48.**
+- T9 search, speed dial, long-press `1` for voicemail. -> **v0.2, FR-65 to FR-67.**
+- Bluetooth / audio route picker beyond earpiece/speaker. -> **v0.2, FR-41 to FR-43.**
+- Contact creation and editing (hand-off), -> **v0.2, FR-60 to FR-62**; call notes -> **backlog, see 6.4**; call recording -> **removed, see section 7.**
+- Deleting Call Log Entries. -> **v0.2, FR-70.**
+- Play Store release, localization (English only). -> still out. Release signing was delivered in Epic 13.
+- Shared people model with Rovsti Messages. -> still out.
+
+### 6.3 In Scope for v0.2
+
+FR-41 to FR-73 and NFR-14 to NFR-18, delivered as Epics 14 to 21 (`../../epics.md` is extended by the next epics step). Build order and cut line, from the gap analysis:
+
+- **P1:** Epic 14 audio routes (FR-41 to FR-43), Epic 15 multi-call and conference (FR-44 to FR-48), Epic 16 Settings, SIM and local data (FR-49 to FR-51, FR-71 to FR-73), Epic 17 blocking (FR-53 to FR-55), Epic 18 incoming controls (FR-56 to FR-59).
+- **P2:** Epic 19 contacts management (FR-60, FR-61, FR-63, FR-64), Epic 20 keypad intelligence (FR-65 to FR-68), Epic 21 call details (FR-52, FR-69, FR-70).
+- **P3 (cut first):** FR-62 in-app contact editor, the Frequent row in FR-64, flip to silence in FR-58 if the platform refuses silencing, vibrate-on-connect/end in FR-71.
+
+Every epic ends with a signed release APK for the owner's phone test.
+
+### 6.4 Backlog (not scheduled)
+
+- Call and contact notes (needs its own store; conflicts with "providers are the source of truth").
+- Silencing unknown or private callers through a call-screening role (spike only; sideload behaviour unverified).
+- RTT/TTY beyond the Settings shortcut (FR-49).
 
 ## 7. Non-Goals
 
@@ -550,6 +892,8 @@ The APK installs with `adb install` on the owner's phone and launches to the Key
 - It does not keep its own contacts database. Android's providers stay the source of truth.
 - It is not a general Android dialer for other OEMs in v1. It may work elsewhere, but only Xiaomi is tested.
 - It does not replace the system Contacts app.
+- It does not record calls. Android gives third-party apps no supported way to capture call audio, workarounds are restricted for sideloaded apps and carry legal risk, so this is removed from the roadmap, not deferred.
+- It does not offer visual voicemail, call screening by AI, Hold for Me, or video calls (they need network services, carrier clients or Google/Apple services; see the gap analysis).
 
 ## 8. Success Metrics
 
@@ -562,10 +906,12 @@ These are personal-project metrics, measured by the owner on their phone.
 **Secondary**
 - **SM-3:** The automated run delivers an APK that installs and passes FR-1, FR-2, FR-11 and FR-24 in the owner's first manual test session. Validates FR-39, FR-40.
 - **SM-4:** Workspace checks (NFR-8) pass at the end of the run.
+- **SM-5 (v0.2):** In the owner's first test of Epics 14 and 15, he moves a call between at least two named Bluetooth devices and the earpiece (FR-41), and completes a three-way call with merge and end-one-participant (FR-44 to FR-47), without falling back to the stock dialer. Carrier limits are reported, not counted as failures.
+- **SM-6 (v0.2):** Reject-with-message (FR-56) and block (FR-53) each work on the first test or the story records the platform reason and the fallback used.
 
 **Counter-metrics (do not optimize)**
 - **SM-C1:** Visual polish at the cost of ring latency. A slower but prettier incoming screen is a regression. Counterbalances SM-1.
-- **SM-C2:** Feature count. Adding deferred items to the MVP run risks not finishing it. Counterbalances SM-3.
+- **SM-C2:** Feature count. Adding deferred items to the MVP run risks not finishing it. Counterbalances SM-3. For v0.2, feature count must not cost layout stability (NFR-14) or frame pacing (NFR-5, NFR-18).
 
 ## 9. Risks
 
@@ -576,6 +922,10 @@ These are personal-project metrics, measured by the owner on their phone.
 - **No automated device test.** Final acceptance is the owner's manual test. Partial mitigation: the `x86_64` ABI is built, so an Android emulator can exercise the role grant and incoming / answer / decline / missed flows (`adb emu gsm call <number>`) before sideloading, if the run has an emulator image available.
 - **MIUI background pop-ups.** They may be off by default for sideloaded apps, which silently breaks FR-23. Covered by the Background pop-ups Xiaomi Setting; verify on device.
 - **Carrier-dependent call waiting.** FR-20's behavior depends on the network supporting call waiting.
+- **Carrier-dependent conference (v0.2).** Merge, split and participant lists (FR-46, FR-47) depend on three-way calling and IMS conference support. Capability bits decide at run time; acceptance needs two real calls on the owner's SIM.
+- **Reject-with-message sender (v0.2).** Which component sends the SMS, and whether Android 15 restricted settings or Xiaomi's Send-SMS app-op block it, is unproven. Mitigation: Story 18.1 spike and the Messages hand-off fallback (FR-56).
+- **HyperOS blocklist divergence (v0.2).** Xiaomi's own filter may not share the system blocked-numbers store (FR-54). Verify on the device.
+- **Control-grid growth (v0.2).** More In-Call controls can crowd the screen or shift the layout. Mitigation: NFR-14 fixed slots, designed in Story 15.2 before any control is added.
 
 ## 10. Open Questions
 
@@ -584,6 +934,10 @@ These are personal-project metrics, measured by the owner on their phone.
 - **Q3 (Architecture).** Where the Call State lives when the GPUI view is not running (Kotlin `InCallService` as the owner, Rust view as a renderer), and how the view resyncs on attach.
 - **Q4 (Product, non-blocking).** Missed-call notification: MVP relies on Telecom's own notification (no `ACTION_SHOW_MISSED_CALLS_NOTIFICATION` handler). If the owner's device shows none, a Rovsti notification that opens Recents is the first post-MVP addition. Owner: the owner; revisit after first device test.
 - **Q5 (Product, non-blocking).** Should Xiaomi confirmations reset on every app update (FR-8) or only when the owner asks? Default: reset on version change. Revisit after a week of use.
+- **Q6 (Product, v0.2, non-blocking).** Does the owner use two SIMs? If not, FR-50 and FR-51 drop to P3; they are invisible on one SIM by design. Owner: the owner.
+- **Q7 (Architecture, v0.2).** Wire model for endpoints, multi-call and conference: extend the call snapshot (`rovsti_core::wire`) with endpoint lists and per-call capability bits, keeping golden fixtures (AD-7, AD-14). Owner: architecture, before Story 14.1.
+- **Q8 (Product/Spike, v0.2).** Reject-with-message sender (FR-56), ringer-silence permission (FR-58), HyperOS blocklist sharing (FR-54), voicemail badge signal (FR-67), emergency-info intent (FR-68), contact ringtone write (FR-63). Each is proven on the device in the first story that needs it. Owner: the owner (device check).
+- **Q9 (Product, v0.2, non-blocking).** In-app contact editor (FR-62) or keep the system editor? Default: system editor (FR-60); editor is a P3 stretch.
 
 ## 11. Assumptions Index
 
@@ -601,4 +955,15 @@ These are personal-project metrics, measured by the owner on their phone.
 - NFR-1: the generated host does not add `INTERNET`, or the ejected host removes it.
 - NFR-2: latency budgets of 1.5 s warm / 3 s cold.
 - NFR-10: font scale up to 1.3×.
-- §6.2: one active SIM, or the system default SIM is acceptable.
+- §6.2 (MVP only): one active SIM, or the system default SIM is acceptable. Superseded for dual-SIM by FR-50.
+- v0.2: the owner has allowed restricted settings for the dialer role (Android 15+ sideload rule), so the role stays held; other v0.2 features need no extra privileged permission.
+- FR-41: hearing aids appear as Bluetooth endpoints with their device name `[?]`.
+- FR-46, FR-47: the owner's carrier supports three-way calls and exposes conference children `[?]`.
+- FR-56: the reject-with-message SMS path works or falls back to the Messages hand-off `[?]`.
+- FR-72: name order applies app-wide, not only to the contact lists.
+- NFR-18: T9 8 ms budget for 2,000 contacts.
+
+## 12. Revision History
+
+- **2026-10-27 (MVP).** FR-1 to FR-40, NFR-1 to NFR-13, deferred list in section 6.2.
+- **2026-10-28 (v0.2).** Added FR-41 to FR-73 (section 4.11), NFR-14 to NFR-18, UJ-7 to UJ-10, SM-5, SM-6, glossary terms, new risks and open questions Q6 to Q9, sections 6.3 and 6.4. Deferred items moved out of 6.2 (history kept). Changed wording, no renumbering: FR-11, FR-12, FR-15, FR-17 and FR-20 each carry a pointer to the FR that supersedes or refines them; FR-26's "blocked hidden" is refined by FR-55. Call recording, visual voicemail, call screening AI, Hold for Me and video calls were removed from the roadmap (section 7). Source: `../../gap-analysis-2026-10-28.md`.

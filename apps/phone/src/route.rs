@@ -346,7 +346,41 @@ impl Default for RouteUi {
     }
 }
 
+/// How a pending route request ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PendingEnd {
+    /// Still waiting (or nothing was pending).
+    Open,
+    /// Android now reports the requested endpoint as selected.
+    Landed(SharedString),
+    /// The requested device left before it was selected.
+    Vanished(SharedString),
+}
+
 impl RouteUi {
+    /// Settles the pending request against the newest list: `selected` is the
+    /// endpoint Android reports as in use, `present` tells whether an id is
+    /// still connected.
+    pub(crate) fn resolve_pending(
+        &mut self,
+        selected: Option<&str>,
+        present: impl Fn(&str) -> bool,
+    ) -> PendingEnd {
+        let Some(pending) = &self.pending else {
+            return PendingEnd::Open;
+        };
+        let end = if selected == Some(&*pending.id) {
+            PendingEnd::Landed(pending.name.clone())
+        } else if !present(&pending.id) {
+            PendingEnd::Vanished(pending.name.clone())
+        } else {
+            return PendingEnd::Open;
+        };
+        self.pending = None;
+        self.pending_gen += 1;
+        end
+    }
+
     pub(crate) fn is_open(&self) -> bool {
         self.open
     }
@@ -466,15 +500,29 @@ impl PhoneApp {
             ui.sync(list, rev, route);
             list.selected().map(|r| r.id.clone())
         };
+        // A pending request ends when Android reports the new route, or when
+        // its device left: the pending look never sticks.
+        let present = |id: &str| {
+            self.backend
+                .read(cx)
+                .endpoints()
+                .get(id)
+                .is_some_and(|r| !r.ghost)
+        };
         let ui = &mut self.route;
-        // A pending request ends when Android reports the new route.
-        if let Some(pending) = &ui.pending
-            && selected_id.as_deref() == Some(&*pending.id)
-        {
-            ui.announce = Some(format!("Now using {}", pending.name).into());
-            ui.pending = None;
-            ui.pending_gen += 1;
+        let ended = ui.resolve_pending(selected_id.as_deref(), present);
+        let vanished = match ended {
+            PendingEnd::Landed(name) => {
+                ui.announce = Some(format!("Now using {name}").into());
+                None
+            }
+            PendingEnd::Vanished(name) => Some(name),
+            PendingEnd::Open => None,
+        };
+        if let Some(name) = vanished {
+            self.show_notice_pill(format!("Couldn't switch to {name}"), None, false, cx);
         }
+        let ui = &mut self.route;
         if !diff.added.is_empty() {
             if ui.open {
                 ui.halo_id = diff.added.first().map(|id| SharedString::from(id.clone()));
@@ -1404,5 +1452,43 @@ mod tests {
         let phone = rows.last().expect("placeholder");
         assert_eq!(phone.aria, "Phone, unavailable");
         assert!(!phone.tappable());
+    }
+
+    fn pending_for(id: &str, name: &str) -> RouteUi {
+        RouteUi {
+            pending: Some(PendingRoute {
+                id: id.to_owned().into(),
+                name: name.to_owned().into(),
+            }),
+            ..RouteUi::default()
+        }
+    }
+
+    #[test]
+    fn a_pending_route_lands_when_android_selects_it() {
+        let mut ui = pending_for("b", "Buds");
+        assert_eq!(ui.resolve_pending(Some("p"), |_| true), PendingEnd::Open);
+        assert!(ui.has_pending());
+        assert_eq!(
+            ui.resolve_pending(Some("b"), |_| true),
+            PendingEnd::Landed("Buds".into())
+        );
+        assert!(!ui.has_pending());
+    }
+
+    #[test]
+    fn a_pending_route_never_sticks_when_its_device_vanishes() {
+        // The selected endpoint disappears while a request is pending.
+        let mut ui = pending_for("b", "Buds");
+        assert_eq!(
+            ui.resolve_pending(Some("p"), |id| id != "b"),
+            PendingEnd::Vanished("Buds".into())
+        );
+        assert!(!ui.has_pending());
+        assert_eq!(
+            ui.resolve_pending(None, |_| false),
+            PendingEnd::Open,
+            "nothing pending"
+        );
     }
 }

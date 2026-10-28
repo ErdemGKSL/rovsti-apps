@@ -662,4 +662,36 @@ mod tests {
             assert_eq!((s.headline(), s.reason()), (headline, reason), "{cause:?}");
         }
     }
+
+    #[test]
+    fn a_selected_endpoint_that_disappears_leaves_a_ghost_and_no_selection() {
+        use crate::wire::{Endpoint, EndpointType};
+        let ep = |id: &str, kind, selected| Endpoint {
+            id: id.to_owned(),
+            kind,
+            name: (kind == EndpointType::Bluetooth).then(|| "Buds".to_owned()),
+            selected,
+            hint: None,
+        };
+        let mut with = snap(1);
+        with.calls = vec![call(1, WireCallState::Active)];
+        with.audio.endpoints = vec![
+            ep("p", EndpointType::Earpiece, false),
+            ep("b", EndpointType::Bluetooth, true),
+        ];
+        let mut m = CallModel::new();
+        m.apply(with.clone());
+        assert_eq!(m.endpoints().selected().map(|r| r.id.as_str()), Some("b"));
+        // The device vanishes and Android has not named a fallback yet.
+        let mut gone = with;
+        gone.seq = 2;
+        gone.audio.endpoints = vec![ep("p", EndpointType::Earpiece, false)];
+        m.apply(gone);
+        assert!(
+            m.endpoints().selected().is_none(),
+            "the view then follows `route`"
+        );
+        assert!(m.endpoints().get("b").is_some_and(|r| r.ghost));
+        assert_eq!(m.take_endpoint_diff().removed, ["b"]);
+    }
 }

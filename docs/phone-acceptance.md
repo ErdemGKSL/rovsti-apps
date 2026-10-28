@@ -61,3 +61,32 @@ APK: `~/Downloads/rovsti-phone-release.apk` (signed by `CN=ErdemGKSL`, built wit
 * Share a bug with: `adb logcat -d -s Rovsti RovstiPerf GPUI AndroidRuntime > rovsti.log`.
 
 Result: ____ of 35 passed. Tester: ____  Date: ____  Phone / HyperOS version: ____
+
+## Owner release 3: Settings, SIM, backup (Epic 16)
+
+Install over the previous release (no uninstall). Single-SIM phones skip the SIM rows (S1 to S5):
+nothing SIM-related may be visible on them, and that is itself a check.
+
+| # | Step | Expected | Pass / Fail | Notes |
+|---|---|---|---|---|
+| **UJ-10 Settings** | | | | |
+| S1 | On any tab tap the gear left of the shield. | The gear turns while held, Settings slides in from the right, the tab bar fades out. Back, the system Back and the edge swipe return. | | |
+| S2 | Toggle "Proximity screen-off" off, place a call, hold the phone to your ear. | The screen stays on. Turn it back on: the screen blanks at the ear. | | |
+| S3 | Turn on "Vibrate when call connects" and "Vibrate when call ends", place a call. | A short vibration when the call is answered, and when it ends. (If it does not come with the screen off, note it in `docs/spikes/s14-system.md`.) | | |
+| S4 | Set Haptics to Off, then Light, then Normal and press keys and toggles. | Off: no app ticks. Light: key and toggle ticks only. Normal: all. | | |
+| S5 | Keypad tones on, press keys; then off. | A dial-pad tone with each key when on, none when off. | | |
+| S6 | Display: set Name format to "Last, First" and Sort by to "Last name". Visit Contacts, Favorites, Recents, call someone saved. | Names read "Last, First" everywhere including the In-Call screen, and Contacts sort by family name. Back to defaults restores the old look. | | |
+| S7 | Ringtone and sounds. | The system sound settings open. | | |
+| S8 | System shortcuts: Call forwarding and waiting, Accessibility, Default apps. | Each opens its system page (or App info with "Opened app settings instead"). "Hearing-aid compatibility" shows Supported or Not reported and does nothing. | | |
+| **UJ-10 Backup** | | | | |
+| S9 | Settings, Data, Export favorites and settings. | The system file picker; after saving: "Saved to rovsti-phone-backup-{date}.json". | | |
+| S10 | Change a setting, then Import and pick that file. | The Import preview sheet lists what it replaces and says it cannot be undone. Import: the setting is back. Cancel leaves everything as is. | | |
+| S11 | Import any text file that is not a backup. | Red row "This isn't a Rovsti Phone backup." and nothing changes. | | |
+| **Dual SIM (skip on one SIM)** | | | | |
+| S12 | Phone default SIM = "Ask every time". Type a number and tap Call. | "Call with" rises with both SIMs; the number stays in the field. Pick one: the call starts on it and the chip flies to the In-Call screen. | | |
+| S13 | Dismiss the chooser by dragging it down. | Nothing is placed, the number stays typed. | | |
+| S14 | Choose a default SIM in the phone settings, then hold the Call button for half a second. | The chooser opens with the default row captioned "Default". | | |
+| S15 | Open Recents. | Each row shows its SIM at the end of the subtitle line; a row whose SIM is unknown shows nothing. | | |
+| S16 | Settings, SIM, "Default for calls". | The system page for the default SIM opens. | | |
+| **Diagnostics (long-press the Settings title for 0.8 s)** | | | | |
+| S17 | Run SIM (after one call on each SIM), Backup (two pickers) and TalkBack/system (5 s countdown at the ear). | Copy the report and fill the PENDING tables in `docs/spikes/s5-sim.md`, `s13-saf.md` and `s14-system.md`. | | |

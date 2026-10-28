@@ -139,6 +139,8 @@ pub(crate) struct Row {
     pub enabled: bool,
     /// Ids of the segments (built once with the row).
     pub segment_ids: Vec<SharedString>,
+    /// What TalkBack reads, built with the row (not per frame).
+    pub aria: SharedString,
 }
 
 impl Row {
@@ -156,6 +158,7 @@ impl Row {
             control,
             enabled: true,
             segment_ids,
+            aria: SharedString::default(),
         }
     }
 
@@ -422,7 +425,36 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
     });
 
     out.retain(|section| !section.rows.is_empty());
+    for row in out.iter_mut().flat_map(|s| s.rows.iter_mut()) {
+        row.aria = aria_for(row, s, key.facts.system_keypad_tones);
+    }
     out
+}
+
+/// The TalkBack text of a row (EXPERIENCE): "{title}, on/off. Double tap to
+/// toggle", "{title}: {selected}, {n} options".
+fn aria_for(row: &Row, settings: &Settings, system_tones: bool) -> SharedString {
+    match &row.control {
+        Control::Toggle => {
+            let on = toggle_value(row.id, settings, system_tones);
+            format!(
+                "{}, {}. Double tap to toggle",
+                row.title,
+                if on { "on" } else { "off" }
+            )
+        }
+        Control::Segmented(options) => {
+            let i = segment_value(row.id, settings).min(options.len() - 1);
+            format!("{}: {}, {} options", row.title, options[i], options.len())
+        }
+        Control::Link { value, .. } => match value {
+            Some(v) => format!("{}, {v}", row.title),
+            None => row.title.to_owned(),
+        },
+        Control::Info(v) => format!("{}, {v}", row.title),
+        Control::Error(message) => message.to_string(),
+    }
+    .into()
 }
 
 /// The page's state.
@@ -1056,30 +1088,6 @@ impl PhoneApp {
                 .into_any_element(),
             Control::Error(_) => div().into_any_element(),
         };
-        let label = match &row.control {
-            Control::Toggle => {
-                let on = toggle_value(
-                    row.id,
-                    &self.backend.read(cx).settings(),
-                    self.backend.read(cx).facts().system_keypad_tones,
-                );
-                format!(
-                    "{}, {}. Double tap to toggle",
-                    row.title,
-                    if on { "on" } else { "off" }
-                )
-            }
-            Control::Segmented(options) => {
-                let i = (self.settings.anim[row.id.index()].target as usize).min(options.len() - 1);
-                format!("{}: {}, {} options", row.title, options[i], options.len())
-            }
-            Control::Link { value, .. } => match value {
-                Some(v) => format!("{}, {v}", row.title),
-                None => row.title.to_owned(),
-            },
-            Control::Info(v) => format!("{}, {v}", row.title),
-            Control::Error(_) => String::new(),
-        };
         let mut el = div()
             .id(id.clone())
             .role(match row.control {
@@ -1087,7 +1095,7 @@ impl PhoneApp {
                 Control::Link { .. } => Role::Button,
                 _ => Role::Row,
             })
-            .aria_label(label)
+            .aria_label(row.aria.clone())
             .aria_disabled(!row.enabled)
             .relative()
             .w_full()
@@ -1443,6 +1451,20 @@ mod tests {
         assert_eq!(segment_value(RowId::Haptics, &s), 0);
         assert_eq!(segment_value(RowId::SortBy, &s), 1);
         assert_eq!(segment_value(RowId::NameFormat, &s), 1);
+    }
+
+    #[test]
+    fn talkback_text_matches_the_experience_copy() {
+        let sections = build_sections(&key());
+        assert_eq!(
+            &*sections[0].rows[0].aria,
+            "Proximity screen-off, on. Double tap to toggle"
+        );
+        assert_eq!(
+            &*sections[0].rows[1].aria,
+            "Flip to silence, off. Double tap to toggle"
+        );
+        assert_eq!(&*sections[1].rows[1].aria, "Haptics: Normal, 3 options");
     }
 
     #[test]

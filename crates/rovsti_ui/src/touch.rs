@@ -92,3 +92,115 @@ pub fn pointer_surface(
     .left_0()
     .size_full()
 }
+
+/// How far a finger may wander (px) and still count as a tap.
+pub const TAP_SLOP: f32 = 10.0;
+
+/// Decides whether the synthesised `Click` that follows a finger lifting is a
+/// real tap. A finger that moved past [`TAP_SLOP`], or a list that scrolled
+/// under it, is a scroll or flick and must never act, whatever the host does
+/// with the touch afterwards. With no touch at all (a desktop mouse) every
+/// click is allowed.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TapGuard {
+    start: Option<(f32, f32, f32)>,
+    spoiled: bool,
+}
+
+impl TapGuard {
+    /// A finger landed at `(x, y)` over a list scrolled by `scroll`.
+    pub fn begin(&mut self, x: f32, y: f32, scroll: f32) {
+        self.start = Some((x, y, scroll));
+        self.spoiled = false;
+    }
+
+    /// The finger is now at `(x, y)`; true once it has gone beyond the slop.
+    pub fn moved(&mut self, x: f32, y: f32) -> bool {
+        if let Some((sx, sy, _)) = self.start
+            && (x - sx).hypot(y - sy) > TAP_SLOP
+        {
+            self.spoiled = true;
+        }
+        self.spoiled
+    }
+
+    /// The finger lifted (or the touch was cancelled) at `(x, y)`.
+    pub fn finish(&mut self, x: f32, y: f32) {
+        self.moved(x, y);
+        self.start = None;
+    }
+
+    /// A press that has become something else (a long press) is not a tap.
+    pub fn spoil(&mut self) {
+        self.spoiled = true;
+    }
+
+    /// Consume the click: true when it may act. `scroll` is the list's
+    /// current scroll offset.
+    pub fn allow_click(&mut self, scroll: f32) -> bool {
+        let scrolled = self
+            .start
+            .is_some_and(|(_, _, at)| (scroll - at).abs() > 0.5);
+        let ok = !self.spoiled && !scrolled;
+        *self = Self::default();
+        ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_tap_is_allowed() {
+        let mut g = TapGuard::default();
+        g.begin(100.0, 200.0, 40.0);
+        g.moved(102.0, 203.0);
+        g.finish(102.0, 203.0);
+        assert!(g.allow_click(40.0));
+    }
+
+    #[test]
+    fn mouse_click_without_touch_is_allowed() {
+        assert!(TapGuard::default().allow_click(0.0));
+    }
+
+    #[test]
+    fn flick_beyond_slop_never_clicks() {
+        let mut g = TapGuard::default();
+        g.begin(100.0, 400.0, 0.0);
+        assert!(g.moved(100.0, 360.0));
+        // The host lifts and then synthesises the click.
+        g.finish(100.0, 300.0);
+        assert!(!g.allow_click(0.0));
+        // The next tap is fine again.
+        g.begin(100.0, 400.0, 0.0);
+        g.finish(100.0, 400.0);
+        assert!(g.allow_click(0.0));
+    }
+
+    #[test]
+    fn lift_far_from_start_without_moves_never_clicks() {
+        let mut g = TapGuard::default();
+        g.begin(10.0, 10.0, 0.0);
+        g.finish(10.0, 80.0);
+        assert!(!g.allow_click(0.0));
+    }
+
+    #[test]
+    fn scrolled_list_never_clicks() {
+        let mut g = TapGuard::default();
+        g.begin(10.0, 10.0, 0.0);
+        g.finish(10.0, 10.0);
+        assert!(!g.allow_click(120.0));
+    }
+
+    #[test]
+    fn long_press_is_not_a_tap() {
+        let mut g = TapGuard::default();
+        g.begin(10.0, 10.0, 0.0);
+        g.spoil();
+        g.finish(10.0, 10.0);
+        assert!(!g.allow_click(0.0));
+    }
+}

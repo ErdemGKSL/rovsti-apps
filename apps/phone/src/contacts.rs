@@ -28,7 +28,7 @@ use rovsti_ui::{
     spring::Spring,
     theme::{self, call_colors},
     tokens::{Theme, metrics, mix, shadow, typography},
-    touch::{Pointer, pointer_surface, touch_surface},
+    touch::{Pointer, TAP_SLOP, TapGuard, pointer_surface, touch_surface},
 };
 
 use crate::{
@@ -50,7 +50,6 @@ const TILE_GAP: f32 = 12.0;
 const TILE_TOP: f32 = 6.0;
 /// One grid row: a tile and the gap under it.
 const GRID_ROW_H: f32 = TILE_H + TILE_GAP;
-const TAP_SLOP: f32 = 10.0;
 /// A held finger on a tile or row opens the sheet (story 8.7).
 pub(crate) const LONG_PRESS: Duration = Duration::from_millis(450);
 const NOTE_FOR: Duration = Duration::from_secs(3);
@@ -158,6 +157,7 @@ pub(crate) struct ContactsView {
     /// The field's text as of the last edit.
     field_text: String,
     touch: Option<Point<Pixels>>,
+    tap: TapGuard,
     last_pressed: Option<usize>,
     /// The keyboard is up (the field has focus): the Tab Bar steps aside.
     pub(crate) typing: bool,
@@ -187,6 +187,7 @@ impl ContactsView {
             seen_edits: 0,
             field_text: String::new(),
             touch: None,
+            tap: TapGuard::default(),
             last_pressed: None,
             typing: false,
             section_starts: Arc::from(Vec::new()),
@@ -217,6 +218,7 @@ pub(crate) struct FavoritesView {
     source: Option<Arc<Vec<WireContact>>>,
     tiles: Arc<[ContactRow]>,
     touch: Option<Point<Pixels>>,
+    tap: TapGuard,
     last_pressed: Option<usize>,
     long_task: Option<Task<()>>,
     /// A long press already opened the sheet: swallow the tap that follows.
@@ -232,6 +234,7 @@ impl FavoritesView {
             source: None,
             tiles: Arc::from(Vec::new()),
             touch: None,
+            tap: TapGuard::default(),
             last_pressed: None,
             long_task: None,
             suppress_click: false,
@@ -578,6 +581,11 @@ impl PhoneApp {
         };
         match pointer {
             Pointer::Touch(TouchPhase::Started) => {
+                self.contacts.tap.begin(
+                    f32::from(position.x),
+                    f32::from(position.y),
+                    self.contacts.scrolled(),
+                );
                 if let Some(index) = hit(self) {
                     self.contacts.touch = Some(position);
                     self.contacts.last_pressed = Some(index);
@@ -586,6 +594,9 @@ impl PhoneApp {
                 }
             }
             Pointer::Touch(TouchPhase::Moved) => {
+                self.contacts
+                    .tap
+                    .moved(f32::from(position.x), f32::from(position.y));
                 if let Some(start) = self.contacts.touch {
                     let d =
                         (f32::from(position.x - start.x)).hypot(f32::from(position.y - start.y));
@@ -597,11 +608,17 @@ impl PhoneApp {
                 }
             }
             Pointer::Touch(_) => {
+                self.contacts
+                    .tap
+                    .finish(f32::from(position.x), f32::from(position.y));
                 self.contacts.touch = None;
                 self.presses.release_all();
                 cx.notify();
             }
             Pointer::Click => {
+                if !self.contacts.tap.allow_click(self.contacts.scrolled()) {
+                    return;
+                }
                 let Some(index) = hit(self) else {
                     return;
                 };
@@ -652,6 +669,11 @@ impl PhoneApp {
         match pointer {
             Pointer::Touch(TouchPhase::Started) => {
                 self.favorites.suppress_click = false;
+                self.favorites.tap.begin(
+                    f32::from(position.x),
+                    f32::from(position.y),
+                    self.favorites.scrolled(),
+                );
                 if let Some(index) = hit(self) {
                     self.favorites.touch = Some(position);
                     self.favorites.last_pressed = Some(index);
@@ -664,6 +686,7 @@ impl PhoneApp {
                                 && let Some(row) = this.favorites.tiles.get(index).cloned()
                             {
                                 this.favorites.suppress_click = true;
+                                this.favorites.tap.spoil();
                                 this.favorites.touch = None;
                                 window.perform_haptic_feedback(HapticFeedback::LongPress);
                                 this.open_contact_sheet(row, false, window, cx);
@@ -675,6 +698,9 @@ impl PhoneApp {
                 }
             }
             Pointer::Touch(TouchPhase::Moved) => {
+                self.favorites
+                    .tap
+                    .moved(f32::from(position.x), f32::from(position.y));
                 if let Some(start) = self.favorites.touch {
                     let d =
                         (f32::from(position.x - start.x)).hypot(f32::from(position.y - start.y));
@@ -687,13 +713,17 @@ impl PhoneApp {
                 }
             }
             Pointer::Touch(_) => {
+                self.favorites
+                    .tap
+                    .finish(f32::from(position.x), f32::from(position.y));
                 self.favorites.touch = None;
                 self.favorites.long_task = None;
                 self.presses.release_all();
                 cx.notify();
             }
             Pointer::Click => {
-                if std::mem::take(&mut self.favorites.suppress_click) {
+                let tapped = self.favorites.tap.allow_click(self.favorites.scrolled());
+                if std::mem::take(&mut self.favorites.suppress_click) || !tapped {
                     return;
                 }
                 let Some(index) = hit(self) else {

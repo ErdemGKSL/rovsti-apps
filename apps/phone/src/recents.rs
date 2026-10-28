@@ -30,7 +30,7 @@ use rovsti_ui::{
     motion_tokens::scale,
     theme::{self, call_colors},
     tokens::{Theme, metrics, mix, typography},
-    touch::{Pointer, pointer_surface, touch_surface},
+    touch::{Pointer, TAP_SLOP, TapGuard, pointer_surface, touch_surface},
 };
 
 use crate::{
@@ -48,7 +48,6 @@ const INFO_W: f32 = 44.0;
 const TAIL_ROWS: usize = 2;
 const AVATAR: f32 = 40.0;
 /// A finger that travels further than this is scrolling, not tapping.
-const TAP_SLOP: f32 = 10.0;
 /// Skeleton rows appear only when loading takes longer than this.
 const SKELETON_DELAY: Duration = Duration::from_millis(150);
 /// The first rows must stay on screen this long before Recents counts as seen.
@@ -164,6 +163,7 @@ pub(crate) struct RecentsView {
     missed_counted: bool,
     /// A long press already opened the info sheet: swallow the tap after it.
     suppress_click: bool,
+    tap: TapGuard,
     /// Live refresh (story 10.3): the rows above the first old one, how many
     /// of the leading rows are new or newer, and the shared 0 to 1 progress.
     /// Only transforms and opacity move; the list never relayouts.
@@ -193,6 +193,7 @@ impl RecentsView {
             missed: 0,
             missed_counted: false,
             suppress_click: false,
+            tap: TapGuard::default(),
             inserted: 0,
             fresh: 0,
             fresh_in: Entrance::default(),
@@ -509,6 +510,11 @@ impl PhoneApp {
         }
         match pointer {
             Pointer::Touch(TouchPhase::Started) => {
+                self.recents.tap.begin(
+                    f32::from(position.x),
+                    f32::from(position.y),
+                    self.recents.scrolled(),
+                );
                 if let Some((index, zone)) = self.recents_hit(position, window) {
                     self.recents.touch = Some(Touch { start: position });
                     self.recents.last_pressed = Some((index, zone));
@@ -525,6 +531,7 @@ impl PhoneApp {
                                     this.recents.long_task = None;
                                     if this.recents.touch.take().is_some() {
                                         this.recents.suppress_click = true;
+                                        this.recents.tap.spoil();
                                         window.perform_haptic_feedback(HapticFeedback::LongPress);
                                         this.presses.release_all();
                                         this.recents_info(index, window, cx);
@@ -537,6 +544,9 @@ impl PhoneApp {
                 }
             }
             Pointer::Touch(TouchPhase::Moved) => {
+                self.recents
+                    .tap
+                    .moved(f32::from(position.x), f32::from(position.y));
                 if let Some(touch) = self.recents.touch {
                     let dx = f32::from(position.x - touch.start.x);
                     let dy = f32::from(position.y - touch.start.y);
@@ -550,13 +560,18 @@ impl PhoneApp {
                 }
             }
             Pointer::Touch(_) => {
+                self.recents
+                    .tap
+                    .finish(f32::from(position.x), f32::from(position.y));
                 self.recents.touch = None;
                 self.recents.long_task = None;
                 self.presses.release_all();
                 cx.notify();
             }
             Pointer::Click => {
-                if std::mem::take(&mut self.recents.suppress_click) {
+                // A flick must never call, however the host synthesises taps.
+                let tapped = self.recents.tap.allow_click(self.recents.scrolled());
+                if std::mem::take(&mut self.recents.suppress_click) || !tapped {
                     return;
                 }
                 let Some((index, zone)) = self.recents_hit(position, window) else {

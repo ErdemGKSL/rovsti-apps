@@ -1,0 +1,8 @@
+{
+  "schema_version": 2,
+  "ui": {"last_tab": 1, "missed_seen_ms": 1790000000000, "app_version": "0.2.0", "xiaomi_confirmed": {"autostart": "0.2.0"}, "hint_counters": {"three_call": 2}},
+  "settings": {"haptics": "light", "proximity": false, "flip_to_silence": true, "vibrate_connect": true, "vibrate_end": false, "keypad_tones": false, "sort_by": "last_name", "name_format": "last_first", "show_frequent": false},
+  "quick_replies": ["Later", "In a meeting"],
+  "speed_dial": {"2": {"lookup_key": "0r17-2A3B", "number_raw": "+90 555 111 22 33", "name": "Ayşe Yılmaz"}, "9": {"lookup_key": "1r18-77", "number_raw": "0532 123 45 67", "name": "Özgür"}},
+  "favorites_order": ["1r18-77", "0r17-2A3B"]
+}

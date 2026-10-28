@@ -16,6 +16,7 @@ pub mod phone_number;
 pub mod recents;
 pub mod scene;
 pub mod search;
+pub mod settings;
 pub mod setup;
 pub mod small_text;
 pub mod thread;

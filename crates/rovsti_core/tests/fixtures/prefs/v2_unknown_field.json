@@ -1,0 +1,9 @@
+{
+  "schema_version": 3,
+  "ui": {"last_tab": 0, "future_ui": true},
+  "settings": {"haptics": "ultra", "sort_by": "zodiac", "proximity": true, "future_setting": 1},
+  "quick_replies": ["Hi"],
+  "speed_dial": {"3": {"lookup_key": "k", "number_raw": "112", "name": "Home", "photo": "x"}},
+  "favorites_order": ["a", "a", "b"],
+  "cloud": {"never": "used"}
+}

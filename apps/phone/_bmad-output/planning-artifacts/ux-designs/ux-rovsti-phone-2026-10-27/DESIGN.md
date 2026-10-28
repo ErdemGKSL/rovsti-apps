@@ -3,10 +3,11 @@ name: Rovsti Phone
 description: A local, open Android dialer in iOS-26-style liquid glass with real spring motion. Glass floats above calm content; emerald-teal is the only accent.
 status: final
 created: 2026-10-27
-updated: 2026-10-27
+updated: 2026-10-28
 sources:
   - apps/phone/_bmad-output/planning-artifacts/prds/prd-rovsti-phone-2026-10-27/prd.md
   - apps/phone/_bmad-output/planning-artifacts/briefs/brief-rovsti-phone-2026-10-27/brief.md
+  - apps/phone/_bmad-output/planning-artifacts/gap-analysis-2026-10-28.md
   - .claude/skills/liquid-glass-gpui/SKILL.md
   - crates/rovsti_ui/src/lib.rs
 ui-system: liquid_glass_kit (Theme, GlassSpec, motion_tokens, metrics, typography) + rovsti_ui (TabBar, components, Motion, Presses, Entrance)
@@ -85,6 +86,15 @@ spacing:
   key-size: 78px
   key-gap: 24px
   incall-control-size: 76px
+  # v0.2 (Epics 14-21)
+  route-row: 52px
+  menu-row: 48px
+  notice-height: 48px
+  action-tile: 64px                # Contact Sheet / Call details action strip
+  secondary-incoming-size: 56px    # Message and Silence on the Incoming screen
+  chip-height: 20px                # SIM, HD, Wi-Fi chips
+  incall-chip-row: 22px            # reserved row under the number line, always present
+  incall-zone: 'flex between the 64px top gap and the control grid (min 300px)'
 motion:
   note: 'Springs from liquid_glass_kit::motion_tokens, (damping ratio, stiffness). Values are the contract; do not substitute durations.'
   select: { zeta: 0.76, stiffness: 750 }
@@ -97,6 +107,9 @@ motion:
   glow: { zeta: 0.5, stiffness: 300 }
   theme-fade: { zeta: 1.0, stiffness: 600 }
   press-scale: 0.97
+  # v0.2 adds no new spring. Everything below reuses the tokens above; gesture thresholds:
+  commit-distance: 96px            # drag distance that commits answer / decline / reply
+  arm-hold: 450ms                  # speed-dial and drag-to-reorder arm time (existing long-press)
   press-scale-card: 0.94
   puck-pressed: 1.39
 components:
@@ -151,6 +164,48 @@ components:
     rounded: '{rounded.full}'
     height: 44px
     glass: control
+  route-popover:
+    rounded: '{rounded.card}'
+    width: 288px
+    glass: sheet
+    rowHeight: '{spacing.route-row}'
+  notice-pill:
+    rounded: '{rounded.full}'
+    height: '{spacing.notice-height}'
+    glass: control-flat
+  action-tile:
+    size: '{spacing.action-tile}'
+    rounded: '{rounded.card}'
+    glass: control-flat
+  chip:
+    height: '{spacing.chip-height}'
+    rounded: '{rounded.full}'
+    typography: '{typography.caption2}'
+  toggle:
+    width: 51px
+    height: 31px
+    rounded: '{rounded.full}'
+    onColor: '{colors.accent}'
+  segmented:
+    height: 36px
+    rounded: '{rounded.full}'
+    glass: control-flat
+  held-card:
+    height: 64px
+    rounded: '{rounded.full}'
+    glass: control-flat
+  waiting-card:
+    rounded: '{rounded.sheet}'
+    glass: sheet-flat
+  conference-panel:
+    rounded: '{rounded.grouped-list}'
+    glass: control-flat
+  settings-group:
+    rounded: '{rounded.grouped-list}'
+    backgroundColor: '{colors.secondary-background}'
+  t9-strip:
+    height: 56px
+    slot: 'the large-title slot of the Keypad'
 ---
 
 ## Brand & Style
@@ -206,6 +261,15 @@ The Tab Bar is 264 x 56, centered horizontally. Over the Keypad tab the Call row
 
 In-call screen vertical rhythm (top to bottom): top inset, 64 px gap, avatar 96 (or none), 16, name, 4, status, flexible space, control grid (3 columns x 2 rows of 76 px controls, 24 px gaps), 32, End button (64 high, 220 wide), bottom inset + 24. No tab bar on the in-call or incoming screens.
 
+**In-Call layout, v0.2.** Everything above the control grid lives in the *in-call zone*, the flexible space between the 64 px top gap and the grid (392 px on 402 x 874). Its content changes by state, its height never does, and the grid and End stay anchored to the bottom, so nothing below the zone moves:
+- *One call:* avatar 96, name, status, number line, chip row (22 px reserved): about 222 px.
+- *Two calls:* active block (avatar 72, name at 28 px, timer), chip row, then the Held card (64 px) with 12 px above it.
+- *Conference:* avatar stack 56, "Conference" `title3`, timer, then the participant panel (156 px window).
+- The Waiting card and the route popover are overlays and do not take zone space.
+- Zone height on 402 x 874: 874 - top inset 48 - gap 64 - grid 216 - 32 - End 64 - 24 - bottom inset 34 = 392 px. The tallest state (conference: stack 56 + title 28 + timer 22 + 12 + panel 156 = about 290) and the two-call state (about 250) both fit with slack. Below 760 dp tall, the chip row and number line merge into one line and the zone scrolls vertically (the grid and End stay pinned).
+
+**Settings and Call details** are full-height pages (no Tab Bar): top inset, 44 px Back button row, `large-title`, content scrolling with `content-bottom-inset` of just the bottom inset + 24. **Incoming v0.2:** secondary row (56 px circles) sits 24 px above the Decline/Answer row; the card (avatar, name, number) is draggable within a 96 px commit distance and never changes its resting position.
+
 Touch targets: at least 44 x 44; keys and in-call controls are 76 to 78. Tab hit areas are 64 x 56, wider than the 22 px icon.
 
 ## Elevation & Depth
@@ -216,6 +280,8 @@ Depth comes from glass, not from drop shadows on content. Three levels:
 3. **Sheet glass**: Contact Sheet, number sheet, number chooser, Setup Checklist card. `GlassSpec::sheet` (blur 12 light / 14 dark, for legibility), shadow blur 32 black 10 to 15%.
 
 Glass recipe, fixed: blur 2 px on chrome and control (never heavy), edge-band refraction, saturation 1.5, symmetric dark outline 1.6 px centred on the edge, specular rim 0.8 px from the top-left (225 degrees). Glass paints in `on_paint_before_children`, labels paint after. **Refractive surfaces are budgeted, see Performance Budget**: at most 4 refractive (backdrop-sampling) surfaces on screen at once. Anything beyond that is a *flat glass look* (no shader): a `fill` or `material::THIN` tint, the same outline and rim, no backdrop sample.
+
+Flat variants (`control-flat`, `sheet-flat`) exist for v0.2 surfaces that must not sample the backdrop; see v0.2 components.
 
 Fallback: when `!window.supports_backdrop_blur()` or the user's system turns on reduced transparency, surfaces use `paint_glass_fallback`: an opaque-ish material (`material::THICK`, 0.85 alpha) over the plain backdrop with the same outline and rim. All text contrast values assume the fallback as the worst case.
 
@@ -262,6 +328,40 @@ Lucide, through `gpui_icons::GpuiIcons` (typed enum, verified present at rev d6c
 | Disclosure | `LucideChevronRight`, `LucideChevronDown` |
 | Lock-screen note | `LucideLock` |
 | Preview-mode banner | `LucideSmartphone` |
+| Route: Phone (earpiece) | `LucideSmartphone` |
+| Route: Speaker | `LucideVolume2` |
+| Route: wired headset | `LucideHeadphones` |
+| Route: Bluetooth device | `LucideBluetooth` (`LucideBluetoothConnected` when it is the current route) |
+| Route: hearing aid (best effort, name says so) | `LucideEar` |
+| Route selected | `LucideCheck` (accent) in a 24 px circle |
+| Audio control (summary) | the current route's icon above |
+| Add call | `LucideCirclePlus` |
+| Swap | `LucideArrowUpDown` |
+| Merge | `LucideMerge` |
+| Split from conference | `LucideSplit` |
+| End one participant | `LucideUserMinus` (danger) |
+| Conference | `LucideUsers` |
+| Settings gear | `LucideSettings` |
+| Back | `LucideChevronLeft` |
+| SIM chip glyph | `LucideCardSim` (only in Settings; chips use text) |
+| Block / blocked | `LucideBan` (danger only on destructive actions, otherwise `label`) |
+| Message | `LucideMessageSquare` |
+| Silence ringer / silenced | `LucideBellOff` |
+| Copy | `LucideCopy` |
+| Share | `LucideShare2` |
+| Delete (contact, history) | `LucideTrash2` (danger) |
+| Undo | text button "Undo", no icon |
+| Voicemail | `LucideVoicemail` |
+| Emergency | `LucideSiren` |
+| Reorder grip (a11y action only) | `LucideGripVertical` |
+| Export / import | `LucideUpload` / `LucideDownload` |
+| Phone forwarding (system shortcut) | `LucidePhoneForwarded` |
+| Hearing-aid compatibility | `LucideEar` |
+| Wi-Fi calling chip | `LucideWifi` 12 |
+| Vibrate settings | `LucideVibrate` |
+| Quick reply | `LucideMessageCircle` |
+
+> `LucideDownload`, `LucideUpload`, `LucideBan`, `LucideEar`, `LucideMerge`, `LucideSplit`, `LucideCardSim`, `LucideVoicemail`, `LucideSiren`, `LucideVibrate`, `LucidePhoneForwarded` were checked in the pinned `gpui_icons` asset tree (groups core, common, connectivity, editing, media, misc). `LucideFileDown` lives in the `files` group, which the workspace does not enable: do not use it.
 
 Every icon-only control keeps its meaning in the accessibility label (EXPERIENCE.md Accessibility Floor); the Tab Bar sets `aria_label` per tab and `Role::Tab`.
 
@@ -319,6 +419,35 @@ Distinctive on purpose, cheap by construction. Every moment below is built only 
 | S15 | **Theme melt** | System theme changes | One `theme-fade` spring (ζ 1, k 600, about 260 ms) crossfades colours, glass tint, shadow, aura palette. | C | Instant snap |
 | S16 | **Sheet rise** | Contact Sheet opens | Sheet rises on `appear` (ζ 1, k 450) with the page behind scaling to 0.97 and dimming to 0.85; the avatar inside the sheet scales 0.8 to 1.0 on `release` 60 ms later; number rows fade up 8 px staggered 30 ms. | C | 120 ms fade |
 
+### v0.2 Signature Moments (Epics 14 to 21)
+
+Same rules as above: transforms, opacity and colour mixes of already-painted quads, springs from the existing tokens only (no new spring), cost class C or M, a reduced-motion fallback, and at most two moments animating at once per screen. **Glass rule for scaled surfaces:** a refractive surface that changes size or scale during a spring (route popover, reply sheet while it opens) paints as the *flat glass look* until the spring is within 2% of rest, then swaps to the refractive pass in one frame. Cost stays cheap and the budget count is unchanged.
+
+| # | Moment | Trigger | Motion spec | Cost | Reduced motion |
+| --- | --- | --- | --- | --- | --- |
+| S17 | **Route bloom and handoff** (Epic 14) | Audio control opens the route list; a row is chosen | Open: the popover scales 0.86 to 1.0 from the Audio control's top-centre (its transform origin) on `appear` (ζ 1, k 450) while rows rise 8 px staggered 24 ms; the Audio control presses to 0.97 and stays tinted while the list is open. Choose: the `LucideCheck` circle of the chosen row travels (`morph`, ζ 1, k 950) to the Audio control, whose icon cross-fades to the new route icon and whose label slides 6 px; the popover dismisses on `sheet_dismiss` (ζ 1, k 400) at the same time; a Bluetooth or wired choice adds one ripple ring (accent, RELEASE_RING) around the control. The control shows the pending look until Android reports the route (see EXPERIENCE State Patterns) | M (1 popover, 1 shared element, 1 ring) | 120 ms fade open and close; check and icon swap instantly; no ring |
+| S18 | **Device arrival** | An endpoint appears while the list is open or the Audio control is visible | Open list: the new row fades in at the top edge on `appear` and its icon tile gets one halo ring (accent-glow 0.5 alpha, scale 1.0 to 1.6, 380 ms RELEASE_RING). Closed list: the Audio control's route icon is unchanged but a 6 px accent dot fades in at its top-right for 3 s ("a new device is available"); it never changes the selected route. Departure: the row dims to 0.4 in place with the subtitle "Disconnected"; if it was the current route the check moves to the fallback row on `select` | C | Instant; dot has no fade |
+| S19 | **Hold-away** (second call placed) | Add call places a second call, or a second call becomes held | The first call's avatar, name and timer shrink (96 to 40, name 34 to 17 px) and travel on `morph` into the Held card slot while the new call's avatar drops in at the active slot with overshoot on `release` (ζ 0.6, k 420); aura: the first call's blobs desaturate to the Holding look, the new call's pair blooms from 0.6 scale on `appear` | M | 120 ms cross-fade, no travel |
+| S20 | **Swap crossing** | Swap control or tap on the Held card | The two calls exchange places along arcs: the active block moves down and shrinks, the held block moves up and grows, each with a 12 px sideways offset that peaks mid-flight (sin curve), on one `morph` spring; timers and avatars are the same quads (shared elements), aura hue cross-fades on `select`; one medium haptic | C | 120 ms cross-fade |
+| S21 | **Merge weave** | Merge succeeds (reported conference state) | The Held card's avatar travels to the active avatar and stops 28 px offset, overlapping; a third avatar overlaps on later joins (stack of up to 3, then "+n"); aura blobs of the two hue pairs mix in RGB over `select` with one `glow` pulse (scale 1.12, ζ 0.5, k 300); the participant panel rises from the bottom of the zone on `appear` and rows fade up staggered 30 ms (max 6 staggered). Plays only after Android reports the conference, never on tap | M | Instant swap; no pulse |
+| S22 | **Participant eject** | Split or End on a participant row | Split: the row's avatar scales 1.15 and flies up to the active slot on `morph` as the split call's avatar (the remaining conference stack shrinks by one on the same spring). End: the row content fades and shifts 24 px sideways in 120 ms (`appear`), then the list re-lays instantly (no layout spring) | C | Fade only |
+| S23 | **Waiting card drop** | A second call rings during a call | The Waiting card falls from 40 px above the top inset with a visible overshoot on `release` (ζ 0.6, k 420); its four choice pills spring in staggered 40 ms on `select`; the call underneath dims to 0.85 and the aura plays its double-pulse (S6 waiting); the card is tappable from the first frame | C | 120 ms fade |
+| S24 | **Gear turn and page push** | Gear button tapped; Settings and sub-pages open | The gear rotates 60 degrees on `glow` (ζ 0.5, k 300) while held and settles back; the Settings page enters from the right: translate x 28 px to 0 with fade on `appear` (same direction logic as S5, title parallax 12 px extra), the old page does not animate; Back reverses with the page leaving toward the right; the tab bar fades out over `appear` | C | 120 ms fade, no rotation |
+| S25 | **Toggle snap** | Any Settings toggle | Finger down: the thumb stretches to 1.2 x width on `press`; finger up: it travels to the other end on `select` (ζ 0.76, k 750) with the slight overshoot; the track mixes grey to `{colors.accent}` in RGB at the same time; light haptic (follows the haptics setting). Segmented controls move their glass indicator with the same `select` spring | C | Thumb and track jump |
+| S26 | **SIM chip flight** | A SIM is chosen in the chooser | The chosen row's colour dot and "SIM n" label (a chip) travel to the reserved chip slot on the In-Call Screen on `morph`, or just fade if the screen is not ready; the other row fades out with the chooser (`sheet_dismiss`) | C | Cross-fade |
+| S27 | **Block sweep** | Block confirmed from any surface | A `LucideBan` ring-and-slash draws itself over the number's avatar with a stroke sweep (260 ms, RELEASE_RING bezier), the avatar desaturates to grey (`select`), then in Recents the row fades out in 120 ms and the list re-lays instantly; the Notice pill rises (S28) | C | Row disappears with a 120 ms fade; no sweep |
+| S28 | **Notice pill** | Block, Unblock, Delete, Copy, "Sent", "Opened Messages", Merge reasons | The pill rises 16 px with fade on `appear` from 12 px above the Tab Bar (or above the bottom inset where no Tab Bar), a 2 px hairline along its bottom edge shrinks from full width to zero over its lifetime (transform scale X, linear: the only timed animation, 5 s for Undo, 2 s for info); Undo press rewinds the line on `release`; leaves on `sheet_dismiss`. One pill at a time, a new one replaces the old in place | C | No rise, no hairline; plain fade |
+| S29 | **Incoming slide** | Finger drags the incoming card | Direct manipulation, no spring while the finger is down: the card (avatar, name, number) follows the finger with 0.9 gain, rubber-banded past the commit distance. Right: a `{colors.answer}` wash grows from the right edge (alpha 0 to 0.35) and an Answer bubble grows 0.6 to 1.2; left: the same in `{colors.danger}` with a Decline bubble; up: the reply sheet is pulled up under the finger (sheet drag, detent medium). A light haptic tick at 50% and a medium one at the commit distance (96 px). Lifting before the commit distance, or below the fling velocity, springs back on `release`. Commit right = S8 Answer morph; left = the card flies off to the left with fade (`sheet_dismiss`) while Decline is sent first | C (transform, one alpha wash) | Buttons only; the gesture is off while reduced motion is on, but never blocked: a drag still commits at 96 px without the follow effect |
+| S30 | **Silence hush** | Silence tapped, or flip-to-silence | Rings in flight finish and fade; the avatar breath eases to rest and the aura saturation drops 40% on `select`; the Silence control floods with accent tint (S10) and its label becomes "Silenced"; the Answer glow pulse stops. The call stays fully answerable | C | Instant |
+| S31 | **Reply sent** | A quick reply is chosen | The chosen row's text becomes a glass-flat bubble that travels to the avatar on `morph` and fades; the sheet dismisses on `sheet_dismiss`; the card label reads "Sent" or "Opened Messages" for 1.2 s, then the screen leaves with the S11 fade. The Call is already rejected when the finger lifts | C | Fade, no travel |
+| S32 | **Results morph** (T9) | First digit typed on an empty field, or the field empties | The large title "Keypad" slides up 12 px and fades while the best-match row rises from 12 px below and fades in, same slot, on `appear`; matched letters in the name go from weight 400 to 700 on `release` (colour unchanged); changing matches swap the row with a 120 ms cross-fade, no slide. Never delays a digit | C | 120 ms cross-fade |
+| S33 | **Speed-dial charge** | Finger held on an assigned digit key on an empty Keypad | The digit appears at once (key rule). A 2 px accent ring around the key fills clockwise over 450 ms (conic sweep, the arm time); the key lens glow rises to 0.6; at 450 ms the key pops to 1.12 on `release` with a RELEASE_RING ripple and a medium haptic, the digit is removed and the call is placed (S3 bloom). Releasing early drains the ring on `press` and leaves the digit. A key with no assignment does nothing extra | C | No ring: a static ring appears at 450 ms with the haptic |
+| S34 | **Reorder lift** | Long-press then drag on a Favorite tile | At 450 ms the tile lifts (scale 1.06 on `release`, shadow grows, it paints as flat glass), medium haptic; dragging moves it under the finger; neighbours translate into their new slots on `select` (transforms only, the grid cells do not change until drop); drop settles on `release` and the order commits once. If the finger has not moved by lift-off, the Contact Sheet opens instead | M (up to 8 tiles translating) | Tiles jump to slots, no lift scale |
+| S35 | **Details arrival** | Info on a Recents row, or Call details from a sheet | The row's avatar flies to the header avatar slot (96 px) on `morph` (S4 variant); header text fades up 12 px on `appear`; the action strip tiles rise staggered 30 ms (S16 pattern); history rows fade in staggered 20 ms for the first 8 visible rows only | C | Fade |
+| S36 | **Hold to delete** | "Delete all call history" confirm step | A `{colors.danger}` fill sweeps left to right inside the pill over 1 s while held (transform scale X); releasing early drains it on `press`; completion flashes the pill and the rows fade; haptic ticks at 33% and 66%, medium at completion. With TalkBack on, a plain "Delete everything" button replaces the hold | C | Fill appears in steps (no sweep), hold still required |
+
+All v0.2 moments obey the Performance Budget rows below and the degradation rule: on degradation S18 dot, S21 pulse, S24 rotation, S29 wash, S34 neighbour displacement and S36 sweep stop first; functionality is unchanged.
+
 **Cheap vs costly additions (Performance Budget extension):** the aura (S6) and the incoming rings (S7) are the only looping animations; both are transform/opacity on plain quads, only while their screen is visible and the screen is on, and they are first to go in the degradation rule. Signature moments never add refractive passes, so the glass budget is unchanged.
 
 ## Performance Budget
@@ -340,6 +469,25 @@ Fluid motion, a clean look and speed are product requirements, not polish (owner
 | In-Call Keypad | 1 held key | Same rule as Keypad |
 
 A refractive surface may not scroll: list rows, Favorites tiles and Recents rows are never refractive. Glass sits only on fixed chrome and sheets. The tab bar and its puck count as two passes; the puck's lens blend is a parameter change on the same surface, not an extra one.
+
+**v0.2 refractive-surface rows (same hard limit of 4).**
+
+| Screen / state | Refractive surfaces | Which |
+| --- | --- | --- |
+| In-Call, route popover open | 1 | The popover (settled); the controls stay flat; page behind dimmed to 0.7 |
+| In-Call, two calls or conference | 0 at rest, 1 per held control | Held card and panel are flat glass |
+| In-Call, Waiting card | 0 | Flat sheet look; the card never samples the backdrop |
+| In-Call, Add call sheet | 2 (+1 held key) | Sheet, segmented control indicator while moving; the Keypad inside the sheet follows the Keypad rule |
+| Incoming, reply sheet open | 1 | The sheet (settled); Message and Silence are flat |
+| Settings and sub-pages | 0 at rest | Back button and gear are flat; toggles are not glass; a sheet from Settings adds 1 |
+| Call details | 0 at rest | Action tiles are flat; Back flat |
+| Keypad with T9 strip | 2 (+1 held key) | Unchanged: the strip is flat; the results sheet adds 1 |
+| SIM chooser, route popover, quick-reply editor sheet | 1 | The sheet or popover; Tab Bar hidden or dimmed behind it counts as already painted |
+| Favorites during reorder | 2 | Tab bar and puck; the lifted tile is flat |
+
+**v0.2 list rules.** Blocked numbers, Blocked calls, Call details history, conference participants, route list (more than 5 rows) and T9 results are virtualised with fixed row heights (58, 58, 58, 52, 52, 52). Insertions fade in with no layout spring; removals fade out then re-lay instantly. The only animated reflow is the Favorites reorder drag, where tiles move by transform and the grid itself does not change until drop. Endpoint, call and conference updates are coalesced to one snapshot per frame. T9 results are computed off the UI thread from a prebuilt index and swap in within one frame of arriving (PRD NFR-18); a stale result for an older digit string is dropped.
+
+**v0.2 idle cost.** New surfaces add no looping animation. The Notice pill hairline is a timed transform for at most 5 s. The speed-dial ring and hold-to-delete sweep run only while a finger is held. The flip-to-silence sensor listener exists only while a call is ringing.
 
 **Costly vs cheap motion.**
 
@@ -388,7 +536,36 @@ Visual specs. Behaviour is in EXPERIENCE.md.
 - **Incoming card.** See Incoming Call Screen layout in EXPERIENCE.md; visually: avatar 120, name `incall-name`, "Rovsti Phone incoming call" label `footnote`, two 76 px circles (Decline `{colors.danger}`, Answer `{colors.answer}`) 96 px apart, captions "Decline" / "Answer" under them in `label` over the wash.
 - **Waiting Call banner.** Glass capsule 76 high, inset 16, 12 px under the top inset: avatar 40, name `headline`, "Waiting" `footnote`, trailing Decline (36 px, danger) and Answer (36 px, answer) circles.
 - **Return-to-call pill.** Glass capsule 44 high, `{colors.answer}` at 20% tint, `LucidePhone` 18, "Return to call · 2:41" `headline` (timer updates each second); sits below the status bar above the page title.
-- **Toast / status line.** There are no toasts. Transient information uses the status line under the number field, or inline row text. Errors are inline (see EXPERIENCE.md States).
+- **Status line and Notice pill.** There are no toasts. Transient information uses the status line under the number field, inline row text, or (v0.2) the single Notice pill described below for reversible actions and confirmations. Errors are inline (see EXPERIENCE.md States).
+
+### v0.2 components (Epics 14 to 21)
+
+Visual specs. Behaviour and states are in EXPERIENCE.md.
+
+- **Flat variants.** `control-flat` and `sheet-flat` are the existing "flat glass look" (tint, outline, rim, shadow; no backdrop sample) for surfaces that must not use a refractive pass: held card, conference panel, waiting card, notice pill, action tiles, segmented controls, secondary incoming controls. They keep the same look at rest as the refractive version so a swap is invisible.
+- **In-call control grid, v0.2.** Still 3 columns x 2 rows of 76 px controls, 24 px gaps, in fixed slots: row 1 Mute, Keypad, Audio; row 2 Add call, Hold (becomes Swap with two calls), Merge. Disabled controls are dimmed to 0.4 and keep their place. The Audio caption shows the current route name (a 96 px wide, one-line, end-ellipsis caption slot; it is "Audio" when no route detail is known). With a Bluetooth route, the Audio icon is `LucideBluetoothConnected`.
+- **Route popover** (`{components.route-popover}`). Sheet glass, 20 radius, 288 px wide, right edge on the 16 px inset, bottom edge 8 px above the top of the Audio control row (it opens upward and may cover the avatar zone; the End button and the control grid stay visible and tappable below it). Rows 52 px: 36 px icon tile (12 radius, `fill`), name `headline` (one line, ellipsis), optional subtitle `footnote` secondary-label ("Connected", "Disconnected", "Hearing aid"), trailing 24 px check circle (accent `LucideCheck`, only on the current route). Footer rows 44 px, `subheadline`, accent text with trailing `LucideExternalLink` 16: "Bluetooth settings", "Hearing aids". A hairline separates the footer. More than 5 device rows scroll inside a fixed 5-row window; the popover never exceeds 70% of the screen height.
+- **Notice pill** (`{components.notice-pill}`). 48 px high capsule, flat glass, 16 side inset, centred text `subheadline` (one line, ellipsis in the middle for numbers), optional trailing text button (accent, 44 px target, "Undo", "Open"), bottom hairline 2 px (`{colors.accent}` at 60%) for the lifetime. It replaces every use of a toast: it is the one transient message surface.
+- **Action tile** (`{components.action-tile}`). 64 x 64, 20 radius, flat glass; icon 20 centred over a `caption2` label (`label`). Used in strips of five with 12 px gaps (5 x 64 + 4 x 12 = 368 within the 370 px content width), on the Contact Sheet, number sheet and Call details. Destructive tiles (Block) keep a `label` icon; danger colour appears only on the confirm step.
+- **Toggle** (`{components.toggle}`). iOS shape, 51 x 31, thumb 27 white, track `fill` off and `{colors.accent}` on; 44 px tall touch row (the whole Settings row is the target).
+- **Segmented control** (`{components.segmented}`). 36 px high capsule, 2 to 4 segments, flat glass track, a glass indicator capsule (chrome, 2 px inset) moves between segments on `select`; labels `subheadline` weight 600.
+- **Chip** (`{components.chip}`). 20 px high capsule, `caption2`, `fill` background, 8 px side padding. **SIM chip:** a 6 px dot in the SIM's slot colour plus "SIM 1" or the carrier label (max 8 characters, ellipsis); the dot colour is Android's account highlight colour *clamped* to contrast of at least 3:1 against the chip fill (mix toward `label` if lower); the text is always `label`. **Quality chips:** "HD", "Wi-Fi" (with `LucideWifi` 12), "VoLTE" in `secondary-label`, same shape. A chip is never the only carrier of meaning; the TalkBack label spells it out.
+- **In-call chip row.** A reserved 22 px row directly under the number line, left to right: SIM chip, HD, Wi-Fi. Empty rows keep their height. It is centred.
+- **Held card** (`{components.held-card}`). 64 px capsule, full width minus 32, flat glass tinted `{colors.warning}` 12%: avatar 40 with the Holding ring, name `headline`, "On hold · 1:12" `footnote` (timer tabular), trailing 44 px round swap button (`LucideArrowUpDown`). Whole card is the swap target.
+- **Conference panel** (`{components.conference-panel}`). 26 radius, flat glass, full width minus 32, fixed three-row window (156 px) that scrolls beyond 3 participants. Row 52: avatar 36, name `headline`, subtitle `footnote` (number or "Participant"), trailing two 44 px icon buttons: Split (`LucideSplit`, label colour) and End (`LucideUserMinus`, danger). Unavailable actions are dimmed, never hidden; read-only rows show neither. Header above the panel: avatar stack, "Conference" `title3`, timer `incall-status`.
+- **Waiting card** (`{components.waiting-card}`). Flat sheet glass, 38 radius, 16 side inset, 12 px under the top inset, height 184: header row (avatar 40, name `headline`, "Waiting" `footnote`), then a 2 x 2 grid of 44 px pills with 8 px gaps: "Hold and answer" (answer colour fill, white/black glyph per mode), "End and answer" (glass, label), "Decline" (danger fill), "Message" (glass, `LucideMessageSquare`). The Message pill is dimmed (not hidden) when there are no quick replies.
+- **Incoming secondary controls.** Two 56 px flat-glass circles above the Decline/Answer row, 24 px apart, centred: **Message** (`LucideMessageSquare`, left) and **Silence** (`LucideBellOff`, right), captions `caption` below. Silenced state: accent ring and tint, caption "Silenced".
+- **Reply sheet.** Sheet glass at medium detent; title `headline` "Decline with message"; rows 56 px (quick reply text `body`, up to two lines, `LucideMessageCircle` 18 leading in secondary-label); last row "Write your own…" (accent) which declines and opens Messages with an empty body.
+- **SIM chooser.** Sheet glass, medium detent. Title "Call with"; rows 64 px: 12 px SIM dot (slot colour), "SIM 1" `headline`, carrier and number `footnote`, trailing "Default" `caption` when applicable. A final text row "Change default SIM" (accent) when the system page exists.
+- **Settings page.** Large title "Settings" on a back button row (Back 44 px flat glass at the left inset). Content is grouped lists (`{components.settings-group}`): section label `footnote` weight 600 secondary-label 8 px above the group, rows 58 px (title `headline`, value `body` secondary-label, trailing chevron or toggle), 16 px between groups, 35 px between sections. Page background is `grouped-background` plus the usual wash.
+- **Settings gear.** The reserved 44 px trailing glass round button of the large title, `LucideSettings` 20, on all four tab screens. It is a flat glass button, refractive only while pressed.
+- **T9 strip** (`{components.t9-strip}`). 56 px, in the large-title slot of the Keypad: best-match row (avatar 36, name `headline` with the matched prefix in weight 700, matched number `footnote` secondary-label, trailing 36 px answer-colour call circle) and, when more matches exist, a 36 px "+n" capsule between name and call circle opening the results sheet. 16 px side inset.
+- **Results sheet.** Sheet glass at medium detent: rows 58 as Contact rows with highlighted matches; tapping the row fills the field, the trailing call circle calls.
+- **Speed-dial key badge.** A 14 px avatar dot (contact hue pair) at the key's top-right, only on assigned keys; the `1` key shows `LucideVoicemail` 14 in place of its empty caption.
+- **Emergency Call button.** Same 78 px answer-colour circle with a `caption2` "Emergency call" label centred 6 px below it (in the 12 px gap above the Tab Bar), and the status line reads "Emergency call" in `{colors.danger}`.
+- **Details header and history.** Header: avatar 96, name `title2`, number `subheadline` secondary-label, chip row (Blocked in danger outline when blocked, "Contact" when matched); totals card (settings-group, two cells "12 calls" and "1 h 04 min talk time", `title3` figures, `footnote` captions). History rows 58: direction icon 16, type label `headline` ("Outgoing", "Missed" in danger), date and time `subheadline`, trailing duration `body` tabular, chips under the date on the right for SIM, HD, Wi-Fi. Sticky date headers 28 px.
+- **Blocked list.** Segmented control "Numbers | Blocked calls" under the title; add-number field (search-field shape, `LucideBan` leading, placeholder "Add a number to block") with a trailing "Block" accent button; rows 58 with a `LucideBan` tile, formatted number (+ name when matched), trailing "Unblock" glass pill 36 px.
+- **Hold-to-confirm pill.** 52 px capsule, `{colors.danger}` at 15% with a danger fill sweeping in, label `headline` danger "Hold to delete everything".
 
 ## Do's and Don'ts
 
@@ -407,3 +584,10 @@ Visual specs. Behaviour is in EXPERIENCE.md.
 | Fall back to opaque material when backdrop blur is unsupported | Ship a flat translucent rectangle as "glass" |
 | Keep at most 4 refractive surfaces per screen (Performance Budget) | Wrap rows, tiles or keys at rest in refractive glass |
 | Respect reduced motion and the system font size | Pin text sizes in px that ignore the font scale |
+| Keep In-Call control slots fixed and dim unsupported ones | Hide or reflow a control because the carrier or Android refuses it |
+| Open pickers as overlays anchored to their control (route popover, SIM chooser) | Push the controls or keys that opened them |
+| Reserve the space for SIM, HD and Wi-Fi chips, the Audio label, T9 and Silence | Add a chip or label that changes row height later |
+| Show SIM chips only when two or more SIMs exist | Show "SIM 1" on a single-SIM phone |
+| Use the Notice pill with Undo for reversible actions | Use a modal confirmation for Block or Copy |
+| Confirm irreversible deletes inline (named contact, hold-to-delete) | Offer Undo for a provider delete the app cannot restore |
+| Use flat glass for held card, panel, tiles, pills | Spend a refractive pass on something that scrolls or sits in a list |

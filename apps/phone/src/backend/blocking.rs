@@ -167,6 +167,27 @@ impl Backend {
         can_block(raw, &EmergencyList::default()).err()
     }
 
+    /// The blocklist as a cheap clone for a background pull.
+    pub(super) fn block_set(&self) -> Arc<BlockSet> {
+        match &self.blocklist {
+            Load::Ready(state) => Arc::new(state.set.clone()),
+            _ => Arc::new(BlockSet::default()),
+        }
+    }
+
+    /// The blocklist changed: the call log's rows follow it at once, from the
+    /// entries already in memory.
+    pub(super) fn refilter_call_log(&mut self) {
+        let Load::Ready(log) = &self.call_log else {
+            return;
+        };
+        let set = self.block_set();
+        let next = super::build_call_log_with(Arc::clone(&log.source), log.locale, &set);
+        if next.entries != log.entries {
+            self.call_log = Load::Ready(Arc::new(next));
+        }
+    }
+
     /// Re-pulls the blocklist off the UI thread. A late older pull never
     /// overwrites a newer one, and an identical pull draws nothing.
     pub(super) fn refresh_blocklist(&mut self, cx: &mut Context<Self>) {
@@ -188,6 +209,7 @@ impl Backend {
                 if !same || this.can_block != can {
                     this.blocklist = load;
                     this.can_block = can;
+                    this.refilter_call_log();
                     cx.notify();
                 }
             })
@@ -375,7 +397,8 @@ mod tests {
 
     #[test]
     fn the_golden_blocklist_becomes_a_set() {
-        let Load::Ready(state) = decode(BLOCKLIST, |p: BlocklistPayload| BlockState::new(p.numbers))
+        let Load::Ready(state) =
+            decode(BLOCKLIST, |p: BlocklistPayload| BlockState::new(p.numbers))
         else {
             panic!("expected rows");
         };
@@ -410,7 +433,10 @@ mod tests {
     #[test]
     fn labels_follow_what_happened() {
         assert_eq!(ReplyOutcome::from(Reject::Sent).label(), "Sent");
-        assert_eq!(ReplyOutcome::from(Reject::Opened).label(), "Opened Messages");
+        assert_eq!(
+            ReplyOutcome::from(Reject::Opened).label(),
+            "Opened Messages"
+        );
         assert_eq!(ReplyOutcome::from(Reject::RejectedOnly).label(), "Declined");
         assert_eq!(ReplyOutcome::from(Reject::Stale), ReplyOutcome::Failed);
     }

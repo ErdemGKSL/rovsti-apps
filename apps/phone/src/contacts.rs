@@ -1709,12 +1709,16 @@ fn number_row(
     let press = app.presses.value(&id).clamp(0.0, 1.0);
     let answer = call_colors(theme).answer;
     let act_id = id.clone();
+    // Story 17.4: a blocked number carries the glyph; the word is in the label too.
+    let blocked = app.backend.read(cx).is_blocked(&n.display);
     div()
         .id(id.clone())
         .role(Role::Button)
         .aria_label(SharedString::from(format!(
-            "Call {} {}",
-            n.label, n.display
+            "Call {} {}{}",
+            n.label,
+            n.display,
+            if blocked { ", blocked" } else { "" }
         )))
         .relative()
         .h(px(58.0))
@@ -1755,11 +1759,24 @@ fn number_row(
                 )
                 .child(
                     div()
-                        .truncate()
-                        .text_size(typography::HEADLINE.size)
-                        .font_weight(gpui::FontWeight::NORMAL)
-                        .text_color(colors.label)
-                        .child(n.display.clone()),
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(typography::HEADLINE.size)
+                                .font_weight(gpui::FontWeight::NORMAL)
+                                .text_color(colors.label)
+                                .child(n.display.clone()),
+                        )
+                        .children(blocked.then(|| {
+                            svg()
+                                .path(Icon::LucideBan.path())
+                                .size(px(14.0))
+                                .flex_none()
+                                .text_color(colors.secondary_label)
+                        })),
                 ),
         )
         .child(

@@ -77,10 +77,13 @@ pub(crate) enum RowId {
     DefaultApps,
     EmergencyInfo,
     Hearing,
+    Replies,
+    Blocked,
+    BlockedAccess,
 }
 
 impl RowId {
-    const COUNT: usize = 20;
+    const COUNT: usize = 23;
 
     const fn index(self) -> usize {
         self as usize
@@ -108,6 +111,9 @@ impl RowId {
             Self::DefaultApps => "set-default-apps",
             Self::EmergencyInfo => "set-emergency",
             Self::Hearing => "set-hearing",
+            Self::Replies => "set-replies",
+            Self::Blocked => "set-blocked",
+            Self::BlockedAccess => "set-bk-access",
         }
     }
 }
@@ -195,6 +201,13 @@ pub(crate) struct RowsKey {
     pub on_android: bool,
     pub import_error: Option<&'static str>,
     pub names_differ: bool,
+    /// Numbers on the blocklist, `None` while unknown or unavailable.
+    pub blocked: Option<usize>,
+    /// Blocking is available to this user at all.
+    pub can_block: bool,
+    /// The call log permission is missing (the Blocked calls view needs it).
+    pub call_log_missing: bool,
+    pub replies: usize,
 }
 
 impl PartialEq for RowsKey {
@@ -205,6 +218,10 @@ impl PartialEq for RowsKey {
             && self.on_android == other.on_android
             && self.import_error == other.import_error
             && self.names_differ == other.names_differ
+            && self.blocked == other.blocked
+            && self.can_block == other.can_block
+            && self.call_log_missing == other.call_log_missing
+            && self.replies == other.replies
     }
 }
 
@@ -262,6 +279,15 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
         rows: vec![
             Row::new(RowId::Proximity, "Proximity screen-off", Control::Toggle),
             flip,
+            Row::new(
+                RowId::Replies,
+                "Quick replies",
+                Control::Link {
+                    value: Some(key.replies.to_string().into()),
+                    icon: Icon::LucideChevronRight,
+                },
+            )
+            .note("Texts to decline a call with"),
             Row::new(
                 RowId::VibrateConnect,
                 "Vibrate when call connects",
@@ -326,6 +352,35 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
             ),
         ],
         footer: None,
+    });
+
+    let mut blocking = vec![Row::new(
+        RowId::Blocked,
+        "Blocked numbers",
+        Control::Link {
+            value: Some(match (key.can_block, key.blocked) {
+                (false, _) => "Unavailable".into(),
+                (true, Some(n)) => n.to_string().into(),
+                (true, None) => "".into(),
+            }),
+            icon: Icon::LucideChevronRight,
+        },
+    )];
+    if key.call_log_missing {
+        // The Blocked calls view reads the call log: ask for it right here.
+        blocking.push(Row::new(
+            RowId::BlockedAccess,
+            "Allow call log access",
+            Control::Link {
+                value: Some("Grant access".into()),
+                icon: Icon::LucideChevronRight,
+            },
+        ));
+    }
+    out.push(Section {
+        title: "Blocking",
+        rows: blocking,
+        footer: Some("Blocked numbers are shared with the phone and your messages app."),
     });
 
     if key.sims.visible() {
@@ -457,6 +512,30 @@ fn aria_for(row: &Row, settings: &Settings, system_tones: bool) -> SharedString 
     .into()
 }
 
+/// A page pushed over the Settings list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Sub {
+    Blocked,
+    Replies,
+}
+
+impl Sub {
+    /// Ids of this page's controls start with this (the touch router needs it).
+    pub const fn prefix(self) -> &'static str {
+        match self {
+            Self::Blocked => "set-bk-",
+            Self::Replies => "set-qr-",
+        }
+    }
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Blocked => "Blocked numbers",
+            Self::Replies => "Quick replies",
+        }
+    }
+}
+
 /// The page's state.
 pub(crate) struct SettingsUi {
     pub open: bool,
@@ -478,6 +557,10 @@ pub(crate) struct SettingsUi {
     pub import_error: Option<&'static str>,
     /// Contacts whose alternative name differs from the primary one.
     pub names_differ: bool,
+    /// The second-level page pushed over the list (stories 17.5, 18.3).
+    pub sub: Option<Sub>,
+    sub_shown: bool,
+    sub_enter: Spring,
     /// Desktop preview: row ids to tap, one per `I` key.
     #[cfg(not(target_os = "android"))]
     pub preview_taps: std::collections::VecDeque<String>,
@@ -501,6 +584,9 @@ impl Default for SettingsUi {
             scroll_gen: 0,
             import_error: None,
             names_differ: true,
+            sub: None,
+            sub_shown: false,
+            sub_enter: Spring::new(0.0, motion_tokens::appear()).with_epsilon(0.002),
             #[cfg(not(target_os = "android"))]
             preview_taps: std::env::var("ROVSTI_PREVIEW_TAPS")
                 .map(|v| v.split(',').map(str::to_owned).collect())
@@ -528,6 +614,54 @@ impl SettingsUi {
     /// Anything of the page is on screen.
     pub fn covers(&self) -> bool {
         self.shown
+    }
+
+    /// A second-level page is open (or still leaving).
+    pub fn sub_open(&self) -> bool {
+        self.sub.is_some()
+    }
+
+    /// 0 when the second-level page is away, 1 when it has settled.
+    pub fn sub_progress(&self) -> f32 {
+        if self.reduced && !self.sub_shown {
+            return 0.0;
+        }
+        self.sub_enter.value.clamp(0.0, 1.0)
+    }
+
+    pub fn open_sub(&mut self, sub: Sub, reduced: bool) {
+        self.sub = Some(sub);
+        self.sub_shown = true;
+        if reduced {
+            self.sub_enter.snap(1.0);
+        } else {
+            self.sub_enter.snap(0.0);
+            self.sub_enter.set_target(1.0);
+        }
+    }
+
+    pub fn close_sub(&mut self, reduced: bool) {
+        if self.sub.is_none() {
+            return;
+        }
+        self.sub_shown = false;
+        if reduced {
+            self.sub_enter.snap(0.0);
+        } else {
+            self.sub_enter.set_target(0.0);
+        }
+        if reduced {
+            self.sub = None;
+        }
+    }
+
+    /// Whether a touch on `id` belongs to the page now showing. With a
+    /// second-level page up, only its own controls (and sheets) react.
+    pub fn owns(&self, id: &str) -> bool {
+        match self.sub {
+            Some(sub) => id.starts_with(sub.prefix()) || id.starts_with("sheet-"),
+            None => id.starts_with("set-") || id.starts_with("sheet-"),
+        }
     }
 
     pub fn is_open(&self) -> bool {
@@ -571,6 +705,9 @@ impl SettingsUi {
     pub fn close_now(&mut self) {
         self.open = false;
         self.shown = false;
+        self.sub = None;
+        self.sub_shown = false;
+        self.sub_enter.snap(0.0);
         self.enter.snap(0.0);
     }
 
@@ -587,6 +724,12 @@ impl SettingsUi {
             }
         }
         moving |= self.gear.tick(dt);
+        if self.sub.is_some() {
+            moving |= self.sub_enter.tick(dt);
+            if !self.sub_shown && self.sub_enter.value < 0.002 && self.sub_enter.is_settled() {
+                self.sub = None;
+            }
+        }
         if self.shown && !self.open && self.progress() <= 0.002 && !moving_fade(self) {
             self.shown = false;
         }
@@ -627,7 +770,43 @@ impl PhoneApp {
 
     pub(crate) fn settings_close(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let reduced = window.prefers_reduced_motion();
+        if self.settings.sub_open() {
+            self.settings_close_sub(window, cx);
+        }
         self.settings.close(reduced);
+        self.update_back(window);
+        cx.notify();
+    }
+
+    /// Pushes a second-level page over the list (S24 again, 28 px and a fade).
+    pub(crate) fn settings_open_sub(
+        &mut self,
+        sub: Sub,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.settings.sub_open() {
+            return;
+        }
+        self.settings.open_sub(sub, window.prefers_reduced_motion());
+        match sub {
+            Sub::Blocked => self.blocked_opened(cx),
+            Sub::Replies => self.replies_opened(cx),
+        }
+        self.presses.release_all();
+        self.update_back(window);
+        cx.notify();
+    }
+
+    pub(crate) fn settings_close_sub(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(sub) = self.settings.sub else { return };
+        self.settings.close_sub(window.prefers_reduced_motion());
+        window.blur();
+        match sub {
+            Sub::Blocked => self.blocked_closed(cx),
+            Sub::Replies => self.replies_closed(cx),
+        }
+        self.presses.release_all();
         self.update_back(window);
         cx.notify();
     }
@@ -643,6 +822,13 @@ impl PhoneApp {
             on_android: cfg!(target_os = "android"),
             import_error: self.settings.import_error,
             names_differ: self.settings.names_differ,
+            blocked: match backend.blocklist() {
+                crate::backend::Load::Ready(state) => Some(state.rows.len()),
+                _ => None,
+            },
+            can_block: backend.can_block_here(),
+            call_log_missing: !backend.permissions().phone.is_granted(),
+            replies: backend.prefs().quick_replies.len(),
         };
         let system_tones = key.facts.system_keypad_tones;
         for row in [
@@ -681,6 +867,10 @@ impl PhoneApp {
             self.settings_close(window, cx);
             return;
         }
+        if id == "set-bk-back" || id == "set-qr-back" {
+            self.settings_close_sub(window, cx);
+            return;
+        }
         let tapped = self
             .settings
             .sections
@@ -696,7 +886,15 @@ impl PhoneApp {
                         .map(|i| (r.id, Some(i)))
                 }
             });
-        let Some((row, segment)) = tapped else { return };
+        let Some((row, segment)) = tapped else {
+            // Not a row of the list: a control of the page pushed over it.
+            if id.starts_with("set-bk-") {
+                self.blocked_tap(id, window, cx);
+            } else if id.starts_with("set-qr-") {
+                self.replies_tap(id, window, cx);
+            }
+            return;
+        };
         let enabled = self
             .settings
             .sections
@@ -765,6 +963,9 @@ impl PhoneApp {
             (RowId::EmergencyInfo, _) => {
                 self.open_system_page(rovsti_android::telecom::SystemPage::EmergencyInfo, cx);
             }
+            (RowId::Blocked, _) => self.settings_open_sub(Sub::Blocked, window, cx),
+            (RowId::Replies, _) => self.settings_open_sub(Sub::Replies, window, cx),
+            (RowId::BlockedAccess, _) => self.blocked_grant(cx),
             (RowId::Export, _) => self.backup_export(cx),
             (RowId::Import, _) => self.backup_import(cx),
             _ => {}
@@ -834,6 +1035,9 @@ impl PhoneApp {
     pub(crate) fn sync_settings_live(&mut self, cx: &mut Context<Self>) {
         if self.settings.covers() {
             self.sync_settings_rows(cx, false);
+            if self.settings.sub == Some(Sub::Blocked) {
+                self.blocked_sync(cx);
+            }
         }
     }
 
@@ -1181,6 +1385,7 @@ impl PhoneApp {
     pub(crate) fn settings_overlay(
         &mut self,
         theme: Theme,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if !self.settings.covers() {
@@ -1286,6 +1491,85 @@ impl PhoneApp {
                         .child(title)
                         .child(list),
                 )
+                .children(self.settings_sub_overlay(theme, window, cx))
+                .into_any_element(),
+        )
+    }
+
+    /// The page pushed over the list: the glass Back button, the large title and
+    /// the page's own body, all inside one absolute layer so nothing under it moves.
+    fn settings_sub_overlay(
+        &mut self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let sub = self.settings.sub?;
+        let colors = theme::colors(theme);
+        let p = self.settings.sub_progress();
+        let reduced = self.settings.reduced;
+        let slide = if reduced { 0.0 } else { 28.0 * (1.0 - p) };
+        let back_id: &'static str = match sub {
+            Sub::Blocked => "set-bk-back",
+            Sub::Replies => "set-qr-back",
+        };
+        let back_press = self.presses.value(back_id);
+        let back = div()
+            .id(back_id)
+            .role(Role::Button)
+            .aria_label("Back")
+            .size(px(44.0))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    this.presses.down(back_id);
+                    this.settings_tap(back_id, window, cx);
+                }),
+            )
+            .child(glass_icon_button(
+                theme,
+                Icon::LucideChevronLeft,
+                back_press,
+                false,
+            ))
+            .child(touch_surface(Self::touch_listener(
+                cx,
+                Some(back_id.into()),
+            )));
+        let title = div()
+            .px(px(16.0))
+            .pt(px(4.0))
+            .pb(px(8.0))
+            .flex_none()
+            .text_size(typography::LARGE_TITLE.size)
+            .line_height(typography::LARGE_TITLE.line)
+            .font_weight(typography::LARGE_TITLE.weight)
+            .text_color(colors.label)
+            .child(sub.title());
+        let body = match sub {
+            Sub::Blocked => self.blocked_body(theme, window, cx),
+            Sub::Replies => self.replies_body(theme, window, cx),
+        };
+        Some(
+            div()
+                .id("settings-sub")
+                .absolute()
+                .inset_0()
+                .occlude()
+                .opacity(p)
+                .child(backdrop(theme, theme::accent_glow(theme)))
+                .child(
+                    div()
+                        .relative()
+                        .left(px(slide))
+                        .size_full()
+                        .flex()
+                        .flex_col()
+                        .child(div().h(px(54.0)).flex_none())
+                        .child(div().px(px(12.0)).h(px(44.0)).flex_none().child(back))
+                        .child(title)
+                        .child(body),
+                )
                 .into_any_element(),
         )
     }
@@ -1319,6 +1603,10 @@ mod tests {
             on_android: true,
             import_error: None,
             names_differ: true,
+            blocked: Some(2),
+            can_block: true,
+            call_log_missing: false,
+            replies: 3,
         }
     }
 
@@ -1336,6 +1624,7 @@ mod tests {
                 "Calls",
                 "Sounds and haptics",
                 "Display",
+                "Blocking",
                 "Data",
                 "System shortcuts"
             ]

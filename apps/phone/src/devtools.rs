@@ -321,6 +321,21 @@ impl PhoneApp {
                     }
                 }
             }
+            // Epic 17: `!` long-presses the first Recents row (the menu), `@` taps its Block
+            // (or Unblock) row, `#`-free: `$` opens Blocked numbers, `%` its second segment.
+            '!' => self.recents_menu_open(0, window, cx),
+            '@' => self.row_menu_tap("rm-block", window, cx),
+            // `$` opens Blocked numbers (after `Q`), `%` its Blocked calls segment, `&` unblocks
+            // its first row, `|` types "0532 111 22 33" into the add field and taps Block.
+            '$' => self.settings_open_sub(crate::settings_ui::Sub::Blocked, window, cx),
+            '%' => self.blocked_tap("set-bk-seg-1", window, cx),
+            '&' => self.blocked_tap("set-bk-un-0", window, cx),
+            '|' => {
+                self.blocked
+                    .field
+                    .update(cx, |f, cx| f.set("0532 111 22 33", cx));
+                self.blocked_tap("set-bk-add", window, cx);
+            }
             'z' => {
                 let reduced = window.prefers_reduced_motion();
                 self.celebrate.observe(false, reduced);

@@ -15,6 +15,8 @@ mod addcall;
 mod aura;
 mod backend;
 mod backup_ui;
+mod block_ui;
+mod blocked_ui;
 mod contacts;
 #[cfg(not(target_os = "android"))]
 mod devtools;
@@ -32,6 +34,7 @@ mod perf_harness;
 mod perf_run;
 mod photos;
 mod recents;
+mod replies_ui;
 mod route;
 mod sample;
 mod settings_ui;
@@ -60,7 +63,7 @@ use rovsti_ui::{
     moments::Fade,
     motion::{Entrance, Motion, Presses},
     motion_tokens,
-    notice_pill::NoticePill,
+    notice_pill::{NoticePill, PillEvent},
     sheet::Sheet,
     spring::Spring,
     tab_bar::{Tab, TabBar, TabBarView, content_bottom_inset},
@@ -187,6 +190,12 @@ struct PhoneApp {
     sim: sim_ui::SimUi,
     /// The Notice pill (S28): confirmations and reasons, never in the layout.
     pill: NoticePill,
+    /// What the pill's trailing button does, with the token of the pill it belongs to.
+    pill_action: Option<(u64, block_ui::PillAction)>,
+    /// The Recents row menu and S27 (Epic 17).
+    row_menu: block_ui::RowMenu,
+    /// The Blocked numbers page behind Settings (stories 17.5, 17.6).
+    blocked: blocked_ui::BlockedUi,
 
     /// The Recents tab: row view-models, scroll and the seen-timer.
     recents: RecentsView,
@@ -285,6 +294,8 @@ impl PhoneApp {
         }
         let contacts_view = ContactsView::new(cx);
         let search_field = contacts_view.field.clone();
+        let blocked_ui = blocked_ui::BlockedUi::new(cx);
+        let blocked_field = blocked_ui.field.clone();
         let subscriptions = vec![
             cx.observe_in(&backend, window, |this, _, window, cx| {
                 this.sync_restore(cx);
@@ -298,6 +309,10 @@ impl PhoneApp {
                 cx.notify();
             }),
             cx.observe_window_appearance(window, |_, _, cx| cx.notify()),
+            // Typing in the add field of the Blocked numbers page clears its error.
+            cx.observe_in(&blocked_field, window, |this, _, window, cx| {
+                this.blocked_field_changed(window, cx);
+            }),
             // Typing in the Contacts search field filters the list.
             cx.observe_in(&search_field, window, |this, _, window, cx| {
                 this.contacts_field_changed(window, cx);
@@ -397,6 +412,9 @@ impl PhoneApp {
             setting_failed_seen: 0,
             sim: sim_ui::SimUi::default(),
             pill: NoticePill::new(),
+            pill_action: None,
+            row_menu: block_ui::RowMenu::new(),
+            blocked: blocked_ui,
             back_enabled: false,
             recents: RecentsView::new(),
             contacts: contacts_view,
@@ -588,11 +606,15 @@ impl PhoneApp {
     fn on_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.incoming.covers() {
             // Back does nothing while a call rings: it must not look like a decline.
+        } else if self.row_menu.is_open() {
+            self.row_menu_close(window, cx);
         } else if self.route.is_open() {
             // The route list closes first.
             self.route_close(window, cx);
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
+        } else if self.settings.sub_open() {
+            self.settings_close_sub(window, cx);
         } else if self.settings.is_open() {
             self.settings_close(window, cx);
         } else if self.contacts.typing {
@@ -608,6 +630,7 @@ impl PhoneApp {
     fn update_back(&mut self, window: &mut Window) {
         let call_only = self.incall.call_only;
         let want = self.incoming.wants_back()
+            || self.row_menu.is_open()
             || self.route.is_open()
             || self.sheet.is_open()
             || self.settings.is_open()
@@ -639,6 +662,12 @@ impl PhoneApp {
     }
 
     fn select_tab(&mut self, index: usize, cx: &mut Context<Self>) {
+        if self.row_menu.is_open() {
+            // A tap outside the menu only puts it away.
+            self.row_menu.close();
+            cx.notify();
+            return;
+        }
         self.tabs.press();
         let from = self.tabs.selected();
         if self.tabs.select(index) {
@@ -676,9 +705,7 @@ impl PhoneApp {
                 // Under the open sheet only the sheet's own buttons react, and
                 // under the In-Call screen only its own controls.
                 // The Settings page owns the screen: only its own controls (and sheets) react.
-                let on_settings = id
-                    .as_deref()
-                    .is_some_and(|i| i.starts_with("set-") || i.starts_with("sheet-"));
+                let on_settings = id.as_deref().is_some_and(|i| self.settings.owns(i));
                 if self.settings.covers() && !on_settings {
                     return;
                 }
@@ -811,6 +838,8 @@ impl PhoneApp {
         moving |= self.incoming.tick(dt);
         moving |= self.incoming.tick_real(real);
         moving |= self.recents.tick(dt);
+        moving |= self.row_menu.tick(dt);
+        moving |= self.blocked.tick(dt);
         moving |= self.notice_h.tick(dt);
         moving |= self.tabs_away.tick(dt);
         moving |= self.pill_in.tick(dt);
@@ -949,9 +978,11 @@ impl PhoneApp {
         self.pill.render(
             theme,
             self.pill_bottom(),
-            move |pointer, position, _, cx| {
+            move |pointer, position, window, cx| {
                 entity.update(cx, |this, cx| {
-                    this.pill.pointer(pointer, position);
+                    if this.pill.pointer(pointer, position) == PillEvent::Action {
+                        this.pill_fired(window, cx);
+                    }
                     cx.notify();
                 });
             },
@@ -1133,6 +1164,7 @@ impl Render for PhoneApp {
         self.contacts_sync_focus(window, cx);
         self.sync_notice(cx);
         self.sync_pill(cx);
+        self.sync_row_menu(cx);
         self.sync_settings_frame(window, cx);
         self.sync_dial_match(cx);
         let mut motion = std::mem::take(&mut self.motion);
@@ -1209,8 +1241,9 @@ impl Render for PhoneApp {
                         )
                 }))
                 .child(self.keyfx.clone())
-                .children(self.settings_overlay(theme, cx))
-                .children(sheet);
+                .children(self.settings_overlay(theme, window, cx))
+                .children(sheet)
+                .children(self.row_menu_overlay(theme, window, cx));
         }
         #[cfg(not(target_os = "android"))]
         let root = root.child(self.dev_switcher(theme, cx));

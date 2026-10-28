@@ -224,10 +224,10 @@ development_status:
   epic-17: in-progress
   17-1-kotlin-blocklist-block_guard-and-spike-s6: review
   17-2-blocked-state-in-the-app-recents-exclusion-badge-and-pulls: review
-  17-3-recents-row-menu-and-the-block-flow-with-s27: backlog
-  17-4-block-from-the-incoming-screen-after-a-call-and-the-blocked: backlog
-  17-5-blocked-numbers-page-in-settings: backlog
-  17-6-blocked-calls-view-and-reasons: backlog
+  17-3-recents-row-menu-and-the-block-flow-with-s27: review
+  17-4-block-from-the-incoming-screen-after-a-call-and-the-blocked: review
+  17-5-blocked-numbers-page-in-settings: review
+  17-6-blocked-calls-view-and-reasons: review
   epic-17-retrospective: optional
 
   epic-18: in-progress

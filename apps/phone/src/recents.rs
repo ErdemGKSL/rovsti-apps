@@ -117,6 +117,26 @@ pub(crate) struct SimBadge {
 }
 
 impl RowVm {
+    /// A row for a number that has no call-log row of its own (the Blocked
+    /// calls view opens the number sheet with it).
+    pub(crate) fn for_number(number: SharedString, title: SharedString, named: bool) -> Self {
+        Self {
+            sim: None,
+            aria: title.clone(),
+            title,
+            count: None,
+            subtitle: SharedString::default(),
+            time: SharedString::default(),
+            direction: Direction::Unknown,
+            missed: false,
+            callable: !number.trim().is_empty(),
+            number,
+            hue: None,
+            monogram: None,
+            named,
+        }
+    }
+
     fn build(v: RowView, sims: &SimInfo) -> Self {
         let account = v
             .account_key
@@ -305,6 +325,10 @@ impl PhoneApp {
     /// Pulls the backend's call log into the view. Rebuilds the row
     /// view-models only when the snapshot actually changed.
     pub(crate) fn sync_recents(&mut self, cx: &mut Context<Self>) {
+        // S27 is playing over a row: the list holds still until it ends.
+        if self.row_menu.s27.is_some() {
+            return;
+        }
         let load = self.backend.read(cx).call_log();
         match load {
             Load::Ready(log) => {
@@ -531,6 +555,7 @@ impl PhoneApp {
             || self.sheet.is_visible()
             || self.incall.covers()
             || self.incoming.covers()
+            || self.row_menu.is_visible()
             || self.recents.state != State::Ready
     }
 
@@ -599,7 +624,7 @@ impl PhoneApp {
                                             HapticFeedback::LongPress,
                                         );
                                         this.presses.release_all();
-                                        this.recents_info(index, window, cx);
+                                        this.recents_menu_open(index, window, cx);
                                     }
                                 })
                                 .ok();
@@ -735,6 +760,18 @@ impl PhoneApp {
         default_dialer && matches!(placement, Placement::Placed | Placement::Requesting)
     }
 
+    /// A row's number, the name to show for it and its top edge in window
+    /// coordinates (for the row menu).
+    pub(crate) fn recents_row_facts(
+        &self,
+        index: usize,
+    ) -> Option<(SharedString, SharedString, f32)> {
+        let row = self.recents.rows.get(index)?;
+        let bounds = self.recents.bounds.get();
+        let top = f32::from(bounds.origin.y) + index as f32 * ROW_H - self.recents.scrolled();
+        Some((row.number.clone(), row.title.clone(), top))
+    }
+
     fn recents_info(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(row) = self.recents.rows.get(index) else {
             return;
@@ -762,6 +799,9 @@ impl PhoneApp {
         match id {
             "rc-grant" => self.recents_grant(cx),
             "rc-retry" => self.backend.update(cx, |b, cx| b.retry_call_log(cx)),
+            "set-bk-retry" | "set-bk-grant" => {
+                self.blocked_tap_state(id, cx);
+            }
             other => self.contacts_pill(other, cx),
         }
     }
@@ -897,7 +937,9 @@ impl PhoneApp {
                         }
                         _ => (0.0, 0.0),
                     };
-                    let row = recents_row(theme, i, vm, row_press, info_press, r.sims.visible());
+                    let fx = self.row_fx(i);
+                    let row =
+                        recents_row(theme, i, vm, row_press, info_press, r.sims.visible(), fx);
                     if live {
                         live_row(row, i, r.inserted, r.fresh, progress)
                     } else {
@@ -1236,6 +1278,7 @@ fn recents_row(
     row_press: f32,
     info_press: f32,
     sim_slot: bool,
+    fx: Option<crate::block_ui::RowFx>,
 ) -> AnyElement {
     let colors = theme::colors(theme);
     let danger = call_colors(theme).danger;
@@ -1257,7 +1300,7 @@ fn recents_row(
         .w_full()
         .flex()
         .items_center()
-        .opacity(if vm.callable { 1.0 } else { 0.6 })
+        .opacity(if vm.callable { 1.0 } else { 0.6 } * fx.map_or(1.0, |fx| fx.alpha))
         // Press tint: inset, rounded, springs in with the finger.
         .when(held > 0.002, |row| {
             row.child(
@@ -1284,7 +1327,36 @@ fn recents_row(
                 .gap(px(12.0))
                 .pl(metrics::ROW_INSET)
                 .pr(px(4.0))
-                .child(avatar_view(theme, vm, AVATAR))
+                .child(match fx {
+                    // S27: the avatar greys and a ring with a slash settles over it.
+                    Some(fx) if fx.ring > 0.0 => div()
+                        .relative()
+                        .flex_none()
+                        .size(px(AVATAR))
+                        .child(avatar_view(theme, vm, AVATAR))
+                        .child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .rounded_full()
+                                .bg(gpui::Hsla {
+                                    a: 0.85 * fx.ring,
+                                    ..colors.fill
+                                })
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    svg()
+                                        .path(Icon::LucideBan.path())
+                                        .size(px(AVATAR * (1.4 - 0.4 * fx.ring)))
+                                        .opacity(fx.ring)
+                                        .text_color(PhoneApp::s27_ink(theme)),
+                                ),
+                        )
+                        .into_any_element(),
+                    _ => avatar_view(theme, vm, AVATAR).into_any_element(),
+                })
                 .child(
                     div()
                         .flex_1()

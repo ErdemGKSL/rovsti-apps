@@ -625,6 +625,14 @@ impl PhoneApp {
             backend::move_task_to_back();
         }
         self.presses.release_all();
+        // Story 17.4: after a call that rang and ended, the pill offers "Block". Never over
+        // the keyguard, and deliberately never while the call rings.
+        if let Some(view) = self.incoming.view.clone()
+            && !self.incoming.began_locked
+            && !self.incoming.locked
+        {
+            self.offer_block_after_call(&view.number, &view.name, false, cx);
+        }
         cx.notify();
     }
 

@@ -29,6 +29,7 @@ use rovsti_android::{
     permissions, providers, roles, telecom, xiaomi,
 };
 use rovsti_core::{
+    blocklist::BlockSet,
     call::CallModel,
     call_log::{self, RecentsRow},
     recents::LocaleTime,
@@ -170,6 +171,10 @@ impl<T> Clone for Load<T> {
 /// The call log as pulled, plus its grouped Recents rows.
 #[derive(Debug)]
 pub struct CallLog {
+    /// What the phone gave us, newest first. Rows of a blocked number are
+    /// left out of [`Self::entries`] and [`Self::rows`] but stay here, so
+    /// Unblock (and Undo) brings them straight back.
+    pub source: Arc<Vec<CallLogEntry>>,
     pub entries: Vec<CallLogEntry>,
     pub rows: Vec<RecentsRow>,
     /// Clock style of the phone, for the row time labels.
@@ -964,14 +969,17 @@ impl Backend {
     fn refresh_call_log(&mut self, cx: &mut Context<Self>) {
         self.log_pull += 1;
         let pull = self.log_pull;
+        let blocked = self.block_set();
         let task = cx.spawn(async move |this, cx| {
             let load = cx
                 .background_executor()
-                .spawn(async { load_call_log() })
+                .spawn(async move { load_call_log(&blocked) })
                 .await;
             this.update(cx, |this, cx| {
                 if this.log_pull == pull && !same_call_log(&this.call_log, &load) {
                     this.call_log = load;
+                    // The list may have changed while this pull ran.
+                    this.refilter_call_log();
                     cx.notify();
                 }
             })
@@ -1091,6 +1099,11 @@ pub fn request_permission(group: Group) -> Outcome {
 /// Opens the system "add contact" screen with `number` filled in.
 pub fn add_contact(number: &str) -> Outcome {
     Outcome::from(telecom::add_contact(number), "adding a contact")
+}
+
+/// Opens the system SMS app on `number` (an empty body).
+pub fn send_sms_to(number: &str) -> Outcome {
+    Outcome::from(telecom::send_sms_to(number), "message")
 }
 
 /// Opens the system Contacts app.
@@ -1226,15 +1239,44 @@ fn load<U>(
 fn same_call_log(current: &Load<CallLog>, pulled: &Load<CallLog>) -> bool {
     match (current, pulled) {
         (Load::Ready(old), Load::Ready(new)) => {
-            Arc::ptr_eq(old, new) || (old.entries == new.entries && old.locale == new.locale)
+            Arc::ptr_eq(old, new)
+                || (old.source == new.source
+                    && old.entries == new.entries
+                    && old.locale == new.locale)
         }
         _ => false,
     }
 }
 
 fn build_call_log(entries: Vec<CallLogEntry>, locale: LocaleTime) -> CallLog {
+    build_call_log_with(Arc::new(entries), locale, &BlockSet::default())
+}
+
+/// Builds the visible entries and rows: a number on the blocklist leaves
+/// Recents, the badge and the Frequent row at once (FR-53).
+fn build_call_log_with(
+    source: Arc<Vec<CallLogEntry>>,
+    locale: LocaleTime,
+    blocked: &BlockSet,
+) -> CallLog {
+    let entries: Vec<CallLogEntry> = if blocked.is_empty() {
+        source.as_ref().clone()
+    } else {
+        // One check per distinct number: a log repeats the same few callers.
+        let mut known: std::collections::HashMap<&str, bool> = std::collections::HashMap::new();
+        source
+            .iter()
+            .filter(|e| {
+                !*known
+                    .entry(e.number_raw.as_str())
+                    .or_insert_with(|| blocked.is_blocked(&e.number_raw))
+            })
+            .cloned()
+            .collect()
+    };
     let rows = call_log::group(&entries);
     CallLog {
+        source,
         entries,
         rows,
         locale,
@@ -1251,7 +1293,7 @@ fn local_time() -> LocaleTime {
     }
 }
 
-fn load_call_log() -> Load<CallLog> {
+fn load_call_log(blocked: &BlockSet) -> Load<CallLog> {
     // Desktop design preview of the Recents states.
     #[cfg(not(target_os = "android"))]
     match std::env::var("ROVSTI_PREVIEW_RECENTS").as_deref() {
@@ -1264,8 +1306,18 @@ fn load_call_log() -> Load<CallLog> {
     let locale = local_time();
     let result = load(
         providers::call_log(call_log::MAX_ENTRIES),
-        |json| decode(json, |p: CallLogPayload| build_call_log(p.entries, locale)),
-        || build_call_log(sample::preview_call_log(now_ms()), locale),
+        |json| {
+            decode(json, |p: CallLogPayload| {
+                build_call_log_with(Arc::new(p.entries), locale, blocked)
+            })
+        },
+        || {
+            build_call_log_with(
+                Arc::new(sample::preview_call_log(now_ms())),
+                locale,
+                blocked,
+            )
+        },
     );
     if let Load::Ready(log) = &result {
         log::info!(
@@ -1394,7 +1446,10 @@ mod tests {
     #[cfg(not(target_os = "android"))]
     #[test]
     fn desktop_serves_sample_data() {
-        assert!(matches!(load_call_log(), Load::Ready(_)));
+        assert!(matches!(
+            load_call_log(&BlockSet::default()),
+            Load::Ready(_)
+        ));
         assert!(matches!(load_contacts(), Load::Ready(_)));
         let Load::Ready(favorites) = load_favorites() else {
             panic!("expected sample favorites");

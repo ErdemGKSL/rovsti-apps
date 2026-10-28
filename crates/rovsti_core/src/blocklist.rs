@@ -7,7 +7,7 @@
 
 use crate::dial::is_emergency;
 use crate::phone_number::PhoneNumber;
-use crate::wire::{BlockedNumber, EmergencyList};
+use crate::wire::{BlockReason, BlockedNumber, CallLogEntry, EmergencyList};
 
 /// A blocked entry: a number we can match tolerantly, or a sender id that
 /// only matches itself.
@@ -101,6 +101,103 @@ pub fn can_block(raw: &str, emergency: &EmergencyList) -> Result<(), BlockRefusa
         return Err(BlockRefusal::NotANumber);
     }
     Ok(())
+}
+
+/// Why typed text cannot be added to the blocklist (story 17.5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum BlockInputError {
+    /// Letters, dial codes, nothing: "Not a valid number".
+    #[error("Not a valid number")]
+    Invalid,
+    /// Emergency numbers can never be blocked.
+    #[error("Emergency numbers can't be blocked")]
+    Emergency,
+}
+
+/// Turns what the owner typed into the string that is blocked: the canonical
+/// digits (with a leading `+` for an international number), after the FR-9
+/// dial-string rules. Separators are accepted, letters are not.
+pub fn parse_input(typed: &str, emergency: &EmergencyList) -> Result<String, BlockInputError> {
+    let number = PhoneNumber::parse(typed.trim()).map_err(|_| BlockInputError::Invalid)?;
+    match can_block(number.as_str(), emergency) {
+        Ok(()) => Ok(number.as_str().to_owned()),
+        Err(BlockRefusal::Emergency) => Err(BlockInputError::Emergency),
+        Err(_) => Err(BlockInputError::Invalid),
+    }
+}
+
+/// What one row of the Blocked numbers page says (stories 17.5, 17.6).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockedLine {
+    pub title: String,
+    pub subtitle: String,
+    /// What TalkBack reads.
+    pub aria: String,
+}
+
+/// The number as a person reads it: grouped when it parses, as stored when
+/// it does not (a sender id).
+fn shown_number(raw: &str) -> String {
+    match PhoneNumber::parse(raw) {
+        Ok(n) => crate::call::format_number(&n),
+        Err(_) => raw.trim().to_owned(),
+    }
+}
+
+/// "Blocked by you" / "Blocked by the system"; nothing when the reason is
+/// not known.
+pub fn reason_text(reason: Option<BlockReason>) -> Option<&'static str> {
+    match reason? {
+        BlockReason::User => Some("Blocked by you"),
+        BlockReason::System => Some("Blocked by the system"),
+        BlockReason::Unknown => None,
+    }
+}
+
+/// A Numbers row: the contact's name if the number matches, else the number;
+/// the subtitle is the number, or "Blocked number" when the title already is.
+pub fn numbers_line(row: &BlockedNumber, contact_name: Option<&str>) -> BlockedLine {
+    let raw = if row.number_raw.trim().is_empty() {
+        row.normalized.as_str()
+    } else {
+        row.number_raw.as_str()
+    };
+    let number = shown_number(raw);
+    let (title, subtitle) = match contact_name.filter(|n| !n.trim().is_empty()) {
+        Some(name) => (name.to_owned(), number),
+        None => (number, "Blocked number".to_owned()),
+    };
+    let aria = format!("{title}, {subtitle}. Unblock");
+    BlockedLine {
+        title,
+        subtitle,
+        aria,
+    }
+}
+
+/// A Blocked calls row. `time` is the Recents time label of the call.
+pub fn call_line(entry: &CallLogEntry, contact_name: Option<&str>, time: &str) -> BlockedLine {
+    let number = if entry.number_raw.trim().is_empty() {
+        "Unknown number".to_owned()
+    } else {
+        shown_number(&entry.number_raw)
+    };
+    let title = contact_name
+        .filter(|n| !n.trim().is_empty())
+        .map_or(number, str::to_owned);
+    let subtitle = reason_text(entry.block_reason)
+        .unwrap_or_default()
+        .to_owned();
+    let aria = if subtitle.is_empty() {
+        format!("{title}, blocked call, {time}")
+    } else {
+        format!("{title}, {subtitle}, {time}")
+    };
+    BlockedLine {
+        title,
+        subtitle,
+        aria,
+    }
 }
 
 #[cfg(test)]
@@ -206,5 +303,88 @@ mod tests {
         assert_eq!(can_block("", &tr), Err(BlockRefusal::NoNumber));
         assert_eq!(can_block("  ", &tr), Err(BlockRefusal::NoNumber));
         assert_eq!(can_block("*#06#", &tr), Err(BlockRefusal::NotANumber));
+    }
+
+    #[test]
+    fn typed_numbers_are_cleaned_and_checked() {
+        let list = EmergencyList::default();
+        assert_eq!(
+            parse_input(" 0532 123-45-67 ", &list).as_deref(),
+            Ok("05321234567")
+        );
+        assert_eq!(
+            parse_input("+90 (532) 123 45 67", &list).as_deref(),
+            Ok("+905321234567")
+        );
+        assert_eq!(
+            parse_input("00 49 151 2345678", &list).as_deref(),
+            Ok("+491512345678")
+        );
+    }
+
+    #[test]
+    fn letters_codes_and_nothing_are_not_a_number() {
+        let list = EmergencyList::default();
+        for bad in ["", "   ", "abc", "05a5", "*#06#", "+", "1234567890123456"] {
+            assert_eq!(
+                parse_input(bad, &list),
+                Err(BlockInputError::Invalid),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_emergency_number_is_refused_by_name() {
+        let list = EmergencyList::default();
+        assert_eq!(parse_input("112", &list), Err(BlockInputError::Emergency));
+        assert_eq!(parse_input("911", &list), Err(BlockInputError::Emergency));
+    }
+
+    #[test]
+    fn a_numbers_row_prefers_the_contact_name() {
+        let r = BlockedNumber {
+            id: 1,
+            number_raw: "0532 123 45 67".into(),
+            normalized: "05321234567".into(),
+        };
+        let named = numbers_line(&r, Some("Ayse Yilmaz"));
+        assert_eq!(named.title, "Ayse Yilmaz");
+        assert!(named.subtitle.contains("532"));
+        let plain = numbers_line(&r, None);
+        assert_eq!(plain.subtitle, "Blocked number");
+        assert!(plain.title.contains("532"));
+        assert!(plain.aria.ends_with("Unblock"));
+    }
+
+    #[test]
+    fn a_sender_id_is_shown_as_stored() {
+        let r = BlockedNumber {
+            id: 2,
+            number_raw: "  Bank  ".into(),
+            normalized: String::new(),
+        };
+        assert_eq!(numbers_line(&r, None).title, "Bank");
+    }
+
+    #[test]
+    fn blocked_call_reasons_read_plainly() {
+        assert_eq!(reason_text(Some(BlockReason::User)), Some("Blocked by you"));
+        assert_eq!(
+            reason_text(Some(BlockReason::System)),
+            Some("Blocked by the system")
+        );
+        assert_eq!(reason_text(Some(BlockReason::Unknown)), None);
+        assert_eq!(reason_text(None), None);
+        let entry = CallLogEntry {
+            number_raw: String::new(),
+            block_reason: Some(BlockReason::System),
+            ..CallLogEntry::default()
+        };
+        let line = call_line(&entry, None, "Monday");
+        assert_eq!(line.title, "Unknown number");
+        assert_eq!(line.aria, "Unknown number, Blocked by the system, Monday");
+        let unknown = call_line(&CallLogEntry::default(), None, "9:41");
+        assert_eq!(unknown.subtitle, "");
     }
 }

@@ -42,6 +42,8 @@ use crate::{
 };
 
 /// "Call ended" holds this long; a failed call holds longer so it can be read.
+/// An answered incoming call shorter than this offers "Block" when it ends (story 17.4).
+const SHORT_CALL_MS: i64 = 15_000;
 const ENDED_HOLD: Duration = Duration::from_millis(1000);
 const FAILED_HOLD: Duration = Duration::from_millis(2000);
 const DIGIT_LINE: usize = 24;
@@ -86,6 +88,8 @@ pub struct CallView {
     /// The call came in (rang) rather than being placed here.
     pub incoming: bool,
     pub name: SharedString,
+    /// The number as Telecom gave it (empty for a private caller); never drawn as is.
+    pub number: SharedString,
     pub secondary: Option<SharedString>,
     pub monogram: Option<SharedString>,
     pub hue: Option<usize>,
@@ -184,6 +188,7 @@ impl CallView {
             state: call.call_state(),
             incoming: call.is_incoming,
             name: middle_truncate(&label, 22).into(),
+            number: call.number_raw.clone().into(),
             secondary,
             monogram: call
                 .display_name
@@ -1123,6 +1128,17 @@ impl PhoneApp {
             return;
         }
         ic.done_id = ic.last_id;
+        // Story 17.4: a short answered call from somebody calling in offers "Block".
+        let offer = ic
+            .view
+            .as_ref()
+            .filter(|v| {
+                v.incoming
+                    && !ic.began_locked
+                    && v.connect_time_ms > 0
+                    && backend::now_ms() - v.connect_time_ms < SHORT_CALL_MS
+            })
+            .map(|v| (v.number.clone(), v.name.clone()));
         ic.view = None;
         ic.last_id = None;
         ic.set_shown(false);
@@ -1134,6 +1150,9 @@ impl PhoneApp {
             backend::move_task_to_back();
         }
         self.presses.release_all();
+        if let Some((number, who)) = offer {
+            self.offer_block_after_call(&number, &who, false, cx);
+        }
         cx.notify();
     }
 

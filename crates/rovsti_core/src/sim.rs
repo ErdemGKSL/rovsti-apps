@@ -140,6 +140,15 @@ impl SimInfo {
         self.inner.accounts.iter().find(|a| &*a.key == key)
     }
 
+    /// Position of the account `key` names, for the Recents rows' one-time
+    /// lookup; `None` with one SIM or an unknown key.
+    pub fn index_of(&self, key: &str) -> Option<usize> {
+        if !self.visible() {
+            return None;
+        }
+        self.inner.accounts.iter().position(|a| &*a.key == key)
+    }
+
     /// "Ask every time" or the default SIM's title (Settings value).
     pub fn default_label(&self) -> &str {
         match self.default_key().and_then(|k| self.find(k)) {

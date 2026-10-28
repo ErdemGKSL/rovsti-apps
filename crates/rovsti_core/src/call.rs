@@ -9,7 +9,7 @@ use crate::phone_number::PhoneNumber;
 use crate::scene::SceneDiff;
 use crate::small_text::SmallText;
 pub use crate::wire::{AudioRoute, DisconnectCause};
-use crate::wire::{AudioState, CallSnapshot, WireCall, WireCallState};
+use crate::wire::{AudioState, CallSnapshot, NameFormat, WireCall, WireCallState};
 use std::borrow::Cow;
 
 /// A call's state with its disconnect cause folded in. `Copy`, so views can
@@ -59,6 +59,24 @@ pub struct CallModel {
     /// The last call that ended while the screen was up. Kotlin drops it from
     /// the next snapshot; the Ended overlay needs it until it has played.
     ended: Option<WireCall>,
+    /// The Name format setting (story 16.9): with `LastFirst` a call shows its
+    /// `display_name_alt`. The wire's two names are swapped in place, so every
+    /// view reads `display_name` as before.
+    format: NameFormat,
+}
+
+/// Swaps a call's names when the contact has a distinct alternative one.
+fn swap_names(call: &mut WireCall) {
+    let distinct = call
+        .display_name_alt
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|alt| {
+            !alt.is_empty() && Some(alt) != call.display_name.as_deref().map(str::trim)
+        });
+    if distinct && call.display_name.is_some() {
+        std::mem::swap(&mut call.display_name, &mut call.display_name_alt);
+    }
 }
 
 impl CallModel {
@@ -74,9 +92,12 @@ impl CallModel {
     ///
     /// Every snapshot is applied in order even when no frame is drawn, so the
     /// model never skips a state a view has not seen.
-    pub fn apply(&mut self, snapshot: CallSnapshot) -> SceneDiff {
+    pub fn apply(&mut self, mut snapshot: CallSnapshot) -> SceneDiff {
         if self.held_seq.is_some_and(|held| snapshot.seq <= held) {
             return SceneDiff::default();
+        }
+        if self.format == NameFormat::LastFirst {
+            snapshot.calls.iter_mut().for_each(swap_names);
         }
         self.held_seq = Some(snapshot.seq);
         let in_call = !snapshot.calls.is_empty();
@@ -99,6 +120,19 @@ impl CallModel {
             && self.ended.as_ref() != Some(call)
         {
             self.ended = Some(call.clone());
+        }
+    }
+
+    /// The Name format changed: the calls already held are restyled (the swap
+    /// is its own inverse), later snapshots are styled as they arrive.
+    pub fn set_name_format(&mut self, format: NameFormat) {
+        if self.format == format {
+            return;
+        }
+        self.format = format;
+        self.snapshot.calls.iter_mut().for_each(swap_names);
+        if let Some(ended) = &mut self.ended {
+            swap_names(ended);
         }
     }
 
@@ -454,6 +488,44 @@ mod tests {
         a.now_ms = 5_000;
         let diff = m.apply(a);
         assert!(diff.applied && !diff.changed());
+    }
+
+    #[test]
+    fn last_first_shows_the_alternative_name() {
+        let mut model = CallModel::new();
+        model.set_name_format(NameFormat::LastFirst);
+        let mut c = call(1, WireCallState::Active);
+        c.display_name = Some("Ayşe Yılmaz".into());
+        c.display_name_alt = Some("Yılmaz, Ayşe".into());
+        let mut s = snap(1);
+        s.calls = vec![c];
+        model.apply(s);
+        assert_eq!(
+            model.calls()[0].display_name.as_deref(),
+            Some("Yılmaz, Ayşe")
+        );
+        // Back to First Last restyles the held call.
+        model.set_name_format(NameFormat::FirstLast);
+        assert_eq!(
+            model.calls()[0].display_name.as_deref(),
+            Some("Ayşe Yılmaz")
+        );
+    }
+
+    #[test]
+    fn an_equal_or_missing_alternative_changes_nothing() {
+        let mut model = CallModel::new();
+        model.set_name_format(NameFormat::LastFirst);
+        let mut same = call(1, WireCallState::Active);
+        same.display_name = Some("Mehmet".into());
+        same.display_name_alt = Some("Mehmet".into());
+        let mut none = call(2, WireCallState::Holding);
+        none.display_name = Some("Zeynep".into());
+        let mut s = snap(1);
+        s.calls = vec![same, none];
+        model.apply(s);
+        assert_eq!(model.calls()[0].display_name.as_deref(), Some("Mehmet"));
+        assert_eq!(model.calls()[1].display_name.as_deref(), Some("Zeynep"));
     }
 
     #[test]

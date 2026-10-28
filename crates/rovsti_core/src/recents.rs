@@ -68,6 +68,8 @@ pub struct RowView {
     pub hue: Option<usize>,
     pub monogram: Option<char>,
     pub named: bool,
+    /// The SIM the newest call used (AD-26); the view resolves it to a chip.
+    pub account_key: Option<String>,
 }
 
 /// Time-zone offset and clock style of the phone, injected so tests and the
@@ -218,6 +220,7 @@ fn view(row: &RecentsRow, now_ms: i64, locale: LocaleTime) -> RowView {
         hue: avatar::hue_index(row.contact_id),
         monogram: name.and_then(avatar::monogram),
         named,
+        account_key: row.account_key.clone(),
     }
 }
 
@@ -401,5 +404,24 @@ mod tests {
     fn refresh_delta_unchanged_log_is_quiet() {
         let rows = group(&[entry(1, "0555 111 22 33", CallLogKind::Incoming, MIN, None)]);
         assert_eq!(refresh_delta(&rows, &rows), RefreshDelta::default());
+    }
+
+    #[test]
+    fn a_row_carries_the_account_of_its_newest_entry() {
+        let mut newest = entry(2, "0555 111 22 33", CallLogKind::Outgoing, MIN, None);
+        newest.account_key = Some("tel/pstn#2".into());
+        let mut older = entry(1, "0555 111 22 33", CallLogKind::Outgoing, 2 * MIN, None);
+        older.account_key = Some("tel/pstn#1".into());
+        let rows = group(&[newest, older]);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].account_key.as_deref(), Some("tel/pstn#2"));
+        let view = view(&rows[0], NOW, LocaleTime::default());
+        assert_eq!(view.account_key.as_deref(), Some("tel/pstn#2"));
+    }
+
+    #[test]
+    fn a_row_without_an_account_has_none() {
+        let rows = group(&[entry(1, "0555 111 22 33", CallLogKind::Missed, MIN, None)]);
+        assert_eq!(rows[0].account_key, None);
     }
 }

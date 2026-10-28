@@ -37,6 +37,7 @@ mod sample;
 mod settings_ui;
 mod setup_ui;
 mod signature;
+mod sim_ui;
 mod waiting_card;
 mod zone;
 mod zone_ui;
@@ -93,6 +94,8 @@ enum SheetKind {
     AddCall,
     /// What an import would replace (story 16.6).
     ImportPreview,
+    /// "Call with": the SIM chooser (story 16.4), drawn by `sim_overlay`.
+    SimChooser,
 }
 
 /// The line under the number field.
@@ -180,6 +183,8 @@ struct PhoneApp {
     settings: settings_ui::SettingsUi,
     backup: backup_ui::BackupUi,
     setting_failed_seen: u64,
+    /// The SIM chooser and the chip flight (stories 16.4, 16.5).
+    sim: sim_ui::SimUi,
     /// The Notice pill (S28): confirmations and reasons, never in the layout.
     pill: NoticePill,
 
@@ -285,6 +290,7 @@ impl PhoneApp {
                 this.sync_restore(cx);
                 this.sync_calls(window, cx);
                 this.sync_documents(window, cx);
+                this.sync_sim_selection(cx);
                 this.sync_settings_live(cx);
                 this.sync_recents(cx);
                 this.sync_contacts(cx);
@@ -389,6 +395,7 @@ impl PhoneApp {
             settings: settings_ui::SettingsUi::default(),
             backup: backup_ui::BackupUi::default(),
             setting_failed_seen: 0,
+            sim: sim_ui::SimUi::default(),
             pill: NoticePill::new(),
             back_enabled: false,
             recents: RecentsView::new(),
@@ -678,7 +685,9 @@ impl PhoneApp {
                 let on_incoming = id.as_deref().is_some_and(|i| i.starts_with("in-"));
                 let blocked_by_incoming = self.incoming.covers() != on_incoming;
                 // The Add call sheet's own keys, field and buttons work over the call.
-                let owned = id.as_deref().is_some_and(|i| self.add_call_owns(i));
+                let owned = id
+                    .as_deref()
+                    .is_some_and(|i| self.add_call_owns(i) || self.sim_owns(i));
                 let blocked_by_sheet = self.sheet.is_visible()
                     && !owned
                     && !id.as_deref().is_some_and(|i| i.starts_with("sheet-"));
@@ -729,6 +738,19 @@ impl PhoneApp {
                         );
                     } else if Self::acts_on_down(&id) {
                         self.activate(&id, window, cx);
+                    } else if let Some(n) = id
+                        .strip_prefix("sheet-cn-")
+                        .and_then(|n| n.parse::<u8>().ok())
+                        .filter(|_| self.sim_has_default(cx))
+                    {
+                        self.arm_hold(
+                            sim_ui::HOLD_MS,
+                            keypad::HoldAction::SimNumber(n),
+                            window,
+                            cx,
+                        );
+                    } else if &*id == "call" && self.sim_long_press_ready(cx) {
+                        self.arm_hold(sim_ui::HOLD_MS, keypad::HoldAction::SimChooser, window, cx);
                     } else if &*id == "set-title" {
                         self.arm_hold(
                             settings_ui::DIAG_AFTER_MS,
@@ -769,6 +791,7 @@ impl PhoneApp {
     fn tick(&mut self, dt: std::time::Duration, real: std::time::Duration) -> bool {
         let mut moving = self.tabs.tick(dt);
         moving |= self.settings.tick(dt, real);
+        moving |= self.sim.tick(dt);
         moving |= self.page_fade.tick(real);
         moving |= self.call_fade.tick(real);
         moving |= self.presses.tick(dt);
@@ -1064,7 +1087,7 @@ impl PhoneApp {
             SheetKind::Setup => self.setup_sheet(theme, window, cx),
             SheetKind::Diagnostics => self.diag_sheet(theme, window, cx),
             // Drawn over the In-Call screen by `add_call_overlay`.
-            SheetKind::AddCall => None,
+            SheetKind::AddCall | SheetKind::SimChooser => None,
             SheetKind::ImportPreview => {
                 if !self.sheet.is_visible() {
                     return None;
@@ -1115,6 +1138,7 @@ impl Render for PhoneApp {
         let mut motion = std::mem::take(&mut self.motion);
         motion.frame_timed(window, |dt, real| self.tick(dt, real));
         self.flights_ready(cx);
+        self.sim_flight_ready();
         self.motion = motion;
         #[cfg(any(feature = "perf", test))]
         self.perf_observe(window);
@@ -1138,6 +1162,7 @@ impl Render for PhoneApp {
             .update(cx, |view, cx| view.sync(tabs, theme, cx));
         let incall = self.render_incall(theme, window, cx);
         let add_call = self.add_call_overlay(theme, window, cx);
+        let sim_sheet = self.sim_overlay(theme, window, cx);
         let incoming = self.render_incoming(theme, cx);
         let tabs_visible = self.restored
             && !self.incall.hides_tabs()
@@ -1193,10 +1218,12 @@ impl Render for PhoneApp {
         let route = self.render_route(theme, window, cx);
         root.children(incall)
             .children(add_call)
+            .children(sim_sheet)
             .children(route)
             .children(pill)
             .children(incoming)
             .children(self.flight_layer(theme))
+            .children(self.sim_flight_layer(theme))
             .children(self.theme_veil())
     }
 }

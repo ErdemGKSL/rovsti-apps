@@ -15,7 +15,7 @@ use gpui::{
     Window, div, linear_color_stop, linear_gradient, prelude::*, px, svg, uniform_list,
 };
 use rovsti_core::{
-    contacts_view::{self, CallTarget, ContactVm, NumberVm},
+    contacts_view::{self, CallTarget, ContactVm, NameStyle, NumberVm},
     search::ContactIndex,
     wire::WireContact,
 };
@@ -116,8 +116,15 @@ pub(crate) fn list_key(prefix: &str, index: usize) -> rovsti_core::small_text::S
 fn rows_of<'a>(
     contacts: impl IntoIterator<Item = &'a WireContact>,
     query: &str,
+    style: NameStyle,
 ) -> Arc<[ContactRow]> {
-    contacts_view::build_rows(contacts, query)
+    // The list follows the Sort by setting; search results keep their ranking.
+    let contacts = if query.trim().is_empty() {
+        contacts_view::ordered(contacts, style)
+    } else {
+        contacts.into_iter().collect()
+    };
+    contacts_view::build_rows_styled(contacts, query, style)
         .into_iter()
         .map(ContactRow::from)
         .collect::<Vec<_>>()
@@ -165,6 +172,10 @@ pub(crate) struct ContactsView {
     section_starts: Arc<[u32]>,
     /// A search running on the background executor (large address books).
     search_task: Option<Task<()>>,
+    /// The Name format and Sort by the rows were built with (story 16.9).
+    style: NameStyle,
+    /// A re-sort running off the UI thread after a setting change.
+    sort_task: Option<Task<()>>,
 }
 
 /// Address books longer than this filter on the background executor.
@@ -183,6 +194,8 @@ impl ContactsView {
             all: Arc::from(Vec::new()),
             rows: Arc::from(Vec::new()),
             query: String::new(),
+            style: NameStyle::default(),
+            sort_task: None,
             field: cx.new(SearchField::new),
             seen_edits: 0,
             field_text: SharedString::default(),
@@ -333,7 +346,7 @@ impl StarFx {
 
 pub(crate) struct ContactSheet {
     star_fx: StarFx,
-    contact: ContactRow,
+    pub(crate) contact: ContactRow,
     /// Shown at once; reverts when the write fails.
     starred: bool,
     /// "Call {name}": only the numbers, no star or edit.
@@ -392,8 +405,22 @@ impl PhoneApp {
                     .index
                     .as_ref()
                     .is_some_and(|known| Arc::ptr_eq(known, index));
+                let style = self.name_style(cx);
+                if same && style != self.contacts.style {
+                    // Name format or Sort by changed: sort once, off the UI thread, swap the Arc.
+                    self.resort_contacts(Arc::clone(index), style, cx);
+                }
                 if !same {
-                    self.contacts.all = rows_of(index.all(), "");
+                    self.contacts.style = style;
+                    // The Display rows dim when no contact has a distinct alternative name (S11).
+                    self.settings.names_differ = index.all().any(|c| {
+                        c.display_name_alt
+                            .as_deref()
+                            .map(str::trim)
+                            .is_some_and(|alt| !alt.is_empty() && alt != c.display_name.trim())
+                    });
+                    self.contacts.sort_task = None;
+                    self.contacts.all = rows_of(index.all(), "", style);
                     self.contacts.index = Some(Arc::clone(index));
                     self.photos.forget_misses();
                     self.apply_contacts_query(true, cx);
@@ -418,7 +445,7 @@ impl PhoneApp {
                 .as_ref()
                 .is_some_and(|known| Arc::ptr_eq(known, list));
             if !same {
-                self.favorites.tiles = rows_of(list.iter(), "");
+                self.favorites.tiles = rows_of(list.iter(), "", self.name_style(cx));
                 self.favorites.source = Some(Arc::clone(list));
                 self.favorites.last_pressed = None;
             }
@@ -457,14 +484,15 @@ impl PhoneApp {
             let rows = Arc::clone(&self.contacts.all);
             self.set_contact_rows(rows);
         } else if index.len() <= SEARCH_OFF_THREAD_ABOVE {
-            let rows = rows_of(index.search(&text), &text);
+            let rows = rows_of(index.search(&text), &text, self.contacts.style);
             self.set_contact_rows(rows);
         } else {
+            let style = self.contacts.style;
             self.contacts.search_task = Some(cx.spawn(async move |this, cx| {
                 let query = text.clone();
                 let rows = cx
                     .background_executor()
-                    .spawn(async move { rows_of(index.search(&query), &query) })
+                    .spawn(async move { rows_of(index.search(&query), &query, style) })
                     .await;
                 this.update(cx, |this, cx| {
                     if this.contacts.query == text {
@@ -819,7 +847,7 @@ impl PhoneApp {
         let chooser = spec.ends_with('c');
         let id = spec.trim_end_matches('c').parse::<i64>().unwrap_or(1);
         let all = crate::sample::contacts();
-        if let Some(row) = rows_of(all.iter().filter(|c| c.id == id), "")
+        if let Some(row) = rows_of(all.iter().filter(|c| c.id == id), "", self.name_style(cx))
             .first()
             .cloned()
         {
@@ -833,7 +861,55 @@ impl PhoneApp {
             return None;
         };
         let found = index.match_number(number)?;
-        rows_of(std::iter::once(found), "").first().cloned()
+        rows_of(std::iter::once(found), "", self.name_style(cx))
+            .first()
+            .cloned()
+    }
+
+    /// The Name format and Sort by settings as the lists use them.
+    pub(crate) fn name_style(&self, cx: &gpui::App) -> NameStyle {
+        let settings = self.backend.read(cx).settings();
+        NameStyle {
+            format: settings.name_format,
+            sort: settings.sort_by,
+        }
+    }
+
+    /// Sorts and builds the Contacts rows for a new style off the UI thread
+    /// (once per setting change, never per frame), then swaps the `Arc`.
+    fn resort_contacts(
+        &mut self,
+        index: Arc<ContactIndex>,
+        style: NameStyle,
+        cx: &mut Context<Self>,
+    ) {
+        self.contacts.style = style;
+        self.contacts.sort_task = Some(cx.spawn(async move |this, cx| {
+            let rows = cx
+                .background_executor()
+                .spawn({
+                    let index = Arc::clone(&index);
+                    async move { rows_of(index.all(), "", style) }
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                if this.contacts.style == style {
+                    this.contacts.all = rows;
+                    this.contacts.sort_task = None;
+                    this.apply_contacts_query(true, cx);
+                    // Favorites and the open sheet take the new format at once.
+                    this.sync_contacts(cx);
+                    this.refresh_open_sheet();
+                    cx.notify();
+                }
+            })
+            .ok();
+        }));
+        // Favorites tiles are not sorted: restyle them now.
+        if let Load::Ready(list) = self.backend.read(cx).favorites() {
+            self.favorites.tiles = rows_of(list.iter(), "", style);
+        }
+        cx.notify();
     }
 
     fn sheet_note(&mut self, text: &'static str, cx: &mut Context<Self>) {
@@ -861,6 +937,10 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A hold already moved the sheet to the SIM chooser: the lift that follows is not a tap.
+        if self.sheet_kind == SheetKind::SimChooser {
+            return;
+        }
         let Some(sheet) = &mut self.contact_sheet else {
             return;
         };

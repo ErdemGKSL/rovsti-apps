@@ -23,7 +23,7 @@ use crate::PhoneApp;
 /// Long-press on the Setup title opens the page.
 pub(crate) const OPEN_AFTER_MS: u64 = 800;
 /// Probe groups with a probe behind them; the rest read "Not built yet".
-const REGISTERED: [&str; 2] = ["audio", "calls"];
+const REGISTERED: [&str; 5] = ["audio", "calls", "sim", "backup", "system"];
 const ROW_H: f32 = 48.0;
 const LOG_H: f32 = 168.0;
 
@@ -35,8 +35,20 @@ struct Done {
     lines: Vec<SharedString>,
 }
 
+/// Where the S13 round trip is (story 16.6): the owner drives two pickers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BackupStage {
+    Exporting,
+    Importing,
+}
+
+/// The tiny file the S13 check writes and reads back.
+const BACKUP_PROBE: &str = "{\"probe\":\"rovsti-s13\",\"n\":1}";
+
 #[derive(Default)]
 pub(crate) struct Diagnostics {
+    pub(crate) backup: Option<BackupStage>,
+    backup_lines: Vec<SharedString>,
     done: Vec<Done>,
     running: Option<&'static str>,
     /// "Copied" until the Notice pill takes over (14.3).
@@ -103,8 +115,104 @@ fn desktop_header() -> String {
 }
 
 impl PhoneApp {
+    /// S13: export a small file, import it back, compare. Driven by the
+    /// pickers, so it lives here and not in Kotlin.
+    fn diag_backup_start(&mut self, cx: &mut Context<Self>) {
+        self.diag.running = Some("backup");
+        self.diag.copied = false;
+        self.diag.backup_lines.clear();
+        let outcome = self.backend.update(cx, |b, cx| {
+            b.export_raw("rovsti-s13-probe.json", BACKUP_PROBE, cx)
+        });
+        if outcome.failed() {
+            self.diag_backup_finish("fail: export picker started (no activity answered)", cx);
+        } else {
+            self.diag.backup = Some(BackupStage::Exporting);
+            self.diag
+                .backup_lines
+                .push("info: choose a place to save the test file".into());
+        }
+        cx.notify();
+    }
+
+    fn diag_backup_finish(&mut self, last: &str, cx: &mut Context<Self>) {
+        self.diag.backup = None;
+        self.diag.backup_lines.push(last.to_owned().into());
+        let lines = std::mem::take(&mut self.diag.backup_lines);
+        let (p, f, u) = count(
+            &lines
+                .iter()
+                .map(|l| l.as_ref())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        self.diag.done.retain(|d| d.probe != "backup");
+        self.diag.done.push(Done {
+            probe: "backup",
+            summary: format!("{p} pass, {f} fail, {u} unknown").into(),
+            lines,
+        });
+        self.diag.running = None;
+        cx.notify();
+    }
+
+    /// A picker answered while the S13 check is waiting for it.
+    pub(crate) fn diag_backup_result(
+        &mut self,
+        result: rovsti_core::wire::DocumentResult,
+        cx: &mut Context<Self>,
+    ) {
+        use rovsti_core::wire::DocumentOp;
+        match (self.diag.backup, result.op) {
+            (Some(BackupStage::Exporting), DocumentOp::ExportBackup) => {
+                if !result.ok {
+                    let why = if result.error.is_some() {
+                        "fail"
+                    } else {
+                        "unknown"
+                    };
+                    self.diag_backup_finish(
+                        &format!(
+                            "{why}: export wrote a file (the picker was cancelled or refused)"
+                        ),
+                        cx,
+                    );
+                    return;
+                }
+                self.diag
+                    .backup_lines
+                    .push("pass: export wrote a file with no storage permission".into());
+                let outcome = self.backend.update(cx, |b, cx| b.import_backup(cx));
+                if outcome.failed() {
+                    self.diag_backup_finish("fail: import picker started", cx);
+                } else {
+                    self.diag.backup = Some(BackupStage::Importing);
+                    self.diag
+                        .backup_lines
+                        .push("info: now choose the test file you just saved".into());
+                }
+            }
+            (Some(BackupStage::Importing), DocumentOp::ImportBackup) => {
+                let verdict = match (result.ok, result.text.as_deref()) {
+                    (true, Some(text)) if text == BACKUP_PROBE => {
+                        "pass: import read back the same text"
+                    }
+                    (true, _) => "fail: import read back the same text (the contents differ)",
+                    (false, _) if result.error.is_some() => "fail: import read the file",
+                    (false, _) => "unknown: import picker was cancelled",
+                };
+                self.diag_backup_finish(verdict, cx);
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn diag_run(&mut self, probe: &'static str, cx: &mut Context<Self>) {
         if !REGISTERED.contains(&probe) || self.diag.running.is_some() {
+            return;
+        }
+        if probe == "backup" {
+            self.diag_backup_start(cx);
             return;
         }
         self.diag.running = Some(probe);
@@ -268,6 +376,7 @@ impl PhoneApp {
             .done
             .iter()
             .flat_map(|d| d.lines.iter().cloned())
+            .chain(self.diag.backup_lines.iter().cloned())
             .collect();
         let copy_id = SharedString::new_static("sheet-diag-copy");
         let press = self.presses.value(&copy_id);
@@ -399,8 +508,8 @@ mod tests {
     }
 
     #[test]
-    fn audio_and_calls_are_built_so_far() {
-        assert_eq!(REGISTERED, ["audio", "calls"]);
+    fn the_built_groups_so_far() {
+        assert_eq!(REGISTERED, ["audio", "calls", "sim", "backup", "system"]);
         assert!(GROUPS.iter().any(|(p, _)| *p == "audio"));
         assert!(GROUPS.iter().any(|(p, _)| *p == "calls"));
     }

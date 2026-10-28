@@ -56,6 +56,9 @@ pub struct RecentsRow {
     pub contact_id: Option<i64>,
     /// False for private/unknown numbers: nothing to call back.
     pub callable: bool,
+    /// The account of the newest entry that carried one (AD-26); resolved to a
+    /// SIM chip by `sim::SimInfo`, never parsed.
+    pub account_key: Option<String>,
 }
 
 /// How an entry's number is compared. Parsed once per entry.
@@ -121,6 +124,9 @@ pub fn group(entries: &[CallLogEntry]) -> Vec<RecentsRow> {
             if row.contact_id.is_none() {
                 row.contact_id = entry.contact_id;
             }
+            if row.account_key.is_none() {
+                row.account_key.clone_from(&entry.account_key);
+            }
             continue;
         }
         rows.push(RecentsRow {
@@ -134,6 +140,7 @@ pub fn group(entries: &[CallLogEntry]) -> Vec<RecentsRow> {
             label: entry.number_label.clone(),
             contact_id: entry.contact_id,
             callable: !matches!(key, Key::Private),
+            account_key: entry.account_key.clone(),
         });
         last_key = Some(key);
     }

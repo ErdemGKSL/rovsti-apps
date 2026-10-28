@@ -50,6 +50,37 @@ pub fn sort_key(contact: &WireContact, by: SortBy) -> String {
     fold(chosen)
 }
 
+/// Orders `contacts` (references) by the sort key of `by`, with letters before
+/// digits and symbols; equal keys keep their given order. The Contacts tab
+/// calls this once per setting change or payload swap, never per frame.
+pub fn sort_refs(contacts: &mut Vec<&WireContact>, by: SortBy) {
+    let mut keyed: Vec<(u8, String, usize)> = contacts
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            // Leading punctuation does not decide the place: "(Bank)" sorts as "Bank",
+            // the same way the section letter reads it.
+            let key = sort_key(c, by);
+            let key = key
+                .trim_start_matches(|ch: char| !ch.is_alphanumeric())
+                .to_owned();
+            (group(&key), key, i)
+        })
+        .collect();
+    keyed.sort();
+    let sorted: Vec<&WireContact> = keyed.into_iter().map(|(_, _, i)| contacts[i]).collect();
+    *contacts = sorted;
+}
+
+/// The name the section letter is taken from: the alternative (family-first)
+/// name when sorting by last name, else the primary one.
+pub fn section_name(contact: &WireContact, by: SortBy) -> &str {
+    match by {
+        SortBy::LastName => non_empty(&contact.display_name_alt).unwrap_or(&contact.display_name),
+        SortBy::FirstName => &contact.display_name,
+    }
+}
+
 /// Contacts that start with a letter come first, then digits and symbols
 /// (the "#" section), as in the system Contacts app.
 fn group(key: &str) -> u8 {
@@ -148,6 +179,28 @@ mod tests {
     }
 
     // ---- display -------------------------------------------------------
+
+    #[test]
+    fn sort_refs_orders_by_the_chosen_key_and_keeps_ties() {
+        let mk = |name: &str, alt: &str, key: &str, key_alt: &str| WireContact {
+            display_name: name.into(),
+            display_name_alt: Some(alt.into()),
+            sort_key: Some(key.into()),
+            sort_key_alt: Some(key_alt.into()),
+            ..WireContact::default()
+        };
+        let ayse = mk("Ayse Zeybek", "Zeybek, Ayse", "ayse zeybek", "zeybek ayse");
+        let can = mk("Can Aksoy", "Aksoy, Can", "can aksoy", "aksoy can");
+        let num = mk("5551", "5551", "5551", "5551");
+        let mut v = vec![&num, &can, &ayse];
+        sort_refs(&mut v, SortBy::FirstName);
+        assert_eq!(v[0].display_name, "Ayse Zeybek");
+        assert_eq!(v[2].display_name, "5551");
+        sort_refs(&mut v, SortBy::LastName);
+        assert_eq!(v[0].display_name, "Can Aksoy");
+        assert_eq!(section_name(&can, SortBy::LastName), "Aksoy, Can");
+        assert_eq!(section_name(&can, SortBy::FirstName), "Can Aksoy");
+    }
 
     #[test]
     fn display_picks_primary_or_alternate() {

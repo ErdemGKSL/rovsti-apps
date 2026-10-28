@@ -11,10 +11,11 @@ use crate::{
 };
 
 /// The probe groups the page lists, in order, as `(probe name, title)`.
-pub const GROUPS: [(&str, &str); 11] = [
+pub const GROUPS: [(&str, &str); 12] = [
     ("audio", "Audio"),
     ("calls", "Calls"),
     ("sim", "SIM"),
+    ("backup", "Backup"),
     ("blocking", "Blocking"),
     ("reject_text", "Reject text"),
     ("silence", "Silence"),

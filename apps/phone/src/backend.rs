@@ -680,7 +680,10 @@ impl Backend {
                 Some(name) => calls::route(name),
                 None => return Outcome::Declined,
             },
-            CallCommand::Dtmf(digit) => calls::dtmf(digit),
+            CallCommand::Dtmf(digit) => {
+                self.key_tone(digit, cx);
+                calls::dtmf(digit)
+            }
             CallCommand::DtmfStop => calls::dtmf_stop(),
             CallCommand::AnswerReplacing(id) => calls::answer_replacing(id),
             CallCommand::Swap => calls::swap(),

@@ -88,12 +88,43 @@ fn digits_of(raw: &str) -> String {
     raw.chars().filter(char::is_ascii_digit).collect()
 }
 
+/// How names are shown and sectioned (story 16.9). The default is the v0.1
+/// look: the primary name, sections by its first letter.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NameStyle {
+    pub format: crate::wire::NameFormat,
+    pub sort: crate::settings::SortBy,
+}
+
+/// The contacts in the order the list shows them: the provider's order for
+/// First name, re-sorted by the alternative key for Last name.
+pub fn ordered<'a>(
+    contacts: impl IntoIterator<Item = &'a WireContact>,
+    style: NameStyle,
+) -> Vec<&'a WireContact> {
+    let mut all: Vec<&WireContact> = contacts.into_iter().collect();
+    if style.sort == crate::settings::SortBy::LastName {
+        crate::names::sort_refs(&mut all, style.sort);
+    }
+    all
+}
+
 /// Builds rows for `contacts` (already in provider order). With an empty
 /// `query` the rows carry section headers; with one they are a flat list and
 /// a number match shows the matched number as the subtitle.
 pub fn build_rows<'a>(
     contacts: impl IntoIterator<Item = &'a WireContact>,
     query: &str,
+) -> Vec<ContactVm> {
+    build_rows_styled(contacts, query, NameStyle::default())
+}
+
+/// [`build_rows`] with the Name format and Sort by settings: the shown name
+/// follows the format, the section letter follows the sort key.
+pub fn build_rows_styled<'a>(
+    contacts: impl IntoIterator<Item = &'a WireContact>,
+    query: &str,
+    style: NameStyle,
 ) -> Vec<ContactVm> {
     let query = query.trim();
     let sections = query.is_empty();
@@ -108,7 +139,7 @@ pub fn build_rows<'a>(
         if numbers.is_empty() {
             continue;
         }
-        let letter = section_letter(&c.display_name);
+        let letter = section_letter(crate::names::section_name(c, style.sort));
         let subtitle = if digit_query {
             c.numbers
                 .iter()
@@ -126,7 +157,7 @@ pub fn build_rows<'a>(
         let header = sections && out.last().is_none_or(|prev| prev.letter != letter);
         out.push(ContactVm {
             id: c.id,
-            name: c.display_name.clone(),
+            name: crate::names::display(c, style.format).into_owned(),
             subtitle,
             letter,
             header,
@@ -305,5 +336,45 @@ mod tests {
     fn wide_windows_get_three_columns() {
         assert_eq!(favorite_columns(402.0), 2);
         assert_eq!(favorite_columns(440.0), 3);
+    }
+
+    fn named(id: i64, name: &str, alt: &str) -> WireContact {
+        WireContact {
+            display_name_alt: Some(alt.to_owned()),
+            sort_key: Some(name.to_lowercase()),
+            sort_key_alt: Some(alt.to_lowercase()),
+            ..person(id, name, vec![num("0555 000 00 01", None, false)])
+        }
+    }
+
+    #[test]
+    fn last_first_shows_the_alternative_and_sections_follow_the_sort_key() {
+        let people = vec![
+            named(1, "Ayse Yilmaz", "Yilmaz, Ayse"),
+            named(2, "Can Aksoy", "Aksoy, Can"),
+        ];
+        let style = NameStyle {
+            format: crate::wire::NameFormat::LastFirst,
+            sort: crate::settings::SortBy::LastName,
+        };
+        let rows = build_rows_styled(ordered(&people, style), "", style);
+        assert_eq!(rows[0].name, "Aksoy, Can");
+        assert_eq!(rows[0].letter, 'A');
+        assert_eq!(rows[1].name, "Yilmaz, Ayse");
+        assert_eq!(rows[1].letter, 'Y');
+        // The default style is the v0.1 look.
+        let rows = build_rows(&people, "");
+        assert_eq!(rows[0].name, "Ayse Yilmaz");
+        assert_eq!(rows[0].letter, 'A');
+    }
+
+    #[test]
+    fn first_name_sort_keeps_the_provider_order() {
+        let people = vec![
+            named(2, "Can Aksoy", "Aksoy, Can"),
+            named(1, "Ayse Yilmaz", "Yilmaz, Ayse"),
+        ];
+        let out = ordered(&people, NameStyle::default());
+        assert_eq!(out[0].id, 2);
     }
 }

@@ -60,6 +60,11 @@ impl PhoneApp {
         let Some(result) = self.backend.update(cx, |b, _| b.take_document()) else {
             return;
         };
+        // The Diagnostics "Backup" check (S13) is waiting for this answer.
+        if self.diag.backup.is_some() {
+            self.diag_backup_result(result, cx);
+            return;
+        }
         match result.op {
             DocumentOp::ExportBackup => {
                 if result.ok {

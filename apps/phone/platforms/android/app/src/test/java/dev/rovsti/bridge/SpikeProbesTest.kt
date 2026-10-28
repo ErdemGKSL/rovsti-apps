@@ -43,9 +43,11 @@ class SpikeProbesTest {
         assertTrue(SpikeProbes.verdicts(listOf(s), true, 800).last().startsWith("fail"))
     }
 
-    @Test fun onlyAudioIsRegisteredForNow() {
-        assertTrue(SpikeProbes.isRegistered("audio"))
-        assertTrue(!SpikeProbes.isRegistered("sim"))
-        assertTrue(SpikeProbes.GROUPS.contains("audio"))
+    @Test fun registeredGroupsSoFar() {
+        for (probe in listOf("audio", "calls", "sim", "system")) assertTrue(SpikeProbes.isRegistered(probe))
+        // Backup runs in Rust (it drives the pickers); Blocking and the rest are not built yet.
+        assertTrue(!SpikeProbes.isRegistered("backup"))
+        assertTrue(!SpikeProbes.isRegistered("blocking"))
+        assertTrue(SpikeProbes.GROUPS.contains("audio") && SpikeProbes.GROUPS.contains("backup"))
     }
 }

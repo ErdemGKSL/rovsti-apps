@@ -208,17 +208,17 @@ development_status:
   15-9-notifications-end-semantics-and-lock-screen-rules-for-severa: review
   epic-15-retrospective: optional
 
-  epic-16: backlog
-  16-1-gear-button-settings-page-shell-and-s24-page-push: backlog
-  16-2-settings-store-wiring-and-kotlin-mirror: backlog
-  16-3-sim-accounts-place_call-account_key-and-spike-s5: backlog
-  16-4-sim-chooser-and-s26-sim-chip-flight: backlog
-  16-5-sim-chips-in-the-in-call-screen-and-recents: backlog
-  16-6-backup-and-restore-of-local-data-and-spike-s13: backlog
-  16-7-settings-controls-s25-toggle-snap-and-the-calls-sounds-and-h: backlog
-  16-8-settings-take-effect-proximity-keypad-tones-vibration-haptic: backlog
-  16-9-name-order-and-sort-across-the-app: backlog
-  16-10-system-shortcuts-section-and-hearing-aid-compatibility-value: backlog
+  epic-16: in-progress
+  16-1-gear-button-settings-page-shell-and-s24-page-push: review
+  16-2-settings-store-wiring-and-kotlin-mirror: review
+  16-3-sim-accounts-place_call-account_key-and-spike-s5: review
+  16-4-sim-chooser-and-s26-sim-chip-flight: review
+  16-5-sim-chips-in-the-in-call-screen-and-recents: review
+  16-6-backup-and-restore-of-local-data-and-spike-s13: review
+  16-7-settings-controls-s25-toggle-snap-and-the-calls-sounds-and-h: review
+  16-8-settings-take-effect-proximity-keypad-tones-vibration-haptic: review
+  16-9-name-order-and-sort-across-the-app: review
+  16-10-system-shortcuts-section-and-hearing-aid-compatibility-value: review
   epic-16-retrospective: optional
 
   epic-17: backlog

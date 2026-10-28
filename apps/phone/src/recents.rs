@@ -22,7 +22,10 @@ use gpui::{
     TouchPhase, UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient,
     prelude::*, px, svg, uniform_list,
 };
-use rovsti_core::recents::{self, Direction, RowView};
+use rovsti_core::{
+    recents::{self, Direction, RowView},
+    sim::SimInfo,
+};
 use rovsti_ui::{
     Icon,
     components::glass_pill,
@@ -101,16 +104,40 @@ pub(crate) struct RowVm {
     hue: Option<usize>,
     monogram: Option<SharedString>,
     named: bool,
+    /// The SIM the newest call used, resolved once per call-log swap (never per frame).
+    /// `None` with one SIM or when the log's key matches no account (the slot stays empty).
+    sim: Option<SimBadge>,
 }
 
-impl From<RowView> for RowVm {
-    fn from(v: RowView) -> Self {
+/// What a Recents row draws in its reserved SIM slot.
+#[derive(Clone)]
+pub(crate) struct SimBadge {
+    label: SharedString,
+    argb: i32,
+}
+
+impl RowVm {
+    fn build(v: RowView, sims: &SimInfo) -> Self {
+        let account = v
+            .account_key
+            .as_deref()
+            .and_then(|key| sims.index_of(key))
+            .and_then(|i| sims.accounts().get(i));
+        let sim = account.map(|a| SimBadge {
+            label: a.chip.to_string().into(),
+            argb: a.color_argb,
+        });
+        let aria: SharedString = match account {
+            Some(a) => format!("{}, {}", v.aria, crate::sim_ui::chip_aria(a)).into(),
+            None => v.aria.into(),
+        };
         Self {
+            sim,
+            aria,
             title: v.title.into(),
             count: v.count.map(Into::into),
             subtitle: v.subtitle.into(),
             time: v.time.into(),
-            aria: v.aria.into(),
             direction: v.direction,
             missed: v.missed,
             callable: v.callable,
@@ -143,6 +170,10 @@ pub(crate) struct RecentsView {
     state: State,
     rows: Arc<[RowVm]>,
     log: Option<Arc<CallLog>>,
+    /// The SIMs the rows were resolved against.
+    sims: SimInfo,
+    /// The Name format the titles were built with.
+    format: rovsti_core::wire::NameFormat,
     built_at: Option<Instant>,
     /// Loading has taken longer than [`SKELETON_DELAY`].
     skeleton_on: bool,
@@ -180,6 +211,8 @@ impl RecentsView {
             state: State::Loading,
             rows: Arc::from(Vec::new()),
             log: None,
+            sims: SimInfo::default(),
+            format: rovsti_core::wire::NameFormat::default(),
             built_at: None,
             skeleton_on: false,
             skeleton_in: Entrance::default(),
@@ -280,9 +313,16 @@ impl PhoneApp {
                     .log
                     .as_ref()
                     .is_some_and(|known| Arc::ptr_eq(known, &log));
+                if same
+                    && (self.recents.sims != self.backend.read(cx).sims()
+                        || self.recents.format != self.backend.read(cx).settings().name_format)
+                {
+                    // A SIM came or went: the chips are resolved again, nothing animates.
+                    self.rebuild_recents(log.clone(), cx);
+                }
                 if !same {
                     let old = self.recents.log.clone();
-                    self.rebuild_recents(log);
+                    self.rebuild_recents(log, cx);
                     self.animate_refresh(old);
                 }
                 self.recents.state = State::Ready;
@@ -384,10 +424,32 @@ impl PhoneApp {
         self.recents.skeleton_task = None;
     }
 
-    fn rebuild_recents(&mut self, log: Arc<CallLog>) {
+    fn rebuild_recents(&mut self, log: Arc<CallLog>, cx: &gpui::App) {
         let started = Instant::now();
         let views = recents::build(&log.rows, backend::now_ms(), log.locale);
-        let rows: Vec<RowVm> = views.into_iter().map(RowVm::from).collect();
+        let sims = self.backend.read(cx).sims();
+        let format = self.backend.read(cx).settings().name_format;
+        let contacts = match self.backend.read(cx).contacts() {
+            backend::Load::Ready(index) if format == rovsti_core::wire::NameFormat::LastFirst => {
+                Some(index)
+            }
+            _ => None,
+        };
+        let rows: Vec<RowVm> = views
+            .into_iter()
+            .map(|mut v| {
+                // Last, First: the title of a known person follows the setting (story 16.9).
+                if let Some(index) = &contacts
+                    && v.named
+                    && let Some(contact) = index.match_number(&v.number)
+                {
+                    v.title = rovsti_core::names::display(contact, format).into_owned();
+                }
+                RowVm::build(v, &sims)
+            })
+            .collect();
+        self.recents.format = format;
+        self.recents.sims = sims;
         log::debug!(
             "recents: {} row view-models in {:?}",
             rows.len(),
@@ -414,7 +476,7 @@ impl PhoneApp {
             if let (Some(log), Some(built)) = (self.recents.log.clone(), self.recents.built_at)
                 && built.elapsed() > LABELS_STALE
             {
-                self.rebuild_recents(log);
+                self.rebuild_recents(log, cx);
             }
             self.arm_view_timer(cx);
         }
@@ -632,11 +694,32 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.place_call_from_on(number, None, window, cx)
+    }
+
+    /// [`Self::place_call_from`] on a chosen SIM. With "ask every time" and no
+    /// choice yet, the chooser opens first and nothing is placed.
+    pub(crate) fn place_call_from_on(
+        &mut self,
+        number: &str,
+        account: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if account.is_none() && self.sim_needs_choice(number, cx) {
+            self.open_sim_chooser(
+                crate::sim_ui::ChooserFor::List,
+                number.to_owned().into(),
+                None,
+                cx,
+            );
+            return false;
+        }
         rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
         self.flights.home = None;
         let placement = self
             .backend
-            .update(cx, |backend, cx| backend.place_call(number, cx));
+            .update(cx, |backend, cx| backend.place_call_on(number, account, cx));
         let default_dialer = self.backend.read(cx).is_default_dialer();
         self.call_note = match placement {
             Placement::Placed | Placement::Requesting if !default_dialer => Some(Notice::System),
@@ -814,7 +897,7 @@ impl PhoneApp {
                         }
                         _ => (0.0, 0.0),
                     };
-                    let row = recents_row(theme, i, vm, row_press, info_press);
+                    let row = recents_row(theme, i, vm, row_press, info_press, r.sims.visible());
                     if live {
                         live_row(row, i, r.inserted, r.fresh, progress)
                     } else {
@@ -1113,6 +1196,37 @@ pub(crate) fn avatar_view(theme: Theme, row: &RowVm, size: f32) -> gpui::Div {
     }
 }
 
+/// The SIM slot: a 36 px column holding the dot and the short label (or nothing).
+fn sim_slot_el(theme: Theme, vm: &RowVm) -> AnyElement {
+    let colors = theme::colors(theme);
+    let slot = div().flex_none().w(px(36.0)).h(px(20.0)).overflow_hidden();
+    match &vm.sim {
+        Some(badge) => slot
+            .flex()
+            .items_center()
+            .justify_end()
+            .gap(px(3.0))
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(6.0))
+                    .rounded_full()
+                    .bg(crate::sim_ui::chip_dot(theme, badge.argb)),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(typography::CAPTION2.size)
+                    .font_weight(typography::CAPTION2.weight)
+                    .text_color(colors.secondary_label)
+                    .child(badge.label.clone()),
+            )
+            .into_any_element(),
+        None => slot.into_any_element(),
+    }
+}
+
 /// One Recents row: a purely visual element; the list's pointer surface does
 /// the touching.
 fn recents_row(
@@ -1121,6 +1235,7 @@ fn recents_row(
     vm: &RowVm,
     row_press: f32,
     info_press: f32,
+    sim_slot: bool,
 ) -> AnyElement {
     let colors = theme::colors(theme);
     let danger = call_colors(theme).danger;
@@ -1211,7 +1326,16 @@ fn recents_row(
                                         .flex_none()
                                         .text_color(sub_ink),
                                 )
-                                .child(div().min_w_0().truncate().child(vm.subtitle.clone())),
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex_1()
+                                        .truncate()
+                                        .child(vm.subtitle.clone()),
+                                )
+                                // Reserved 36 px at the trailing end: only with two SIMs, and empty
+                                // when the log's key matches no account.
+                                .children(sim_slot.then(|| sim_slot_el(theme, vm))),
                         ),
                 )
                 .child(

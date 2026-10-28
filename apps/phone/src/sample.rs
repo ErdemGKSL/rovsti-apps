@@ -19,10 +19,20 @@ fn number(raw: &str, label: Option<&str>) -> WireNumber {
     }
 }
 
+/// "Ayşe Yılmaz" to "Yılmaz, Ayşe": the family-name-first form the provider keeps.
+fn alternative(name: &str) -> Option<String> {
+    let (given, family) = name.rsplit_once(' ')?;
+    Some(format!("{family}, {given}"))
+}
+
 fn contact(id: i64, name: &str, numbers: Vec<WireNumber>, starred: bool) -> WireContact {
+    let alt = alternative(name);
     WireContact {
         id,
         display_name: name.to_owned(),
+        sort_key: Some(name.to_lowercase()),
+        sort_key_alt: alt.as_ref().map(|a| a.to_lowercase()),
+        display_name_alt: alt,
         numbers,
         starred,
         photo_uri: cfg!(not(target_os = "android"))
@@ -195,6 +205,8 @@ pub fn call_log(now_ms: i64) -> Vec<CallLogEntry> {
                 cached_name: name.map(str::to_owned),
                 number_label: None,
                 contact_id: None,
+                // Alternating accounts: only drawn by the dual-SIM preview.
+                account_key: Some(format!("tel/pstn#{}", 1 + id % 2)),
                 ..Default::default()
             }
         };
@@ -344,6 +356,7 @@ pub fn long_call_log(now_ms: i64, count: usize) -> Vec<CallLogEntry> {
             cached_name: name,
             number_label: None,
             contact_id: (i % 5 != 4 && i % 11 != 10).then_some(1 + ((i / 2) % people.len()) as i64),
+            account_key: Some(format!("tel/pstn#{}", 1 + i % 2)),
             ..Default::default()
         });
     }

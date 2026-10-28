@@ -158,4 +158,27 @@ class Epic16Test {
         assertEquals("android.settings.ACCESSIBILITY_SETTINGS", chain[1])
         assertEquals(SystemPages.ACTION_DETAILS, chain.last())
     }
+
+    // ---- S5 and S14 probes -------------------------------------------------------------------
+
+    private fun acct(key: String, slot: Int) = SimAccounts.Account(key, "Net$slot", slot, 0xFF123456.toInt(), true)
+
+    @Test fun simProbeIsNotApplicableOnOneSim() {
+        val lines = SimProbe.lines(listOf(acct("a#1", 0)), "a#1", "a#1", "a#1")
+        assertTrue(lines.last().startsWith("unknown") && lines.last().contains("n/a"))
+    }
+
+    @Test fun simProbeComparesPlacedAndLoggedKeys() {
+        val two = listOf(acct("a#1", 0), acct("a#2", 1))
+        assertTrue(SimProbe.lines(two, null, "a#2", "a#2").any { it.startsWith("pass: key equals") })
+        assertTrue(SimProbe.lines(two, null, "a#2", "a#1").any { it.startsWith("fail: key equals") })
+        assertTrue(SimProbe.lines(two, null, null, "a#1").any { it.startsWith("unknown: key equals") })
+        assertTrue(SimProbe.lines(two, null, "a#2", null).any { it.startsWith("fail: key equals") })
+        assertTrue(SimProbe.lines(two, null, "a#2", "zzz#1").any { it.startsWith("unknown: the newest log row matches no") })
+    }
+
+    @Test fun vibrateProbeNeverClaimsAPassItCannotKnow() {
+        assertTrue(SimProbe.vibrateLines(true, false, false, false, true).last().startsWith("unknown"))
+        assertTrue(SimProbe.vibrateLines(false, false, false, false, false).last().startsWith("fail"))
+    }
 }

@@ -13,9 +13,9 @@ object SpikeProbes {
     const val TAG = "RovstiSpike"
 
     /** Probe groups the page lists; a group is inert ("Not built yet") until its spike registers it. */
-    val GROUPS = listOf("audio", "calls", "sim", "blocking", "reject_text", "silence", "voicemail", "emergency", "contacts", "call_log", "system")
+    val GROUPS = listOf("audio", "calls", "sim", "backup", "blocking", "reject_text", "silence", "voicemail", "emergency", "contacts", "call_log", "system")
 
-    private val registered = setOf("audio", "calls", "header", "events")
+    private val registered = setOf("audio", "calls", "sim", "system", "header", "events")
 
     fun isRegistered(probe: String) = probe in registered
 
@@ -24,6 +24,8 @@ object SpikeProbes {
         "events" -> (calls?.eventDump() ?: emptyList()).joinToString("\n")
         "audio" -> audio(context, calls)
         "calls" -> calls(calls)
+        "sim" -> sim(context, calls)
+        "system" -> system(context)
         else -> "unknown: Not built yet"
     }
 
@@ -46,6 +48,77 @@ object SpikeProbes {
         ""
     } catch (_: RuntimeException) {
         ""
+    }
+
+    // ---- S5: SIM accounts ------------------------------------------------------------------------
+
+    /** The account list, and the last placed call's key against the key built from its call-log row. */
+    @android.annotation.SuppressLint("MissingPermission")
+    private fun sim(context: Context?, calls: CallsApi?): String {
+        if (context == null) return "unknown: no context"
+        val parsed = try {
+            JSONObject(SimAccounts.collect(context))
+        } catch (_: org.json.JSONException) {
+            return "unknown: accounts unreadable"
+        }
+        if (!parsed.optBoolean("ok")) return "unknown: accounts ${parsed.optString("error", "unavailable")} (grant Phone access first)"
+        val data = parsed.getJSONObject("data")
+        val list = data.getJSONArray("accounts")
+        val accounts = (0 until list.length()).map { i ->
+            val o = list.getJSONObject(i)
+            SimAccounts.Account(
+                key = o.getString("key"),
+                label = o.optString("label"),
+                slotIndex = if (o.has("slot_index")) o.getInt("slot_index") else null,
+                colorArgb = o.optInt("color_argb"),
+                sim = o.optBoolean("sim"),
+                enabled = o.optBoolean("enabled", true),
+            )
+        }
+        val defaultKey = if (data.has("default_key")) data.getString("default_key") else null
+        val placed = lastPlacedKey(calls)
+        return SimProbe.lines(accounts, defaultKey, placed, newestLogKey(context)).joinToString("\n")
+    }
+
+    /** The account key of the foreground (or newest) call in the last snapshot. */
+    private fun lastPlacedKey(calls: CallsApi?): String? = try {
+        val snap = SnapshotJson.parse(JSONObject(calls?.snapshot() ?: return null))
+        snap.calls.firstOrNull { it.id == snap.foregroundCallId }?.accountKey ?: snap.calls.lastOrNull()?.accountKey
+    } catch (_: org.json.JSONException) {
+        null
+    }
+
+    /** The key built from the newest outgoing call-log row's account columns. */
+    private fun newestLogKey(context: Context): String? = try {
+        val args = android.os.Bundle().apply {
+            putInt(android.content.ContentResolver.QUERY_ARG_LIMIT, 1)
+            putString(android.content.ContentResolver.QUERY_ARG_SQL_SORT_ORDER, "${android.provider.CallLog.Calls.DATE} DESC")
+            putString(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION, "${android.provider.CallLog.Calls.TYPE} = ${android.provider.CallLog.Calls.OUTGOING_TYPE}")
+        }
+        context.contentResolver.query(
+            android.provider.CallLog.Calls.CONTENT_URI,
+            arrayOf(android.provider.CallLog.Calls.PHONE_ACCOUNT_COMPONENT_NAME, android.provider.CallLog.Calls.PHONE_ACCOUNT_ID),
+            args, null,
+        )?.use { if (it.moveToFirst()) SimAccounts.keyOf(it.getString(0), it.getString(1)) else null }
+    } catch (_: SecurityException) {
+        null
+    }
+
+    // ---- S14: vibration (system part) ----------------------------------------------------------------
+
+    /** Counts down 5 s so the phone can go to the ear with the screen off, then vibrates once. */
+    private fun system(context: Context?): String {
+        if (context == null) return "unknown: no context"
+        val vibrator = context.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+        val values = SettingsMirror.values
+        val touch = try {
+            context.getSystemService(android.view.accessibility.AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
+        } catch (_: RuntimeException) {
+            false
+        }
+        Thread.sleep(5000)
+        val vibrated = Haptics.click(context)
+        return SimProbe.vibrateLines(vibrator?.hasVibrator() == true, values.vibrateConnect, values.vibrateEnd, touch, vibrated).joinToString("\n")
     }
 
     // ---- S4: multi-call ------------------------------------------------------------------------

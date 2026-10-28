@@ -156,6 +156,10 @@ pub(crate) enum HoldAction {
     Clear,
     /// The Setup title was held: open Diagnostics (story 14.0f).
     Diagnostics,
+    /// The Call button was held with a default SIM: open the chooser (story 16.4).
+    SimChooser,
+    /// A number's call circle in the Contact sheet was held (its index).
+    SimNumber(u8),
     /// The Settings title was held: open Diagnostics (story 16.1).
     SettingsDiagnostics,
     /// The Audio control was held: open the route list (story 14.6).
@@ -185,6 +189,10 @@ impl PhoneApp {
     /// stray touch never places a call. Press feedback still starts on
     /// finger-down through the raw-touch listener.
     pub(crate) fn call_tap(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A hold already opened the chooser: the lift that follows is not a tap.
+        if self.sheet.is_visible() {
+            return;
+        }
         if !self.presses.touch_seen() {
             self.presses.down("call");
         }
@@ -277,6 +285,8 @@ impl PhoneApp {
                     self.presses.release_all();
                 }
             }
+            HoldAction::SimChooser => self.sim_long_press(window, cx),
+            HoldAction::SimNumber(i) => self.sim_long_press_number(usize::from(i), window, cx),
             HoldAction::SettingsDiagnostics => self.settings_diagnostics(window, cx),
             HoldAction::RouteList => self.route_long_press(window, cx),
             HoldAction::Reason(slot) => self.show_reason(usize::from(slot), window, cx),
@@ -303,6 +313,7 @@ impl PhoneApp {
         match dial::push(&mut self.dialed, key) {
             Push::Accepted => {
                 self.status = None;
+                self.backend.update(cx, |b, cx| b.key_tone(key, cx));
                 self.key_fx(key, window, cx);
                 self.digit_pop.snap(1.18);
                 self.digit_pop.set_target(1.0);
@@ -404,15 +415,31 @@ impl PhoneApp {
     }
 
     fn call_press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.call_press_on(None, window, cx);
+    }
+
+    /// Calls the typed number, on `account` when a SIM was chosen. With "ask
+    /// every time" and no choice yet, the chooser opens first and the number
+    /// stays in the field (moment S3 does not play yet).
+    pub(crate) fn call_press_on(
+        &mut self,
+        account: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let raw = self.dialed.clone();
         if dial::validate(&raw).is_err() {
             self.invalid(window);
             return;
         }
+        if account.is_none() && self.sim_needs_choice(&raw, cx) {
+            self.open_sim_chooser(crate::sim_ui::ChooserFor::Dial, raw.into(), None, cx);
+            return;
+        }
         rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
         let placement = self
             .backend
-            .update(cx, |backend, cx| backend.place_call(&raw, cx));
+            .update(cx, |backend, cx| backend.place_call_on(&raw, account, cx));
         match placement {
             Placement::Placed | Placement::Requesting => {
                 // Not the default phone app: the system's in-call screen takes over.

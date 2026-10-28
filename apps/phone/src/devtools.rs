@@ -312,7 +312,13 @@ impl PhoneApp {
             'Z' => self.settings_close(window, cx),
             'I' => {
                 if let Some(id) = self.settings.preview_taps.pop_front() {
-                    self.settings_tap(&id, window, cx);
+                    if id.starts_with("sheet-sim") {
+                        self.sim_sheet_act(&id, window, cx);
+                    } else if id.starts_with("sheet-import") {
+                        self.backup_sheet_act(&id, cx);
+                    } else {
+                        self.settings_tap(&id, window, cx);
+                    }
                 }
             }
             'z' => {

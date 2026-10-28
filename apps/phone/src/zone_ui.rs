@@ -336,7 +336,8 @@ impl PhoneApp {
                         .flex()
                         .justify_center()
                         .items_center()
-                        .gap(px(6.0)),
+                        .gap(px(6.0))
+                        .children(self.incall_sim_chip(theme, cx)),
                 );
 
             // ---- The Held card ----------------------------------------------------

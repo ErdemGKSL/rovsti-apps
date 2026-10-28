@@ -229,6 +229,29 @@ impl Backend {
         )
     }
 
+    /// Plays the dial-pad tone of `key` when Keypad tones is on (setting, else
+    /// the system's). Kotlin plays it on `STREAM_DTMF`; this is the app's one
+    /// sound and never fires for UI clicks. Off the UI thread, Android only.
+    pub fn key_tone(&self, key: char, cx: &mut Context<Self>) {
+        if !self.keypad_tones_on() {
+            return;
+        }
+        let digit = match key {
+            '0'..='9' => i32::from(key as u8 - b'0'),
+            '*' => 10,
+            '#' => 11,
+            _ => return,
+        };
+        #[cfg(target_os = "android")]
+        cx.background_executor()
+            .spawn(async move {
+                let _ = android_settings::keypad_tone(digit);
+            })
+            .detach();
+        #[cfg(not(target_os = "android"))]
+        let _ = (digit, cx);
+    }
+
     // ---- a setting changes ------------------------------------------------
 
     /// Applies a settings change at once, saves it, mirrors it to Kotlin and
@@ -272,6 +295,7 @@ impl Backend {
     /// the Kotlin mirror follow.
     pub(super) fn settings_published(&mut self, cx: &mut Context<Self>) {
         rovsti_ui::haptics::set_level(self.settings.haptics);
+        self.calls.set_name_format(self.settings.name_format);
         self.push_settings(cx);
     }
 
@@ -288,6 +312,22 @@ impl Backend {
             self.preview_document(
                 rovsti_core::wire::DocumentOp::ExportBackup,
                 Some((&name, &json)),
+                cx,
+            );
+            return Outcome::Done;
+        }
+        let _ = cx;
+        outcome
+    }
+
+    /// Starts "save as" for any text (the Diagnostics S13 check).
+    pub fn export_raw(&mut self, name: &str, json: &str, cx: &mut Context<Self>) -> Outcome {
+        let outcome = Outcome::from(documents::export(name, json), "export document");
+        #[cfg(not(target_os = "android"))]
+        if outcome == Outcome::NotAvailable {
+            self.preview_document(
+                rovsti_core::wire::DocumentOp::ExportBackup,
+                Some((name, json)),
                 cx,
             );
             return Outcome::Done;

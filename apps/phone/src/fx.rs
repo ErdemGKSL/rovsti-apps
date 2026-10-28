@@ -32,7 +32,10 @@ pub const A_ANSWER: usize = 17;
 pub const A_INCOMING_AVATAR: usize = 18;
 /// The In-Call Audio control (the route popover and S17 find it here).
 pub const A_AUDIO: usize = 19;
-pub const A_COUNT: usize = 20;
+/// The In-Call SIM chip (S26 lands here) and the chooser's first two rows.
+pub const A_CHIP_SLOT: usize = 20;
+pub const A_SIM_ROW: usize = 21;
+pub const A_COUNT: usize = 23;
 
 pub type Marks = Anchors<A_COUNT>;
 

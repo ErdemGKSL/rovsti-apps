@@ -196,6 +196,7 @@ mod tests {
             numbers,
             starred: false,
             photo_uri: None,
+            ..Default::default()
         }
     }
 

@@ -544,8 +544,21 @@ pub enum CallLogKind {
     Unknown,
 }
 
+/// Why a call was blocked (`CallLog.Calls.BLOCK_REASON`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockReason {
+    /// Blocked by the owner's blocklist.
+    User,
+    /// Blocked by the system or the carrier.
+    System,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
 /// One row pulled from the system call log.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallLogEntry {
     pub id: i64,
     #[serde(default, deserialize_with = "null_default")]
@@ -569,6 +582,19 @@ pub struct CallLogEntry {
     pub number_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub contact_id: Option<i64>,
+    /// Opaque account key of the SIM the call used (AD-26).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_key: Option<String>,
+    /// Only for `kind == blocked` (AD-27).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_reason: Option<BlockReason>,
+    /// [`features`] bits; read by the details view only.
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_zero_u32"
+    )]
+    pub features: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -593,7 +619,7 @@ pub struct WireNumber {
 }
 
 /// A contact as pulled from `ContactsContract`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WireContact {
     pub id: i64,
     #[serde(default, deserialize_with = "null_default")]
@@ -608,6 +634,18 @@ pub struct WireContact {
     pub starred: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub photo_uri: Option<String>,
+    /// `LOOKUP_KEY`: survives raw-contact merges, unlike `id` (AD-32).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lookup_key: Option<String>,
+    /// `DISPLAY_NAME_ALTERNATIVE`, e.g. "Yilmaz, Ayse".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name_alt: Option<String>,
+    /// `SORT_KEY_PRIMARY`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_key: Option<String>,
+    /// `SORT_KEY_ALTERNATIVE`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sort_key_alt: Option<String>,
 }
 
 impl From<&WireContact> for crate::Contact {
@@ -648,6 +686,14 @@ pub enum WireError {
     /// The runtime permission is missing (`SecurityException` in Kotlin).
     #[error("permission denied")]
     Permission,
+    /// The provider or service is not there (no SIM, no voicemail app).
+    #[error("unavailable")]
+    Unavailable,
+    /// The system refused the request (e.g. not the default dialer).
+    #[error("refused")]
+    Refused,
+    #[error("not found")]
+    NotFound,
     #[default]
     #[serde(other)]
     #[error("provider error")]
@@ -685,6 +731,206 @@ pub struct OpenSystemData {
     #[serde(default, deserialize_with = "null_default")]
     pub fallback: bool,
 }
+
+/// One call-capable SIM or account (AD-26).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhoneAccountInfo {
+    /// Opaque `"{component}#{handle id}"`; never parsed (AD-26).
+    pub key: String,
+    #[serde(default, deserialize_with = "null_default")]
+    pub label: String,
+    /// Physical slot, when the account is a SIM.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot_index: Option<u8>,
+    #[serde(default, deserialize_with = "null_default")]
+    pub color_argb: i32,
+    /// A SIM-backed account (as opposed to a VoIP one).
+    #[serde(default, deserialize_with = "null_default")]
+    pub sim: bool,
+    #[serde(default = "default_true", deserialize_with = "null_true")]
+    pub enabled: bool,
+}
+
+/// `phone_accounts` provider payload.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhoneAccounts {
+    #[serde(default, deserialize_with = "null_default")]
+    pub accounts: Vec<PhoneAccountInfo>,
+    /// The system default outgoing account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_key: Option<String>,
+    /// The system is set to "ask every time".
+    #[serde(default, deserialize_with = "null_default")]
+    pub ask: bool,
+}
+
+/// One row of the system blocklist.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockedNumber {
+    pub id: i64,
+    #[serde(default, deserialize_with = "null_default")]
+    pub number_raw: String,
+    #[serde(default, deserialize_with = "null_default")]
+    pub normalized: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlocklistPayload {
+    #[serde(default, deserialize_with = "null_default")]
+    pub numbers: Vec<BlockedNumber>,
+}
+
+/// Name order setting (AD-32).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NameFormat {
+    /// "Yilmaz, Ayse".
+    LastFirst,
+    /// "Ayse Yilmaz"; also what an unknown value reads as.
+    #[default]
+    #[serde(other)]
+    FirstLast,
+}
+
+/// What Rust pushes to Kotlin when a setting Kotlin acts on changes
+/// (`syncSettings`, AD-30). Sent as a string; Kotlin keeps only this copy.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsSync {
+    #[serde(default = "default_true", deserialize_with = "null_true")]
+    pub proximity: bool,
+    #[serde(default, deserialize_with = "null_default")]
+    pub flip_to_silence: bool,
+    #[serde(default, deserialize_with = "null_default")]
+    pub vibrate_connect: bool,
+    #[serde(default, deserialize_with = "null_default")]
+    pub vibrate_end: bool,
+    #[serde(default, deserialize_with = "null_default")]
+    pub has_replies: bool,
+    /// `None` follows the system dial-pad tone setting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keypad_tones: Option<bool>,
+    #[serde(default, deserialize_with = "null_default")]
+    pub haptics: HapticsLevel,
+    #[serde(default, deserialize_with = "null_default")]
+    pub name_format: NameFormat,
+}
+
+impl Default for SettingsSync {
+    /// The v0.1 behaviour.
+    fn default() -> Self {
+        Self {
+            proximity: true,
+            flip_to_silence: false,
+            vibrate_connect: false,
+            vibrate_end: false,
+            has_replies: false,
+            keypad_tones: None,
+            haptics: HapticsLevel::Normal,
+            name_format: NameFormat::FirstLast,
+        }
+    }
+}
+
+/// Haptics strength setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HapticsLevel {
+    Off,
+    Light,
+    #[default]
+    #[serde(other)]
+    Normal,
+}
+
+/// `voicemail_info` provider payload (AD-33).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VoicemailInfo {
+    /// A voicemail number is configured for the default account.
+    #[serde(default, deserialize_with = "null_default")]
+    pub available: bool,
+    /// Unheard messages when the carrier reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<u32>,
+    /// Account the numbers below belong to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_key: Option<String>,
+}
+
+/// `emergency_numbers` provider payload: numbers the telephony stack treats
+/// as emergency for the current country. `112` and `911` are always added by
+/// [`crate::dial::is_emergency`].
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmergencyList {
+    #[serde(default, deserialize_with = "null_default")]
+    pub numbers: Vec<String>,
+}
+
+/// Which document operation a `document_result` answers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DocumentOp {
+    ExportBackup,
+    ImportBackup,
+    ExportCalls,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// One-shot event: a file picker finished (`document_result`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentResult {
+    #[serde(default, deserialize_with = "null_default")]
+    pub op: DocumentOp,
+    #[serde(default, deserialize_with = "null_default")]
+    pub ok: bool,
+    /// Display name of the chosen document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The text read from an import.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<WireError>,
+}
+
+/// One-shot event: the ringtone picker finished (`ringtone_result`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RingtoneResult {
+    #[serde(default, deserialize_with = "null_default")]
+    pub ok: bool,
+    /// Display title of the chosen tone; `None` for the silent choice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
+/// What a system-driven UI request asks Rust to show (`ui_request`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiRequestKind {
+    /// The user asked to open the dial pad (e.g. a `tel:` intent).
+    ShowDialer,
+    /// The in-call screen for `call_id`.
+    ShowCall,
+    /// Open Recents (missed-call notification tap).
+    ShowRecents,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiRequest {
+    #[serde(default, deserialize_with = "null_default")]
+    pub kind: UiRequestKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<i32>,
+}
+
+pub type PhoneAccountsResponse = Envelope<PhoneAccounts>;
+pub type BlocklistResponse = Envelope<BlocklistPayload>;
+pub type VoicemailInfoResponse = Envelope<VoicemailInfo>;
+pub type EmergencyListResponse = Envelope<EmergencyList>;
 
 pub type OpenSystemResponse = Envelope<OpenSystemData>;
 pub type CallLogResponse = Envelope<CallLogPayload>;

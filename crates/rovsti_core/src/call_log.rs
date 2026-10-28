@@ -299,6 +299,7 @@ mod tests {
             cached_name: None,
             number_label: None,
             contact_id: None,
+            ..Default::default()
         }
     }
 

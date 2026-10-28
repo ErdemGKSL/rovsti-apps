@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "ok": true,
+  "data": {
+    "entries": [
+      {"id": 210, "number_raw": "+90 555 111 22 33", "normalized": "+905551112233", "kind": "blocked", "date_ms": 1790100000000, "block_reason": "user", "account_key": "com.android.phone/.PstnConnectionService#1"},
+      {"id": 209, "number_raw": "0850 000 00 00", "normalized": "08500000000", "kind": "blocked", "date_ms": 1790090000000, "block_reason": "system"},
+      {"id": 208, "number_raw": "905", "normalized": "905", "kind": "voicemail", "date_ms": 1790080000000, "duration_s": 42},
+      {"id": 207, "number_raw": "05551112233", "normalized": "05551112233", "kind": "incoming", "date_ms": 1790070000000, "duration_s": 61, "features": 5, "account_key": "com.android.phone/.PstnConnectionService#2"}
+    ]
+  }
+}

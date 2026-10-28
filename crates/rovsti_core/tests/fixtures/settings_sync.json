@@ -1,0 +1,10 @@
+{
+  "proximity": false,
+  "flip_to_silence": true,
+  "vibrate_connect": true,
+  "vibrate_end": false,
+  "has_replies": true,
+  "keypad_tones": false,
+  "haptics": "light",
+  "name_format": "last_first"
+}

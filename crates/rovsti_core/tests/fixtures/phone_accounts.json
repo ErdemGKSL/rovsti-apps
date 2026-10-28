@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "ok": true,
+  "data": {
+    "accounts": [
+      {"key": "com.android.phone/.PstnConnectionService#1", "label": "SIM 1 (Turkcell)", "slot_index": 0, "color_argb": -16776961, "sim": true, "enabled": true},
+      {"key": "com.android.phone/.PstnConnectionService#2", "label": "SIM 2", "slot_index": 1, "color_argb": -65536, "sim": true, "enabled": false}
+    ],
+    "default_key": "com.android.phone/.PstnConnectionService#1",
+    "ask": false
+  }
+}

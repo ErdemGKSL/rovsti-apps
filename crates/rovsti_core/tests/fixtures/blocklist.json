@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "ok": true,
+  "data": {
+    "numbers": [
+      {"id": 1, "number_raw": "+90 555 111 22 33", "normalized": "+905551112233"},
+      {"id": 2, "number_raw": "0850 000 00 00", "normalized": "08500000000"}
+    ]
+  }
+}

@@ -249,6 +249,7 @@ mod tests {
             cached_name: name.map(str::to_owned),
             number_label: None,
             contact_id: name.map(|_| id),
+            ..Default::default()
         }
     }
 

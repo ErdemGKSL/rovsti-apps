@@ -2,9 +2,11 @@
 //! the Kotlin JVM test described in the `wire` module docs.
 
 use rovsti_core::wire::{
-    AudioRoute, CallLogKind, CallLogResponse, CallSnapshot, ContactsResponse, DisconnectCause,
-    EndpointHint, EndpointType, FavoritesResponse, PendingOp, SilencedBy, WireCallState, WireError,
-    caps, props,
+    AudioRoute, BlockReason, BlocklistResponse, CallLogKind, CallLogResponse, CallSnapshot,
+    ContactsResponse, DisconnectCause, DocumentOp, DocumentResult, EmergencyListResponse,
+    EndpointHint, EndpointType, FavoritesResponse, HapticsLevel, NameFormat, PendingOp,
+    PhoneAccountsResponse, RingtoneResult, SettingsSync, SilencedBy, UiRequest, UiRequestKind,
+    VoicemailInfoResponse, WireCallState, WireContact, WireError, caps, features, props,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -207,4 +209,149 @@ fn contacts_and_favorites_content() {
         .into_result()
         .expect("ok");
     assert!(f.contacts.iter().all(|c| c.starred));
+}
+
+#[test]
+fn v02_provider_fixtures_round_trip() {
+    assert_round_trips::<CallLogResponse>("call_log_v2.json");
+    assert_round_trips::<ContactsResponse>("contacts_v2.json");
+    assert_round_trips::<PhoneAccountsResponse>("phone_accounts.json");
+    assert_round_trips::<BlocklistResponse>("blocklist.json");
+    assert_round_trips::<VoicemailInfoResponse>("voicemail_info.json");
+    assert_round_trips::<EmergencyListResponse>("emergency_list.json");
+}
+
+#[test]
+fn v02_events_and_settings_round_trip() {
+    assert_round_trips::<SettingsSync>("settings_sync.json");
+    assert_round_trips::<DocumentResult>("document_result_import.json");
+    assert_round_trips::<DocumentResult>("document_result_error.json");
+    assert_round_trips::<RingtoneResult>("ringtone_result.json");
+    assert_round_trips::<UiRequest>("ui_request.json");
+}
+
+#[test]
+fn v02_call_log_content() {
+    let rows = parse::<CallLogResponse>("call_log_v2.json")
+        .into_result()
+        .expect("ok")
+        .entries;
+    assert_eq!(rows[0].kind, CallLogKind::Blocked);
+    assert_eq!(rows[0].block_reason, Some(BlockReason::User));
+    assert_eq!(rows[1].block_reason, Some(BlockReason::System));
+    assert_eq!(rows[2].kind, CallLogKind::Voicemail);
+    assert_eq!(rows[3].features, features::HD | features::VOLTE);
+    assert!(rows[3].account_key.is_some());
+}
+
+#[test]
+fn v01_rows_default_every_new_field() {
+    let rows = parse::<CallLogResponse>("call_log_ok.json")
+        .into_result()
+        .expect("ok")
+        .entries;
+    for row in &rows {
+        assert_eq!(row.account_key, None);
+        assert_eq!(row.block_reason, None);
+        assert_eq!(row.features, 0);
+    }
+    let contacts = parse::<ContactsResponse>("contacts_ok.json")
+        .into_result()
+        .expect("ok")
+        .contacts;
+    for c in &contacts {
+        assert_eq!(c.lookup_key, None);
+        assert_eq!(c.display_name_alt, None);
+        assert_eq!(c.sort_key, None);
+        assert_eq!(c.sort_key_alt, None);
+    }
+}
+
+#[test]
+fn v02_contact_fields() {
+    let c: Vec<WireContact> = parse::<ContactsResponse>("contacts_v2.json")
+        .into_result()
+        .expect("ok")
+        .contacts;
+    assert_eq!(c[0].lookup_key.as_deref(), Some("0r17-2A3B"));
+    assert_eq!(c[0].display_name_alt.as_deref(), Some("Yılmaz, Ayşe"));
+}
+
+#[test]
+fn accounts_content() {
+    let a = parse::<PhoneAccountsResponse>("phone_accounts.json")
+        .into_result()
+        .expect("ok");
+    assert_eq!(a.accounts.len(), 2);
+    assert_eq!(a.accounts[1].slot_index, Some(1));
+    assert!(!a.accounts[1].enabled);
+    assert!(a.accounts[0].sim);
+    assert!(!a.ask);
+    assert!(a.default_key.is_some());
+}
+
+#[test]
+fn settings_sync_content_and_defaults() {
+    let s: SettingsSync = parse("settings_sync.json");
+    assert!(!s.proximity && s.flip_to_silence && s.vibrate_connect);
+    assert_eq!(s.keypad_tones, Some(false));
+    assert_eq!(s.haptics, HapticsLevel::Light);
+    assert_eq!(s.name_format, NameFormat::LastFirst);
+    // An empty object is the v0.1 behaviour.
+    let d: SettingsSync = serde_json::from_str("{}").expect("parse");
+    assert_eq!(d, SettingsSync::default());
+    assert!(d.proximity);
+    assert_eq!(d.keypad_tones, None);
+}
+
+#[test]
+fn unknown_enum_values_do_not_fail() {
+    let d: DocumentResult =
+        serde_json::from_str(r#"{"op":"print_it","ok":false,"error":"nope","extra":1}"#)
+            .expect("parse");
+    assert_eq!(d.op, DocumentOp::Unknown);
+    assert_eq!(d.error, Some(WireError::Unknown));
+    let u: UiRequest = serde_json::from_str(r#"{"kind":"warp"}"#).expect("parse");
+    assert_eq!(u.kind, UiRequestKind::Unknown);
+    let s: SettingsSync =
+        serde_json::from_str(r#"{"haptics":"turbo","name_format":"zzz","new":1}"#).expect("parse");
+    assert_eq!(s.haptics, HapticsLevel::Normal);
+    assert_eq!(s.name_format, NameFormat::FirstLast);
+    let e = parse::<UiRequest>("ui_request.json");
+    assert_eq!(e.call_id, Some(3));
+}
+
+#[test]
+fn every_envelope_error_parses() {
+    let all: Vec<CallLogResponse> = parse("envelope_errors.json");
+    let errors: Vec<_> = all
+        .into_iter()
+        .map(|r| r.into_result().expect_err("error envelope"))
+        .collect();
+    assert_eq!(
+        errors,
+        [
+            WireError::Permission,
+            WireError::Unavailable,
+            WireError::Refused,
+            WireError::NotFound,
+            WireError::Unknown,
+            WireError::Unknown,
+        ]
+    );
+}
+
+#[test]
+fn voicemail_and_emergency_content() {
+    let v = parse::<VoicemailInfoResponse>("voicemail_info.json")
+        .into_result()
+        .expect("ok");
+    assert!(v.available);
+    assert_eq!(v.count, Some(2));
+    let e = parse::<EmergencyListResponse>("emergency_list.json")
+        .into_result()
+        .expect("ok");
+    assert_eq!(e.numbers, ["112", "155", "110"]);
+    let r: RingtoneResult = parse("ringtone_result.json");
+    assert_eq!(r.title.as_deref(), Some("Aurora"));
 }

@@ -28,6 +28,7 @@ fn contact(id: i64, name: &str, numbers: Vec<WireNumber>, starred: bool) -> Wire
         photo_uri: cfg!(not(target_os = "android"))
             .then(|| format!("sample:{id}"))
             .filter(|_| SAMPLE_PHOTOS.contains(&id)),
+        ..Default::default()
     }
 }
 
@@ -194,6 +195,7 @@ pub fn call_log(now_ms: i64) -> Vec<CallLogEntry> {
                 cached_name: name.map(str::to_owned),
                 number_label: None,
                 contact_id: None,
+                ..Default::default()
             }
         };
     vec![
@@ -292,6 +294,7 @@ pub fn add_call(kind: CallLogKind, now_ms: i64) {
             cached_name: Some("Özgür Şahin".to_owned()),
             number_label: None,
             contact_id: None,
+            ..Default::default()
         });
     }
 }
@@ -341,6 +344,7 @@ pub fn long_call_log(now_ms: i64, count: usize) -> Vec<CallLogEntry> {
             cached_name: name,
             number_label: None,
             contact_id: (i % 5 != 4 && i % 11 != 10).then_some(1 + ((i / 2) % people.len()) as i64),
+            ..Default::default()
         });
     }
     out

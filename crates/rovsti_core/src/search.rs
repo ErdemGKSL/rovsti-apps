@@ -225,6 +225,7 @@ mod tests {
                 .collect(),
             starred: false,
             photo_uri: None,
+            ..Default::default()
         }
     }
 

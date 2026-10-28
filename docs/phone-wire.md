@@ -65,11 +65,26 @@ two ever differ; until then the snapshot-level pair is the contract.
 
 ## 2. Provider pulls (Rust calls Kotlin, envelope `{v, ok, error?, data?}`)
 
-`pullCallLog`, `pullContacts`, `pullFavorites` are unchanged (`=`). Added by
-later stories (owner in brackets): `phone_accounts` (16.3), `voicemail_info`,
-`emergency_numbers`, blocklist rows (18.x), call history with `features` (21.x),
-contact `lookup_key`, `display_name_alt`, `sort_key`, `sort_key_alt` (19.x),
-log row `account_key` and `features` (hd=1, wifi=2, volte=4, video=8).
+`pullCallLog`, `pullContacts`, `pullFavorites` keep their calls (`=`); their
+rows gained optional fields (below). The error enum is
+`permission|unavailable|refused|not_found|unknown` (`wire::WireError`).
+Rust shapes landed in 14.9; the Kotlin side of each arrives with the story in
+brackets.
+
+| Provider | Rust type | Fixture | Kotlin story / JVM test |
+|---|---|---|---|
+| `phone_accounts` | `PhoneAccountsResponse` (`PhoneAccounts{accounts[{key,label,slot_index?,color_argb,sim,enabled}],default_key?,ask}`) | `phone_accounts.json` | 16.3 `WireFixturesTest` |
+| `voicemail_info` | `VoicemailInfoResponse` | `voicemail_info.json` | 20.x `WireFixturesTest` |
+| `emergency_numbers` | `EmergencyListResponse` | `emergency_list.json` | 19.x `WireFixturesTest` |
+| blocklist rows | `BlocklistResponse` (`numbers[{id,number_raw,normalized}]`) | `blocklist.json` | 18.x `WireFixturesTest` |
+| contacts, new fields `lookup_key`, `display_name_alt`, `sort_key`, `sort_key_alt` | `WireContact` | `contacts_v2.json` | 19.x `WireFixturesTest` |
+| call log, new fields `account_key`, `block_reason` (`user|system|unknown`), `features` (details only), kinds `voicemail`, `blocked` | `CallLogEntry` | `call_log_v2.json` | 18.x, 21.x `WireFixturesTest` |
+| `SettingsSync{proximity,flip_to_silence,vibrate_connect,vibrate_end,has_replies,keypad_tones?,haptics,name_format}` (Rust pushes via `syncSettings(json)`) | `SettingsSync` | `settings_sync.json` | 14.12 / 17.x `WireFixturesTest` |
+| envelope errors | `WireError` | `envelope_errors.json` | 18.x `WireFixturesTest` |
+| one-shot payloads | `DocumentResult`, `RingtoneResult`, `UiRequest` | `document_result_*.json`, `ringtone_result.json`, `ui_request.json` | 21.x, 17.x, 16.x |
+
+A v0.1 row (no new field) parses with every new field defaulted
+(`v01_rows_default_every_new_field`).
 
 ## 3. One-shot events (Kotlin to Rust, `RovstiBridge.emit`)
 
@@ -81,6 +96,10 @@ log row `account_key` and `features` (hd=1, wifi=2, volte=4, video=8).
 | `permissions_changed` = | none | 3.4 |
 | `sims_changed` + | none | 16.3 |
 | `voicemail_changed` + | none | 20.x |
+| `blocked_changed` + | none | 18.x |
+| `document_result` + | `DocumentResult{op,ok,name?,text?,error?}` | 14.9 (shape), 21.x |
+| `ringtone_result` + | `RingtoneResult{ok,title?}` | 14.9 (shape), 17.x |
+| `ui_request` + | `UiRequest{kind,call_id?}` (`show_dialer|show_call|show_recents`) | 14.9 (shape), 16.x |
 
 ## 4. Rust to Kotlin commands (static methods on `RovstiBridge`)
 

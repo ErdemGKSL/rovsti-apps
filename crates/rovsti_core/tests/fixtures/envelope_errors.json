@@ -1,0 +1,8 @@
+[
+  {"v": 1, "ok": false, "error": "permission"},
+  {"v": 1, "ok": false, "error": "unavailable"},
+  {"v": 1, "ok": false, "error": "refused"},
+  {"v": 1, "ok": false, "error": "not_found"},
+  {"v": 1, "ok": false, "error": "unknown"},
+  {"v": 1, "ok": false, "error": "something_new"}
+]

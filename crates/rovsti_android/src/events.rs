@@ -21,6 +21,12 @@ pub mod kind {
     pub const CALL_LOG_CHANGED: &str = "call_log_changed";
     pub const CONTACTS_CHANGED: &str = "contacts_changed";
     pub const PERMISSIONS_CHANGED: &str = "permissions_changed";
+    pub const BLOCKED_CHANGED: &str = "blocked_changed";
+    pub const SIMS_CHANGED: &str = "sims_changed";
+    pub const VOICEMAIL_CHANGED: &str = "voicemail_changed";
+    pub const DOCUMENT_RESULT: &str = "document_result";
+    pub const RINGTONE_RESULT: &str = "ringtone_result";
+    pub const UI_REQUEST: &str = "ui_request";
 }
 
 /// One undecoded event.

@@ -77,7 +77,11 @@ fn routes_preview() -> Option<bool> {
 }
 
 impl Backend {
-    pub(super) fn preview_apply(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut CallSnapshot)) {
+    pub(super) fn preview_apply(
+        &mut self,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut CallSnapshot),
+    ) {
         let mut snapshot = self.calls.snapshot().clone();
         snapshot.seq = self.calls.seq().map_or(0, |s| s + 1);
         snapshot.now_ms = now_ms();
@@ -149,7 +153,12 @@ impl Backend {
     /// Disconnects the fake call `id` (its conference children go with it), then removes
     /// it. The other call, if any, becomes the foreground and stays as it was (a held call
     /// does not resume by itself).
-    pub(super) fn preview_end_id(&mut self, id: i32, cause: DisconnectCause, cx: &mut Context<Self>) {
+    pub(super) fn preview_end_id(
+        &mut self,
+        id: i32,
+        cause: DisconnectCause,
+        cx: &mut Context<Self>,
+    ) {
         self.preview_apply(cx, |s| {
             if let Some(call) = s.calls.iter_mut().find(|c| c.id == id) {
                 call.state = WireCallState::Disconnected;
@@ -184,9 +193,11 @@ impl Backend {
             .map(str::to_owned)
             .or_else(|| std::env::var("ROVSTI_PREVIEW_CALL").ok());
         let raw = raw.to_owned();
-        if self.calls.foreground().is_some_and(|c| {
-            matches!(c.state, WireCallState::Active | WireCallState::Holding)
-        }) {
+        if self
+            .calls
+            .foreground()
+            .is_some_and(|c| matches!(c.state, WireCallState::Active | WireCallState::Holding))
+        {
             self.preview_add_call(&raw, cx);
             return;
         }
@@ -306,7 +317,8 @@ impl Backend {
             CallCommand::Merge => self.preview_merge(cx),
             CallCommand::Split(id) => self.preview_split(id, cx),
             CallCommand::EndAll => self.preview_apply(cx, |s| {
-                s.calls.retain(|c| c.state == WireCallState::Ringing && c.parent_id.is_none());
+                s.calls
+                    .retain(|c| c.state == WireCallState::Ringing && c.parent_id.is_none());
                 roles::assign(s, None);
             }),
             CallCommand::Answer(id) => self.preview_answer(id, Answer::Plain, cx),
@@ -413,7 +425,10 @@ pub(super) mod roles {
             .iter()
             .find(|c| c.state == WireCallState::Ringing && Some(c.id) != fg)
             .map(|c| c.id);
-        let background = top.iter().find(|c| live(c) && Some(c.id) != fg).map(|c| c.id);
+        let background = top
+            .iter()
+            .find(|c| live(c) && Some(c.id) != fg)
+            .map(|c| c.id);
         let any_live = top
             .iter()
             .any(|c| live(c) || c.state == WireCallState::Ringing);
@@ -432,8 +447,8 @@ pub(super) mod roles {
             .iter()
             .find(|c| Some(c.id) == background)
             .is_some_and(|c| c.can_hold || c.has_cap(caps::HOLD));
-        let can_swap = fg_call.is_some_and(|c| c.has_cap(caps::SWAP))
-            || (live_count == 2 && held_resumes);
+        let can_swap =
+            fg_call.is_some_and(|c| c.has_cap(caps::SWAP)) || (live_count == 2 && held_resumes);
         let can_add = !emergency && live_count < 2 && any_live;
         s.foreground_call_id = fg;
         s.waiting_call_id = waiting;

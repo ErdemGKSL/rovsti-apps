@@ -183,7 +183,10 @@ object CallNotifications {
         if (call.connectTimeMs > 0) {
             builder.setWhen(call.connectTimeMs).setShowWhen(true).setUsesChronometer(true)
         }
-        if (call.holding) builder.setContentText("On hold")
+        // End on the notification ends every call (documented); in-app End ends the foreground one.
+        val subtext = if (call.callCount > 1) "${call.callCount} calls" else null
+        if (call.holding) builder.setContentText(if (subtext != null) "On hold · $subtext" else "On hold")
+        else if (subtext != null) builder.setContentText(subtext)
         return builder.build()
     }
 }

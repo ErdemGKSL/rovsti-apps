@@ -266,11 +266,19 @@ impl<'a> CallScene<'a> {
         }
     }
 
+    /// Mute, Keypad and Audio act on the live call: dim while it is on hold.
+    fn on_hold_reason(&self) -> Option<DisabledReason> {
+        self.primary()
+            .is_some_and(|p| p.state == WireCallState::Holding)
+            .then_some(DisabledReason::OnHold)
+    }
+
     /// Why `control` is dimmed, or `None` when it is available.
     /// Precedence: emergency, pending or ringing, count, carrier, capability.
     pub fn reason(&self, control: Control) -> Option<DisabledReason> {
         let f = &self.facts;
         match control {
+            Control::Mute | Control::Keypad | Control::Audio => self.on_hold_reason(),
             Control::AddCall => {
                 if f.emergency {
                     Some(DisabledReason::Emergency)
@@ -280,6 +288,8 @@ impl<'a> CallScene<'a> {
                     Some(DisabledReason::Incoming)
                 } else if f.live >= 2 {
                     Some(DisabledReason::TwoCalls)
+                } else if self.held().is_none() && self.on_hold_reason().is_some() {
+                    Some(DisabledReason::OnHold)
                 } else if !f.can_add_call {
                     Some(DisabledReason::AddCallCarrier)
                 } else {
@@ -304,6 +314,12 @@ impl<'a> CallScene<'a> {
             Control::HoldSwap => {
                 if f.pending.is_some() {
                     return Some(DisabledReason::Pending);
+                }
+                if self
+                    .primary()
+                    .is_some_and(|p| p.state == WireCallState::Dialing)
+                {
+                    return Some(DisabledReason::Connecting);
                 }
                 match self.hold_slot() {
                     HoldSlot::Swap if !f.can_swap => Some(DisabledReason::SwapUnsupported),
@@ -337,6 +353,9 @@ fn can_hold(call: &WireCall) -> bool {
 /// A control on the In-Call Screen that can be dimmed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Control {
+    Mute,
+    Keypad,
+    Audio,
     AddCall,
     Merge,
     /// The Hold / Swap slot.
@@ -368,6 +387,10 @@ pub enum DisabledReason {
     HoldUnsupported,
     SwapUnsupported,
     CurrentCallCannotHold,
+    /// The call is on hold: resume it first.
+    OnHold,
+    /// The call is still dialing.
+    Connecting,
 }
 
 impl DisabledReason {
@@ -383,6 +406,8 @@ impl DisabledReason {
             Self::HoldUnsupported => "This call can't be put on hold",
             Self::SwapUnsupported => "Your carrier doesn't allow swapping calls",
             Self::CurrentCallCannotHold => "Ends the current call instead: it can't be held",
+            Self::OnHold => "Resume the call first",
+            Self::Connecting => "Wait for the call to connect",
         }
     }
 }
@@ -894,6 +919,8 @@ mod tests {
             HoldUnsupported,
             SwapUnsupported,
             CurrentCallCannotHold,
+            OnHold,
+            Connecting,
         ];
         for (i, a) in all.iter().enumerate() {
             assert!(!a.text().is_empty());
@@ -907,6 +934,37 @@ mod tests {
             "Your carrier doesn't allow merging calls"
         );
         assert_eq!(TwoCalls.text(), "Two calls are already in progress");
+    }
+
+    #[test]
+    fn a_held_single_call_dims_the_live_controls_with_one_reason() {
+        use DisabledReason::*;
+        let s = snap(vec![call(1, WireCallState::Holding)], Some(1), None);
+        let scene = CallScene::of(&s);
+        for control in [Control::Mute, Control::Keypad, Control::Audio] {
+            assert_eq!(scene.reason(control), Some(OnHold));
+        }
+        let mut live = s.clone();
+        live.calls[0].state = WireCallState::Active;
+        let scene = CallScene::of(&live);
+        for control in [Control::Mute, Control::Keypad, Control::Audio] {
+            assert_eq!(scene.reason(control), None);
+        }
+    }
+
+    #[test]
+    fn add_call_is_dimmed_while_the_only_call_is_held_and_hold_while_dialing() {
+        use DisabledReason::*;
+        let mut s = snap(vec![call(1, WireCallState::Holding)], Some(1), None);
+        s.can_add_call = true;
+        assert_eq!(CallScene::of(&s).reason(Control::AddCall), Some(OnHold));
+        // Resume is still offered on a held call.
+        assert_eq!(CallScene::of(&s).reason(Control::HoldSwap), None);
+        let d = snap(vec![call(1, WireCallState::Dialing)], Some(1), None);
+        assert_eq!(
+            CallScene::of(&d).reason(Control::HoldSwap),
+            Some(Connecting)
+        );
     }
 
     // ---- diff ----------------------------------------------------------

@@ -252,3 +252,37 @@ pub fn glass_icon_button_scaled(
                 .border_color(colors.background)
         }))
 }
+
+/// The flat glass look (DESIGN.md "Flat variants"): the tint, a hairline rim and the
+/// shadow of a glass surface, with no backdrop sample, for surfaces that must not
+/// cost a refractive pass (Held card, conference panel, waiting card). At rest it
+/// reads like the refractive version. `tint` is mixed over the glass fill
+/// (`warning` at 12% for the Held card).
+pub fn flat_glass(theme: Theme, tint: Option<(Hsla, f32)>) -> Div {
+    let fill = theme.glass_fill();
+    // A flat plate has nothing behind it to refract, so its veil is a little denser.
+    let base = Hsla {
+        a: (fill.a + if theme.is_dark() { 0.04 } else { 0.18 }).min(0.9),
+        ..fill
+    };
+    let plate = match tint {
+        Some((color, amount)) => crate::tokens::mix(base, color, amount),
+        None => base,
+    };
+    let rim = if theme.is_dark() {
+        Hsla {
+            a: 0.20,
+            ..gpui::white()
+        }
+    } else {
+        Hsla {
+            a: 0.65,
+            ..gpui::white()
+        }
+    };
+    div()
+        .bg(plate)
+        .border(px(0.8))
+        .border_color(rim)
+        .shadow(crate::tokens::shadow::glass(theme.is_dark()))
+}

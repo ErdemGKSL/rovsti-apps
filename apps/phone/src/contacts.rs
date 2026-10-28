@@ -60,12 +60,12 @@ const SHEET_AVATAR: f32 = 80.0;
 #[derive(Clone)]
 pub(crate) struct ContactRow {
     pub(crate) id: i64,
-    name: SharedString,
-    subtitle: Option<SharedString>,
+    pub(crate) name: SharedString,
+    pub(crate) subtitle: Option<SharedString>,
     letter: SharedString,
-    header: bool,
-    monogram: Option<SharedString>,
-    hue: Option<usize>,
+    pub(crate) header: bool,
+    pub(crate) monogram: Option<SharedString>,
+    pub(crate) hue: Option<usize>,
     pub(crate) numbers: Arc<[NumberVm]>,
     starred: bool,
     aria: SharedString,
@@ -146,10 +146,10 @@ impl State {
 pub(crate) struct ContactsView {
     scroll: UniformListScrollHandle,
     bounds: Rc<Cell<Bounds<Pixels>>>,
-    state: State,
+    pub(crate) state: State,
     index: Option<Arc<ContactIndex>>,
     all: Arc<[ContactRow]>,
-    rows: Arc<[ContactRow]>,
+    pub(crate) rows: Arc<[ContactRow]>,
     /// The query `rows` was built for.
     query: String,
     pub(crate) field: Entity<SearchField>,
@@ -214,9 +214,9 @@ impl ContactsView {
 pub(crate) struct FavoritesView {
     scroll: UniformListScrollHandle,
     bounds: Rc<Cell<Bounds<Pixels>>>,
-    state: State,
+    pub(crate) state: State,
     source: Option<Arc<Vec<WireContact>>>,
-    tiles: Arc<[ContactRow]>,
+    pub(crate) tiles: Arc<[ContactRow]>,
     touch: Option<Point<Pixels>>,
     tap: TapGuard,
     last_pressed: Option<usize>,
@@ -1021,7 +1021,7 @@ impl PhoneApp {
     }
 
     /// The sticky glass search field (44 px).
-    fn contacts_field(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn contacts_field(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(theme);
         let field = self.contacts.field.clone();
         let focus = field.read(cx).focus_handle();

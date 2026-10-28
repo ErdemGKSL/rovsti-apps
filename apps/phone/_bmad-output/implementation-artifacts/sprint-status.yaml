@@ -197,15 +197,15 @@ development_status:
   epic-14-retrospective: optional
 
   epic-15: backlog
-  15-1-kotlin-multi-call-model-and-spike-s4-probe: backlog
-  15-2-the-pendingop-machine-and-multi-call-commands: backlog
-  15-3-rust-call-scene-integration-and-commands: backlog
-  15-4-fixed-in-call-control-grid-chip-row-and-disabled-reasons: backlog
-  15-5-add-call-sheet: backlog
-  15-6-two-call-view-held-card-s19-hold-away-and-s20-swap-crossing: backlog
-  15-7-merge-conference-view-s21-merge-weave-and-s22-participant-ej: backlog
-  15-8-waiting-card-s23-waiting-card-drop: backlog
-  15-9-notifications-end-semantics-and-lock-screen-rules-for-severa: backlog
+  15-1-kotlin-multi-call-model-and-spike-s4-probe: review
+  15-2-the-pendingop-machine-and-multi-call-commands: review
+  15-3-rust-call-scene-integration-and-commands: review
+  15-4-fixed-in-call-control-grid-chip-row-and-disabled-reasons: review
+  15-5-add-call-sheet: review
+  15-6-two-call-view-held-card-s19-hold-away-and-s20-swap-crossing: review
+  15-7-merge-conference-view-s21-merge-weave-and-s22-participant-ej: review
+  15-8-waiting-card-s23-waiting-card-drop: review
+  15-9-notifications-end-semantics-and-lock-screen-rules-for-severa: review
   epic-15-retrospective: optional
 
   epic-16: backlog

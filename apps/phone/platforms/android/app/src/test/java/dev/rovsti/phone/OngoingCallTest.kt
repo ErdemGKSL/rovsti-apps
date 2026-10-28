@@ -52,4 +52,28 @@ class OngoingCallTest {
         assertEquals(a.key, b.key)
         assertFalse(a.key == connected.key)
     }
+
+    @Test
+    fun theNotificationFollowsTheForegroundAndCountsLiveCalls() {
+        val n = of(call(1, "holding", name = "Ada"), call(2, "active", name = "Bob"))!!
+        assertEquals(2, n.callCount)
+        assertEquals("Bob", n.title)
+        assertFalse(n.key == of(call(2, "active", name = "Bob"))!!.key)
+    }
+
+    @Test
+    fun aConferenceCountsAsOneCall() {
+        val n = of(
+            CallInfo(id = 1, state = "active", parentId = 3),
+            CallInfo(id = 2, state = "active", parentId = 3),
+            CallInfo(id = 3, state = "active", children = listOf(1, 2), props = 1),
+        )!!
+        assertEquals(1, n.callCount)
+        assertEquals(3, n.callId)
+    }
+
+    @Test
+    fun aWaitingCallDoesNotChangeTheCount() {
+        assertEquals(1, of(call(1, "active"), call(2, "ringing"))!!.callCount)
+    }
 }

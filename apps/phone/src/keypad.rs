@@ -158,6 +158,8 @@ pub(crate) enum HoldAction {
     Diagnostics,
     /// The Audio control was held: open the route list (story 14.6).
     RouteList,
+    /// A dimmed In-Call control (its [`Slot`](crate::zone::Slot) index) was held: say why.
+    Reason(u8),
 }
 
 impl PhoneApp {
@@ -273,11 +275,12 @@ impl PhoneApp {
                 }
             }
             HoldAction::RouteList => self.route_long_press(window, cx),
+            HoldAction::Reason(slot) => self.show_reason(usize::from(slot), window, cx),
         }
         cx.notify();
     }
 
-    fn invalid(&mut self, window: &mut Window) {
+    pub(crate) fn invalid(&mut self, window: &mut Window) {
         // A sideways kick on a centred spring reads as "no".
         if window.prefers_reduced_motion() {
             self.set_status("Not a valid number");
@@ -614,7 +617,7 @@ impl PhoneApp {
             .children(rows)
     }
 
-    fn number_display(&self, theme: Theme) -> impl IntoElement {
+    pub(crate) fn number_display(&self, theme: Theme) -> impl IntoElement {
         let colors = theme::colors(theme);
         let (_, head, last) = &self.shown_digits;
         let font = self.font.value;

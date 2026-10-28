@@ -30,39 +30,93 @@ const CHIPS: [(&str, &str); 10] = [
     ("dev-btrm", "-BT"),
 ];
 
+/// The multi-call design scenes (story 15.3), a second row of chips under the first.
+/// `(press id, label, scene name)`; see `backend/preview_multi.rs`.
+const SCENE_CHIPS: [(&str, &str, &str); 8] = [
+    ("dev-s-single", "1 call", "single"),
+    ("dev-s-two", "2 calls", "two"),
+    ("dev-s-nomerge", "No merge", "nomerge"),
+    ("dev-s-conf", "Conf 4", "conf"),
+    ("dev-s-conf4", "Conf 6", "conf4"),
+    ("dev-s-hidden", "Conf n", "hidden"),
+    ("dev-s-waiting", "Waiting+1", "waiting"),
+    ("dev-s-three", "3 calls", "three"),
+];
+
 impl PhoneApp {
     pub(crate) fn dev_switcher(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
+        let scene_row = div()
+            .flex()
+            .justify_center()
+            .gap(px(4.0))
+            // Not drawn in tests: the allocation budgets count the app, not its design aids.
+            .children(
+                (!cfg!(test))
+                    .then_some(SCENE_CHIPS)
+                    .into_iter()
+                    .flatten()
+                    .map(|(id, label, _)| {
+                        div()
+                            .id(id)
+                            .role(Role::Button)
+                            .aria_label(label)
+                            .h(px(20.0))
+                            .px(px(7.0))
+                            .rounded_full()
+                            .bg(gpui::Hsla {
+                                a: 0.8,
+                                ..colors.fill
+                            })
+                            .flex()
+                            .items_center()
+                            .text_size(px(10.5))
+                            .text_color(colors.secondary_label)
+                            .child(label)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| this.dev_action(id, cx)),
+                            )
+                    }),
+            );
         div()
             .absolute()
             .top(px(8.0))
             .left_0()
             .right_0()
             .flex()
-            .justify_center()
+            .flex_col()
+            .items_center()
             .gap(px(4.0))
-            .children(CHIPS.map(|(id, label)| {
+            .child(scene_row)
+            .child(
                 div()
-                    .id(id)
-                    .role(Role::Button)
-                    .aria_label(label)
-                    .h(px(20.0))
-                    .px(px(7.0))
-                    .rounded_full()
-                    .bg(gpui::Hsla {
-                        a: 0.8,
-                        ..colors.fill
-                    })
                     .flex()
-                    .items_center()
-                    .text_size(px(10.5))
-                    .text_color(colors.secondary_label)
-                    .child(label)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, _, cx| this.dev_action(id, cx)),
-                    )
-            }))
+                    .justify_center()
+                    .gap(px(4.0))
+                    .children(CHIPS.map(|(id, label)| {
+                        div()
+                            .id(id)
+                            .role(Role::Button)
+                            .aria_label(label)
+                            .h(px(20.0))
+                            .px(px(7.0))
+                            .rounded_full()
+                            .bg(gpui::Hsla {
+                                a: 0.8,
+                                ..colors.fill
+                            })
+                            .flex()
+                            .items_center()
+                            .text_size(px(10.5))
+                            .text_color(colors.secondary_label)
+                            .child(label)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| this.dev_action(id, cx)),
+                            )
+                    })),
+            )
             .into_any_element()
     }
 
@@ -171,6 +225,33 @@ impl PhoneApp {
             'y' => self.preview_route_pick(1, window, cx),
             'g' => self.preview_route_pick(0, window, cx),
             'l' => self.preview_audio_tap(window, cx),
+            // Multi-call scenes: `S` one call, `T` two calls, `N` two calls without merge,
+            // `C` a 4-person conference, `G` a 6-person one, `U` a conference with hidden
+            // participants, `W` a call with a waiting caller, `R` three calls.
+            'S' => self.dev_scene("single", cx),
+            'T' => self.dev_scene("two", cx),
+            'N' => self.dev_scene("nomerge", cx),
+            'C' => self.dev_scene("conf", cx),
+            'G' => self.dev_scene("conf4", cx),
+            'U' => self.dev_scene("hidden", cx),
+            'W' => self.dev_scene("waiting", cx),
+            'R' => self.dev_scene("three", cx),
+            // Taps: `A` Add call, `X` Hold or Swap, `M` Merge, `H` the Held card, `B`/`D`/`E`/`F`
+            // the Waiting card's pills (Hold and answer, End and answer, Decline, Message),
+            // `P`/`L` Split/End on the first conference row, `J` the Add call sheet's next
+            // segment, `K` its first Favorites tile.
+            'A' => self.incall_tap("ix-add", window, cx),
+            'X' => self.incall_tap("ix-hold", window, cx),
+            'M' => self.incall_tap("ix-merge", window, cx),
+            'H' => self.incall_tap("ix-held", window, cx),
+            'B' => self.incall_tap("iw-hold", window, cx),
+            'D' => self.incall_tap("iw-end", window, cx),
+            'E' => self.incall_tap("iw-decline", window, cx),
+            'F' => self.incall_tap("iw-msg", window, cx),
+            'P' => self.conference_act(0, 0, window, cx),
+            'L' => self.conference_act(0, 1, window, cx),
+            'J' => self.preview_add_segment(window, cx),
+            'K' => self.preview_add_pick(window, cx),
             'q' => self.route_close(window, cx),
             // `i` opens the Diagnostics page, `j` runs its Audio probe, `p` copies the report.
             'i' => {
@@ -190,6 +271,11 @@ impl PhoneApp {
         cx.notify();
     }
 
+    fn dev_scene(&mut self, scene: &str, cx: &mut Context<Self>) {
+        self.backend
+            .update(cx, |backend, cx| backend.preview_scene(scene, cx));
+    }
+
     fn dev_action(&mut self, id: &str, cx: &mut Context<Self>) {
         self.backend.update(cx, |backend, cx| match id {
             "dev-ring" => backend.preview_ring(None, false, false, cx),
@@ -204,6 +290,9 @@ impl PhoneApp {
             "dev-routes" => backend.preview_scenario("routes", cx),
             "dev-btadd" => backend.preview_add_bluetooth(cx),
             "dev-btrm" => backend.preview_remove_bluetooth(cx),
+            scene if scene.starts_with("dev-s-") => {
+                backend.preview_scene(&scene["dev-s-".len()..], cx)
+            }
             _ => {}
         });
     }

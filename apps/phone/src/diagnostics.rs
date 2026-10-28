@@ -399,8 +399,9 @@ mod tests {
     }
 
     #[test]
-    fn only_audio_is_built_so_far() {
-        assert_eq!(REGISTERED, ["audio"]);
+    fn audio_and_calls_are_built_so_far() {
+        assert_eq!(REGISTERED, ["audio", "calls"]);
         assert!(GROUPS.iter().any(|(p, _)| *p == "audio"));
+        assert!(GROUPS.iter().any(|(p, _)| *p == "calls"));
     }
 }

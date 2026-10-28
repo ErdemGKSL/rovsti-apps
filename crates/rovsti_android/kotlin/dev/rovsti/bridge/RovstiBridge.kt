@@ -352,6 +352,37 @@ object RovstiBridge {
         return true
     }
 
+    /** The keyguard state re-read from the system at the moment of a tap (story 15.5). */
+    @JvmStatic
+    fun isKeyguardLocked(): Boolean =
+        app.getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked ?: true
+
+    /**
+     * Asks the system to dismiss the keyguard (the Add call sheet needs the phone unlocked for
+     * Favorites and Contacts). The answer is the `keyguard_dismissed` event; an unlocked phone
+     * answers at once and a refused or cancelled request never answers.
+     */
+    @JvmStatic
+    fun requestDismissKeyguard(): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread {
+            val keyguard = app.getSystemService(android.app.KeyguardManager::class.java)
+            if (keyguard == null || !keyguard.isKeyguardLocked) {
+                emit("keyguard_dismissed", "{}")
+                return@runOnUiThread
+            }
+            keyguard.requestDismissKeyguard(
+                activity,
+                object : android.app.KeyguardManager.KeyguardDismissCallback() {
+                    override fun onDismissSucceeded() {
+                        emit("keyguard_dismissed", "{}")
+                    }
+                },
+            )
+        }
+        return true
+    }
+
     // ---- Battery / Xiaomi ---------------------------------------------
 
     @JvmStatic

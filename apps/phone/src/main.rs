@@ -11,6 +11,7 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
     TouchPhase, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
 };
+mod addcall;
 mod aura;
 mod backend;
 mod contacts;
@@ -34,6 +35,9 @@ mod route;
 mod sample;
 mod setup_ui;
 mod signature;
+mod waiting_card;
+mod zone;
+mod zone_ui;
 
 use backend::{Backend, XiaomiOs};
 use contacts::{ContactSheet, ContactsView, FavoritesView};
@@ -83,6 +87,8 @@ enum SheetKind {
     Contact,
     /// The hidden Diagnostics page (story 14.0f).
     Diagnostics,
+    /// The Add call sheet over the In-Call screen (story 15.5).
+    AddCall,
 }
 
 /// The line under the number field.
@@ -152,6 +158,8 @@ struct PhoneApp {
 
     /// The Setup sheet (an overlay: opening it never moves the page).
     sheet: Sheet,
+    /// The Add call sheet's state (story 15.5).
+    add: addcall::AddCall,
     /// The audio route list and its moments (S17, S18).
     route: route::RouteUi,
     /// Xiaomi pages opened, and pages that fell back to App info, this session.
@@ -242,6 +250,12 @@ impl PhoneApp {
             backend.update(cx, |backend, cx| {
                 backend.place_call("+905551112233", cx);
             });
+        }
+        // Desktop design preview: a multi-call scene at start-up (ROVSTI_PREVIEW_SCENE=two, conf,
+        // conf4, hidden, waiting, nomerge, three; see backend/preview_multi.rs).
+        #[cfg(not(target_os = "android"))]
+        if let Ok(scene) = std::env::var("ROVSTI_PREVIEW_SCENE") {
+            backend.update(cx, |backend, cx| backend.preview_scene(&scene, cx));
         }
         // Desktop design preview: ring a fake call at start-up (see backend/preview.rs).
         #[cfg(not(target_os = "android"))]
@@ -353,6 +367,7 @@ impl PhoneApp {
             font: Spring::new(dial::font_step(0), motion_tokens::morph()).with_epsilon(0.01),
             hold_gen: 0,
             sheet,
+            add: addcall::AddCall::new(cx),
             opened: OpenedThisSession::default(),
             fell_back: OpenedThisSession::default(),
             role_declined: false,
@@ -632,12 +647,19 @@ impl PhoneApp {
                 // under the In-Call screen only its own controls.
                 let on_incoming = id.as_deref().is_some_and(|i| i.starts_with("in-"));
                 let blocked_by_incoming = self.incoming.covers() != on_incoming;
+                // The Add call sheet's own keys, field and buttons work over the call.
+                let owned = id.as_deref().is_some_and(|i| self.add_call_owns(i));
                 let blocked_by_sheet = self.sheet.is_visible()
+                    && !owned
                     && !id.as_deref().is_some_and(|i| i.starts_with("sheet-"));
-                let is_call_id =
-                    |i: &str| i.starts_with("ic-") || i.starts_with("ik-") || i.starts_with("iw-");
+                let is_call_id = |i: &str| {
+                    i.starts_with("ic-")
+                        || i.starts_with("ik-")
+                        || i.starts_with("iw-")
+                        || i.starts_with("ix-")
+                };
                 let blocked_by_call =
-                    self.incall.covers() && !id.as_deref().is_some_and(is_call_id);
+                    self.incall.covers() && !owned && !id.as_deref().is_some_and(is_call_id);
                 // The open route list owns the screen: only End still works.
                 let blocked_by_route = self.route.is_open()
                     && id
@@ -645,17 +667,34 @@ impl PhoneApp {
                         .is_some_and(|i| is_call_id(i) && i != "ic-end");
                 let blocked_by_tabs =
                     !self.incall.covers() && id.as_deref().is_some_and(is_call_id);
+                // Over a sheet only the sheet's own controls react; the call controls under it do not.
+                let call_under_sheet = self.sheet.is_visible()
+                    && id
+                        .as_deref()
+                        .is_some_and(|i| is_call_id(i) && i != "ic-end");
                 if blocked_by_incoming
                     || blocked_by_sheet
                     || blocked_by_call
                     || blocked_by_tabs
                     || blocked_by_route
+                    || call_under_sheet
                 {
                     return;
                 }
                 if let Some(id) = id.clone() {
                     self.presses.touch_down(id.clone());
-                    if Self::acts_on_down(&id) {
+                    if let Some(slot) = id
+                        .strip_prefix("ix-dim-")
+                        .and_then(|n| n.parse::<u8>().ok())
+                    {
+                        // A dimmed control: held for 450 ms it says why.
+                        self.arm_hold(
+                            incall::REASON_AFTER_MS,
+                            keypad::HoldAction::Reason(slot),
+                            window,
+                            cx,
+                        );
+                    } else if Self::acts_on_down(&id) {
                         self.activate(&id, window, cx);
                     } else if &*id == "sheet-title" {
                         self.arm_hold(
@@ -702,6 +741,7 @@ impl PhoneApp {
             moving |= sheet.tick_star(dt);
         }
         moving |= self.incall.tick(dt);
+        moving |= self.add.tick(dt);
         moving |= self.pill.tick(dt);
         moving |= self.route.tick(dt);
         moving |= self.incoming.tick(dt);
@@ -977,6 +1017,8 @@ impl PhoneApp {
         match self.sheet_kind {
             SheetKind::Setup => self.setup_sheet(theme, window, cx),
             SheetKind::Diagnostics => self.diag_sheet(theme, window, cx),
+            // Drawn over the In-Call screen by `add_call_overlay`.
+            SheetKind::AddCall => None,
             SheetKind::Number => {
                 if !self.sheet.is_visible() {
                     return None;
@@ -1040,7 +1082,8 @@ impl Render for PhoneApp {
         let tabs = &self.tabs;
         self.tab_view
             .update(cx, |view, cx| view.sync(tabs, theme, cx));
-        let incall = self.render_incall(theme, cx);
+        let incall = self.render_incall(theme, window, cx);
+        let add_call = self.add_call_overlay(theme, window, cx);
         let incoming = self.render_incoming(theme, cx);
         let tabs_visible = self.restored
             && !self.incall.hides_tabs()
@@ -1093,6 +1136,7 @@ impl Render for PhoneApp {
         let pill = self.render_pill(theme, cx);
         let route = self.render_route(theme, window, cx);
         root.children(incall)
+            .children(add_call)
             .children(route)
             .children(pill)
             .children(incoming)

@@ -13,9 +13,11 @@ data class OngoingCall(
     val title: String,
     val connectTimeMs: Long,
     val holding: Boolean,
+    /** Live top-level calls (a conference counts once); the notification says "2 calls" beyond one. */
+    val callCount: Int = 1,
 ) {
     /** Notifications are re-posted only when this changes. */
-    val key: String get() = "$callId|$title|$connectTimeMs|$holding"
+    val key: String get() = "$callId|$title|$connectTimeMs|$holding|$callCount"
 
     companion object {
         fun of(calls: List<CallInfo>, focus: Focus): OngoingCall? {
@@ -24,7 +26,8 @@ data class OngoingCall(
             val title = call.displayName?.takeIf { it.isNotBlank() }
                 ?: call.numberRaw.takeIf { it.isNotBlank() }
                 ?: "Unknown"
-            return OngoingCall(call.id, title, call.connectTimeMs, call.state == "holding")
+            val count = calls.count { it.parentId == null && (it.state == "active" || it.state == "dialing" || it.state == "holding") }
+            return OngoingCall(call.id, title, call.connectTimeMs, call.state == "holding", count.coerceAtLeast(1))
         }
     }
 }

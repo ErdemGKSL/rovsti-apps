@@ -19,7 +19,8 @@ use gpui::{
 use rovsti_core::{
     avatar,
     call::{CallState, caller_label, format_number, status_text},
-    wire::{AudioRoute, DisconnectCause},
+    scene::{CallScene, DisabledReason},
+    wire::{AudioRoute, DisconnectCause, PendingOp},
 };
 use rovsti_ui::{
     Icon, current_theme,
@@ -37,13 +38,12 @@ use crate::{
     aura::{Aura, AuraState, Phase},
     backend::{self, CallCommand, now_ms},
     fx::{A_AUDIO, A_AVATAR, A_END},
+    zone::{self, Face, Moment, Slot, ZoneState, slots},
 };
 
 /// "Call ended" holds this long; a failed call holds longer so it can be read.
 const ENDED_HOLD: Duration = Duration::from_millis(1000);
 const FAILED_HOLD: Duration = Duration::from_millis(2000);
-/// A tapped toggle keeps its pressed look at least this long.
-const PENDING_LOOK: Duration = Duration::from_millis(120);
 const DIGIT_LINE: usize = 24;
 /// The in-call digit buffer keeps only the latest keys.
 const DIGIT_BUFFER: usize = 64;
@@ -65,13 +65,15 @@ fn digit_line(digits: &str) -> String {
         digits.to_owned()
     }
 }
-const AVATAR: f32 = 96.0;
-const CONTROL: f32 = 76.0;
+const CONTROL: f32 = slots::CONTROL;
 /// The control circle, for the route popover and S17.
 pub(crate) const CONTROL_SIZE: f32 = CONTROL;
 const IN_KEY: f32 = 72.0;
-/// Clears the waiting-call banner (46 px + 76 px) so it never covers the avatar.
-const TOP: f32 = 128.0;
+/// A pending look (Hold, Swap, Merge, Mute, Audio) holds this long, then reverts
+/// if the snapshot did not confirm it.
+const PENDING_HOLD: Duration = Duration::from_millis(1000);
+/// Long-press on a dimmed control shows its reason after this long.
+pub(crate) const REASON_AFTER_MS: u64 = 450;
 
 // ---- The call as the screen draws it ------------------------------------
 
@@ -93,19 +95,42 @@ pub struct CallView {
     pub route: AudioRoute,
 }
 
-/// The second caller of a waiting call (story 9.2).
+/// The second caller of a waiting call (stories 9.2, 15.8) and what the card may offer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WaitingView {
     pub id: i32,
     pub name: SharedString,
     pub monogram: Option<SharedString>,
     pub hue: Option<usize>,
+    /// The name "End and answer" ends ("Ends Ayşe").
+    pub ends: SharedString,
+    /// An Active, a Held and a Ringing call: the primary pill ends the held call.
+    pub relabelled: bool,
+    /// Why "Hold and answer" and "End and answer" are dimmed (a running operation, an
+    /// emergency call), or why Hold-and-answer alone is (the current call cannot be held).
+    pub hold_reason: Option<DisabledReason>,
+    pub end_reason: Option<DisabledReason>,
 }
 
 impl WaitingView {
-    pub(crate) fn from_model(model: &rovsti_core::call::CallModel) -> Option<Self> {
-        let call = model.waiting()?;
+    pub(crate) fn from_scene(scene: &CallScene<'_>) -> Option<Self> {
+        use rovsti_core::scene::Control;
+        let call = scene.waiting?;
         let label = caller_label(call.display_name.as_deref(), &call.number_raw, false);
+        let ends = scene.primary().map_or_else(String::new, |p| {
+            if p.has_prop(rovsti_core::wire::props::CONFERENCE) || !p.children.is_empty() {
+                "the conference".to_owned()
+            } else {
+                middle_truncate(
+                    &caller_label(p.display_name.as_deref(), &p.number_raw, false),
+                    16,
+                )
+            }
+        });
+        let hold_reason = scene.reason(Control::HoldAndAnswer);
+        // Ending a call is blocked only while something else is running or for an emergency call.
+        let end_reason = hold_reason
+            .filter(|r| matches!(r, DisabledReason::Emergency | DisabledReason::Pending));
         Some(Self {
             id: call.id,
             name: middle_truncate(&label, 22).into(),
@@ -118,6 +143,10 @@ impl WaitingView {
                 call.contact_id
                     .map_or(avatar::AvatarKey::Unknown, avatar::AvatarKey::Contact),
             ),
+            ends: ends.into(),
+            relabelled: scene.held().is_some(),
+            hold_reason,
+            end_reason,
         })
     }
 }
@@ -137,7 +166,13 @@ impl CallView {
     pub(crate) fn from_model(model: &rovsti_core::call::CallModel) -> Option<Self> {
         let call = model.foreground()?;
         let audio = model.audio();
-        let label = caller_label(call.display_name.as_deref(), &call.number_raw, false);
+        let conference =
+            call.has_prop(rovsti_core::wire::props::CONFERENCE) || !call.children.is_empty();
+        let label = if conference {
+            std::borrow::Cow::Borrowed("Conference")
+        } else {
+            caller_label(call.display_name.as_deref(), &call.number_raw, false)
+        };
         let secondary = call
             .display_name
             .as_deref()
@@ -153,10 +188,12 @@ impl CallView {
             monogram: call
                 .display_name
                 .as_deref()
+                .filter(|_| !conference)
                 .and_then(avatar::monogram)
                 .map(|c| SharedString::from(c.to_string())),
             hue: avatar::avatar_hue(
                 call.contact_id
+                    .filter(|_| !conference)
                     .map_or(avatar::AvatarKey::Unknown, avatar::AvatarKey::Contact),
             ),
             can_hold: call.can_hold,
@@ -286,7 +323,7 @@ impl CallStatus {
 }
 
 /// Milliseconds until the elapsed time next rolls over a whole second.
-fn ms_to_next_second(connect_time_ms: i64) -> u64 {
+pub(crate) fn ms_to_next_second(connect_time_ms: i64) -> u64 {
     if connect_time_ms <= 0 {
         return 1000;
     }
@@ -387,15 +424,15 @@ enum RingKind {
     Over,
 }
 
-struct Ending {
+pub(crate) struct Ending {
     _task: Task<()>,
 }
 
 pub struct InCall {
     /// The screen the owner wants to see right now.
     pub shown: bool,
-    view: Option<CallView>,
-    ending: Option<Ending>,
+    pub(crate) view: Option<CallView>,
+    pub(crate) ending: Option<Ending>,
     keypad_open: bool,
     digits: String,
     /// Which `clear_pending_later` timer is the latest.
@@ -413,15 +450,24 @@ pub struct InCall {
     pub call_only: bool,
     /// After a locked call ends: paint nothing while the task goes back.
     pub blank: bool,
-    pending: [Option<Instant>; 2],
+    /// When each grid slot was tapped, for its pending look (indexed by [`Slot`]).
+    pending: [Option<Instant>; 6],
     dtmf_down: bool,
-    aura: Entity<Aura>,
-    status: Entity<CallStatus>,
-    /// The waiting caller; kept while the banner slides away.
-    waiting: Option<WaitingView>,
-    /// 0 = banner above the screen, 1 = in place.
-    waiting_in: Spring,
-    waiting_open: bool,
+    pub(crate) aura: Entity<Aura>,
+    pub(crate) status: Entity<CallStatus>,
+    /// The waiting caller; kept while the card rises away.
+    pub(crate) waiting: Option<WaitingView>,
+    /// 0 = card above the screen, 1 = in place (overshoots on the way in, S23).
+    pub(crate) waiting_in: Spring,
+    pub(crate) waiting_open: bool,
+    /// Seconds since the Waiting card appeared (its pills stagger 40 ms).
+    pub(crate) waiting_age: f32,
+    /// The caller left before an answer or decline of ours: say so in a pill.
+    pub(crate) waiting_acted: bool,
+    /// The keyguard was up at the last snapshot (a re-lock closes sheets).
+    was_locked: bool,
+    /// The multi-call zone: view-models and the springs of S19 to S22.
+    pub(crate) zone: ZoneState,
 
     /// 0 = tabs, 1 = In-Call screen.
     fade: Entrance,
@@ -435,8 +481,13 @@ pub struct InCall {
     ring_t: Spring,
     ring_from: RingKind,
     ring_to: RingKind,
-    bloom: Spring,
+    pub(crate) bloom: Spring,
 }
+
+/// Press ids of the dimmed controls (long-press shows the reason), by [`Slot`] index.
+pub(crate) const DIM_IDS: [&str; 6] = [
+    "ix-dim-0", "ix-dim-1", "ix-dim-2", "ix-dim-3", "ix-dim-4", "ix-dim-5",
+];
 
 /// The fixed caption box under a control: 96 px wide (it overhangs the 76 px
 /// circle evenly), 16 px high, one line, ellipsised (AD-35 slot constants).
@@ -472,13 +523,17 @@ impl InCall {
             began_locked: false,
             call_only: false,
             blank: false,
-            pending: [None; 2],
+            pending: [None; 6],
             dtmf_down: false,
             aura: cx.new(|_| Aura::new()),
             status: cx.new(|_| CallStatus::new()),
             waiting: None,
-            waiting_in: sp(0.0, motion_tokens::appear()),
+            waiting_in: sp(0.0, motion_tokens::release()),
             waiting_open: false,
+            waiting_age: 1.0,
+            waiting_acted: false,
+            was_locked: false,
+            zone: ZoneState::new(cx),
             fade: Entrance::default(),
             fade_value: sp(0.0, motion_tokens::appear()),
             keypad_t: sp(0.0, motion_tokens::select()),
@@ -503,11 +558,7 @@ impl InCall {
 
     /// The Audio control can be used right now: a live call that is not on hold.
     pub(crate) fn audio_usable(&self) -> bool {
-        self.ending.is_none()
-            && self
-                .view
-                .as_ref()
-                .is_some_and(|v| v.state != CallState::Holding)
+        self.ending.is_none() && self.view.is_some() && self.zone.enablement.enabled(Slot::Audio)
     }
 
     /// The route Android last reported for the foreground call.
@@ -553,6 +604,11 @@ impl InCall {
     pub fn tick(&mut self, dt: Duration) -> bool {
         let mut moving = self.fade_value.tick(dt);
         moving |= self.waiting_in.tick(dt);
+        moving |= self.zone.tick(dt);
+        if self.waiting_open && self.waiting_age < 1.0 {
+            self.waiting_age += dt.as_secs_f32();
+            moving = true;
+        }
         if !self.waiting_open && self.waiting_in.value < 0.003 && self.waiting.is_some() {
             self.waiting = None;
         }
@@ -582,7 +638,8 @@ impl InCall {
         self.fade_value.set_target(f32::from(u8::from(shown)));
     }
 
-    /// Points the waiting banner at the snapshot's waiting call.
+    /// Points the Waiting card at the snapshot's waiting call (S23: it falls
+    /// with an overshoot, and rises away on `sheet_dismiss`).
     fn set_waiting(&mut self, waiting: Option<WaitingView>) {
         match waiting {
             Some(w) => {
@@ -591,12 +648,15 @@ impl InCall {
                 self.waiting_open = true;
                 if new {
                     self.waiting_in.snap(0.0);
+                    self.waiting_age = 0.0;
+                    self.waiting_acted = false;
+                    self.waiting_in.retarget(1.0, motion_tokens::release());
                 }
-                self.waiting_in.set_target(1.0);
             }
             None => {
                 self.waiting_open = false;
-                self.waiting_in.set_target(0.0);
+                self.waiting_in
+                    .retarget(0.0, motion_tokens::sheet_dismiss());
             }
         }
     }
@@ -627,13 +687,19 @@ impl PhoneApp {
     /// Brings the screen in line with the newest call snapshot. Runs only when
     /// the backend notifies.
     pub(crate) fn sync_calls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let (view, locked, call_only) = {
+        let diff = self.backend.update(cx, |b, _| b.take_scene_diff());
+        let full = !self.incall.zone.synced;
+        let (view, locked, call_only, waiting, scene_in) = {
             let backend = self.backend.read(cx);
             let model = backend.calls();
+            let scene = CallScene::of(model.snapshot());
             (
                 CallView::from_model(model),
                 model.keyguard_locked(),
                 model.is_call_only_mode(),
+                WaitingView::from_scene(&scene),
+                (diff.changed() || full)
+                    .then(|| zone::SceneIn::of(&scene, model.snapshot().pending_failed)),
             )
         };
         self.incall.call_only = call_only;
@@ -649,7 +715,10 @@ impl PhoneApp {
             Some(route) => self.route_sync(route, cx),
             None => self.route.reset(),
         }
-        let waiting = WaitingView::from_model(self.backend.read(cx).calls());
+        if let Some(scene_in) = scene_in {
+            self.apply_scene(scene_in, diff, window, cx);
+        }
+        let waiting_before = self.incall.waiting.clone();
         let ic = &mut self.incall;
         if waiting.is_some() && !ic.waiting_open && ic.has_call() {
             // A second caller rings: the call screen comes to the front.
@@ -658,8 +727,14 @@ impl PhoneApp {
         }
         if waiting.is_some() && !ic.waiting_open {
             ic.aura.update(cx, |a, cx| a.waiting_pulse(cx));
+            window.perform_haptic_feedback(HapticFeedback::Selection);
         }
+        let waiting_gone = waiting.is_none() && ic.waiting_open;
         ic.set_waiting(waiting);
+        if waiting_gone && !self.incall.waiting_acted {
+            self.waiting_left(waiting_before, cx);
+        }
+        let ic = &mut self.incall;
         let view = view.filter(|v| Some(v.id) != ic.done_id);
         if view.is_none() && !self.backend.read(cx).calls().has_calls() {
             self.incall.done_id = None;
@@ -677,7 +752,7 @@ impl PhoneApp {
         match view {
             Some(view) => {
                 let is_new = ic.last_id != Some(view.id);
-                if is_new {
+                if ic.last_id.is_none() {
                     ic.last_id = Some(view.id);
                     ic.ending = None;
                     ic.hidden_for = None;
@@ -703,6 +778,11 @@ impl PhoneApp {
                     self.status = None;
                     self.delete_shown.set_target(0.0);
                     self.bloom_start();
+                } else if is_new {
+                    // The foreground call changed inside one conversation (a swap, a
+                    // split, a hang-up beside a held call): the screen stays up.
+                    ic.last_id = Some(view.id);
+                    ic.ending = None;
                 }
                 let ic = &mut self.incall;
                 let was_active = ic.view.as_ref().map(|v| v.state) == Some(CallState::Active);
@@ -722,6 +802,211 @@ impl PhoneApp {
                     self.begin_ending(DisconnectCause::Unknown, window, cx);
                 }
             }
+        }
+        self.zone_lines(cx);
+        self.sync_add_call(window, cx);
+        self.relock_closes(locked, window, cx);
+    }
+
+    /// A re-lock closes any open sheet or popover (AD-3): the lock screen shows only the call.
+    fn relock_closes(&mut self, locked: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let was = std::mem::replace(&mut self.incall.was_locked, locked);
+        if locked && !was && self.incall.view.is_some() {
+            if self.sheet.is_open() {
+                self.close_sheet(cx);
+            }
+            if self.route.is_open() {
+                self.route_close(window, cx);
+            }
+        }
+    }
+
+    /// Points the two ticking lines at their times; they run only while the screen shows.
+    pub(crate) fn zone_lines(&mut self, cx: &mut Context<Self>) {
+        let shown = self.incall.shown;
+        let z = &self.incall.zone;
+        let held = z
+            .held
+            .as_ref()
+            .or(z.held_ghost.as_ref())
+            .map(|p| p.hold_since_ms);
+        let conf = z.conference.as_ref().map(|c| c.connect_time_ms);
+        let (held_line, conf_line) = (z.held_line.clone(), z.conf_line.clone());
+        held_line.update(cx, |l, cx| {
+            l.set(held.unwrap_or(0), shown && held.is_some(), cx)
+        });
+        conf_line.update(cx, |l, cx| {
+            l.set(conf.unwrap_or(0), shown && conf.is_some(), cx)
+        });
+    }
+
+    /// Applies a changed scene to the zone: view-models, enablement, and which
+    /// moment (S19 to S21) plays.
+    fn apply_scene(
+        &mut self,
+        si: zone::SceneIn,
+        diff: rovsti_core::scene::SceneDiff,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let reduced = window.prefers_reduced_motion();
+        let ic = &mut self.incall;
+        let moving_part = diff.primary || diff.held || diff.participants || diff.audio;
+        if moving_part {
+            // Reported state arrived: pending looks are no longer needed.
+            ic.pending = [None; 6];
+        }
+        let z = &mut ic.zone;
+        let first = !z.synced;
+        z.synced = true;
+        let old = (z.face, z.fg_id, z.bg_id);
+        let new = (si.face, si.fg_id, si.bg_id);
+        let moment = if first {
+            Moment::None
+        } else {
+            zone::moment(old, new)
+        };
+        let old_primary = z.primary.take();
+        let old_held = z.held.take();
+        z.enablement = si.enablement;
+        z.face = si.face;
+        z.fg_id = si.fg_id;
+        z.bg_id = si.bg_id;
+        z.primary = si.primary.clone();
+        z.held = si.held.clone();
+        z.conference = si.conference;
+        // ---- The Held card's presence ----
+        if z.held.is_some() {
+            if old_held.is_none() && moment == Moment::None {
+                z.held_t.snap(1.0);
+            } else {
+                z.held_t.set_target(1.0);
+            }
+            z.held_ghost = None;
+        } else if let Some(gone) = old_held.clone() {
+            // The held party hung up (or was merged): the card fades out in 120 ms.
+            z.held_ghost = Some(gone);
+            z.held_t.set_target(0.0);
+        }
+        // ---- Moments ----
+        match moment {
+            Moment::HoldAway => {
+                if reduced {
+                    z.layout.snap(1.0);
+                    z.drop.snap(1.0);
+                    z.cross.restart();
+                } else {
+                    z.layout.snap(0.0);
+                    z.layout.set_target(1.0);
+                    z.drop.snap(0.0);
+                    z.drop.set_target(1.0);
+                }
+                ic.aura.update(cx, |a, cx| a.bloom(cx));
+            }
+            Moment::Swap => {
+                if reduced {
+                    z.swap.snap(1.0);
+                    z.cross.restart();
+                } else if let (Some(out), Some(inn)) = (old_primary, old_held.clone()) {
+                    z.crossing = Some(zone::Crossing { out, inn });
+                    z.swap.snap(0.0);
+                    z.swap.set_target(1.0);
+                }
+            }
+            Moment::Merge => {
+                z.weave_from = old_held.clone();
+                if reduced {
+                    z.weave.snap(1.0);
+                    z.cross.restart();
+                } else {
+                    z.weave.snap(0.0);
+                    z.weave.set_target(1.0);
+                    z.weave_age = 0.0;
+                    ic.aura.update(cx, |a, cx| a.pulse_once(1.12, cx));
+                }
+            }
+            Moment::None => match (old.0, si.face) {
+                (_, Face::Conference) => {
+                    z.weave.snap(1.0);
+                    z.layout.snap(1.0);
+                }
+                (_, Face::Two) => {
+                    z.weave.snap(0.0);
+                    z.layout.snap(1.0);
+                }
+                (_, Face::Single | Face::Empty) => {
+                    z.weave.snap(0.0);
+                    if z.ended.is_none() {
+                        z.layout.snap(0.0);
+                    }
+                }
+            },
+        }
+        if si.face != Face::Conference && moment != Moment::Merge {
+            z.weave.snap(0.0);
+        }
+        // ---- A call that ended beside a live one: "Call ended" for a second ----
+        if diff.ended
+            && z.ended.is_none()
+            && let Some(party) = si.ended
+            && si.face == Face::Single
+            && !first
+        {
+            z.ended = Some(zone::EndedParty { party });
+            z.layout.snap(1.0);
+            z.held = z.primary.clone();
+            z.held_ghost = None;
+            z.held_t.snap(1.0);
+            z.ended_task = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(ENDED_HOLD).await;
+                this.update(cx, |this, cx| this.zone_ended_done(cx)).ok();
+            }));
+        }
+        // ---- A failed operation: the control returns and a pill says why ----
+        match si.failed {
+            Some(PendingOp::Merge) => {
+                self.show_notice_pill("Couldn't merge calls", None, false, cx)
+            }
+            Some(PendingOp::Swap) => self.show_notice_pill("Couldn't swap calls", None, false, cx),
+            Some(PendingOp::Answer) => {
+                self.show_notice_pill("Couldn't answer the call", None, false, cx);
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// The "Call ended" second is over: the held party takes the active block.
+    fn zone_ended_done(&mut self, cx: &mut Context<Self>) {
+        let z = &mut self.incall.zone;
+        if z.ended.take().is_some() {
+            z.ended_task = None;
+            z.held = None;
+            if self.reduced {
+                z.layout.snap(0.0);
+                z.cross.restart();
+            } else {
+                z.layout.set_target(0.0);
+            }
+            z.held_t.set_target(0.0);
+            cx.notify();
+        }
+    }
+
+    /// The waiting caller left without our answer or decline: a pill says so for 2 s.
+    fn waiting_left(&mut self, was: Option<WaitingView>, cx: &mut Context<Self>) {
+        let Some(was) = was else {
+            return;
+        };
+        // Still there and no longer ringing: it was answered (here or elsewhere).
+        let answered = self
+            .backend
+            .read(cx)
+            .calls()
+            .call(was.id)
+            .is_some_and(|c| c.state != rovsti_core::wire::WireCallState::Ringing);
+        if !answered {
+            self.show_notice_pill(format!("Missed call from {}", was.name), None, false, cx);
         }
     }
 
@@ -763,7 +1048,7 @@ impl PhoneApp {
             }
         }
         // Reported state arrived: the pending look is no longer needed.
-        ic.pending = [None; 2];
+        ic.pending = [None; 6];
 
         let before = ic.ring_kind();
         let status_args = (view.state, view.connect_time_ms);
@@ -909,20 +1194,16 @@ impl PhoneApp {
             return;
         };
         let live = self.incall.ending.is_none();
+        let zone = self.incall.zone.enablement;
         match id {
             "ic-end" if live => {
                 self.send(CallCommand::Disconnect(view.id), cx);
             }
-            "ic-mute" if live && view.state != CallState::Holding => {
-                self.incall.pending[0] = Some(Instant::now());
+            "ic-mute" if live && zone.enabled(Slot::Mute) => {
+                self.start_pending(Slot::Mute, window, cx);
                 self.send(CallCommand::Mute(!view.muted), cx);
-                self.clear_pending_later(window, cx);
             }
-            "ic-hold" if live && view.can_hold && view.state != CallState::Dialing => {
-                let on = view.state != CallState::Holding;
-                self.send(CallCommand::Hold(view.id, on), cx);
-            }
-            "ic-keypad" if live && view.state != CallState::Holding => {
+            "ic-keypad" if live && zone.enabled(Slot::Keypad) => {
                 self.incall.keypad_open = true;
                 self.incall.keypad_t.set_target(1.0);
             }
@@ -945,20 +1226,101 @@ impl PhoneApp {
         cx.notify();
     }
 
+    /// A finger-up control (Add call, Hold or Swap, Merge, the Held card, the Waiting
+    /// card's pills): the press look has been showing since finger-down.
+    pub(crate) fn incall_tap(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.incall.view.is_none() || self.incall.ending.is_some() {
+            return;
+        }
+        if id.starts_with("iw-") {
+            self.waiting_act(id, window, cx);
+            return;
+        }
+        let en = self.incall.zone.enablement;
+        match id {
+            "ix-add" => {
+                if let Some(reason) = en.reason(Slot::AddCall) {
+                    self.show_notice_pill(reason.text(), None, false, cx);
+                } else {
+                    self.open_add_call(window, cx);
+                }
+            }
+            "ix-hold" | "ix-held" => {
+                let swapping = en.swap || id == "ix-held";
+                if let Some(reason) = en.reason(Slot::HoldSwap) {
+                    self.show_notice_pill(reason.text(), None, false, cx);
+                } else if swapping {
+                    window.perform_haptic_feedback(HapticFeedback::Confirm);
+                    self.start_pending(Slot::HoldSwap, window, cx);
+                    self.backend.update(cx, |b, cx| {
+                        b.swap(cx);
+                    });
+                } else if let Some(view) = self.incall.view.clone() {
+                    let on = view.state != CallState::Holding;
+                    self.start_pending(Slot::HoldSwap, window, cx);
+                    self.send(CallCommand::Hold(view.id, on), cx);
+                }
+            }
+            "ix-merge" => {
+                if let Some(reason) = en.reason(Slot::Merge) {
+                    self.show_notice_pill(reason.text(), None, false, cx);
+                } else {
+                    window.perform_haptic_feedback(HapticFeedback::Confirm);
+                    self.start_pending(Slot::Merge, window, cx);
+                    self.backend.update(cx, |b, cx| {
+                        b.merge(cx);
+                    });
+                }
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// The reason a dimmed control is dimmed (long-press, 450 ms).
+    pub(crate) fn show_reason(&mut self, slot: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(slot) = Slot::ALL.get(slot).copied() else {
+            return;
+        };
+        if let Some(reason) = self.incall.zone.enablement.reason(slot) {
+            window.perform_haptic_feedback(HapticFeedback::Selection);
+            self.show_notice_pill(reason.text(), None, false, cx);
+        }
+    }
+
+    /// A tapped control keeps its pending look until the snapshot confirms it, at
+    /// most a second; then it returns.
+    fn start_pending(&mut self, slot: Slot, window: &mut Window, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        self.incall.pending[slot.index()] = Some(now);
+        self.incall.pending_gen = self.incall.pending_gen.wrapping_add(1);
+        cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(PENDING_HOLD).await;
+            this.update(cx, |this, cx| {
+                if this.incall.pending[slot.index()] == Some(now) {
+                    this.incall.pending[slot.index()] = None;
+                    this.presses.release_all();
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// The Phone/Speaker toggle (only those two routes exist): the pending
-    /// look for 120 ms, the state always from the next snapshot.
+    /// look until the next snapshot, the state always from the snapshot.
     pub(crate) fn incall_toggle_speaker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.incall.audio_usable() {
             return;
         }
-        self.incall.pending[1] = Some(Instant::now());
+        self.start_pending(Slot::Audio, window, cx);
         let target = if self.incall.route() == AudioRoute::Speaker {
             AudioRoute::Earpiece
         } else {
             AudioRoute::Speaker
         };
         self.send(CallCommand::Route(target), cx);
-        self.clear_pending_later(window, cx);
         cx.notify();
     }
 
@@ -976,53 +1338,37 @@ impl PhoneApp {
         });
     }
 
-    fn clear_pending_later(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Only the latest tap's timer may clear: an earlier one would cut the
-        // second tap's pending look short.
-        self.incall.pending_gen = self.incall.pending_gen.wrapping_add(1);
-        let generation = self.incall.pending_gen;
-        cx.spawn_in(window, async move |this, cx| {
-            cx.background_executor().timer(PENDING_LOOK).await;
-            this.update(cx, |this, cx| {
-                if this.incall.pending_gen != generation {
-                    return;
-                }
-                this.incall.pending = [None; 2];
-                this.presses.release_all();
-                cx.notify();
-            })
-            .ok();
-        })
-        .detach();
-    }
-
     // ---- Rendering --------------------------------------------------------------
 
     fn pressed(&self, id: &str, pending: Option<Instant>) -> f32 {
         let held = self.presses.value(id);
         match pending {
-            Some(at) if at.elapsed() < PENDING_LOOK + PENDING_LOOK => held.max(0.8),
+            Some(at) if at.elapsed() < PENDING_HOLD => held.max(0.8),
             _ => held,
         }
     }
 
+    /// One grid control. `slot` says which of the six it is; a dimmed one keeps its place
+    /// at 0.4 and, held for 450 ms, shows why. Ids starting `ix-` act on finger-up, the
+    /// others on finger-down (Mute and Keypad, as in v0.1).
     #[allow(clippy::too_many_arguments)] // one call site per control; a struct would only repeat these
     fn control(
         &self,
         theme: Theme,
+        slot: Slot,
         id: &'static str,
         icon: Icon,
         label: &'static str,
-        aria: &'static str,
+        aria: SharedString,
         alt: Option<Icon>,
         on: f32,
         wobble: f32,
-        enabled: bool,
-        pending: Option<Instant>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = theme::colors(theme);
-        let press = self.pressed(id, pending);
+        let reason = self.incall.zone.enablement.reason(slot);
+        let enabled = reason.is_none() && self.incall.ending.is_none();
+        let press = self.pressed(id, self.incall.pending[slot.index()]);
         let side = CONTROL * press_scale(press, scale::PRESS_CARD);
         let on = on.clamp(0.0, 1.0);
         let spec = GlassSpec::control(theme).lerp(
@@ -1050,16 +1396,20 @@ impl PhoneApp {
             None => draw(icon, 1.0).into_any_element(),
         };
         let ending = self.incall.ending.is_some();
-        let mut slot = div()
+        let label_aria: SharedString = match reason {
+            Some(reason) => format!("{aria}, unavailable: {}", reason.text()).into(),
+            None => aria,
+        };
+        let mut slot_el = div()
             .id(id)
             .role(Role::Button)
-            .aria_label(aria)
+            .aria_label(label_aria)
             .aria_disabled(!enabled)
             .w(px(CONTROL))
             .flex()
             .flex_col()
             .items_center()
-            .gap(px(4.0))
+            .gap(px(slots::CAPTION_GAP))
             // S11: when the call ends the controls dim to 0.4 on the `over` spring.
             .opacity({
                 let rest: f32 = if enabled { 1.0 } else { 0.4 };
@@ -1107,14 +1457,34 @@ impl PhoneApp {
                     }),
             );
         if enabled {
-            slot = slot
-                .on_mouse_down(
+            slot_el = if id.starts_with("ix-") {
+                slot_el.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| this.tap_press(id, window, cx)),
+                )
+            } else {
+                slot_el.on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, window, cx| this.mouse_down(id, window, cx)),
                 )
-                .child(touch_surface(Self::touch_listener(cx, Some(id.into()))));
+            };
+            slot_el = slot_el.child(touch_surface(Self::touch_listener(cx, Some(id.into()))));
+        } else if reason.is_some() && !ending {
+            // A dimmed control does nothing on a tap; held for 450 ms it says why.
+            let dim: &'static str = DIM_IDS[slot.index()];
+            slot_el = slot_el
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        if !this.presses.touch_seen() {
+                            this.show_reason(slot.index(), window, cx);
+                        }
+                    }),
+                )
+                .child(touch_surface(Self::touch_listener(cx, Some(dim.into()))));
         }
-        slot.child(circle)
+        slot_el
+            .child(circle)
             .child(caption_slot(colors.secondary_label).child(label))
     }
 
@@ -1127,14 +1497,14 @@ impl PhoneApp {
     fn audio_control(
         &self,
         theme: Theme,
-        view: &CallView,
+        _view: &CallView,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let ic = &self.incall;
         let colors = theme::colors(theme);
         let id = "ic-audio";
-        let enabled = ic.ending.is_none() && view.state != CallState::Holding;
-        let held = self.pressed(id, ic.pending[1]);
+        let enabled = ic.ending.is_none() && ic.zone.enablement.enabled(Slot::Audio);
+        let held = self.pressed(id, ic.pending[Slot::Audio.index()]);
         let press = if self.route.has_pending() {
             held.max(0.8)
         } else {
@@ -1262,63 +1632,112 @@ impl PhoneApp {
         slot.child(circle).child(caption)
     }
 
+    /// The six fixed slots: row 1 Mute, Keypad, Audio; row 2 Add call, Hold (Swap with
+    /// two calls), Merge. Every scene uses the same slots; enablement comes from
+    /// `zone::Enablement`, never from this code.
     fn controls(&self, theme: Theme, view: &CallView, cx: &mut Context<Self>) -> AnyElement {
         let ic = &self.incall;
+        let z = &ic.zone;
         let holding = view.state == CallState::Holding;
-        let live = ic.ending.is_none();
-        let usable = live && !holding;
-        let hold_label = if holding { "Resume" } else { "Hold" };
-        let hold_ok = live && view.can_hold && view.state != CallState::Dialing;
+        let hold_face = if z.enablement.swap {
+            ("Swap", Icon::LucideArrowUpDown, None, 0.0)
+        } else if holding {
+            (
+                "Resume",
+                Icon::LucidePause,
+                Some(Icon::LucidePlay),
+                ic.on[2].value,
+            )
+        } else {
+            (
+                "Hold",
+                Icon::LucidePause,
+                Some(Icon::LucidePlay),
+                ic.on[2].value,
+            )
+        };
+        let hold_aria: SharedString = match (&z.held, z.enablement.swap) {
+            (Some(held), true) => format!("Swap calls, {} on hold", held.name).into(),
+            (_, true) => "Swap calls".into(),
+            (_, false) => hold_face.0.into(),
+        };
+        let merged = z.face == Face::Conference;
         div()
             .flex()
             .flex_col()
             .items_center()
-            .gap(px(20.0))
+            .gap(px(slots::GRID_GAP))
             .child(
                 div()
                     .flex()
-                    .gap(px(24.0))
+                    .gap(px(slots::GRID_GAP))
                     .child(self.control(
                         theme,
+                        Slot::Mute,
                         "ic-mute",
                         Icon::LucideMic,
                         "Mute",
-                        if view.muted { "Mute, on" } else { "Mute, off" },
+                        if view.muted { "Mute, on" } else { "Mute, off" }.into(),
                         Some(Icon::LucideMicOff),
                         ic.on[0].value,
                         ic.wobble[0].value,
-                        usable,
-                        ic.pending[0],
                         cx,
                     ))
                     .child(self.control(
                         theme,
+                        Slot::Keypad,
                         "ic-keypad",
                         Icon::LucideGrid3x3,
                         "Keypad",
-                        "Keypad",
+                        "Keypad".into(),
                         None,
                         0.0,
                         0.0,
-                        usable,
-                        None,
                         cx,
                     ))
                     .child(self.audio_control(theme, view, cx)),
             )
-            .child(self.control(
-                theme,
-                "ic-hold",
-                Icon::LucidePause,
-                hold_label,
-                hold_label,
-                Some(Icon::LucidePlay),
-                ic.on[2].value,
-                ic.wobble[2].value,
-                hold_ok,
-                None,
-                cx,
-            ))
+            .child(
+                div()
+                    .flex()
+                    .gap(px(slots::GRID_GAP))
+                    .child(self.control(
+                        theme,
+                        Slot::AddCall,
+                        "ix-add",
+                        Icon::LucidePlus,
+                        "Add call",
+                        "Add call".into(),
+                        None,
+                        0.0,
+                        0.0,
+                        cx,
+                    ))
+                    .child(self.control(
+                        theme,
+                        Slot::HoldSwap,
+                        "ix-hold",
+                        hold_face.1,
+                        hold_face.0,
+                        hold_aria,
+                        hold_face.2,
+                        hold_face.3,
+                        ic.wobble[2].value,
+                        cx,
+                    ))
+                    .child(self.control(
+                        theme,
+                        Slot::Merge,
+                        "ix-merge",
+                        Icon::LucideMerge,
+                        if merged { "Merged" } else { "Merge" },
+                        if merged { "Merged" } else { "Merge calls" }.into(),
+                        None,
+                        f32::from(u8::from(merged)),
+                        0.0,
+                        cx,
+                    )),
+            )
             .into_any_element()
     }
 
@@ -1373,7 +1792,8 @@ impl PhoneApp {
             .child(label)
     }
 
-    fn avatar_view(&self, theme: Theme, view: &CallView) -> impl IntoElement {
+    pub(crate) fn avatar_view(&self, theme: Theme, view: &CallView, size: f32) -> impl IntoElement {
+        let u = size / 96.0;
         let ic = &self.incall;
         let colors = theme::colors(theme);
         let (top, bottom) = theme::hue_pair(theme, view.hue);
@@ -1401,43 +1821,43 @@ impl PhoneApp {
         };
         let inner = match &view.monogram {
             Some(letter) => div()
-                .text_size(px(42.0))
+                .text_size(px(42.0 * u))
                 .font_weight(typography::HEADLINE.weight)
                 .text_color(gpui::white())
                 .child(letter.clone())
                 .into_any_element(),
             None => svg()
                 .path(Icon::LucideUser.path())
-                .size(px(44.0))
+                .size(px(44.0 * u))
                 .text_color(colors.secondary_label)
                 .into_any_element(),
         };
         let flying = f32::from(u8::from(self.flights.hides_avatar()));
         div()
             .relative()
-            .size(px(AVATAR))
+            .size(px(size))
             .opacity((1.0 - 0.4 * over) * (1.0 - flying))
             .child(self.marks.probe(A_AVATAR))
             .child(
                 div()
-                    .size(px(AVATAR * k))
+                    .size(px(size * k))
                     .mx_auto()
-                    .mt(px(AVATAR * (1.0 - k) * 0.5))
+                    .mt(px(size * (1.0 - k) * 0.5))
                     .rounded_full()
                     .relative()
-                    .border_3()
+                    .border(px(3.0 * u.max(0.45)))
                     .border_color(Hsla {
                         a: ring.a * (1.0 - muted),
                         ..ring
                     })
-                    .p(px(3.0))
+                    .p(px(3.0 * u.max(0.45)))
                     .children((muted > 0.01).then(|| {
                         dashed_ring(
                             Hsla {
                                 a: ring.a * muted,
                                 ..ring
                             },
-                            AVATAR * k,
+                            size * k,
                         )
                     }))
                     .child(
@@ -1445,7 +1865,7 @@ impl PhoneApp {
                             .size_full()
                             .rounded_full()
                             .bg(fill)
-                            .border(px(1.5))
+                            .border(px(1.5 * u.max(0.6)))
                             .border_color(Hsla {
                                 a: 0.35,
                                 ..gpui::white()
@@ -1467,8 +1887,9 @@ impl PhoneApp {
         let danger = call_colors(theme).danger;
         let press = self.presses.value("ic-end");
         let grow = ic.end_in.value.clamp(0.0, 1.2);
-        let w = 220.0 * (0.35 + 0.65 * grow.min(1.0)) * press_scale(press, scale::PRESS_CARD);
-        let h = 64.0 * press_scale(press, scale::PRESS_CARD);
+        let w =
+            slots::END_W * (0.35 + 0.65 * grow.min(1.0)) * press_scale(press, scale::PRESS_CARD);
+        let h = slots::END_H * press_scale(press, scale::PRESS_CARD);
         let over = ic.over.value.clamp(0.0, 1.0);
         let color = mix(danger, gpui::white(), 0.18 * press.clamp(0.0, 1.0));
         div()
@@ -1476,8 +1897,8 @@ impl PhoneApp {
             .role(Role::Button)
             .aria_label("End call")
             .relative()
-            .w(px(220.0))
-            .h(px(64.0))
+            .w(px(slots::END_W))
+            .h(px(slots::END_H))
             .flex()
             .items_center()
             .justify_center()
@@ -1509,172 +1930,16 @@ impl PhoneApp {
             )
     }
 
-    /// Decline or Answer on the waiting banner; acts on finger-up.
-    pub(crate) fn waiting_act(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(waiting) = self.incall.waiting.as_ref().map(|w| w.id) else {
-            return;
-        };
-        if !self.incall.waiting_open || self.incall.ending.is_some() {
-            return;
-        }
-        match id {
-            "iw-decline" => {
-                self.send(CallCommand::Reject(waiting), cx);
-            }
-            "iw-answer" => {
-                window.perform_haptic_feedback(HapticFeedback::Confirm);
-                self.send(CallCommand::AnswerReplacing(waiting), cx);
-            }
-            _ => {}
-        }
-        cx.notify();
-    }
-
-    /// The 76 px banner that slides down over the call for a waiting caller.
-    fn waiting_banner(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let w = self.incall.waiting.as_ref()?;
-        let t = self.incall.waiting_in.value;
-        let colors = theme::colors(theme);
-        let call = call_colors(theme);
-        let button = |id: &'static str,
-                      icon: Icon,
-                      fill: Hsla,
-                      label: &'static str,
-                      cx: &mut Context<Self>| {
-            let press = self.presses.value(id).clamp(0.0, 1.0);
-            div()
-                .id(id)
-                .role(Role::Button)
-                .aria_label(label)
-                .relative()
-                .size(px(44.0))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(
-                    div()
-                        .size(px(36.0 * press_scale(press, scale::PRESS_CARD)))
-                        .rounded_full()
-                        .bg(mix(fill, gpui::white(), 0.18 * press))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(
-                            svg()
-                                .path(icon.path())
-                                .size(px(18.0))
-                                .text_color(gpui::white()),
-                        ),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        this.presses.down(id);
-                        this.waiting_act(id, window, cx);
-                    }),
-                )
-                .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
-        };
-        let spec = GlassSpec::control(theme);
-        Some(
-            div()
-                .id("waiting")
-                .role(Role::Alert)
-                .aria_label(SharedString::from(format!(
-                    "{} is calling. Answering ends the current call.",
-                    w.name
-                )))
-                .absolute()
-                .left(px(12.0))
-                .right(px(12.0))
-                .top(px(46.0 - 130.0 * (1.0 - t)))
-                .h(px(76.0))
-                .opacity(t.clamp(0.0, 1.0))
-                .child(
-                    glass_interactive(spec, || GlassInteraction {
-                        press: 0.0,
-                        focus: None,
-                    })
-                    .size_full()
-                    .rounded(px(28.0))
-                    .shadow(rovsti_ui::tokens::shadow::glass(theme.is_dark()))
-                    .flex()
-                    .flex_col()
-                    .justify_center()
-                    .gap(px(2.0))
-                    .pl(px(14.0))
-                    .pr(px(6.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(10.0))
-                            .child(crate::contacts::person_avatar(
-                                theme,
-                                w.hue,
-                                w.monogram.as_ref(),
-                                40.0,
-                                None,
-                            ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .child(
-                                        div()
-                                            .truncate()
-                                            .text_size(typography::HEADLINE.size)
-                                            .font_weight(typography::HEADLINE.weight)
-                                            .text_color(colors.label)
-                                            .child(w.name.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(typography::FOOTNOTE.size)
-                                            .text_color(colors.secondary_label)
-                                            .child("Waiting"),
-                                    ),
-                            )
-                            .child(button(
-                                "iw-decline",
-                                Icon::LucidePhoneOff,
-                                call.danger,
-                                "Decline",
-                                cx,
-                            ))
-                            .child(button(
-                                "iw-answer",
-                                Icon::LucidePhone,
-                                call.answer,
-                                "Answer",
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .pl(px(50.0))
-                            .text_size(typography::CAPTION.size)
-                            .text_color(colors.tertiary_label)
-                            .child("Answer ends current call"),
-                    ),
-                )
-                .into_any_element(),
-        )
-    }
-
     /// The In-Call screen, or nothing when the tabs are fully showing.
     pub(crate) fn render_incall(
         &mut self,
         theme: Theme,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         if !self.incall.covers() {
             return None;
         }
-        let colors = theme::colors(theme);
         let fade = self.incall.fade_value.value.clamp(0.0, 1.0) * self.call_fade.value();
         let lift = self.incall.fade.offset(24.0);
         let view = self.incall.view.clone();
@@ -1693,21 +1958,8 @@ impl PhoneApp {
             return Some(root.into_any_element());
         };
         let t = self.incall.keypad_t.value.clamp(0.0, 1.0);
-        let middle = if t < 0.5 {
-            div()
-                .opacity(1.0 - 2.0 * t)
-                .child(self.controls(theme, &view, cx))
-        } else {
-            div()
-                .opacity(2.0 * t - 1.0)
-                .child(self.in_call_keypad(theme, cx))
-        };
-        let bloom = self.incall.bloom.value;
-        let secondary = match (view.route, &view.secondary) {
-            (AudioRoute::Bluetooth, _) => Some(SharedString::from("Bluetooth")),
-            (AudioRoute::WiredHeadset, _) => Some(SharedString::from("Headphones")),
-            (_, s) => s.clone(),
-        };
+        let keypad_mode = t >= 0.5;
+        let zone = self.render_zone(theme, &view, window, cx);
         let content = div()
             .relative()
             .top(px(lift))
@@ -1715,54 +1967,59 @@ impl PhoneApp {
             .flex()
             .flex_col()
             .items_center()
-            .pt(px(TOP))
-            .pb(px(58.0))
-            .child(self.avatar_view(theme, &view))
-            .child(
-                div()
-                    .mt(px(16.0))
-                    .max_w(px(340.0))
-                    .px(px(16.0))
-                    .text_size(px(28.0))
-                    .font_weight(gpui::FontWeight(700.0))
-                    .text_color(colors.label)
-                    .truncate()
-                    .child(view.name.clone()),
-            )
-            .child(
-                div()
-                    .mt(px(4.0))
-                    .w_full()
-                    .opacity(bloom.clamp(0.0, 1.0))
-                    .child(self.incall.status.clone()),
-            )
-            .child(
-                div()
-                    .h(px(18.0))
-                    .text_size(typography::FOOTNOTE.size)
-                    .text_color(colors.secondary_label)
-                    .children(secondary),
-            )
-            .child(
-                div()
-                    .id("ic-middle")
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .overflow_y_scroll()
-                    .child(
-                        div()
-                            .min_h_full()
-                            .flex()
-                            .flex_col()
-                            .justify_end()
-                            .items_center()
-                            .pb(px(32.0))
-                            .child(middle),
-                    ),
-            )
-            .child(self.end_button(theme, cx));
-        root = root.child(content).children(self.waiting_banner(theme, cx));
+            .pt(px(slots::TOP))
+            .pb(px(slots::BOTTOM));
+        let content = if keypad_mode {
+            // The dial pad takes the grid's place; the caller block stays above it (v0.1).
+            content
+                .child(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .w_full()
+                        .h(px(slots::ONE_CHIPS_Y))
+                        .child(zone),
+                )
+                .child(
+                    div()
+                        .id("ic-middle")
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .overflow_y_scroll()
+                        .child(
+                            div()
+                                .min_h_full()
+                                .flex()
+                                .flex_col()
+                                .justify_end()
+                                .items_center()
+                                .pb(px(slots::GRID_TO_END))
+                                .opacity(2.0 * t - 1.0)
+                                .child(self.in_call_keypad(theme, cx)),
+                        ),
+                )
+        } else {
+            // The zone is the flexible space; the grid and End below it never move.
+            content
+                .child(div().relative().flex_1().min_h_0().w_full().child(zone))
+                .child(
+                    div()
+                        .id("ic-middle")
+                        .flex_none()
+                        .w_full()
+                        .h(px(slots::GRID_H + slots::GRID_TO_END))
+                        .pb(px(slots::GRID_TO_END))
+                        .flex()
+                        .justify_center()
+                        .opacity(1.0 - 2.0 * t)
+                        .child(self.controls(theme, &view, cx)),
+                )
+        };
+        let content = content.child(self.end_button(theme, cx));
+        root = root
+            .child(content)
+            .children(self.waiting_card(theme, window, cx));
         Some(root.into_any_element())
     }
 }

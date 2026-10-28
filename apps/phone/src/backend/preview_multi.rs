@@ -30,7 +30,13 @@ const MERT: (&str, &str, i64) = ("Mert Çelik", "+905059876543", 20);
 
 const HOLDABLE: u32 = caps::HOLD | caps::SUPPORT_HOLD | caps::MUTE | caps::ADD_PARTICIPANT;
 
-fn person(id: i32, who: (&str, &str, i64), state: WireCallState, ago_s: i64, caps: u32) -> WireCall {
+fn person(
+    id: i32,
+    who: (&str, &str, i64),
+    state: WireCallState,
+    ago_s: i64,
+    caps: u32,
+) -> WireCall {
     let now = now_ms();
     WireCall {
         id,
@@ -186,10 +192,7 @@ impl Backend {
 
     /// Hang-up of one call, a conference, or one participant.
     pub(super) fn preview_disconnect(&mut self, id: i32, cx: &mut Context<Self>) {
-        let is_child = self
-            .calls
-            .call(id)
-            .is_some_and(|c| c.parent_id.is_some());
+        let is_child = self.calls.call(id).is_some_and(|c| c.parent_id.is_some());
         if is_child {
             self.preview_apply(cx, move |s| drop_child(s, id, false));
         } else {
@@ -219,14 +222,13 @@ impl Backend {
                         .calls
                         .iter()
                         .filter(|c| {
-                            c.parent_id.is_none()
-                                && c.state == WireCallState::Active
-                                && c.id != id
+                            c.parent_id.is_none() && c.state == WireCallState::Active && c.id != id
                         })
                         .map(|c| c.id)
                         .collect();
-                    s.calls
-                        .retain(|c| !gone.contains(&c.id) && c.parent_id.is_none_or(|p| !gone.contains(&p)));
+                    s.calls.retain(|c| {
+                        !gone.contains(&c.id) && c.parent_id.is_none_or(|p| !gone.contains(&p))
+                    });
                 }
                 Answer::EndHeld => {
                     if let Some(h) = held_id {
@@ -322,7 +324,12 @@ impl Backend {
 /// the active private call and the rest of the conference is held (a split); otherwise
 /// it simply leaves. A conference left with one person is demoted to a normal call.
 fn drop_child(s: &mut CallSnapshot, id: i32, private: bool) {
-    let Some(parent) = s.calls.iter().find(|c| c.id == id).and_then(|c| c.parent_id) else {
+    let Some(parent) = s
+        .calls
+        .iter()
+        .find(|c| c.id == id)
+        .and_then(|c| c.parent_id)
+    else {
         return;
     };
     if let Some(host) = s.calls.iter_mut().find(|c| c.id == parent) {

@@ -99,6 +99,7 @@ A v0.1 row (no new field) parses with every new field defaulted
 | `blocked_changed` + | none | 18.x |
 | `document_result` + | `DocumentResult{op,ok,name?,text?,error?}` | 14.9 (shape), 21.x |
 | `ringtone_result` + | `RingtoneResult{ok,title?}` | 14.9 (shape), 17.x |
+| `keyguard_dismissed` + | none | 15.5 |
 | `ui_request` + | `UiRequest{kind,call_id?}` (`show_dialer|show_call|show_recents`) | 14.9 (shape), 16.x |
 
 ## 4. Rust to Kotlin commands (static methods on `RovstiBridge`)
@@ -118,6 +119,8 @@ string and never throw.
 | `diagnostics(probe)` + | 14.0f | one `pass|fail|unknown` line per check |
 | `pullBlocklist()`, `blockNumber(n)`, `unblockNumber(n)` + | facade 14.15 (`rovsti_android::blocklist`), Kotlin 18.x | envelope / Boolean |
 | `exportDocument(name, json)`, `importDocument()` + | facade 14.15 (`rovsti_android::documents`), Kotlin 21.x | Boolean; the answer is the `document_result` event |
+| `callSwap()`, `callMerge()`, `callSplit(id)`, `callAnswerHolding(id)`, `callAnswerEndingHeld(id)`, `callEndAll()` + | 15.2 | Boolean, never block; `rovsti_android::calls::{swap, merge, split, answer_holding, answer_ending_held, end_all}`. Results arrive only as the next snapshot (`pending` / `pending_failed`) |
+| `isKeyguardLocked()`, `requestDismissKeyguard()` + | 15.5 | Boolean; the answer to the second is the `keyguard_dismissed` event (`rovsti_android::window`) |
 | `settingsSync(json)`, `systemFacts()` + | facade 14.15 (`rovsti_android::settings`), Kotlin 17.x | Boolean / JSON string |
 
 ## 5. Bit constants (Rust `wire::caps|props|features`, Kotlin `WireJson.kt`)

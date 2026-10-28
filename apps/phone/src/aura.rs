@@ -140,6 +140,20 @@ impl Aura {
         cx.notify();
     }
 
+    /// One glow pulse (S21 Merge weave: scale 1.12 settling back on `glow`).
+    pub fn pulse_once(&mut self, scale: f32, cx: &mut Context<Self>) {
+        self.pulse.snap(scale);
+        self.pulse.set_target(1.0);
+        cx.notify();
+    }
+
+    /// The blobs bloom from 0.6 scale on `appear` (S19: the new call's pair).
+    pub fn bloom(&mut self, cx: &mut Context<Self>) {
+        self.collapse.snap(0.6);
+        self.collapse.set_target(1.0);
+        cx.notify();
+    }
+
     pub fn set(&mut self, state: AuraState, cx: &mut Context<Self>) {
         if state == self.state {
             return;

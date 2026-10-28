@@ -27,6 +27,8 @@ pub mod kind {
     pub const DOCUMENT_RESULT: &str = "document_result";
     pub const RINGTONE_RESULT: &str = "ringtone_result";
     pub const UI_REQUEST: &str = "ui_request";
+    /// The keyguard was dismissed after `window::request_dismiss_keyguard` (no payload).
+    pub const KEYGUARD_DISMISSED: &str = "keyguard_dismissed";
 }
 
 /// One undecoded event.

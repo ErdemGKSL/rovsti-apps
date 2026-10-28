@@ -394,6 +394,50 @@ mod tests {
     const KEYPAD_ALLOCS_P95: f32 = 1_900.0;
     const SCENARIOS: [&str; 5] = ["tab", "recents", "keypad", "incall", "incoming"];
 
+    /// P-13 (story 15.4): the control grid and End sit at the same pixels in every
+    /// call scene, with the route popover and the Add call sheet open too.
+    #[test]
+    fn grid_and_end_never_move_between_scenes() {
+        use crate::fx::{A_AUDIO, A_END};
+        let mut rig = Rig::new();
+        rig.settle();
+        type Seen = (
+            String,
+            Option<gpui::Bounds<gpui::Pixels>>,
+            Option<gpui::Bounds<gpui::Pixels>>,
+        );
+        let mut seen: Vec<Seen> = Vec::new();
+        for scene in crate::backend::SCENES {
+            if scene == "three" {
+                continue;
+            }
+            rig.with_app(|app, _, cx| {
+                app.backend.update(cx, |b, cx| b.preview_scene(scene, cx));
+            });
+            rig.settle();
+            let (a, e) = rig.with_app(|app, _, _| (app.marks.get(A_AUDIO), app.marks.get(A_END)));
+            seen.push((scene.to_owned(), a, e));
+        }
+        // The Add call sheet over a single call.
+        rig.with_app(|app, window, cx| {
+            app.backend
+                .update(cx, |b, cx| b.preview_scene("single", cx));
+            app.open_add_call(window, cx);
+        });
+        rig.settle();
+        let (a, e) = rig.with_app(|app, _, _| (app.marks.get(A_AUDIO), app.marks.get(A_END)));
+        seen.push(("add-call sheet".to_owned(), a, e));
+        let (name0, audio0, end0) = seen[0].clone();
+        assert!(
+            audio0.is_some() && end0.is_some(),
+            "{name0}: anchors painted"
+        );
+        for (name, audio, end) in &seen[1..] {
+            assert_eq!(*audio, audio0, "{name}: the Audio control moved");
+            assert_eq!(*end, end0, "{name}: End moved");
+        }
+    }
+
     /// Prints the table for docs/perf (see the module docs for the command).
     #[test]
     #[ignore = "measurement, run on demand"]

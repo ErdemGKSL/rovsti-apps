@@ -50,6 +50,8 @@ use crate::sample;
 mod preview;
 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
 mod preview_multi;
+#[cfg(test)]
+pub use preview_multi::SCENES;
 
 pub use rovsti_android::{
     permissions::{Access, Group},
@@ -252,6 +254,8 @@ pub struct Backend {
     calls: CallModel,
     /// Parts of the call scene that changed and no view has consumed yet.
     scene_diff: SceneDiff,
+    /// Bumped when the system confirms the keyguard was dismissed (Add call, 15.5).
+    keyguard_gen: u64,
     last_place: Option<Instant>,
     /// A number waiting for the Phone permission, and the permission pull
     /// number it was requested at (only newer pulls may judge the answer).
@@ -319,6 +323,7 @@ impl Backend {
             let mut backend = Self {
                 calls: CallModel::new(),
                 scene_diff: SceneDiff::default(),
+                keyguard_gen: 0,
                 last_place: None,
                 pending_call: None,
                 call_blocked: false,
@@ -697,6 +702,11 @@ impl Backend {
         self.send(CallCommand::EndAll, cx)
     }
 
+    /// How many times the system confirmed a keyguard dismissal.
+    pub fn keyguard_gen(&self) -> u64 {
+        self.keyguard_gen
+    }
+
     /// What changed in the call scene since a view last asked (ORed across
     /// snapshots, so a view that renders less often never misses a part).
     pub fn take_scene_diff(&mut self) -> SceneDiff {
@@ -819,6 +829,10 @@ impl Backend {
                 self.refresh_permissions(cx);
                 self.refresh_call_log(cx);
                 self.refresh_contacts(cx);
+            }
+            kind::KEYGUARD_DISMISSED => {
+                self.keyguard_gen += 1;
+                cx.notify();
             }
             kind::CALL_LOG_CHANGED => self.refresh_call_log(cx),
             kind::CONTACTS_CHANGED => self.refresh_contacts(cx),

@@ -3,7 +3,8 @@
 
 use rovsti_core::wire::{
     AudioRoute, CallLogKind, CallLogResponse, CallSnapshot, ContactsResponse, DisconnectCause,
-    FavoritesResponse, WireCallState, WireError,
+    EndpointHint, EndpointType, FavoritesResponse, PendingOp, SilencedBy, WireCallState, WireError,
+    caps, props,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -35,6 +36,85 @@ fn snapshot_fixtures_round_trip() {
     assert_round_trips::<CallSnapshot>("call_snapshot_active.json");
     assert_round_trips::<CallSnapshot>("call_snapshot_waiting.json");
     assert_round_trips::<CallSnapshot>("call_snapshot_empty.json");
+}
+
+#[test]
+fn v02_snapshot_fixtures_round_trip() {
+    for name in [
+        "audio_endpoints.json",
+        "two_calls.json",
+        "conference.json",
+        "selecting_account.json",
+    ] {
+        assert_round_trips::<CallSnapshot>(name);
+    }
+}
+
+#[test]
+fn audio_endpoints_content_and_derivation() {
+    let s: CallSnapshot = parse("audio_endpoints.json");
+    let e = &s.audio.endpoints;
+    assert_eq!(e.len(), 5);
+    assert_eq!(e[1].name.as_deref(), Some("Galaxy Buds"));
+    assert!(e[1].selected && !e[0].selected);
+    assert_eq!(e[2].hint, Some(EndpointHint::HearingAid));
+    assert_eq!(e[0].kind, EndpointType::Earpiece);
+    assert!(s.audio.is_consistent());
+    assert_eq!(s.audio.route_from_endpoints(), Some(AudioRoute::Bluetooth));
+    assert_eq!(
+        s.calls[0].caps,
+        caps::HOLD | caps::SUPPORT_HOLD | caps::MUTE | caps::ADD_PARTICIPANT
+    );
+}
+
+#[test]
+fn two_calls_and_conference_content() {
+    let s: CallSnapshot = parse("two_calls.json");
+    assert_eq!(s.background_call_id, Some(1));
+    assert!(s.can_add_call && s.can_merge && s.can_swap);
+    assert_eq!(s.pending, Some(PendingOp::Swap));
+    assert_eq!(s.calls[0].hold_since_ms, Some(1_790_000_440_000));
+    assert!(s.calls[1].has_prop(props::HD));
+    let c: CallSnapshot = parse("conference.json");
+    let parent = &c.calls[2];
+    assert!(parent.has_prop(props::CONFERENCE));
+    assert_eq!(parent.children, [1, 2]);
+    assert_eq!(c.calls[0].parent_id, Some(3));
+    assert!(c.calls[0].has_cap(caps::SPLIT) && c.calls[0].has_cap(caps::DISCONNECT_PARTICIPANT));
+}
+
+#[test]
+fn selecting_account_content() {
+    let s: CallSnapshot = parse("selecting_account.json");
+    assert!(s.selecting_account);
+    assert_eq!(s.accounts.len(), 2);
+    assert_eq!(s.accounts[1].label, "SIM 2");
+    assert!(s.ringer_silenced);
+    assert_eq!(s.silenced_by, Some(SilencedBy::Volume));
+    assert_eq!(s.pending_failed, Some(PendingOp::Merge));
+    assert_eq!(s.ended_call_id, Some(9));
+}
+
+#[test]
+fn an_unknown_endpoint_type_and_extra_fields_keep_the_snapshot() {
+    let mut value: Value =
+        serde_json::from_str(&fixture_text("audio_endpoints.json")).expect("fixture is JSON");
+    value["audio"]["endpoints"][3]["type"] = Value::from("usb_dongle");
+    value["future_field"] = serde_json::json!({"x": 1});
+    value["calls"][0]["future_call_field"] = Value::from(true);
+    let s: CallSnapshot = serde_json::from_value(value).expect("parse");
+    assert_eq!(s.audio.endpoints[3].kind, EndpointType::Unknown);
+    assert_eq!(s.audio.endpoints.len(), 5);
+    assert_eq!(s.calls.len(), 1);
+}
+
+#[test]
+fn a_newer_version_is_rejected_by_the_helper() {
+    let mut value: Value =
+        serde_json::from_str(&fixture_text("two_calls.json")).expect("fixture is JSON");
+    value["v"] = Value::from(2);
+    let s: CallSnapshot = serde_json::from_value(value).expect("parse");
+    assert!(s.accept().is_err());
 }
 
 #[test]

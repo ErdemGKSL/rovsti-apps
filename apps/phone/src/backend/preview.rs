@@ -60,6 +60,7 @@ impl Backend {
                 can_hold: true,
                 is_incoming: true,
                 disconnect_cause: None,
+                ..WireCall::default()
             }];
             s.foreground_call_id = Some(CALL_ID);
             s.waiting_call_id = None;
@@ -132,6 +133,7 @@ impl Backend {
                 can_hold: true,
                 is_incoming: false,
                 disconnect_cause: None,
+                ..WireCall::default()
             }];
             s.foreground_call_id = Some(CALL_ID);
             s.waiting_call_id = None;
@@ -184,6 +186,7 @@ impl Backend {
                 can_hold: true,
                 is_incoming: true,
                 disconnect_cause: None,
+                ..WireCall::default()
             });
             s.waiting_call_id = Some(WAITING_ID);
         });

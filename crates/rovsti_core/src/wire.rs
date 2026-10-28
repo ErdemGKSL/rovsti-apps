@@ -28,6 +28,75 @@ use serde::{Deserialize, Serialize};
 /// The only wire version this build understands.
 pub const WIRE_VERSION: u32 = 1;
 
+/// Per-call capability bits (`WireCall::caps`, AD-24). Kotlin mirrors them in
+/// `WireJson.kt`; the golden tests keep both sides honest.
+pub mod caps {
+    /// The call can be put on hold now (`CAPABILITY_HOLD`).
+    pub const HOLD: u32 = 1;
+    /// The call may be held at all (`CAPABILITY_SUPPORT_HOLD`).
+    pub const SUPPORT_HOLD: u32 = 2;
+    /// Can merge into a conference (`CAPABILITY_MERGE_CONFERENCE`).
+    pub const MERGE: u32 = 4;
+    /// Can swap with another call (`CAPABILITY_SWAP_CONFERENCE`).
+    pub const SWAP: u32 = 8;
+    /// Conference participants can be managed (`CAPABILITY_MANAGE_CONFERENCE`).
+    pub const MANAGE: u32 = 16;
+    /// A child can leave the conference (`CAPABILITY_SEPARATE_FROM_CONFERENCE`).
+    pub const SPLIT: u32 = 32;
+    /// A child can be dropped (`CAPABILITY_DISCONNECT_FROM_CONFERENCE`).
+    pub const DISCONNECT_PARTICIPANT: u32 = 64;
+    /// The ringing call can be declined with a text (`CAPABILITY_RESPOND_VIA_TEXT`).
+    pub const RESPOND_VIA_TEXT: u32 = 128;
+    /// The microphone can be muted (`CAPABILITY_MUTE`).
+    pub const MUTE: u32 = 256;
+    /// A participant can be added (`CAPABILITY_ADD_PARTICIPANT`).
+    pub const ADD_PARTICIPANT: u32 = 512;
+
+    /// Every bit above, for overlap checks.
+    pub const ALL: [u32; 10] = [
+        HOLD,
+        SUPPORT_HOLD,
+        MERGE,
+        SWAP,
+        MANAGE,
+        SPLIT,
+        DISCONNECT_PARTICIPANT,
+        RESPOND_VIA_TEXT,
+        MUTE,
+        ADD_PARTICIPANT,
+    ];
+}
+
+/// Per-call property bits (`WireCall::props`, AD-24).
+pub mod props {
+    /// The call is a conference (`PROPERTY_CONFERENCE`).
+    pub const CONFERENCE: u32 = 1;
+    /// High-definition audio (`PROPERTY_HIGH_DEF_AUDIO`).
+    pub const HD: u32 = 2;
+    /// Carried over Wi-Fi (`PROPERTY_WIFI`).
+    pub const WIFI: u32 = 4;
+    /// An emergency call.
+    pub const EMERGENCY: u32 = 8;
+
+    /// Every bit above, for overlap checks.
+    pub const ALL: [u32; 4] = [CONFERENCE, HD, WIFI, EMERGENCY];
+}
+
+/// Call-log quality feature bits (`CallLogEntry::features`, AD-31).
+pub mod features {
+    /// `FEATURES_HD_CALL`.
+    pub const HD: u32 = 1;
+    /// `FEATURES_WIFI`.
+    pub const WIFI: u32 = 2;
+    /// `FEATURES_VOLTE`.
+    pub const VOLTE: u32 = 4;
+    /// `FEATURES_VIDEO`.
+    pub const VIDEO: u32 = 8;
+
+    /// Every bit above, for overlap checks.
+    pub const ALL: [u32; 4] = [HD, WIFI, VOLTE, VIDEO];
+}
+
 fn default_version() -> u32 {
     WIRE_VERSION
 }
@@ -62,6 +131,10 @@ fn is_zero(n: &i64) -> bool {
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
 }
 
 /// Telecom call state as mapped by Kotlin.
@@ -111,6 +184,63 @@ pub enum DisconnectCause {
     Unknown,
 }
 
+/// The kind of one audio endpoint (`CallEndpoint.getEndpointType()`, AD-23).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointType {
+    Earpiece,
+    Bluetooth,
+    WiredHeadset,
+    Speaker,
+    /// A type this build does not know: it renders as an `unknown` row.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+impl EndpointType {
+    /// The v0.1 route of this endpoint type.
+    pub fn route(self) -> AudioRoute {
+        match self {
+            Self::Earpiece => AudioRoute::Earpiece,
+            Self::Bluetooth => AudioRoute::Bluetooth,
+            Self::WiredHeadset => AudioRoute::WiredHeadset,
+            Self::Speaker => AudioRoute::Speaker,
+            Self::Unknown => AudioRoute::Unknown,
+        }
+    }
+}
+
+/// Extra knowledge Kotlin has about an endpoint (best effort, AD-23).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndpointHint {
+    HearingAid,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// One audio output of the phone. `id` is a session handle: never persisted,
+/// never compared across a reconnect.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Endpoint {
+    pub id: String,
+    #[serde(rename = "type", default, deserialize_with = "null_default")]
+    pub kind: EndpointType,
+    /// Sent for Bluetooth, wired and unknown endpoints; Rust names the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
+    pub selected: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<EndpointHint>,
+}
+
 /// Audio section of a [`CallSnapshot`].
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioState {
@@ -120,10 +250,85 @@ pub struct AudioState {
     pub route: AudioRoute,
     #[serde(default, deserialize_with = "null_default")]
     pub routes: Vec<AudioRoute>,
+    /// The id-addressed endpoint list (AD-23); empty from a v0.1 sender.
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub endpoints: Vec<Endpoint>,
+}
+
+impl AudioState {
+    /// The route the endpoints say is in use: the type of the selected one.
+    pub fn route_from_endpoints(&self) -> Option<AudioRoute> {
+        self.endpoints
+            .iter()
+            .find(|e| e.selected)
+            .map(|e| e.kind.route())
+    }
+
+    /// The distinct endpoint types, in first-seen order.
+    pub fn routes_from_endpoints(&self) -> Vec<AudioRoute> {
+        let mut out: Vec<AudioRoute> = Vec::with_capacity(4);
+        for e in &self.endpoints {
+            let route = e.kind.route();
+            if !out.contains(&route) {
+                out.push(route);
+            }
+        }
+        out
+    }
+
+    /// With endpoints present, `route` and `routes` must be derived from them
+    /// (AD-23). Without endpoints (a v0.1 sender) there is nothing to check.
+    pub fn is_consistent(&self) -> bool {
+        if self.endpoints.is_empty() {
+            return true;
+        }
+        let route_ok = match self.route_from_endpoints() {
+            Some(route) => route == self.route,
+            None => true,
+        };
+        route_ok && self.routes_from_endpoints() == self.routes
+    }
+}
+
+/// An operation the registry is running (`pending`, AD-25).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PendingOp {
+    Answer,
+    Swap,
+    Merge,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// How the ringer was silenced (`silenced_by`, AD-29).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SilencedBy {
+    User,
+    Volume,
+    Flip,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// One call-capable account offered while a call waits in
+/// `selecting_account` (AD-26).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountRef {
+    pub key: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
 }
 
 /// One call inside a [`CallSnapshot`].
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WireCall {
     pub id: i32,
     #[serde(default, deserialize_with = "null_default")]
@@ -157,9 +362,50 @@ pub struct WireCall {
     pub is_incoming: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disconnect_cause: Option<DisconnectCause>,
+    /// The conference this call belongs to (AD-24).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<i32>,
+    /// Conference participants; empty when the carrier hides them.
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub children: Vec<i32>,
+    /// [`caps`] bits.
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_zero_u32"
+    )]
+    pub caps: u32,
+    /// [`props`] bits.
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_zero_u32"
+    )]
+    pub props: u32,
+    /// Opaque `"{component}#{handle id}"` (AD-26).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_key: Option<String>,
+    /// `DISPLAY_NAME_ALTERNATIVE` of the contact (AD-30).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name_alt: Option<String>,
+    /// When the call went to Holding (epoch ms).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_since_ms: Option<i64>,
 }
 
 impl WireCall {
+    pub fn has_cap(&self, bit: u32) -> bool {
+        self.caps & bit != 0
+    }
+
+    pub fn has_prop(&self, bit: u32) -> bool {
+        self.props & bit != 0
+    }
+
     pub fn is_connected(&self) -> bool {
         self.connect_time_ms > 0
     }
@@ -183,8 +429,75 @@ pub struct CallSnapshot {
     pub foreground_call_id: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_call_id: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background_call_id: Option<i32>,
+    /// A call that just ended while another is live (AD-24).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_call_id: Option<i32>,
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
+    pub can_add_call: bool,
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
+    pub can_merge: bool,
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
+    pub can_swap: bool,
+    /// The operation the registry is running right now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending: Option<PendingOp>,
+    /// An operation that just failed (present for one rebuild).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_failed: Option<PendingOp>,
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
+    pub ringer_silenced: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub silenced_by: Option<SilencedBy>,
+    /// A call waits for the user to choose an account (AD-26).
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_false"
+    )]
+    pub selecting_account: bool,
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub accounts: Vec<AccountRef>,
     #[serde(default, deserialize_with = "null_default")]
     pub calls: Vec<WireCall>,
+}
+
+/// A snapshot from a newer wire version than this build knows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("snapshot wire version {0} is newer than {WIRE_VERSION}")]
+pub struct NewerVersion(pub u32);
+
+impl CallSnapshot {
+    /// Rejects a snapshot whose `v` is higher than [`WIRE_VERSION`], so the
+    /// caller keeps showing the last good one (a changed field bumps `v`).
+    pub fn accept(self) -> Result<Self, NewerVersion> {
+        if self.v > WIRE_VERSION {
+            Err(NewerVersion(self.v))
+        } else {
+            Ok(self)
+        }
+    }
 }
 
 impl Default for CallSnapshot {
@@ -198,6 +511,17 @@ impl Default for CallSnapshot {
             audio: AudioState::default(),
             foreground_call_id: None,
             waiting_call_id: None,
+            background_call_id: None,
+            ended_call_id: None,
+            can_add_call: false,
+            can_merge: false,
+            can_swap: false,
+            pending: None,
+            pending_failed: None,
+            ringer_silenced: false,
+            silenced_by: None,
+            selecting_account: false,
+            accounts: Vec::new(),
             calls: Vec::new(),
         }
     }
@@ -454,5 +778,107 @@ mod tests {
         assert_eq!(c.id, crate::ContactId(7));
         assert_eq!(c.numbers.len(), 1);
         assert!(c.starred);
+    }
+
+    #[test]
+    fn bit_constants_are_pinned() {
+        assert_eq!(
+            caps::ALL,
+            [1, 2, 4, 8, 16, 32, 64, 128, 256, 512],
+            "caps are wire values"
+        );
+        assert_eq!(
+            (
+                caps::HOLD,
+                caps::SUPPORT_HOLD,
+                caps::MERGE,
+                caps::SWAP,
+                caps::MANAGE
+            ),
+            (1, 2, 4, 8, 16)
+        );
+        assert_eq!(
+            (
+                caps::SPLIT,
+                caps::DISCONNECT_PARTICIPANT,
+                caps::RESPOND_VIA_TEXT,
+                caps::MUTE,
+                caps::ADD_PARTICIPANT
+            ),
+            (32, 64, 128, 256, 512)
+        );
+        assert_eq!(
+            (props::CONFERENCE, props::HD, props::WIFI, props::EMERGENCY),
+            (1, 2, 4, 8)
+        );
+        assert_eq!(
+            (
+                features::HD,
+                features::WIFI,
+                features::VOLTE,
+                features::VIDEO
+            ),
+            (1, 2, 4, 8)
+        );
+    }
+
+    #[test]
+    fn no_two_bits_of_one_mask_overlap() {
+        fn disjoint(bits: &[u32]) {
+            let mut seen = 0_u32;
+            for &bit in bits {
+                assert_eq!(bit.count_ones(), 1, "{bit} is not a single bit");
+                assert_eq!(seen & bit, 0, "{bit} overlaps");
+                seen |= bit;
+            }
+        }
+        disjoint(&caps::ALL);
+        disjoint(&props::ALL);
+        disjoint(&features::ALL);
+    }
+
+    #[test]
+    fn a_v01_snapshot_has_no_v02_fields() {
+        let s: CallSnapshot = serde_json::from_str(
+            r#"{"v":1,"seq":4,"audio":{"muted":false,"route":"speaker","routes":["earpiece","speaker"]},
+                "foreground_call_id":1,"calls":[{"id":1,"state":"active","can_hold":true}]}"#,
+        )
+        .expect("parse");
+        assert!(s.audio.endpoints.is_empty());
+        assert!(s.audio.is_consistent(), "nothing to derive from");
+        assert_eq!(s.background_call_id, None);
+        assert!(!s.can_add_call && !s.can_merge && !s.can_swap);
+        assert_eq!(s.pending, None);
+        let call = &s.calls[0];
+        assert_eq!((call.caps, call.props), (0, 0));
+        assert!(call.children.is_empty() && call.parent_id.is_none());
+    }
+
+    #[test]
+    fn endpoints_parse_and_unknown_types_do_not_drop_the_snapshot() {
+        let s: CallSnapshot = serde_json::from_str(
+            r#"{"audio":{"route":"bluetooth","routes":["earpiece","bluetooth","unknown"],
+                "endpoints":[
+                  {"id":"a","type":"earpiece"},
+                  {"id":"b","type":"bluetooth","name":"Buds","selected":true,"hint":"hearing_aid"},
+                  {"id":"c","type":"usb_c","name":"Dock","future":1}]}}"#,
+        )
+        .expect("parse");
+        let e = &s.audio.endpoints;
+        assert_eq!(e[2].kind, EndpointType::Unknown);
+        assert_eq!(e[1].hint, Some(EndpointHint::HearingAid));
+        assert_eq!(s.audio.route_from_endpoints(), Some(AudioRoute::Bluetooth));
+        assert!(s.audio.is_consistent());
+        let mut off = s.audio.clone();
+        off.route = AudioRoute::Speaker;
+        assert!(!off.is_consistent());
+    }
+
+    #[test]
+    fn a_newer_wire_version_is_rejected() {
+        let s: CallSnapshot = serde_json::from_str(r#"{"v":2,"seq":9}"#).expect("parse");
+        assert_eq!(s.accept(), Err(NewerVersion(2)));
+        let ok: CallSnapshot = serde_json::from_str(r#"{"v":1}"#).expect("parse");
+        assert!(ok.accept().is_ok());
     }
 }

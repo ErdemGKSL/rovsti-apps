@@ -318,6 +318,7 @@ mod tests {
             can_hold: false,
             is_incoming: false,
             disconnect_cause: None,
+            ..WireCall::default()
         }
     }
 

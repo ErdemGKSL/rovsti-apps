@@ -1,0 +1,40 @@
+{
+  "v": 1,
+  "seq": 61,
+  "now_ms": 1790000500000,
+  "keyguard_locked": false,
+  "audio": {"muted": false, "route": "earpiece", "routes": ["earpiece", "speaker"]},
+  "foreground_call_id": 2,
+  "background_call_id": 1,
+  "can_add_call": true,
+  "can_merge": true,
+  "can_swap": true,
+  "pending": "swap",
+  "calls": [
+    {
+      "id": 1,
+      "state": "holding",
+      "number_raw": "+4915123456789",
+      "normalized": "+4915123456789",
+      "display_name": "Burak Demir",
+      "display_name_alt": "Demir, Burak",
+      "contact_id": 2,
+      "connect_time_ms": 1790000100000,
+      "can_hold": true,
+      "caps": 783,
+      "hold_since_ms": 1790000440000,
+      "account_key": "com.android.phone/.PstnConn#8901"
+    },
+    {
+      "id": 2,
+      "state": "active",
+      "number_raw": "05551112233",
+      "normalized": "05551112233",
+      "connect_time_ms": 1790000460000,
+      "can_hold": true,
+      "caps": 783,
+      "props": 2,
+      "account_key": "com.android.phone/.PstnConn#8901"
+    }
+  ]
+}

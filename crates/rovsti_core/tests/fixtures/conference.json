@@ -1,0 +1,41 @@
+{
+  "v": 1,
+  "seq": 70,
+  "now_ms": 1790000600000,
+  "keyguard_locked": false,
+  "audio": {"muted": false, "route": "speaker", "routes": ["earpiece", "speaker"]},
+  "foreground_call_id": 3,
+  "can_add_call": true,
+  "calls": [
+    {
+      "id": 1,
+      "state": "active",
+      "number_raw": "05551112233",
+      "normalized": "05551112233",
+      "connect_time_ms": 1790000100000,
+      "caps": 96,
+      "parent_id": 3
+    },
+    {
+      "id": 2,
+      "state": "active",
+      "number_raw": "+4915123456789",
+      "normalized": "+4915123456789",
+      "display_name": "Burak Demir",
+      "connect_time_ms": 1790000150000,
+      "caps": 96,
+      "parent_id": 3
+    },
+    {
+      "id": 3,
+      "state": "active",
+      "number_raw": "",
+      "normalized": "",
+      "connect_time_ms": 1790000100000,
+      "can_hold": true,
+      "caps": 59,
+      "props": 1,
+      "children": [1, 2]
+    }
+  ]
+}

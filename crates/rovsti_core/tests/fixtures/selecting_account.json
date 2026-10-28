@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "seq": 80,
+  "now_ms": 1790000700000,
+  "keyguard_locked": false,
+  "audio": {"muted": false, "route": "earpiece", "routes": ["earpiece", "speaker"]},
+  "foreground_call_id": 1,
+  "selecting_account": true,
+  "accounts": [
+    {"key": "com.android.phone/.PstnConn#8901", "label": "SIM 1"},
+    {"key": "com.android.phone/.PstnConn#8902", "label": "SIM 2"}
+  ],
+  "ringer_silenced": true,
+  "silenced_by": "volume",
+  "pending_failed": "merge",
+  "ended_call_id": 9,
+  "calls": [
+    {
+      "id": 1,
+      "state": "dialing",
+      "number_raw": "05551112233",
+      "normalized": "05551112233"
+    }
+  ]
+}

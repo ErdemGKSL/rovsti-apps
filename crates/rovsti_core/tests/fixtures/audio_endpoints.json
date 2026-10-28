@@ -1,0 +1,30 @@
+{
+  "v": 1,
+  "seq": 50,
+  "now_ms": 1790000400000,
+  "keyguard_locked": false,
+  "audio": {
+    "muted": false,
+    "route": "bluetooth",
+    "routes": ["earpiece", "bluetooth", "wired_headset", "speaker"],
+    "endpoints": [
+      {"id": "7c1d0c3e-0000-4000-8000-000000000001", "type": "earpiece"},
+      {"id": "7c1d0c3e-0000-4000-8000-000000000002", "type": "bluetooth", "name": "Galaxy Buds", "selected": true},
+      {"id": "7c1d0c3e-0000-4000-8000-000000000003", "type": "bluetooth", "name": "Phonak Audeo", "hint": "hearing_aid"},
+      {"id": "7c1d0c3e-0000-4000-8000-000000000004", "type": "wired_headset", "name": "USB-C headset"},
+      {"id": "7c1d0c3e-0000-4000-8000-000000000005", "type": "speaker"}
+    ]
+  },
+  "foreground_call_id": 1,
+  "calls": [
+    {
+      "id": 1,
+      "state": "active",
+      "number_raw": "05551112233",
+      "normalized": "05551112233",
+      "connect_time_ms": 1790000340000,
+      "can_hold": true,
+      "caps": 771
+    }
+  ]
+}

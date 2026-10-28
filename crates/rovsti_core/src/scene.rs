@@ -421,6 +421,22 @@ impl SceneDiff {
             || self.session
     }
 
+    /// Both diffs together: a part changed if it changed in either.
+    pub fn merge(self, other: Self) -> Self {
+        Self {
+            applied: self.applied || other.applied,
+            primary: self.primary || other.primary,
+            held: self.held || other.held,
+            waiting: self.waiting || other.waiting,
+            ended: self.ended || other.ended,
+            endpoints: self.endpoints || other.endpoints,
+            participants: self.participants || other.participants,
+            controls: self.controls || other.controls,
+            audio: self.audio || other.audio,
+            session: self.session || other.session,
+        }
+    }
+
     /// Compares two snapshots. `endpoints` is whether the endpoint list changed.
     pub fn between(old: &CallSnapshot, new: &CallSnapshot, endpoints: bool) -> Self {
         let (a, b) = (Roles::of(old), Roles::of(new));
@@ -442,7 +458,9 @@ impl SceneDiff {
                 || old.can_swap != new.can_swap
                 || old.pending != new.pending
                 || old.pending_failed != new.pending_failed,
-            audio: old.audio.muted != new.audio.muted || old.audio.route != new.audio.route,
+            audio: old.audio.muted != new.audio.muted
+                || old.audio.route != new.audio.route
+                || old.audio.routes != new.audio.routes,
             session: old.keyguard_locked != new.keyguard_locked
                 || old.ringer_silenced != new.ringer_silenced
                 || old.silenced_by != new.silenced_by

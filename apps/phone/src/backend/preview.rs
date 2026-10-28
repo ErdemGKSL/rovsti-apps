@@ -13,7 +13,7 @@ use std::time::Duration;
 use gpui::Context;
 use rovsti_core::wire::{
     AudioRoute, AudioState, CallSnapshot, DisconnectCause, Endpoint, EndpointHint, EndpointType,
-    WireCall, WireCallState,
+    WireCall, WireCallState, caps, props,
 };
 
 use super::{Backend, CallCommand, now_ms};
@@ -77,15 +77,13 @@ fn routes_preview() -> Option<bool> {
 }
 
 impl Backend {
-    fn preview_apply(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut CallSnapshot)) {
+    pub(super) fn preview_apply(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut CallSnapshot)) {
         let mut snapshot = self.calls.snapshot().clone();
         snapshot.seq = self.calls.seq().map_or(0, |s| s + 1);
         snapshot.now_ms = now_ms();
         snapshot.keyguard_locked = self.preview_locked;
         edit(&mut snapshot);
-        if self.calls.apply(snapshot).applied {
-            cx.notify();
-        }
+        self.apply_snapshot(snapshot, cx);
     }
 
     /// A fake incoming call: rings until Answer, Decline, or (if `give_up`) the
@@ -137,20 +135,34 @@ impl Backend {
         }
     }
 
-    /// Disconnects the fake call with `cause`, then removes it (as Telecom does).
+    /// Disconnects the first fake call with `cause`, then removes it (as Telecom does).
     fn preview_end(&mut self, cause: DisconnectCause, cx: &mut Context<Self>) {
+        let id = self
+            .calls
+            .calls()
+            .iter()
+            .find(|c| c.parent_id.is_none())
+            .map_or(CALL_ID, |c| c.id);
+        self.preview_end_id(id, cause, cx);
+    }
+
+    /// Disconnects the fake call `id` (its conference children go with it), then removes
+    /// it. The other call, if any, becomes the foreground and stays as it was (a held call
+    /// does not resume by itself).
+    pub(super) fn preview_end_id(&mut self, id: i32, cause: DisconnectCause, cx: &mut Context<Self>) {
         self.preview_apply(cx, |s| {
-            if let Some(call) = s.calls.first_mut() {
+            if let Some(call) = s.calls.iter_mut().find(|c| c.id == id) {
                 call.state = WireCallState::Disconnected;
                 call.disconnect_cause = Some(cause);
             }
+            roles::assign(s, None);
         });
         let task = cx.spawn(async move |this, cx| {
             cx.background_executor().timer(REMOVE_AFTER).await;
             this.update(cx, |this, cx| {
                 this.preview_apply(cx, |s| {
-                    s.calls.clear();
-                    s.foreground_call_id = None;
+                    s.calls.retain(|c| c.id != id && c.parent_id != Some(id));
+                    roles::assign(s, None);
                 });
             })
             .ok();
@@ -172,6 +184,12 @@ impl Backend {
             .map(str::to_owned)
             .or_else(|| std::env::var("ROVSTI_PREVIEW_CALL").ok());
         let raw = raw.to_owned();
+        if self.calls.foreground().is_some_and(|c| {
+            matches!(c.state, WireCallState::Active | WireCallState::Holding)
+        }) {
+            self.preview_add_call(&raw, cx);
+            return;
+        }
         self.preview_apply(cx, |s| {
             s.calls = vec![WireCall {
                 id: CALL_ID,
@@ -273,34 +291,25 @@ impl Backend {
                     };
                 }
             }),
-            CallCommand::Disconnect(_) => self.preview_end(DisconnectCause::Local, cx),
-            CallCommand::Reject(id) if id == WAITING_ID => self.preview_apply(cx, |s| {
-                s.calls.retain(|c| c.id != WAITING_ID);
-                s.waiting_call_id = None;
-            }),
+            CallCommand::Disconnect(id) => self.preview_disconnect(id, cx),
+            CallCommand::Reject(id) if self.calls.waiting().is_some_and(|w| w.id == id) => {
+                self.preview_apply(cx, |s| {
+                    s.calls.retain(|c| c.id != id);
+                    roles::assign(s, None);
+                });
+            }
             CallCommand::Reject(_) => self.preview_end(DisconnectCause::Rejected, cx),
-            CallCommand::AnswerReplacing(id) => {
-                // The first call ends, then the waiting one is answered.
-                self.preview_apply(cx, |s| {
-                    s.calls.retain(|c| c.id == id);
-                    s.waiting_call_id = None;
-                    s.foreground_call_id = Some(id);
-                    if let Some(call) = s.calls.first_mut() {
-                        call.state = WireCallState::Active;
-                        call.connect_time_ms = now_ms();
-                    }
-                });
-            }
-            CallCommand::Answer(_) => {
-                self.preview_apply(cx, |s| {
-                    if let Some(call) = s.calls.first_mut()
-                        && call.state == WireCallState::Ringing
-                    {
-                        call.state = WireCallState::Active;
-                        call.connect_time_ms = now_ms();
-                    }
-                });
-            }
+            CallCommand::AnswerReplacing(id) => self.preview_answer(id, Answer::EndCurrent, cx),
+            CallCommand::AnswerHolding(id) => self.preview_answer(id, Answer::Hold, cx),
+            CallCommand::AnswerEndingHeld(id) => self.preview_answer(id, Answer::EndHeld, cx),
+            CallCommand::Swap => self.preview_swap(cx),
+            CallCommand::Merge => self.preview_merge(cx),
+            CallCommand::Split(id) => self.preview_split(id, cx),
+            CallCommand::EndAll => self.preview_apply(cx, |s| {
+                s.calls.retain(|c| c.state == WireCallState::Ringing && c.parent_id.is_none());
+                roles::assign(s, None);
+            }),
+            CallCommand::Answer(id) => self.preview_answer(id, Answer::Plain, cx),
             CallCommand::Dtmf(_) | CallCommand::DtmfStop => {}
         }
     }
@@ -364,5 +373,146 @@ impl Backend {
                 derive_audio(&mut s.audio);
             }
         });
+    }
+}
+
+/// How a waiting call is answered in the preview.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Answer {
+    Plain,
+    Hold,
+    EndCurrent,
+    EndHeld,
+}
+
+/// Mirrors Kotlin's `Focus.of` and `MultiCall.canDo` (AD-24) so the fake calls carry
+/// the same roles and flags a phone would.
+pub(super) mod roles {
+    use super::{CallSnapshot, WireCall, WireCallState, caps, props};
+
+    fn live(c: &WireCall) -> bool {
+        matches!(
+            c.state,
+            WireCallState::Dialing | WireCallState::Active | WireCallState::Holding
+        )
+    }
+
+    /// Fills the role ids and the three `can_*` flags from `calls`. `keep` is the foreground
+    /// that stays in front while an operation runs.
+    pub(in crate::backend) fn assign(s: &mut CallSnapshot, keep: Option<i32>) {
+        let top: Vec<&WireCall> = s.calls.iter().filter(|c| c.parent_id.is_none()).collect();
+        let first = |state| top.iter().find(|c| c.state == state).map(|c| c.id);
+        let kept = keep.filter(|k| top.iter().any(|c| c.id == *k && live(c)));
+        let fg = kept
+            .or_else(|| first(WireCallState::Active))
+            .or_else(|| first(WireCallState::Dialing))
+            .or_else(|| first(WireCallState::Holding))
+            .or_else(|| first(WireCallState::Ringing))
+            .or_else(|| first(WireCallState::Disconnected));
+        let waiting = top
+            .iter()
+            .find(|c| c.state == WireCallState::Ringing && Some(c.id) != fg)
+            .map(|c| c.id);
+        let background = top.iter().find(|c| live(c) && Some(c.id) != fg).map(|c| c.id);
+        let any_live = top
+            .iter()
+            .any(|c| live(c) || c.state == WireCallState::Ringing);
+        let ended = any_live
+            .then(|| {
+                top.iter()
+                    .find(|c| c.state == WireCallState::Disconnected && Some(c.id) != fg)
+                    .map(|c| c.id)
+            })
+            .flatten();
+        let live_count = top.iter().filter(|c| live(c)).count();
+        let fg_call = top.iter().find(|c| Some(c.id) == fg);
+        let emergency = top.iter().any(|c| c.has_prop(props::EMERGENCY));
+        let can_merge = fg_call.is_some_and(|c| c.has_cap(caps::MERGE));
+        let held_resumes = top
+            .iter()
+            .find(|c| Some(c.id) == background)
+            .is_some_and(|c| c.can_hold || c.has_cap(caps::HOLD));
+        let can_swap = fg_call.is_some_and(|c| c.has_cap(caps::SWAP))
+            || (live_count == 2 && held_resumes);
+        let can_add = !emergency && live_count < 2 && any_live;
+        s.foreground_call_id = fg;
+        s.waiting_call_id = waiting;
+        s.background_call_id = background;
+        s.ended_call_id = ended;
+        s.can_merge = can_merge;
+        s.can_swap = can_swap;
+        s.can_add_call = can_add;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call(id: i32, state: WireCallState) -> WireCall {
+        WireCall {
+            id,
+            state,
+            can_hold: true,
+            caps: caps::HOLD,
+            ..WireCall::default()
+        }
+    }
+
+    #[test]
+    fn roles_follow_the_kotlin_rules() {
+        let mut s = CallSnapshot {
+            calls: vec![
+                call(1, WireCallState::Holding),
+                call(2, WireCallState::Active),
+                call(3, WireCallState::Ringing),
+            ],
+            ..CallSnapshot::default()
+        };
+        roles::assign(&mut s, None);
+        assert_eq!(s.foreground_call_id, Some(2));
+        assert_eq!(s.background_call_id, Some(1));
+        assert_eq!(s.waiting_call_id, Some(3));
+        assert!(s.can_swap && !s.can_add_call && !s.can_merge);
+    }
+
+    #[test]
+    fn the_active_party_hanging_up_leaves_the_held_call_in_front_and_held() {
+        let mut s = CallSnapshot {
+            calls: vec![
+                call(1, WireCallState::Holding),
+                call(2, WireCallState::Disconnected),
+            ],
+            ..CallSnapshot::default()
+        };
+        roles::assign(&mut s, None);
+        assert_eq!(s.foreground_call_id, Some(1));
+        assert_eq!(s.ended_call_id, Some(2));
+        s.calls.retain(|c| c.id == 1);
+        roles::assign(&mut s, None);
+        assert_eq!(s.foreground_call_id, Some(1));
+        assert_eq!(s.calls[0].state, WireCallState::Holding);
+        assert_eq!(s.ended_call_id, None);
+    }
+
+    #[test]
+    fn children_never_take_a_role() {
+        let mut s = CallSnapshot {
+            calls: vec![
+                WireCall {
+                    parent_id: Some(3),
+                    ..call(1, WireCallState::Active)
+                },
+                WireCall {
+                    props: props::CONFERENCE,
+                    children: vec![1],
+                    ..call(3, WireCallState::Active)
+                },
+            ],
+            ..CallSnapshot::default()
+        };
+        roles::assign(&mut s, None);
+        assert_eq!(s.foreground_call_id, Some(3));
+        assert_eq!(s.background_call_id, None);
     }
 }

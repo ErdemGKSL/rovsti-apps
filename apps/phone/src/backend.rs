@@ -33,6 +33,7 @@ use rovsti_core::{
     call::CallModel,
     call_log::{self, RecentsRow},
     recents::LocaleTime,
+    scene::SceneDiff,
     search::ContactIndex,
     setup::{self, Reading, SetupChecklist, SetupFacts, SetupItem, XiaomiConfirmations},
     wire::{
@@ -47,6 +48,8 @@ use crate::sample;
 
 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
 mod preview;
+#[cfg(any(not(target_os = "android"), feature = "perf", test))]
+mod preview_multi;
 
 pub use rovsti_android::{
     permissions::{Access, Group},
@@ -212,6 +215,18 @@ pub enum CallCommand {
     Dtmf(char),
     DtmfStop,
     AnswerReplacing(i32),
+    /// Swap the active and the held call (FR-45).
+    Swap,
+    /// Merge the two calls into a conference (FR-46).
+    Merge,
+    /// Take a participant out of the conference into a private call (FR-47).
+    Split(i32),
+    /// Answer a waiting call and let the network hold the current one (FR-48).
+    AnswerHolding(i32),
+    /// The relabelled "End held call and answer" (FR-48).
+    AnswerEndingHeld(i32),
+    /// End every call (the notification's End).
+    EndAll,
 }
 
 /// What `place_call` did (AD-11, story 4.3).
@@ -235,6 +250,8 @@ const PLACE_DEBOUNCE: Duration = Duration::from_millis(800);
 
 pub struct Backend {
     calls: CallModel,
+    /// Parts of the call scene that changed and no view has consumed yet.
+    scene_diff: SceneDiff,
     last_place: Option<Instant>,
     /// A number waiting for the Phone permission, and the permission pull
     /// number it was requested at (only newer pulls may judge the answer).
@@ -301,6 +318,7 @@ impl Backend {
             }
             let mut backend = Self {
                 calls: CallModel::new(),
+                scene_diff: SceneDiff::default(),
                 last_place: None,
                 pending_call: None,
                 call_blocked: false,
@@ -619,6 +637,12 @@ impl Backend {
             CallCommand::Dtmf(digit) => calls::dtmf(digit),
             CallCommand::DtmfStop => calls::dtmf_stop(),
             CallCommand::AnswerReplacing(id) => calls::answer_replacing(id),
+            CallCommand::Swap => calls::swap(),
+            CallCommand::Merge => calls::merge(),
+            CallCommand::Split(id) => calls::split(id),
+            CallCommand::AnswerHolding(id) => calls::answer_holding(id),
+            CallCommand::AnswerEndingHeld(id) => calls::answer_ending_held(id),
+            CallCommand::EndAll => calls::end_all(),
         };
         let outcome = Outcome::from(result, "call command");
         #[cfg(any(not(target_os = "android"), feature = "perf", test))]
@@ -627,6 +651,56 @@ impl Backend {
         }
         let _ = cx;
         outcome
+    }
+
+    // ---- Multi-call commands (AD-24, AD-25) -----------------------------
+    //
+    // Each returns whether Android took the command; the displayed state only
+    // ever changes with the next snapshot.
+
+    pub fn swap(&mut self, cx: &mut Context<Self>) -> Outcome {
+        self.send(CallCommand::Swap, cx)
+    }
+
+    pub fn merge(&mut self, cx: &mut Context<Self>) -> Outcome {
+        self.send(CallCommand::Merge, cx)
+    }
+
+    pub fn split(&mut self, id: i32, cx: &mut Context<Self>) -> Outcome {
+        self.send(CallCommand::Split(id), cx)
+    }
+
+    /// Ends one call or conference participant.
+    pub fn disconnect(&mut self, id: i32, cx: &mut Context<Self>) -> Outcome {
+        self.send(CallCommand::Disconnect(id), cx)
+    }
+
+    pub fn answer_holding(&mut self, id: i32, cx: &mut Context<Self>) -> Outcome {
+        self.send(CallCommand::AnswerHolding(id), cx)
+    }
+
+    /// Ends the current call, then answers `id`.
+    pub fn answer_replacing(&mut self, id: i32, cx: &mut Context<Self>) -> Outcome {
+        self.send(CallCommand::AnswerReplacing(id), cx)
+    }
+
+    /// Ends the held call, then answers `id` (the relabelled primary choice).
+    pub fn answer_ending_held(&mut self, id: i32, cx: &mut Context<Self>) -> Outcome {
+        self.send(CallCommand::AnswerEndingHeld(id), cx)
+    }
+
+    pub fn reject(&mut self, id: i32, cx: &mut Context<Self>) -> Outcome {
+        self.send(CallCommand::Reject(id), cx)
+    }
+
+    pub fn end_all(&mut self, cx: &mut Context<Self>) -> Outcome {
+        self.send(CallCommand::EndAll, cx)
+    }
+
+    /// What changed in the call scene since a view last asked (ORed across
+    /// snapshots, so a view that renders less often never misses a part).
+    pub fn take_scene_diff(&mut self) -> SceneDiff {
+        std::mem::take(&mut self.scene_diff)
     }
 
     /// Perf runs (story 12.2): a 500-entry call log, so the scroll scenario
@@ -738,11 +812,7 @@ impl Backend {
     fn handle(&mut self, event: RawEvent, cx: &mut Context<Self>) {
         match event.kind.as_str() {
             kind::CALLS => match serde_json::from_str::<CallSnapshot>(&event.json) {
-                Ok(snapshot) => {
-                    if self.calls.apply(snapshot).applied {
-                        cx.notify();
-                    }
-                }
+                Ok(snapshot) => self.apply_snapshot(snapshot, cx),
                 Err(error) => log::warn!("bad calls event: {error}"),
             },
             kind::PERMISSIONS_CHANGED => {
@@ -753,6 +823,16 @@ impl Backend {
             kind::CALL_LOG_CHANGED => self.refresh_call_log(cx),
             kind::CONTACTS_CHANGED => self.refresh_contacts(cx),
             other => log::debug!("ignoring event {other}"),
+        }
+    }
+
+    /// Applies a snapshot and wakes the views only when the scene they draw
+    /// changed (AD-35): a snapshot that only moved `seq` or `now_ms` costs nothing.
+    fn apply_snapshot(&mut self, snapshot: CallSnapshot, cx: &mut Context<Self>) {
+        let diff = self.calls.apply(snapshot);
+        if diff.changed() {
+            self.scene_diff = self.scene_diff.merge(diff);
+            cx.notify();
         }
     }
 

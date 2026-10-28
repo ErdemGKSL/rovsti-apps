@@ -23,7 +23,7 @@ use crate::PhoneApp;
 /// Long-press on the Setup title opens the page.
 pub(crate) const OPEN_AFTER_MS: u64 = 800;
 /// Probe groups with a probe behind them; the rest read "Not built yet".
-const REGISTERED: [&str; 1] = ["audio"];
+const REGISTERED: [&str; 2] = ["audio", "calls"];
 const ROW_H: f32 = 48.0;
 const LOG_H: f32 = 168.0;
 

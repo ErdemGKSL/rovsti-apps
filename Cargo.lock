@@ -5319,6 +5319,7 @@ dependencies = [
 name = "rovsti_android"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "jni",
  "log",
  "thiserror 2.0.21",
@@ -5359,13 +5360,18 @@ dependencies = [
 name = "rovsti_phone"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "gpui",
  "gpui_android",
  "gpui_platform",
+ "gpui_wgpu",
+ "image",
  "log",
  "rovsti_android",
  "rovsti_core",
  "rovsti_ui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -5389,6 +5395,10 @@ dependencies = [
  "gpui_android",
  "gpui_icons",
  "liquid_glass_kit",
+ "log",
+ "rovsti_core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

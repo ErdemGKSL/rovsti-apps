@@ -28,6 +28,10 @@
 // rim_width + 1 device px (`glass::effect_bounds` does this).
 //   slot7  [pointer.x, pointer.y, 0, 0]             press focus in device px, absolute
 
+// The press glow is compiled out of the "rest" and grid variants (the Rust
+// side swaps this line), which paint only surfaces that are not pressed.
+const LG_PRESS_GLOW: bool = true;
+
 fn lg_corner_radius(p: vec2<f32>, radii: vec4<f32>, half_size: vec2<f32>) -> f32 {
     var r = select(radii.w, radii.x, p.y < 0.0);
     if (p.x >= 0.0) {
@@ -147,7 +151,7 @@ fn backdrop_effect(input: BackdropInput, params: BackdropParams) -> vec4<f32> {
     }
 
     // ---- Press glow: additive wash + radial highlight at the finger.
-    if (extra.z > 0.0) {
+    if (LG_PRESS_GLOW && extra.z > 0.0) {
         let radius = min_half * 2.0 * max(extra.w, 0.01);
         let d = length(input.position - focus.xy) / radius;
         let spot = 1.0 - smoothstep(0.0, 1.0, d);

@@ -1,0 +1,103 @@
+import java.util.Properties
+import java.util.zip.ZipFile
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.w3c.dom.Element
+
+plugins { id("com.android.application") }
+
+val gpuiAbis = providers.gradleProperty("gpuiAbis").getOrElse("arm64-v8a,x86_64")
+    .split(',').map { it.trim() }.distinct()
+require(gpuiAbis.isNotEmpty() && gpuiAbis.all { it == "arm64-v8a" || it == "x86_64" }) {
+    "Supported Android ABIs: arm64-v8a, x86_64"
+}
+
+val gpuiRustProfile = providers.gradleProperty("gpuiRustProfile")
+    .orElse(providers.environmentVariable("GPUIFORGE_RUST_PROFILE"))
+val gpuiStagingRoot = providers.gradleProperty("gpuiStagingRoot")
+    .orElse(providers.environmentVariable("GPUIFORGE_STAGING_ROOT"))
+    .getOrElse("")
+val gpuiSigningMode = providers.gradleProperty("gpuiSigning")
+    .orElse(providers.environmentVariable("GPUIFORGE_SIGNING_MODE")).getOrElse("auto")
+require(gpuiSigningMode in listOf("auto", "debug", "configured", "unsigned")) {
+    "Unsupported signing mode: $gpuiSigningMode"
+}
+
+android {
+    namespace = "dev.rovsti.phone"
+    // Android lint's release "vital" pass crashes inside a detector on this
+    // toolchain (LintDriver.handleDetectorError); the build does not need it.
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+    ndkPath = providers.environmentVariable("ANDROID_NDK_HOME").orNull
+    ndkPath?.let { path ->
+        val properties = Properties()
+        file("$path/source.properties").inputStream().use { properties.load(it) }
+        ndkVersion = properties.getProperty("Pkg.Revision")
+    }
+    compileSdk {
+        version = release(rootProject.extra["gpuiCompileSdkMajor"] as Int) {
+            minorApiLevel = rootProject.extra["gpuiCompileSdkMinor"] as Int
+        }
+    }
+    defaultConfig {
+        applicationId = "dev.rovsti.phone"
+        minSdk = "34".toInt()
+        targetSdk = "36".toInt()
+        versionCode = "1".toInt()
+        versionName = "0.1.0"
+        ndk { abiFilters += gpuiAbis }
+    }
+    val configuredSigning = if (providers.environmentVariable("GPUIFORGE_SIGNING_ENABLED").orNull == "1") {
+        signingConfigs.create("gpuiRelease") {
+            storeFile = file(providers.environmentVariable("GPUIFORGE_SIGNING_KEYSTORE").get())
+            keyAlias = providers.environmentVariable("GPUIFORGE_SIGNING_KEY_ALIAS").get()
+            storePassword = providers.environmentVariable("GPUIFORGE_SIGNING_STORE_PASSWORD").get()
+            keyPassword = providers.environmentVariable("GPUIFORGE_SIGNING_KEY_PASSWORD").get()
+        }
+    } else null
+    buildTypes.configureEach {
+        when (gpuiSigningMode) {
+            "debug" -> signingConfig = signingConfigs.getByName("debug")
+            "configured" -> signingConfig = requireNotNull(configuredSigning) {
+                "Configured signing requires GPUiForge signing credentials"
+            }
+            "unsigned" -> signingConfig = null
+            "auto" -> if (name == "release") signingConfig = configuredSigning
+        }
+    }
+}
+
+for (profile in listOf("debug", "release")) {
+    val variant = profile.replaceFirstChar { it.uppercase() }
+    val rustProfile = gpuiRustProfile.getOrElse(if (profile == "debug") "dev" else "release")
+    require(rustProfile.matches(Regex("[A-Za-z0-9_-]+"))) { "Invalid Rust profile: $rustProfile" }
+    val output = layout.buildDirectory.dir("rustJniLibs/$profile/$rustProfile")
+    android.sourceSets[profile].jniLibs.directories.add(output.get().asFile.absolutePath)
+    val rustBuilds = gpuiAbis.map { abi ->
+        tasks.register<Exec>("buildRust${variant}_${abi.replace('-', '_')}") {
+            workingDir("/home/erdem/Documents/Github/rovsti-apps/apps/phone")
+            commandLine(providers.gradleProperty("gpuiForgeExecutable").getOrElse("gpuiforge"),
+                "build-android-native", "--output", output.get().asFile.absolutePath,
+                "--manifest-path", "/home/erdem/Documents/Github/rovsti-apps/apps/phone/Cargo.toml",
+                "--library", "rovsti_phone", "--abi", abi,
+                "--profile", rustProfile, "--min-sdk", "34")
+            if (gpuiStagingRoot.isNotEmpty()) args("--staging-root", gpuiStagingRoot)
+        }
+    }
+    tasks.matching { it.name == "pre${variant}Build" }.configureEach { dependsOn(rustBuilds) }
+}
+
+dependencies {
+    implementation(project(":host"))
+    // JVM unit tests (WireFixturesTest): the android.jar org.json is a stub, so use the real one.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
+}
+
+

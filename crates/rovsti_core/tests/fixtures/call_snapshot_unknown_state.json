@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "seq": 50,
+  "now_ms": 1790000400000,
+  "keyguard_locked": false,
+  "future_top_level_field": {"ignored": true},
+  "audio": {"muted": false, "route": "hdmi", "routes": ["hdmi"]},
+  "foreground_call_id": 4,
+  "calls": [
+    {"id": 3, "state": "conferencing", "number_raw": "112", "normalized": "112", "disconnect_cause": "meteor", "new_field": 1},
+    {"id": 4, "state": "active", "number_raw": "112", "normalized": "112", "connect_time_ms": 1790000390000}
+  ]
+}

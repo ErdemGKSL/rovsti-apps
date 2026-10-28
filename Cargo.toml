@@ -28,7 +28,7 @@ gpui = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db0
 gpui_effects = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5" }
 gpui_platform = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5", features = ["wayland"] }
 gpui_android = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5" }
-gpui_icons = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5", default-features = false, features = ["lucide-common", "lucide-connectivity", "lucide-editing", "lucide-misc"] }
+gpui_icons = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5", default-features = false, features = ["lucide-common", "lucide-connectivity", "lucide-editing", "lucide-media", "lucide-misc"] }
 gpui_wgpu = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af8775db003b17c6393c3e38e1097ac5" }
 
 liquid_glass_kit = { path = "crates/liquid_glass_kit" }
@@ -69,6 +69,48 @@ debug = "line-tables-only"
 opt-level = 1
 
 [profile.release]
-lto = "thin"
+# Small binary first, hot paths stay fast (see the per-package overrides).
+# panic stays "unwind": gpui_android's JNI bridge catches panics with
+# catch_unwind and reports them to Java instead of killing the process.
+opt-level = "s"
+lto = "fat"
 codegen-units = 1
-strip = "debuginfo"
+strip = "symbols"
+debug = false
+incremental = false
+
+# Rendering, layout and our own per-frame code keep full optimisation.
+[profile.release.package.gpui]
+opt-level = 3
+[profile.release.package.gpui_wgpu]
+opt-level = 3
+[profile.release.package.gpui_android]
+opt-level = 3
+[profile.release.package.liquid_glass_kit]
+opt-level = 3
+[profile.release.package.rovsti_ui]
+opt-level = 3
+[profile.release.package.rovsti_core]
+opt-level = 3
+# The app's own per-frame code (building the element tree every frame).
+[profile.release.package.rovsti_phone]
+opt-level = 3
+# Layout and text run on every frame that changes: taffy lays the tree out,
+# cosmic-text shapes strings the line cache has not seen (a list scrolling in
+# new rows), swash and zeno rasterise new glyphs, tiny-skia rasterises icons on
+# first use. Measured on the desktop harness (docs/perf/glass-and-profile.md):
+# 4 to 9% less scene-build time than leaving them at `s`.
+[profile.release.package.taffy]
+opt-level = 3
+[profile.release.package.cosmic-text]
+opt-level = 3
+[profile.release.package.harfrust]
+opt-level = 3
+[profile.release.package.rustybuzz]
+opt-level = 3
+[profile.release.package.swash]
+opt-level = 3
+[profile.release.package.zeno]
+opt-level = 3
+[profile.release.package.tiny-skia]
+opt-level = 3

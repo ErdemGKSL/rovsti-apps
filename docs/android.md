@@ -35,8 +35,7 @@
 cd apps/phone && gpuiforge run android
 ```
 
-This prompts for an `adb` device. `gpuiforge build android` produces
-`target/gpuiforge/android/app/build/outputs/apk/debug/app-debug.apk` with both ABIs.
+This prompts for an `adb` device. `gpuiforge build android` produces `apps/phone/platforms/android/app/build/outputs/apk/debug/app-debug.apk` (arm64-v8a only).
 GPU logs: `adb logcat -s GPUI`.
 
 ## Adding the Rovsti Kotlin pieces (eject once per app)
@@ -53,7 +52,7 @@ The project now lives in `apps/phone/platforms/android` and is owned by us. Then
 1. Copy `crates/rovsti_android/kotlin/dev/rovsti/bridge/RovstiBridge.kt` into the
    app module, and add `proguard-rovsti.pro` to its R8 rules.
 2. Add an `Application` subclass that calls
-   `RovstiBridge.install(this, "rovsti_phone")`, and register it in the manifest.
+   `RovstiBridge.install(this)` (no `System.loadLibrary`; `MainActivity.onCreate` calls `RovstiBridge.attachNative()`), and register it in the manifest.
 3. Add the role components listed in [architecture.md](architecture.md#what-each-app-needs-from-android).
 
 Later `gpuiforge` builds keep these user-owned files.
@@ -66,3 +65,13 @@ cargo check -p rovsti_android --target aarch64-linux-android
 
 Crates with C code (SQLite, ring) need the NDK linker, so a full Android
 `cargo check` of `rovsti_messages` needs `ANDROID_NDK_HOME`.
+
+## Contact photos (Phone, story 10.5)
+
+The bridge still moves only strings and ints. `RovstiBridge.contactPhoto(uri, size)`
+(`ContactPhotos.kt`) centre-crops the `PHOTO_THUMBNAIL_URI` image to a square of at most
+`size` px, writes a PNG into `cacheDir/contact-photos/` and returns its path (`""` for none).
+Rust (`backend::contact_photo`, background executor only) reads and decodes the file; the
+`photos` module keeps 64 decoded `RenderImage`s in an LRU keyed by contact id. Avatars never
+decode while painting. A photo edited in Contacts shows after the cached file is older than
+10 minutes and the LRU entry was evicted or the app restarted.

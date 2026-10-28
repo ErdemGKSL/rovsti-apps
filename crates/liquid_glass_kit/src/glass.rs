@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 
 use gpui::{
     BackdropShader, Bounds, Corners, Div, EffectUniforms, Hsla, PaintBackdropEffect, Pixels, Point,
-    Rgba, Window, div, fill, hsla, point, px,
+    Rgba, Styled, Window, div, fill, hsla, point, px,
 };
 
 use crate::tokens::Theme;
@@ -180,12 +180,57 @@ pub struct GlassInteraction {
     pub focus: Option<Point<Pixels>>,
 }
 
+const SHADER_SOURCE: &str = include_str!("../shaders/liquid_glass.wgsl");
+/// The line the variants rewrite (the press glow switch).
+const PRESS_GLOW_ON: &str = "const LG_PRESS_GLOW: bool = true;";
+const PRESS_GLOW_OFF: &str = "const LG_PRESS_GLOW: bool = false;";
+/// The grid entry point renames the single-surface one to `lg_shade`.
+const SINGLE_ENTRY: &str = "fn backdrop_effect(input: BackdropInput, params: BackdropParams)";
+const GRID_ENTRY: &str = include_str!("../shaders/liquid_glass_grid.wgsl");
+
 /// The template shader, compiled once (hashing the source is not free).
 pub fn glass_shader() -> BackdropShader {
     static SHADER: OnceLock<BackdropShader> = OnceLock::new();
     SHADER
-        .get_or_init(|| BackdropShader::wgsl(include_str!("../shaders/liquid_glass.wgsl")))
+        .get_or_init(|| BackdropShader::wgsl(SHADER_SOURCE))
         .clone()
+}
+
+/// The same material without the press glow, for surfaces that are not
+/// pressed: identical pixels at `press == 0`, with the glow's branch and its
+/// `length`/`smoothstep` work compiled out.
+pub fn glass_shader_rest() -> BackdropShader {
+    static SHADER: OnceLock<BackdropShader> = OnceLock::new();
+    SHADER
+        .get_or_init(|| BackdropShader::wgsl(SHADER_SOURCE.replace(PRESS_GLOW_ON, PRESS_GLOW_OFF)))
+        .clone()
+}
+
+/// The material for a whole grid of identical, unpressed surfaces drawn as one
+/// backdrop effect (see [`paint_glass_grid`]).
+pub fn glass_grid_shader() -> BackdropShader {
+    static SHADER: OnceLock<BackdropShader> = OnceLock::new();
+    SHADER
+        .get_or_init(|| {
+            let mut source = SHADER_SOURCE
+                .replace(PRESS_GLOW_ON, PRESS_GLOW_OFF)
+                .replace(
+                    SINGLE_ENTRY,
+                    "fn lg_shade(input: BackdropInput, params: BackdropParams)",
+                );
+            source.push_str(GRID_ENTRY);
+            BackdropShader::wgsl(source)
+        })
+        .clone()
+}
+
+/// The shader for a surface at `press`: the rest variant unless it is pressed.
+fn shader_for(press: f32) -> BackdropShader {
+    if press > 0.0 {
+        glass_shader()
+    } else {
+        glass_shader_rest()
+    }
 }
 
 /// Packs a spec into the shader's 8 uniform slots. `scale` is
@@ -291,10 +336,163 @@ pub fn paint_glass(
         PaintBackdropEffect::new(
             effect_bounds(bounds, spec, scale),
             spec.blur,
-            glass_shader(),
+            shader_for(interaction.press),
         )
         .uniforms(uniforms),
     );
+}
+
+/// Most cells a [`GlassGrid`] can hold (the skip mask travels as an f32).
+pub const GRID_MAX_CELLS: usize = 24;
+
+/// A regular grid of equal glass surfaces (a dial pad), described by where
+/// its first cell sits and how far apart the cells are.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GlassGrid {
+    /// Top-left corner of cell (0, 0).
+    pub origin: Point<Pixels>,
+    /// Size of every cell.
+    pub cell: gpui::Size<Pixels>,
+    /// Distance from one cell's top-left corner to the next one's, per axis.
+    pub pitch: gpui::Size<Pixels>,
+    pub cols: u8,
+    pub rows: u8,
+}
+
+impl GlassGrid {
+    pub fn cells(&self) -> usize {
+        usize::from(self.cols) * usize::from(self.rows)
+    }
+
+    /// Bounds of cell `index` (row major).
+    pub fn cell_bounds(&self, index: usize) -> Bounds<Pixels> {
+        let cols = usize::from(self.cols).max(1);
+        let (col, row) = ((index % cols) as f32, (index / cols) as f32);
+        Bounds::new(
+            point(
+                self.origin.x + self.pitch.width * col,
+                self.origin.y + self.pitch.height * row,
+            ),
+            self.cell,
+        )
+    }
+
+    /// The smallest rectangle holding every cell.
+    pub fn bounds(&self) -> Bounds<Pixels> {
+        let first = self.cell_bounds(0);
+        let last = self.cell_bounds(self.cells().saturating_sub(1));
+        Bounds::from_corners(first.origin, last.bottom_right())
+    }
+
+    fn valid(&self) -> bool {
+        self.cols > 0
+            && self.rows > 0
+            && self.cols < 16
+            && self.rows < 16
+            && self.cells() <= GRID_MAX_CELLS
+            && self.cell.width > px(0.0)
+            && self.cell.height > px(0.0)
+    }
+}
+
+/// Packs the grid shader's inputs: slot 0 is the first cell exactly as a
+/// single surface would have it, slot 6 carries the skip mask and the grid
+/// size (where the single-surface press fields were), slot 7 the pitch.
+pub fn glass_grid_uniforms(
+    grid: &GlassGrid,
+    corners: Corners<Pixels>,
+    spec: &GlassSpec,
+    skip: u32,
+    scale: f32,
+) -> EffectUniforms {
+    let first = grid.cell_bounds(0);
+    let corners = corners.clamp_radii_for_quad_size(grid.cell);
+    glass_uniforms(first, corners, spec, GlassInteraction::default(), scale)
+        .with_slot(
+            6,
+            [
+                spec.inner_shade,
+                spec.dark_rim,
+                (skip & ((1 << GRID_MAX_CELLS) - 1)) as f32,
+                f32::from(grid.cols) + 16.0 * f32::from(grid.rows),
+            ],
+        )
+        .with_slot(
+            7,
+            [
+                grid.pitch.width.as_f32() * scale,
+                grid.pitch.height.as_f32() * scale,
+                0.0,
+                0.0,
+            ],
+        )
+}
+
+/// Paints every cell of `grid` whose bit in `skip` is clear as ONE backdrop
+/// effect: one copy of the backdrop, one blur, one composite, instead of one
+/// of each per surface. Pixel-equivalent to painting the cells one by one with
+/// [`paint_glass`] at rest, as long as the cells are further apart than the
+/// blur reaches (a dial pad's gaps are). Surfaces being pressed are left out
+/// with `skip` and painted on their own (they need the press glow and a
+/// different size). Call during paint, before the cells' children.
+pub fn paint_glass_grid(
+    grid: &GlassGrid,
+    corners: Corners<Pixels>,
+    spec: &GlassSpec,
+    skip: u32,
+    window: &mut Window,
+) {
+    if !grid.valid() {
+        return;
+    }
+    let live = (0..grid.cells()).filter(|i| skip & (1 << i) == 0);
+    if !backdrop_supported(window) {
+        for index in live {
+            let bounds = grid.cell_bounds(index);
+            let corners = corners.clamp_radii_for_quad_size(bounds.size);
+            paint_glass_fallback(bounds, corners, spec, window);
+        }
+        return;
+    }
+    // Only the cells that are painted decide the bounds, so a pressed key's
+    // cell does not make the effect bigger than it needs to be.
+    let mut live = live.map(|i| grid.cell_bounds(i));
+    let Some(first) = live.next() else {
+        return;
+    };
+    let area = live.fold(first, |acc, b| acc.union(&b));
+    let scale = window.raster_scale_factor();
+    window.paint_backdrop_effect(
+        PaintBackdropEffect::new(
+            effect_bounds(area, spec, scale),
+            spec.blur,
+            glass_grid_shader(),
+        )
+        .uniforms(glass_grid_uniforms(grid, corners, spec, skip, scale)),
+    );
+}
+
+static WARMED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// An invisible element that makes the renderer compile every glass pipeline
+/// during the first frame (while only the backdrop shows), instead of on the
+/// first touch of a glass control. It paints three one-pixel effects outside
+/// the window, once; afterwards it paints nothing.
+pub fn warm_up_layer() -> Div {
+    div()
+        .absolute()
+        .size(px(1.0))
+        .on_paint_before_children(|_, _, window, _| {
+            if !backdrop_supported(window)
+                || WARMED.swap(true, std::sync::atomic::Ordering::Relaxed)
+            {
+                return;
+            }
+            let off_screen = Bounds::new(point(px(-8.0), px(-8.0)), gpui::size(px(1.0), px(1.0)));
+            for shader in [glass_shader(), glass_shader_rest(), glass_grid_shader()] {
+                window.paint_backdrop_effect(PaintBackdropEffect::new(off_screen, px(0.0), shader));
+            }
+        })
 }
 
 /// Bounds to hand the renderer: the shape plus room for the anti-aliased edge

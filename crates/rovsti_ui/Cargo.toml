@@ -10,9 +10,17 @@ description = "Shared liquid-glass components and app shell for the Rovsti apps.
 gpui.workspace = true
 gpui_icons.workspace = true
 liquid_glass_kit.workspace = true
+log.workspace = true
+rovsti_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true
+
+[features]
+# Frame diagnostics and the RovstiPerf recorder (story 12.1). Off in release.
+perf = []
 
 [lints]
 workspace = true

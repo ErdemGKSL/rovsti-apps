@@ -38,7 +38,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   or `rovsti_geo`: phone number matching, the alarm state machine, and later thread
   merging and search.
 - **JNI seam.** `gpui_android` keeps its `JavaVM` private, so the Kotlin host passes
-  its own through `RovstiBridge.install(app, "rovsti_<app>")` → `nativeInit`. Rust
+  its own through `RovstiBridge.install(app)` and, after the activity loaded the library, `RovstiBridge.attachNative()` → `nativeInit`. Rust
   calls static Kotlin methods that take only strings, ints and bools. Android logic
   such as RoleManager, Telecom, providers and services lives in Kotlin. Desktop
   builds return `Error::Unsupported`.
@@ -56,6 +56,19 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | Phone | `ROLE_DIALER` | `InCallService` (in-call UI + ringing via full-screen intent), `ACTION_DIAL` activity filter, call log and contacts providers |
 | Messages | `ROLE_SMS` | `SMS_DELIVER` receiver, `WAP_PUSH_DELIVER` (MMS) receiver, `RESPOND_VIA_MESSAGE` service, `SENDTO` activity, foreground `dataSync` service keeping the WhatsApp socket alive |
 | Stops | none | foreground `location` service feeding fixes to `rovsti_geo::Trip`, full-screen alarm activity, exact alarm as a fallback |
+
+### Phone: incoming calls
+
+`RovstiInCallService` -> `CallRegistry` posts a `CallStyle.forIncomingCall`
+notification (Decline to `CallActionReceiver`, Answer an activity PendingIntent
+carrying `answer_call_id`, full-screen intent when allowed) before anything else
+happens, so a call is answerable without GPUI. `MainActivity` sets
+`setShowWhenLocked`/`setTurnScreenOn` dynamically while a call is live. Rust draws
+`apps/phone/src/incoming.rs` from the same snapshot and reports its first frame back
+(`RovstiPerf` log, `docs/spikes/s2-incoming.md`). The native fallback screen
+(`NativeIncoming.kt`) is off unless `CURTAIN_ENABLED` is flipped; it is always the
+error view if GPUI dies while ringing. Telecom rings (the app plays no sound);
+`ProximityController` blanks the screen at the ear.
 
 Android only grants the dialer and SMS roles to apps that declare all of these
 components. Until they exist, the apps run in read-only preview mode.

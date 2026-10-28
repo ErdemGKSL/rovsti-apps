@@ -1,0 +1,194 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 10-27-2026 12:00
+last_updated: 10-28-2026 12:00 (Epics 8, 9, 11 and 12.1-12.6 implemented; DEVICE checks pending)
+project: rovsti-phone
+project_key: NOKEY
+tracking_system: file-system
+story_location: apps/phone/_bmad-output/implementation-artifacts
+development_status:
+  epic-1: in-progress
+  1-1-android-toolchain-ready: done
+  1-2-eject-the-android-host-and-build-a-hello-debug-apk: done
+  1-3-manifest-components-for-role-eligibility: done
+  1-4-install-launch-and-verify-the-role-picker-spike-s1-on-device: backlog
+  1-5-jni-symbol-export-check-and-check-apk-sh: done
+  1-6-spike-s2a-incallservice-minimal-registry-foreground-service: backlog
+  1-7-spike-s2b-incoming-notification-full-screen-intent-and-calls: backlog
+  1-8-spike-s2c-hyperos-lock-screen-behaviour-and-proximity-lock: backlog
+  epic-1-retrospective: optional
+
+  epic-2: done
+  2-1-wire-dtos-with-golden-fixtures: done
+  2-2-call-model-and-reducer: done
+  2-3-elapsed-time-formatting-and-call-display-name: done
+  2-4-call-log-grouping: done
+  2-5-missed-badge-and-recents-time-formatting: done
+  2-6-contact-search-index: done
+  2-7-dial-string-rules-and-paste-normalisation: done
+  2-8-setup-checklist-derivation: done
+  2-9-frame-statistics-ring: done
+  epic-2-retrospective: optional
+
+  epic-3: in-progress
+  3-1-event-channel-and-rovstibridge-emit: review
+  3-2-call-snapshot-commands-and-callregistry: review
+  3-3-permissions-and-settings-bridge: review
+  3-4-provider-pulls-and-observers-call-log-contacts-favorites: review
+  3-5-backend-rs-facade-sample-data-and-attach-order: review
+  3-6-local-preferences-store: review
+  epic-3-retrospective: optional
+
+  epic-4: in-progress
+  4-1-teal-accent-and-system-theme: review
+  4-2-keypad-number-entry: review
+  4-3-one-call-path: review
+  4-4-dial-intents: review
+  4-5-in-call-screen-rendering: review
+  4-6-mute-and-speaker: review
+  4-7-in-call-keypad-and-dtmf: review
+  4-8-end-the-call: review
+  4-9-ongoing-call-notification-and-return: review
+  4-10-failure-containment: review
+  epic-4-retrospective: optional
+
+  # Epic 5 is implemented and compiles on every target; every story awaits DEVICE
+  # acceptance. 5.6 ships the RovstiPerf measurement plus the documented curtain
+  # switch (NativeIncoming.CURTAIN_ENABLED = false until the owner's numbers say otherwise).
+  epic-5: in-progress
+  5-1-incoming-call-notification-unlocked: review
+  5-2-incoming-call-screen-over-the-lock-screen: review
+  5-3-answer-and-decline-from-the-screen: review
+  5-4-ringer-behaviour: review
+  5-5-missed-calls: review
+  5-6-ring-latency-measurement-and-surface-decision: review
+  5-7-proximity-screen-off: review
+  epic-5-retrospective: optional
+
+  # Epic 6 is implemented (virtualised Recents list, states, call back, number sheet,
+  # seen-timer + missed-call notification cancel); stories await DEVICE acceptance.
+  epic-6: in-progress
+  6-1-recents-list: review
+  6-2-recents-empty-loading-and-permission-states: review
+  6-3-call-back-from-recents: review
+  6-4-cancel-the-system-missed-call-notification-when-recents-is-v: review
+  epic-6-retrospective: optional
+
+  # Epic 7 setup stories are implemented as a header button + glass bottom
+  # sheet (not a page card, owner feedback 2026-10-27). All await DEVICE
+  # acceptance on the Xiaomi/HyperOS phone with the signed release APK.
+  epic-7: in-progress
+  7-1-setup-checklist-card: review
+  7-2-act-on-a-setup-item: review
+  7-3-request-the-default-phone-role: review
+  7-4-re-check-on-launch-and-resume-collapse-when-complete: review
+  7-5-confirm-xiaomi-settings: review
+  7-6-preview-mode: review
+  epic-7-retrospective: optional
+
+  # Epic 8 is implemented (virtualised Contacts + Favorites, search field, Contact sheet,
+  # chooser, star/unstar, Recents info/long-press to the sheet); stories await DEVICE acceptance.
+  epic-8: in-progress
+  8-1-contacts-list: review
+  8-2-contact-search: review
+  8-3-sheet-component: review
+  8-4-contact-sheet-with-call-actions: review
+  8-5-star-and-unstar: review
+  8-6-favorites-grid: review
+  8-7-call-a-favorite: review
+  8-8-recents-info-opens-the-contact-sheet: review
+  epic-8-retrospective: optional
+
+  # Epic 9: hold/resume verified (already in the In-Call screen), waiting-call banner,
+  # Return-to-call pill and tab behaviour implemented; stories await DEVICE acceptance.
+  epic-9: in-progress
+  9-1-hold-and-resume: review
+  9-2-waiting-call: review
+  9-3-return-to-call-pill: review
+  9-4-tab-navigation-behaviour: review
+  epic-9-retrospective: optional
+
+  # Epic 10 is implemented and verified on desktop with sample data; stories await DEVICE
+  # acceptance: keypad match runs off-thread (10.1), Recents tab badge with a pop hook (10.2),
+  # live Recents refresh with fade/glide and scroll preservation (10.3), desktop debug switcher
+  # and "Preview data" caption (10.4), photos via Kotlin ContactPhotos -> cache PNG path ->
+  # off-thread decode into a 64-entry LRU (10.5), last tab remembered (10.6). Also: sticky
+  # Contacts section letters, "Try again" on Unavailable lists, search off-thread above 200.
+  epic-10: in-progress
+  10-1-keypad-contact-match: review
+  10-2-missed-call-badge: review
+  10-3-recents-live-refresh: review
+  10-4-desktop-sample-data: review
+  10-5-contact-photos-on-favorites: review
+  10-6-remember-the-last-tab: review
+  epic-10-retrospective: optional
+
+  # Epic 11, first half implemented and verified on desktop with sample data (frame crops);
+  # stories await DEVICE acceptance for feel and perf. 11.1 rovsti_ui::moments (Tween, RippleRing,
+  # Fade, Scheduler, SpringBank, Flights, Glide, Anchors; Motion::frame_timed settles springs in
+  # one frame under reduced motion); 11.2 KeyFx view + ghost delete + font spring; 11.3 flight.rs
+  # (Call/Answer circle -> End, list avatar flights and return); 11.4 tab flow; 11.5 avatar_hue,
+  # 135 deg monogram + 1.5 px rim, waiting double pulse, muted dashed ring. 11.6-11.10 implemented (review): S7 completed (reduced-motion button fade, static aura),
+  S9-S11 (tint flood, wobble, control dim), S12-S14, S15 veil melt, S16 sheet rise, slow-frame
+  logging; see docs/phone-motion-audit.md. DEVICE acceptance pending for all of epic 11.
+  epic-11: in-progress
+  11-1-moment-infrastructure: review
+  11-2-s1-drop-key-and-s2-liquid-number-field: review
+  11-3-s3-call-blooms-s4-shared-element-avatar-s8-answer-morph: review
+  11-4-s5-tab-flow: review
+  11-5-s6-call-aura-avatar-hue-pairs-and-state-ring: review
+  11-6-s7-incoming-entrance: review
+  11-7-s9-timer-lands-s10-control-tint-flood-s11-call-ended-collaps: review
+  11-8-s12-star-burst-s13-badge-pop-s14-setup-complete: review
+  11-9-s15-theme-melt-and-s16-sheet-rise: review
+  11-10-reduced-motion-audit-and-slow-frame-logging: review
+  epic-11-retrospective: optional
+
+  # Epic 12, 12.1-12.6 implemented and verified on desktop (cargo tests, headless harness, glass pixel
+  # tests, window crops); DEVICE numbers pending. Evidence: docs/perf/ (README: phone commands and the
+  # table to fill; baseline.md, after-epic-12.md). 12.7 stays in backlog: it needs the phone
+  # (scripts/perf-build.sh, scripts/perf-run.sh, docs/perf/final.md).
+  epic-12: in-progress
+  12-1-perf-feature-and-rovstiperf-logging: review
+  12-2-scripted-perf-scenarios: review
+  12-3-idle-discipline-and-view-caching: review
+  12-4-allocation-discipline: review
+  12-5-virtualised-lists-and-photo-cache-audit: review
+  12-6-glass-pass-cost: review
+  12-7-measured-run-on-the-phone: backlog
+  epic-12-retrospective: optional
+
+  epic-13: in-progress
+  13-1-signing-configuration: done
+  13-2-signed-release-apk: done
+  13-3-final-workspace-checks: done
+  13-4-owner-acceptance-checklist: review
+  epic-13-retrospective: optional

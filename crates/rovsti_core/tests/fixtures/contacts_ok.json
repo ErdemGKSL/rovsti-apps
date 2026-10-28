@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "ok": true,
+  "data": {
+    "contacts": [
+      {"id": 17, "display_name": "Ayşe Yılmaz", "numbers": [{"raw": "+90 555 111 22 33", "label": "Mobile"}, {"raw": "0212 555 00 11"}], "starred": true, "photo_uri": "content://com.android.contacts/contacts/17/photo"},
+      {"id": 18, "display_name": "Özgür Kaya", "numbers": [{"raw": "0532 123 45 67"}]}
+    ]
+  }
+}

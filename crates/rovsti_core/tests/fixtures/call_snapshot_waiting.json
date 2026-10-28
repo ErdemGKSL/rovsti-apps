@@ -1,0 +1,26 @@
+{
+  "v": 1,
+  "seq": 43,
+  "now_ms": 1790000200000,
+  "keyguard_locked": false,
+  "audio": {"muted": false, "route": "earpiece", "routes": ["earpiece", "speaker"]},
+  "foreground_call_id": 1,
+  "waiting_call_id": 2,
+  "calls": [
+    {
+      "id": 1,
+      "state": "active",
+      "number_raw": "05551112233",
+      "normalized": "05551112233",
+      "connect_time_ms": 1790000040000,
+      "can_hold": true
+    },
+    {
+      "id": 2,
+      "state": "ringing",
+      "number_raw": "+4915123456789",
+      "normalized": "+4915123456789",
+      "is_incoming": true
+    }
+  ]
+}

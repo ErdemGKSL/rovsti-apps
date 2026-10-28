@@ -1,11 +1,15 @@
 //! Small stateless building blocks. Each returns an element styled from the
 //! kit's iOS-like tokens so the three apps read as one family.
 
-use gpui::{AnyElement, Div, Hsla, IntoElement, ParentElement, SharedString, Styled, div, px};
+use gpui::{AnyElement, Div, Hsla, IntoElement, ParentElement, SharedString, Styled, div, px, svg};
+use gpui_icons::GpuiIcons;
 use liquid_glass_kit::{
-    glass::{GlassSpec, glass},
+    glass::{GlassInteraction, GlassSpec, glass, glass_interactive},
+    motion_tokens::scale,
     tokens::{Theme, metrics, radius, shadow, typography},
 };
+
+use crate::motion::press_scale;
 
 /// Large title at the top of a screen, with an optional trailing accessory.
 pub fn large_title(
@@ -13,7 +17,7 @@ pub fn large_title(
     title: impl Into<SharedString>,
     trailing: Option<AnyElement>,
 ) -> Div {
-    let colors = theme.colors();
+    let colors = crate::theme::colors(theme);
     div()
         .flex()
         .items_end()
@@ -34,7 +38,7 @@ pub fn large_title(
 
 /// Circular monogram avatar.
 pub fn avatar(theme: Theme, initials: impl Into<SharedString>, size: f32, tint: Hsla) -> Div {
-    let colors = theme.colors();
+    let colors = crate::theme::colors(theme);
     div()
         .size(px(size))
         .flex_none()
@@ -57,7 +61,7 @@ pub fn list_row(
     subtitle: Option<SharedString>,
     trailing: Option<SharedString>,
 ) -> Div {
-    let colors = theme.colors();
+    let colors = crate::theme::colors(theme);
     div()
         .flex()
         .items_center()
@@ -105,7 +109,7 @@ pub fn section(
     header: Option<SharedString>,
     rows: impl IntoIterator<Item = AnyElement>,
 ) -> Div {
-    let colors = theme.colors();
+    let colors = crate::theme::colors(theme);
     div()
         .flex()
         .flex_col()
@@ -129,7 +133,7 @@ pub fn section(
 
 /// A floating glass pill button with a centred label.
 pub fn glass_pill(theme: Theme, label: impl Into<SharedString>) -> Div {
-    let colors = theme.colors();
+    let colors = crate::theme::colors(theme);
     glass(GlassSpec::control(theme))
         .h(metrics::MIN_HIT)
         .px(px(20.0))
@@ -150,7 +154,7 @@ pub fn empty_state(
     title: impl Into<SharedString>,
     body: impl Into<SharedString>,
 ) -> impl IntoElement {
-    let colors = theme.colors();
+    let colors = crate::theme::colors(theme);
     div()
         .flex()
         .flex_col()
@@ -177,7 +181,7 @@ pub fn empty_state(
 /// Screen background with a soft colour wash, so glass chrome has something
 /// to refract and tint (glass over a flat fill reads as a grey plate).
 pub fn backdrop(theme: Theme, accent: Hsla) -> Div {
-    let colors = theme.colors();
+    let colors = crate::theme::colors(theme);
     let wash = Hsla {
         a: if theme.is_dark() { 0.28 } else { 0.18 },
         ..accent
@@ -191,4 +195,60 @@ pub fn backdrop(theme: Theme, accent: Hsla) -> Div {
             gpui::linear_color_stop(wash, 0.0),
             gpui::linear_color_stop(Hsla { a: 0.0, ..accent }, 0.55),
         )))
+}
+
+/// A round glass icon button in a fixed 44 px slot (so a press scale never
+/// moves neighbours), with an optional accent dot badge. The caller adds `id`,
+/// `aria_label`, the mouse handler and a [`crate::touch::touch_surface`]
+/// child; `press` is the control's [`crate::motion::Presses`] value.
+pub fn glass_icon_button(theme: Theme, icon: GpuiIcons, press: f32, badge: bool) -> Div {
+    glass_icon_button_scaled(theme, icon, press, badge, 1.0)
+}
+
+/// [`glass_icon_button`] with the glyph drawn at `icon_scale` (S14: the check
+/// pops from 0.6). The slot and the glass keep their size, so nothing shifts.
+pub fn glass_icon_button_scaled(
+    theme: Theme,
+    icon: GpuiIcons,
+    press: f32,
+    badge: bool,
+    icon_scale: f32,
+) -> Div {
+    let colors = crate::theme::colors(theme);
+    let held = press.clamp(0.0, 1.0);
+    let side = f32::from(metrics::MIN_HIT) * press_scale(press, scale::PRESS_CARD);
+    let spec = GlassSpec::control(theme).lerp(GlassSpec::lens(theme), held * 0.6);
+    div()
+        .relative()
+        .size(metrics::MIN_HIT)
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            glass_interactive(spec, move || GlassInteraction { press, focus: None })
+                .size(px(side))
+                .rounded_full()
+                .shadow(shadow::glass(theme.is_dark()))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    svg()
+                        .path(icon.path())
+                        .size(px(20.0 * icon_scale))
+                        .text_color(colors.label),
+                ),
+        )
+        .children(badge.then(|| {
+            div()
+                .absolute()
+                .top(px(5.0))
+                .right(px(5.0))
+                .size(px(11.0))
+                .rounded_full()
+                .bg(colors.accent)
+                .border_2()
+                .border_color(colors.background)
+        }))
 }

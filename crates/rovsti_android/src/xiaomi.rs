@@ -66,14 +66,50 @@ pub fn open(setting: Setting) -> Result<bool> {
     bridge::call_bool_str("openXiaomiSetting", setting.bridge_key())
 }
 
+/// A Xiaomi permission kept in AppOps under a private op code (Kotlin
+/// `XiaomiOps`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Op {
+    Autostart,
+    ShowOnLockScreen,
+    /// "Display pop-up windows while running in the background".
+    BackgroundPopups,
+}
+
+impl Op {
+    fn bridge_key(self) -> &'static str {
+        match self {
+            Self::Autostart => "autostart",
+            Self::ShowOnLockScreen => "lock_screen",
+            Self::BackgroundPopups => "popups",
+        }
+    }
+}
+
+/// Decodes `RovstiBridge.xiaomiOpState`: 1 granted, 0 denied, anything else
+/// (the bridge sends -1) unknown.
+pub fn decode_op_state(code: i32) -> Option<bool> {
+    match code {
+        1 => Some(true),
+        0 => Some(false),
+        _ => None,
+    }
+}
+
+/// Reads one Xiaomi permission: `Some(true)` allowed, `Some(false)` denied,
+/// `None` when this device gives no usable answer.
+pub fn op_allowed(op: Op) -> Result<Option<bool>> {
+    bridge::call_int("xiaomiOpState", &[bridge::Arg::Str(op.bridge_key())]).map(decode_op_state)
+}
+
 /// AOSP `PowerManager.isIgnoringBatteryOptimizations` for this package.
 pub fn is_ignoring_battery_optimizations() -> Result<bool> {
-    bridge::call_bool("isIgnoringBatteryOptimizations")
+    bridge::call_bool0("isIgnoringBatteryOptimizations")
 }
 
 /// AOSP `ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` dialog.
 pub fn request_ignore_battery_optimizations() -> Result<bool> {
-    bridge::call_bool("requestIgnoreBatteryOptimizations")
+    bridge::call_bool0("requestIgnoreBatteryOptimizations")
 }
 
 #[cfg(target_os = "android")]
@@ -102,4 +138,27 @@ fn system_property(name: &str) -> Option<String> {
 #[cfg(not(target_os = "android"))]
 fn system_property(_name: &str) -> Option<String> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn op_codes_decode() {
+        assert_eq!(decode_op_state(1), Some(true));
+        assert_eq!(decode_op_state(0), Some(false));
+        assert_eq!(decode_op_state(-1), None);
+        assert_eq!(decode_op_state(7), None);
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn desktop_is_unsupported() {
+        assert!(detect().is_none());
+        assert!(matches!(
+            op_allowed(Op::Autostart),
+            Err(crate::Error::Unsupported)
+        ));
+    }
 }

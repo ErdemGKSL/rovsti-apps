@@ -10,8 +10,14 @@
 //! [`Error::Unsupported`], so the apps run under `cargo run` for UI work.
 
 pub mod bridge;
+pub mod calls;
+pub mod events;
+pub mod perf;
+pub mod permissions;
+pub mod providers;
 pub mod roles;
 pub mod telecom;
+pub mod window;
 pub mod xiaomi;
 
 #[derive(Debug, thiserror::Error)]

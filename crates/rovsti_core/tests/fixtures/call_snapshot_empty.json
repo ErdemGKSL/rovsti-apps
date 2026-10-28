@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "seq": 44,
+  "now_ms": 1790000300000,
+  "keyguard_locked": true,
+  "audio": {"muted": false, "route": "earpiece", "routes": []},
+  "calls": []
+}

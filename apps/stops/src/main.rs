@@ -144,6 +144,7 @@ impl Render for StopsApp {
         self.motion = motion;
         let tab = self.tabs.selected();
         let entity = cx.entity();
+        let touch_entity = entity.clone();
 
         let body = match tab {
             0 => self.trip(theme, cx).into_any_element(),
@@ -190,15 +191,24 @@ impl Render for StopsApp {
                             .child(body),
                     ),
             )
-            .child(self.tabs.render(theme, move |index, _, cx| {
-                entity.update(cx, |this, cx| {
-                    this.tabs.press();
-                    if this.tabs.select(index) {
-                        this.page.restart();
-                    }
-                    cx.notify();
-                });
-            }))
+            .child(self.tabs.render(
+                theme,
+                move |index, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.tabs.press();
+                        if this.tabs.select(index) {
+                            this.page.restart();
+                        }
+                        cx.notify();
+                    });
+                },
+                move |phase, _, cx| {
+                    touch_entity.update(cx, |this, cx| {
+                        this.tabs.touch(phase);
+                        cx.notify();
+                    });
+                },
+            ))
     }
 }
 

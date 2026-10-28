@@ -1,0 +1,4 @@
+# 4.1: read colours through rovsti_ui::theme::colors so the app accent applies.
+disallowed-methods = [
+    { path = "liquid_glass_kit::tokens::Theme::colors", reason = "use rovsti_ui::theme::colors" },
+]

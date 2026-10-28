@@ -3,6 +3,7 @@ package dev.rovsti.bridge
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Application
+import android.app.NotificationManager
 import android.app.role.RoleManager
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
@@ -15,6 +16,7 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import android.telecom.TelecomManager
+import org.json.JSONObject
 
 /**
  * Static entry points that Rust (`rovsti_android::bridge`) calls over JNI.
@@ -23,7 +25,7 @@ import android.telecom.TelecomManager
  *
  * ```kotlin
  * class RovstiApp : Application() {
- *     override fun onCreate() { super.onCreate(); RovstiBridge.install(this, "rovsti_phone") }
+ *     override fun onCreate() { super.onCreate(); RovstiBridge.install(this) }
  * }
  * ```
  *
@@ -35,10 +37,38 @@ object RovstiBridge {
     private lateinit var app: Application
     private var foreground: Activity? = null
 
+    /** True once `nativeInit` has run; guards [emit] (AD-5). */
+    @Volatile private var nativeReady = false
+
+    /** The app's call owner, set once from `Application.onCreate`. */
+    @Volatile var calls: CallsApi? = null
+
     @JvmStatic external fun nativeInit()
 
-    /** `libName` is the Rust library GPUiForge packages: the app crate name, e.g. `rovsti_phone`. */
-    fun install(application: Application, libName: String) {
+    /** Enqueues one event in Rust. Call only through [emit]. */
+    @JvmStatic external fun nativeOnEvent(kind: String, json: String)
+
+    /**
+     * The only way Kotlin delivers an event to Rust (AD-5). A silent no-op
+     * until [attachNative] has run, and swallows a missing native symbol, so a
+     * registry mutation never throws out of a Telecom callback.
+     */
+    @JvmStatic
+    fun emit(kind: String, json: String) {
+        if (!nativeReady) return
+        try {
+            nativeOnEvent(kind, json)
+        } catch (_: LinkageError) {
+            // Library not (or no longer) linked: drop the event; attach re-pulls.
+        } catch (_: RuntimeException) {
+        }
+    }
+
+    /**
+     * Records the application and lifecycle hooks. Does not load the native
+     * library (AD-8): the GPUI activity loads it, then calls [attachNative].
+     */
+    fun install(application: Application) {
         app = application
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) { foreground = activity }
@@ -49,11 +79,133 @@ object RovstiBridge {
             override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {}
         })
-        // The GPUI host loads the library when its Activity starts; load it
-        // here too so services and receivers can call in without a UI.
-        // Loading twice is a no-op.
-        System.loadLibrary(libName)
-        nativeInit()
+    }
+
+    /** Call from `MainActivity.onCreate` after `super.onCreate`, once the library is loaded. */
+    fun attachNative() {
+        try {
+            nativeInit()
+            nativeReady = true
+        } catch (_: LinkageError) {
+            nativeReady = false
+        }
+    }
+
+    /** Registers the call-log and contacts observers (Rovsti Phone). Idempotent. */
+    fun observeProviders() = ProviderObservers.register(app)
+
+    // ---- Calls (delegated to the app's CallsApi; AD-4, AD-6) ----------
+
+    @JvmStatic fun callsSnapshot(): String =
+        calls?.snapshot() ?: SnapshotJson.toJson(SnapshotJson.empty(0, System.currentTimeMillis(), true))
+    @JvmStatic fun callAnswer(id: Int): Boolean = calls?.answer(id) ?: false
+    @JvmStatic fun callReject(id: Int): Boolean = calls?.reject(id) ?: false
+    @JvmStatic fun callDisconnect(id: Int): Boolean = calls?.disconnect(id) ?: false
+    @JvmStatic fun callHold(id: Int, on: Boolean): Boolean = calls?.hold(id, on) ?: false
+    @JvmStatic fun callMute(on: Boolean): Boolean = calls?.mute(on) ?: false
+    @JvmStatic fun callRoute(name: String): Boolean = calls?.route(name) ?: false
+    @JvmStatic fun callDtmf(digit: Int): Boolean = calls?.dtmf(digit.toChar()) ?: false
+    @JvmStatic fun callDtmfStop(): Boolean = calls?.dtmfStop() ?: false
+    @JvmStatic fun callAnswerReplacing(id: Int): Boolean = calls?.answerReplacing(id) ?: false
+    @JvmStatic fun callIncomingFrame(id: Int): Boolean = calls?.incomingFrame(id) ?: false
+
+    /** One slow-frame report from Rust (story 11.10); logcat tag `RovstiPerf`. */
+    @JvmStatic fun perfLog(line: String): Boolean {
+        android.util.Log.w("RovstiPerf", line)
+        return true
+    }
+
+    // ---- Provider pulls (blocking; Rust calls them off the UI thread) --
+
+    @JvmStatic fun pullCallLog(limit: Int): String = CallLogQuery.json(app, limit)
+    @JvmStatic fun pullContacts(): String = ContactsQuery.contactsJson(app)
+    @JvmStatic fun pullFavorites(): String = ContactsQuery.favoritesJson(app)
+
+    /** [contactId] is a decimal string (the bridge passes String, Int and Boolean only). */
+    @JvmStatic fun setStarred(contactId: String, starred: Boolean): Boolean =
+        contactId.toLongOrNull()?.let { ContactsQuery.setStarred(app, it, starred) } ?: false
+
+    /** Story 10.5: path of a PNG thumbnail (at most [size] px) for a photo URI, or "". */
+    @JvmStatic fun contactPhoto(uri: String, size: Int): String = ContactPhotos.thumbnailPath(app, uri, size)
+
+    @JvmStatic fun markMissedCallsRead(): Boolean = MissedCalls.markRead(app)
+
+    @JvmStatic
+    fun localTimeInfo(): String = LocaleTimeInfo.encode(
+        java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()),
+        android.text.format.DateFormat.is24HourFormat(app),
+        android.text.format.DateFormat.getDateFormatOrder(app),
+    )
+
+    // ---- Permissions ---------------------------------------------------
+
+    private val groups = mapOf(
+        "phone" to listOf(
+            android.Manifest.permission.CALL_PHONE,
+            android.Manifest.permission.READ_PHONE_STATE,
+            android.Manifest.permission.READ_CALL_LOG,
+            android.Manifest.permission.WRITE_CALL_LOG,
+        ),
+        "contacts" to listOf(
+            android.Manifest.permission.READ_CONTACTS,
+            android.Manifest.permission.WRITE_CONTACTS,
+        ),
+        "notifications" to listOf(android.Manifest.permission.POST_NOTIFICATIONS),
+    )
+
+    private fun missing(group: String): List<String>? =
+        groups[group]?.filter { app.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+
+    private fun prefs() = app.getSharedPreferences("rovsti_bridge", Context.MODE_PRIVATE)
+
+    /** 1 granted, 0 denied (dialog can still show), 2 permanently denied, 0 for an unknown group. */
+    @JvmStatic
+    fun permissionState(group: String): Int {
+        val missing = missing(group) ?: return 0
+        if (missing.isEmpty()) return 1
+        val activity = foreground ?: return 0
+        val asked = prefs().getBoolean("asked_$group", false)
+        val canAsk = missing.any { activity.shouldShowRequestPermissionRationale(it) }
+        return if (asked && !canAsk) 2 else 0
+    }
+
+    @JvmStatic
+    fun requestPermission(group: String): Boolean {
+        val missing = missing(group) ?: return false
+        if (missing.isEmpty() || permissionState(group) == 2) return false
+        val activity = foreground ?: return false
+        prefs().edit().putBoolean("asked_$group", true).apply()
+        activity.runOnUiThread { activity.requestPermissions(missing.toTypedArray(), REQUEST_PERMISSION) }
+        return true
+    }
+
+    @JvmStatic
+    fun openAppDetails(): Boolean =
+        start(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.packageName}")))
+
+    @JvmStatic
+    fun openDefaultApps(): Boolean = start(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+
+    @JvmStatic
+    fun canUseFullScreenIntent(): Boolean =
+        app.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() == true
+
+    @JvmStatic
+    fun openFullScreenIntentSettings(): Boolean = start(
+        Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:${app.packageName}"))
+    )
+
+    /**
+     * Emits `permissions_changed`. Called from `MainActivity.onResume` and
+     * nowhere else (AD-5); Rust re-pulls the states and the provider data.
+     */
+    fun emitPermissionsChanged() {
+        val json = JSONObject().put("v", WIRE_VERSION)
+        for (key in groups.keys) {
+            json.put(key, when (permissionState(key)) { 1 -> "granted"; 2 -> "permanently_denied"; else -> "denied" })
+        }
+        json.put("full_screen_intent", canUseFullScreenIntent())
+        emit("permissions_changed", json.toString())
     }
 
     // ---- Roles --------------------------------------------------------
@@ -92,6 +244,39 @@ object RovstiBridge {
         return true
     }
 
+    /** Opens the system "add contact" screen with [number] filled in. */
+    @JvmStatic
+    fun addContact(number: String): Boolean = start(
+        Intent(Intent.ACTION_INSERT, android.provider.ContactsContract.Contacts.CONTENT_URI)
+            .putExtra(android.provider.ContactsContract.Intents.Insert.PHONE, number)
+    )
+
+    /** Opens the system Contacts app (the empty Contacts state). */
+    @JvmStatic
+    fun openContacts(): Boolean = start(
+        Intent(Intent.ACTION_VIEW, android.provider.ContactsContract.Contacts.CONTENT_URI)
+    )
+
+    /** Opens the system Contacts app on [contactId] to edit it (story 8.4). */
+    @JvmStatic
+    fun editContact(contactId: String): Boolean {
+        val id = contactId.toLongOrNull() ?: return false
+        val uri = android.content.ContentUris.withAppendedId(
+            android.provider.ContactsContract.Contacts.CONTENT_URI, id,
+        )
+        return start(Intent(Intent.ACTION_EDIT).setDataAndType(uri, android.provider.ContactsContract.Contacts.CONTENT_ITEM_TYPE))
+    }
+
+    // ---- Window --------------------------------------------------------
+
+    /** Sends the task to the background (never `finish()`, AD-3a); keeps the GPUI session warm. */
+    @JvmStatic
+    fun moveTaskToBack(): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { activity.moveTaskToBack(true) }
+        return true
+    }
+
     // ---- Battery / Xiaomi ---------------------------------------------
 
     @JvmStatic
@@ -104,12 +289,32 @@ object RovstiBridge {
         Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${app.packageName}"))
     )
 
-    /** `key` is one of `autostart`, `battery`, `permissions` (see `xiaomi.rs`). */
+    /**
+     * Tri-state of a Xiaomi AppOps permission: 1 granted, 0 denied, -1 unknown
+     * (not Xiaomi, reflection failed, or an unexpected mode). `key` is
+     * `autostart`, `lock_screen` or `popups`.
+     */
+    @JvmStatic
+    fun xiaomiOpState(key: String): Int = XiaomiOps.state(app, key)
+
+    /**
+     * Opens a Xiaomi settings page for this app. `key` is one of `autostart`,
+     * `battery`, `permissions` (see `xiaomi.rs`). Returns true when a
+     * dedicated page opened and false when only the generic App info page did,
+     * in which case Rust shows on-screen steps.
+     *
+     * Actions and components below are the ones MIUI helper projects use
+     * (miui.intent.action.OP_AUTO_START, APP_PERM_EDITOR,
+     * POWER_HIDE_MODE_APP_LIST and the securitycenter / powerkeeper
+     * activities). MIUI/HyperOS may mark an activity non-exported, in which
+     * case start() fails and the next candidate is tried.
+     */
     @JvmStatic
     fun openXiaomiSetting(key: String): Boolean {
         val pkg = app.packageName
         val candidates = when (key) {
             "autostart" -> listOf(
+                action("miui.intent.action.OP_AUTO_START"),
                 component("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
                 component("com.miui.securitycenter", "com.miui.appmanager.ApplicationsDetailsActivity")
                     .putExtra("package_name", pkg).putExtra("package_label", label()),
@@ -117,11 +322,18 @@ object RovstiBridge {
             "battery" -> listOf(
                 component("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity")
                     .putExtra("package_name", pkg).putExtra("package_label", label()),
+                action("miui.intent.action.POWER_HIDE_MODE_APP_LIST"),
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
             )
             "permissions" -> listOf(
-                component("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+                action("miui.intent.action.APP_PERM_EDITOR")
+                    .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
                     .putExtra("extra_pkgname", pkg),
-                component("com.miui.securitycenter", "com.miui.permcenter.permissions.AppPermissionsEditorActivity")
+                action("miui.intent.action.APP_PERM_EDITOR")
+                    .setClassName("com.miui.securitycenter", "com.miui.permcenter.permissions.AppPermissionsEditorActivity")
+                    .putExtra("extra_pkgname", pkg),
+                action("miui.intent.action.APP_PERM_EDITOR").putExtra("extra_pkgname", pkg),
+                component("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
                     .putExtra("extra_pkgname", pkg),
             )
             else -> emptyList()
@@ -134,8 +346,11 @@ object RovstiBridge {
     // ---- Helpers ------------------------------------------------------
 
     private const val REQUEST_ROLE = 0x524f // "RO"
+    private const val REQUEST_PERMISSION = 0x5045 // "PE"
 
     private fun label(): String = app.applicationInfo.loadLabel(app.packageManager).toString()
+
+    private fun action(name: String) = Intent(name).addCategory(Intent.CATEGORY_DEFAULT)
 
     private fun component(pkg: String, cls: String) = Intent().setComponent(ComponentName(pkg, cls))
 

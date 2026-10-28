@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "seq": 42,
+  "now_ms": 1790000100000,
+  "keyguard_locked": false,
+  "audio": {"muted": true, "route": "speaker", "routes": ["earpiece", "speaker", "bluetooth"]},
+  "foreground_call_id": 1,
+  "calls": [
+    {
+      "id": 1,
+      "state": "active",
+      "number_raw": "+90 555 111 22 33",
+      "normalized": "+905551112233",
+      "display_name": "Ayşe Yılmaz",
+      "contact_id": 17,
+      "connect_time_ms": 1790000040000,
+      "can_hold": true
+    }
+  ]
+}

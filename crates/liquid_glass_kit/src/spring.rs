@@ -267,6 +267,10 @@ impl Timeline {
     }
 }
 
+thread_local! {
+    static FIXED_STEP: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
 /// Measures frame-to-frame `dt` for a group of springs.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameClock {
@@ -274,8 +278,25 @@ pub struct FrameClock {
 }
 
 impl FrameClock {
+    /// Makes every [`FrameClock::tick`] on this thread return `step` after the
+    /// first one, instead of the wall-clock time. For deterministic headless
+    /// measurements and tests (a scripted 60 fps run needs no real sleeping);
+    /// `None` restores the real clock. Costs one thread-local read per frame.
+    pub fn set_fixed_step(step: Option<Duration>) {
+        FIXED_STEP.with(|s| s.set(step));
+    }
+
     /// Returns the time since the previous call (zero on the first call).
     pub fn tick(&mut self) -> Duration {
+        if let Some(step) = FIXED_STEP.with(std::cell::Cell::get) {
+            let dt = if self.last.is_some() {
+                step
+            } else {
+                Duration::ZERO
+            };
+            self.last = Some(std::time::Instant::now());
+            return dt;
+        }
         let now = std::time::Instant::now();
         let dt = self.last.map_or(Duration::ZERO, |last| now - last);
         self.last = Some(now);

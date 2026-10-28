@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "ok": true,
+  "data": {
+    "entries": [
+      {"id": 104, "number_raw": "+90 555 111 22 33", "normalized": "+905551112233", "kind": "missed", "date_ms": 1790000000000, "cached_name": "Ayşe Yılmaz", "number_label": "Mobile", "contact_id": 17},
+      {"id": 103, "number_raw": "05551112233", "normalized": "05551112233", "kind": "incoming", "date_ms": 1789990000000, "duration_s": 61},
+      {"id": 102, "number_raw": "+4915123456789", "normalized": "+4915123456789", "kind": "rejected", "date_ms": 1789980000000},
+      {"id": 101, "number_raw": "", "normalized": "", "kind": "unknown", "date_ms": 1789970000000}
+    ]
+  }
+}

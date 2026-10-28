@@ -1,0 +1,125 @@
+//! Kotlin to Rust event channel (AD-5).
+//!
+//! `RovstiBridge.nativeOnEvent(kind, json)` lands in [`dispatch`], which only
+//! enqueues a [`RawEvent`]; it never touches GPUI types and never blocks. The
+//! app installs a fresh sink for each GPUI session ([`install_sink`]) and
+//! drains the receiver in a foreground task. Events arriving with no sink are
+//! dropped: the attach sequence re-pulls state anyway.
+//!
+//! This module is platform-free. On desktop nothing ever sends, so the
+//! receiver simply never yields.
+
+use std::sync::{Mutex, PoisonError};
+
+#[cfg(test)]
+use futures::channel::mpsc::TryRecvError;
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+
+/// Event kinds Kotlin emits.
+pub mod kind {
+    pub const CALLS: &str = "calls";
+    pub const CALL_LOG_CHANGED: &str = "call_log_changed";
+    pub const CONTACTS_CHANGED: &str = "contacts_changed";
+    pub const PERMISSIONS_CHANGED: &str = "permissions_changed";
+}
+
+/// One undecoded event.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawEvent {
+    pub kind: String,
+    pub json: String,
+}
+
+pub type Receiver = UnboundedReceiver<RawEvent>;
+
+static SINK: Mutex<Option<UnboundedSender<RawEvent>>> = Mutex::new(None);
+
+fn sink() -> std::sync::MutexGuard<'static, Option<UnboundedSender<RawEvent>>> {
+    SINK.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Installs a new sink, replacing (and closing) any previous one.
+pub fn install_sink() -> Receiver {
+    let (tx, rx) = unbounded();
+    *sink() = Some(tx);
+    rx
+}
+
+/// Removes the sink; later events are dropped.
+pub fn clear_sink() {
+    *sink() = None;
+}
+
+/// Enqueues an event. Returns whether a live sink accepted it.
+pub fn dispatch(kind: impl Into<String>, json: impl Into<String>) -> bool {
+    let guard = sink();
+    let Some(tx) = guard.as_ref() else {
+        return false;
+    };
+    tx.unbounded_send(RawEvent {
+        kind: kind.into(),
+        json: json.into(),
+    })
+    .is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sink is process-wide, so tests that use it run one at a time.
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[test]
+    fn dropped_without_a_sink() {
+        let _g = serial();
+        clear_sink();
+        assert!(!dispatch("calls", "{}"));
+    }
+
+    #[test]
+    fn enqueued_with_a_sink_in_order() {
+        let _g = serial();
+        let mut rx = install_sink();
+        assert!(dispatch("calls", "{\"seq\":1}"));
+        assert!(dispatch("call_log_changed", "{}"));
+        let first = rx.try_recv().expect("event");
+        assert_eq!(first.kind, "calls");
+        assert_eq!(first.json, "{\"seq\":1}");
+        assert_eq!(rx.try_recv().expect("event").kind, "call_log_changed");
+        assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+        clear_sink();
+    }
+
+    #[test]
+    fn a_new_sink_replaces_the_old_one() {
+        let _g = serial();
+        let mut old = install_sink();
+        let mut new = install_sink();
+        assert!(dispatch("contacts_changed", "{}"));
+        assert_eq!(old.try_recv(), Err(TryRecvError::Closed));
+        assert_eq!(new.try_recv().expect("event").kind, "contacts_changed");
+        clear_sink();
+    }
+
+    #[test]
+    fn clear_sink_stops_delivery() {
+        let _g = serial();
+        let mut rx = install_sink();
+        clear_sink();
+        assert!(!dispatch("calls", "{}"));
+        assert_eq!(rx.try_recv(), Err(TryRecvError::Closed));
+    }
+
+    #[test]
+    fn an_idle_sink_never_yields() {
+        let _g = serial();
+        let mut rx = install_sink();
+        assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+        clear_sink();
+    }
+}

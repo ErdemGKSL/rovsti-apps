@@ -15,7 +15,8 @@ if [[ ! -x "$SDKMANAGER" ]]; then
 fi
 
 if [[ -z "$NDK_PACKAGE" ]]; then
-  NDK_PACKAGE=$("$SDKMANAGER" --list 2>/dev/null | grep -oE 'ndk;29\.[0-9.]+' | sort -V | tail -1)
+  NDK_PACKAGE=$("$SDKMANAGER" --list 2>/dev/null | grep -oE 'ndk;29\.[0-9.]+' | sort -V | tail -1 || true)
+  [[ -n "$NDK_PACKAGE" ]] || { echo "No ndk;29.* found; set NDK_PACKAGE." >&2; exit 1; }
 fi
 echo "Installing platform 36, build tools and $NDK_PACKAGE into $SDK"
 "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "platform-tools" "$NDK_PACKAGE"

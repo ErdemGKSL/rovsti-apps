@@ -5,9 +5,16 @@
   },
   "platforms": {
     "android": {
-      "abis": ["arm64-v8a", "x86_64"],
+      "abis": [
+        "arm64-v8a"
+      ],
       "application-id": "dev.rovsti.phone",
-      "features": ["notifications", "audio-routing"],
+      "features": [
+        "notifications",
+        "audio-routing"
+      ],
+      "icon": "assets/app.png",
+      "management": "manual",
       "permissions": [
         "android.permission.CALL_PHONE",
         "android.permission.READ_CALL_LOG",
@@ -15,18 +22,55 @@
         "android.permission.READ_CONTACTS",
         "android.permission.WRITE_CONTACTS",
         "android.permission.READ_PHONE_STATE",
-        "android.permission.MANAGE_OWN_CALLS",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
         "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.BLUETOOTH_SCAN"
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_PHONE_CALL",
+        "android.permission.WAKE_LOCK"
       ],
-      "url-schemes": ["tel"]
+      "project-dir": "platforms/android",
+      "url-schemes": [
+        "tel"
+      ],
+      "variables": {
+        "min_sdk": "34",
+        "target_sdk": "36"
+      },
+      "activity": "dev.rovsti.phone.MainActivity",
+      "signing": {
+        "keystore": "/home/erdem/.config/rovsti/rovsti-release.jks",
+        "key-alias": "rovsti",
+        "store-password-env": "ANDROID_STORE_PASSWORD",
+        "key-password-env": "ANDROID_KEY_PASSWORD"
+      }
     },
     "desktop": {
-      "build": [{ "program": "cargo", "args": ["build", "-p", "rovsti_phone", "--profile", "{{cargo_profile}}"] }],
-      "run": [{ "program": "cargo", "args": ["run", "-p", "rovsti_phone", "--profile", "{{cargo_profile}}"] }]
+      "build": [
+        {
+          "args": [
+            "build",
+            "-p",
+            "rovsti_phone",
+            "--profile",
+            "{{cargo_profile}}"
+          ],
+          "program": "cargo"
+        }
+      ],
+      "run": [
+        {
+          "args": [
+            "run",
+            "-p",
+            "rovsti_phone",
+            "--profile",
+            "{{cargo_profile}}"
+          ],
+          "program": "cargo"
+        }
+      ]
     }
   }
 }

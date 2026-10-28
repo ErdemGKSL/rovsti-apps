@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "seq": 51,
+  "now_ms": 1790000500000,
+  "foreground_call_id": 5,
+  "calls": [
+    {"id": 5, "state": "dialing", "number_raw": "*#06#", "normalized": "*#06#"}
+  ]
+}

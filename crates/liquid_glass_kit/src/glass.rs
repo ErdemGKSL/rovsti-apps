@@ -188,6 +188,20 @@ const PRESS_GLOW_OFF: &str = "const LG_PRESS_GLOW: bool = false;";
 const SINGLE_ENTRY: &str = "fn backdrop_effect(input: BackdropInput, params: BackdropParams)";
 const GRID_ENTRY: &str = include_str!("../shaders/liquid_glass_grid.wgsl");
 
+const GRID_SHADE: &str = "fn lg_shade(input: BackdropInput, params: BackdropParams)";
+
+/// The template with the press glow compiled out.
+fn rest_source() -> String {
+    SHADER_SOURCE.replace(PRESS_GLOW_ON, PRESS_GLOW_OFF)
+}
+
+/// The rest variant with the entry point renamed, plus the grid entry.
+fn grid_source() -> String {
+    let mut source = rest_source().replace(SINGLE_ENTRY, GRID_SHADE);
+    source.push_str(GRID_ENTRY);
+    source
+}
+
 /// The template shader, compiled once (hashing the source is not free).
 pub fn glass_shader() -> BackdropShader {
     static SHADER: OnceLock<BackdropShader> = OnceLock::new();
@@ -202,7 +216,7 @@ pub fn glass_shader() -> BackdropShader {
 pub fn glass_shader_rest() -> BackdropShader {
     static SHADER: OnceLock<BackdropShader> = OnceLock::new();
     SHADER
-        .get_or_init(|| BackdropShader::wgsl(SHADER_SOURCE.replace(PRESS_GLOW_ON, PRESS_GLOW_OFF)))
+        .get_or_init(|| BackdropShader::wgsl(rest_source()))
         .clone()
 }
 
@@ -211,16 +225,7 @@ pub fn glass_shader_rest() -> BackdropShader {
 pub fn glass_grid_shader() -> BackdropShader {
     static SHADER: OnceLock<BackdropShader> = OnceLock::new();
     SHADER
-        .get_or_init(|| {
-            let mut source = SHADER_SOURCE
-                .replace(PRESS_GLOW_ON, PRESS_GLOW_OFF)
-                .replace(
-                    SINGLE_ENTRY,
-                    "fn lg_shade(input: BackdropInput, params: BackdropParams)",
-                );
-            source.push_str(GRID_ENTRY);
-            BackdropShader::wgsl(source)
-        })
+        .get_or_init(|| BackdropShader::wgsl(grid_source()))
         .clone()
 }
 
@@ -556,4 +561,35 @@ pub fn scale_about_center(bounds: Bounds<Pixels>, sx: f32, sy: f32) -> Bounds<Pi
     let w = bounds.size.width * sx;
     let h = bounds.size.height * sy;
     Bounds::new(point(c.x - w / 2.0, c.y - h / 2.0), gpui::size(w, h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `str::replace` is a silent no-op when the pattern is gone: these fail
+    /// loudly if the WGSL text drifts from the strings the variants rewrite.
+    #[test]
+    fn rest_variant_really_switches_the_press_glow_off() {
+        assert!(SHADER_SOURCE.contains(PRESS_GLOW_ON));
+        let rest = rest_source();
+        assert_ne!(rest, SHADER_SOURCE);
+        assert!(rest.contains(PRESS_GLOW_OFF));
+        assert!(!rest.contains(PRESS_GLOW_ON));
+    }
+
+    #[test]
+    fn grid_variant_renames_the_entry_and_appends_the_grid_entry() {
+        assert_eq!(SHADER_SOURCE.matches(SINGLE_ENTRY).count(), 1);
+        let grid = grid_source();
+        assert_ne!(grid, rest_source());
+        // Only the appended grid entry defines `backdrop_effect` now.
+        let template = &grid[..grid.len() - GRID_ENTRY.len()];
+        assert!(!template.contains(SINGLE_ENTRY));
+        assert!(template.contains(GRID_SHADE));
+        assert!(GRID_ENTRY.contains(SINGLE_ENTRY));
+        assert!(grid.contains(GRID_SHADE));
+        assert!(grid.ends_with(GRID_ENTRY));
+        assert!(!grid.contains(PRESS_GLOW_ON));
+    }
 }

@@ -18,6 +18,33 @@ object ContactPhotos {
     /** A cached file younger than this is reused. */
     const val FRESH_MS = 10 * 60 * 1000L
 
+    /** Files older than this are deleted at startup. */
+    const val MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000L
+
+    /** At most this many cached photos are kept (the newest). */
+    const val MAX_FILES = 400
+
+    /** One cached file as [prune] sees it. */
+    class Cached(val name: String, val modifiedMs: Long)
+
+    /** The names to delete: everything past [maxAgeMs], then the oldest beyond [maxFiles]. */
+    fun pruneVictims(files: List<Cached>, now: Long, maxAgeMs: Long = MAX_AGE_MS, maxFiles: Int = MAX_FILES): List<String> {
+        val (old, young) = files.partition { now - it.modifiedMs > maxAgeMs }
+        val extra = young.sortedByDescending { it.modifiedMs }.drop(maxFiles)
+        return (old + extra).map { it.name }
+    }
+
+    /** Prunes the photo cache directory. Disk work: call it off the main thread. */
+    fun prune(context: Context) {
+        try {
+            val dir = File(context.cacheDir, "contact-photos")
+            val files = dir.listFiles() ?: return
+            val victims = pruneVictims(files.map { Cached(it.name, it.lastModified()) }, System.currentTimeMillis()).toSet()
+            for (f in files) if (f.name in victims) f.delete()
+        } catch (_: Exception) {
+        }
+    }
+
     /** `inSampleSize` (a power of two) that keeps the decoded bitmap at least [target] on its short side. */
     fun sampleSize(width: Int, height: Int, target: Int): Int {
         var sample = 1

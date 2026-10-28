@@ -83,24 +83,13 @@ object CallNotifications {
         ensureChannels(context)
         val person = Person.Builder().setName(call.title).setImportant(true).build()
         val show = showIncomingIntent(context, call.callId)
-        val answer = PendingIntent.getActivity(
-            context,
-            REQ_ANSWER + call.callId,
-            Intent(context, MainActivity::class.java)
-                .setAction(ACTION_ANSWER)
-                .putExtra(EXTRA_ANSWER_CALL_ID, call.callId)
-                .putExtra(EXTRA_ANSWER_TOKEN, answerToken)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        val decline = PendingIntent.getBroadcast(
-            context,
-            REQ_DECLINE + call.callId,
-            Intent(context, CallActionReceiver::class.java)
-                .setAction(ACTION_DECLINE)
-                .putExtra(EXTRA_CALL_ID, call.callId),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
+        val answer = answerIntent(context, call)
+        val decline = declineIntent(context, call)
+        // The platform refuses a CallStyle notification that is neither a foreground-service
+        // notification nor carries a full-screen intent, and the incoming one is posted by a plain
+        // notify(). Without the permission the heads-up falls back to ordinary Answer / Decline
+        // actions (AD-2), which never throws.
+        if (!fullScreenAllowed) return incomingHeadsUp(context, call, show, answer, decline)
         val builder = Notification.Builder(context, CHANNEL_INCOMING)
             .setSmallIcon(Icon.createWithResource(context, R.drawable.ic_stat_call))
             .setStyle(Notification.CallStyle.forIncomingCall(person, decline, answer))
@@ -110,11 +99,61 @@ object CallNotifications {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setAutoCancel(false)
-        // Without the permission the heads-up with Answer / Decline is the committed fallback (AD-2).
-        if (fullScreenAllowed) builder.setFullScreenIntent(show, true)
+            .setFullScreenIntent(show, true)
         call.subtitle?.let { builder.setContentText(it) }
         return builder.build()
     }
+
+    /**
+     * The heads-up without a full-screen intent: a plain notification on the high-importance
+     * channel with working Answer and Decline buttons. Also the fallback when the platform
+     * refuses the CallStyle one.
+     */
+    fun incomingHeadsUp(
+        context: Context,
+        call: IncomingCall,
+        show: PendingIntent = showIncomingIntent(context, call.callId),
+        answer: PendingIntent = answerIntent(context, call),
+        decline: PendingIntent = declineIntent(context, call),
+    ): Notification {
+        ensureChannels(context)
+        val icon = Icon.createWithResource(context, R.drawable.ic_stat_call)
+        val builder = Notification.Builder(context, CHANNEL_INCOMING)
+            .setSmallIcon(icon)
+            .setContentTitle(call.title)
+            .setContentText(call.subtitle ?: "Incoming call")
+            .setContentIntent(show)
+            .setCategory(Notification.CATEGORY_CALL)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(false)
+            .addAction(Notification.Action.Builder(icon, "Decline", decline).build())
+            .addAction(Notification.Action.Builder(icon, "Answer", answer).build())
+        return builder.build()
+    }
+
+    /** Answer is an activity PendingIntent (a broadcast trampoline would be blocked on Android 12+). */
+    private fun answerIntent(context: Context, call: IncomingCall): PendingIntent = PendingIntent.getActivity(
+        context,
+        REQ_ANSWER + call.callId,
+        Intent(context, MainActivity::class.java)
+            .setAction(ACTION_ANSWER)
+            .putExtra(EXTRA_ANSWER_CALL_ID, call.callId)
+            .putExtra(EXTRA_ANSWER_TOKEN, answerToken)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
+    /** Decline never opens the app. */
+    private fun declineIntent(context: Context, call: IncomingCall): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        REQ_DECLINE + call.callId,
+        Intent(context, CallActionReceiver::class.java)
+            .setAction(ACTION_DECLINE)
+            .putExtra(EXTRA_CALL_ID, call.callId),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
 
     /** `CallStyle.forOngoingCall`: caller, chronometer and End. The body opens the app directly. */
     fun ongoing(context: Context, call: OngoingCall): Notification {

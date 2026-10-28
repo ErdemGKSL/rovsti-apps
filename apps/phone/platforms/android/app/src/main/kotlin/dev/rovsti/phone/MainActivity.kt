@@ -23,6 +23,7 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
     private val main = Handler(Looper.getMainLooper())
     private val clearLockScreenFlags = Runnable { setLockScreenFlags(false) }
     private var curtain: View? = null
+    private var gpuiFailed = false
     private val dropCurtain = Runnable { removeCurtain() }
 
     override fun nativeLibraryName() = "rovsti_phone"
@@ -129,6 +130,16 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
     override fun onGpuiError(error: RuntimeException) {
         Log.e("Rovsti", "GPUI stopped; calls are unaffected", error)
         removeCurtain()
+        gpuiFailed = true
+        showNativeFallback()
+    }
+
+    /** The native view follows the call: Answer and Decline while it rings, then the message. */
+    override fun onIncomingChanged(call: IncomingCall?) {
+        if (gpuiFailed) showNativeFallback()
+    }
+
+    private fun showNativeFallback() {
         val ringing = CallRegistry.incomingNow
         if (ringing != null) {
             setContentView(incomingView(ringing))

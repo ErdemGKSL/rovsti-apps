@@ -30,4 +30,18 @@ class ContactPhotosTest {
         assertNotEquals(a, ContactPhotos.cacheName("content://com.android.contacts/contacts/1/photo", 64))
         assertTrue(a.matches(Regex("p-?[0-9a-f]+_128\\.png")))
     }
+
+    @Test
+    fun pruneDropsOldThenTheOldestBeyondTheCap() {
+        val day = 24 * 60 * 60 * 1000L
+        val now = 100 * day
+        val files = listOf(
+            ContactPhotos.Cached("ancient", now - 30 * day),
+            ContactPhotos.Cached("a", now - 3 * day),
+            ContactPhotos.Cached("b", now - 2 * day),
+            ContactPhotos.Cached("c", now - 1 * day),
+        )
+        assertEquals(listOf("ancient"), ContactPhotos.pruneVictims(files, now))
+        assertEquals(listOf("ancient", "a"), ContactPhotos.pruneVictims(files, now, maxFiles = 2))
+    }
 }

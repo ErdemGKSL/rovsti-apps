@@ -1,5 +1,6 @@
 package dev.rovsti.phone
 
+import android.app.Notification
 import android.app.Application
 import android.app.NotificationManager
 import android.app.Service
@@ -45,6 +46,9 @@ object CallRegistry : CallsApi {
 
         /** Rust drew the first frame of the Incoming Call screen (story 5.6). */
         fun onIncomingFrame(callId: Int) {}
+
+        /** The ringing call changed (answered, declined, gone, or a new one): `null` when none rings. */
+        fun onIncomingChanged(call: IncomingCall?) {}
     }
 
     private const val ANSWER_REPLACING_TIMEOUT_MS = 2_000L
@@ -416,7 +420,9 @@ object CallRegistry : CallsApi {
      * Re-posts only when what it shows changes. Kotlin only: answerable without GPUI (AD-2).
      */
     private fun syncIncoming(call: IncomingCall?) {
+        val changed = incomingNow?.key != call?.key
         incomingNow = call
+        if (changed) surface?.onIncomingChanged(call)
         val context = app ?: return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         if (call == null) {
@@ -431,18 +437,35 @@ object CallRegistry : CallsApi {
         incomingPerfId = call.callId
         val first = incomingKey == null
         incomingKey = call.key
+        val allowed = try {
+            manager.canUseFullScreenIntent()
+        } catch (e: RuntimeException) {
+            false
+        }
+        var posted = postIncoming(manager) { CallNotifications.incoming(context, call, allowed) }
+        // The platform may still refuse the CallStyle one: the plain heads-up cannot be.
+        if (!posted) posted = postIncoming(manager) { CallNotifications.incomingHeadsUp(context, call) }
+        if (!posted) {
+            incomingKey = null
+            return
+        }
+        if (first) IncomingPerf.mark("notify")
+        // No notifications at all means no heads-up either: raising the activity directly is
+        // the last resort (it may be refused on HyperOS; nothing else is left to try).
         try {
-            val allowed = manager.canUseFullScreenIntent()
-            manager.notify(CallNotifications.INCOMING_ID, CallNotifications.incoming(context, call, allowed))
-            if (first) IncomingPerf.mark("notify")
-            // No notifications at all means no heads-up either: raising the activity directly is
-            // the last resort (it may be refused on HyperOS; nothing else is left to try).
             if (first && !manager.areNotificationsEnabled()) CallSurface.raise(context)
         } catch (e: RuntimeException) {
-            // A refused notification (permission) must never break the call itself.
-            Log.w("Rovsti", "incoming-call notification failed", e)
-            incomingKey = null
+            Log.w("Rovsti", "raising the incoming call failed", e)
         }
+    }
+
+    /** Builds and posts; a refusal is logged, never thrown, so it can never break the call itself. */
+    private inline fun postIncoming(manager: NotificationManager, build: () -> Notification): Boolean = try {
+        manager.notify(CallNotifications.INCOMING_ID, build())
+        true
+    } catch (e: RuntimeException) {
+        Log.w("Rovsti", "incoming-call notification failed", e)
+        false
     }
 
     private fun syncProximity(calls: List<CallInfo>, focus: Focus) {

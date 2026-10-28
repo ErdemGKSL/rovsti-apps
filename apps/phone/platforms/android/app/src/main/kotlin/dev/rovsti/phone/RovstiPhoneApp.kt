@@ -3,6 +3,7 @@ package dev.rovsti.phone
 import android.app.Application
 import android.content.pm.ApplicationInfo
 import android.os.StrictMode
+import dev.rovsti.bridge.ContactPhotos
 import dev.rovsti.bridge.RovstiBridge
 
 /**
@@ -16,6 +17,8 @@ class RovstiPhoneApp : Application() {
         RovstiBridge.install(this)
         CallRegistry.init(this)
         RovstiBridge.observeProviders()
+        // Old contact photos go, off the main thread.
+        Thread({ ContactPhotos.prune(this) }, "photo-prune").start()
     }
 
     /**

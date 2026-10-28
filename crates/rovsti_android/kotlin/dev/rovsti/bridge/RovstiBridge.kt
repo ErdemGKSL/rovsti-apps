@@ -200,6 +200,24 @@ object RovstiBridge {
      * nowhere else (AD-5); Rust re-pulls the states and the provider data.
      */
     fun emitPermissionsChanged() {
+        // The checks read SharedPreferences and ask the system: off the main thread (onResume).
+        try {
+            permissionsExecutor.execute {
+                try {
+                    emitPermissionsNow()
+                } catch (e: RuntimeException) {
+                    android.util.Log.w("Rovsti", "permission check failed", e)
+                }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+        }
+    }
+
+    private val permissionsExecutor: java.util.concurrent.ExecutorService by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "permissions").apply { isDaemon = true } }
+    }
+
+    private fun emitPermissionsNow() {
         val json = JSONObject().put("v", WIRE_VERSION)
         for (key in groups.keys) {
             json.put(key, when (permissionState(key)) { 1 -> "granted"; 2 -> "permanently_denied"; else -> "denied" })

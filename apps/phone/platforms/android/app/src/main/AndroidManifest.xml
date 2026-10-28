@@ -9,11 +9,27 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.WRITE_CALL_LOG" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 
     <uses-feature android:name="android.hardware.vulkan.level" android:version="0" android:required="false" />
+
+    <!-- Package visibility (AD-34): exactly the three intents resolveActivity
+         must see. No QUERY_ALL_PACKAGES. -->
+    <queries>
+        <intent>
+            <action android:name="android.telephony.action.EMERGENCY_ASSISTANCE" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.HEARING_DEVICES_SETTINGS" />
+        </intent>
+        <intent>
+            <action android:name="android.telecom.action.SHOW_CALL_SETTINGS" />
+        </intent>
+    </queries>
+
     <application
         android:name=".RovstiPhoneApp"
         android:label="Rovsti Phone"
@@ -64,5 +80,18 @@
         <receiver
             android:name=".CallActionReceiver"
             android:exported="false" />
+
+        <!-- Voicemail count (AD-33, AD-34). Ships disabled; spike S9 enables it
+             with setComponentEnabledSetting. The system sends this broadcast
+             and holds READ_PHONE_STATE, which keeps other apps from spoofing it. -->
+        <receiver
+            android:name=".VoicemailReceiver"
+            android:enabled="false"
+            android:exported="true"
+            android:permission="android.permission.READ_PHONE_STATE">
+            <intent-filter>
+                <action android:name="android.telephony.action.SHOW_VOICEMAIL_NOTIFICATION" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

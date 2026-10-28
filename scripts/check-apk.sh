@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Checks the built Rovsti Phone debug/release APK:
 #   1. librovsti_phone.so exports the JNI bridge symbols (nm -D);
-#   2. the merged manifest has no INTERNET permission and all AD-18 permissions.
+#   2. the merged manifest has no INTERNET or SEND_SMS permission, no privileged
+#      permission, and all AD-18/AD-34 permissions (incl. VIBRATE);
+#   3. the <queries> block lists exactly the three v0.2 intents and the
+#      VoicemailReceiver is declared disabled by default (AD-34).
 # Reads the APK path from `gpuiforge info android`. Pass a path to override.
 # Needs ANDROID_HOME and ANDROID_NDK_HOME (or the defaults under ~/Android/Sdk).
 set -euo pipefail
@@ -76,11 +79,17 @@ if grep -qx 'android.permission.INTERNET' <<<"$perms"; then
 else
   echo "ok   no INTERNET permission"
 fi
+if grep -qx 'android.permission.SEND_SMS' <<<"$perms"; then
+  echo "FAIL SEND_SMS permission is present (a declined-with-text reply uses Telecom or a hand-off)." >&2
+  fail=1
+else
+  echo "ok   no SEND_SMS permission"
+fi
 REQUIRED=(
   CALL_PHONE READ_CALL_LOG WRITE_CALL_LOG READ_CONTACTS WRITE_CONTACTS
   READ_PHONE_STATE POST_NOTIFICATIONS USE_FULL_SCREEN_INTENT
   REQUEST_IGNORE_BATTERY_OPTIMIZATIONS BLUETOOTH_CONNECT FOREGROUND_SERVICE
-  FOREGROUND_SERVICE_PHONE_CALL WAKE_LOCK
+  FOREGROUND_SERVICE_PHONE_CALL WAKE_LOCK VIBRATE
 )
 for p in "${REQUIRED[@]}"; do
   if grep -qx "android.permission.$p" <<<"$perms"; then
@@ -90,11 +99,108 @@ for p in "${REQUIRED[@]}"; do
     fail=1
   fi
 done
-for p in MANAGE_OWN_CALLS BLUETOOTH_SCAN; do
+for p in MANAGE_OWN_CALLS BLUETOOTH_SCAN READ_PHONE_NUMBERS MODIFY_PHONE_STATE \
+         QUERY_ALL_PACKAGES BIND_SCREENING_SERVICE READ_EXTERNAL_STORAGE; do
   if grep -qx "android.permission.$p" <<<"$perms"; then
-    echo "FAIL $p must be removed (AD-18)." >&2
+    echo "FAIL $p must be removed (AD-18, AD-34)." >&2
     fail=1
   fi
 done
+
+# 3. <queries> and the disabled VoicemailReceiver, from the compiled manifest.
+"$AAPT2" dump xmltree --file AndroidManifest.xml "$APK" >"$work/manifest.txt"
+if python3 - "$work/manifest.txt" <<'PY'
+import re, sys
+
+ANDROID = "http://schemas.android.com/apk/res/android:"
+lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+
+# Rebuild the element tree from the indentation of `E:` lines.
+class Node:
+    def __init__(self, tag, depth):
+        self.tag, self.depth, self.attrs, self.kids = tag, depth, {}, []
+
+root = Node("root", -1)
+stack = [root]
+for line in lines:
+    m = re.match(r"^(\s*)E: (\S+)", line)
+    if m:
+        depth = len(m.group(1))
+        while stack[-1].depth >= depth:
+            stack.pop()
+        node = Node(m.group(2), depth)
+        stack[-1].kids.append(node)
+        stack.append(node)
+        continue
+    m = re.match(r"^\s*A: (\S+?)(?:\(0x[0-9a-f]+\))?=(.*)$", line)
+    if m and stack[-1] is not root:
+        name = m.group(1).removeprefix(ANDROID)
+        value = m.group(2)
+        raw = re.search(r'\(Raw: "(.*)"\)$', value)
+        value = raw.group(1) if raw else value.strip().strip('"')
+        stack[-1].attrs[name] = value
+
+def find(node, tag):
+    out = [k for k in node.kids if k.tag == tag]
+    for k in node.kids:
+        out += find(k, tag)
+    return out
+
+manifest = find(root, "manifest")[0]
+problems = []
+
+# <queries>: exactly the three intents, nothing else.
+wanted = {
+    "android.telephony.action.EMERGENCY_ASSISTANCE",
+    "android.settings.HEARING_DEVICES_SETTINGS",
+    "android.telecom.action.SHOW_CALL_SETTINGS",
+}
+queries = [k for k in manifest.kids if k.tag == "queries"]
+if len(queries) != 1:
+    problems.append("expected one <queries> block, found %d" % len(queries))
+else:
+    q = queries[0]
+    others = [k.tag for k in q.kids if k.tag != "intent"]
+    if others:
+        problems.append("<queries> holds more than intents: %s" % ", ".join(others))
+    actions = {
+        a.attrs.get("name")
+        for i in q.kids if i.tag == "intent"
+        for a in i.kids if a.tag == "action"
+    }
+    for missing in sorted(wanted - actions):
+        print("FAIL <queries> lacks the intent %s" % missing, file=sys.stderr)
+        problems.append(missing)
+    for extra in sorted(actions - wanted):
+        problems.append("unexpected <queries> intent %s" % extra)
+    if not (wanted - actions):
+        print("ok   <queries> lists the three v0.2 intents")
+
+# VoicemailReceiver: disabled by default, protected, with the broadcast action.
+app = find(manifest, "application")[0]
+rec = [r for r in app.kids if r.tag == "receiver"
+       and r.attrs.get("name", "").endswith(".VoicemailReceiver")]
+if not rec:
+    problems.append("VoicemailReceiver is not declared")
+else:
+    r = rec[0]
+    if r.attrs.get("enabled") != "false":
+        problems.append("VoicemailReceiver is enabled by default (enabled=%s)" % r.attrs.get("enabled"))
+    else:
+        print("ok   VoicemailReceiver is disabled by default")
+    if r.attrs.get("permission") != "android.permission.READ_PHONE_STATE":
+        problems.append("VoicemailReceiver lacks android:permission=READ_PHONE_STATE")
+    if r.attrs.get("exported") != "true":
+        problems.append("VoicemailReceiver is not exported (the system must reach it)")
+    actions = {a.attrs.get("name") for f in r.kids if f.tag == "intent-filter"
+               for a in f.kids if a.tag == "action"}
+    if "android.telephony.action.SHOW_VOICEMAIL_NOTIFICATION" not in actions:
+        problems.append("VoicemailReceiver lacks the SHOW_VOICEMAIL_NOTIFICATION action")
+
+for p in problems:
+    print("FAIL " + p, file=sys.stderr)
+sys.exit(1 if problems else 0)
+PY
+then :; else fail=1; fi
 
 [[ $fail -eq 0 ]] && echo "check-apk: all checks passed" || { echo "check-apk: FAILED" >&2; exit 1; }

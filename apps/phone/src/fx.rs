@@ -30,7 +30,9 @@ pub const A_END: usize = 15;
 pub const A_AVATAR: usize = 16;
 pub const A_ANSWER: usize = 17;
 pub const A_INCOMING_AVATAR: usize = 18;
-pub const A_COUNT: usize = 19;
+/// The In-Call Audio control (the route popover and S17 find it here).
+pub const A_AUDIO: usize = 19;
+pub const A_COUNT: usize = 20;
 
 pub type Marks = Anchors<A_COUNT>;
 

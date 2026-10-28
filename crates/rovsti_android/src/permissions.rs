@@ -16,9 +16,13 @@ pub enum Group {
     Phone,
     Contacts,
     Notifications,
+    /// `BLUETOOTH_CONNECT`: only ever asked for by the route popover's "Show
+    /// device names" row (story 14.7), never at startup and never in Setup.
+    Bluetooth,
 }
 
 impl Group {
+    /// The groups Setup tracks. [`Group::Bluetooth`] is requested on demand only.
     pub const ALL: [Group; 3] = [Group::Phone, Group::Contacts, Group::Notifications];
 
     /// The key `RovstiBridge` understands.
@@ -27,6 +31,7 @@ impl Group {
             Self::Phone => "phone",
             Self::Contacts => "contacts",
             Self::Notifications => "notifications",
+            Self::Bluetooth => "bluetooth",
         }
     }
 }

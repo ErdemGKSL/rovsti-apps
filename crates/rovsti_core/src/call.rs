@@ -4,6 +4,7 @@
 //! Also home to the pure formatting helpers used by the In-Call Screen:
 //! [`format_elapsed`], [`caller_label`] and [`status_text`] (AD-7).
 
+use crate::audio::{Diff, EndpointList, EndpointTracker};
 use crate::phone_number::PhoneNumber;
 use crate::small_text::SmallText;
 pub use crate::wire::{AudioRoute, DisconnectCause};
@@ -51,6 +52,7 @@ impl WireCall {
 #[derive(Clone, Debug, Default)]
 pub struct CallModel {
     snapshot: CallSnapshot,
+    endpoints: EndpointTracker,
     /// `None` until the first snapshot is applied, so seq 0 is accepted.
     held_seq: Option<u64>,
 }
@@ -69,7 +71,32 @@ impl CallModel {
         }
         self.held_seq = Some(snapshot.seq);
         self.snapshot = snapshot;
+        self.endpoints.observe(
+            &self.snapshot.audio.endpoints,
+            !self.snapshot.calls.is_empty(),
+        );
         true
+    }
+
+    /// The audio route list, rebuilt only when the endpoint part of a snapshot
+    /// changed (AD-35).
+    pub fn endpoints(&self) -> &EndpointList {
+        self.endpoints.list()
+    }
+
+    /// Bumped when the list changed.
+    pub fn endpoint_rev(&self) -> u64 {
+        self.endpoints.rev()
+    }
+
+    /// Arrivals and losses since the last call (consumed by the views).
+    pub fn take_endpoint_diff(&mut self) -> Diff {
+        self.endpoints.take_diff()
+    }
+
+    /// The route popover opens: vanished devices leave the list.
+    pub fn open_route_list(&mut self) {
+        self.endpoints.open();
     }
 
     /// Forgets everything, e.g. when the session sink is replaced.

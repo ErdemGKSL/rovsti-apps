@@ -13,6 +13,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.OutcomeReceiver
 import android.telecom.Call
 import android.telecom.CallEndpoint
@@ -84,6 +85,9 @@ object CallRegistry : CallsApi {
     private var canAddCall = false
     private val audio = AudioPath()
     private var firstCallSeen = false
+    private var routeTargetId: String? = null
+    private var routeRequestedAt = 0L
+    @Volatile private var routeLatency = -1L
     private val events = CallEventRing()
     private val coalescer = RebuildCoalescer(
         post = { r, delay -> main.postDelayed(r, delay) },
@@ -168,6 +172,9 @@ object CallRegistry : CallsApi {
                 if (mask != 0) service?.setAudioRoute(mask)
                 return@post
             }
+            routeTargetId = id
+            routeRequestedAt = SystemClock.elapsedRealtime()
+            routeLatency = -1
             // Re-validated here: the list may have changed since the caller looked.
             val target = audio.endpoint(id)
             if (target == null) rebuild() else requestEndpoint(target)
@@ -467,7 +474,9 @@ object CallRegistry : CallsApi {
     }
 
     /** The Diagnostics report's event dump (no numbers, no names). */
-    fun eventDump(): List<String> = events.dump()
+    override fun eventDump(): List<String> = events.dump()
+
+    override fun routeLatencyMs(): Long = routeLatency
 
     /** Builds the snapshot, stores it, and pushes it (AD-4). Main thread only. */
     private fun rebuildNow() {
@@ -486,6 +495,12 @@ object CallRegistry : CallsApi {
             calls = calls,
         )
         val text = SnapshotJson.toJson(data)
+        routeTargetId?.let { target ->
+            if (audioInfo.endpoints.any { it.id == target && it.selected }) {
+                routeLatency = SystemClock.elapsedRealtime() - routeRequestedAt
+                routeTargetId = null
+            }
+        }
         // Ids and booleans only (spike logs): the burst test counts these lines.
         Log.d("RovstiSpike", "snapshot seq=$seq calls=${calls.size} endpoints=${audioInfo.endpoints.size} legacy=${audio.legacy}")
         knownIds = calls.mapTo(HashSet()) { it.id }

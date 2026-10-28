@@ -17,7 +17,7 @@ use rovsti_ui::{
 use crate::PhoneApp;
 
 /// `(press id, label)` of each chip.
-const CHIPS: [(&str, &str); 7] = [
+const CHIPS: [(&str, &str); 10] = [
     ("dev-ring", "Ring"),
     ("dev-ringp", "Ring Ayşe"),
     ("dev-call", "Call"),
@@ -25,6 +25,9 @@ const CHIPS: [(&str, &str); 7] = [
     ("dev-wait", "Waiting"),
     ("dev-mute", "Muted"),
     ("dev-missed", "+Missed"),
+    ("dev-routes", "Routes"),
+    ("dev-btadd", "+BT"),
+    ("dev-btrm", "-BT"),
 ];
 
 impl PhoneApp {
@@ -69,7 +72,9 @@ impl PhoneApp {
     /// `c` Call, `d` Delete, `a` Answer, `x` Decline, `e` End, `f` the first
     /// Favorites tile, `r` the first Recents row, `t<n>` selects tab n and
     /// `.` waits one step, `m` Mute, `h` Hold, `w` Waiting, `k` a call, `n` a new missed call,
-    /// `s` the open Contact Sheet's star, `z` replays Setup complete (S14). It goes through the same code as a tap.
+    /// `s` the open Contact Sheet's star, `z` replays Setup complete (S14),
+    /// `u` a call with the fake route list, `b`/`v` a Bluetooth device connecting or leaving,
+    /// `o` the route popover, `y`/`g` its second/first row, `l` a tap on the Audio control. It goes through the same code as a tap.
     pub(crate) fn start_preview_keys(
         &mut self,
         script: String,
@@ -157,6 +162,16 @@ impl PhoneApp {
             'w' => self.dev_action("dev-wait", cx),
             'k' => self.dev_action("dev-call", cx),
             'n' => self.dev_action("dev-missed", cx),
+            'u' => self.dev_action("dev-routes", cx),
+            'b' => self.dev_action("dev-btadd", cx),
+            'v' => self.dev_action("dev-btrm", cx),
+            // The route popover: `o` opens it, `y` picks its second row, `g` the first,
+            // `l` taps the Audio control (toggle or open), `q` closes it.
+            'o' => self.route_open(window, cx),
+            'y' => self.preview_route_pick(1, window, cx),
+            'g' => self.preview_route_pick(0, window, cx),
+            'l' => self.preview_audio_tap(window, cx),
+            'q' => self.route_close(window, cx),
             's' => self.contact_sheet_act("sheet-cstar", window, cx),
             'z' => {
                 let reduced = window.prefers_reduced_motion();
@@ -179,6 +194,9 @@ impl PhoneApp {
             "dev-wait" => backend.preview_scenario("waiting", cx),
             "dev-mute" => backend.preview_scenario("mute", cx),
             "dev-missed" => backend.preview_new_call(CallLogKind::Missed, cx),
+            "dev-routes" => backend.preview_scenario("routes", cx),
+            "dev-btadd" => backend.preview_add_bluetooth(cx),
+            "dev-btrm" => backend.preview_remove_bluetooth(cx),
             _ => {}
         });
     }

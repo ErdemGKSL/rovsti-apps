@@ -678,6 +678,15 @@ impl<T> Envelope<T> {
     }
 }
 
+/// Result of opening a system settings page (story 14.4).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenSystemData {
+    /// App info opened instead because the page has no activity on this phone.
+    #[serde(default, deserialize_with = "null_default")]
+    pub fallback: bool,
+}
+
+pub type OpenSystemResponse = Envelope<OpenSystemData>;
 pub type CallLogResponse = Envelope<CallLogPayload>;
 pub type ContactsResponse = Envelope<ContactsPayload>;
 pub type FavoritesResponse = Envelope<FavoritesPayload>;

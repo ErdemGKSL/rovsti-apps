@@ -154,6 +154,10 @@ pub const KEYS: [Key; 12] = [
 pub(crate) enum HoldAction {
     Plus,
     Clear,
+    /// The Setup title was held: open Diagnostics (story 14.0f).
+    Diagnostics,
+    /// The Audio control was held: open the route list (story 14.6).
+    RouteList,
 }
 
 impl PhoneApp {
@@ -222,7 +226,7 @@ impl PhoneApp {
 
     // ---- Keypad actions --------------------------------------------------
 
-    fn arm_hold(
+    pub(crate) fn arm_hold(
         &mut self,
         ms: u64,
         action: HoldAction,
@@ -261,6 +265,14 @@ impl PhoneApp {
                     self.delete_shown.set_target(0.0);
                 }
             }
+            HoldAction::Diagnostics => {
+                if self.sheet.is_open() && self.sheet_kind == crate::SheetKind::Setup {
+                    window.perform_haptic_feedback(HapticFeedback::LongPress);
+                    self.sheet_kind = crate::SheetKind::Diagnostics;
+                    self.presses.release_all();
+                }
+            }
+            HoldAction::RouteList => self.route_long_press(window, cx),
         }
         cx.notify();
     }

@@ -11,6 +11,7 @@
 
 pub mod bridge;
 pub mod calls;
+pub mod diagnostics;
 pub mod events;
 pub mod perf;
 pub mod permissions;

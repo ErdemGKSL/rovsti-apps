@@ -7,6 +7,7 @@
 pub mod components;
 pub mod moments;
 pub mod motion;
+pub mod notice_pill;
 pub mod perf;
 pub mod sheet;
 pub mod storage;

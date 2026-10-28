@@ -64,6 +64,11 @@ pub enum Outcome {
 }
 
 impl Outcome {
+    /// Android did not take the command (a desktop preview "takes" it itself).
+    pub fn failed(self) -> bool {
+        self == Self::Declined
+    }
+
     /// What to tell the owner when an action did not happen: the platform
     /// note on desktop, otherwise `fallback`.
     pub fn why_not(self, fallback: &'static str) -> &'static str {
@@ -83,6 +88,52 @@ impl Outcome {
                 log::warn!("{what} failed: {error}");
                 Self::Declined
             }
+        }
+    }
+}
+
+/// How opening a system settings page went (story 14.4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemOutcome {
+    Opened,
+    /// The page has no activity here; App info opened instead.
+    Fallback,
+    /// Nothing opened at all.
+    Missing,
+    NotAvailable,
+}
+
+impl SystemOutcome {
+    /// The Notice pill text for an outcome that needs one.
+    pub fn notice(self) -> Option<&'static str> {
+        match self {
+            Self::Opened => None,
+            Self::Fallback => Some("Opened app settings instead"),
+            Self::Missing => Some("Couldn't open settings"),
+            Self::NotAvailable => Some("Not available on this platform"),
+        }
+    }
+
+    /// Reads Kotlin's `{v, ok, error?, data?:{fallback}}` envelope.
+    pub fn from_envelope(json: &str) -> Self {
+        match serde_json::from_str::<rovsti_core::wire::OpenSystemResponse>(json)
+            .map(Envelope::into_result)
+        {
+            Ok(Ok(data)) if data.fallback => Self::Fallback,
+            Ok(Ok(_)) => Self::Opened,
+            _ => Self::Missing,
+        }
+    }
+}
+
+/// Opens a system settings page; never throws, never touches a call.
+pub fn open_system(page: rovsti_android::telecom::SystemPage) -> SystemOutcome {
+    match telecom::open_system(page) {
+        Ok(json) => SystemOutcome::from_envelope(&json),
+        Err(Error::Unsupported) => SystemOutcome::NotAvailable,
+        Err(error) => {
+            log::warn!("open_system failed: {error}");
+            SystemOutcome::Missing
         }
     }
 }
@@ -327,6 +378,39 @@ impl Backend {
     }
 
     // ---- Reads: views take Arc snapshots -------------------------------
+
+    /// The audio route list (story 14.2); rebuilt only when it changed.
+    pub fn endpoints(&self) -> &rovsti_core::audio::EndpointList {
+        self.calls.endpoints()
+    }
+
+    pub fn endpoint_rev(&self) -> u64 {
+        self.calls.endpoint_rev()
+    }
+
+    /// `(rev, arrivals and losses since the last call)`; consumed by the views.
+    pub fn take_route_changes(&mut self) -> (u64, rovsti_core::audio::Diff) {
+        (self.calls.endpoint_rev(), self.calls.take_endpoint_diff())
+    }
+
+    /// The route popover opens: vanished devices leave.
+    pub fn open_route_list(&mut self, cx: &mut Context<Self>) {
+        self.calls.open_route_list();
+        cx.notify();
+    }
+
+    /// Routes call audio to the endpoint with this identifier (AD-23). Views
+    /// never see a `Result`: an unknown id is `Declined`.
+    pub fn route_endpoint(&mut self, id: &str, cx: &mut Context<Self>) -> Outcome {
+        let outcome = Outcome::from(calls::route_endpoint(id), "route endpoint");
+        #[cfg(any(not(target_os = "android"), feature = "perf", test))]
+        if outcome == Outcome::NotAvailable {
+            self.preview_route_endpoint(id, cx);
+            return Outcome::Done;
+        }
+        let _ = cx;
+        outcome
+    }
 
     pub fn calls(&self) -> &CallModel {
         &self.calls

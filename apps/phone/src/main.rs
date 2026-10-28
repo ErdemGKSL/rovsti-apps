@@ -16,6 +16,7 @@ mod backend;
 mod contacts;
 #[cfg(not(target_os = "android"))]
 mod devtools;
+mod diagnostics;
 mod field;
 mod flight;
 mod fx;
@@ -29,6 +30,7 @@ mod perf_harness;
 mod perf_run;
 mod photos;
 mod recents;
+mod route;
 mod sample;
 mod setup_ui;
 mod signature;
@@ -51,6 +53,7 @@ use rovsti_ui::{
     moments::Fade,
     motion::{Entrance, Motion, Presses},
     motion_tokens,
+    notice_pill::NoticePill,
     sheet::Sheet,
     spring::Spring,
     tab_bar::{Tab, TabBar, TabBarView, content_bottom_inset},
@@ -78,6 +81,8 @@ enum SheetKind {
     Number,
     /// A person's numbers (or the number chooser): `PhoneApp::contact_sheet`.
     Contact,
+    /// The hidden Diagnostics page (story 14.0f).
+    Diagnostics,
 }
 
 /// The line under the number field.
@@ -147,6 +152,8 @@ struct PhoneApp {
 
     /// The Setup sheet (an overlay: opening it never moves the page).
     sheet: Sheet,
+    /// The audio route list and its moments (S17, S18).
+    route: route::RouteUi,
     /// Xiaomi pages opened, and pages that fell back to App info, this session.
     opened: OpenedThisSession,
     fell_back: OpenedThisSession,
@@ -155,6 +162,10 @@ struct PhoneApp {
     setup_note: Option<SharedString>,
     sheet_kind: SheetKind,
     back_enabled: bool,
+    /// The hidden Diagnostics page (story 14.0f).
+    diag: diagnostics::Diagnostics,
+    /// The Notice pill (S28): confirmations and reasons, never in the layout.
+    pill: NoticePill,
 
     /// The Recents tab: row view-models, scroll and the seen-timer.
     recents: RecentsView,
@@ -344,6 +355,9 @@ impl PhoneApp {
             role_declined: false,
             setup_note: None,
             sheet_kind: SheetKind::Setup,
+            route: route::RouteUi::default(),
+            diag: diagnostics::Diagnostics::default(),
+            pill: NoticePill::new(),
             back_enabled: false,
             recents: RecentsView::new(),
             contacts: contacts_view,
@@ -529,6 +543,9 @@ impl PhoneApp {
     fn on_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.incoming.covers() {
             // Back does nothing while a call rings: it must not look like a decline.
+        } else if self.route.is_open() {
+            // The route list closes first.
+            self.route_close(window, cx);
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
         } else if self.contacts.typing {
@@ -544,6 +561,7 @@ impl PhoneApp {
     fn update_back(&mut self, window: &mut Window) {
         let call_only = self.incall.call_only;
         let want = self.incoming.wants_back()
+            || self.route.is_open()
             || self.sheet.is_open()
             || self.contacts.typing
             || self.incall.wants_back(call_only);
@@ -617,15 +635,32 @@ impl PhoneApp {
                     |i: &str| i.starts_with("ic-") || i.starts_with("ik-") || i.starts_with("iw-");
                 let blocked_by_call =
                     self.incall.covers() && !id.as_deref().is_some_and(is_call_id);
+                // The open route list owns the screen: only End still works.
+                let blocked_by_route = self.route.is_open()
+                    && id
+                        .as_deref()
+                        .is_some_and(|i| is_call_id(i) && i != "ic-end");
                 let blocked_by_tabs =
                     !self.incall.covers() && id.as_deref().is_some_and(is_call_id);
-                if blocked_by_incoming || blocked_by_sheet || blocked_by_call || blocked_by_tabs {
+                if blocked_by_incoming
+                    || blocked_by_sheet
+                    || blocked_by_call
+                    || blocked_by_tabs
+                    || blocked_by_route
+                {
                     return;
                 }
                 if let Some(id) = id.clone() {
                     self.presses.touch_down(id.clone());
                     if Self::acts_on_down(&id) {
                         self.activate(&id, window, cx);
+                    } else if &*id == "sheet-title" {
+                        self.arm_hold(
+                            diagnostics::OPEN_AFTER_MS,
+                            keypad::HoldAction::Diagnostics,
+                            window,
+                            cx,
+                        );
                     }
                 }
             }
@@ -664,6 +699,8 @@ impl PhoneApp {
             moving |= sheet.tick_star(dt);
         }
         moving |= self.incall.tick(dt);
+        moving |= self.pill.tick(dt);
+        moving |= self.route.tick(dt);
         moving |= self.incoming.tick(dt);
         moving |= self.incoming.tick_real(real);
         moving |= self.recents.tick(dt);
@@ -769,6 +806,48 @@ impl PhoneApp {
                     ..theme::colors(from).background
                 })
                 .into_any_element(),
+        )
+    }
+
+    /// Shows the Notice pill (S28), replacing the one up. `action` is the
+    /// trailing accent button's label; `undo` gives it the 5 s life.
+    pub(crate) fn show_notice_pill(
+        &mut self,
+        text: impl Into<SharedString>,
+        action: Option<SharedString>,
+        undo: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.pill.show(text, action, undo, false);
+        cx.notify();
+    }
+
+    /// The pill's distance from the window bottom: 12 px above the Tab Bar,
+    /// 12 px above the End button on the In-Call screen, 12 px above the
+    /// bottom inset over a sheet.
+    fn pill_bottom(&self) -> f32 {
+        const GAP: f32 = 12.0;
+        if self.incall.covers() {
+            // pb(58) + the 64 px End button.
+            58.0 + 64.0 + GAP
+        } else if self.sheet.is_visible() {
+            GAP + 10.0
+        } else {
+            f32::from(metrics::TAB_BAR_MARGIN) + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1 + GAP
+        }
+    }
+
+    fn render_pill(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let entity = cx.entity();
+        self.pill.render(
+            theme,
+            self.pill_bottom(),
+            move |pointer, position, _, cx| {
+                entity.update(cx, |this, cx| {
+                    this.pill.pointer(pointer, position);
+                    cx.notify();
+                });
+            },
         )
     }
 
@@ -894,6 +973,7 @@ impl PhoneApp {
     ) -> Option<AnyElement> {
         match self.sheet_kind {
             SheetKind::Setup => self.setup_sheet(theme, window, cx),
+            SheetKind::Diagnostics => self.diag_sheet(theme, window, cx),
             SheetKind::Number => {
                 if !self.sheet.is_visible() {
                     return None;
@@ -922,6 +1002,8 @@ impl Render for PhoneApp {
         let theme = current_theme(window);
         let reduced = window.prefers_reduced_motion();
         self.sheet.set_reduced(reduced);
+        self.pill.set_reduced(reduced);
+        self.route.set_reduced(reduced);
         // S15: a theme change melts (or snaps when the last frame was slow).
         self.melt
             .observe(theme, reduced, self.motion.last_frame_over_budget());
@@ -1005,7 +1087,11 @@ impl Render for PhoneApp {
         }
         #[cfg(not(target_os = "android"))]
         let root = root.child(self.dev_switcher(theme, cx));
+        let pill = self.render_pill(theme, cx);
+        let route = self.render_route(theme, window, cx);
         root.children(incall)
+            .children(route)
+            .children(pill)
             .children(incoming)
             .children(self.flight_layer(theme))
             .children(self.theme_veil())

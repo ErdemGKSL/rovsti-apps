@@ -110,6 +110,16 @@ object RovstiBridge {
     @JvmStatic fun callAnswerReplacing(id: Int): Boolean = calls?.answerReplacing(id) ?: false
     @JvmStatic fun callIncomingFrame(id: Int): Boolean = calls?.incomingFrame(id) ?: false
 
+    /**
+     * Runs a Diagnostics probe (AD-36). Blocking, up to ~20 s: Rust calls it off the UI thread.
+     * Never throws; a failure is one `unknown:` line.
+     */
+    @JvmStatic fun diagnostics(probe: String): String = try {
+        SpikeProbes.run(probe, app, calls)
+    } catch (e: RuntimeException) {
+        "unknown: probe crashed (${e.javaClass.simpleName})"
+    }
+
     /** One slow-frame report from Rust (story 11.10); logcat tag `RovstiPerf`. */
     @JvmStatic fun perfLog(line: String): Boolean {
         android.util.Log.w("RovstiPerf", line)
@@ -152,6 +162,7 @@ object RovstiBridge {
             android.Manifest.permission.WRITE_CONTACTS,
         ),
         "notifications" to listOf(android.Manifest.permission.POST_NOTIFICATIONS),
+        "bluetooth" to listOf(android.Manifest.permission.BLUETOOTH_CONNECT),
     )
 
     private fun missing(group: String): List<String>? =
@@ -263,12 +274,51 @@ object RovstiBridge {
         return true
     }
 
-    /** Opens the system "add contact" screen with [number] filled in. */
+    /** Opens the system "add contact" screen (create or add to existing) with [number] filled in. */
     @JvmStatic
     fun addContact(number: String): Boolean = start(
-        Intent(Intent.ACTION_INSERT, android.provider.ContactsContract.Contacts.CONTENT_URI)
+        Intent(Intent.ACTION_INSERT_OR_EDIT)
+            .setType(android.provider.ContactsContract.Contacts.CONTENT_ITEM_TYPE)
             .putExtra(android.provider.ContactsContract.Intents.Insert.PHONE, number)
     )
+
+    /**
+     * Story 14.4: opens a settings page by key (see [SystemPages]). Returns the envelope
+     * `{v, ok, error?, data?:{fallback}}`; a missing activity falls back to App info and says so.
+     */
+    @JvmStatic
+    fun openSystem(page: String): String = SystemPages.open(page) { action ->
+        val intent = Intent(action).addCategory(Intent.CATEGORY_DEFAULT)
+        if (action == SystemPages.ACTION_DETAILS) intent.data = Uri.parse("package:${app.packageName}")
+        start(intent)
+    }
+
+    /** Story 14.4: the SMS composer for [number] (`smsto:`). */
+    @JvmStatic
+    fun sendSmsTo(number: String): Boolean = start(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", number, null)))
+
+    /** Story 14.4: puts [text] on the clipboard. */
+    @JvmStatic
+    fun copyText(text: String): Boolean = try {
+        app.getSystemService(android.content.ClipboardManager::class.java)
+            ?.setPrimaryClip(android.content.ClipData.newPlainText("Rovsti", text)) != null
+    } catch (_: RuntimeException) {
+        false
+    }
+
+    /** Story 14.4: the system share sheet with [text]. */
+    @JvmStatic
+    fun shareText(text: String): Boolean = start(
+        Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null)
+    )
+
+    /** Story 14.8: `TelephonyManager.isHearingAidCompatibilitySupported()` (API 23). */
+    @JvmStatic
+    fun hearingAidCompatible(): Boolean = try {
+        app.getSystemService(android.telephony.TelephonyManager::class.java)?.isHearingAidCompatibilitySupported == true
+    } catch (_: RuntimeException) {
+        false
+    }
 
     /** Opens the system Contacts app (the empty Contacts state). */
     @JvmStatic

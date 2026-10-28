@@ -95,6 +95,29 @@ impl Diff {
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.removed.is_empty() && self.selection.is_none()
     }
+
+    /// Folds a newer diff into this one (two snapshots before a frame).
+    pub fn merge(&mut self, newer: Diff) {
+        for id in newer.added {
+            // A device that left and came back is neither lost nor new.
+            if let Some(i) = self.removed.iter().position(|r| *r == id) {
+                self.removed.remove(i);
+            } else {
+                self.added.push(id);
+            }
+        }
+        for id in newer.removed {
+            if let Some(i) = self.added.iter().position(|a| *a == id) {
+                self.added.remove(i);
+            } else {
+                self.removed.push(id);
+            }
+        }
+        if let Some((from, to)) = newer.selection {
+            let from = self.selection.take().map_or(from, |(f, _)| f);
+            self.selection = (from != to).then_some((from, to));
+        }
+    }
 }
 
 /// The ordered list, built once per snapshot whose endpoint part changed.
@@ -345,6 +368,72 @@ impl EndpointList {
     }
 }
 
+/// Keeps the current [`EndpointList`] and the pending [`Diff`] across
+/// snapshots. The list is rebuilt only when the endpoint part of a snapshot
+/// changed (AD-35), so a mute toggle or a timer-only snapshot costs nothing.
+#[derive(Clone, Debug, Default)]
+pub struct EndpointTracker {
+    src: Vec<Endpoint>,
+    list: EndpointList,
+    pending: Diff,
+    rev: u64,
+}
+
+impl EndpointTracker {
+    /// Feeds the endpoint part of a snapshot. `in_call` is false when the
+    /// snapshot carries no call: the baseline resets, so the first list of the
+    /// next call seeds it with no arrival or loss reported. Returns whether
+    /// the list changed.
+    pub fn observe(&mut self, endpoints: &[Endpoint], in_call: bool) -> bool {
+        if !in_call {
+            if self.src.is_empty() && self.list.is_empty() {
+                return false;
+            }
+            self.src.clear();
+            self.list = EndpointList::default();
+            self.pending = Diff::default();
+            self.rev += 1;
+            return true;
+        }
+        if endpoints == self.src.as_slice() {
+            return false;
+        }
+        // Seeded once a list with live endpoints exists.
+        let baseline = (!self.list.is_empty()).then_some(&self.list);
+        let next = EndpointList::from_snapshot(endpoints, baseline);
+        let diff = EndpointList::diff(baseline, &next);
+        self.pending.merge(diff);
+        self.src.clear();
+        self.src.extend_from_slice(endpoints);
+        self.list = next;
+        self.rev += 1;
+        true
+    }
+
+    pub fn list(&self) -> &EndpointList {
+        &self.list
+    }
+
+    /// Bumped on every change of the list.
+    pub fn rev(&self) -> u64 {
+        self.rev
+    }
+
+    /// The arrivals and losses since the last call; the views consume them.
+    pub fn take_diff(&mut self) -> Diff {
+        std::mem::take(&mut self.pending)
+    }
+
+    /// The popover opens: vanished devices leave the list.
+    pub fn open(&mut self) {
+        let before = self.list.len();
+        self.list.clear_ghosts();
+        if self.list.len() != before {
+            self.rev += 1;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,5 +663,63 @@ mod tests {
         let list = EndpointList::from_snapshot(&eps, None);
         assert_eq!(list.len(), MAX_ROWS);
         assert!(list.get("p").is_some() && list.get("s").is_some());
+    }
+
+    #[test]
+    fn the_tracker_rebuilds_only_when_endpoints_change() {
+        let mut t = EndpointTracker::default();
+        assert!(t.observe(&phone_speaker(), true));
+        let rev = t.rev();
+        assert!(
+            !t.observe(&phone_speaker(), true),
+            "same endpoints: no rebuild"
+        );
+        assert_eq!(t.rev(), rev);
+        assert!(t.take_diff().is_empty(), "the first list reports nothing");
+    }
+
+    #[test]
+    fn the_tracker_reports_arrival_loss_and_resets_between_calls() {
+        let mut t = EndpointTracker::default();
+        t.observe(&phone_speaker(), true);
+        let mut with_bt = phone_speaker();
+        with_bt.push(ep("b", EndpointType::Bluetooth, Some("Buds"), false));
+        t.observe(&with_bt, true);
+        assert_eq!(t.take_diff().added, ["b"]);
+        assert!(t.take_diff().is_empty(), "taken once");
+        t.observe(&phone_speaker(), true);
+        assert_eq!(t.take_diff().removed, ["b"]);
+        assert!(t.list().get("b").is_some_and(|r| r.ghost));
+        t.open();
+        assert!(t.list().get("b").is_none());
+        // No call: everything resets, the next call seeds again.
+        assert!(t.observe(&[], false));
+        assert!(t.list().is_empty());
+        t.observe(&with_bt, true);
+        assert!(t.take_diff().is_empty(), "a new call is a new baseline");
+    }
+
+    #[test]
+    fn merged_diffs_cancel_a_blip() {
+        let mut d = Diff::default();
+        d.merge(Diff {
+            added: vec!["x".into()],
+            ..Diff::default()
+        });
+        d.merge(Diff {
+            removed: vec!["x".into()],
+            ..Diff::default()
+        });
+        assert!(d.is_empty());
+        let mut s = Diff::default();
+        s.merge(Diff {
+            selection: Some((Some("a".into()), Some("b".into()))),
+            ..Diff::default()
+        });
+        s.merge(Diff {
+            selection: Some((Some("b".into()), Some("a".into()))),
+            ..Diff::default()
+        });
+        assert!(s.selection.is_none(), "a round trip is no change");
     }
 }

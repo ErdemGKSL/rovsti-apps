@@ -256,6 +256,8 @@ impl PhoneApp {
                         Group::Phone => p.phone,
                         Group::Contacts => p.contacts,
                         Group::Notifications => p.notifications,
+                        // Never a Setup row: only the route popover asks for it.
+                        Group::Bluetooth => Access::Denied,
                     }
                 };
                 let requested = if access == Access::PermanentlyDenied {
@@ -440,7 +442,12 @@ impl PhoneApp {
             })
     }
 
-    fn sheet_header(&self, theme: Theme, list: &SetupChecklist) -> impl IntoElement {
+    fn sheet_header(
+        &self,
+        theme: Theme,
+        list: &SetupChecklist,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
         let colors = rovsti_ui::theme::colors(theme);
         let progress = list.progress();
         let fraction = if progress.total == 0 {
@@ -466,8 +473,28 @@ impl PhoneApp {
                     .justify_between()
                     .child(
                         div()
+                            .id("sheet-title")
+                            .relative()
                             .flex()
                             .flex_col()
+                            // Holding the title for 800 ms opens Diagnostics (story 14.0f).
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    if !this.presses.touch_seen() {
+                                        this.arm_hold(
+                                            crate::diagnostics::OPEN_AFTER_MS,
+                                            crate::keypad::HoldAction::Diagnostics,
+                                            window,
+                                            cx,
+                                        );
+                                    }
+                                }),
+                            )
+                            .child(touch_surface(Self::touch_listener(
+                                cx,
+                                Some("sheet-title".into()),
+                            )))
                             .child(
                                 div()
                                     .text_size(typography::TITLE2.size)
@@ -524,7 +551,7 @@ impl PhoneApp {
 
         let mut children = vec![reveal(
             0,
-            self.sheet_header(theme, &list).into_any_element(),
+            self.sheet_header(theme, &list, cx).into_any_element(),
         )];
         for (i, status) in list.items().iter().enumerate() {
             children.push(reveal(

@@ -6,7 +6,10 @@
 //! the aura are their own views, so a once-a-second timer tick or a drifting
 //! blob never re-renders this screen.
 
-use std::time::{Duration, Instant};
+use std::{
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use gpui::{
     AnyElement, Context, Entity, HapticFeedback, Hsla, InteractiveElement, IntoElement,
@@ -26,14 +29,14 @@ use rovsti_ui::{
     spring::Spring,
     theme::{self, call_colors},
     tokens::{Theme, mix, typography},
-    touch::touch_surface,
+    touch::{pointer_surface, touch_surface},
 };
 
 use crate::{
     PhoneApp,
     aura::{Aura, AuraState, Phase},
     backend::{self, CallCommand, now_ms},
-    fx::{A_AVATAR, A_END},
+    fx::{A_AUDIO, A_AVATAR, A_END},
 };
 
 /// "Call ended" holds this long; a failed call holds longer so it can be read.
@@ -64,6 +67,8 @@ fn digit_line(digits: &str) -> String {
 }
 const AVATAR: f32 = 96.0;
 const CONTROL: f32 = 76.0;
+/// The control circle, for the route popover and S17.
+pub(crate) const CONTROL_SIZE: f32 = CONTROL;
 const IN_KEY: f32 = 72.0;
 /// Clears the waiting-call banner (46 px + 76 px) so it never covers the avatar.
 const TOP: f32 = 128.0;
@@ -86,7 +91,6 @@ pub struct CallView {
     pub connect_time_ms: i64,
     pub muted: bool,
     pub route: AudioRoute,
-    pub headset: Option<AudioRoute>,
 }
 
 /// The second caller of a waiting call (story 9.2).
@@ -140,11 +144,6 @@ impl CallView {
             .filter(|n| !n.trim().is_empty())
             .and_then(|_| rovsti_core::PhoneNumber::parse(&call.number_raw).ok())
             .map(|n| SharedString::from(middle_truncate(&format_number(&n), 28)));
-        let headset = audio
-            .routes
-            .iter()
-            .copied()
-            .find(|r| matches!(r, AudioRoute::Bluetooth | AudioRoute::WiredHeadset));
         Some(Self {
             id: call.id,
             state: call.call_state(),
@@ -164,7 +163,6 @@ impl CallView {
             connect_time_ms: call.connect_time_ms,
             muted: audio.muted,
             route: audio.route,
-            headset,
         })
     }
 
@@ -440,6 +438,20 @@ pub struct InCall {
     bloom: Spring,
 }
 
+/// The fixed caption box under a control: 96 px wide (it overhangs the 76 px
+/// circle evenly), 16 px high, one line, ellipsised (AD-35 slot constants).
+fn caption_slot(color: Hsla) -> gpui::Div {
+    div()
+        .relative()
+        .w(px(crate::route::CAPTION_W))
+        .h(px(16.0))
+        .mx(px(-10.0))
+        .overflow_hidden()
+        .text_size(typography::CAPTION.size)
+        .text_color(color)
+        .text_center()
+}
+
 fn sp(value: f32, params: rovsti_ui::spring::SpringParams) -> Spring {
     Spring::new(value, params).with_epsilon(0.002)
 }
@@ -486,6 +498,31 @@ impl InCall {
             ring_from: RingKind::Dialing,
             ring_to: RingKind::Dialing,
             bloom: sp(1.0, motion_tokens::appear()),
+        }
+    }
+
+    /// The Audio control can be used right now: a live call that is not on hold.
+    pub(crate) fn audio_usable(&self) -> bool {
+        self.ending.is_none()
+            && self
+                .view
+                .as_ref()
+                .is_some_and(|v| v.state != CallState::Holding)
+    }
+
+    /// The route Android last reported for the foreground call.
+    pub(crate) fn route(&self) -> AudioRoute {
+        self.view.as_ref().map_or(AudioRoute::Unknown, |v| v.route)
+    }
+
+    /// The Audio control reads as on (tinted); S10's flood and wobble play on
+    /// the way in.
+    pub(crate) fn set_audio_on(&mut self, on: bool, reduced: bool) {
+        let turning_on = on && self.on[1].target < 0.5;
+        self.on[1].set_target(f32::from(u8::from(on)));
+        if turning_on && !reduced {
+            self.wobble[1].snap(1.0);
+            self.wobble[1].set_target(0.0);
         }
     }
 
@@ -600,6 +637,18 @@ impl PhoneApp {
             )
         };
         self.incall.call_only = call_only;
+        // The route list and the Audio control's face come first: `apply_view`
+        // reads whether the control is on from them.
+        let route = self
+            .backend
+            .read(cx)
+            .calls()
+            .foreground()
+            .map(|_| self.backend.read(cx).calls().audio().route);
+        match route {
+            Some(route) => self.route_sync(route, cx),
+            None => self.route.reset(),
+        }
         let waiting = WaitingView::from_model(self.backend.read(cx).calls());
         let ic = &mut self.incall;
         if waiting.is_some() && !ic.waiting_open && ic.has_call() {
@@ -682,6 +731,12 @@ impl PhoneApp {
     }
 
     fn apply_view(&mut self, view: CallView, window: &mut Window, cx: &mut Context<Self>) {
+        if view.state == CallState::Holding || view.state.is_disconnected() {
+            // Hold (or the end) closes the route list; the control dims.
+            self.route.close();
+        }
+        let audio_on = self.route.face.on || self.route.open;
+        let speaker = self.route.face.speaker || view.route == AudioRoute::Speaker;
         let ic = &mut self.incall;
         let disconnected = view.state.is_disconnected();
         let failed = matches!(view.phase(), Phase::Failed);
@@ -693,13 +748,9 @@ impl PhoneApp {
             phase: view.phase(),
             hue: view.hue,
             muted: view.muted,
-            speaker: view.route == AudioRoute::Speaker,
+            speaker,
         };
-        let on = [
-            view.muted,
-            view.route == AudioRoute::Speaker,
-            view.state == CallState::Holding,
-        ];
+        let on = [view.muted, audio_on, view.state == CallState::Holding];
         // S10 plays only for the state Android reported: a press that was
         // reverted never changes `on`, so it never floods or wobbles.
         let reduced = window.prefers_reduced_motion();
@@ -713,6 +764,7 @@ impl PhoneApp {
         }
         // Reported state arrived: the pending look is no longer needed.
         ic.pending = [None; 2];
+
         let before = ic.ring_kind();
         let status_args = (view.state, view.connect_time_ms);
         ic.view = Some(view);
@@ -866,16 +918,6 @@ impl PhoneApp {
                 self.send(CallCommand::Mute(!view.muted), cx);
                 self.clear_pending_later(window, cx);
             }
-            "ic-speaker" if live && view.state != CallState::Holding => {
-                self.incall.pending[1] = Some(Instant::now());
-                let target = match (view.route, view.headset) {
-                    (AudioRoute::Speaker, Some(headset)) => headset,
-                    (AudioRoute::Speaker, None) => AudioRoute::Earpiece,
-                    _ => AudioRoute::Speaker,
-                };
-                self.send(CallCommand::Route(target), cx);
-                self.clear_pending_later(window, cx);
-            }
             "ic-hold" if live && view.can_hold && view.state != CallState::Dialing => {
                 let on = view.state != CallState::Holding;
                 self.send(CallCommand::Hold(view.id, on), cx);
@@ -900,6 +942,23 @@ impl PhoneApp {
                 }
             }
         }
+        cx.notify();
+    }
+
+    /// The Phone/Speaker toggle (only those two routes exist): the pending
+    /// look for 120 ms, the state always from the next snapshot.
+    pub(crate) fn incall_toggle_speaker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.incall.audio_usable() {
+            return;
+        }
+        self.incall.pending[1] = Some(Instant::now());
+        let target = if self.incall.route() == AudioRoute::Speaker {
+            AudioRoute::Earpiece
+        } else {
+            AudioRoute::Speaker
+        };
+        self.send(CallCommand::Route(target), cx);
+        self.clear_pending_later(window, cx);
         cx.notify();
     }
 
@@ -1055,13 +1114,152 @@ impl PhoneApp {
                 )
                 .child(touch_surface(Self::touch_listener(cx, Some(id.into()))));
         }
-        slot.child(circle).child(
+        slot.child(circle)
+            .child(caption_slot(colors.secondary_label).child(label))
+    }
+
+    /// The Audio control (row 1, column 3): the route's icon and caption, a
+    /// tap toggles Phone/Speaker or opens the route list, a long press always
+    /// opens it. Touches go through a pointer surface and the tap guard, so
+    /// press feedback paints on the raw finger-down and the action runs on
+    /// finger-up (UIQ-1). The caption slot is fixed (96 px, one line), and the
+    /// S17 cross-fade plays inside it.
+    fn audio_control(
+        &self,
+        theme: Theme,
+        view: &CallView,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let ic = &self.incall;
+        let colors = theme::colors(theme);
+        let id = "ic-audio";
+        let enabled = ic.ending.is_none() && view.state != CallState::Holding;
+        let held = self.pressed(id, ic.pending[1]);
+        let press = if self.route.has_pending() {
+            held.max(0.8)
+        } else {
+            held
+        };
+        let side = CONTROL * press_scale(press, scale::PRESS_CARD);
+        let on = ic.on[1].value.clamp(0.0, 1.0);
+        let wobble = ic.wobble[1].value;
+        let spec = GlassSpec::control(theme).lerp(
+            GlassSpec::lens(theme),
+            (press.clamp(0.0, 1.0) * 0.6 + on * 0.2).min(1.0),
+        );
+        let glyph = mix(colors.label, colors.accent, on);
+        let tilt = gpui::Transformation::rotate(gpui::radians(wobble * 6.0_f32.to_radians()));
+        let draw = |icon: Icon, alpha: f32| {
+            svg()
+                .path(icon.path())
+                .size(px(28.0))
+                .text_color(Hsla { a: alpha, ..glyph })
+                .with_transformation(tilt)
+        };
+        let (old_icon, old_caption, swap) = self.audio_swap();
+        let face = &self.route.face;
+        let icon = if swap < 1.0 {
             div()
-                .text_size(typography::CAPTION.size)
-                .text_color(colors.secondary_label)
-                .text_center()
-                .child(label),
-        )
+                .relative()
+                .size(px(28.0))
+                .child(div().absolute().inset_0().child(draw(old_icon, 1.0 - swap)))
+                .child(div().absolute().inset_0().child(draw(face.icon, swap)))
+                .into_any_element()
+        } else {
+            draw(face.icon, 1.0).into_any_element()
+        };
+        let over = if ic.ending.is_some() {
+            1.0 - 0.6 * ic.over.value.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let mut slot = div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(face.aria.clone())
+            .aria_disabled(!enabled)
+            .relative()
+            .w(px(CONTROL))
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(4.0))
+            .opacity(if enabled { 1.0 } else { 0.4_f32 }.min(over));
+        let circle = div()
+            .relative()
+            .size(px(CONTROL))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(self.marks.probe(A_AUDIO))
+            .child(
+                glass_interactive(spec, move || GlassInteraction { press, focus: None })
+                    .size(px(side))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .absolute()
+                            .size(px(side * on))
+                            .rounded_full()
+                            .bg(Hsla {
+                                a: 0.20,
+                                ..colors.accent
+                            }),
+                    )
+                    .child(icon),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .size(px(side))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(Hsla {
+                        a: on,
+                        ..colors.accent
+                    }),
+            )
+            // S18: the arrival dot at the icon's top-right (3 s, popover closed).
+            .children(self.audio_dot(theme));
+        if enabled {
+            let entity = cx.entity();
+            slot = slot.child(pointer_surface(
+                Rc::clone(&self.route.control_bounds),
+                move |pointer, position, window, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.audio_pointer(pointer, position, window, cx)
+                    });
+                },
+            ));
+        }
+        let caption = if swap < 1.0 {
+            caption_slot(colors.secondary_label)
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .w_full()
+                        .opacity(1.0 - swap)
+                        .truncate()
+                        .child(old_caption.clone()),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(6.0 * (1.0 - swap)))
+                        .w_full()
+                        .opacity(swap)
+                        .truncate()
+                        .child(face.caption.clone()),
+                )
+        } else {
+            caption_slot(colors.secondary_label)
+                .child(div().w_full().truncate().child(face.caption.clone()))
+        };
+        slot.child(circle).child(caption)
     }
 
     fn controls(&self, theme: Theme, view: &CallView, cx: &mut Context<Self>) -> AnyElement {
@@ -1069,11 +1267,6 @@ impl PhoneApp {
         let holding = view.state == CallState::Holding;
         let live = ic.ending.is_none();
         let usable = live && !holding;
-        let route_icon = match view.headset {
-            Some(AudioRoute::Bluetooth) => Icon::LucideBluetooth,
-            Some(_) => Icon::LucideHeadphones,
-            None => Icon::LucideVolume2,
-        };
         let hold_label = if holding { "Resume" } else { "Hold" };
         let hold_ok = live && view.can_hold && view.state != CallState::Dialing;
         div()
@@ -1111,23 +1304,7 @@ impl PhoneApp {
                         None,
                         cx,
                     ))
-                    .child(self.control(
-                        theme,
-                        "ic-speaker",
-                        route_icon,
-                        "Speaker",
-                        if view.route == AudioRoute::Speaker {
-                            "Speaker, on"
-                        } else {
-                            "Speaker, off"
-                        },
-                        None,
-                        ic.on[1].value,
-                        ic.wobble[1].value,
-                        usable,
-                        ic.pending[1],
-                        cx,
-                    )),
+                    .child(self.audio_control(theme, view, cx)),
             )
             .child(self.control(
                 theme,
@@ -1631,6 +1808,7 @@ mod tests {
             ..CallSnapshot::default()
         };
         snapshot.audio.muted = muted;
+        snapshot.audio.route = AudioRoute::Bluetooth;
         snapshot.audio.routes = vec![AudioRoute::Earpiece, AudioRoute::Bluetooth];
         snapshot.foreground_call_id = Some(7);
         snapshot.calls = vec![WireCall {
@@ -1659,7 +1837,7 @@ mod tests {
         assert!(view.hue.is_some());
         assert!(view.secondary.is_some());
         assert!(view.muted);
-        assert_eq!(view.headset, Some(AudioRoute::Bluetooth));
+        assert_eq!(view.route, AudioRoute::Bluetooth);
         assert_eq!(view.phase(), Phase::Active);
     }
 

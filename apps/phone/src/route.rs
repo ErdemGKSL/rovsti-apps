@@ -603,7 +603,7 @@ impl PhoneApp {
         if !self.incall.audio_usable() {
             return;
         }
-        window.perform_haptic_feedback(HapticFeedback::Selection);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
         if self.route.face.toggle || self.route.rows.is_empty() {
             self.incall_toggle_speaker(window, cx);
         } else {
@@ -615,7 +615,7 @@ impl PhoneApp {
         if !self.incall.audio_usable() || self.route.open {
             return;
         }
-        window.perform_haptic_feedback(HapticFeedback::LongPress);
+        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
         self.route.long_fired = true;
         self.route.control_tap.spoil();
         self.presses.release_all();
@@ -703,7 +703,7 @@ impl PhoneApp {
                     && let Some(id) = press_id(hit, &self.route)
                 {
                     self.presses.touch_down(id);
-                    window.perform_haptic_feedback(HapticFeedback::Selection);
+                    rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
                     cx.notify();
                 }
             }
@@ -769,7 +769,7 @@ impl PhoneApp {
             .backend
             .update(cx, |backend, cx| backend.route_endpoint(&id, cx));
         self.route_close(window, cx);
-        window.perform_haptic_feedback(HapticFeedback::Confirm);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
         if outcome.failed() {
             self.show_notice_pill(format!("Couldn't switch to {}", row.label), None, false, cx);
             return;

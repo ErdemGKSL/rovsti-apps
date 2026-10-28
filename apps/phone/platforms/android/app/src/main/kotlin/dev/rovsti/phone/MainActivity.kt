@@ -59,7 +59,37 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
         CallRegistry.refreshKeyguard()
     }
 
+    override fun onStart() {
+        super.onStart()
+        registerSimListener()
+    }
+
+    /** `sims_changed` (AD-26): a SIM was inserted, removed or switched; Rust re-pulls the accounts. */
+    private var simListener: android.telephony.SubscriptionManager.OnSubscriptionsChangedListener? = null
+
+    private fun registerSimListener() {
+        if (simListener != null) return
+        val manager = getSystemService(android.telephony.SubscriptionManager::class.java) ?: return
+        val listener = object : android.telephony.SubscriptionManager.OnSubscriptionsChangedListener() {
+            override fun onSubscriptionsChanged() = RovstiBridge.emit("sims_changed", "{}")
+        }
+        try {
+            manager.addOnSubscriptionsChangedListener(java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "sims").apply { isDaemon = true } }, listener)
+            simListener = listener
+        } catch (_: SecurityException) {
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        RovstiBridge.handleActivityResult(requestCode, resultCode, data)
+    }
+
     override fun onStop() {
+        simListener?.let {
+            getSystemService(android.telephony.SubscriptionManager::class.java)?.removeOnSubscriptionsChangedListener(it)
+        }
+        simListener = null
         // Nothing left to show over the lock screen: put the flags back at once.
         if (!CallRegistry.hasLiveCall()) setLockScreenFlags(false)
         super.onStop()

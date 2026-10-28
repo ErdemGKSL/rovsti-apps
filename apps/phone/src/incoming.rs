@@ -658,10 +658,13 @@ impl PhoneApp {
         let outcome = self
             .backend
             .update(cx, |backend, cx| backend.send(command, cx));
-        window.perform_haptic_feedback(match act {
-            Act::Answer => HapticFeedback::Confirm,
-            Act::Decline => HapticFeedback::Selection,
-        });
+        rovsti_ui::haptics::perform(
+            window,
+            match act {
+                Act::Answer => HapticFeedback::Confirm,
+                Act::Decline => HapticFeedback::Selection,
+            },
+        );
         if outcome != backend::Outcome::Declined {
             let inc = &mut self.incoming;
             inc.acted = Some(act);

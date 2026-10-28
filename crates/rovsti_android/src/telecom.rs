@@ -9,6 +9,31 @@ pub fn place_call(number: &str) -> Result<bool> {
     bridge::call_bool_str("placeCall", number)
 }
 
+/// [`place_call`] on a chosen SIM (story 16.3): `account_key` is the opaque
+/// `PhoneAccountInfo::key`. Kotlin adds `EXTRA_PHONE_ACCOUNT_HANDLE`; it never
+/// changes the system default, and never takes a key for an emergency number.
+pub fn place_call_on(number: &str, account_key: &str) -> Result<bool> {
+    bridge::call_bool(
+        "placeCallOn",
+        &[bridge::Arg::Str(number), bridge::Arg::Str(account_key)],
+    )
+}
+
+/// The call-capable accounts as JSON (`rovsti_core::wire::PhoneAccountsResponse`).
+/// Blocks on Telecom and Subscription queries: call it off the UI thread.
+pub fn phone_accounts() -> Result<String> {
+    bridge::call_string("phoneAccounts", &[])
+}
+
+/// Answers a system account picker with the account `account_key` (the
+/// registry safety net, story 16.3).
+pub fn select_account(call_id: i32, account_key: &str) -> Result<bool> {
+    bridge::call_bool(
+        "callSelectAccount",
+        &[bridge::Arg::Int(call_id), bridge::Arg::Str(account_key)],
+    )
+}
+
 /// A settings page the apps hand off to (story 14.4).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SystemPage {
@@ -109,6 +134,9 @@ mod tests {
 
     #[test]
     fn desktop_is_unsupported() {
+        assert!(matches!(place_call_on("1", "k"), Err(Error::Unsupported)));
+        assert!(matches!(phone_accounts(), Err(Error::Unsupported)));
+        assert!(matches!(select_account(1, "k"), Err(Error::Unsupported)));
         assert!(matches!(place_call("1"), Err(Error::Unsupported)));
         assert!(matches!(add_contact("1"), Err(Error::Unsupported)));
         for page in SystemPage::ALL {

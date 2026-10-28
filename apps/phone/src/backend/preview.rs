@@ -193,6 +193,7 @@ impl Backend {
             .map(str::to_owned)
             .or_else(|| std::env::var("ROVSTI_PREVIEW_CALL").ok());
         let raw = raw.to_owned();
+        let account = self.preview_account.take();
         if self
             .calls
             .foreground()
@@ -213,6 +214,7 @@ impl Backend {
                 can_hold: true,
                 is_incoming: false,
                 disconnect_cause: None,
+                account_key: account,
                 ..WireCall::default()
             }];
             s.foreground_call_id = Some(CALL_ID);

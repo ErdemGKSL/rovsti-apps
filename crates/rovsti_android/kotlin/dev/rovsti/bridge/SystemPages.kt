@@ -29,6 +29,8 @@ object SystemPages {
     /** The actions to try in order; empty for an unknown page. The last is App info, which always exists. */
     fun chain(page: String): List<String> {
         val action = ACTIONS[page] ?: return emptyList()
+        // TTY and RTT: the call accessibility page, else the general Accessibility page, else App info.
+        if (page == "call_accessibility") return listOf(action, ACTIONS.getValue("accessibility"), ACTION_DETAILS)
         return if (action == ACTION_DETAILS) listOf(ACTION_DETAILS) else listOf(action, ACTION_DETAILS)
     }
 

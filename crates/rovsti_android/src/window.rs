@@ -20,6 +20,13 @@ pub fn request_dismiss_keyguard() -> Result<bool> {
     bridge::call_bool0("requestDismissKeyguard")
 }
 
+/// Tells Kotlin whether Rust's session is live and the activity resumed
+/// (story 16.3). While `false`, Kotlin answers system account pickers itself
+/// and keeps one-shot events in its mailbox; `true` drains the mailbox.
+pub fn ui_attached(attached: bool) -> Result<bool> {
+    bridge::call_bool("uiAttached", &[bridge::Arg::Bool(attached)])
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -33,5 +40,6 @@ mod tests {
             request_dismiss_keyguard(),
             Err(Error::Unsupported)
         ));
+        assert!(matches!(ui_attached(true), Err(Error::Unsupported)));
     }
 }

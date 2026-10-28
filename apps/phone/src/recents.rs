@@ -532,7 +532,10 @@ impl PhoneApp {
                                     if this.recents.touch.take().is_some() {
                                         this.recents.suppress_click = true;
                                         this.recents.tap.spoil();
-                                        window.perform_haptic_feedback(HapticFeedback::LongPress);
+                                        rovsti_ui::haptics::perform(
+                                            window,
+                                            HapticFeedback::LongPress,
+                                        );
                                         this.presses.release_all();
                                         this.recents_info(index, window, cx);
                                     }
@@ -629,7 +632,7 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        window.perform_haptic_feedback(HapticFeedback::Confirm);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
         self.flights.home = None;
         let placement = self
             .backend

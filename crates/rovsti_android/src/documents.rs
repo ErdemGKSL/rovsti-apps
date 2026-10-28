@@ -1,5 +1,5 @@
-//! Storage Access Framework hand-offs for backup and export (AD-30). Facade
-//! only: the Kotlin bodies arrive with the backup stories (21.x).
+//! Storage Access Framework hand-offs for backup and export (AD-30). Kotlin
+//! side: `Documents`.
 //!
 //! Both start a system picker and return at once; the answer arrives later as
 //! the one-shot event `document_result` (`rovsti_core::wire::DocumentResult`).

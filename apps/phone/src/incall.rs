@@ -727,7 +727,7 @@ impl PhoneApp {
         }
         if waiting.is_some() && !ic.waiting_open {
             ic.aura.update(cx, |a, cx| a.waiting_pulse(cx));
-            window.perform_haptic_feedback(HapticFeedback::Selection);
+            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
         }
         let waiting_gone = waiting.is_none() && ic.waiting_open;
         ic.set_waiting(waiting);
@@ -789,7 +789,7 @@ impl PhoneApp {
                 if ic.view.as_ref() != Some(&view) {
                     if view.state == CallState::Active && !was_active && !is_new {
                         // S9: a light haptic as the timer lands.
-                        window.perform_haptic_feedback(HapticFeedback::Selection);
+                        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
                     }
                     self.apply_view(view, window, cx);
                 }
@@ -1215,7 +1215,7 @@ impl PhoneApp {
                 if let Some(digit) = id.strip_prefix("ik-").and_then(|d| d.chars().next())
                     && live
                 {
-                    window.perform_haptic_feedback(HapticFeedback::Selection);
+                    rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
                     push_digit(&mut self.incall.digits, digit);
                     self.incall.digit_line = digit_line(&self.incall.digits).into();
                     self.incall.dtmf_down = true;
@@ -1250,7 +1250,7 @@ impl PhoneApp {
                 if let Some(reason) = en.reason(Slot::HoldSwap) {
                     self.show_notice_pill(reason.text(), None, false, cx);
                 } else if swapping {
-                    window.perform_haptic_feedback(HapticFeedback::Confirm);
+                    rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
                     self.start_pending(Slot::HoldSwap, window, cx);
                     self.backend.update(cx, |b, cx| {
                         b.swap(cx);
@@ -1265,7 +1265,7 @@ impl PhoneApp {
                 if let Some(reason) = en.reason(Slot::Merge) {
                     self.show_notice_pill(reason.text(), None, false, cx);
                 } else {
-                    window.perform_haptic_feedback(HapticFeedback::Confirm);
+                    rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
                     self.start_pending(Slot::Merge, window, cx);
                     self.backend.update(cx, |b, cx| {
                         b.merge(cx);
@@ -1283,7 +1283,7 @@ impl PhoneApp {
             return;
         };
         if let Some(reason) = self.incall.zone.enablement.reason(slot) {
-            window.perform_haptic_feedback(HapticFeedback::Selection);
+            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
             self.show_notice_pill(reason.text(), None, false, cx);
         }
     }

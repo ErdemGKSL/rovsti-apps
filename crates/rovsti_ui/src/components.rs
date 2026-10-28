@@ -214,6 +214,19 @@ pub fn glass_icon_button_scaled(
     badge: bool,
     icon_scale: f32,
 ) -> Div {
+    glass_icon_button_turned(theme, icon, press, badge, icon_scale, 0.0)
+}
+
+/// [`glass_icon_button_scaled`] with the glyph turned by `turn` radians (S24:
+/// the Settings gear). The slot and the glass keep their place.
+pub fn glass_icon_button_turned(
+    theme: Theme,
+    icon: GpuiIcons,
+    press: f32,
+    badge: bool,
+    icon_scale: f32,
+    turn: f32,
+) -> Div {
     let colors = crate::theme::colors(theme);
     let held = press.clamp(0.0, 1.0);
     let side = f32::from(metrics::MIN_HIT) * press_scale(press, scale::PRESS_CARD);
@@ -233,12 +246,17 @@ pub fn glass_icon_button_scaled(
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(
-                    svg()
+                .child({
+                    let glyph = svg()
                         .path(icon.path())
                         .size(px(20.0 * icon_scale))
-                        .text_color(colors.label),
-                ),
+                        .text_color(colors.label);
+                    if turn == 0.0 {
+                        glyph
+                    } else {
+                        glyph.with_transformation(gpui::Transformation::rotate(gpui::radians(turn)))
+                    }
+                }),
         )
         .children(badge.then(|| {
             div()

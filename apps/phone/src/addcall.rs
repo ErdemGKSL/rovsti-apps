@@ -191,7 +191,7 @@ impl PhoneApp {
 
     /// The one call path. A refusal stays in the sheet and the first call stays Active.
     fn add_call_place(&mut self, raw: &str, window: &mut Window, cx: &mut Context<Self>) {
-        window.perform_haptic_feedback(HapticFeedback::Confirm);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
         let placement = self
             .backend
             .update(cx, |backend, cx| backend.place_call(raw, cx));
@@ -235,7 +235,7 @@ impl PhoneApp {
             "sheet-ac-seg0" | "sheet-ac-seg1" | "sheet-ac-seg2" => {
                 let segment = usize::from(id.as_bytes()[id.len() - 1] - b'0');
                 if self.add.segment_allowed(segment, locked) && segment != self.add.segment {
-                    window.perform_haptic_feedback(HapticFeedback::Selection);
+                    rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
                     self.add.segment = segment;
                     self.add.chooser = None;
                     self.add.failed = None;

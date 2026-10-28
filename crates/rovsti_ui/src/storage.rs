@@ -14,7 +14,9 @@ use std::{
 };
 
 use gpui::{App, Task};
-use rovsti_core::settings::{PrefsV1, PrefsV2, SCHEMA_VERSION};
+use rovsti_core::settings::{
+    BackupFile, ImportError, ImportPreview, PrefsV1, PrefsV2, SCHEMA_VERSION, plausible_backup_size,
+};
 use serde::Deserialize;
 
 /// The app's private data directory, created if missing.
@@ -65,6 +67,46 @@ pub type Prefs = PrefsV2;
 
 /// File name of the preferences.
 pub const PREFS_FILE: &str = "prefs.json";
+
+// ---- backup file (story 16.6) ---------------------------------------------------
+
+/// Why a picked file is not a usable backup, in the owner's words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BackupRefusal {
+    /// Over 256 KB, not JSON, or another kind of file.
+    NotABackup,
+    /// Written by a newer build of the app.
+    Newer,
+}
+
+impl BackupRefusal {
+    /// The inline red row's text.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::NotABackup => "This isn't a Rovsti Phone backup.",
+            Self::Newer => "This backup is from a newer version of Rovsti Phone.",
+        }
+    }
+}
+
+/// The text of a backup file for the current preferences.
+pub fn backup_json(prefs: &Prefs, created_ms: i64, app_version: &str) -> String {
+    let file = BackupFile::from_prefs(prefs, created_ms, app_version);
+    serde_json::to_string_pretty(&file).unwrap_or_default()
+}
+
+/// Parses picked text outside core: the size is checked first, then the JSON,
+/// then the kind and version, and the result is what an import would change.
+pub fn parse_backup(text: &str, current: &Prefs) -> Result<ImportPreview, BackupRefusal> {
+    if !plausible_backup_size(text.len()) {
+        return Err(BackupRefusal::NotABackup);
+    }
+    let file: BackupFile = serde_json::from_str(text).map_err(|_| BackupRefusal::NotABackup)?;
+    ImportPreview::from(&file, current).map_err(|error| match error {
+        ImportError::Newer => BackupRefusal::Newer,
+        ImportError::NotABackup => BackupRefusal::NotABackup,
+    })
+}
 
 /// Reads only the version of a prefs file; a missing one counts as 1.
 #[derive(Deserialize)]
@@ -619,5 +661,68 @@ mod tests {
         assert_eq!(load_prefs(&dir).prefs.ui.last_tab, Some(2));
         drop(writer);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_backup_round_trips_through_export_wipe_import() {
+        use rovsti_core::settings::SpeedDialEntry;
+        let mut model = Prefs::default();
+        model.settings.haptics = rovsti_core::wire::HapticsLevel::Light;
+        model.settings.flip_to_silence = true;
+        model.settings.keypad_tones = Some(false);
+        model.quick_replies = vec!["Call you back".into(), "In a meeting".into()];
+        model.favorites_order = vec!["k1".into(), "k2".into()];
+        model.speed_dial.insert(
+            2,
+            SpeedDialEntry {
+                lookup_key: "k1".into(),
+                number_raw: "+905551112233".into(),
+                name: "Ayse".into(),
+            },
+        );
+        let text = backup_json(&model, 1_700_000_000_000, "0.2.0");
+        // Wipe: a fresh install, with its own ui state kept.
+        let mut wiped = Prefs::default();
+        wiped.ui.last_tab = Some(2);
+        let preview = parse_backup(&text, &wiped).expect("preview");
+        assert_eq!(preview.speed_dial, 1);
+        assert_eq!(preview.favorites, 2);
+        assert_eq!(preview.quick_replies, 2);
+        assert_eq!(preview.settings_changed, 3);
+        preview.apply_to(&mut wiped);
+        assert_eq!(wiped.settings, model.settings);
+        assert_eq!(wiped.quick_replies, model.quick_replies);
+        assert_eq!(wiped.speed_dial, model.speed_dial);
+        assert_eq!(wiped.favorites_order, model.favorites_order);
+        assert_eq!(wiped.ui.last_tab, Some(2));
+    }
+
+    #[test]
+    fn foreign_oversized_and_newer_files_are_refused() {
+        let p = Prefs::default();
+        assert_eq!(
+            parse_backup("", &p).expect_err("refused"),
+            BackupRefusal::NotABackup
+        );
+        assert_eq!(
+            parse_backup("[1,2]", &p).expect_err("refused"),
+            BackupRefusal::NotABackup
+        );
+        assert_eq!(
+            parse_backup(r#"{"v":1,"kind":"other"}"#, &p).expect_err("refused"),
+            BackupRefusal::NotABackup
+        );
+        assert_eq!(
+            parse_backup(r#"{"v":9,"kind":"rovsti-phone-backup"}"#, &p).expect_err("refused"),
+            BackupRefusal::Newer
+        );
+        let big = format!(
+            r#"{{"v":1,"kind":"rovsti-phone-backup","pad":"{}"}}"#,
+            "x".repeat(300_000)
+        );
+        assert_eq!(
+            parse_backup(&big, &p).expect_err("refused"),
+            BackupRefusal::NotABackup
+        );
     }
 }

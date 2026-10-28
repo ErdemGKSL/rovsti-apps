@@ -156,6 +156,8 @@ pub(crate) enum HoldAction {
     Clear,
     /// The Setup title was held: open Diagnostics (story 14.0f).
     Diagnostics,
+    /// The Settings title was held: open Diagnostics (story 16.1).
+    SettingsDiagnostics,
     /// The Audio control was held: open the route list (story 14.6).
     RouteList,
     /// A dimmed In-Call control (its [`Slot`](crate::zone::Slot) index) was held: say why.
@@ -223,6 +225,7 @@ impl PhoneApp {
     pub(crate) fn released(&mut self, cx: &mut Context<Self>) {
         self.hold_gen += 1;
         self.presses.release_all();
+        self.settings.gear_held = false;
         self.incall_released(cx);
     }
 
@@ -255,25 +258,26 @@ impl PhoneApp {
         match action {
             HoldAction::Plus => {
                 if dial::long_press_zero(&mut self.dialed) {
-                    window.perform_haptic_feedback(HapticFeedback::LongPress);
+                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
                     self.digit_pop.snap(1.18);
                     self.digit_pop.set_target(1.0);
                 }
             }
             HoldAction::Clear => {
                 if !self.dialed.is_empty() {
-                    window.perform_haptic_feedback(HapticFeedback::LongPress);
+                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
                     self.dialed.clear();
                     self.delete_shown.set_target(0.0);
                 }
             }
             HoldAction::Diagnostics => {
                 if self.sheet.is_open() && self.sheet_kind == crate::SheetKind::Setup {
-                    window.perform_haptic_feedback(HapticFeedback::LongPress);
+                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
                     self.sheet_kind = crate::SheetKind::Diagnostics;
                     self.presses.release_all();
                 }
             }
+            HoldAction::SettingsDiagnostics => self.settings_diagnostics(window, cx),
             HoldAction::RouteList => self.route_long_press(window, cx),
             HoldAction::Reason(slot) => self.show_reason(usize::from(slot), window, cx),
         }
@@ -287,7 +291,7 @@ impl PhoneApp {
         } else {
             self.shake.kick(-1400.0);
         }
-        window.perform_haptic_feedback(HapticFeedback::Reject);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Reject);
     }
 
     pub(crate) fn set_status(&mut self, status: impl Into<SharedString>) {
@@ -303,7 +307,7 @@ impl PhoneApp {
                 self.digit_pop.snap(1.18);
                 self.digit_pop.set_target(1.0);
                 self.delete_shown.set_target(1.0);
-                window.perform_haptic_feedback(HapticFeedback::Selection);
+                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
                 if key == '0' {
                     self.arm_hold(LONG_ZERO, HoldAction::Plus, window, cx);
                 } else {
@@ -357,7 +361,7 @@ impl PhoneApp {
             if let Some(digit) = last {
                 self.begin_ghost(digit, window);
             }
-            window.perform_haptic_feedback(HapticFeedback::Selection);
+            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
             self.status = None;
             if self.dialed.is_empty() {
                 self.delete_shown.set_target(0.0);
@@ -396,7 +400,7 @@ impl PhoneApp {
         self.digit_pop.snap(1.1);
         self.digit_pop.set_target(1.0);
         self.delete_shown.set_target(1.0);
-        window.perform_haptic_feedback(HapticFeedback::Confirm);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
     }
 
     fn call_press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -405,7 +409,7 @@ impl PhoneApp {
             self.invalid(window);
             return;
         }
-        window.perform_haptic_feedback(HapticFeedback::Confirm);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
         let placement = self
             .backend
             .update(cx, |backend, cx| backend.place_call(&raw, cx));

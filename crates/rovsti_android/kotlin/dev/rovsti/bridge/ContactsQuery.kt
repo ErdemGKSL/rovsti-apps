@@ -9,7 +9,7 @@ import android.provider.ContactsContract.CommonDataKinds.Phone
 
 /** Contacts pulls and number lookup (AD-9): one row per number, grouped in [ProviderJson.contacts]. */
 object ContactsQuery {
-    data class Match(val contactId: Long, val displayName: String)
+    data class Match(val contactId: Long, val displayName: String, val displayNameAlt: String? = null)
 
     private val PROJECTION = arrayOf(
         Phone.CONTACT_ID,
@@ -21,6 +21,9 @@ object ContactsQuery {
         Phone.STARRED,
         Phone.PHOTO_THUMBNAIL_URI,
         Phone.LOOKUP_KEY,
+        Phone.DISPLAY_NAME_ALTERNATIVE,
+        Phone.SORT_KEY_PRIMARY,
+        Phone.SORT_KEY_ALTERNATIVE,
     )
 
     fun contactsJson(context: Context): String = pull(context, starredOnly = false)
@@ -59,6 +62,10 @@ object ContactsQuery {
                         superPrimary = c.getInt(5) != 0,
                         starred = c.getInt(6) != 0,
                         photoUri = c.getString(7),
+                        lookupKey = c.getString(8),
+                        displayNameAlt = c.getString(9),
+                        sortKey = c.getString(10),
+                        sortKeyAlt = c.getString(11),
                     )
                 )
             }
@@ -87,10 +94,14 @@ object ContactsQuery {
             val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(number))
             context.contentResolver.query(
                 uri,
-                arrayOf(ContactsContract.PhoneLookup._ID, ContactsContract.PhoneLookup.DISPLAY_NAME),
+                arrayOf(
+                    ContactsContract.PhoneLookup._ID,
+                    ContactsContract.PhoneLookup.DISPLAY_NAME,
+                    ContactsContract.PhoneLookup.DISPLAY_NAME_ALTERNATIVE,
+                ),
                 null, null, null,
             )?.use { c ->
-                if (c.moveToFirst()) Match(c.getLong(0), c.getString(1) ?: "") else null
+                if (c.moveToFirst()) Match(c.getLong(0), c.getString(1) ?: "", c.getString(2)?.takeIf { it.isNotEmpty() }) else null
             }
         } catch (_: SecurityException) {
             null

@@ -20,11 +20,13 @@ import android.telecom.CallEndpoint
 import android.telecom.CallEndpointException
 import android.telecom.TelecomManager
 import android.telecom.VideoProfile
+import dev.rovsti.bridge.AccountRef
 import dev.rovsti.bridge.AudioInfo
 import dev.rovsti.bridge.CallInfo
 import dev.rovsti.bridge.CallsApi
 import dev.rovsti.bridge.ContactsQuery
 import dev.rovsti.bridge.Focus
+import dev.rovsti.bridge.Haptics
 import dev.rovsti.bridge.MultiCall
 import dev.rovsti.bridge.MultiCallFacts
 import dev.rovsti.bridge.OpResult
@@ -34,6 +36,8 @@ import dev.rovsti.bridge.Tick
 import dev.rovsti.bridge.Wire
 import dev.rovsti.bridge.ProviderJson
 import dev.rovsti.bridge.RovstiBridge
+import dev.rovsti.bridge.SettingsMirror
+import dev.rovsti.bridge.SimAccounts
 import dev.rovsti.bridge.SnapshotData
 import dev.rovsti.bridge.SnapshotJson
 import java.util.concurrent.Executor
@@ -60,11 +64,19 @@ object CallRegistry : CallsApi {
     }
 
     private const val DTMF_SAFETY_MS = 4_000L
+    private const val SELECT_TIMEOUT_MS = 10_000L
     private const val AUDIO_FALLBACK_MS = 1_500L
 
     private class Entry(val id: Int, val call: Call, val callback: Call.Callback) {
         var displayName: String? = null
+        var displayNameAlt: String? = null
         var contactId: Long? = null
+
+        /** The call went Active once (the connect vibration plays once per call, story 16.8). */
+        var connectedOnce = false
+
+        /** A system account picker for this call waits for an answer from Rust (story 16.3). */
+        var selecting = false
 
         /** Wall-clock time the call went on hold (null while it is not held). */
         var holdSince: Long? = null
@@ -358,6 +370,8 @@ object CallRegistry : CallsApi {
         val callback = object : Call.Callback() {
             override fun onStateChanged(call: Call, state: Int) {
                 if (state == Call.STATE_SELECT_PHONE_ACCOUNT) selectAccount(call)
+                else entries[id]?.selecting = false
+                vibrateFor(id, state)
                 entries[id]?.let { it.holdSince = if (state == Call.STATE_HOLDING) (it.holdSince ?: System.currentTimeMillis()) else null }
                 record("onStateChanged", id, stateName(state))
                 observeHoldAnswer(id, state)
@@ -435,7 +449,30 @@ object CallRegistry : CallsApi {
 
     // ---- Internals: main thread ----------------------------------------
 
+    /**
+     * The registry safety net for `STATE_SELECT_PHONE_ACCOUNT` raised by another app (AD-26): when the
+     * phone is locked, Rust has no live session, or nobody answers within [SELECT_TIMEOUT_MS], the
+     * account is chosen as in v0.1; otherwise the snapshot says `selecting_account` and Rust answers
+     * with `callSelectAccount`.
+     */
     private fun selectAccount(call: Call) {
+        val entry = entries.values.firstOrNull { it.call === call }
+        if (entry == null || !RovstiBridge.uiReady || keyguardLocked()) {
+            autoSelectAccount(call)
+            return
+        }
+        if (entry.selecting) return
+        entry.selecting = true
+        main.postDelayed({
+            if (entries[entry.id] === entry && entry.selecting) {
+                entry.selecting = false
+                autoSelectAccount(call)
+                rebuild()
+            }
+        }, SELECT_TIMEOUT_MS)
+    }
+
+    private fun autoSelectAccount(call: Call) {
         val telecom = app?.getSystemService(TelecomManager::class.java) ?: return
         try {
             val suggested = call.details.intentExtras
@@ -449,6 +486,34 @@ object CallRegistry : CallsApi {
         }
     }
 
+    override fun selectAccount(callId: Int, key: String): Boolean {
+        val context = app ?: return false
+        val handle = SimAccounts.handleFor(context, key) ?: return false
+        main.post {
+            val entry = entries[callId] ?: return@post
+            if (entry.call.state != Call.STATE_SELECT_PHONE_ACCOUNT) return@post
+            entry.selecting = false
+            try {
+                entry.call.phoneAccountSelected(handle, false)
+            } catch (_: SecurityException) {
+            }
+            rebuild()
+        }
+        return true
+    }
+
+    /** Connect and end vibration (story 16.8): once per call, only when the mirror says so. */
+    private fun vibrateFor(id: Int, state: Int) {
+        val context = app ?: return
+        val entry = entries[id] ?: return
+        if (state == Call.STATE_ACTIVE && !entry.connectedOnce) {
+            entry.connectedOnce = true
+            Haptics.forEvent(context, "connect")
+        } else if (state == Call.STATE_DISCONNECTED && entry.connectedOnce && id == foregroundId) {
+            Haptics.forEvent(context, "end")
+        }
+    }
+
     /** Resolves the caller name once, off the main thread, then rebuilds. */
     private fun resolveName(entry: Entry) {
         val context = app ?: return
@@ -458,6 +523,7 @@ object CallRegistry : CallsApi {
             main.post {
                 if (entries[entry.id] !== entry) return@post
                 entry.displayName = match.displayName
+                entry.displayNameAlt = match.displayNameAlt
                 entry.contactId = match.contactId
                 rebuild()
             }
@@ -612,6 +678,19 @@ object CallRegistry : CallsApi {
         }
     }
 
+    /** The accounts a pending picker offers (key and label). */
+    private fun selectableAccounts(): List<AccountRef> {
+        val context = app ?: return emptyList()
+        return try {
+            val telecom = context.getSystemService(TelecomManager::class.java)
+            telecom?.callCapablePhoneAccounts?.map { h ->
+                AccountRef(SimAccounts.keyOf(h), telecom.getPhoneAccount(h)?.label?.toString().orEmpty())
+            } ?: emptyList()
+        } catch (_: SecurityException) {
+            emptyList()
+        }
+    }
+
     private val LIVE_STATES = setOf(Call.STATE_ACTIVE, Call.STATE_DIALING, Call.STATE_HOLDING, Call.STATE_CONNECTING)
 
     private fun stateName(state: Int): String = when (state) {
@@ -641,6 +720,7 @@ object CallRegistry : CallsApi {
                 numberRaw = raw,
                 normalized = ProviderJson.normalize(raw),
                 displayName = e.displayName,
+                displayNameAlt = e.displayNameAlt,
                 contactId = e.contactId,
                 connectTimeMs = d.connectTimeMillis.coerceAtLeast(0),
                 canHold = d.can(Call.Details.CAPABILITY_HOLD),
@@ -716,6 +796,7 @@ object CallRegistry : CallsApi {
         }
         checkOp()
         val calls = buildCalls()
+        val selecting = entries.values.firstOrNull { it.selecting }
         // While an operation runs the previous foreground stays in front (no transient scene).
         val focus = Focus.of(calls, if (ops.current != null) foregroundId else null)
         foregroundId = focus.foreground
@@ -736,6 +817,8 @@ object CallRegistry : CallsApi {
             canSwap = can.swap,
             pending = pendingNow,
             pendingFailed = pendingFailed,
+            selectingAccount = selecting != null,
+            accounts = if (selecting != null) selectableAccounts() else emptyList(),
             calls = calls,
         )
         val text = SnapshotJson.toJson(data)
@@ -825,7 +908,7 @@ object CallRegistry : CallsApi {
         val context = app ?: return
         val controller = proximity ?: ProximityController(context).also { proximity = it }
         controller.update(
-            wanted = ProximityPolicy.wanted(calls, focus, audio.routeName() ?: "earpiece"),
+            wanted = SettingsMirror.values.proximity && ProximityPolicy.wanted(calls, focus, audio.routeName() ?: "earpiece"),
             callInProgress = ProximityPolicy.inProgress(calls),
         )
     }

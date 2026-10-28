@@ -14,6 +14,7 @@ use gpui::{
 mod addcall;
 mod aura;
 mod backend;
+mod backup_ui;
 mod contacts;
 #[cfg(not(target_os = "android"))]
 mod devtools;
@@ -33,6 +34,7 @@ mod photos;
 mod recents;
 mod route;
 mod sample;
+mod settings_ui;
 mod setup_ui;
 mod signature;
 mod waiting_card;
@@ -89,6 +91,8 @@ enum SheetKind {
     Diagnostics,
     /// The Add call sheet over the In-Call screen (story 15.5).
     AddCall,
+    /// What an import would replace (story 16.6).
+    ImportPreview,
 }
 
 /// The line under the number field.
@@ -172,6 +176,10 @@ struct PhoneApp {
     back_enabled: bool,
     /// The hidden Diagnostics page (story 14.0f).
     diag: diagnostics::Diagnostics,
+    /// The Settings page behind the gear (Epic 16).
+    settings: settings_ui::SettingsUi,
+    backup: backup_ui::BackupUi,
+    setting_failed_seen: u64,
     /// The Notice pill (S28): confirmations and reasons, never in the layout.
     pill: NoticePill,
 
@@ -276,6 +284,8 @@ impl PhoneApp {
             cx.observe_in(&backend, window, |this, _, window, cx| {
                 this.sync_restore(cx);
                 this.sync_calls(window, cx);
+                this.sync_documents(window, cx);
+                this.sync_settings_live(cx);
                 this.sync_recents(cx);
                 this.sync_contacts(cx);
                 this.update_back(window);
@@ -289,6 +299,7 @@ impl PhoneApp {
             // Opening the app again brings a live call back.
             cx.observe_window_activation(window, |this, window, cx| {
                 let active = window.is_window_active();
+                this.backend.update(cx, |b, _| b.set_ui_ready(active));
                 if active {
                     this.app_activated(cx);
                 } else {
@@ -375,6 +386,9 @@ impl PhoneApp {
             sheet_kind: SheetKind::Setup,
             route: route::RouteUi::default(),
             diag: diagnostics::Diagnostics::default(),
+            settings: settings_ui::SettingsUi::default(),
+            backup: backup_ui::BackupUi::default(),
+            setting_failed_seen: 0,
             pill: NoticePill::new(),
             back_enabled: false,
             recents: RecentsView::new(),
@@ -506,6 +520,12 @@ impl PhoneApp {
             app.start_preview_keys(script, window, cx);
         }
         #[cfg(not(target_os = "android"))]
+        if std::env::var_os("ROVSTI_PREVIEW_SETTINGS").is_some() {
+            app.settings.open(false);
+            app.settings.enter_snap();
+            app.sync_settings_rows(cx, true);
+        }
+        #[cfg(not(target_os = "android"))]
         if let Ok(query) = std::env::var("ROVSTI_PREVIEW_QUERY") {
             app.contacts.field.update(cx, |f, cx| f.set(&query, cx));
         }
@@ -566,6 +586,8 @@ impl PhoneApp {
             self.route_close(window, cx);
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
+        } else if self.settings.is_open() {
+            self.settings_close(window, cx);
         } else if self.contacts.typing {
             // First Back puts the keyboard away; the next one is the OS's.
             window.blur();
@@ -581,6 +603,7 @@ impl PhoneApp {
         let want = self.incoming.wants_back()
             || self.route.is_open()
             || self.sheet.is_open()
+            || self.settings.is_open()
             || self.contacts.typing
             || self.incall.wants_back(call_only);
         if want != self.back_enabled {
@@ -645,6 +668,13 @@ impl PhoneApp {
             TouchPhase::Started => {
                 // Under the open sheet only the sheet's own buttons react, and
                 // under the In-Call screen only its own controls.
+                // The Settings page owns the screen: only its own controls (and sheets) react.
+                let on_settings = id
+                    .as_deref()
+                    .is_some_and(|i| i.starts_with("set-") || i.starts_with("sheet-"));
+                if self.settings.covers() && !on_settings {
+                    return;
+                }
                 let on_incoming = id.as_deref().is_some_and(|i| i.starts_with("in-"));
                 let blocked_by_incoming = self.incoming.covers() != on_incoming;
                 // The Add call sheet's own keys, field and buttons work over the call.
@@ -683,6 +713,9 @@ impl PhoneApp {
                 }
                 if let Some(id) = id.clone() {
                     self.presses.touch_down(id.clone());
+                    if &*id == "gear" {
+                        self.settings.gear_held = true;
+                    }
                     if let Some(slot) = id
                         .strip_prefix("ix-dim-")
                         .and_then(|n| n.parse::<u8>().ok())
@@ -696,6 +729,13 @@ impl PhoneApp {
                         );
                     } else if Self::acts_on_down(&id) {
                         self.activate(&id, window, cx);
+                    } else if &*id == "set-title" {
+                        self.arm_hold(
+                            settings_ui::DIAG_AFTER_MS,
+                            keypad::HoldAction::SettingsDiagnostics,
+                            window,
+                            cx,
+                        );
                     } else if &*id == "sheet-title" {
                         self.arm_hold(
                             diagnostics::OPEN_AFTER_MS,
@@ -728,6 +768,7 @@ impl PhoneApp {
 
     fn tick(&mut self, dt: std::time::Duration, real: std::time::Duration) -> bool {
         let mut moving = self.tabs.tick(dt);
+        moving |= self.settings.tick(dt, real);
         moving |= self.page_fade.tick(real);
         moving |= self.call_fade.tick(real);
         moving |= self.presses.tick(dt);
@@ -873,7 +914,7 @@ impl PhoneApp {
         if self.incall.covers() {
             // pb(58) + the 64 px End button.
             58.0 + 64.0 + GAP
-        } else if self.sheet.is_visible() {
+        } else if self.sheet.is_visible() || self.settings.covers() {
             GAP + 10.0
         } else {
             f32::from(metrics::TAB_BAR_MARGIN) + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1 + GAP
@@ -898,6 +939,7 @@ impl PhoneApp {
         let tab = self.tabs.selected();
         let complete = self.checklist(cx).complete();
         let setup = self.setup_button(theme, complete, cx).into_any_element();
+        let gear = self.settings_gear(theme, cx).into_any_element();
         if tab != KEYPAD_TAB {
             // Past 24 px of scroll the large title hands over to a compact one
             // (opacity and translate only: the list never moves).
@@ -913,6 +955,7 @@ impl PhoneApp {
                 .top(px(-10.0 * collapse))
                 .left(px(self.title_shift()))
                 .opacity(1.0 - collapse)
+                .pr(px(56.0))
                 .child(large_title(theme, TABS[tab], None));
             let compact = div()
                 .absolute()
@@ -955,6 +998,7 @@ impl PhoneApp {
                         .child(compact)
                         .children(caption)
                         .child(setup)
+                        .child(gear)
                         .child(body),
                 )
                 .into_any_element();
@@ -962,6 +1006,7 @@ impl PhoneApp {
         let title = div()
             .relative()
             .left(px(self.title_shift()))
+            .pr(px(56.0))
             .child(large_title(theme, TABS[tab], None));
         div()
             .id("page")
@@ -976,6 +1021,7 @@ impl PhoneApp {
                     .left(px(self.page_slide()))
                     .child(title)
                     .child(setup)
+                    .child(gear)
                     .child(self.keypad(theme, cx)),
             )
             .into_any_element()
@@ -1019,6 +1065,13 @@ impl PhoneApp {
             SheetKind::Diagnostics => self.diag_sheet(theme, window, cx),
             // Drawn over the In-Call screen by `add_call_overlay`.
             SheetKind::AddCall => None,
+            SheetKind::ImportPreview => {
+                if !self.sheet.is_visible() {
+                    return None;
+                }
+                let body = self.import_sheet_body(theme, cx)?;
+                self.modal_sheet(theme, window, "Import backup", body, cx)
+            }
             SheetKind::Number => {
                 if !self.sheet.is_visible() {
                     return None;
@@ -1057,6 +1110,7 @@ impl Render for PhoneApp {
         self.contacts_sync_focus(window, cx);
         self.sync_notice(cx);
         self.sync_pill(cx);
+        self.sync_settings_frame(window, cx);
         self.sync_dial_match(cx);
         let mut motion = std::mem::take(&mut self.motion);
         motion.frame_timed(window, |dt, real| self.tick(dt, real));
@@ -1111,7 +1165,7 @@ impl Render for PhoneApp {
                 .child(self.page(theme, window, cx))
                 .children(self.return_pill(theme, cx))
                 .children(self.notice_slot(theme, cx))
-                .children((away < 0.995).then(|| {
+                .children((away < 0.995 && self.settings.progress() < 0.995).then(|| {
                     // Under the keyboard the bar slides off the bottom; it is
                     // hidden, not dismissed. The bar is a cached view: frames in
                     // which it did not change replay its last frame.
@@ -1122,6 +1176,7 @@ impl Render for PhoneApp {
                         .left_0()
                         .right_0()
                         .h(metrics::TAB_BAR_HEIGHT * 1.1)
+                        .opacity(self.settings_tab_fade())
                         .child(
                             self.tab_view
                                 .clone()
@@ -1129,6 +1184,7 @@ impl Render for PhoneApp {
                         )
                 }))
                 .child(self.keyfx.clone())
+                .children(self.settings_overlay(theme, cx))
                 .children(sheet);
         }
         #[cfg(not(target_os = "android"))]

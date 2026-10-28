@@ -18,6 +18,8 @@ object CallLogQuery {
         CallLog.Calls.CACHED_NAME,
         CallLog.Calls.CACHED_NUMBER_LABEL,
         CallLog.Calls.CACHED_LOOKUP_URI,
+        CallLog.Calls.PHONE_ACCOUNT_COMPONENT_NAME,
+        CallLog.Calls.PHONE_ACCOUNT_ID,
     )
 
     fun json(context: Context, limit: Int): String = try {
@@ -46,6 +48,7 @@ object CallLogQuery {
                         cachedName = c.getString(5)?.takeIf { it.isNotEmpty() },
                         label = c.getString(6)?.takeIf { it.isNotEmpty() },
                         contactId = c.getString(7)?.let { android.net.Uri.parse(it).lastPathSegment?.toLongOrNull() },
+                        accountKey = SimAccounts.keyOf(c.getString(8), c.getString(9)),
                     )
                 )
             }

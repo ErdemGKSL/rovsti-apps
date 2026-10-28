@@ -332,6 +332,8 @@ object ProviderJson {
         val cachedName: String? = null,
         val label: String? = null,
         val contactId: Long? = null,
+        /** Opaque `"{component}#{handle id}"` of the account the call used (AD-26); null when unknown. */
+        val accountKey: String? = null,
     )
 
     data class PhoneRow(
@@ -342,6 +344,10 @@ object ProviderJson {
         val superPrimary: Boolean = false,
         val starred: Boolean = false,
         val photoUri: String? = null,
+        val lookupKey: String? = null,
+        val displayNameAlt: String? = null,
+        val sortKey: String? = null,
+        val sortKeyAlt: String? = null,
     )
 
     fun error(code: String): String =
@@ -394,6 +400,7 @@ object ProviderJson {
             r.cachedName?.let { o.put("cached_name", it) }
             r.label?.let { o.put("number_label", it) }
             r.contactId?.let { o.put("contact_id", it) }
+            r.accountKey?.let { o.put("account_key", it) }
             entries.put(o)
         }
         return ok(JSONObject().put("entries", entries))
@@ -421,6 +428,10 @@ object ProviderJson {
                 .put("numbers", numbers)
             if (group.any { it.starred }) o.put("starred", true)
             group.firstNotNullOfOrNull { it.photoUri }?.let { o.put("photo_uri", it) }
+            first.lookupKey?.let { o.put("lookup_key", it) }
+            first.displayNameAlt?.takeIf { it.isNotEmpty() }?.let { o.put("display_name_alt", it) }
+            first.sortKey?.takeIf { it.isNotEmpty() }?.let { o.put("sort_key", it) }
+            first.sortKeyAlt?.takeIf { it.isNotEmpty() }?.let { o.put("sort_key_alt", it) }
             contacts.put(o)
         }
         return ok(JSONObject().put("contacts", contacts))

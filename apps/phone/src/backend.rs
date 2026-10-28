@@ -28,7 +28,6 @@ use rovsti_android::{
     events::{self, RawEvent, kind},
     permissions, providers, roles, telecom, xiaomi,
 };
-use rovsti_core::settings::Settings;
 use rovsti_core::{
     call::CallModel,
     call_log::{self, RecentsRow},
@@ -41,11 +40,13 @@ use rovsti_core::{
         FavoritesPayload, WireContact, WireError,
     },
 };
+use rovsti_core::{settings::Settings, sim::SimInfo};
 use rovsti_ui::storage::{self, Prefs, PrefsWriter};
 use serde::de::DeserializeOwned;
 
 use crate::sample;
 
+mod local;
 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
 mod preview;
 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
@@ -53,6 +54,7 @@ mod preview_multi;
 #[cfg(test)]
 pub use preview_multi::SCENES;
 
+pub use local::SystemFacts;
 pub use rovsti_android::{
     permissions::{Access, Group},
     xiaomi::{Setting as XiaomiSetting, XiaomiOs},
@@ -282,6 +284,23 @@ pub struct Backend {
     log_pull: u64,
     contacts_pull: u64,
     permissions_pull: u64,
+    /// The phone's SIMs (empty until the first pull and on desktop).
+    sims: SimInfo,
+    sims_pull: u64,
+    /// A SIM chosen for a call that waits for the Phone permission.
+    pending_account: Option<String>,
+    /// Desktop preview: the SIM chosen for the next fake call.
+    preview_account: Option<String>,
+    /// Desktop preview: 1 single SIM, 2 dual (ask), 3 dual (default SIM 2).
+    preview_sims: u8,
+    facts: SystemFacts,
+    ui_ready: bool,
+    last_sync: String,
+    /// Bumped by every setting change; a late save check ignores older ones.
+    change_gen: u64,
+    setting_failed_gen: u64,
+    document: Option<rovsti_core::wire::DocumentResult>,
+    document_gen: u64,
     /// Desktop preview only: the fake call reports a locked keyguard.
     #[cfg(any(not(target_os = "android"), feature = "perf", test))]
     preview_locked: bool,
@@ -339,6 +358,21 @@ impl Backend {
                 log_pull: 0,
                 contacts_pull: 0,
                 permissions_pull: 0,
+                sims: SimInfo::default(),
+                sims_pull: 0,
+                pending_account: None,
+                preview_account: None,
+                preview_sims: std::env::var("ROVSTI_PREVIEW_SIMS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(1),
+                facts: SystemFacts::default(),
+                ui_ready: false,
+                last_sync: String::new(),
+                change_gen: 0,
+                setting_failed_gen: 0,
+                document: None,
+                document_gen: 0,
                 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
                 preview_locked: false,
                 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
@@ -386,6 +420,7 @@ impl Backend {
                     this.settings = Arc::new(prefs.settings.clone());
                     this.prefs = prefs;
                     this.prefs_ready = true;
+                    this.settings_published(cx);
                     this.writer = Some(PrefsWriter::new(dir, loaded.origin));
                     if changed || upgraded {
                         this.save_prefs();
@@ -398,6 +433,7 @@ impl Backend {
             backend._tasks.push(prefs);
             // The sink belongs to this session; clear it when the session ends.
             cx.on_release(move |_, _| {
+                let _ = rovsti_android::window::ui_attached(false);
                 events::clear_sink_if(sink_token);
             })
             .detach();
@@ -405,6 +441,10 @@ impl Backend {
             backend.refresh_permissions(cx);
             backend.refresh_call_log(cx);
             backend.refresh_contacts(cx);
+            backend.refresh_sims(cx);
+            backend.refresh_facts(cx);
+            // Rust's session is live: Kotlin may now hand over queued one-shot events.
+            backend.set_ui_ready(true);
             backend
         })
     }
@@ -589,6 +629,7 @@ impl Backend {
         }
         if self.prefs.settings != *self.settings {
             self.settings = Arc::new(self.prefs.settings.clone());
+            self.settings_published(cx);
             cx.notify();
         }
         self.save_prefs();
@@ -771,20 +812,7 @@ impl Backend {
     }
 
     fn place_now(&mut self, raw: &str, cx: &mut Context<Self>) -> Placement {
-        match telecom::place_call(raw) {
-            Ok(true) => Placement::Placed,
-            Ok(false) => Placement::Failed,
-            Err(Error::Unsupported) => {
-                #[cfg(not(target_os = "android"))]
-                self.preview_start(raw, cx);
-                let _ = cx;
-                Placement::Placed
-            }
-            Err(error) => {
-                log::warn!("placing a call failed: {error}");
-                Placement::Failed
-            }
-        }
+        self.place_with_account(raw, cx)
     }
 
     fn request_phone_for(&mut self, raw: &str, cx: &mut Context<Self>) -> Placement {
@@ -827,6 +855,8 @@ impl Backend {
             },
             kind::PERMISSIONS_CHANGED => {
                 self.refresh_permissions(cx);
+                self.refresh_sims(cx);
+                self.refresh_facts(cx);
                 self.refresh_call_log(cx);
                 self.refresh_contacts(cx);
             }
@@ -834,6 +864,8 @@ impl Backend {
                 self.keyguard_gen += 1;
                 cx.notify();
             }
+            kind::SIMS_CHANGED => self.refresh_sims(cx),
+            kind::DOCUMENT_RESULT => self.on_document_result(&event.json, cx),
             kind::CALL_LOG_CHANGED => self.refresh_call_log(cx),
             kind::CONTACTS_CHANGED => self.refresh_contacts(cx),
             other => log::debug!("ignoring event {other}"),

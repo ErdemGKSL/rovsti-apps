@@ -43,6 +43,13 @@ const SCENE_CHIPS: [(&str, &str, &str); 8] = [
     ("dev-s-three", "3 calls", "three"),
 ];
 
+/// Fake SIM set-ups for the desktop preview (Epic 16): `(press id, label, mode)`.
+const SIM_CHIPS: [(&str, &str, u8); 3] = [
+    ("dev-sim-1", "1 SIM", 1),
+    ("dev-sim-2", "2 SIM ask", 2),
+    ("dev-sim-3", "2 SIM def", 3),
+];
+
 impl PhoneApp {
     pub(crate) fn dev_switcher(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
@@ -79,6 +86,43 @@ impl PhoneApp {
                             )
                     }),
             );
+        let sim_row = div().flex().justify_center().gap(px(4.0)).children(
+            (!cfg!(test))
+                .then_some(SIM_CHIPS)
+                .into_iter()
+                .flatten()
+                .map(|(id, label, mode)| {
+                    let on = self.backend.read(cx).preview_sims_mode() == mode;
+                    div()
+                        .id(id)
+                        .role(Role::Button)
+                        .aria_label(label)
+                        .h(px(20.0))
+                        .px(px(7.0))
+                        .rounded_full()
+                        .bg(if on {
+                            colors.accent
+                        } else {
+                            gpui::Hsla {
+                                a: 0.8,
+                                ..colors.fill
+                            }
+                        })
+                        .flex()
+                        .items_center()
+                        .text_size(px(10.5))
+                        .text_color(if on {
+                            gpui::white()
+                        } else {
+                            colors.secondary_label
+                        })
+                        .child(label)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| this.dev_action(id, cx)),
+                        )
+                }),
+        );
         div()
             .absolute()
             .top(px(8.0))
@@ -89,6 +133,7 @@ impl PhoneApp {
             .items_center()
             .gap(px(4.0))
             .child(scene_row)
+            .child(sim_row)
             .child(
                 div()
                     .flex()
@@ -261,6 +306,15 @@ impl PhoneApp {
             'j' => self.diag_run("audio", cx),
             'p' => self.diag_copy(cx),
             's' => self.contact_sheet_act("sheet-cstar", window, cx),
+            // Settings: `Q` opens the page, `Z` closes it, `I` taps the next row id of
+            // ROVSTI_PREVIEW_TAPS (comma separated, e.g. `set-proximity,set-sort-1`).
+            'Q' => self.settings_open(window, cx),
+            'Z' => self.settings_close(window, cx),
+            'I' => {
+                if let Some(id) = self.settings.preview_taps.pop_front() {
+                    self.settings_tap(&id, window, cx);
+                }
+            }
             'z' => {
                 let reduced = window.prefers_reduced_motion();
                 self.celebrate.observe(false, reduced);
@@ -290,6 +344,10 @@ impl PhoneApp {
             "dev-routes" => backend.preview_scenario("routes", cx),
             "dev-btadd" => backend.preview_add_bluetooth(cx),
             "dev-btrm" => backend.preview_remove_bluetooth(cx),
+            sim if sim.starts_with("dev-sim-") => {
+                let mode = sim["dev-sim-".len()..].parse().unwrap_or(1);
+                backend.preview_set_sims(mode, cx)
+            }
             scene if scene.starts_with("dev-s-") => {
                 backend.preview_scene(&scene["dev-s-".len()..], cx)
             }

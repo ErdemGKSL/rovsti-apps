@@ -46,6 +46,9 @@ interface CallsApi {
     /** Ends every non-ringing top-level call. */
     fun endAll(): Boolean = false
 
+    /** Answers a call waiting in `STATE_SELECT_PHONE_ACCOUNT` with the account [key] (story 16.3). */
+    fun selectAccount(callId: Int, key: String): Boolean = false
+
     /** What the registry measured for the S4 probe. */
     fun multiCallFacts(): MultiCallFacts = MultiCallFacts()
 

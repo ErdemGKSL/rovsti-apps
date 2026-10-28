@@ -238,6 +238,17 @@ impl From<PrefsV1> for PrefsV2 {
     }
 }
 
+// ---- keypad tones ----------------------------------------------------------
+
+/// Whether dial-pad tones play: the owner's choice, else what the system's
+/// "dial pad tones" setting says (story 16.8, AD-29).
+pub const fn effective_keypad_tones(setting: Option<bool>, system: bool) -> bool {
+    match setting {
+        Some(on) => on,
+        None => system,
+    }
+}
+
 // ---- haptics -------------------------------------------------------------
 
 /// The kind of haptic a view asks for.
@@ -332,6 +343,21 @@ pub enum ImportError {
     /// Written by a newer build.
     #[error("backup is from a newer version")]
     Newer,
+}
+
+/// `rovsti-phone-backup-{yyyy-mm-dd}.json` for the UTC day of `ms`.
+pub fn backup_file_name(ms: i64) -> String {
+    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    let days = ms.div_euclid(86_400_000) + 719_468;
+    let era = days.div_euclid(146_097);
+    let doe = days.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("rovsti-phone-backup-{year:04}-{month:02}-{day:02}.json")
 }
 
 /// Whether `len` bytes can be a backup at all (checked before parsing).
@@ -447,6 +473,11 @@ impl ImportPreview {
         })
     }
 
+    /// The contact on `digit` after the import (for the "moved" notes).
+    pub fn speed_dial_name(&self, digit: u8) -> Option<&str> {
+        self.clean.speed_dial.get(&digit).map(|e| e.name.as_str())
+    }
+
     /// Replaces the backed-up sections of `prefs`; `ui` is untouched.
     pub fn apply_to(self, prefs: &mut PrefsV2) {
         prefs.settings = self.clean.settings;
@@ -454,6 +485,43 @@ impl ImportPreview {
         prefs.speed_dial = self.clean.speed_dial;
         prefs.favorites_order = self.clean.favorites_order;
         prefs.validate();
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::backup_file_name;
+
+    #[test]
+    fn the_file_name_carries_the_utc_date() {
+        assert_eq!(backup_file_name(0), "rovsti-phone-backup-1970-01-01.json");
+        // 2026-10-28T12:00:00Z
+        assert_eq!(
+            backup_file_name(1_793_188_800_000),
+            "rovsti-phone-backup-2026-10-28.json"
+        );
+        // Leap day.
+        assert_eq!(
+            backup_file_name(1_709_164_800_000),
+            "rovsti-phone-backup-2024-02-29.json"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tone_tests {
+    use super::*;
+
+    #[test]
+    fn the_setting_wins_over_the_system() {
+        assert!(effective_keypad_tones(Some(true), false));
+        assert!(!effective_keypad_tones(Some(false), true));
+    }
+
+    #[test]
+    fn no_choice_follows_the_system() {
+        assert!(effective_keypad_tones(None, true));
+        assert!(!effective_keypad_tones(None, false));
     }
 }
 

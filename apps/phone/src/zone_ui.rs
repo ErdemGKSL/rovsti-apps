@@ -902,7 +902,7 @@ impl PhoneApp {
         };
         let reduced = self.reduced;
         if kind == 0 && r.can_split {
-            window.perform_haptic_feedback(gpui::HapticFeedback::Confirm);
+            rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Confirm);
             let party = Party {
                 id: r.id,
                 name: r.label.clone(),
@@ -921,7 +921,7 @@ impl PhoneApp {
                 b.split(r.id, cx);
             });
         } else if kind == 1 && r.can_drop {
-            window.perform_haptic_feedback(gpui::HapticFeedback::Selection);
+            rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
             self.incall.zone.eject = Some(crate::zone::Eject {
                 id: r.id,
                 since: std::time::Instant::now(),

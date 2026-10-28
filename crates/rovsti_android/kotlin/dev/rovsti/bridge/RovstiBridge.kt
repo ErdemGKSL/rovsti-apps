@@ -40,6 +40,13 @@ object RovstiBridge {
     /** True once `nativeInit` has run; guards [emit] (AD-5). */
     @Volatile private var nativeReady = false
 
+    /** One-shot events wait here until Rust's session is live (story 16.2). */
+    private val mailbox = Mailbox { kind, json -> emit(kind, json) }
+
+    /** Rust's session is live and the activity is resumed ([uiAttached]); false answers system pickers itself. */
+    @Volatile var uiReady = false
+        private set
+
     /** The app's call owner, set once from `Application.onCreate`. */
     @Volatile var calls: CallsApi? = null
 
@@ -70,6 +77,7 @@ object RovstiBridge {
      */
     fun install(application: Application) {
         app = application
+        SettingsMirror.restore(application)
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) { foreground = activity }
             override fun onActivityPaused(activity: Activity) { if (foreground === activity) foreground = null }
@@ -93,6 +101,60 @@ object RovstiBridge {
 
     /** Registers the call-log and contacts observers (Rovsti Phone). Idempotent. */
     fun observeProviders() = ProviderObservers.register(app)
+
+    /** Delivers a one-shot event now, or when Rust attaches (story 16.2). */
+    fun postOneShot(kind: String, json: String) = mailbox.post(kind, json)
+
+    /**
+     * Rust calls this with `true` once its session is live and the activity resumed, and with `false`
+     * when the session closes. `true` drains the mailbox (right after the snapshot, AD-5).
+     */
+    @JvmStatic
+    fun uiAttached(attached: Boolean): Boolean {
+        uiReady = attached
+        if (attached) mailbox.attach() else mailbox.detach()
+        return true
+    }
+
+    // ---- Settings mirror, documents, SIMs, tones (Epic 16) -------------
+
+    @JvmStatic fun settingsSync(json: String): Boolean = SettingsMirror.apply(app, json)
+
+    @JvmStatic
+    fun systemFacts(): String = SettingsMirror.factsJson(SettingsMirror.flipSupported(app), SettingsMirror.systemKeypadTones(app))
+
+    @JvmStatic
+    fun exportDocument(name: String, json: String): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.start(activity, true, name, json) }
+        return true
+    }
+
+    @JvmStatic
+    fun importDocument(): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.start(activity, false, "", "") }
+        return true
+    }
+
+    /** `MainActivity.onActivityResult`: true when the request was a document picker's. */
+    fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean =
+        Documents.handle(app, requestCode, resultCode, data, documentExecutor) { json -> postOneShot("document_result", json) }
+
+    private val documentExecutor: java.util.concurrent.ExecutorService by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "documents").apply { isDaemon = true } }
+    }
+
+    @JvmStatic fun phoneAccounts(): String = SimAccounts.collect(app)
+
+    @JvmStatic fun callSelectAccount(callId: Int, key: String): Boolean = calls?.selectAccount(callId, key) ?: false
+
+    /** Plays a dial-pad tone when the effective Keypad tones value is on (negative digit stops). */
+    @JvmStatic
+    fun keypadTone(digit: Int): Boolean {
+        if (digit >= 0 && !SettingsMirror.effectiveKeypadTones(SettingsMirror.values, SettingsMirror.systemKeypadTones(app))) return false
+        return KeypadTone.play(digit)
+    }
 
     // ---- Calls (delegated to the app's CallsApi; AD-4, AD-6) ----------
 
@@ -270,13 +332,33 @@ object RovstiBridge {
 
     @JvmStatic
     @SuppressLint("MissingPermission")
-    fun placeCall(number: String): Boolean {
+    fun placeCall(number: String): Boolean = place(number, null)
+
+    /**
+     * Story 16.3: places the call on the account [accountKey]. An emergency number never gets a key, and the
+     * app never changes the system's default account.
+     */
+    @JvmStatic
+    @SuppressLint("MissingPermission")
+    fun placeCallOn(number: String, accountKey: String): Boolean = place(number, accountKey)
+
+    @SuppressLint("MissingPermission")
+    private fun place(number: String, accountKey: String?): Boolean {
         val uri = Uri.fromParts("tel", number, null)
         if (app.checkSelfPermission(android.Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
             start(Intent(Intent.ACTION_DIAL, uri))
             return false
         }
-        app.getSystemService(TelecomManager::class.java)?.placeCall(uri, Bundle()) ?: return false
+        val extras = Bundle()
+        val emergency = try {
+            android.telephony.PhoneNumberUtils.isEmergencyNumber(number)
+        } catch (_: RuntimeException) {
+            false
+        }
+        if (accountKey != null && !emergency) {
+            SimAccounts.handleFor(app, accountKey)?.let { extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it) }
+        }
+        app.getSystemService(TelecomManager::class.java)?.placeCall(uri, extras) ?: return false
         return true
     }
 

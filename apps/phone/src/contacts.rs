@@ -688,7 +688,7 @@ impl PhoneApp {
                                 this.favorites.suppress_click = true;
                                 this.favorites.tap.spoil();
                                 this.favorites.touch = None;
-                                window.perform_haptic_feedback(HapticFeedback::LongPress);
+                                rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
                                 this.open_contact_sheet(row, false, window, cx);
                             }
                         })
@@ -896,11 +896,14 @@ impl PhoneApp {
                             {
                                 sheet.star_fx.play(next, reduced);
                             }
-                            window.perform_haptic_feedback(if next {
-                                HapticFeedback::Confirm
-                            } else {
-                                HapticFeedback::Selection
-                            });
+                            rovsti_ui::haptics::perform(
+                                window,
+                                if next {
+                                    HapticFeedback::Confirm
+                                } else {
+                                    HapticFeedback::Selection
+                                },
+                            );
                         } else if let Some(sheet) = &mut this.contact_sheet
                             && sheet.contact.id == contact_id
                         {

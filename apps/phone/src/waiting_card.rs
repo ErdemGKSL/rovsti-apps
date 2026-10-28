@@ -58,7 +58,7 @@ impl PhoneApp {
         }
         match id {
             "iw-hold" => {
-                window.perform_haptic_feedback(HapticFeedback::Confirm);
+                rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
                 self.incall.waiting_acted = true;
                 self.backend.update(cx, |b, cx| {
                     if w.relabelled {
@@ -69,7 +69,7 @@ impl PhoneApp {
                 });
             }
             "iw-end" => {
-                window.perform_haptic_feedback(HapticFeedback::Confirm);
+                rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
                 self.incall.waiting_acted = true;
                 self.backend.update(cx, |b, cx| {
                     b.answer_replacing(w.id, cx);

@@ -3,6 +3,7 @@
 //! Nothing in this crate touches GPUI, JNI or the network, so it builds and
 //! tests on any host in seconds.
 
+pub mod audio;
 pub mod avatar;
 pub mod call;
 pub mod call_log;

@@ -192,6 +192,8 @@ pub enum EndpointType {
     Bluetooth,
     WiredHeadset,
     Speaker,
+    /// Never sent by Kotlin (it omits `TYPE_STREAMING`); ignored if it arrives.
+    Streaming,
     /// A type this build does not know: it renders as an `unknown` row.
     #[default]
     #[serde(other)]
@@ -206,7 +208,7 @@ impl EndpointType {
             Self::Bluetooth => AudioRoute::Bluetooth,
             Self::WiredHeadset => AudioRoute::WiredHeadset,
             Self::Speaker => AudioRoute::Speaker,
-            Self::Unknown => AudioRoute::Unknown,
+            Self::Streaming | Self::Unknown => AudioRoute::Unknown,
         }
     }
 }

@@ -172,6 +172,13 @@ impl PhoneApp {
             'g' => self.preview_route_pick(0, window, cx),
             'l' => self.preview_audio_tap(window, cx),
             'q' => self.route_close(window, cx),
+            // `i` opens the Diagnostics page, `j` runs its Audio probe, `p` copies the report.
+            'i' => {
+                self.sheet_kind = crate::SheetKind::Diagnostics;
+                self.sheet.open();
+            }
+            'j' => self.diag_run("audio", cx),
+            'p' => self.diag_copy(cx),
             's' => self.contact_sheet_act("sheet-cstar", window, cx),
             'z' => {
                 let reduced = window.prefers_reduced_motion();

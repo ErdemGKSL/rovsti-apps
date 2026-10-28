@@ -232,12 +232,12 @@ development_status:
 
   epic-18: in-progress
   18-1-reject-path-in-kotlin-and-spike-s7: review
-  18-2-reply-sheet-and-s31-reply-sent: backlog
-  18-3-quick-replies-editor-in-settings: backlog
+  18-2-reply-sheet-and-s31-reply-sent: review
+  18-3-quick-replies-editor-in-settings: review
   18-4-silenceringer-flipdetector-and-spike-s8: review
-  18-5-answer-and-decline-gestures-s29-and-spike-s14: backlog
-  18-6-silence-control-and-s30-silence-hush: backlog
-  18-7-heads-up-notification-message-action-and-waiting-card-wiring: backlog
+  18-5-answer-and-decline-gestures-s29-and-spike-s14: review
+  18-6-silence-control-and-s30-silence-hush: review
+  18-7-heads-up-notification-message-action-and-waiting-card-wiring: review
   epic-18-retrospective: optional
 
   epic-19: backlog

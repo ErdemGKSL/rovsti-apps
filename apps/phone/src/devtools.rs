@@ -336,6 +336,16 @@ impl PhoneApp {
                     .update(cx, |f, cx| f.set("0532 111 22 33", cx));
                 self.blocked_tap("set-bk-add", window, cx);
             }
+            // Epic 18: `^` the reply sheet, `)` its first reply, `(` Silence, `{` the Quick replies
+            // page, `<` `>` `^`-free drags: `<` right 70 px, `_` left 70 px, `=` up 80 px, `~` lets go.
+            '^' => self.incoming_activate_for_preview("in-msg", window, cx),
+            ')' => self.reply_tap("rp-0", window, cx),
+            '(' => self.incoming_activate_for_preview("in-silence", window, cx),
+            '{' => self.settings_open_sub(crate::settings_ui::Sub::Replies, window, cx),
+            '<' => self.preview_drag(70.0, 0.0, window, cx),
+            '_' => self.preview_drag(-70.0, 0.0, window, cx),
+            '=' => self.preview_drag(0.0, -80.0, window, cx),
+            '~' => self.preview_release(window, cx),
             'z' => {
                 let reduced = window.prefers_reduced_motion();
                 self.celebrate.observe(false, reduced);
@@ -344,6 +354,39 @@ impl PhoneApp {
             _ => {}
         }
         cx.notify();
+    }
+
+    fn incoming_activate_for_preview(
+        &mut self,
+        id: &'static str,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.incoming_mouse_down(id, window, cx);
+    }
+
+    /// Puts a finger on the card and drags it by `(dx, dy)`; `~` lets go.
+    fn preview_drag(
+        &mut self,
+        dx: f32,
+        dy: f32,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        use gpui::{TouchPhase, point, px};
+        self.incoming_drag(TouchPhase::Started, point(px(200.0), px(260.0)), window, cx);
+        self.incoming_drag(
+            TouchPhase::Moved,
+            point(px(200.0 + dx), px(260.0 + dy)),
+            window,
+            cx,
+        );
+    }
+
+    fn preview_release(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        use gpui::{TouchPhase, point, px};
+        let (x, y) = self.incoming.drag_point();
+        self.incoming_drag(TouchPhase::Ended, point(px(x), px(y)), window, cx);
     }
 
     fn dev_scene(&mut self, scene: &str, cx: &mut Context<Self>) {

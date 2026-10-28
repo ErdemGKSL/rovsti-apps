@@ -14,7 +14,9 @@ use rovsti_core::{
     wire::{BlockedNumber, BlocklistPayload, CallLogEntry, CallLogPayload, EmergencyList},
 };
 
-use super::{Backend, CallCommand, Load, Outcome, decode, now_ms};
+#[cfg(not(target_os = "android"))]
+use super::CallCommand;
+use super::{Backend, Load, Outcome, decode, now_ms};
 use crate::sample;
 
 /// The blocklist as pulled, with the set that answers "is this blocked".

@@ -48,8 +48,9 @@ impl PhoneApp {
             _ => None,
         };
         if id == "iw-msg" {
-            // The reply sheet arrives with story 18.7.
-            self.show_notice_pill("Add replies in Settings", None, false, cx);
+            // Story 18.7: the reply sheet over the call; choosing a reply declines the
+            // waiting call with that text and leaves the call underneath alone.
+            self.reply_open(w.id, true, window, cx);
             return;
         }
         if let Some(reason) = dimmed {
@@ -197,6 +198,7 @@ impl PhoneApp {
         } else {
             "Hold and answer"
         };
+        let no_replies = self.backend.read(cx).prefs().quick_replies.is_empty();
         let hold_dim = w.hold_reason.is_some();
         let end_dim = w.end_reason.is_some();
         let grid = div()
@@ -252,11 +254,11 @@ impl PhoneApp {
                         theme,
                         "iw-msg",
                         "Message",
-                        None,
+                        no_replies.then(|| SharedString::from("Add replies in Settings")),
                         Some(Icon::LucideMessageSquare),
                         None,
                         colors.label,
-                        true,
+                        no_replies,
                         3,
                         cx,
                     )),

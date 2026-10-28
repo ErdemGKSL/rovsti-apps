@@ -41,6 +41,34 @@ pub fn touch_surface(
     .size_full()
 }
 
+/// A drag surface: an invisible layer over its parent that reports a finger's
+/// whole path. [`TouchPhase::Started`] only when the finger lands inside the
+/// parent; `Moved`, `Ended` and `Cancelled` wherever they happen, each with the
+/// window position, so a drag that leaves the surface is still followed. The
+/// owner decides which finger it follows (it keeps the first `Started`).
+///
+/// The parent must be a positioned box.
+pub fn drag_surface(
+    on_touch: impl Fn(TouchPhase, Point<Pixels>, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |bounds, (), window, _| {
+            window.on_mouse_event(move |event: &TouchEvent, phase, window, cx| {
+                if !phase.bubble() {
+                    return;
+                }
+                if event.phase == TouchPhase::Started && !bounds.contains(&event.position) {
+                    return;
+                }
+                on_touch(event.phase, event.position, window, cx);
+            });
+        },
+    )
+    .absolute()
+    .size_full()
+}
+
 /// What a [`pointer_surface`] saw.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Pointer {

@@ -318,6 +318,8 @@ pub struct Backend {
     blocked_pull: u64,
     /// Android refused `silenceRinger()`: the control stays a blank slot (AD-29).
     silence_refused: bool,
+    /// A system-driven request for the UI that nobody has taken yet (`ui_request`).
+    ui_request: Option<rovsti_core::wire::UiRequest>,
     /// Desktop preview only: the fake call reports a locked keyguard.
     #[cfg(any(not(target_os = "android"), feature = "perf", test))]
     preview_locked: bool,
@@ -397,6 +399,7 @@ impl Backend {
                 blocked_calls_wanted: false,
                 blocked_pull: 0,
                 silence_refused: false,
+                ui_request: None,
                 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
                 preview_locked: false,
                 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
@@ -511,6 +514,16 @@ impl Backend {
 
     pub fn calls(&self) -> &CallModel {
         &self.calls
+    }
+
+    /// The pending `ui_request`, if any; the app takes it once.
+    pub fn take_ui_request(&mut self) -> Option<rovsti_core::wire::UiRequest> {
+        self.ui_request.take()
+    }
+
+    /// A request that is waiting, without taking it.
+    pub fn peek_ui_request(&self) -> Option<&rovsti_core::wire::UiRequest> {
+        self.ui_request.as_ref()
     }
 
     pub fn call_log(&self) -> Load<CallLog> {
@@ -656,6 +669,9 @@ impl Backend {
             self.settings = Arc::new(self.prefs.settings.clone());
             self.settings_published(cx);
             cx.notify();
+        } else if before.quick_replies.is_empty() != self.prefs.quick_replies.is_empty() {
+            // Kotlin shows the notification's Message action only while replies exist.
+            self.push_settings(cx);
         }
         self.save_prefs();
     }
@@ -901,6 +917,15 @@ impl Backend {
             }
             kind::SIMS_CHANGED => self.refresh_sims(cx),
             kind::DOCUMENT_RESULT => self.on_document_result(&event.json, cx),
+            kind::UI_REQUEST => {
+                match serde_json::from_str::<rovsti_core::wire::UiRequest>(&event.json) {
+                    Ok(request) => {
+                        self.ui_request = Some(request);
+                        cx.notify();
+                    }
+                    Err(error) => log::warn!("bad ui_request: {error}"),
+                }
+            }
             kind::CALL_LOG_CHANGED => {
                 self.refresh_call_log(cx);
                 if self.blocked_calls_wanted {

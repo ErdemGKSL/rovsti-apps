@@ -99,6 +99,10 @@ enum SheetKind {
     ImportPreview,
     /// "Call with": the SIM chooser (story 16.4), drawn by `sim_overlay`.
     SimChooser,
+    /// "Decline with message" over the ringing screen or a call (story 18.2), drawn by `reply_overlay`.
+    Reply,
+    /// "Reset quick replies?" (story 18.3).
+    ResetReplies,
 }
 
 /// The line under the number field.
@@ -196,6 +200,9 @@ struct PhoneApp {
     row_menu: block_ui::RowMenu,
     /// The Blocked numbers page behind Settings (stories 17.5, 17.6).
     blocked: blocked_ui::BlockedUi,
+    /// The reply sheet and S31 (stories 18.2, 18.7), and the Quick replies editor (18.3).
+    reply: replies_ui::ReplyUi,
+    replies_ed: replies_ui::ReplyEditor,
 
     /// The Recents tab: row view-models, scroll and the seen-timer.
     recents: RecentsView,
@@ -296,13 +303,16 @@ impl PhoneApp {
         let search_field = contacts_view.field.clone();
         let blocked_ui = blocked_ui::BlockedUi::new(cx);
         let blocked_field = blocked_ui.field.clone();
-        let subscriptions = vec![
+        let replies_ed = replies_ui::ReplyEditor::new(cx);
+        let reply_fields = replies_ed.fields.clone();
+        let mut subscriptions = vec![
             cx.observe_in(&backend, window, |this, _, window, cx| {
                 this.sync_restore(cx);
                 this.sync_calls(window, cx);
                 this.sync_documents(window, cx);
                 this.sync_sim_selection(cx);
                 this.sync_settings_live(cx);
+                this.sync_ui_request(window, cx);
                 this.sync_recents(cx);
                 this.sync_contacts(cx);
                 this.update_back(window);
@@ -330,6 +340,12 @@ impl PhoneApp {
                 this.recents_window_active(active, cx);
             }),
         ];
+        // Typing in a quick reply field autosaves it.
+        for field in &reply_fields {
+            subscriptions.push(cx.observe_in(field, window, |this, _, window, cx| {
+                this.replies_field_changed(window, cx);
+            }));
+        }
         // `tel:` links arrive as `ACTION_VIEW` URLs (see MainActivity).
         let mut dial_urls = dial_urls;
         cx.spawn_in(window, async move |this, cx| {
@@ -415,6 +431,8 @@ impl PhoneApp {
             pill_action: None,
             row_menu: block_ui::RowMenu::new(),
             blocked: blocked_ui,
+            reply: replies_ui::ReplyUi::default(),
+            replies_ed,
             back_enabled: false,
             recents: RecentsView::new(),
             contacts: contacts_view,
@@ -604,7 +622,10 @@ impl PhoneApp {
     /// System Back, in the order of EXPERIENCE.md: sheet, in-call keypad,
     /// In-Call screen. On the tabs the OS decides (Activity moves to back).
     fn on_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.incoming.covers() {
+        if self.reply_is_open() {
+            // Back puts the reply sheet away and returns to the ringing card.
+            self.reply_close(window, cx);
+        } else if self.incoming.covers() {
             // Back does nothing while a call rings: it must not look like a decline.
         } else if self.row_menu.is_open() {
             self.row_menu_close(window, cx);
@@ -630,6 +651,7 @@ impl PhoneApp {
     fn update_back(&mut self, window: &mut Window) {
         let call_only = self.incall.call_only;
         let want = self.incoming.wants_back()
+            || self.reply_is_open()
             || self.row_menu.is_open()
             || self.route.is_open()
             || self.sheet.is_open()
@@ -710,11 +732,13 @@ impl PhoneApp {
                     return;
                 }
                 let on_incoming = id.as_deref().is_some_and(|i| i.starts_with("in-"));
-                let blocked_by_incoming = self.incoming.covers() != on_incoming;
+                // The reply sheet's rows work over the ringing screen and over a call.
+                let reply_owned = id.as_deref().is_some_and(|i| self.reply_owns(i));
+                let blocked_by_incoming = self.incoming.covers() != on_incoming && !reply_owned;
                 // The Add call sheet's own keys, field and buttons work over the call.
-                let owned = id
-                    .as_deref()
-                    .is_some_and(|i| self.add_call_owns(i) || self.sim_owns(i));
+                let owned = id.as_deref().is_some_and(|i| {
+                    self.add_call_owns(i) || self.sim_owns(i) || self.reply_owns(i)
+                });
                 let blocked_by_sheet = self.sheet.is_visible()
                     && !owned
                     && !id.as_deref().is_some_and(|i| i.starts_with("sheet-"));
@@ -840,6 +864,8 @@ impl PhoneApp {
         moving |= self.recents.tick(dt);
         moving |= self.row_menu.tick(dt);
         moving |= self.blocked.tick(dt);
+        moving |= self.reply.tick(dt);
+        moving |= self.replies_ed.tick(dt);
         moving |= self.notice_h.tick(dt);
         moving |= self.tabs_away.tick(dt);
         moving |= self.pill_in.tick(dt);
@@ -1117,8 +1143,9 @@ impl PhoneApp {
         match self.sheet_kind {
             SheetKind::Setup => self.setup_sheet(theme, window, cx),
             SheetKind::Diagnostics => self.diag_sheet(theme, window, cx),
-            // Drawn over the In-Call screen by `add_call_overlay`.
-            SheetKind::AddCall | SheetKind::SimChooser => None,
+            // Drawn over the In-Call screen by `add_call_overlay`; the reply sheet by `reply_overlay`.
+            SheetKind::AddCall | SheetKind::SimChooser | SheetKind::Reply => None,
+            SheetKind::ResetReplies => self.replies_reset_sheet(theme, window, cx),
             SheetKind::ImportPreview => {
                 if !self.sheet.is_visible() {
                     return None;
@@ -1165,6 +1192,7 @@ impl Render for PhoneApp {
         self.sync_notice(cx);
         self.sync_pill(cx);
         self.sync_row_menu(cx);
+        self.sync_reply(window, cx);
         self.sync_settings_frame(window, cx);
         self.sync_dial_match(cx);
         let mut motion = std::mem::take(&mut self.motion);
@@ -1255,6 +1283,8 @@ impl Render for PhoneApp {
             .children(route)
             .children(pill)
             .children(incoming)
+            .children(self.reply_overlay(theme, window, cx))
+            .children(self.reply_bubble(theme))
             .children(self.flight_layer(theme))
             .children(self.sim_flight_layer(theme))
             .children(self.theme_veil())

@@ -1785,11 +1785,54 @@ mod tests {
             RowId::DefaultApps,
             RowId::EmergencyInfo,
             RowId::Hearing,
+            RowId::Replies,
+            RowId::Blocked,
+            RowId::BlockedAccess,
         ];
         assert_eq!(all.len(), RowId::COUNT);
         for (i, a) in all.iter().enumerate() {
             assert_eq!(a.index(), i);
             assert!(all.iter().skip(i + 1).all(|b| b.key() != a.key()));
         }
+    }
+
+    #[test]
+    fn blocking_and_replies_rows_follow_what_the_phone_can_do() {
+        let sections = build_sections(&key());
+        let blocking = sections
+            .iter()
+            .find(|s| s.title == "Blocking")
+            .expect("section");
+        assert_eq!(blocking.rows.len(), 1);
+        let mut k = key();
+        k.call_log_missing = true;
+        let sections = build_sections(&k);
+        let blocking = sections
+            .iter()
+            .find(|s| s.title == "Blocking")
+            .expect("section");
+        assert!(blocking.rows.iter().any(|r| r.id == RowId::BlockedAccess));
+        let mut k = key();
+        k.can_block = false;
+        let row = &build_sections(&k)
+            .iter()
+            .find(|s| s.title == "Blocking")
+            .expect("section")
+            .rows[0]
+            .clone();
+        assert!(row.aria.contains("Unavailable"));
+    }
+
+    #[test]
+    fn a_second_level_page_owns_its_own_touches() {
+        let mut ui = SettingsUi::default();
+        assert!(ui.owns("set-proximity") && ui.owns("sheet-x"));
+        ui.open_sub(Sub::Blocked, false);
+        assert!(ui.owns("set-bk-add") && ui.owns("sheet-qr-yes"));
+        assert!(
+            !ui.owns("set-proximity"),
+            "the list under the page stays quiet"
+        );
+        assert!(!ui.owns("set-qr-add"));
     }
 }

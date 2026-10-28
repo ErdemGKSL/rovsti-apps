@@ -56,6 +56,8 @@ pub struct AuraState {
     pub hue: Option<usize>,
     pub muted: bool,
     pub speaker: bool,
+    /// The ringer was silenced (S30): the colours lose 40% of their saturation.
+    pub hushed: bool,
 }
 
 pub struct Aura {
@@ -73,6 +75,7 @@ pub struct Aura {
     breath: Spring,
     danger: Spring,
     intro: Spring,
+    hush: Spring,
     /// Seconds since a waiting call rang (the double pulse), while it plays.
     waiting: Option<(f32, bool)>,
     /// When the drift clock was last advanced (`None` while it is not drifting).
@@ -104,6 +107,7 @@ impl Aura {
             speed: spring(1.0, motion_tokens::select()),
             breath: spring(1.0, motion_tokens::select()),
             danger: spring(0.0, motion_tokens::select()),
+            hush: spring(0.0, motion_tokens::select()),
             intro,
             waiting: None,
             last_drift: None,
@@ -185,6 +189,7 @@ impl Aura {
             .set_target(f32::from(u8::from(state.phase == Phase::Dialing)));
         self.danger
             .set_target(f32::from(u8::from(state.phase == Phase::Failed)));
+        self.hush.set_target(f32::from(u8::from(state.hushed)));
         if connected {
             // The connect pulse: a quick overshoot that settles back.
             self.pulse.snap(1.12);
@@ -204,6 +209,7 @@ impl Aura {
             &mut self.speed,
             &mut self.breath,
             &mut self.danger,
+            &mut self.hush,
             &mut self.intro,
         ] {
             moving |= s.tick(dt);
@@ -244,7 +250,10 @@ impl Aura {
         };
         let mono = self.mono.value.clamp(0.0, 1.0);
         let danger = self.danger.value.clamp(0.0, 1.0);
+        let hush = self.hush.value.clamp(0.0, 1.0);
         [top, bottom, theme::accent_glow(theme)].map(|c| {
+            // S30: a hushed ring keeps its hue but loses 40% of its saturation.
+            let c = mix(c, neutral, 0.4 * hush);
             let c = mix(c, neutral, 0.8 * mono);
             let c = mix(c, calls.warning, 0.25 * mono);
             mix(c, calls.danger, 0.7 * danger)

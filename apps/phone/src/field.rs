@@ -39,8 +39,8 @@ impl SearchField {
         self.focus.clone()
     }
 
-    /// Sets the text (the desktop preview types a query this way).
-    #[cfg(not(target_os = "android"))]
+    /// Sets the text (the desktop preview types a query this way; the quick
+    /// replies editor loads its rows with it).
     pub(crate) fn set(&mut self, text: &str, cx: &mut Context<Self>) {
         self.content = text.to_owned();
         self.marked = None;

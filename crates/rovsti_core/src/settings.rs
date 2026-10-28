@@ -150,6 +150,28 @@ fn clip(s: &str, max: usize) -> &str {
     }
 }
 
+/// Characters left before the counter shows in the quick replies editor.
+pub const REPLY_COUNTER_AT: usize = 80;
+
+/// Moves the reply at `from` to position `to` (both clamped into the list).
+/// Used by the drag handle and by Move up / Move down.
+pub fn move_reply<T>(list: &mut Vec<T>, from: usize, to: usize) {
+    if list.is_empty() {
+        return;
+    }
+    let last = list.len() - 1;
+    let (from, to) = (from.min(last), to.min(last));
+    if from != to {
+        let item = list.remove(from);
+        list.insert(to, item);
+    }
+}
+
+/// "Add reply" is allowed below [`MAX_REPLIES`].
+pub const fn can_add_reply(count: usize) -> bool {
+    count < MAX_REPLIES
+}
+
 /// Trimmed, non-empty, at most [`MAX_REPLY_CHARS`]; at most [`MAX_REPLIES`].
 fn clamp_replies(replies: &mut Vec<String>) {
     replies.retain_mut(|r| {
@@ -776,5 +798,20 @@ mod tests {
         assert!(plausible_backup_size(100));
         assert!(!plausible_backup_size(0));
         assert!(!plausible_backup_size(MAX_BACKUP_BYTES + 1));
+    }
+
+    #[test]
+    fn replies_move_and_the_list_stops_at_six() {
+        let mut list = vec!["a", "b", "c", "d"];
+        move_reply(&mut list, 0, 2);
+        assert_eq!(list, ["b", "c", "a", "d"]);
+        move_reply(&mut list, 3, 0);
+        assert_eq!(list, ["d", "b", "c", "a"]);
+        // Out of range is clamped, never a panic.
+        move_reply(&mut list, 1, 99);
+        assert_eq!(list, ["d", "c", "a", "b"]);
+        move_reply(&mut Vec::<u8>::new(), 0, 1);
+        assert!(can_add_reply(5));
+        assert!(!can_add_reply(MAX_REPLIES));
     }
 }

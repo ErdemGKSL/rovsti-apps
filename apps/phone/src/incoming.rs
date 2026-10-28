@@ -10,7 +10,7 @@
 //! a call), but press feedback runs on the raw finger-down. Neither waits for
 //! an animation: the command is issued first, the animation runs alongside.
 
-use std::{f32::consts::TAU, time::Duration};
+use std::{cell::Cell, f32::consts::TAU, rc::Rc, time::Duration, time::Instant};
 
 use gpui::{
     AnyElement, Bounds, Context, Corners, Edges, Entity, HapticFeedback, Hsla, InteractiveElement,
@@ -20,19 +20,20 @@ use gpui::{
 };
 use rovsti_core::{
     call::{CallState, incoming_announcement, is_missed, missed_headline},
-    wire::DisconnectCause,
+    gesture::{self, Dir, Release, Tick},
+    wire::{DisconnectCause, SilencedBy},
 };
 use rovsti_ui::moments::Fade;
 use rovsti_ui::{
     Icon,
-    components::backdrop,
+    components::{backdrop, flat_glass},
     current_theme,
     motion::{Entrance, Motion, press_scale},
     motion_tokens::{self, scale},
     spring::Spring,
     theme::{self, call_colors},
     tokens::{Theme, mix, typography},
-    touch::touch_surface,
+    touch::{TapGuard, drag_surface, touch_surface},
 };
 
 use crate::{
@@ -60,6 +61,18 @@ const CAPTION_H: f32 = 24.0;
 const BOTTOM_PAD: f32 = 56.0;
 /// Seconds after which every loop (1.6 s rings, 2 s breath, 1.2 s glow) lines up again.
 const WRAP: f32 = 24.0;
+/// The secondary row (Message, Silence): 56 px circles 24 px apart, captions under them.
+const SECONDARY: f32 = 56.0;
+const SECONDARY_GAP: f32 = 24.0;
+const SECONDARY_H: f32 = SECONDARY + 24.0;
+/// Space between the secondary row and Decline/Answer.
+const SECONDARY_LIFT: f32 = 28.0;
+/// The drag surface covers the card: avatar, name and number.
+const CARD_TOP: f32 = AVATAR_TOP - 24.0;
+const CARD_H: f32 = AVATAR + 24.0 + 24.0 + 34.0 + 20.0 + 20.0;
+/// How many incoming calls show the drag hint.
+const HINT_CALLS: u32 = 3;
+const HINT_KEY: &str = "incoming_drag";
 const RING_PERIOD: f32 = 1.6;
 const GLOW_PERIOD: f32 = 1.2;
 
@@ -91,13 +104,19 @@ pub struct RingFx {
     /// S8: the avatar copy flying to the In-Call slot replaces this one.
     avatar_hidden: bool,
     marks: Marks,
+    /// S30: 0 ringing, 1 hushed (rings, breath and glow ease to rest).
+    calm: Spring,
+    /// Where the card is dragged to (S29); written by the screen each frame, read here.
+    offset: Rc<Cell<(f32, f32, f32)>>,
 }
 
 impl RingFx {
-    fn new(marks: Marks) -> Self {
+    fn new(marks: Marks, offset: Rc<Cell<(f32, f32, f32)>>) -> Self {
         Self {
             avatar_hidden: false,
             marks,
+            calm: sp(0.0, motion_tokens::select()),
+            offset,
             motion: Motion::default(),
             clock: 0.0,
             running: false,
@@ -123,6 +142,17 @@ impl RingFx {
         }
         self.live.snap(0.0);
         self.live.set_target(1.0);
+        self.calm.snap(0.0);
+        cx.notify();
+    }
+
+    /// S30: the ringer was silenced (or the call rings again).
+    fn hush(&mut self, hushed: bool, reduced: bool, cx: &mut Context<Self>) {
+        if reduced {
+            self.calm.snap(f32::from(u8::from(hushed)));
+        } else {
+            self.calm.set_target(f32::from(u8::from(hushed)));
+        }
         cx.notify();
     }
 
@@ -150,6 +180,7 @@ impl RingFx {
     fn tick(&mut self, dt: Duration, loops: bool) -> bool {
         let mut moving = self.drop.tick(dt);
         moving |= self.live.tick(dt);
+        moving |= self.calm.tick(dt);
         if loops && self.running {
             self.clock = (self.clock + dt.as_secs_f32()) % WRAP;
             moving = true;
@@ -188,27 +219,36 @@ impl Render for RingFx {
         let (top, bottom) = theme::hue_pair(theme, self.spec.hue);
         let answer = call_colors(theme).answer;
         let clock = self.clock;
-        let size_scale = if still { 1.0 } else { breath(clock) };
+        let calm = self.calm.value.clamp(0.0, 1.0);
+        let rest = 1.0 - calm;
+        let (off_x, off_y, card_alpha) = self.offset.get();
+        let size_scale = if still {
+            1.0
+        } else {
+            1.0 + (breath(clock) - 1.0) * rest
+        };
 
         let canvas = canvas(
             |_, _, _| (),
             move |bounds, (), window, _| {
-                let cx = bounds.origin.x + bounds.size.width * 0.5;
-                let cy = bounds.origin.y + px(AVATAR_TOP + AVATAR * 0.5);
+                let cx = bounds.origin.x + bounds.size.width * 0.5 + px(off_x);
+                let cy = bounds.origin.y + px(AVATAR_TOP + AVATAR * 0.5 + off_y);
                 if still {
                     // One static ring.
-                    ring(window, cx, cy, 1.25, 0.2 * live, top);
+                    ring(window, cx, cy, 1.25, 0.2 * live * rest, top);
                 } else {
                     for phase in [0.0, 0.8] {
                         let (scale, alpha) = ring_state(clock, phase);
-                        ring(window, cx, cy, scale, alpha * live, top);
+                        ring(window, cx, cy, scale, alpha * live * rest, top);
                     }
                     // The glow behind Answer.
-                    let ax = cx + px(BUTTON_GAP * 0.5 + BUTTON * 0.5);
+                    let ax = bounds.origin.x
+                        + bounds.size.width * 0.5
+                        + px(BUTTON_GAP * 0.5 + BUTTON * 0.5);
                     let ay = bounds.origin.y + bounds.size.height
                         - px(BOTTOM_PAD + CAPTION_H + BUTTON * 0.5);
                     let d = px(BUTTON * 1.9);
-                    let alpha = glow_alpha(clock) * live;
+                    let alpha = glow_alpha(clock) * live * rest;
                     let glow = Bounds::new(point(ax - d * 0.5, ay - d * 0.5), size(d, d));
                     window.paint_quad(gpui::fill(
                         glow,
@@ -256,10 +296,13 @@ impl Render for RingFx {
         div().absolute().size_full().child(canvas).child(
             div()
                 .absolute()
-                .top(px(AVATAR_TOP + self.drop.value))
+                .top(px(AVATAR_TOP + self.drop.value + off_y))
+                .left(px(off_x))
                 .w_full()
                 .h(px(AVATAR))
-                .opacity(1.0 - f32::from(u8::from(self.avatar_hidden)))
+                .opacity(
+                    (1.0 - f32::from(u8::from(self.avatar_hidden))) * card_alpha.clamp(0.0, 1.0),
+                )
                 .flex()
                 .items_center()
                 .justify_center()
@@ -364,11 +407,45 @@ pub struct Incoming {
     swap: Spring,
     /// Reduced motion: the 120 ms fade that brings both buttons in.
     buttons_fade: Fade,
+    /// "Sent", "Opened Messages" or "Declined": held 1.2 s in the label's place (S31).
+    reply_label: Option<SharedString>,
+    /// The held line is a reply result, not a missed call: it is not drawn in the danger colour.
+    hold_reply: bool,
+    /// Who silenced the ringer, from the snapshot (S30).
+    silenced: Option<SilencedBy>,
+    /// 0 ringing, 1 hushed: the Silence control's accent flood.
+    hush: Spring,
+    /// The card drag (S29): the finger's rules, the follow it produced and the
+    /// springs that carry the card back (or away).
+    drag: Option<gesture::Drag>,
+    off_x: Spring,
+    off_y: Spring,
+    card_alpha: Spring,
+    offset: Rc<Cell<(f32, f32, f32)>>,
+    epoch: Instant,
+    /// Every finger on the screen: a drag or a flick is never a tap on Answer or Decline,
+    /// whatever the host synthesises when it lifts.
+    tap: TapGuard,
+    /// The first calls show "Drag the card to answer or decline".
+    hint: bool,
 }
 
 impl Incoming {
     pub fn new(cx: &mut gpui::App, marks: Marks) -> Self {
+        let offset = Rc::new(Cell::new((0.0, 0.0, 1.0)));
         Self {
+            reply_label: None,
+            hold_reply: false,
+            silenced: None,
+            hush: sp(0.0, motion_tokens::select()),
+            drag: None,
+            off_x: sp(0.0, motion_tokens::release()),
+            off_y: sp(0.0, motion_tokens::release()),
+            card_alpha: sp(1.0, motion_tokens::sheet_dismiss()),
+            epoch: Instant::now(),
+            tap: TapGuard::default(),
+            hint: false,
+            offset: Rc::clone(&offset),
             shown: false,
             view: None,
             state: RingState::Ringing,
@@ -379,7 +456,7 @@ impl Incoming {
             missed_text: SharedString::default(),
             announce: SharedString::default(),
             stagger: None,
-            fx: cx.new(|_| RingFx::new(marks)),
+            fx: cx.new(|_| RingFx::new(marks, offset)),
             aura: cx.new(|_| Aura::new().centered_at(AVATAR_TOP + AVATAR * 0.5)),
             _leave: None,
             fade: sp(0.0, motion_tokens::appear()),
@@ -429,6 +506,12 @@ impl Incoming {
         let mut moving = self.fade.tick(dt);
         moving |= self.enter.tick(dt);
         moving |= self.swap.tick(dt);
+        moving |= self.hush.tick(dt);
+        moving |= self.off_x.tick(dt);
+        moving |= self.off_y.tick(dt);
+        moving |= self.card_alpha.tick(dt);
+        self.offset
+            .set((self.off_x.value, self.off_y.value, self.card_alpha.value));
         for s in self.intro.iter_mut().chain(self.hidden.iter_mut()) {
             moving |= s.tick(dt);
         }
@@ -456,7 +539,22 @@ impl Incoming {
             hue: self.view.as_ref().and_then(|v| v.hue),
             muted: false,
             speaker: false,
+            hushed: self.silenced.is_some(),
         }
+    }
+
+    /// Desktop preview: where the previewed finger is now.
+    #[cfg(not(target_os = "android"))]
+    pub(crate) fn drag_point(&self) -> (f32, f32) {
+        (
+            200.0 + self.off_x.target / gesture::GAIN,
+            260.0 + self.off_y.target / gesture::GAIN,
+        )
+    }
+
+    /// Milliseconds since the screen was made, for the drag's velocity.
+    fn now_ms(&self) -> f32 {
+        self.epoch.elapsed().as_secs_f32() * 1000.0
     }
 }
 
@@ -512,6 +610,26 @@ impl PhoneApp {
         cx: &mut Context<Self>,
     ) {
         let reduced = window.prefers_reduced_motion();
+        // The first calls teach the drag: a counter in `ui.hint_counters`.
+        let new_call = self.incoming.call_id() != Some(view.id) || !self.incoming.shown;
+        let hint = new_call
+            && self
+                .backend
+                .read(cx)
+                .prefs()
+                .ui
+                .hint_counters
+                .get(HINT_KEY)
+                .copied()
+                .unwrap_or(0)
+                < HINT_CALLS;
+        if hint {
+            self.backend.update(cx, |b, cx| {
+                b.update_prefs(cx, |p| {
+                    *p.ui.hint_counters.entry(HINT_KEY.to_owned()).or_insert(0) += 1;
+                });
+            });
+        }
         let inc = &mut self.incoming;
         inc.locked = locked;
         let is_new = inc.call_id() != Some(view.id) || !inc.shown;
@@ -520,6 +638,16 @@ impl PhoneApp {
             inc.state = RingState::Ringing;
             inc.acted = None;
             inc._leave = None;
+            inc.reply_label = None;
+            inc.hold_reply = false;
+            inc.silenced = None;
+            inc.hush.snap(0.0);
+            inc.drag = None;
+            inc.off_x.snap(0.0);
+            inc.off_y.snap(0.0);
+            inc.card_alpha.snap(1.0);
+            inc.offset.set((0.0, 0.0, 1.0));
+            inc.hint = hint;
             inc.announce = incoming_announcement(&view.name).into();
             inc.missed_text = missed_headline(&view.name).into();
             // First frame: the wash and the name are already there (never blank).
@@ -562,7 +690,37 @@ impl PhoneApp {
             let aura = inc.aura_state(Phase::Dialing);
             inc.aura.update(cx, |a, cx| a.set(aura, cx));
         }
+        self.incoming_sync_hush(window, cx);
         cx.notify();
+    }
+
+    /// S30: the snapshot says the ringer was silenced (by the button, a volume key
+    /// or the flip): the loops ease to rest, the aura loses colour, the control floods.
+    fn incoming_sync_hush(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let silenced = {
+            let snapshot = self.backend.read(cx).calls().snapshot();
+            snapshot
+                .ringer_silenced
+                .then(|| snapshot.silenced_by.unwrap_or(SilencedBy::User))
+        };
+        let reduced = window.prefers_reduced_motion();
+        let inc = &mut self.incoming;
+        if inc.silenced == silenced || !inc.shown {
+            return;
+        }
+        inc.silenced = silenced;
+        let hushed = silenced.is_some();
+        if reduced {
+            inc.hush.snap(f32::from(u8::from(hushed)));
+        } else {
+            inc.hush.set_target(f32::from(u8::from(hushed)));
+        }
+        inc.fx.update(cx, |fx, cx| fx.hush(hushed, reduced, cx));
+        let aura = inc.aura_state(Phase::Dialing);
+        inc.aura.update(cx, |a, cx| a.set(aura, cx));
+        if silenced == Some(SilencedBy::Flip) {
+            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        }
     }
 
     /// The call the screen shows was answered (here, from the notification, or by a headset):
@@ -596,7 +754,21 @@ impl PhoneApp {
                 cx,
             );
         });
-        if is_missed(cause) && inc.acted.is_none() {
+        if let Some(label) = inc.reply_label.take() {
+            // S31: the result of declining with a text, held for 1.2 s like "Missed call from".
+            inc.state = RingState::Missed;
+            inc.missed_text = label;
+            inc.hold_reply = true;
+            inc.swap.set_target(1.0);
+            inc.hidden[0].set_target(1.0);
+            inc.hidden[1].set_target(1.0);
+            inc._leave = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(MISSED_HOLD).await;
+                this.update(cx, |this, cx| this.incoming_leave(cx)).ok();
+            }));
+            cx.notify();
+        } else if is_missed(cause) && inc.acted.is_none() {
+            inc.hold_reply = false;
             inc.state = RingState::Missed;
             inc.swap.set_target(1.0);
             inc.hidden[0].set_target(1.0);
@@ -643,13 +815,168 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A finger that dragged (or flicked) across the screen never taps a button on lift.
+        if !self.incoming.tap.allow_click(0.0) {
+            return;
+        }
         if !self.presses.touch_seen() {
             self.presses.down(id);
         }
         self.incoming_activate(id, window, cx);
     }
 
+    /// "Decline with message" over the ringing card: the Message control or an upward drag.
+    fn incoming_open_reply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let inc = &self.incoming;
+        let Some(call_id) = inc.call_id() else { return };
+        let has_number = inc
+            .view
+            .as_ref()
+            .is_some_and(|v| !v.number.trim().is_empty());
+        if !inc.is_ringing() || inc.acted.is_some() || !has_number {
+            return;
+        }
+        self.reply_open(call_id, false, window, cx);
+    }
+
+    /// Silence: the ringer stops, the call stays answerable (S30). The look follows the snapshot.
+    fn incoming_silence(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let inc = &self.incoming;
+        if !inc.is_ringing()
+            || inc.acted.is_some()
+            || inc.silenced.is_some()
+            || self.backend.read(cx).silence_refused()
+        {
+            return;
+        }
+        let outcome = self.backend.update(cx, |b, cx| b.silence_ringer(cx));
+        if outcome != backend::Outcome::Declined {
+            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        }
+        cx.notify();
+    }
+
+    /// The reply sheet chose "Sent", "Opened Messages" or "Declined": the label takes the place of
+    /// "Incoming call" at once and holds for 1.2 s after the call ends (S31).
+    pub(crate) fn incoming_reply_label(&mut self, label: &'static str) {
+        let inc = &mut self.incoming;
+        inc.reply_label = Some(label.into());
+        inc.missed_text = label.into();
+        inc.hold_reply = true;
+        inc.acted = Some(Act::Decline);
+        inc.swap.set_target(1.0);
+        inc.hidden[0].set_target(1.0);
+        inc.hidden[1].set_target(1.0);
+    }
+
+    /// Every touch on the screen, for the tap guard.
+    pub(crate) fn incoming_touch_all(
+        &mut self,
+        phase: gpui::TouchPhase,
+        position: gpui::Point<gpui::Pixels>,
+    ) {
+        use gpui::TouchPhase;
+        let (x, y) = (f32::from(position.x), f32::from(position.y));
+        let tap = &mut self.incoming.tap;
+        match phase {
+            TouchPhase::Started => tap.begin(x, y, 0.0),
+            TouchPhase::Moved => {
+                tap.moved(x, y);
+            }
+            _ => tap.finish(x, y),
+        }
+    }
+
+    /// The card drag (S29). The finger decides nothing until it lifts; the buttons never move.
+    pub(crate) fn incoming_drag(
+        &mut self,
+        phase: gpui::TouchPhase,
+        position: gpui::Point<gpui::Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use gpui::TouchPhase;
+        let (x, y) = (f32::from(position.x), f32::from(position.y));
+        let live = {
+            let inc = &self.incoming;
+            inc.is_ringing() && inc.acted.is_none() && !self.sheet.is_visible()
+        };
+        let reduced = window.prefers_reduced_motion();
+        match phase {
+            TouchPhase::Started => {
+                let inc = &mut self.incoming;
+                if live && inc.drag.is_none() {
+                    inc.drag = Some(gesture::Drag::new(x, y, inc.now_ms()));
+                }
+            }
+            TouchPhase::Moved => {
+                let inc = &mut self.incoming;
+                let ms = inc.now_ms();
+                let Some(drag) = inc.drag.as_mut() else {
+                    return;
+                };
+                if !live {
+                    inc.drag = None;
+                    inc.off_x.set_target(0.0);
+                    inc.off_y.set_target(0.0);
+                    return;
+                }
+                let follow = drag.moved(x, y, ms);
+                if !reduced {
+                    // Direct while the finger is down: no spring.
+                    inc.off_x.snap(follow.offset.0);
+                    inc.off_y.snap(follow.offset.1);
+                }
+                match follow.tick {
+                    Some(Tick::Half) => {
+                        rovsti_ui::haptics::perform(window, HapticFeedback::Selection)
+                    }
+                    Some(Tick::Commit) => {
+                        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm)
+                    }
+                    None => {}
+                }
+                cx.notify();
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                let inc = &mut self.incoming;
+                let ms = inc.now_ms();
+                let Some(drag) = inc.drag.take() else {
+                    return;
+                };
+                let release = if phase == TouchPhase::Ended && live {
+                    drag.release(x, y, ms)
+                } else {
+                    Release::Cancel
+                };
+                // Everything springs back; a commit also acts, exactly like its button.
+                inc.off_x.set_target(0.0);
+                inc.off_y.set_target(0.0);
+                match release {
+                    Release::Cancel => {}
+                    Release::Commit(Dir::Right) => self.incoming_activate("in-answer", window, cx),
+                    Release::Commit(Dir::Left) => {
+                        self.incoming_activate("in-decline", window, cx);
+                        // The card flies off and fades while the screen leaves.
+                        if !reduced && self.incoming.acted.is_some() {
+                            let width = f32::from(window.viewport_size().width);
+                            self.incoming.off_x.set_target(-width);
+                            self.incoming.card_alpha.set_target(0.0);
+                        }
+                    }
+                    Release::Commit(Dir::Up) => self.incoming_open_reply(window, cx),
+                }
+                cx.notify();
+            }
+        }
+    }
+
     fn incoming_activate(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        match id {
+            "in-msg" => return self.incoming_open_reply(window, cx),
+            "in-silence" => return self.incoming_silence(window, cx),
+            _ => {}
+        }
         let inc = &self.incoming;
         let Some(call_id) = inc.call_id() else {
             return;
@@ -787,6 +1114,198 @@ impl PhoneApp {
             )
     }
 
+    /// One of the two secondary controls: Message (left) or Silence (right). A hidden one
+    /// leaves its slot blank, so nothing ever moves (UIQ-2).
+    fn secondary_control(
+        &self,
+        theme: Theme,
+        id: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        let inc = &self.incoming;
+        let message = id == "in-msg";
+        let slot = div().w(px(SECONDARY)).h(px(SECONDARY_H)).flex_none();
+        let has_number = inc
+            .view
+            .as_ref()
+            .is_some_and(|v| !v.number.trim().is_empty());
+        let visible = if message {
+            has_number && !self.backend.read(cx).prefs().quick_replies.is_empty()
+        } else {
+            !self.backend.read(cx).silence_refused()
+        };
+        if !visible {
+            return slot.into_any_element();
+        }
+        let press = self.presses.value(id).clamp(0.0, 1.2);
+        let hush = if message {
+            0.0
+        } else {
+            inc.hush.value.clamp(0.0, 1.0)
+        };
+        let silenced = !message && inc.silenced.is_some();
+        let caption: &'static str = if message {
+            "Message"
+        } else {
+            match inc.silenced {
+                Some(SilencedBy::Flip) if hush > 0.5 => "Silenced by flip",
+                Some(_) if hush > 0.5 => "Silenced",
+                _ => "Silence",
+            }
+        };
+        let live = inc.is_ringing() && inc.acted.is_none() && !silenced;
+        let icon = if message {
+            Icon::LucideMessageCircle
+        } else {
+            Icon::LucideBellOff
+        };
+        let side = SECONDARY * press_scale(press, scale::PRESS);
+        // S10: the control floods with the accent tint when it is used.
+        let plate = flat_glass(theme, Some((colors.accent, 0.55 * hush)));
+        let mut el = div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(if message {
+                "Message"
+            } else if silenced {
+                "Silenced"
+            } else {
+                "Silence ringer"
+            })
+            .aria_disabled(!live)
+            .relative()
+            .w(px(SECONDARY))
+            .h(px(SECONDARY_H))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .items_center()
+            .opacity(inc.buttons_fade.value() * (1.0 - inc.hidden[0].value.clamp(0.0, 1.0)))
+            .child(
+                div()
+                    .size(px(SECONDARY))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        plate
+                            .size(px(side))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(svg().path(icon.path()).size(px(24.0)).text_color(
+                                if silenced {
+                                    colors.accent
+                                } else {
+                                    colors.label
+                                },
+                            )),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(110.0))
+                    .mt(px(4.0))
+                    .h(px(16.0))
+                    .flex()
+                    .justify_center()
+                    .text_size(typography::CAPTION.size)
+                    .text_color(colors.secondary_label)
+                    .child(caption),
+            );
+        if live {
+            el = el
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.incoming_mouse_down(id, window, cx);
+                    }),
+                )
+                .child(touch_surface(Self::touch_listener(cx, Some(id.into()))));
+        }
+        el.into_any_element()
+    }
+
+    /// The wash that grows with the drag (alpha 0 to 0.35), and the bubble that says what
+    /// letting go would do: Answer, Decline, or the reply sheet rising.
+    fn drag_wash(&self, theme: Theme, progress_x: f32, progress_up: f32) -> Vec<AnyElement> {
+        let calls = call_colors(theme);
+        let colors = theme::colors(theme);
+        let mut out = Vec::new();
+        let p = progress_x.abs().clamp(0.0, 1.0);
+        if p > 0.004 && !self.reduced {
+            let (tint, icon, side) = if progress_x > 0.0 {
+                (calls.answer, Icon::LucidePhone, 1.0)
+            } else {
+                (calls.danger, Icon::LucidePhoneOff, -1.0)
+            };
+            out.push(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .bg(Hsla {
+                        a: 0.35 * p,
+                        ..tint
+                    })
+                    .into_any_element(),
+            );
+            // The bubble grows 0.6 to 1.2 on the side the card is heading to.
+            let k = 0.6 + 0.6 * p;
+            out.push(
+                div()
+                    .absolute()
+                    .top(px(AVATAR_TOP + AVATAR * 0.5 - BUTTON * 0.5))
+                    .when(side > 0.0, |d| d.right(px(28.0)))
+                    .when(side < 0.0, |d| d.left(px(28.0)))
+                    .size(px(BUTTON))
+                    .opacity(p)
+                    .child(
+                        div()
+                            .size(px(BUTTON * k))
+                            .ml(px(BUTTON * (1.0 - k) * 0.5))
+                            .mt(px(BUTTON * (1.0 - k) * 0.5))
+                            .rounded_full()
+                            .bg(tint)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(svg().path(icon.path()).size(px(30.0 * k)).text_color(
+                                if side > 0.0 && theme.is_dark() {
+                                    gpui::black()
+                                } else {
+                                    gpui::white()
+                                },
+                            )),
+                    )
+                    .into_any_element(),
+            );
+        }
+        let up = progress_up.clamp(0.0, 1.0);
+        if up > 0.004 && !self.reduced {
+            // The reply sheet's edge rising under the finger (detent: medium).
+            out.push(
+                flat_glass(theme, None)
+                    .absolute()
+                    .left(px(10.0))
+                    .right(px(10.0))
+                    .bottom(px(10.0 - 240.0 * (1.0 - up)))
+                    .h(px(240.0))
+                    .rounded(px(38.0))
+                    .flex()
+                    .justify_center()
+                    .pt(px(14.0))
+                    .text_size(typography::HEADLINE.size)
+                    .font_weight(typography::HEADLINE.weight)
+                    .text_color(colors.label)
+                    .child("Decline with message")
+                    .into_any_element(),
+            );
+        }
+        out
+    }
+
     /// The Incoming Call screen, or nothing when the tabs are fully showing.
     pub(crate) fn render_incoming(
         &mut self,
@@ -852,7 +1371,11 @@ impl PhoneApp {
         let missed_label = div()
             .text_size(typography::HEADLINE.size)
             .font_weight(typography::HEADLINE.weight)
-            .text_color(calls.danger)
+            .text_color(if inc.hold_reply {
+                colors.label
+            } else {
+                calls.danger
+            })
             .child(inc.missed_text.clone())
             .into_any_element();
 
@@ -880,8 +1403,9 @@ impl PhoneApp {
                     .role(Role::Alert)
                     .aria_label(inc.announce.clone())
                     .relative()
-                    .top(px(lift))
-                    .opacity(text_alpha * (1.0 - 0.5 * swap))
+                    .top(px(lift + inc.off_y.value))
+                    .left(px(inc.off_x.value))
+                    .opacity(text_alpha * (1.0 - 0.5 * swap) * inc.card_alpha.value.clamp(0.0, 1.0))
                     .w_full()
                     .flex()
                     .flex_col()
@@ -905,23 +1429,86 @@ impl PhoneApp {
                             .children(view.secondary.clone()),
                     ),
             )
+            // The first calls teach the drag; the line never moves anything above it.
+            .child(
+                div()
+                    .h(px(22.0))
+                    .pt(px(4.0))
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.tertiary_label)
+                    .opacity(if inc.hint && inc.is_ringing() {
+                        1.0
+                    } else {
+                        0.0
+                    })
+                    .child("Drag the card to answer or decline"),
+            )
             .child(div().flex_1())
-            // Answer is first in reading order (TalkBack), Decline sits on the left.
+            // Reading order for TalkBack: Answer, Decline, Message, Silence. The secondary
+            // row sits above the buttons (flex_col_reverse), in slots that exist even when empty.
             .child(
                 div()
                     .flex()
-                    .flex_row_reverse()
-                    .gap(px(BUTTON_GAP))
-                    .child(self.ring_button(theme, "in-answer", Icon::LucidePhone, "Answer", 1, cx))
-                    .child(self.ring_button(
-                        theme,
-                        "in-decline",
-                        Icon::LucidePhoneOff,
-                        "Decline",
-                        0,
-                        cx,
-                    )),
+                    .flex_col_reverse()
+                    .items_center()
+                    .child(
+                        // Answer is first in reading order (TalkBack), Decline sits on the left.
+                        div()
+                            .flex()
+                            .flex_row_reverse()
+                            .gap(px(BUTTON_GAP))
+                            .child(self.ring_button(
+                                theme,
+                                "in-answer",
+                                Icon::LucidePhone,
+                                "Answer",
+                                1,
+                                cx,
+                            ))
+                            .child(self.ring_button(
+                                theme,
+                                "in-decline",
+                                Icon::LucidePhoneOff,
+                                "Decline",
+                                0,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .mb(px(SECONDARY_LIFT))
+                            .h(px(SECONDARY_H))
+                            .flex()
+                            .gap(px(SECONDARY_GAP))
+                            .child(self.secondary_control(theme, "in-msg", cx))
+                            .child(self.secondary_control(theme, "in-silence", cx)),
+                    ),
             );
+        // S29: the wash grows with the drag, the bubble names what lifting would do.
+        let (progress_x, progress_up) = (
+            inc.off_x.value / (gesture::COMMIT_PX * gesture::GAIN),
+            -inc.off_y.value / (gesture::COMMIT_PX * gesture::GAIN),
+        );
+        let entity = cx.entity();
+        let tap_entity = entity.clone();
+        let root = root
+            .child(drag_surface(move |phase, position, _, cx| {
+                tap_entity.update(cx, |this, _| this.incoming_touch_all(phase, position));
+            }))
+            .children(self.drag_wash(theme, progress_x, progress_up));
+        let root = root.child(
+            div()
+                .absolute()
+                .top(px(CARD_TOP))
+                .left_0()
+                .right_0()
+                .h(px(CARD_H))
+                .child(drag_surface(move |phase, position, window, cx| {
+                    entity.update(cx, |this, cx| {
+                        this.incoming_drag(phase, position, window, cx)
+                    });
+                })),
+        );
         Some(root.child(content).into_any_element())
     }
 }
@@ -974,6 +1561,38 @@ mod tests {
         for period in [RING_PERIOD, 2.0, GLOW_PERIOD] {
             let turns = WRAP / period;
             assert!((turns - turns.round()).abs() < 1e-4, "{period}");
+        }
+    }
+
+    /// The v0.1 positions (label, avatar, Decline, Answer) are constants the new rows must not
+    /// touch: the secondary row and the hint live in the free space between the name and the
+    /// buttons, on every screen height the phone has.
+    #[test]
+    fn the_new_rows_fit_between_the_name_and_the_buttons() {
+        for height in [740.0_f32, 800.0, 874.0, 932.0] {
+            // The number line ends the v0.1 block: label, avatar, gaps, name 34, number 20.
+            let number_bottom = AVATAR_TOP + AVATAR + 20.0 + 20.0 + 34.0 + 20.0;
+            let hint_bottom = number_bottom + 22.0;
+            let buttons_top = height - BOTTOM_PAD - CAPTION_H - BUTTON;
+            let secondary_bottom = buttons_top - SECONDARY_LIFT;
+            let secondary_top = secondary_bottom - SECONDARY_H;
+            assert!(
+                hint_bottom < secondary_top,
+                "{height}: {hint_bottom} {secondary_top}"
+            );
+            assert!(secondary_bottom < buttons_top);
+        }
+        // The two slots are 24 px apart and centred: Message left, Silence right.
+        assert_eq!(SECONDARY_GAP, 24.0);
+        assert_eq!(SECONDARY, 56.0);
+    }
+
+    /// The drag surface covers the card only: the buttons are never inside it.
+    #[test]
+    fn the_drag_surface_never_covers_a_button() {
+        for height in [740.0_f32, 874.0] {
+            let buttons_top = height - BOTTOM_PAD - CAPTION_H - BUTTON;
+            assert!(CARD_TOP + CARD_H < buttons_top - SECONDARY_LIFT - SECONDARY_H);
         }
     }
 }

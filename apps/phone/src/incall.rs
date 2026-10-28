@@ -1039,6 +1039,7 @@ impl PhoneApp {
             hue: view.hue,
             muted: view.muted,
             speaker,
+            hushed: false,
         };
         let on = [view.muted, audio_on, view.state == CallState::Holding];
         // S10 plays only for the state Android reported: a press that was

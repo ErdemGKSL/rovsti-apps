@@ -90,3 +90,40 @@ nothing SIM-related may be visible on them, and that is itself a check.
 | S16 | Settings, SIM, "Default for calls". | The system page for the default SIM opens. | | |
 | **Diagnostics (long-press the Settings title for 0.8 s)** | | | | |
 | S17 | Run SIM (after one call on each SIM), Backup (two pickers) and TalkBack/system (5 s countdown at the ear). | Copy the report and fill the PENDING tables in `docs/spikes/s5-sim.md`, `s13-saf.md` and `s14-system.md`. | | |
+
+## Owner release 5: Blocking and incoming controls (Epics 17 and 18)
+
+Release 4 ("Blocking", 17.6) was not built on its own: owner release 5 carries both epics. Install
+over the previous release (no uninstall). Rovsti Phone must be the default phone app. Use a second
+phone to call this one; its number goes into the S6, S7 and S8 steps below.
+
+| # | Step | Expected | Pass / Fail | Notes |
+|---|---|---|---|---|
+| **UJ-9 Blocking** | | | | |
+| B1 | Recents: hold a row for half a second. | A light tick; a menu opens beside the row with Copy number, Message, Block number. The row stays visible, the page dims a little. Tap outside: it closes, nothing happens. | | |
+| B2 | Hold a row of the second phone's number (call it once first), tap Block number. | The avatar greys, a ring with a slash settles over it, the row fades and the list closes up. The pill reads "Blocked {name}" with Undo. | | |
+| B3 | Tap Undo within 5 s. | The row comes back. Block again. | | |
+| B4 | Call this phone from the second phone. | It does not ring and shows no badge and no notification. Settings, Blocked numbers, Blocked calls: the call is listed "Blocked by you". (Note ring / no ring in `docs/spikes/s6-blocklist.md`.) | | |
+| B5 | Settings, Blocked numbers. | Numbers shows the number with an Unblock pill; the footnote says Xiaomi's own list may be separate. Type a second number and tap Block: it fades in at the top and the pill says "Blocked {number}". Type "abc": "Not a valid number". Type 112: "Emergency numbers can't be blocked". | | |
+| B6 | Unblock the second phone's number, then call again. | It rings. The pill after Unblock offers Undo. | | |
+| B7 | Let a call from an unknown number ring out, or decline it. | After "Call ended" the tabs show a pill "Call from {number}" with Block. Tap it: blocked, with Undo. While a call rings there is no Block control. | | |
+| B8 | Open a blocked contact's sheet (Contacts). | A small ban glyph follows the blocked number. | | |
+| **UJ-3 / UJ-9 Incoming controls** | | | | |
+| R1 | Call this phone. Look at the ringing screen. | Message (left) and Silence (right) circles above Decline and Answer; avatar, name and the two buttons are where they always were. The first three calls show "Drag the card to answer or decline". | | |
+| R2 | Tap Message. | "Decline with message" rises with your three replies and "Write your own…". Drag it down or press Back: back to the ringing card, the call keeps ringing. | | |
+| R3 | Tap Message, choose a reply. | The text flies to the avatar. The label says "Opened Messages" (HANDOFF is the shipped default) and the system Messages app opens with the text typed in: you send it yourself. Never "Sent" unless S7 passed. | | |
+| R4 | Tap Message, "Write your own…". | The call is declined, Messages opens on the caller with an empty body. | | |
+| R5 | Drag the card right 100 px and let go. Another call: drag left. Another: drag up. | Right answers (green wash, Answer bubble), left declines (red wash, card flies off), up opens the reply sheet. A short or slow drag springs back and does nothing. The buttons still work as taps. | | |
+| R6 | Put a finger on the card, slide it down onto Answer and lift. | Nothing is answered. | | |
+| R7 | Tap Silence while it rings. | The rings, breathing and glow ease to rest, the colours calm down, the control floods teal and reads "Silenced". The call is still answerable and rings out as missed if untouched. | | |
+| R8 | Press a volume key while it rings. | Silenced (silenced by volume). | | |
+| R9 | Settings, Flip to silence on. Call, turn the phone face down. | Silenced, "Silenced by flip", a medium tick. A phone already face down when the call starts does not silence. | | |
+| R10 | Heads-up notification while the phone is on another app. | Decline, Answer and Message actions. Message raises the app with the reply sheet already open. | | |
+| R11 | During a call have a second caller ring. Tap Message on the Waiting card. | The reply sheet opens over the call; choosing a reply declines only the waiting caller, the call underneath is untouched. With no replies the pill says "Add replies in Settings". | | |
+| **Quick replies** | | | | |
+| Q1 | Settings, Quick replies. | Three replies, each with a drag handle. Edit one: it saves by itself. At 80 characters a counter appears; 100 is the limit. | | |
+| Q2 | Drag a handle up or down. | The row follows the finger, the others make room, the order is kept. With a row focused, Move up / Move down buttons appear (the TalkBack way). | | |
+| Q3 | Add reply until 6; clear all rows. | "Up to 6 replies" at 6. With none: "With no replies, Message is hidden", and the Message control and the notification action disappear. | | |
+| Q4 | Reset to defaults. | A confirm sheet; Reset restores the three defaults. | | |
+| **Diagnostics (long-press the Settings title)** | | | | |
+| D1 | Blocking (after B2 and B4), Reject text (call this phone within 40 s of Run), Silence (three rings within 75 s: tap Silence, volume key, flip), TalkBack/system (with TalkBack on, walk the flows). | Copy the report and fill the PENDING tables in `docs/spikes/s6-blocklist.md`, `s7-reject-text.md`, `s8-silence.md` and `s14-system.md`. | | |

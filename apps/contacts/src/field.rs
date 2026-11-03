@@ -1,19 +1,61 @@
-//! The text behind the Contacts search field.
+//! The text behind every Contacts text field: the search box and the editor.
 //!
 //! The same state-only field as Rovsti Phone's (`apps/phone/src/field.rs`):
 //! the text, the focus handle and the platform input-method plumbing
-//! (`EntityInputHandler`). `main.rs` draws the glass field around it.
+//! (`EntityInputHandler`). The pages draw the glass box around it. A
+//! [`Config`] picks the keyboard: search, plain text, phone, email or a
+//! multi-line note.
 
 use std::ops::Range;
 
 use gpui::{
     App, Bounds, Context, Entity, EntityInputHandler, FocusHandle, Focusable, IntoElement,
     KeyDownEvent, Pixels, Point, Styled, SurroundingText, TextInputAction, TextInputMode,
-    UTF16Selection, Window, canvas,
+    TextInputPurpose, UTF16Selection, Window, canvas,
 };
 
-pub(crate) struct SearchField {
+/// Which keyboard a field asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Config {
+    multiline: bool,
+    purpose: TextInputPurpose,
+    action: TextInputAction,
+}
+
+impl Config {
+    /// The search box: one line, a Search key.
+    pub(crate) const SEARCH: Self = Self {
+        multiline: false,
+        purpose: TextInputPurpose::Text,
+        action: TextInputAction::Search,
+    };
+    /// A name, an organisation or a group title.
+    pub(crate) const TEXT: Self = Self {
+        multiline: false,
+        purpose: TextInputPurpose::Text,
+        action: TextInputAction::Done,
+    };
+    pub(crate) const PHONE: Self = Self {
+        multiline: false,
+        purpose: TextInputPurpose::Phone,
+        action: TextInputAction::Done,
+    };
+    pub(crate) const EMAIL: Self = Self {
+        multiline: false,
+        purpose: TextInputPurpose::Email,
+        action: TextInputAction::Done,
+    };
+    /// The note: several lines, Enter makes a new line.
+    pub(crate) const NOTE: Self = Self {
+        multiline: true,
+        purpose: TextInputPurpose::Text,
+        action: TextInputAction::Done,
+    };
+}
+
+pub(crate) struct TextField {
     focus: FocusHandle,
+    config: Config,
     content: String,
     /// The input method's composing text (bytes into `content`).
     marked: Option<Range<usize>>,
@@ -21,11 +63,17 @@ pub(crate) struct SearchField {
     pub(crate) edits: u64,
 }
 
-impl SearchField {
+impl TextField {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+        Self::configured(Config::SEARCH, "", cx)
+    }
+
+    /// A field with the keyboard of `config`, starting with `text`.
+    pub(crate) fn configured(config: Config, text: &str, cx: &mut Context<Self>) -> Self {
         Self {
             focus: cx.focus_handle(),
-            content: String::new(),
+            config,
+            content: text.to_owned(),
             marked: None,
             edits: 0,
         }
@@ -66,6 +114,15 @@ impl SearchField {
         cx.notify();
     }
 
+    /// A single line: line breaks never enter the text. A note keeps them.
+    fn line_safe(&self, text: &str) -> String {
+        if self.config.multiline {
+            text.replace('\r', "")
+        } else {
+            text.replace(['\n', '\r'], " ")
+        }
+    }
+
     fn utf16_to_utf8(&self, offset: usize) -> usize {
         let mut utf16 = 0;
         for (utf8, c) in self.content.char_indices() {
@@ -99,19 +156,27 @@ impl SearchField {
     }
 }
 
-impl Focusable for SearchField {
+impl Focusable for TextField {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus.clone()
     }
 }
 
-impl EntityInputHandler for SearchField {
+impl EntityInputHandler for TextField {
     fn text_input_mode(&self, _: &mut Window, _: &mut Context<Self>) -> TextInputMode {
-        TextInputMode::SingleLine
+        if self.config.multiline {
+            TextInputMode::Multiline
+        } else {
+            TextInputMode::SingleLine
+        }
+    }
+
+    fn text_input_purpose(&self, _: &mut Window, _: &mut Context<Self>) -> TextInputPurpose {
+        self.config.purpose
     }
 
     fn text_input_action(&self, _: &mut Window, _: &mut Context<Self>) -> Option<TextInputAction> {
-        Some(TextInputAction::Search)
+        (!self.config.multiline).then_some(self.config.action)
     }
 
     fn perform_text_input_action(
@@ -120,8 +185,8 @@ impl EntityInputHandler for SearchField {
         window: &mut Window,
         _: &mut Context<Self>,
     ) -> bool {
-        // "Search" on the keyboard: the list already follows every keystroke,
-        // so it just puts the keyboard away (the text stays).
+        // "Search" or "Done" on the keyboard: the page already follows every
+        // keystroke, so it just puts the keyboard away (the text stays).
         window.blur();
         true
     }
@@ -171,8 +236,7 @@ impl EntityInputHandler for SearchField {
             .map(|r| self.range_from_utf16(r))
             .or_else(|| self.marked.clone())
             .unwrap_or(self.content.len()..self.content.len());
-        // A single line: line breaks never enter the query.
-        let text = text.replace(['\n', '\r'], " ");
+        let text = self.line_safe(text);
         self.splice(range, &text);
         self.marked = None;
         cx.notify();
@@ -191,7 +255,7 @@ impl EntityInputHandler for SearchField {
             .map(|r| self.range_from_utf16(r))
             .or_else(|| self.marked.clone())
             .unwrap_or(self.content.len()..self.content.len());
-        let text = text.replace(['\n', '\r'], " ");
+        let text = self.line_safe(text);
         let start = range.start.min(self.content.len());
         self.splice(range, &text);
         self.marked = (!text.is_empty()).then_some(start..start + text.len());
@@ -256,7 +320,7 @@ impl EntityInputHandler for SearchField {
 /// A key-down listener for the element that tracks the field's focus:
 /// handles the keyboard's delete key when it arrives as a key event.
 pub(crate) fn on_backspace(
-    field: Entity<SearchField>,
+    field: Entity<TextField>,
 ) -> impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static {
     move |event, _, cx| {
         if event.keystroke.key == "backspace" {
@@ -268,7 +332,7 @@ pub(crate) fn on_backspace(
 
 /// An invisible layer that connects the platform keyboard to `field` while it
 /// has focus. Put it inside the box that shows the text.
-pub(crate) fn input_layer(field: Entity<SearchField>, cx: &App) -> impl IntoElement {
+pub(crate) fn input_layer(field: Entity<TextField>, cx: &App) -> impl IntoElement {
     let focus = field.read(cx).focus.clone();
     canvas(
         |_, _, _| (),

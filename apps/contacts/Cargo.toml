@@ -13,7 +13,10 @@ rovsti_android.workspace = true
 rovsti_core.workspace = true
 rovsti_ui.workspace = true
 log.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+futures.workspace = true
+image.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true

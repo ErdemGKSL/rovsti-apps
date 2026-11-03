@@ -1,33 +1,47 @@
 //! Rovsti Contacts: the phone's address book in liquid glass.
 //!
 //! Contacts are read from Android's `ContactsContract` through
-//! `rovsti_android::providers`; search, sections and the detail card come from
-//! `rovsti_core`. Desktop runs show a sample address book. Nothing leaves the
-//! device.
+//! `rovsti_android` (the `backend` module); search, sections, the detail card,
+//! the editor's checks, vCard files and the import plan come from
+//! `rovsti_core`. The owner can create, edit and delete contacts and groups,
+//! import and export a `.vcf`, and see photos. Desktop runs show a sample
+//! address book. Nothing leaves the device.
 
+mod backend;
+mod confirm;
+mod detail;
+mod editor;
 mod field;
+mod groups;
+mod photos;
+mod prefs;
 mod sample;
+mod transfer;
+mod ui;
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
+use futures::StreamExt;
 use gpui::{
-    AnyElement, App, Bounds, Context, Entity, IntoElement, MouseButton, ParentElement, Render,
+    AnyElement, App, Bounds, Context, Entity, MouseButton, ParentElement, Render, ScrollHandle,
     SharedString, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div,
     prelude::*, px, size, svg,
 };
-use rovsti_android::permissions::{self, Group};
+use rovsti_android::{
+    events,
+    permissions::{self, Group as AccessGroup},
+};
 use rovsti_core::{
     contact_card::{self, ContactCard},
+    contact_edit::{ContactDraft, Group},
+    contacts_prefs::ContactsPrefs,
     contacts_view::{self, ContactVm, NameStyle},
-    search::ContactIndex,
     settings::SortBy,
-    wire::{ContactsPayload, Envelope, NameFormat, WireContact, WireError},
+    wire::{NameFormat, WireContact},
 };
 use rovsti_ui::{
     Icon, IconAssets,
-    components::{
-        avatar, empty_state, glass_icon_button, glass_pill, large_title, list_row, section,
-    },
+    components::{empty_state, glass_icon_button, glass_pill, large_title, list_row, section},
     current_theme,
     glass::{GlassSpec, glass},
     tab_bar::{Tab, TabBar, content_bottom_inset},
@@ -35,47 +49,33 @@ use rovsti_ui::{
     tokens::{Theme, metrics, shadow, typography},
 };
 
-use crate::field::{SearchField, input_layer, on_backspace};
+use crate::{
+    backend::Book,
+    confirm::Confirm,
+    editor::Editor,
+    field::{TextField, input_layer, on_backspace},
+    groups::GroupEdit,
+    photos::{Photos, photo_avatar},
+    ui::{Tone, tap_row},
+};
 
-const TABS: [&str; 3] = ["Contacts", "Favorites", "Settings"];
-const TAB_ICONS: [Icon; 3] = [Icon::LucideUsers, Icon::LucideStar, Icon::LucideSettings];
+const TABS: [&str; 4] = ["Contacts", "Favorites", "Groups", "Settings"];
+const TAB_ICONS: [Icon; 4] = [
+    Icon::LucideUsers,
+    Icon::LucideStar,
+    Icon::LucideFolder,
+    Icon::LucideSettings,
+];
+const CONTACTS_TAB: usize = 0;
+const FAVORITES_TAB: usize = 1;
+const GROUPS_TAB: usize = 2;
 const FIELD_H: f32 = 44.0;
-
-/// The address book as last pulled.
-enum Book {
-    Loading,
-    Ready(Arc<ContactIndex>),
-    /// `READ_CONTACTS` is not granted.
-    Denied,
-    Unavailable,
-}
-
-/// Pulls and indexes the contacts. Blocks on JNI: run it off the UI thread.
-fn pull() -> Book {
-    match rovsti_android::providers::contacts() {
-        Ok(json) => match serde_json::from_str::<Envelope<ContactsPayload>>(&json)
-            .map(Envelope::into_result)
-        {
-            Ok(Ok(payload)) => Book::Ready(Arc::new(ContactIndex::new(payload.contacts))),
-            Ok(Err(WireError::Permission)) => Book::Denied,
-            Ok(Err(error)) => {
-                log::warn!("contacts pull refused: {error}");
-                Book::Unavailable
-            }
-            Err(error) => {
-                log::warn!("bad contacts payload: {error}");
-                Book::Unavailable
-            }
-        },
-        Err(rovsti_android::Error::Unsupported) => {
-            Book::Ready(Arc::new(ContactIndex::new(sample::contacts())))
-        }
-        Err(error) => {
-            log::warn!("contacts pull failed: {error}");
-            Book::Unavailable
-        }
-    }
-}
+/// A list row is about this tall; used to guess which rows are on screen.
+const ROW_PX: f32 = 58.0;
+/// What sits above the first row (title and search field), in pixels.
+const LIST_TOP_PX: f32 = 150.0;
+/// Rows kept ready beyond the screen's edges when asking for photos.
+const PHOTO_MARGIN: usize = 10;
 
 /// Section letters and row texts as shared strings, built once per change.
 struct Row {
@@ -102,20 +102,41 @@ struct ContactsApp {
     tabs: TabBar,
     motion: rovsti_ui::motion::Motion,
     page: rovsti_ui::motion::Entrance,
-    field: Entity<SearchField>,
+    scroll: ScrollHandle,
+    field: Entity<TextField>,
     seen_edits: u64,
     book: Book,
     pulls: u64,
+    groups: Vec<Group>,
     style: NameStyle,
+    /// Where `contacts-prefs.json` lives, once the data directory is known.
+    prefs_dir: Option<PathBuf>,
+    /// The owner picked a style before the saved one was read.
+    style_touched: bool,
     rows: Vec<Row>,
     favorites: Vec<Row>,
     open: Option<ContactCard>,
+    /// The open contact in full (organisation, emails, note, groups).
+    open_draft: Option<ContactDraft>,
+    editor: Option<Editor>,
+    /// The group whose page is open, and its rows.
+    group_page: Option<i64>,
+    group_rows: Vec<Row>,
+    group_edit: Option<GroupEdit>,
+    confirm: Option<Confirm>,
+    /// Open this contact once the next pull lands (after a save).
+    pending_open: Option<i64>,
+    /// A file picker is open.
+    transfer_busy: bool,
+    /// How many contacts the export in flight holds.
+    exported: Option<usize>,
     notice: Option<SharedString>,
+    photos: Photos,
 }
 
 impl ContactsApp {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let field = cx.new(SearchField::new);
+        let field = cx.new(TextField::new);
         cx.observe(&field, |this, field, cx| {
             let edits = field.read(cx).edits;
             if edits != this.seen_edits {
@@ -132,6 +153,56 @@ impl ContactsApp {
             }
         })
         .detach();
+
+        // Answers from Kotlin (a file picker finished) arrive as events.
+        let (mut events_rx, sink) = events::install_sink_owned();
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = events_rx.next().await {
+                if this
+                    .update(cx, |this, cx| this.on_event(&event, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            events::clear_sink_if(sink);
+        })
+        .detach();
+        // Tell Kotlin the session is live so an answer that came early is delivered.
+        cx.background_executor()
+            .spawn(async {
+                let _ = rovsti_android::window::ui_attached(true);
+            })
+            .detach();
+
+        // The saved name format and sort order.
+        let data_dir = rovsti_ui::storage::data_dir("contacts", cx);
+        cx.spawn(async move |this, cx| {
+            let dir = match data_dir.await {
+                Ok(dir) => dir,
+                Err(error) => {
+                    log::warn!("no data directory for the preferences: {error}");
+                    return;
+                }
+            };
+            let read_from = dir.clone();
+            let saved = cx
+                .background_executor()
+                .spawn(async move { prefs::load(&read_from) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.prefs_dir = Some(dir);
+                if this.style_touched {
+                    // The owner chose before the file was read: theirs wins.
+                    this.save_prefs(cx);
+                } else {
+                    this.apply_style(saved.style(), cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+
         let mut app = Self {
             tabs: TabBar::new(
                 TABS.into_iter()
@@ -140,30 +211,53 @@ impl ContactsApp {
             ),
             motion: Default::default(),
             page: Default::default(),
+            scroll: ScrollHandle::new(),
             field,
             seen_edits: 0,
             book: Book::Loading,
             pulls: 0,
+            groups: Vec::new(),
             style: NameStyle::default(),
+            prefs_dir: None,
+            style_touched: false,
             rows: Vec::new(),
             favorites: Vec::new(),
             open: None,
+            open_draft: None,
+            editor: None,
+            group_page: None,
+            group_rows: Vec::new(),
+            group_edit: None,
+            confirm: None,
+            pending_open: None,
+            transfer_busy: false,
+            exported: None,
             notice: None,
+            photos: Photos::new(),
         };
         app.reload(cx);
         app
     }
 
-    /// Pulls the contacts on the background executor; only the newest pull lands.
+    /// Pulls the contacts and groups on the background executor; only the
+    /// newest pull lands.
     fn reload(&mut self, cx: &mut Context<Self>) {
         self.pulls += 1;
         let pull_id = self.pulls;
         cx.spawn(async move |this, cx| {
-            let book = cx.background_executor().spawn(async { pull() }).await;
+            let (book, groups) = cx
+                .background_executor()
+                .spawn(async { (backend::pull_book(), backend::pull_groups()) })
+                .await;
             this.update(cx, |this, cx| {
                 if this.pulls == pull_id {
                     this.book = book;
+                    this.groups = groups;
+                    this.photos.forget_misses();
                     this.rebuild(cx);
+                    if let Some(id) = this.pending_open.take() {
+                        this.open_contact(id, cx);
+                    }
                 }
             })
             .ok();
@@ -171,20 +265,30 @@ impl ContactsApp {
         .detach();
     }
 
-    fn index(&self) -> Option<&Arc<ContactIndex>> {
+    fn index(&self) -> Option<&Arc<rovsti_core::search::ContactIndex>> {
         match &self.book {
             Book::Ready(index) => Some(index),
             _ => None,
         }
     }
 
-    /// Rebuilds the list rows, favorites and the open card from the book,
-    /// the query and the name style.
+    /// The photo address of contact `id`, if it has one.
+    fn photo_uri_of(&self, id: i64) -> Option<&str> {
+        self.index()?
+            .all()
+            .find(|c| c.id == id)?
+            .photo_uri
+            .as_deref()
+    }
+
+    /// Rebuilds the list rows, favorites, the open card and the open group
+    /// from the book, the query and the name style.
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         let query = self.field.read(cx).text().to_owned();
         let Some(index) = self.index().cloned() else {
             self.rows.clear();
             self.favorites.clear();
+            self.group_rows.clear();
             cx.notify();
             return;
         };
@@ -209,6 +313,15 @@ impl ContactsApp {
                 .find(|c| c.id == id)
                 .map(|c| ContactCard::new(c, self.style.format));
         }
+        if let Some(id) = self.group_page {
+            match self.group(id) {
+                Some(group) => self.group_rows = self.rows_of_group(group),
+                None => {
+                    self.group_page = None;
+                    self.group_rows.clear();
+                }
+            }
+        }
         cx.notify();
     }
 
@@ -218,13 +331,33 @@ impl ContactsApp {
             .index()
             .and_then(|index| index.all().find(|c| c.id == id))
             .map(|c| ContactCard::new(c, format));
+        self.open_draft = None;
         self.notice = None;
         self.page.restart();
         cx.notify();
+        if self.open.is_none() {
+            return;
+        }
+        // The rest of the card (organisation, emails, note, groups) follows.
+        cx.spawn(async move |this, cx| {
+            let draft = cx
+                .background_executor()
+                .spawn(async move { backend::pull_detail(id) })
+                .await;
+            this.update(cx, |this, cx| {
+                if this.open.as_ref().is_some_and(|card| card.id == id) {
+                    this.open_draft = draft.ok();
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn close_contact(&mut self, cx: &mut Context<Self>) {
         self.open = None;
+        self.open_draft = None;
         self.page.restart();
         cx.notify();
     }
@@ -267,7 +400,10 @@ impl ContactsApp {
         };
         contact.starred = !contact.starred;
         let starred = contact.starred;
-        self.book = Book::Ready(Arc::new(ContactIndex::new(all)));
+        self.book = Book::Ready(Arc::new(rovsti_core::search::ContactIndex::new(all)));
+        if let Some(draft) = self.open_draft.as_mut().filter(|d| d.id == Some(id)) {
+            draft.starred = starred;
+        }
         self.rebuild(cx);
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -291,10 +427,76 @@ impl ContactsApp {
         .detach();
     }
 
-    fn set_style(&mut self, style: NameStyle, cx: &mut Context<Self>) {
+    /// Switches the name style without saving it (the saved one was read).
+    fn apply_style(&mut self, style: NameStyle, cx: &mut Context<Self>) {
         if self.style != style {
             self.style = style;
             self.rebuild(cx);
+        }
+    }
+
+    /// The owner picked a name style: show it and remember it.
+    fn set_style(&mut self, style: NameStyle, cx: &mut Context<Self>) {
+        if self.style != style {
+            self.style_touched = true;
+            self.apply_style(style, cx);
+            self.save_prefs(cx);
+        }
+    }
+
+    fn save_prefs(&self, cx: &mut Context<Self>) {
+        let Some(dir) = self.prefs_dir.clone() else {
+            return;
+        };
+        let saved = ContactsPrefs::from_style(self.style);
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(error) = prefs::save(&dir, saved) {
+                    log::warn!("could not save the contacts preferences: {error}");
+                }
+            })
+            .detach();
+    }
+
+    // ---- photos ----
+
+    /// Asks for the photos of the rows near the screen, and of the open card.
+    fn request_photos(&mut self, tab: usize, cx: &mut Context<Self>) {
+        let mut wanted: Vec<(i64, String)> = Vec::new();
+        if let Some(card) = &self.open {
+            if let Some(uri) = self.photo_uri_of(card.id) {
+                wanted.push((card.id, uri.to_owned()));
+            }
+        } else if self.editor.is_none() {
+            let list = if self.group_page.is_some() {
+                Some(&self.group_rows)
+            } else {
+                match tab {
+                    CONTACTS_TAB => Some(&self.rows),
+                    FAVORITES_TAB => Some(&self.favorites),
+                    _ => None,
+                }
+            };
+            if let Some(list) = list {
+                let scrolled = f32::from(-self.scroll.offset().y).max(0.0);
+                let viewport = f32::from(self.scroll.bounds().size.height);
+                let first = ((scrolled - LIST_TOP_PX) / ROW_PX).max(0.0) as usize;
+                let visible = (viewport / ROW_PX) as usize + 2;
+                wanted.extend(
+                    list.iter()
+                        .skip(first.saturating_sub(PHOTO_MARGIN))
+                        .take(visible + 2 * PHOTO_MARGIN)
+                        .filter_map(|row| {
+                            row.vm
+                                .photo_uri
+                                .as_ref()
+                                .map(|uri| (row.vm.id, uri.clone()))
+                        }),
+                );
+            }
+        }
+        if !wanted.is_empty() {
+            self.want_photos(wanted.iter().map(|(id, uri)| (*id, uri.as_str())), cx);
         }
     }
 
@@ -399,9 +601,10 @@ impl ContactsApp {
         let id = row.vm.id;
         let tint = hue_pair(theme, row.vm.hue).0;
         let star = row.vm.starred.then(|| SharedString::from("★"));
+        let photo = row.vm.photo_uri.as_ref().and_then(|_| self.photos.get(id));
         list_row(
             theme,
-            Some(avatar(theme, row.monogram.clone(), 40.0, tint).into_any_element()),
+            Some(photo_avatar(theme, row.monogram.clone(), 40.0, tint, photo).into_any_element()),
             row.name.clone(),
             row.subtitle.clone(),
             star,
@@ -445,7 +648,7 @@ impl ContactsApp {
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.act(
                                     "ask for access",
-                                    || permissions::request(Group::Contacts),
+                                    || permissions::request(AccessGroup::Contacts),
                                     cx,
                                 );
                             })),
@@ -623,232 +826,43 @@ impl ContactsApp {
                     ),
                 ],
             ))
+            .child(section(
+                theme,
+                Some("Contacts file".into()),
+                [
+                    tap_row(
+                        theme,
+                        "export-vcf",
+                        Some(Icon::LucideUpload),
+                        "Export to a .vcf file",
+                        Tone::Accent,
+                    )
+                    .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
+                    .on_click(cx.listener(|this, _, _, cx| this.export_contacts(cx)))
+                    .into_any_element(),
+                    tap_row(
+                        theme,
+                        "import-vcf",
+                        Some(Icon::LucideDownload),
+                        "Import from a .vcf file",
+                        Tone::Accent,
+                    )
+                    .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
+                    .on_click(cx.listener(|this, _, _, cx| this.import_contacts(cx)))
+                    .into_any_element(),
+                ],
+            ))
             .child(
                 div()
                     .px(px(32.0))
                     .text_size(typography::FOOTNOTE.size)
                     .text_color(colors.secondary_label)
                     .child(
-                        "Contacts are read from this phone's address book. \
+                        "Contacts are kept in this phone's address book. \
+                         Files you export or import stay where you save them. \
                          Nothing leaves the device.",
                     ),
             )
-            .into_any_element()
-    }
-
-    /// A round glass action with a caption (Call, Message, Share).
-    fn action_button(
-        theme: Theme,
-        key: &'static str,
-        icon: Icon,
-        label: &'static str,
-        enabled: bool,
-    ) -> gpui::Stateful<gpui::Div> {
-        let colors = theme::colors(theme);
-        div()
-            .id(key)
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(6.0))
-            .opacity(if enabled { 1.0 } else { 0.4 })
-            .child(
-                glass(GlassSpec::control(theme))
-                    .size(px(56.0))
-                    .rounded_full()
-                    .shadow(shadow::glass(theme.is_dark()))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        svg()
-                            .path(icon.path())
-                            .size(px(22.0))
-                            .text_color(colors.accent),
-                    ),
-            )
-            .child(
-                div()
-                    .text_size(typography::CAPTION.size)
-                    .text_color(colors.accent)
-                    .child(label),
-            )
-    }
-
-    fn detail(&self, card: &ContactCard, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let colors = theme::colors(theme);
-        let id = card.id;
-        let primary = card.primary().map(|n| n.raw.clone());
-        let tint = hue_pair(theme, card.hue).0;
-        let monogram: SharedString = card.monogram.map(String::from).unwrap_or_default().into();
-
-        let top = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .px(px(8.0))
-            .pt(px(48.0))
-            .child(
-                glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
-                    .id("back")
-                    .on_click(cx.listener(|this, _, _, cx| this.close_contact(cx))),
-            )
-            .child(
-                // The accent dot marks a favorite.
-                glass_icon_button(theme, Icon::LucideStar, 0.0, card.starred)
-                    .id("star")
-                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_star(id, cx))),
-            );
-
-        let head = div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(12.0))
-            .pt(px(8.0))
-            .pb(px(20.0))
-            .child(avatar(theme, monogram, 96.0, tint))
-            .child(
-                div()
-                    .px(px(24.0))
-                    .text_center()
-                    .text_size(typography::TITLE.size)
-                    .line_height(typography::TITLE.line)
-                    .font_weight(typography::TITLE.weight)
-                    .text_color(colors.label)
-                    .child(SharedString::from(card.name.clone())),
-            );
-
-        let has_number = primary.is_some();
-        let call_number = primary.clone();
-        let sms_number = primary;
-        let share = card.share_text();
-        let actions =
-            div()
-                .flex()
-                .justify_center()
-                .gap(px(28.0))
-                .pb(px(24.0))
-                .child(
-                    Self::action_button(theme, "call", Icon::LucidePhone, "Call", has_number)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(number) = call_number.clone() {
-                                this.act(
-                                    "call",
-                                    move || rovsti_android::telecom::place_call(&number),
-                                    cx,
-                                );
-                            }
-                        })),
-                )
-                .child(
-                    Self::action_button(
-                        theme,
-                        "message",
-                        Icon::LucideMessageCircle,
-                        "Message",
-                        has_number,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(number) = sms_number.clone() {
-                            this.act(
-                                "send a message",
-                                move || rovsti_android::telecom::send_sms_to(&number),
-                                cx,
-                            );
-                        }
-                    })),
-                )
-                .child(
-                    Self::action_button(theme, "share", Icon::LucideUpload, "Share", true)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let text = share.clone();
-                            this.act(
-                                "share",
-                                move || rovsti_android::telecom::share_text(&text),
-                                cx,
-                            );
-                        })),
-                );
-
-        let numbers: Vec<AnyElement> = card
-            .numbers
-            .iter()
-            .enumerate()
-            .map(|(i, number)| {
-                let raw = number.raw.clone();
-                let label: SharedString = if number.default {
-                    format!("{} · default", number.label).into()
-                } else {
-                    number.label.clone().into()
-                };
-                div()
-                    .id(("number", i))
-                    .flex()
-                    .flex_col()
-                    .justify_center()
-                    .min_h(metrics::ROW_HEIGHT_SUBTITLE)
-                    .px(metrics::ROW_INSET)
-                    .border_b(metrics::SEPARATOR)
-                    .border_color(colors.separator)
-                    .child(
-                        div()
-                            .text_size(typography::FOOTNOTE.size)
-                            .text_color(colors.secondary_label)
-                            .child(label),
-                    )
-                    .child(
-                        div()
-                            .text_size(typography::BODY.size)
-                            .text_color(colors.accent)
-                            .child(SharedString::from(number.display.clone())),
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let raw = raw.clone();
-                        this.act(
-                            "call",
-                            move || rovsti_android::telecom::place_call(&raw),
-                            cx,
-                        );
-                    }))
-                    .into_any_element()
-            })
-            .collect();
-
-        let edit = div()
-            .id("edit")
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .h(metrics::MIN_HIT)
-            .px(metrics::ROW_INSET)
-            .text_size(typography::BODY.size)
-            .text_color(colors.accent)
-            .child(
-                svg()
-                    .path(Icon::LucidePencil.path())
-                    .size(px(18.0))
-                    .text_color(colors.accent),
-            )
-            .child("Edit Contact")
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.act(
-                    "edit this contact",
-                    move || rovsti_android::telecom::edit_contact(id),
-                    cx,
-                );
-            }))
-            .into_any_element();
-
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(20.0))
-            .child(top)
-            .child(head)
-            .child(actions)
-            .children((!numbers.is_empty()).then(|| section(theme, Some("Phone".into()), numbers)))
-            .child(section(theme, None, [edit]))
             .into_any_element()
     }
 
@@ -881,26 +895,47 @@ impl ContactsApp {
 impl Render for ContactsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = current_theme(window);
-        let mut motion = std::mem::take(&mut self.motion);
-        motion.frame(window, |dt| self.tabs.tick(dt) | self.page.tick(dt));
-        self.motion = motion;
         let tab = self.tabs.selected();
+        self.request_photos(tab, cx);
+        let fading = self.photos.fading();
+        let mut motion = std::mem::take(&mut self.motion);
+        motion.frame(window, |dt| {
+            self.tabs.tick(dt) | self.page.tick(dt) | fading
+        });
+        self.motion = motion;
         let entity = cx.entity();
         let touch_entity = entity.clone();
+        let editing = self.editor.is_some();
 
-        let page = if let Some(card) = self.open.clone() {
+        let page = if editing {
+            self.editor_view(theme, window, cx)
+        } else if let Some(card) = self.open.clone() {
             self.detail(&card, theme, cx)
+        } else if let Some(id) = self.group_page {
+            self.group_page_view(theme, id, window, cx)
         } else {
             let body = match tab {
-                0 => self.contacts_tab(theme, window, cx),
-                1 => self.favorites_tab(theme, cx),
+                CONTACTS_TAB => self.contacts_tab(theme, window, cx),
+                FAVORITES_TAB => self.favorites_tab(theme, cx),
+                GROUPS_TAB => self.groups_tab(theme, window, cx),
                 _ => self.settings_tab(theme, cx),
             };
+            let trailing =
+                (tab == CONTACTS_TAB && matches!(self.book, Book::Ready(_))).then(|| {
+                    glass_icon_button(theme, Icon::LucidePlus, 0.0, false)
+                        .id("new-contact")
+                        .on_click(cx.listener(|this, _, _, cx| this.open_new_editor(cx)))
+                        .into_any_element()
+                });
             div()
-                .child(large_title(theme, TABS[tab], None))
+                .child(large_title(theme, TABS[tab], trailing))
                 .child(body)
                 .into_any_element()
         };
+
+        // The keyboard covers the bottom of the screen: leave room to scroll.
+        let insets = window.insets();
+        let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
 
         div()
             .size_full()
@@ -921,37 +956,51 @@ impl Render for ContactsApp {
                     .id("page")
                     .size_full()
                     .overflow_y_scroll()
-                    .pb(content_bottom_inset())
+                    .track_scroll(&self.scroll)
+                    .pb(content_bottom_inset() + keyboard)
                     .opacity(self.page.progress())
                     .child(div().relative().top(px(self.page.offset(24.0))).child(page)),
             )
             .children(self.notice(theme))
-            .child(self.tabs.render(
-                theme,
-                move |index, _, cx| {
-                    entity.update(cx, |this, cx| {
-                        this.tabs.press();
-                        let changed = this.tabs.select(index);
-                        if changed || this.open.is_some() {
-                            this.open = None;
-                            this.notice = None;
-                            this.page.restart();
-                        }
-                        cx.notify();
-                    });
-                },
-                move |phase, _, cx| {
-                    touch_entity.update(cx, |this, cx| {
-                        this.tabs.touch(phase);
-                        cx.notify();
-                    });
-                },
-            ))
+            // No tab bar while a form is open: no stray tap loses the edits.
+            .children((!editing).then(|| {
+                self.tabs.render(
+                    theme,
+                    move |index, _, cx| {
+                        entity.update(cx, |this, cx| {
+                            this.tabs.press();
+                            let changed = this.tabs.select(index);
+                            if changed
+                                || this.open.is_some()
+                                || this.group_page.is_some()
+                                || this.group_edit.is_some()
+                            {
+                                this.open = None;
+                                this.open_draft = None;
+                                this.group_page = None;
+                                this.group_edit = None;
+                                this.notice = None;
+                                this.page.restart();
+                            }
+                            cx.notify();
+                        });
+                    },
+                    move |phase, _, cx| {
+                        touch_entity.update(cx, |this, cx| {
+                            this.tabs.touch(phase);
+                            cx.notify();
+                        });
+                    },
+                )
+            }))
+            .children(self.confirm_view(theme, cx))
     }
 }
 
 #[gpui_platform::main]
 fn main() {
+    // Keeps the JNI entry points in the final library (see `bridge::keep_symbols`).
+    rovsti_android::bridge::keep_symbols();
     gpui_platform::application()
         .with_assets(IconAssets::new())
         .run(|cx: &mut App| {

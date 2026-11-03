@@ -225,6 +225,47 @@ object RovstiBridge {
     @JvmStatic fun setStarred(contactId: String, starred: Boolean): Boolean =
         contactId.toLongOrNull()?.let { ContactsQuery.setStarred(app, it, starred) } ?: false
 
+    // ---- Rovsti Contacts: whole-contact edits, groups, vCard files -------------------
+
+    /** [contactId] is a decimal string. The answer is `{contact: ContactDraft}`. */
+    @JvmStatic fun contactDetail(contactId: String): String =
+        contactId.toLongOrNull()?.let { ContactsEdit.detailJson(app, it) } ?: ProviderJson.error("not_found")
+
+    @JvmStatic fun contactsFull(): String = ContactsEdit.fullJson(app)
+
+    /** Creates or updates a contact from a `ContactDraft`; the answer is `{id}`. */
+    @JvmStatic fun saveContact(json: String): String = ContactsEdit.saveJson(app, json)
+
+    @JvmStatic fun deleteContact(contactId: String): Boolean =
+        contactId.toLongOrNull()?.let { ContactsEdit.delete(app, it) } ?: false
+
+    @JvmStatic fun importContacts(json: String): String = ContactsEdit.importJson(app, json)
+
+    @JvmStatic fun contactGroups(): String = ContactsEdit.groupsJson(app)
+
+    /** [groupId] "0" creates a group; the answer is `{id}`. */
+    @JvmStatic fun saveContactGroup(groupId: String, title: String): String =
+        groupId.toLongOrNull()?.let { ContactsEdit.saveGroup(app, it, title) } ?: ProviderJson.error("not_found")
+
+    @JvmStatic fun deleteContactGroup(groupId: String): Boolean =
+        groupId.toLongOrNull()?.let { ContactsEdit.deleteGroup(app, it) } ?: false
+
+    /** Opens "save as" for a `.vcf`; the answer is a `document_result` with op `export_contacts`. */
+    @JvmStatic
+    fun exportContactsDocument(name: String, text: String): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startContacts(activity, true, name, text) }
+        return true
+    }
+
+    /** Opens the file picker for a `.vcf`; the answer is a `document_result` with op `import_contacts`. */
+    @JvmStatic
+    fun importContactsDocument(): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startContacts(activity, false, "", "") }
+        return true
+    }
+
     /** Story 10.5: path of a PNG thumbnail (at most [size] px) for a photo URI, or "". */
     @JvmStatic fun contactPhoto(uri: String, size: Int): String = ContactPhotos.thumbnailPath(app, uri, size)
 

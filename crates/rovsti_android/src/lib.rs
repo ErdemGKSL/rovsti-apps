@@ -12,6 +12,7 @@
 pub mod blocklist;
 pub mod bridge;
 pub mod calls;
+pub mod contacts_edit;
 pub mod diagnostics;
 pub mod documents;
 pub mod events;

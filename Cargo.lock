@@ -5326,6 +5326,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rovsti_contacts"
+version = "0.1.0"
+dependencies = [
+ "gpui",
+ "gpui_android",
+ "gpui_platform",
+ "log",
+ "rovsti_android",
+ "rovsti_core",
+ "rovsti_ui",
+ "serde_json",
+]
+
+[[package]]
 name = "rovsti_core"
 version = "0.1.0"
 dependencies = [

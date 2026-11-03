@@ -153,7 +153,9 @@ pub const KEYS: [Key; 12] = [
 #[derive(Clone, Copy)]
 pub(crate) enum HoldAction {
     Plus,
-    Clear,
+    /// Delete is held: erase the next character from the right (after this
+    /// many repeats), then arm the next erase while the finger stays down.
+    Erase(u32),
     /// The Setup title was held: open Diagnostics (story 14.0f).
     Diagnostics,
     /// The Call button was held with a default SIM: open the chooser (story 16.4).
@@ -271,13 +273,7 @@ impl PhoneApp {
                     self.digit_pop.set_target(1.0);
                 }
             }
-            HoldAction::Clear => {
-                if !self.dialed.is_empty() {
-                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
-                    self.dialed.clear();
-                    self.delete_shown.set_target(0.0);
-                }
-            }
+            HoldAction::Erase(step) => self.erase_step(step, window, cx),
             HoldAction::Diagnostics => {
                 if self.sheet.is_open() && self.sheet_kind == crate::SheetKind::Setup {
                     rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
@@ -377,8 +373,29 @@ impl PhoneApp {
             if self.dialed.is_empty() {
                 self.delete_shown.set_target(0.0);
             } else {
-                self.arm_hold(LONG_DELETE, HoldAction::Clear, window, cx);
+                self.arm_hold(LONG_DELETE, HoldAction::Erase(0), window, cx);
             }
+        }
+    }
+
+    /// One repeat of a held Delete: the last digit leaves as a ghost (S2),
+    /// then the next repeat is armed, sooner each time, until the field is
+    /// empty or the finger lifts (`released` bumps `hold_gen`).
+    fn erase_step(&mut self, step: u32, window: &mut Window, cx: &mut Context<Self>) {
+        let last = self.dialed.chars().last();
+        if !dial::backspace(&mut self.dialed) {
+            return;
+        }
+        if let Some(digit) = last {
+            self.begin_ghost(digit, window);
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.status = None;
+        if self.dialed.is_empty() {
+            self.delete_shown.set_target(0.0);
+        } else {
+            let next = dial::erase_interval_ms(step);
+            self.arm_hold(next, HoldAction::Erase(step.saturating_add(1)), window, cx);
         }
     }
 

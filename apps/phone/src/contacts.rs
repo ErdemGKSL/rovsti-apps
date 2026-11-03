@@ -34,7 +34,7 @@ use rovsti_ui::{
 use crate::{
     CONTACTS_TAB, FAVORITES_TAB, PhoneApp, SheetKind,
     backend::{self, Access, Group, Load},
-    field::{SearchField, input_layer},
+    field::{SearchField, input_layer, on_backspace},
     flight::{Home, Look},
     recents::{ROW_H, row_at, state_view},
 };
@@ -1124,8 +1124,9 @@ impl PhoneApp {
             .items_center()
             .overflow_hidden()
             .text_size(typography::BODY.size)
-            .child(input_layer(field, cx))
-            .child(if text.is_empty() {
+            .child(input_layer(field.clone(), cx))
+            // The placeholder goes as soon as the field is touched.
+            .child(if text.is_empty() && !typing {
                 div()
                     .text_color(colors.tertiary_label)
                     .child("Search name or number")
@@ -1151,6 +1152,7 @@ impl PhoneApp {
             .role(Role::TextInput)
             .aria_label("Search name or number")
             .track_focus(&focus)
+            .on_key_down(on_backspace(field))
             .relative()
             .flex_none()
             .h(px(FIELD_H))

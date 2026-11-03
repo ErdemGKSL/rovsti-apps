@@ -28,7 +28,7 @@ pub struct NumberVm {
 }
 
 impl NumberVm {
-    fn from_wire(n: &WireNumber) -> Self {
+    pub(crate) fn from_wire(n: &WireNumber) -> Self {
         let display = PhoneNumber::parse(&n.raw)
             .map(|p| format_number(&p))
             .unwrap_or_else(|_| n.raw.clone());

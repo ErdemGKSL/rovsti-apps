@@ -38,6 +38,16 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
 - [ ] OTP detection and copy, spam filter (on-device rules), scheduled send
 - [ ] Encrypted local backup and export to a user-chosen file
 
+## Rovsti Contacts
+
+- [x] Scaffold: sectioned list with search, Favorites, contact card (call,
+      message, share, edit, star), name format and sort settings, desktop sample
+- [ ] Eject the Android host and package `RovstiBridge` (contacts pull, intents)
+- [ ] Persist name format and sort (`rovsti_ui::storage`)
+- [ ] Create and edit contacts in-app instead of handing off to the system editor
+- [ ] Photos, groups, vCard import and export
+- [ ] WhatsApp session owner? See `docs/whatsapp-notes.md`
+
 ## Rovsti Stops
 
 - [ ] Foreground location service → `Trip::update`, using `next_fix_in` for battery

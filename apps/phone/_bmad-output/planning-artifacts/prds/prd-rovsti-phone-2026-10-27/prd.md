@@ -201,7 +201,7 @@ The owner can enter a dial string with the keypad (`0-9`, `*`, `#`, long-press `
 **Consequences (testable):**
 - Pasting "+90 (555) 111-22-33" yields a number that `PhoneNumber::parse` accepts.
 - Pasted pause and wait characters (`,` and `;`) are kept.
-- Delete removes one character; long-press delete clears the field.
+- Delete removes one character; holding delete erases right to left, one character at a time and faster the longer it is held, until the finger lifts or the field is empty (owner request 2026-11-03).
 
 #### FR-10: Validate before calling
 

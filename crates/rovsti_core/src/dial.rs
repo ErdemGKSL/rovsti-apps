@@ -161,6 +161,21 @@ pub fn backspace(field: &mut String) -> bool {
     field.pop().is_some()
 }
 
+/// Holding Delete erases one character at a time from the right. The first
+/// repeat waits [`ERASE_FIRST_MS`]; each later one comes sooner, down to
+/// [`ERASE_FASTEST_MS`], so a long number goes quickly but each digit still
+/// visibly leaves.
+pub const ERASE_FIRST_MS: u64 = 140;
+pub const ERASE_FASTEST_MS: u64 = 50;
+const ERASE_STEP_MS: u64 = 15;
+
+/// Milliseconds before the next held-Delete erase, after `step` repeats.
+pub fn erase_interval_ms(step: u32) -> u64 {
+    ERASE_FIRST_MS
+        .saturating_sub(u64::from(step).saturating_mul(ERASE_STEP_MS))
+        .max(ERASE_FASTEST_MS)
+}
+
 /// Long-press on `0` turns the `0` that the press just typed into `+`.
 /// Fires at most once per typed zero: after replacement the field ends in
 /// `+`, so a repeat is a no-op. The caller invokes it only after `push`
@@ -498,5 +513,14 @@ mod tests {
         assert!(!is_emergency("1", &none));
         assert!(!is_emergency("11", &none));
         assert!(!is_emergency("91", &none));
+    }
+
+    #[test]
+    fn held_delete_speeds_up_to_a_floor() {
+        assert_eq!(erase_interval_ms(0), ERASE_FIRST_MS);
+        let steps: Vec<u64> = (0..20).map(erase_interval_ms).collect();
+        assert!(steps.windows(2).all(|w| w[1] <= w[0]), "{steps:?}");
+        assert_eq!(erase_interval_ms(u32::MAX), ERASE_FASTEST_MS);
+        assert!(steps.iter().all(|ms| *ms >= ERASE_FASTEST_MS));
     }
 }

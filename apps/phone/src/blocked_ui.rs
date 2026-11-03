@@ -35,7 +35,7 @@ use rovsti_ui::{
 use crate::{
     PhoneApp,
     backend::{self, Access, Group, Load},
-    field::{SearchField, input_layer},
+    field::{SearchField, input_layer, on_backspace},
     recents::{ROW_H, state_view},
 };
 
@@ -561,8 +561,8 @@ impl PhoneApp {
             .items_center()
             .overflow_hidden()
             .text_size(typography::BODY.size)
-            .child(input_layer(field, cx))
-            .child(if text.is_empty() {
+            .child(input_layer(field.clone(), cx))
+            .child(if text.is_empty() && !(typing && enabled) {
                 div()
                     .text_color(colors.tertiary_label)
                     .child("Add a number to block")
@@ -596,6 +596,7 @@ impl PhoneApp {
         if enabled {
             shell = shell
                 .track_focus(&focus)
+                .on_key_down(on_backspace(field))
                 .on_mouse_down(MouseButton::Left, {
                     let focus = focus_for_tap;
                     cx.listener(move |this, _, window, cx| {

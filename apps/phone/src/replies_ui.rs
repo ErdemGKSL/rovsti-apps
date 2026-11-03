@@ -35,7 +35,7 @@ use rovsti_ui::{
 use crate::{
     PhoneApp, SheetKind,
     backend::ReplyOutcome,
-    field::{SearchField, input_layer},
+    field::{SearchField, input_layer, on_backspace},
 };
 
 const ROW_H: f32 = 56.0;
@@ -890,6 +890,7 @@ impl PhoneApp {
             .role(Role::TextInput)
             .aria_label(FIELD_ARIA[slot])
             .track_focus(&focus_handle)
+            .on_key_down(on_backspace(field.clone()))
             .relative()
             .flex_1()
             .min_w_0()
@@ -899,7 +900,7 @@ impl PhoneApp {
             .overflow_hidden()
             .text_size(typography::BODY.size)
             .child(input_layer(field, cx))
-            .child(if text.is_empty() {
+            .child(if text.is_empty() && !focused {
                 div()
                     .text_color(colors.tertiary_label)
                     .child("Write a reply")

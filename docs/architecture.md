@@ -23,7 +23,7 @@ against `cc05989`, and its shader validation still passes on this rev.
 ## Layers
 
 ```
-apps/{phone,messages,stops}        GPUI views, one window per app
+apps/{phone,messages,contacts,stops}  GPUI views, one window per app
         │
 crates/rovsti_ui                   glass components, tab bar, theme, data dirs
 crates/liquid_glass_kit            glass material (WGSL), springs, tokens
@@ -55,6 +55,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | --- | --- | --- |
 | Phone | `ROLE_DIALER` | `InCallService` (in-call UI + ringing via full-screen intent), `ACTION_DIAL` activity filter, call log and contacts providers |
 | Messages | `ROLE_SMS` | `SMS_DELIVER` receiver, `WAP_PUSH_DELIVER` (MMS) receiver, `RESPOND_VIA_MESSAGE` service, `SENDTO` activity, foreground `dataSync` service keeping the WhatsApp socket alive |
+| Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS` for favorites); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
 | Stops | none | foreground `location` service feeding fixes to `rovsti_geo::Trip`, full-screen alarm activity, exact alarm as a fallback |
 
 ### Phone: incoming calls

@@ -8,8 +8,9 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, Context, Entity, EntityInputHandler, FocusHandle, Focusable, IntoElement, Pixels,
-    Point, Styled, TextInputAction, TextInputMode, UTF16Selection, Window, canvas,
+    App, Bounds, Context, Entity, EntityInputHandler, FocusHandle, Focusable, IntoElement,
+    KeyDownEvent, Pixels, Point, Styled, SurroundingText, TextInputAction, TextInputMode,
+    UTF16Selection, Window, canvas,
 };
 
 pub(crate) struct SearchField {
@@ -56,6 +57,23 @@ impl SearchField {
             self.edits += 1;
             cx.notify();
         }
+    }
+
+    /// The delete key: removes the last character (shrinking the composing
+    /// text if the caret is in it). Keyboards send it as a `backspace` key
+    /// event, rather than an input-method edit, when they hold no text.
+    pub(crate) fn backspace(&mut self, cx: &mut Context<Self>) {
+        let Some((start, _)) = self.content.char_indices().next_back() else {
+            return;
+        };
+        let end = self.content.len();
+        self.splice(start..end, "");
+        self.marked = self
+            .marked
+            .take()
+            .map(|m| m.start..start)
+            .filter(|m| !m.is_empty());
+        cx.notify();
     }
 
     fn utf16_to_utf8(&self, offset: usize) -> usize {
@@ -190,6 +208,41 @@ impl EntityInputHandler for SearchField {
         cx.notify();
     }
 
+    fn surrounding_text(
+        &mut self,
+        max_bytes: usize,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<SurroundingText> {
+        // Without this snapshot the keyboard believes the field is empty, so
+        // it sends a bare delete key instead of deleting text.
+        let end = self.content.len();
+        SurroundingText::from_utf8(&self.content, end, end, self.marked.clone(), max_bytes)
+    }
+
+    fn delete_surrounding_text(
+        &mut self,
+        before_utf16: usize,
+        after_utf16: usize,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        // The caret is always at the end: nothing follows it.
+        if self.marked.is_some() || after_utf16 > 0 {
+            return false;
+        }
+        let end = self.content.len();
+        let Some(start) = self.utf8_to_utf16(end).checked_sub(before_utf16) else {
+            return false;
+        };
+        let start = self.utf16_to_utf8(start);
+        if start < end {
+            self.splice(start..end, "");
+            cx.notify();
+        }
+        true
+    }
+
     fn bounds_for_range(
         &mut self,
         _: Range<usize>,
@@ -207,6 +260,19 @@ impl EntityInputHandler for SearchField {
         _: &mut Context<Self>,
     ) -> Option<usize> {
         Some(self.utf8_to_utf16(self.content.len()))
+    }
+}
+
+/// A key-down listener for the element that tracks the field's focus:
+/// handles the keyboard's delete key when it arrives as a key event.
+pub(crate) fn on_backspace(
+    field: Entity<SearchField>,
+) -> impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static {
+    move |event, _, cx| {
+        if event.keystroke.key == "backspace" {
+            field.update(cx, |field, cx| field.backspace(cx));
+            cx.stop_propagation();
+        }
     }
 }
 

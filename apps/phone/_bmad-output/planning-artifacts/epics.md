@@ -46,7 +46,7 @@ FR5: Checklist contents in order (Default Phone App; Phone and call log; Contact
 FR6: Act on a Setup Item (runtime requests, Xiaomi deep links with fallback to app details, AOSP battery dialog).
 FR7: Re-check readable items on launch and resume; collapse to "Setup complete" when all done.
 FR8: Confirm Xiaomi Settings; persisted locally; cleared on app version change.
-FR9: Enter a number (0-9 * #, long-press 0 for +, paste normalisation, delete, long-press delete clears).
+FR9: Enter a number (0-9 * #, long-press 0 for +, paste normalisation, delete, holding delete erases right to left with acceleration).
 FR10: Validate before calling - reject only strings without digit/*/#; service codes and emergency numbers pass through.
 FR11: Place a call from Keypad, Recents row, Contact Sheet number, Favorites tile via one path; SIM-select auto-resolved; CALL_PHONE requested on demand.
 FR12: Match the entered number to a Contact and show the name on Keypad.
@@ -979,7 +979,7 @@ Covers: FR9, FR10 (shake), UX-DR3, UX-DR4, UX-DR22. Prio: P0. Verify: CARGO, DEV
 
 **Given** the Keypad tab with `dial` rules from 2.7
 **When** a key goes down
-**Then** the digit is in the field on the first frame, a light haptic fires, `0` held 400 ms becomes `+` once, delete removes one character and held 500 ms clears the field.
+**Then** the digit is in the field on the first frame, a light haptic fires, `0` held 400 ms becomes `+` once, delete removes one character and, held 500 ms, erases right to left (140 ms stepping down to 50 ms per character, each leaving as the S2 ghost) until release or empty.
 
 **Given** the field is empty and the clipboard holds "+90 (555) 111-22-33"
 **When** the "Paste" pill is tapped

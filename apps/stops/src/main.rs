@@ -113,6 +113,9 @@ impl StopsApp {
                 before.as_secs() / 60
             )
             .into(),
+            AlarmRule::BeforeStop { metres, .. } => {
+                format!("You'll be woken {metres:.0} m before the previous stop.").into()
+            }
         };
         div()
             .flex()

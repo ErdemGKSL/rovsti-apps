@@ -9,5 +9,8 @@ description = "Offline geometry and the arrival-alarm state machine behind Rovst
 [dependencies]
 serde.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

@@ -95,6 +95,10 @@ list in `docs/phone-acceptance.md`.
 - [x] Contacts without a phone number (done without a device)
 - [x] Groups of a synced account for a new contact (done without a device)
 - [x] WhatsApp: the shared settings screen (resolved, see `docs/whatsapp-notes.md`)
+- [x] WhatsApp availability on the card (on WhatsApp or not, online or last seen) and a
+      WhatsApp mark in the list for contacts with a chat (done without a device)
+- [x] Chat and call on WhatsApp from the card, through Rovsti Messages and Phone
+      (done without a device)
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
 
 ## Rovsti Stops

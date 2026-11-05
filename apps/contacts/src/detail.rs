@@ -21,7 +21,7 @@ use crate::{
 
 impl ContactsApp {
     /// A round glass action with a caption (Call, Message, Share).
-    fn action_button(
+    pub(crate) fn action_button(
         theme: Theme,
         key: &'static str,
         icon: Icon,
@@ -90,6 +90,84 @@ impl ContactsApp {
                     .child(value),
             )
             .into_any_element()
+    }
+
+    /// The WhatsApp section: status line and Chat and Call while the instance
+    /// is connected, else a hint that opens the WhatsApp settings.
+    fn whatsapp_section(
+        &self,
+        card: &ContactCard,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let numbers: Vec<String> = card.numbers.iter().map(|n| n.raw.clone()).collect();
+        if numbers.is_empty() {
+            return None;
+        }
+        if !self.whatsapp.read(cx).is_connected() {
+            return Some(
+                section(
+                    theme,
+                    Some("WhatsApp".into()),
+                    [tap_row(
+                        theme,
+                        "wa-hint",
+                        Some(Icon::LucideMessageCircle),
+                        "Connect WhatsApp to chat and call from here",
+                        Tone::Accent,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.tabs.jump_to(crate::SETTINGS_TAB);
+                        this.open = None;
+                        this.open_draft = None;
+                        this.set_whatsapp_open(true, cx);
+                    }))
+                    .into_any_element()],
+                )
+                .into_any_element(),
+            );
+        }
+        let status = self
+            .wa
+            .status(card.id, &numbers, crate::whatsapp::now_ms())?;
+        let jid = self.wa.jid(card.id, &numbers);
+        let enabled = jid.is_some();
+        let (chat_jid, call_jid) = (jid.clone(), jid);
+        let (chat_name, call_name) = (card.name.clone(), card.name.clone());
+        let buttons = div()
+            .flex()
+            .justify_center()
+            .gap(px(28.0))
+            .py(px(12.0))
+            .child(
+                Self::action_button(theme, "wa-chat", Icon::LucideMessageCircle, "Chat", enabled)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(jid) = chat_jid.clone() {
+                            this.wa_handoff(false, jid, chat_name.clone(), cx);
+                        }
+                    })),
+            )
+            .child(
+                Self::action_button(theme, "wa-call", Icon::LucidePhone, "Call", enabled).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        if let Some(jid) = call_jid.clone() {
+                            this.wa_handoff(true, jid, call_name.clone(), cx);
+                        }
+                    }),
+                ),
+            )
+            .into_any_element();
+        Some(
+            section(
+                theme,
+                Some("WhatsApp".into()),
+                [
+                    Self::info_row(theme, ("wa-status", 0), "Status".into(), status.into()),
+                    buttons,
+                ],
+            )
+            .into_any_element(),
+        )
     }
 
     pub(crate) fn detail(
@@ -284,6 +362,8 @@ impl ContactsApp {
             .filter(|n| !n.is_empty())
             .map(|n| Self::info_row(theme, ("note", 0), "Note".into(), n.to_owned().into()));
 
+        let whatsapp = self.whatsapp_section(card, theme, cx);
+
         let actions_list = section(
             theme,
             None,
@@ -340,6 +420,7 @@ impl ContactsApp {
             .child(head)
             .child(actions)
             .children((!numbers.is_empty()).then(|| section(theme, Some("Phone".into()), numbers)))
+            .children(whatsapp)
             .children((!emails.is_empty()).then(|| section(theme, Some("Email".into()), emails)))
             .children((!group_names.is_empty()).then(|| {
                 section(

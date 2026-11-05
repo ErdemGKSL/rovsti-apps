@@ -1,6 +1,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Chat and call on WhatsApp are handed to Rovsti Messages and Phone. Only
+         apps signed with the same key hold this (whichever installs first defines it). -->
+    <uses-permission android:name="dev.rovsti.permission.HANDOFF" />
+    <permission
+        android:name="dev.rovsti.permission.HANDOFF"
+        android:protectionLevel="signature" />
+
+    <queries>
+        <intent>
+            <action android:name="dev.rovsti.action.WA_CALL" />
+        </intent>
+        <intent>
+            <action android:name="dev.rovsti.action.WA_CHAT" />
+        </intent>
+    </queries>
 
     <uses-feature android:name="android.hardware.vulkan.level" android:version="0" android:required="false" />
     <application

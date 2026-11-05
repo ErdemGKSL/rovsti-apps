@@ -24,8 +24,9 @@ FCM delivery on HyperOS all need hardware. Only checks and unit tests ran here.
 
 ## Owner's direction (2026-11-03)
 
-- **Rovsti Contacts owns the WhatsApp session.** Phone and Messages use it, and
-  neither opens its own.
+- **The gateway owns the WhatsApp session** (superseded: it was Rovsti Contacts).
+  Every app, Contacts included, reaches it through `rovsti_wa_client`, and none
+  opens its own.
 - **WhatsApp calls in Phone.** There is no server today, so the question is how
   an incoming WhatsApp call wakes the app. The owner's idea is a small backend
   that sends an FCM message to wake the app, which then shows the call through

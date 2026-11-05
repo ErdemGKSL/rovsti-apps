@@ -18,6 +18,7 @@ mod prefs;
 mod sample;
 mod transfer;
 mod ui;
+mod whatsapp;
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -88,6 +89,20 @@ struct Row {
     name: SharedString,
     subtitle: Option<SharedString>,
     monogram: SharedString,
+    /// The star and the WhatsApp mark at the row's end.
+    trailing: Option<SharedString>,
+}
+
+impl Row {
+    /// Sets the WhatsApp mark (computed per pull and per chats refresh).
+    fn set_whatsapp(&mut self, on: bool) {
+        self.trailing = match (on, self.vm.starred) {
+            (true, true) => Some("WhatsApp ★".into()),
+            (true, false) => Some("WhatsApp".into()),
+            (false, true) => Some("★".into()),
+            (false, false) => None,
+        };
+    }
 }
 
 impl From<ContactVm> for Row {
@@ -97,6 +112,7 @@ impl From<ContactVm> for Row {
             name: vm.name.clone().into(),
             subtitle: vm.subtitle.clone().map(Into::into),
             monogram: vm.monogram.map(String::from).unwrap_or_default().into(),
+            trailing: vm.starred.then(|| "★".into()),
             vm,
         }
     }
@@ -147,6 +163,8 @@ struct ContactsApp {
     /// The shared WhatsApp settings screen, and whether its page is showing.
     whatsapp: Entity<WhatsAppSettings>,
     whatsapp_open: bool,
+    /// WhatsApp per contact: chats, presence, lookups.
+    wa: whatsapp::WaPanel,
 }
 
 impl ContactsApp {
@@ -220,8 +238,10 @@ impl ContactsApp {
         .detach();
 
         let whatsapp = cx.new(|cx| WhatsAppSettings::new(AppId::Contacts, "contacts", cx));
-        // The Settings row shows whether WhatsApp is linked.
-        cx.observe(&whatsapp, |_, _, cx| cx.notify()).detach();
+        // The Settings row shows whether WhatsApp is linked; gateway events
+        // (presence, resync) and a fresh connection feed the card and the list.
+        cx.observe(&whatsapp, |this, _, cx| this.on_whatsapp_changed(cx))
+            .detach();
         let mut app = Self {
             tabs: TabBar::new(
                 TABS.into_iter()
@@ -259,7 +279,9 @@ impl ContactsApp {
             back_enabled: false,
             whatsapp,
             whatsapp_open: false,
+            wa: whatsapp::WaPanel::default(),
         };
+        app.pull_wa_offset(cx);
         app.reload(cx);
         app
     }
@@ -286,6 +308,7 @@ impl ContactsApp {
                     this.groups = groups;
                     this.accounts = accounts;
                     this.photos.forget_misses();
+                    this.refresh_marks();
                     this.rebuild(cx);
                     if let Some(id) = this.pending_open.take() {
                         this.open_contact(id, cx);
@@ -354,6 +377,7 @@ impl ContactsApp {
                 }
             }
         }
+        self.apply_marks();
         cx.notify();
     }
 
@@ -370,6 +394,7 @@ impl ContactsApp {
         if self.open.is_none() {
             return;
         }
+        self.check_whatsapp(cx);
         // The rest of the card (organisation, emails, note, groups) follows.
         cx.spawn(async move |this, cx| {
             let draft = cx
@@ -661,14 +686,13 @@ impl ContactsApp {
     ) -> AnyElement {
         let id = row.vm.id;
         let tint = hue_pair(theme, row.vm.hue).0;
-        let star = row.vm.starred.then(|| SharedString::from("★"));
         let photo = row.vm.photo_uri.as_ref().and_then(|_| self.photos.get(id));
         list_row(
             theme,
             Some(photo_avatar(theme, row.monogram.clone(), 40.0, tint, photo).into_any_element()),
             row.name.clone(),
             row.subtitle.clone(),
-            star,
+            row.trailing.clone(),
         )
         .id((key, usize::try_from(id).unwrap_or_default()))
         .on_click(cx.listener(move |this, _, _, cx| this.open_contact(id, cx)))

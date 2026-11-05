@@ -58,7 +58,11 @@ impl ContactsApp {
         let ordered = contacts_view::ordered(members, self.style);
         contacts_view::build_rows_styled(ordered, "", self.style)
             .into_iter()
-            .map(Row::from)
+            .map(|vm| {
+                let mut row = Row::from(vm);
+                row.set_whatsapp(self.wa.marked.contains(&row.vm.id));
+                row
+            })
             .collect()
     }
 

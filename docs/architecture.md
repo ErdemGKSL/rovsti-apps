@@ -61,8 +61,31 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | --- | --- | --- |
 | Phone | `ROLE_DIALER` | `InCallService` (in-call UI + ringing via full-screen intent), `ACTION_DIAL` activity filter, call log and contacts providers; `RECORD_AUDIO` for WhatsApp calls |
 | Messages | `ROLE_SMS` | `SMS_DELIVER` receiver, `WAP_PUSH_DELIVER` (MMS) receiver, `RESPOND_VIA_MESSAGE` service, `SENDTO`/`SEND` activity filters, inline-reply, scheduled-SMS and boot receivers; one headless JNI call into Rust for cold decisions (AD-MSG4); WhatsApp wakes through optional FCM push and fetches its text through that same call (AD-MSG5); no foreground service |
-| Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS` for favorites); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
+| Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS`); `INTERNET` for the gateway (WhatsApp only); Photo Picker for contact photos (no permission); handoff to Phone and Messages (`dev.rovsti.permission.HANDOFF`, signature); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
 | Stops | none | foreground `location` service feeding fixes to `rovsti_geo::Trip`, full-screen alarm activity, exact alarm as a fallback |
+
+### Contacts: decisions (AD-CT1 to AD-CT6)
+
+- **AD-CT1 Pure first.** Draft rules, accounts, the photo crop plan, the handoff payload,
+  presence text, a contact's WhatsApp target and the lookup cache are pure (`rovsti_core`,
+  `rovsti_wa_proto`, `apps/contacts/src/whatsapp.rs`) with unit tests. Kotlin and GPUI only map.
+- **AD-CT2 Number-less contacts are Contacts-only.** Phone keeps `pullContacts`; Contacts uses
+  `pullContactsAll`, and a draft needs a name or organisation.
+- **AD-CT3 Accounts.** A writable account is `type|name` (empty = phone only), listed from
+  sync adapters without `GET_ACCOUNTS`; new contacts use the "Save to" account, remembered in
+  `contacts-prefs.json`.
+- **AD-CT4 Photos.** Android Photo Picker (no permission); Rust plans a centred square crop
+  (`contact_photo::plan`), Kotlin decodes, crops and writes a JPEG to the display photo.
+- **AD-CT5 WhatsApp goes through the apps that own it.** Chat and call are handed to Messages
+  and Phone by an explicit intent (`dev.rovsti.action.WA_CHAT` / `WA_CALL`, extras `jid`,
+  `name`) guarded by the signature permission `dev.rovsti.permission.HANDOFF`; Kotlin keeps only
+  same-signed packages. A missing app is reported ("Install Rovsti Phone to call on WhatsApp").
+- **AD-CT6 Availability is lazy.** The list mark comes from the instance's existing chats
+  (`GET /v1/chats`, read on connect and on `Resync`, computed per pull and per refresh, never
+  per frame). Only an opened card sends that one contact's international numbers (at most 12)
+  to `POST /v1/contacts/lookup` and subscribes presence once per JID per run. The gateway
+  caches (24 h, 4096) and rate-limits lookups. A local number without a country code only
+  matches an existing chat, otherwise the card asks for the country code. No push in Contacts.
 
 ### Messages: decisions (AD-MSG1 to AD-MSG9)
 

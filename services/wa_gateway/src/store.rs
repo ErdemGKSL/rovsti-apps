@@ -489,6 +489,22 @@ impl Store {
         .await
     }
 
+    /// Forgets a device token (FCM said it is dead).
+    pub async fn delete_push_token(
+        &self,
+        instance: InstanceId,
+        token: String,
+    ) -> Result<(), StoreError> {
+        self.run(move |conn| {
+            conn.execute(
+                "DELETE FROM push_tokens WHERE instance_id = ?1 AND token = ?2",
+                params![instance.as_str(), token],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn push_tokens(
         &self,
         instance: InstanceId,
@@ -586,7 +602,7 @@ impl Store {
         reaction: Reaction,
     ) -> Result<(), StoreError> {
         self.run(move |conn| {
-            let sender = reaction.sender.unwrap_or_default();
+            let sender = reaction_key(reaction.sender, reaction.from_me);
             if reaction.emoji.is_empty() {
                 conn.execute(
                     "DELETE FROM reactions WHERE instance_id = ?1 AND chat = ?2 AND id = ?3 AND sender = ?4",
@@ -602,6 +618,69 @@ impl Store {
                 )?;
             }
             Ok(())
+        })
+        .await
+    }
+
+    /// Sets the display name of a chat that already exists (a group whose
+    /// subject is known). Does nothing for an unknown chat, so listing groups
+    /// does not fill the inbox with chats nobody wrote in.
+    pub async fn rename_chat(
+        &self,
+        instance: InstanceId,
+        jid: String,
+        name: String,
+    ) -> Result<(), StoreError> {
+        self.run(move |conn| {
+            conn.execute(
+                "UPDATE chats SET name = ?3 WHERE instance_id = ?1 AND jid = ?2",
+                params![instance.as_str(), jid, name],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// The media message `id` and its encoded WhatsApp message, if stored
+    /// (the newest one when several chats reuse the id).
+    pub async fn media_source(
+        &self,
+        instance: InstanceId,
+        id: String,
+    ) -> Result<Option<(WaMessage, Option<Vec<u8>>)>, StoreError> {
+        self.run(move |conn| {
+            let row = conn
+                .query_row(
+                    "SELECT chat, sender, from_me, ts_ms, body_json, raw_proto FROM messages
+                     WHERE instance_id = ?1 AND id = ?2 ORDER BY ts_ms DESC LIMIT 1",
+                    params![instance.as_str(), id],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, bool>(2)?,
+                            r.get::<_, i64>(3)?,
+                            r.get::<_, String>(4)?,
+                            r.get::<_, Option<Vec<u8>>>(5)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((chat, sender, from_me, timestamp_ms, body, raw)) = row else {
+                return Ok(None);
+            };
+            Ok(Some((
+                WaMessage {
+                    id,
+                    chat,
+                    sender,
+                    from_me,
+                    timestamp_ms,
+                    body: serde_json::from_str(&body)?,
+                    reactions: Vec::new(),
+                },
+                raw,
+            )))
         })
         .await
     }
@@ -843,6 +922,15 @@ fn upsert_chat(
     Ok(())
 }
 
+/// Stands in for the reactor's JID in the `reactions` key when the message
+/// does not name one (one-to-one chats), so that my reaction and theirs to the
+/// same message do not overwrite each other. Not a valid JID.
+const OWN_REACTION_KEY: &str = "@me";
+
+fn reaction_key(sender: Option<String>, from_me: bool) -> String {
+    sender.unwrap_or_else(|| if from_me { OWN_REACTION_KEY } else { "" }.to_owned())
+}
+
 fn reactions_of(
     conn: &Connection,
     instance: &InstanceId,
@@ -864,7 +952,7 @@ fn reactions_of(
     for row in rows {
         let (id, sender, from_me, emoji) = row?;
         map.entry(id).or_default().push(Reaction {
-            sender: (!sender.is_empty()).then_some(sender),
+            sender: (!sender.is_empty() && sender != OWN_REACTION_KEY).then_some(sender),
             from_me,
             emoji,
         });
@@ -1324,6 +1412,104 @@ mod tests {
         let chats = store.chats(id(1)).await.unwrap();
         assert_eq!(chats[0].name.as_deref(), Some("Ada"));
         assert_eq!(chats[0].unread, 2);
+    }
+
+    #[tokio::test]
+    async fn my_reaction_and_theirs_in_a_dm_do_not_collide() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 10, 4)
+            .await
+            .unwrap();
+        let chat = "905@s.whatsapp.net";
+        store
+            .insert_message(id(1), text(chat, "m", 10, false), None)
+            .await
+            .unwrap();
+        for (from_me, emoji) in [(false, "👍"), (true, "❤")] {
+            store
+                .set_reaction(
+                    id(1),
+                    chat.into(),
+                    "m".into(),
+                    Reaction {
+                        sender: None,
+                        from_me,
+                        emoji: emoji.into(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let m = store
+            .message(id(1), chat.into(), "m".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.reactions.len(), 2);
+        assert!(m.reactions.iter().all(|r| r.sender.is_none()));
+    }
+
+    #[tokio::test]
+    async fn media_source_rename_chat_and_push_token_delete() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 10, 4)
+            .await
+            .unwrap();
+        let chat = "123-1@g.us";
+        let mut m = text(chat, "img", 10, false);
+        m.body = MessageBody::Media {
+            kind: rovsti_wa_proto::MediaKind::Image,
+            caption: None,
+            mime: "image/png".into(),
+            size: 3,
+        };
+        store
+            .insert_message(id(1), m.clone(), Some(vec![1, 2, 3]))
+            .await
+            .unwrap();
+        let (found, raw) = store
+            .media_source(id(1), "img".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.chat, chat);
+        assert_eq!(found.body, m.body);
+        assert_eq!(raw, Some(vec![1, 2, 3]));
+        assert!(
+            store
+                .media_source(id(2), "img".into())
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        store
+            .rename_chat(id(1), chat.into(), "Family".into())
+            .await
+            .unwrap();
+        store
+            .rename_chat(id(1), "other@g.us".into(), "Nope".into())
+            .await
+            .unwrap();
+        let chats = store.chats(id(1)).await.unwrap();
+        assert_eq!(chats.len(), 1);
+        assert_eq!(chats[0].name.as_deref(), Some("Family"));
+
+        store
+            .set_push_token(id(1), AppId::Phone, "t1".into())
+            .await
+            .unwrap();
+        store
+            .set_push_token(id(1), AppId::Stops, "t2".into())
+            .await
+            .unwrap();
+        store.delete_push_token(id(1), "t1".into()).await.unwrap();
+        assert_eq!(
+            store.push_tokens(id(1)).await.unwrap(),
+            vec![(AppId::Stops, "t2".to_owned())]
+        );
     }
 
     #[tokio::test]

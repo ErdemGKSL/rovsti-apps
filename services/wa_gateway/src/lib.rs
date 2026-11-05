@@ -8,6 +8,8 @@ pub mod config;
 pub mod driver;
 pub mod error;
 pub mod hub;
+pub mod media_cache;
+pub mod push;
 pub mod routes;
 pub mod store;
 pub mod wa;
@@ -22,6 +24,7 @@ use rovsti_wa_proto::limit::AuthLimiter;
 use crate::config::Config;
 use crate::driver::{EventSink, WaDriver};
 use crate::hub::Hub;
+use crate::push::{NoopPusher, Pusher};
 use crate::store::{InstanceId, Store};
 
 /// Failed authentications one address may make in a burst, and how fast the
@@ -45,6 +48,7 @@ struct Inner {
     store: Store,
     hub: Arc<Hub>,
     driver: Arc<dyn WaDriver>,
+    pusher: Arc<dyn Pusher>,
     limiter: Mutex<AuthLimiter>,
 }
 
@@ -55,12 +59,23 @@ impl std::fmt::Debug for AppState {
 }
 
 impl AppState {
+    /// An app state that sends no push notifications.
     pub fn new(config: Config, store: Store, driver: Arc<dyn WaDriver>) -> Self {
+        Self::with_pusher(config, store, driver, Arc::new(NoopPusher))
+    }
+
+    pub fn with_pusher(
+        config: Config,
+        store: Store,
+        driver: Arc<dyn WaDriver>,
+        pusher: Arc<dyn Pusher>,
+    ) -> Self {
         Self(Arc::new(Inner {
             config,
             store,
             hub: Arc::new(Hub::new()),
             driver,
+            pusher,
             limiter: Mutex::new(AuthLimiter::new(
                 AUTH_BURST,
                 AUTH_REFILL_PER_SEC,
@@ -90,6 +105,7 @@ impl AppState {
             instance.clone(),
             Arc::clone(&self.0.hub),
             self.0.store.clone(),
+            Arc::clone(&self.0.pusher),
         )
     }
 

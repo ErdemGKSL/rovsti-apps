@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_BIND: &str = "127.0.0.1:8787";
 pub const DEFAULT_MAX_INSTANCES: u32 = 4;
+/// Largest file `POST /v1/messages/media` accepts (WhatsApp itself stops at 100 MB).
+pub const DEFAULT_MAX_MEDIA_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FcmConfig {
@@ -22,6 +24,8 @@ pub struct Config {
     /// Believe `X-Forwarded-For`. Only set this behind a reverse proxy that
     /// overwrites the header.
     pub trust_proxy: bool,
+    /// Request body limit of the media upload route.
+    pub max_media_bytes: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -129,6 +133,7 @@ impl Config {
             max_instances,
             fcm,
             trust_proxy,
+            max_media_bytes: DEFAULT_MAX_MEDIA_BYTES,
         })
     }
 
@@ -147,6 +152,11 @@ impl Config {
 
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("gateway.db")
+    }
+
+    /// Where the decrypted media of an instance is cached.
+    pub fn media_dir(&self, instance: &str) -> PathBuf {
+        self.data_dir.join("instances").join(instance).join("media")
     }
 }
 
@@ -216,6 +226,11 @@ mod tests {
         assert_eq!(c.max_instances, 4);
         assert_eq!(c.fcm, None);
         assert!(!c.trust_proxy);
+        assert_eq!(c.max_media_bytes, 64 * 1024 * 1024);
+        assert_eq!(
+            c.media_dir("abc"),
+            PathBuf::from("wa-gateway-data/instances/abc/media")
+        );
         assert_eq!(c.db_path(), PathBuf::from("wa-gateway-data/gateway.db"));
     }
 

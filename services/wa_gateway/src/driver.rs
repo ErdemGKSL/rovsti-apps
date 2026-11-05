@@ -5,12 +5,24 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use rovsti_wa_proto::{
-    ChatState, GatewayEvent, LinkRequest, MarkRead, Reaction, SendText, Sent, WaMessage,
+    ChatState, GatewayEvent, GroupInfo, LinkRequest, MarkRead, MediaKind, Reaction, SendReaction,
+    SendText, Sent, WaMessage,
 };
 
 use crate::hub::Hub;
 use crate::now_ms;
+use crate::push::{PushKind, Pusher, should_push};
 use crate::store::{InstanceId, Store};
+
+/// A file to send as a media message.
+#[derive(Clone)]
+pub struct SendMedia {
+    pub chat: String,
+    pub kind: MediaKind,
+    pub mime: String,
+    pub caption: Option<String>,
+    pub data: Vec<u8>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DriverError {
@@ -31,6 +43,7 @@ pub struct EventSink {
     instance: InstanceId,
     hub: Arc<Hub>,
     store: Store,
+    pusher: Arc<dyn Pusher>,
 }
 
 impl std::fmt::Debug for EventSink {
@@ -40,11 +53,12 @@ impl std::fmt::Debug for EventSink {
 }
 
 impl EventSink {
-    pub fn new(instance: InstanceId, hub: Arc<Hub>, store: Store) -> Self {
+    pub fn new(instance: InstanceId, hub: Arc<Hub>, store: Store, pusher: Arc<dyn Pusher>) -> Self {
         Self {
             instance,
             hub,
             store,
+            pusher,
         }
     }
 
@@ -82,7 +96,17 @@ impl EventSink {
                     .insert_message(self.instance.clone(), message.clone(), raw_proto)
                     .await
                 {
-                    Ok(true) => {}
+                    Ok(true) => {
+                        if should_push(message, now_ms()) {
+                            self.pusher.notify(
+                                &self.instance,
+                                PushKind::Message {
+                                    chat: message.chat.clone(),
+                                    count: 1,
+                                },
+                            );
+                        }
+                    }
                     Ok(false) => return,
                     Err(e) => log::warn!("{}: saving message failed: {e}", self.instance),
                 }
@@ -123,6 +147,17 @@ impl EventSink {
             // The reacted-to message is not in history; nothing to update.
             Ok(None) => {}
             Err(e) => log::warn!("{}: reading message failed: {e}", self.instance),
+        }
+    }
+
+    /// Names a group chat once its subject is known (only if the chat exists).
+    pub async fn rename_chat(&self, jid: &str, name: &str) {
+        if let Err(e) = self
+            .store
+            .rename_chat(self.instance.clone(), jid.to_owned(), name.to_owned())
+            .await
+        {
+            log::warn!("{}: renaming chat failed: {e}", self.instance);
         }
     }
 
@@ -232,6 +267,37 @@ pub trait WaDriver: Send + Sync + 'static {
         instance: &InstanceId,
         jid: String,
     ) -> BoxFuture<'_, Result<(), DriverError>>;
+
+    /// Uploads a file and sends it as a media message.
+    fn send_media(
+        &self,
+        instance: &InstanceId,
+        req: SendMedia,
+    ) -> BoxFuture<'_, Result<Sent, DriverError>>;
+
+    /// Reacts to a message; an empty emoji removes the reaction.
+    fn react(
+        &self,
+        instance: &InstanceId,
+        req: SendReaction,
+    ) -> BoxFuture<'_, Result<(), DriverError>>;
+
+    /// Downloads and decrypts the media of a stored message, given its
+    /// encoded WhatsApp message.
+    fn download_media(
+        &self,
+        instance: &InstanceId,
+        raw_proto: Vec<u8>,
+    ) -> BoxFuture<'_, Result<Vec<u8>, DriverError>>;
+
+    /// Every group the account takes part in.
+    fn groups(&self, instance: &InstanceId) -> BoxFuture<'_, Result<Vec<GroupInfo>, DriverError>>;
+
+    fn group(
+        &self,
+        instance: &InstanceId,
+        jid: String,
+    ) -> BoxFuture<'_, Result<GroupInfo, DriverError>>;
 }
 
 /// Refuses to start sessions, so the gateway can serve its API without
@@ -300,6 +366,42 @@ impl WaDriver for UnlinkedDriver {
     ) -> BoxFuture<'_, Result<(), DriverError>> {
         Box::pin(async { Err(DriverError::NotConnected) })
     }
+
+    fn send_media(
+        &self,
+        _instance: &InstanceId,
+        _req: SendMedia,
+    ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    fn react(
+        &self,
+        _instance: &InstanceId,
+        _req: SendReaction,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    fn download_media(
+        &self,
+        _instance: &InstanceId,
+        _raw_proto: Vec<u8>,
+    ) -> BoxFuture<'_, Result<Vec<u8>, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    fn groups(&self, _instance: &InstanceId) -> BoxFuture<'_, Result<Vec<GroupInfo>, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    fn group(
+        &self,
+        _instance: &InstanceId,
+        _jid: String,
+    ) -> BoxFuture<'_, Result<GroupInfo, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
 }
 
 #[cfg(any(test, feature = "fake"))]
@@ -322,6 +424,7 @@ mod fake {
         running: Mutex<HashMap<InstanceId, EventSink>>,
         started: Mutex<Vec<(InstanceId, Option<LinkRequest>)>>,
         ops: Mutex<Vec<String>>,
+        groups: Mutex<Vec<GroupInfo>>,
         counter: AtomicU64,
     }
 
@@ -347,6 +450,11 @@ mod fake {
         /// Receipts, presence and chat-state calls so far, as short strings.
         pub fn ops(&self) -> Vec<String> {
             self.ops.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+
+        /// The groups `groups()` and `group()` report.
+        pub fn set_groups(&self, groups: Vec<GroupInfo>) {
+            *self.groups.lock().unwrap_or_else(|e| e.into_inner()) = groups;
         }
 
         fn record(&self, instance: &InstanceId, op: String) -> Result<(), DriverError> {
@@ -507,6 +615,118 @@ mod fake {
             jid: String,
         ) -> BoxFuture<'_, Result<(), DriverError>> {
             let result = self.record(instance, format!("subscribe {jid}"));
+            Box::pin(async move { result })
+        }
+
+        /// Sent media come back as `Media` messages whose stored "encoded
+        /// message" is the file itself, which `download_media` returns as is.
+        fn send_media(
+            &self,
+            instance: &InstanceId,
+            req: SendMedia,
+        ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+            let instance = instance.clone();
+            Box::pin(async move {
+                let sink = self.sink(&instance).ok_or(DriverError::NotConnected)?;
+                let n = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
+                let timestamp_ms = now_ms();
+                let message_id = format!("FAKE{n:06}");
+                let size = req.data.len() as u64;
+                sink.emit_message(
+                    WaMessage {
+                        id: message_id.clone(),
+                        chat: req.chat,
+                        sender: Some(own_jid(&instance)),
+                        from_me: true,
+                        timestamp_ms,
+                        body: MessageBody::Media {
+                            kind: req.kind,
+                            caption: req.caption,
+                            mime: req.mime,
+                            size,
+                        },
+                        reactions: vec![],
+                    },
+                    Some(req.data),
+                )
+                .await;
+                Ok(Sent {
+                    message_id,
+                    timestamp_ms,
+                })
+            })
+        }
+
+        fn react(
+            &self,
+            instance: &InstanceId,
+            req: SendReaction,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let instance = instance.clone();
+            Box::pin(async move {
+                self.record(
+                    &instance,
+                    format!("react {} {} {:?}", req.chat, req.message_id, req.emoji),
+                )?;
+                let sink = self.sink(&instance).ok_or(DriverError::NotConnected)?;
+                sink.emit_reaction(
+                    req.chat,
+                    req.message_id,
+                    Reaction {
+                        sender: None,
+                        from_me: true,
+                        emoji: req.emoji,
+                    },
+                )
+                .await;
+                Ok(())
+            })
+        }
+
+        fn download_media(
+            &self,
+            instance: &InstanceId,
+            raw_proto: Vec<u8>,
+        ) -> BoxFuture<'_, Result<Vec<u8>, DriverError>> {
+            let result = self
+                .record(instance, "download".to_owned())
+                .map(|()| raw_proto);
+            Box::pin(async move { result })
+        }
+
+        fn groups(
+            &self,
+            instance: &InstanceId,
+        ) -> BoxFuture<'_, Result<Vec<GroupInfo>, DriverError>> {
+            let result = self
+                .sink(instance)
+                .ok_or(DriverError::NotConnected)
+                .map(|_| {
+                    self.groups
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone()
+                });
+            Box::pin(async move { result })
+        }
+
+        fn group(
+            &self,
+            instance: &InstanceId,
+            jid: String,
+        ) -> BoxFuture<'_, Result<GroupInfo, DriverError>> {
+            let result = self
+                .sink(instance)
+                .ok_or(DriverError::NotConnected)
+                .and_then(|_| {
+                    self.groups
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .iter()
+                        .find(|g| g.jid == jid)
+                        .cloned()
+                        .ok_or_else(|| DriverError::BadRequest(format!("unknown group {jid}")))
+                });
             Box::pin(async move { result })
         }
     }

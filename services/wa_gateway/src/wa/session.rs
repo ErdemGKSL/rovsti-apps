@@ -11,17 +11,20 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use rovsti_wa_proto::{
-    ChatState, GatewayEvent, InstanceState, InstanceStatus, LinkRequest, MarkRead, MessageBody,
-    SendText, Sent, TypingState, WaMessage, event::ReceiptKind,
+    ChatState, GatewayEvent, GroupInfo, InstanceState, InstanceStatus, LinkRequest, MarkRead,
+    MessageBody, Reaction, SendReaction, SendText, Sent, TypingState, WaMessage,
+    event::ReceiptKind,
 };
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::prelude::*;
+use whatsapp_rust::upload::UploadOptions;
 use whatsapp_rust::wacore::types::events::ConnectFailureReason;
 use whatsapp_rust::wacore::types::presence::{ChatPresence, ChatPresenceMedia, ReceiptType};
+use whatsapp_rust::waproto::buffa::Message as _;
 
 use super::convert::{self, Converted};
-use super::history;
-use crate::driver::{DriverError, EventSink, WaDriver};
+use super::{groups, history, media, reaction};
+use crate::driver::{DriverError, EventSink, SendMedia, WaDriver};
 use crate::now_ms;
 use crate::store::InstanceId;
 
@@ -296,6 +299,7 @@ impl WaRuntime {
                     EventKind::Presence,
                     EventKind::ChatPresence,
                     EventKind::HistorySync,
+                    EventKind::GroupUpdate,
                     EventKind::Disconnected,
                     EventKind::StreamReplaced,
                     EventKind::TemporaryBan,
@@ -333,6 +337,134 @@ impl WaRuntime {
             },
         );
         Ok(())
+    }
+
+    async fn send_media_inner(
+        &self,
+        instance: &InstanceId,
+        req: SendMedia,
+    ) -> Result<Sent, DriverError> {
+        let (client, sink) = self.client_of(instance)?;
+        let to = convert::parse_jid(&req.chat)?;
+        let chat = to.to_non_ad().to_string();
+        let size = req.data.len() as u64;
+
+        let uploaded: media::Uploaded = client
+            .upload(
+                req.data,
+                media::media_type(req.kind),
+                UploadOptions::default(),
+            )
+            .await
+            .map_err(failed)?
+            .into();
+        let message = media::build_message(req.kind, &uploaded, &req.mime, req.caption.as_deref());
+        let raw = message.encode_to_vec();
+        let result = client.send_message(to, message).await.map_err(failed)?;
+
+        let timestamp_ms = now_ms();
+        let sender = client
+            .persistence_manager()
+            .get_device_snapshot()
+            .pn
+            .as_ref()
+            .and_then(|jid| convert::group_sender(&chat, jid));
+        sink.emit_message(
+            WaMessage {
+                id: result.message_id.clone(),
+                chat,
+                sender,
+                from_me: true,
+                timestamp_ms,
+                body: MessageBody::Media {
+                    kind: req.kind,
+                    caption: req.caption.filter(|c| !c.is_empty()),
+                    mime: req.mime,
+                    size,
+                },
+                reactions: Vec::new(),
+            },
+            Some(raw),
+        )
+        .await;
+        Ok(Sent {
+            message_id: result.message_id,
+            timestamp_ms,
+        })
+    }
+
+    async fn react_inner(
+        &self,
+        instance: &InstanceId,
+        req: SendReaction,
+    ) -> Result<(), DriverError> {
+        let (client, sink) = self.client_of(instance)?;
+        let to = convert::parse_jid(&req.chat)?;
+        let chat = to.to_non_ad().to_string();
+        let own = client
+            .persistence_manager()
+            .get_device_snapshot()
+            .pn
+            .as_ref()
+            .map(|jid| jid.to_non_ad());
+        let own_jid = own.as_ref().map(ToString::to_string);
+
+        let stored = sink.find_message(&chat, &req.message_id).await;
+        let author = reaction::target_author(&req, stored.as_ref(), own_jid.as_deref());
+        let key = reaction::message_key(&chat, &req.message_id, req.from_me, author.as_deref());
+        client
+            .send_reaction(to, key, &req.emoji)
+            .await
+            .map_err(failed)?;
+
+        sink.emit_reaction(
+            chat.clone(),
+            req.message_id,
+            Reaction {
+                sender: own
+                    .as_ref()
+                    .and_then(|jid| convert::group_sender(&chat, jid)),
+                from_me: true,
+                emoji: req.emoji,
+            },
+        )
+        .await;
+        Ok(())
+    }
+
+    async fn group_infos(
+        &self,
+        instance: &InstanceId,
+        only: Option<Jid>,
+    ) -> Result<Vec<GroupInfo>, DriverError> {
+        let (client, sink) = self.client_of(instance)?;
+        let metadata: Vec<_> = match only {
+            Some(jid) => vec![client.groups().get_metadata(&jid).await.map_err(failed)?],
+            None => client
+                .groups()
+                .get_participating()
+                .await
+                .map_err(failed)?
+                .into_values()
+                .collect(),
+        };
+        let mut infos = Vec::with_capacity(metadata.len());
+        for group in &metadata {
+            let info = groups::group_info(
+                &group.id,
+                &group.subject,
+                group.participants.iter().map(|p| {
+                    (
+                        groups::participant_jid(&p.jid, p.phone_number.as_ref()),
+                        p.is_admin(),
+                    )
+                }),
+            );
+            sink.rename_chat(&info.jid, &info.subject).await;
+            infos.push(info);
+        }
+        infos.sort_by_key(|g| g.subject.to_lowercase());
+        Ok(infos)
     }
 
     async fn send_text_inner(
@@ -427,6 +559,13 @@ async fn handle_event(
             jid: update.source.sender.to_non_ad().to_string(),
             state: typing_state(update.state, update.media),
         }),
+        Event::GroupUpdate(update) => {
+            let jid = update.group_jid.to_non_ad().to_string();
+            if let Some(subject) = groups::new_subject(&update.action) {
+                sink.rename_chat(&jid, subject).await;
+            }
+            sink.publish(GatewayEvent::GroupChanged { jid });
+        }
         Event::HistorySync(lazy) => {
             let progress = lazy.progress();
             let lazy = (**lazy).clone();
@@ -580,6 +719,59 @@ impl WaDriver for WaRuntime {
             let jid = convert::parse_jid(&jid)?;
             let (client, _) = self.client_of(&instance)?;
             client.presence().subscribe(jid).await.map_err(failed)
+        })
+    }
+
+    fn send_media(
+        &self,
+        instance: &InstanceId,
+        req: SendMedia,
+    ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move { self.send_media_inner(&instance, req).await })
+    }
+
+    fn react(
+        &self,
+        instance: &InstanceId,
+        req: SendReaction,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move { self.react_inner(&instance, req).await })
+    }
+
+    fn download_media(
+        &self,
+        instance: &InstanceId,
+        raw_proto: Vec<u8>,
+    ) -> BoxFuture<'_, Result<Vec<u8>, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let (client, _) = self.client_of(&instance)?;
+            let message = media::decode(&raw_proto)?;
+            let found = media::media_of(&message)
+                .ok_or_else(|| DriverError::BadRequest("the message has no media".to_owned()))?;
+            client.download(found.downloadable()).await.map_err(failed)
+        })
+    }
+
+    fn groups(&self, instance: &InstanceId) -> BoxFuture<'_, Result<Vec<GroupInfo>, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move { self.group_infos(&instance, None).await })
+    }
+
+    fn group(
+        &self,
+        instance: &InstanceId,
+        jid: String,
+    ) -> BoxFuture<'_, Result<GroupInfo, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let jid = convert::parse_jid(&jid)?;
+            self.group_infos(&instance, Some(jid))
+                .await?
+                .pop()
+                .ok_or_else(|| DriverError::Failed("group query returned nothing".to_owned()))
         })
     }
 }

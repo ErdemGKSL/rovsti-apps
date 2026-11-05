@@ -2,24 +2,29 @@
 
 use std::time::Duration;
 
+use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Path, Query, State};
 use axum::http::StatusCode;
-use axum::response::Response;
+use axum::http::header::{CONTENT_TYPE, HeaderValue};
+use axum::response::{IntoResponse as _, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use rovsti_wa_proto::api::routes as r;
 use rovsti_wa_proto::{
     ChatState, ChatSummary, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope,
-    GatewayEvent, InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest, MarkRead,
-    MintKey, PushRegistration, SendText, Sent, SetPresence, SubscribePresence, WaMessage,
+    GatewayEvent, GroupInfo, InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest,
+    MarkRead, MediaKind, MessageBody, MintKey, PushRegistration, SendReaction, SendText, Sent,
+    SetPresence, SubscribePresence, WaMessage,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::auth::Authed;
+use crate::driver::SendMedia;
 use crate::error::HttpError;
 use crate::hub::Replay;
+use crate::media_cache::{DEFAULT_MAX_BYTES, MediaCache};
 use crate::now_ms;
 use crate::store::{InstanceId, NewKey, parse_key_id};
 use crate::{AppState, store::StoreError};
@@ -28,11 +33,15 @@ const MAX_LABEL_CHARS: usize = 64;
 const MAX_PUSH_TOKEN_BYTES: usize = 4096;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
 const MAX_READ_IDS: usize = 200;
+const MAX_MIME_BYTES: usize = 127;
+const MAX_CAPTION_BYTES: usize = 8 * 1024;
+const MAX_EMOJI_BYTES: usize = 64;
 const DEFAULT_PAGE: u32 = 50;
 const MAX_PAGE: u32 = 200;
 const SERVER_PING: Duration = Duration::from_secs(30);
 
 pub fn router(state: AppState) -> Router {
+    let media_limit = state.config().max_media_bytes;
     Router::new()
         .route(r::HEALTHZ, get(healthz))
         .route(r::INSTANCES, post(create_instance))
@@ -49,6 +58,14 @@ pub fn router(state: AppState) -> Router {
         .route(r::PRESENCE, post(set_presence))
         .route(r::CHAT_STATE, post(chat_state))
         .route(r::PRESENCE_SUBSCRIBE, post(subscribe_presence))
+        .route(
+            r::SEND_MEDIA,
+            post(send_media).layer(DefaultBodyLimit::max(media_limit)),
+        )
+        .route(r::MESSAGE_MEDIA, get(message_media))
+        .route(r::REACT, post(react))
+        .route(r::GROUPS, get(groups))
+        .route(r::GROUP, get(group))
         .with_state(state)
 }
 
@@ -477,9 +494,168 @@ async fn subscribe_presence(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Debug, Deserialize)]
+struct SendMediaQuery {
+    chat: String,
+    kind: MediaKind,
+    mime: String,
+    caption: Option<String>,
+}
+
+/// A MIME type the gateway is willing to store and echo in a header.
+fn check_mime(mime: &str) -> ApiResult<()> {
+    let ok = !mime.is_empty()
+        && mime.len() <= MAX_MIME_BYTES
+        && mime.contains('/')
+        && mime.bytes().all(|b| (0x20..0x7f).contains(&b));
+    if ok {
+        Ok(())
+    } else {
+        Err(HttpError::bad_request(
+            "mime must be a MIME type such as image/jpeg",
+        ))
+    }
+}
+
+async fn send_media(
+    State(state): State<AppState>,
+    auth: Authed,
+    Query(query): Query<SendMediaQuery>,
+    body: Bytes,
+) -> ApiResult<Json<Sent>> {
+    check_jid(&query.chat)?;
+    check_mime(&query.mime)?;
+    if body.is_empty() {
+        return Err(HttpError::bad_request("the request body is empty"));
+    }
+    let caption = query.caption.filter(|c| !c.is_empty());
+    if caption
+        .as_ref()
+        .is_some_and(|c| c.len() > MAX_CAPTION_BYTES)
+    {
+        return Err(HttpError::bad_request("caption is too long"));
+    }
+    let req = SendMedia {
+        chat: query.chat,
+        kind: query.kind,
+        mime: query.mime,
+        caption,
+        data: body.into(),
+    };
+    Ok(Json(state.driver().send_media(&auth.instance, req).await?))
+}
+
+fn media_response(mime: &str, bytes: Vec<u8>) -> Response {
+    let content_type = HeaderValue::from_str(mime)
+        .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
+    (
+        [
+            (CONTENT_TYPE, content_type),
+            // The bytes come from other people: never let a browser sniff them.
+            (
+                axum::http::header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+async fn message_media(
+    State(state): State<AppState>,
+    auth: Authed,
+    Path(message_id): Path<String>,
+) -> ApiResult<Response> {
+    let (message, raw) = state
+        .store()
+        .media_source(auth.instance.clone(), message_id.clone())
+        .await?
+        .ok_or_else(|| HttpError::not_found("no such message"))?;
+    let MessageBody::Media { mime, .. } = message.body else {
+        return Err(HttpError::bad_request("the message has no media"));
+    };
+
+    let cache = MediaCache::new(
+        state.config().media_dir(auth.instance.as_str()),
+        DEFAULT_MAX_BYTES,
+    );
+    let cached = {
+        let (cache, key) = (cache.clone(), message_id.clone());
+        tokio::task::spawn_blocking(move || cache.get(&key))
+            .await
+            .unwrap_or(None)
+    };
+    if let Some(bytes) = cached {
+        return Ok(media_response(&mime, bytes));
+    }
+
+    let raw = raw.ok_or_else(|| HttpError::not_found("the media of this message is not kept"))?;
+    let bytes = state.driver().download_media(&auth.instance, raw).await?;
+    let to_store = bytes.clone();
+    // A failed cache write only costs a download next time.
+    match tokio::task::spawn_blocking(move || cache.put(&message_id, &to_store)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => log::warn!("{}: caching media failed: {e}", auth.instance),
+        Err(e) => log::warn!("{}: caching media failed: {e}", auth.instance),
+    }
+    Ok(media_response(&mime, bytes))
+}
+
+async fn react(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<SendReaction>,
+) -> ApiResult<StatusCode> {
+    check_jid(&req.chat)?;
+    if let Some(sender) = req.sender.as_deref().filter(|s| !s.trim().is_empty()) {
+        check_jid(sender)?;
+    }
+    if req.message_id.is_empty() {
+        return Err(HttpError::bad_request("message_id is empty"));
+    }
+    if req.emoji.len() > MAX_EMOJI_BYTES {
+        return Err(HttpError::bad_request("emoji is too long"));
+    }
+    state.driver().react(&auth.instance, req).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn groups(State(state): State<AppState>, auth: Authed) -> ApiResult<Json<Vec<GroupInfo>>> {
+    Ok(Json(state.driver().groups(&auth.instance).await?))
+}
+
+async fn group(
+    State(state): State<AppState>,
+    auth: Authed,
+    Path(jid): Path<String>,
+) -> ApiResult<Json<GroupInfo>> {
+    check_jid(&jid)?;
+    Ok(Json(state.driver().group(&auth.instance, jid).await?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mime_types_are_checked() {
+        assert!(check_mime("image/jpeg").is_ok());
+        assert!(check_mime("audio/ogg; codecs=opus").is_ok());
+        assert!(check_mime("").is_err());
+        assert!(check_mime("nonsense").is_err());
+        assert!(check_mime("image/jp\neg").is_err());
+        assert!(check_mime(&format!("a/{}", "b".repeat(200))).is_err());
+    }
+
+    #[test]
+    fn hostile_mime_never_breaks_the_response() {
+        let r = media_response("text/html\u{7f}\u{0}", vec![1]);
+        assert_eq!(r.headers()[CONTENT_TYPE], "application/octet-stream");
+        let r = media_response("image/png", vec![1]);
+        assert_eq!(r.headers()[CONTENT_TYPE], "image/png");
+        assert_eq!(r.headers()["x-content-type-options"], "nosniff");
+    }
 
     #[test]
     fn labels_are_trimmed_and_bounded() {

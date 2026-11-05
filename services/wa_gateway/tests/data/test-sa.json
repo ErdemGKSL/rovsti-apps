@@ -1,0 +1,10 @@
+{
+  "_comment": "TEST ONLY. RSA key generated for the push/jwt.rs unit tests; it is not tied to any Google project and grants nothing.",
+  "type": "service_account",
+  "project_id": "test-project",
+  "private_key_id": "test-key-id",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDT8M2RYZZgotTY\nmX9uo4wuUlhHsf4WLcKQmH5ZMCFysRC2qqU8t6KzYExrW+D8zEZZ9vbdSCCKzwxY\nqSi4QgwvHeWEJj9fgzNaCUIVJNCQDpJt41YI2dmMKVk3mSnHDeuNJ3LyD3PBpq7U\nKJ6D5bCaLF+xwuiMCbcA+xPFBLyDEjprl2utT/2qLTycX8CivvwHnITBqJiJuPNL\nU4c7VsblXPpv/9rz8vxJK0GFJXbKomZ7ZQND91YzcOF7Brbi8OHmU2tMnMezrtP6\nyWJy6JSXmFEk06kyQq/Bpr22vhG4V1KPYxNqwpOgUmR95YgJob4Syqb/IGU35EQu\n/DrNvhnJAgMBAAECggEAEZRbuL9bddCLzxuMUmUGb6Es6WV+KeDJzqyXblZrr9O4\nCy7EXfDtcet+6zjHxLA89aFigKBG8ryRzZjaY842rIHSU8/IWefMDp/N92sCUbCj\nvLGqpTlMri+P0ujFallhPGgVRLa7Z0ioH7juzQn0SBV+KoR8PYFgyJgK38Cw0j4+\nBEGvwetozEzofX3XoagJTFOvZthCqkV7glleUmf9ftrnXSIlSe7hHPHOcUcZj2YL\nSXbesLJIoTh7ywRh4NtLIt1SPvjqAg3LsBS8N336xGVeNUP1ysvAX8ooTYGvFfNc\n+jig8i9RINvXADeZIzbxru9mfxNRskFoO0uuLaf18QKBgQD/VTKBfGhBNc113sVi\nGpvRJRQcLGCfPxExu7ASHmoJEyqFSKWOZ+iUgOEMQsF8VdQr+FvBvxhVGtg+96el\nJZu8oSuOX4el8Js68L/hINDZaPgme5Qxg88JfqJTaEttd4YFzZrw+DjcLmo8sbCw\nzTX+yKqiHPycDw8CMpJLB1rFiwKBgQDUfpQyKxrYiTQJT9wPD8g7cdbI6U/Qe9Bc\naYuw1o1t0QxNN3tWtyuaps9qzPYF1FRpoOLSBaxE7xn/+FfecY0Xy0GeLw2M/szg\nJ/f47WXMxwOBYJ80rdBeUxkhzGBXafTDvA4Pej+30DyNtImLkM76WbWFPNm38X5M\n4OpWkGmQewKBgQDoPLzAa8CDt4UWdbZAggVBmKEO8wo7LejcvGLsR/+YG3esXSRA\nP6CbGhIXzcwg5AwkpjQHKGHgXpdbxnQUUP2y90EfsSI3O35lgL517Rwo80Hp9rMW\nylWQxD6u8IjSm0kqlBUeohdNpWX5qIEWfsBi6m/RHd5hr4yuKgNH/PuB+wKBgQCf\nlsEuPHlZDxJpu/SFy1CSdJjfI3qyFYsTHKGxGjH1u/8FLxoOslqpN4anq29KSYFs\nI0y2d1Q+IWThfV5gzd8tc5XAe44tyl+MKfhul7zQ4tabIDnxkmjfroE9hQUGIamW\nJ3JX5XRdVKNluaVjkEoic6WEf4L0RwaYLoNQp/zgaQKBgQDnRX84f7V1nYQeWkj4\n5/2IeM8REnuH+/pzEB7hX7EILxH+rHMwYNosTFbpICEuKp28PtayEX0MVLIuk0E0\nJAmPhkKpv+pvvhW9Dpy8Sw5YWnJskWyTSxtHj+DRGwpuq5+pEIlotBbx8xNkvhol\n9lLInZO4bjWrSIhpUehVHjC3Rw==\n-----END PRIVATE KEY-----\n",
+  "client_email": "fcm-test@test-project.iam.gserviceaccount.com",
+  "client_id": "0",
+  "token_uri": "https://oauth2.googleapis.com/token"
+}

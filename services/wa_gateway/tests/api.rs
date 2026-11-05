@@ -11,8 +11,8 @@ use futures::channel::mpsc::UnboundedReceiver;
 use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway, subscribe};
 use rovsti_wa_proto::{
     AppId, ChatState, ConnectKey, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope,
-    GatewayEvent, GatewayUrl, InstanceState, LinkRequest, MarkRead, MessageBody, SendText,
-    TypingState,
+    GatewayEvent, GatewayUrl, GroupInfo, InstanceState, LinkRequest, MarkRead, MediaKind,
+    MessageBody, Participant, SendReaction, SendText, TypingState,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wa_gateway::config::Config;
@@ -23,14 +23,23 @@ use wa_gateway::{AppState, serve};
 struct Server {
     url: GatewayUrl,
     driver: Arc<FakeDriver>,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 async fn start(max_instances: u32) -> Server {
+    start_with(
+        max_instances,
+        Config::from_parts(None, &|_| None).unwrap().max_media_bytes,
+    )
+    .await
+}
+
+async fn start_with(max_instances: u32, max_media_bytes: usize) -> Server {
     let dir = tempfile::tempdir().unwrap();
     let mut config = Config::from_parts(None, &|_| None).unwrap();
     config.data_dir = dir.path().to_owned();
     config.max_instances = max_instances;
+    config.max_media_bytes = max_media_bytes;
     let store = Store::open(&config.db_path()).unwrap();
     let driver = Arc::new(FakeDriver::new());
     let state = AppState::new(config, store, driver.clone());
@@ -42,7 +51,7 @@ async fn start(max_instances: u32) -> Server {
     Server {
         url: GatewayUrl::parse(&format!("http://127.0.0.1:{port}")).unwrap(),
         driver,
-        _dir: dir,
+        dir,
     }
 }
 
@@ -430,4 +439,228 @@ async fn push_registration_and_healthz() {
     stream.read_to_string(&mut body).await.unwrap();
     assert!(body.starts_with("HTTP/1.1 200"), "{body}");
     assert!(body.ends_with("ok"), "{body}");
+}
+
+#[tokio::test]
+async fn media_round_trip_is_downloaded_once_then_served_from_cache() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let chat = "905321234567@s.whatsapp.net";
+    let file: Vec<u8> = (0..=255u8).cycle().take(10_000).collect();
+    let (g, bytes) = (gateway.clone(), file.clone());
+    let sent = blocking(move || {
+        g.send_media(
+            chat,
+            MediaKind::Image,
+            "image/png",
+            Some("kedi & k\u{f6}pek"),
+            bytes,
+        )
+    })
+    .await
+    .unwrap();
+
+    match events.next_event().await.event {
+        GatewayEvent::Message(m) => {
+            assert_eq!(m.id, sent.message_id);
+            assert!(m.from_me);
+            assert_eq!(
+                m.body,
+                MessageBody::Media {
+                    kind: MediaKind::Image,
+                    caption: Some("kedi & k\u{f6}pek".into()),
+                    mime: "image/png".into(),
+                    size: 10_000,
+                }
+            );
+        }
+        other => panic!("expected Message, got {other:?}"),
+    }
+
+    let (g, id) = (gateway.clone(), sent.message_id.clone());
+    assert_eq!(blocking(move || g.media(&id)).await.unwrap(), file);
+    let (g, id) = (gateway.clone(), sent.message_id.clone());
+    assert_eq!(blocking(move || g.media(&id)).await.unwrap(), file);
+    // The second read came from the disk cache, not from WhatsApp.
+    let downloads = server
+        .driver
+        .ops()
+        .iter()
+        .filter(|op| *op == "download")
+        .count();
+    assert_eq!(downloads, 1);
+    let cache_dir = server
+        .dir
+        .path()
+        .join("instances")
+        .join(&created.instance_id)
+        .join("media");
+    assert_eq!(std::fs::read_dir(cache_dir).unwrap().count(), 1);
+
+    // Text messages and unknown ids have no media.
+    let g = gateway.clone();
+    let text = blocking(move || {
+        g.send_text(&SendText {
+            chat: chat.into(),
+            text: "x".into(),
+            quoted_id: None,
+        })
+    })
+    .await
+    .unwrap();
+    let g = gateway.clone();
+    match blocking(move || g.media(&text.message_id)).await {
+        Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::BadRequest),
+        other => panic!("expected BadRequest, got {other:?}"),
+    }
+    match blocking(move || gateway.media("NOPE")).await {
+        Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::NotFound),
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn media_over_the_limit_is_413_and_bad_requests_are_400() {
+    let server = start_with(4, 1024).await;
+    let (gateway, _created) = create(&server).await;
+    let chat = "905321234567@s.whatsapp.net";
+
+    let g = gateway.clone();
+    let ok = blocking(move || {
+        g.send_media(
+            chat,
+            MediaKind::Document,
+            "application/pdf",
+            None,
+            vec![7; 1024],
+        )
+    })
+    .await;
+    assert!(ok.is_ok(), "{ok:?}");
+
+    let g = gateway.clone();
+    let too_big = blocking(move || {
+        g.send_media(
+            chat,
+            MediaKind::Document,
+            "application/pdf",
+            None,
+            vec![7; 1025],
+        )
+    })
+    .await;
+    match too_big {
+        Err(ClientError::Http(m)) => assert!(m.contains("413"), "{m}"),
+        other => panic!("expected a 413, got {other:?}"),
+    }
+
+    let g = gateway.clone();
+    let (empty, bad_mime, bad_chat) = blocking(move || {
+        (
+            g.send_media(chat, MediaKind::Image, "image/png", None, vec![]),
+            g.send_media(chat, MediaKind::Image, "png", None, vec![1]),
+            g.send_media(" ", MediaKind::Image, "image/png", None, vec![1]),
+        )
+    })
+    .await;
+    for result in [empty, bad_mime, bad_chat] {
+        match result {
+            Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::BadRequest),
+            other => panic!("expected BadRequest, got {other:?}"),
+        }
+    }
+    // Only the one valid upload reached the driver's store.
+    let g = gateway.clone();
+    assert_eq!(
+        blocking(move || g.messages(chat, None, 10))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn reactions_reach_the_driver_and_update_the_message() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+    let chat = "905321234567@s.whatsapp.net";
+
+    let g = gateway.clone();
+    let sent = blocking(move || {
+        g.send_text(&SendText {
+            chat: chat.into(),
+            text: "selam".into(),
+            quoted_id: None,
+        })
+    })
+    .await
+    .unwrap();
+    assert!(matches!(
+        events.next_event().await.event,
+        GatewayEvent::Message(_)
+    ));
+
+    let (g, id) = (gateway.clone(), sent.message_id.clone());
+    blocking(move || {
+        g.react(&SendReaction {
+            chat: chat.into(),
+            message_id: id,
+            from_me: true,
+            sender: None,
+            emoji: "\u{2764}".into(),
+        })
+    })
+    .await
+    .unwrap();
+    match events.next_event().await.event {
+        GatewayEvent::MessageUpdate {
+            chat: c,
+            id,
+            reactions,
+            ..
+        } => {
+            assert_eq!(c, chat);
+            assert_eq!(id, sent.message_id);
+            assert_eq!(reactions.len(), 1);
+            assert_eq!(reactions[0].emoji, "\u{2764}");
+            assert!(reactions[0].from_me);
+        }
+        other => panic!("expected MessageUpdate, got {other:?}"),
+    }
+
+    let g = gateway.clone();
+    let bad = blocking(move || {
+        g.react(&SendReaction {
+            chat: chat.into(),
+            message_id: String::new(),
+            from_me: true,
+            sender: None,
+            emoji: "x".into(),
+        })
+    })
+    .await;
+    assert!(matches!(bad, Err(ClientError::Api(e)) if e.code == ErrorCode::BadRequest));
+}
+
+#[tokio::test]
+async fn groups_are_listed() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    let group = GroupInfo {
+        jid: "120363-1@g.us".into(),
+        subject: "Aile".into(),
+        participants: vec![Participant {
+            jid: "905321234567@s.whatsapp.net".into(),
+            admin: true,
+        }],
+    };
+    server.driver.set_groups(vec![group.clone()]);
+    let g = gateway.clone();
+    assert_eq!(blocking(move || g.groups()).await.unwrap(), vec![group]);
 }

@@ -36,11 +36,13 @@ async fn run(config_path: Option<&std::path::Path>) -> Result<(), String> {
         .map_err(|e| format!("cannot create {}: {e}", config.data_dir.display()))?;
     let store = Store::open(&config.db_path()).map_err(|e| e.to_string())?;
 
+    let pusher = wa_gateway::push::from_config(config.fcm.as_ref(), store.clone())
+        .map_err(|e| e.to_string())?;
     let driver = Arc::new(wa_gateway::wa::WaRuntime::new(config.data_dir.clone()));
     let listener = tokio::net::TcpListener::bind(config.bind)
         .await
         .map_err(|e| format!("cannot bind {}: {e}", config.bind))?;
-    let state = AppState::new(config, store, driver);
+    let state = AppState::with_pusher(config, store, driver, pusher);
     let restarted = state.restart_instances().await.map_err(|e| e.to_string())?;
     log::info!(
         "listening on {}, {restarted} instance(s) restarted",

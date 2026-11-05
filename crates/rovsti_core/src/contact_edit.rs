@@ -6,9 +6,9 @@
 //! the vCard module reads and writes, and what goes back to Kotlin to save.
 //! Everything here is pure: cleaning, validation and the user-facing messages.
 //!
-//! The address book list only shows contacts that have a phone number (the
-//! provider query is `Phone.CONTENT_URI`), so a draft needs at least one
-//! number to be saved. Otherwise a saved contact would vanish from the list.
+//! A draft needs a name or an organisation to be saved; phone numbers are
+//! optional, so a contact can be just an email address or a name. Numbers and
+//! emails that are present must be well formed.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -119,8 +119,6 @@ pub struct ContactDraft {
 pub enum DraftError {
     #[error("Add a name or an organisation.")]
     NoName,
-    #[error("Add at least one phone number.")]
-    NoNumber,
     #[error("Number {} has no digits.", .0 + 1)]
     BadNumber(usize),
     #[error("Email {} needs an @ and a domain.", .0 + 1)]
@@ -137,7 +135,7 @@ impl ContactDraft {
     }
 
     /// The name the list shows: given and family, else the organisation, else
-    /// the first number.
+    /// the first number, else the first email.
     pub fn display_name(&self) -> String {
         let full = [self.given.trim(), self.family.trim()]
             .iter()
@@ -152,8 +150,9 @@ impl ContactDraft {
         } else {
             self.numbers
                 .iter()
-                .map(|n| n.value.trim())
-                .find(|n| !n.is_empty())
+                .chain(&self.emails)
+                .map(|f| f.value.trim())
+                .find(|v| !v.is_empty())
                 .unwrap_or_default()
                 .to_owned()
         }
@@ -176,9 +175,6 @@ impl ContactDraft {
     pub fn validate(&self) -> Result<(), DraftError> {
         if self.given.is_empty() && self.family.is_empty() && self.org.is_empty() {
             return Err(DraftError::NoName);
-        }
-        if self.numbers.is_empty() {
-            return Err(DraftError::NoNumber);
         }
         if let Some(i) = self.numbers.iter().position(|n| !has_digit(&n.value)) {
             return Err(DraftError::BadNumber(i));
@@ -223,6 +219,50 @@ pub struct SavedPayload {
 #[serde(default)]
 pub struct ImportPayload {
     pub added: u32,
+}
+
+/// One account contacts can be stored in, as Kotlin lists it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Account {
+    /// The opaque key (`type|name`); empty for "on this phone".
+    pub key: String,
+    pub name: String,
+    /// The account type, e.g. `com.google`.
+    pub kind: String,
+}
+
+/// What Kotlin returns for the accounts.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AccountsPayload {
+    pub accounts: Vec<Account>,
+}
+
+/// The owner-facing name of an account key: "On this phone",
+/// "Google, a@b.com", or just the account name for an unknown type.
+pub fn account_label(key: &str) -> String {
+    if key.is_empty() {
+        return "On this phone".to_owned();
+    }
+    let (kind, name) = key.split_once('|').unwrap_or(("", key));
+    match kind {
+        "com.google" => format!("Google, {name}"),
+        _ => name.to_owned(),
+    }
+}
+
+/// The groups that belong to `account` (a contact can only join those).
+pub fn groups_of<'a>(groups: &'a [Group], account: &str) -> impl Iterator<Item = &'a Group> {
+    let account = account.to_owned();
+    groups.iter().filter(move |g| g.account == account)
+}
+
+/// Drops the draft's groups that are not in its own account.
+pub fn retain_account_groups(draft: &mut ContactDraft, groups: &[Group]) {
+    let allowed: std::collections::HashSet<i64> =
+        groups_of(groups, &draft.account).map(|g| g.id).collect();
+    draft.groups.retain(|id| allowed.contains(id));
 }
 
 /// Longest group title, in characters.
@@ -361,8 +401,53 @@ mod tests {
     }
 
     #[test]
-    fn a_number_is_required() {
-        assert_eq!(draft("Ayşe", &["  "]).finish(), Err(DraftError::NoNumber));
+    fn a_number_is_optional() {
+        let saved = draft("Ayşe", &["  "]).finish().expect("valid");
+        assert!(saved.numbers.is_empty());
+        assert!(draft("Ayşe", &[]).finish().is_ok());
+    }
+
+    #[test]
+    fn a_name_or_an_organisation_is_needed() {
+        assert_eq!(draft("", &["5551112233"]).finish(), Err(DraftError::NoName));
+        let mut d = draft("", &[]);
+        d.org = "Rovsti".into();
+        assert!(d.finish().is_ok());
+    }
+
+    #[test]
+    fn display_name_falls_back_to_the_first_email() {
+        let mut d = draft("", &[]);
+        d.emails = vec![DraftField::new("a@b.com", FieldKind::Home)];
+        assert_eq!(d.display_name(), "a@b.com");
+        d.numbers = vec![DraftField::new("555", FieldKind::Mobile)];
+        assert_eq!(d.display_name(), "555");
+    }
+
+    #[test]
+    fn account_labels_read_well() {
+        assert_eq!(account_label(""), "On this phone");
+        assert_eq!(account_label("com.google|a@b.com"), "Google, a@b.com");
+        assert_eq!(account_label("org.example|Work"), "Work");
+    }
+
+    #[test]
+    fn only_the_accounts_own_groups_are_kept() {
+        let g = |id, account: &str| Group {
+            id,
+            account: account.into(),
+            ..Group::default()
+        };
+        let groups = vec![g(1, ""), g(2, "com.google|a@b.com"), g(3, "")];
+        assert_eq!(groups_of(&groups, "").count(), 2);
+        let mut d = draft("Ayşe", &[]);
+        d.groups = vec![1, 2, 9];
+        retain_account_groups(&mut d, &groups);
+        assert_eq!(d.groups, [1]);
+        d.account = "com.google|a@b.com".into();
+        d.groups = vec![1, 2];
+        retain_account_groups(&mut d, &groups);
+        assert_eq!(d.groups, [2]);
     }
 
     #[test]

@@ -17,9 +17,9 @@ const FOLD_AT: usize = 75;
 /// What an import found.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Parsed {
-    /// Cards that hold a usable name and at least one phone number.
+    /// Cards that hold a usable name and a name.
     pub contacts: Vec<ContactDraft>,
-    /// Cards that were read but are not usable (no name or no number).
+    /// Cards that were read but are not usable (no name).
     pub skipped: usize,
 }
 
@@ -465,12 +465,12 @@ EMAIL;TYPE=INTERNET,HOME:ayse@example.com\r\nNOTE:Line one\\nLine\\, two\r\nEND:
     }
 
     #[test]
-    fn cards_without_a_number_or_name_are_skipped() {
+    fn cards_without_a_name_are_skipped() {
         let text = "BEGIN:VCARD\nFN:No Number\nEND:VCARD\n\
 BEGIN:VCARD\nTEL:5551112233\nEND:VCARD\nBEGIN:VCARD\nFN:Ok\nTEL:5551112233\nEND:VCARD";
         let parsed = parse(text);
-        assert_eq!(parsed.contacts.len(), 1);
-        assert_eq!(parsed.skipped, 2);
+        assert_eq!(parsed.contacts.len(), 2);
+        assert_eq!(parsed.skipped, 1);
     }
 
     #[test]
@@ -558,5 +558,12 @@ BEGIN:VCARD\nFN:C D\nTEL:222\nEND:VCARD\n";
     #[test]
     fn an_unfinished_card_is_dropped() {
         assert!(parse("BEGIN:VCARD\nFN:A B\nTEL:111\n").contacts.is_empty());
+    }
+
+    #[test]
+    fn an_email_only_card_imports() {
+        let parsed = parse("BEGIN:VCARD\nVERSION:3.0\nFN:A B\nEMAIL:a@b.com\nEND:VCARD\n");
+        assert_eq!(parsed.contacts.len(), 1);
+        assert!(parsed.contacts[0].numbers.is_empty());
     }
 }

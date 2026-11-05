@@ -19,13 +19,16 @@ fn schema() -> u32 {
 
 /// The saved settings. Unknown fields are ignored and missing ones take their
 /// default, so a file written by a newer or older build still loads.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ContactsPrefs {
     #[serde(default = "schema")]
     pub schema_version: u32,
     pub name_format: NameFormat,
     pub sort_by: SortBy,
+    /// The account key new contacts are saved to (empty: on this phone).
+    #[serde(default)]
+    pub save_to: String,
 }
 
 impl Default for ContactsPrefs {
@@ -34,13 +37,14 @@ impl Default for ContactsPrefs {
             schema_version: SCHEMA_VERSION,
             name_format: NameFormat::default(),
             sort_by: SortBy::default(),
+            save_to: String::new(),
         }
     }
 }
 
 impl ContactsPrefs {
     /// The style the lists use.
-    pub fn style(self) -> NameStyle {
+    pub fn style(&self) -> NameStyle {
         NameStyle {
             format: self.name_format,
             sort: self.sort_by,
@@ -53,6 +57,7 @@ impl ContactsPrefs {
             schema_version: SCHEMA_VERSION,
             name_format: style.format,
             sort_by: style.sort,
+            save_to: String::new(),
         }
     }
 }
@@ -92,6 +97,16 @@ mod tests {
         .expect("ok");
         assert_eq!(prefs.name_format, NameFormat::FirstLast);
         assert_eq!(prefs.sort_by, SortBy::LastName);
+    }
+
+    #[test]
+    fn an_old_file_without_save_to_loads() {
+        let prefs: ContactsPrefs =
+            serde_json::from_str(r#"{"schema_version":1,"name_format":"last_first"}"#).expect("ok");
+        assert_eq!(prefs.save_to, "");
+        let with: ContactsPrefs =
+            serde_json::from_str(r#"{"save_to":"com.google|a@b"}"#).expect("ok");
+        assert_eq!(with.save_to, "com.google|a@b");
     }
 
     #[test]

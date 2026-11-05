@@ -11,6 +11,7 @@ pub mod call_log;
 pub mod contact;
 pub mod contact_card;
 pub mod contact_edit;
+pub mod contact_photo;
 pub mod contacts_prefs;
 pub mod contacts_view;
 pub mod dial;

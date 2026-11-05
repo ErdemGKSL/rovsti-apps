@@ -646,6 +646,9 @@ pub struct WireContact {
     /// `SORT_KEY_ALTERNATIVE`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort_key_alt: Option<String>,
+    /// The first email, shown when the contact has no number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
 }
 
 impl From<&WireContact> for crate::Contact {
@@ -880,6 +883,8 @@ pub enum DocumentOp {
     ExportMessages,
     /// Rovsti Messages: an archive was picked and copied to `path`.
     ImportMessages,
+    /// Rovsti Contacts: a contact photo was picked and copied to `path`.
+    ContactPhoto,
     /// Rovsti Messages: a file to attach was picked and copied to `path`
     /// (its type is in `mime`).
     Attachment,

@@ -136,9 +136,6 @@ pub fn build_rows_styled<'a>(
     let mut out: Vec<ContactVm> = Vec::new();
     for c in contacts {
         let numbers: Vec<NumberVm> = c.numbers.iter().map(NumberVm::from_wire).collect();
-        if numbers.is_empty() {
-            continue;
-        }
         let letter = section_letter(crate::names::section_name(c, style.sort));
         let subtitle = if digit_query {
             c.numbers
@@ -149,6 +146,9 @@ pub fn build_rows_styled<'a>(
             None
         }
         .or_else(|| {
+            if numbers.is_empty() {
+                return c.email.clone().filter(|e| !e.trim().is_empty());
+            }
             (numbers.len() > 1).then(|| {
                 let lead = numbers.iter().find(|n| n.default).unwrap_or(&numbers[0]);
                 format!("{} and {} more", lead.label, numbers.len() - 1)
@@ -259,9 +259,14 @@ mod tests {
     }
 
     #[test]
-    fn contacts_without_numbers_are_skipped() {
-        let people = vec![person(1, "Ghost", vec![])];
-        assert!(build_rows(&people, "").is_empty());
+    fn a_number_less_row_shows_the_email() {
+        let mut p = person(1, "Ghost", vec![]);
+        assert_eq!(build_rows(&[p.clone()], "")[0].subtitle, None);
+        p.email = Some("g@x.com".into());
+        let rows = build_rows(&[p], "");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].subtitle.as_deref(), Some("g@x.com"));
+        assert!(rows[0].numbers.is_empty());
     }
 
     #[test]

@@ -76,7 +76,7 @@ mod tests {
             sort_by: SortBy::LastName,
             ..ContactsPrefs::default()
         };
-        save(&dir, prefs).expect("writes");
+        save(&dir, prefs.clone()).expect("writes");
         assert_eq!(load(&dir), prefs);
         assert!(!dir.join("contacts-prefs.json.tmp").exists());
         fs::remove_dir_all(dir).ok();
@@ -90,7 +90,7 @@ mod tests {
             sort_by: SortBy::LastName,
             ..ContactsPrefs::default()
         };
-        save(&dir, second).expect("second");
+        save(&dir, second.clone()).expect("second");
         assert_eq!(load(&dir), second);
         fs::remove_dir_all(dir).ok();
     }

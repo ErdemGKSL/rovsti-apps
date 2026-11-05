@@ -1,6 +1,9 @@
 //! Sample address book for desktop runs, where there is no provider to ask.
 
-use rovsti_core::wire::{WireContact, WireNumber};
+use rovsti_core::{
+    contact_edit::{ContactDraft, DraftField, FieldKind, Group},
+    wire::{WireContact, WireNumber},
+};
 
 fn number(raw: &str, label: Option<&str>, default: bool) -> WireNumber {
     WireNumber {
@@ -99,4 +102,54 @@ pub(crate) fn contacts() -> Vec<WireContact> {
     ];
     all.sort_by_cached_key(|c| (rovsti_core::search::fold(&c.display_name), c.id));
     all
+}
+
+/// The sample groups: two labels with a few members each.
+pub(crate) fn groups() -> Vec<Group> {
+    vec![
+        Group {
+            id: 1,
+            title: "Family".to_owned(),
+            members: vec![1, 4, 6],
+            ..Group::default()
+        },
+        Group {
+            id: 2,
+            title: "Work".to_owned(),
+            members: vec![3, 9],
+            ..Group::default()
+        },
+    ]
+}
+
+/// The editable form of a sample contact, as the provider would return it.
+pub(crate) fn draft(id: i64) -> Option<ContactDraft> {
+    let wire = contacts().into_iter().find(|c| c.id == id)?;
+    let (given, family) = wire
+        .display_name
+        .rsplit_once(' ')
+        .map_or((wire.display_name.as_str(), ""), |(g, f)| (g, f));
+    let kind = |label: &Option<String>| match label.as_deref() {
+        Some("Home") => FieldKind::Home,
+        Some("Work") => FieldKind::Work,
+        Some("Mobile") | None => FieldKind::Mobile,
+        Some(_) => FieldKind::Other,
+    };
+    Some(ContactDraft {
+        id: Some(wire.id),
+        given: given.to_owned(),
+        family: family.to_owned(),
+        numbers: wire
+            .numbers
+            .iter()
+            .map(|n| DraftField::new(n.raw.clone(), kind(&n.label)))
+            .collect(),
+        groups: groups()
+            .iter()
+            .filter(|g| g.members.contains(&id))
+            .map(|g| g.id)
+            .collect(),
+        starred: wire.starred,
+        ..ContactDraft::default()
+    })
 }

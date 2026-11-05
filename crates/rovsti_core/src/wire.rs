@@ -872,6 +872,10 @@ pub enum DocumentOp {
     ExportBackup,
     ImportBackup,
     ExportCalls,
+    /// Rovsti Contacts: the `.vcf` was saved.
+    ExportContacts,
+    /// Rovsti Contacts: a `.vcf` was picked and read.
+    ImportContacts,
     #[default]
     #[serde(other)]
     Unknown,

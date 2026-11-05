@@ -6060,14 +6060,17 @@ dependencies = [
 name = "rovsti_contacts"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "gpui",
  "gpui_android",
  "gpui_platform",
+ "image",
  "log",
  "rovsti_android",
  "rovsti_core",
  "rovsti_ui",
  "rovsti_wa_ui",
+ "serde",
  "serde_json",
 ]
 

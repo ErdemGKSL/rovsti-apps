@@ -42,11 +42,23 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
 
 - [x] Scaffold: sectioned list with search, Favorites, contact card (call,
       message, share, edit, star), name format and sort settings, desktop sample
-- [ ] Eject the Android host and package `RovstiBridge` (contacts pull, intents)
-- [ ] Persist name format and sort (`rovsti_ui::storage`)
-- [ ] Create and edit contacts in-app instead of handing off to the system editor
-- [ ] Photos, groups, vCard import and export
+- [x] Eject the Android host and package `RovstiBridge` (contacts pull, intents).
+      The host adds `crates/rovsti_android/kotlin` as a Gradle source directory, so
+      it needs no symlink and builds on Windows.
+- [x] Persist name format and sort (`contacts-prefs.json` in the app data dir;
+      `rovsti_core::contacts_prefs`, read and written by `apps/contacts/src/prefs.rs`)
+- [x] Create, edit and delete contacts in-app (`rovsti_core::contact_edit` checks the
+      form; Kotlin `ContactsEdit` writes through the primary raw contact). The system
+      editor stays as "Open in Android Contacts".
+- [x] Photos on the list and the card, groups (Groups tab, join a group in the edit
+      form, create, rename, delete), vCard import and export (`rovsti_core::vcard`,
+      duplicates skipped by `rovsti_core::import_plan`, files through the Storage
+      Access Framework)
+- [ ] Choose or change a contact's photo
+- [ ] Contacts without a phone number (the list and the editor need a number today)
+- [ ] Groups of a synced account for a new contact (new contacts live on the phone only)
 - [ ] WhatsApp session owner? See `docs/whatsapp-notes.md`
+- [ ] Check the editor, groups and vCard flows on a phone: written without a device
 
 ## Rovsti Stops
 

@@ -5,17 +5,51 @@
   },
   "platforms": {
     "android": {
-      "abis": ["arm64-v8a", "x86_64"],
+      "abis": [
+        "arm64-v8a",
+        "x86_64"
+      ],
       "application-id": "dev.rovsti.contacts",
-      "features": ["sharing"],
+      "features": [
+        "sharing"
+      ],
+      "management": "manual",
       "permissions": [
         "android.permission.READ_CONTACTS",
         "android.permission.WRITE_CONTACTS"
-      ]
+      ],
+      "project-dir": "platforms/android",
+      "variables": {
+        "min_sdk": "34",
+        "target_sdk": "36"
+      },
+      "activity": "dev.rovsti.contacts.MainActivity"
     },
     "desktop": {
-      "build": [{ "program": "cargo", "args": ["build", "-p", "rovsti_contacts", "--profile", "{{cargo_profile}}"] }],
-      "run": [{ "program": "cargo", "args": ["run", "-p", "rovsti_contacts", "--profile", "{{cargo_profile}}"] }]
+      "build": [
+        {
+          "args": [
+            "build",
+            "-p",
+            "rovsti_contacts",
+            "--profile",
+            "{{cargo_profile}}"
+          ],
+          "program": "cargo"
+        }
+      ],
+      "run": [
+        {
+          "args": [
+            "run",
+            "-p",
+            "rovsti_contacts",
+            "--profile",
+            "{{cargo_profile}}"
+          ],
+          "program": "cargo"
+        }
+      ]
     }
   }
 }

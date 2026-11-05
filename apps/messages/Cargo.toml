@@ -13,7 +13,9 @@ futures.workspace = true
 rovsti_android.workspace = true
 rovsti_core.workspace = true
 rovsti_ui.workspace = true
-rovsti_whatsapp.workspace = true
+rovsti_wa_client.workspace = true
+rovsti_wa_proto.workspace = true
+rovsti_wa_ui.workspace = true
 log.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]

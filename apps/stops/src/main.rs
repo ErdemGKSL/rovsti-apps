@@ -5,9 +5,9 @@
 use std::time::Duration;
 
 use gpui::{
-    App, Bounds, Context, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div, prelude::*, px,
-    size,
+    App, AppContext as _, Bounds, Context, Entity, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div,
+    prelude::*, px, size,
 };
 use rovsti_geo::AlarmRule;
 use rovsti_ui::{
@@ -18,6 +18,7 @@ use rovsti_ui::{
     tab_bar::{Tab, TabBar, content_bottom_inset},
     tokens::{Theme, typography},
 };
+use rovsti_wa_ui::{AppId, WhatsAppSettings};
 
 const TABS: [&str; 3] = ["Trip", "Saved", "Settings"];
 const TAB_ICONS: [Icon; 3] = [
@@ -45,10 +46,11 @@ struct StopsApp {
     motion: rovsti_ui::motion::Motion,
     page: rovsti_ui::motion::Entrance,
     rule: usize,
+    whatsapp: Entity<WhatsAppSettings>,
 }
 
 impl StopsApp {
-    fn new() -> Self {
+    fn new(cx: &mut Context<Self>) -> Self {
         Self {
             tabs: TabBar::new(
                 TABS.into_iter()
@@ -58,6 +60,7 @@ impl StopsApp {
             motion: Default::default(),
             page: Default::default(),
             rule: 1,
+            whatsapp: cx.new(|cx| WhatsAppSettings::new(AppId::Stops, "stops", cx)),
         }
     }
 
@@ -154,12 +157,8 @@ impl Render for StopsApp {
                 "Stops you travel to often appear here for one-tap trips.",
             )
             .into_any_element(),
-            _ => empty_state(
-                theme,
-                "Settings",
-                "Alarm sound, vibration and GPS battery use.",
-            )
-            .into_any_element(),
+            // The shared WhatsApp screen brings its own sections and buttons.
+            _ => self.whatsapp.clone().into_any_element(),
         };
 
         div()
@@ -226,7 +225,7 @@ fn main() {
                     ))),
                     ..Default::default()
                 },
-                |_, cx| cx.new(|_| StopsApp::new()),
+                |_, cx| cx.new(StopsApp::new),
             )
             .expect("failed to open the Rovsti Stops window");
             cx.activate(true);

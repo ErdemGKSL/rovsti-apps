@@ -1,13 +1,14 @@
 //! Rovsti Messages: SMS/MMS and WhatsApp in one inbox.
 //!
-//! WhatsApp runs as a linked device inside this app (see `rovsti_whatsapp`);
-//! nothing goes through a Rovsti server.
-
-mod whatsapp;
+//! WhatsApp runs on the Rovsti gateway (`services/wa_gateway`): the WhatsApp
+//! tab hosts the shared settings screen (`rovsti_wa_ui`) that links this app to
+//! an instance, and chats and live messages come from the gateway through
+//! `rovsti_wa_client`. SMS stays on the phone.
 
 use gpui::{
-    App, Bounds, Context, Entity, IntoElement, ParentElement, Render, StatefulInteractiveElement,
-    Styled, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
+    App, AppContext as _, Bounds, Context, Entity, IntoElement, ParentElement, Render,
+    StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div, prelude::*, px,
+    size,
 };
 use rovsti_ui::{
     Icon, IconAssets,
@@ -17,7 +18,9 @@ use rovsti_ui::{
     tokens::Theme,
 };
 
-use crate::whatsapp::WhatsAppScreen;
+use rovsti_wa_client::ClientError;
+use rovsti_wa_proto::{ChatSummary, GatewayEvent, to_rovsti};
+use rovsti_wa_ui::{AppId, WhatsAppSettings};
 
 const TABS: [&str; 3] = ["Chats", "WhatsApp", "Settings"];
 const TAB_ICONS: [Icon; 3] = [
@@ -30,19 +33,29 @@ struct MessagesApp {
     tabs: TabBar,
     motion: rovsti_ui::motion::Motion,
     page: rovsti_ui::motion::Entrance,
-    whatsapp: Entity<WhatsAppScreen>,
+    whatsapp: Entity<WhatsAppSettings>,
     threads: Vec<rovsti_core::Message>,
+    /// The chat list is being fetched, or was fetched for this link.
+    chats: ChatsState,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChatsState {
+    /// Not connected, or the chat list is stale and a fetch is due.
+    Needed,
+    Loading,
+    Loaded,
 }
 
 impl MessagesApp {
     fn new(cx: &mut Context<Self>) -> Self {
-        let whatsapp = cx.new(WhatsAppScreen::new);
-        // Fold WhatsApp messages into the unified inbox as they arrive.
+        let whatsapp = cx.new(|cx| WhatsAppSettings::new(AppId::Messages, "messages", cx));
+        // Fold WhatsApp messages into the unified inbox as they arrive, and
+        // load the chat list once the instance is connected.
         cx.observe(&whatsapp, |this, whatsapp, cx| {
-            for message in whatsapp.update(cx, |screen, _| screen.take_new_messages()) {
-                this.threads.retain(|m| m.thread != message.thread);
-                this.threads.insert(0, message);
-            }
+            let events = whatsapp.update(cx, |settings, _| settings.take_events());
+            let connected = whatsapp.read(cx).is_connected();
+            this.on_gateway_events(events, connected, cx);
             cx.notify();
         })
         .detach();
@@ -56,7 +69,84 @@ impl MessagesApp {
             page: Default::default(),
             whatsapp,
             threads: Vec::new(),
+            chats: ChatsState::Needed,
         }
+    }
+
+    fn fold(&mut self, message: rovsti_core::Message) {
+        self.threads.retain(|m| m.thread != message.thread);
+        self.threads.insert(0, message);
+    }
+
+    fn on_gateway_events(
+        &mut self,
+        events: Vec<GatewayEvent>,
+        connected: bool,
+        cx: &mut Context<Self>,
+    ) {
+        for event in events {
+            match event {
+                GatewayEvent::Message(message) => self.fold(to_rovsti(&message)),
+                // The stream missed events: fetch the chat list again.
+                GatewayEvent::Resync => self.chats = ChatsState::Needed,
+                _ => {}
+            }
+        }
+        if !connected && self.whatsapp.read(cx).link().is_none() {
+            // Unlinked: WhatsApp chats leave the inbox.
+            self.threads
+                .retain(|m| m.thread.channel() != rovsti_core::Channel::WhatsApp);
+            self.chats = ChatsState::Needed;
+        } else if connected && self.chats == ChatsState::Needed {
+            self.load_chats(cx);
+        }
+    }
+
+    /// Fills the inbox with each chat's last message, off the UI thread.
+    fn load_chats(&mut self, cx: &mut Context<Self>) {
+        let Some(gateway) = self.whatsapp.read(cx).gateway() else {
+            return;
+        };
+        self.chats = ChatsState::Loading;
+        let task = cx
+            .background_executor()
+            .spawn(async move { gateway.chats() });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(chats) => {
+                        this.chats = ChatsState::Loaded;
+                        this.merge_chats(&chats);
+                    }
+                    Err(ClientError::Unauthorized) => this.chats = ChatsState::Loaded,
+                    Err(error) => {
+                        log::warn!("loading WhatsApp chats failed: {error}");
+                        this.chats = ChatsState::Loaded;
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Chats that are already in the inbox (a live message arrived first) keep
+    /// whichever message is newer.
+    fn merge_chats(&mut self, chats: &[ChatSummary]) {
+        for message in chats.iter().filter_map(|c| c.last.as_ref()).map(to_rovsti) {
+            let newer = self
+                .threads
+                .iter()
+                .find(|m| m.thread == message.thread)
+                .is_none_or(|have| have.timestamp_ms < message.timestamp_ms);
+            if newer {
+                self.fold(message);
+            }
+        }
+        self.threads
+            .sort_by_key(|m| std::cmp::Reverse(m.timestamp_ms));
     }
 
     fn chats(&self, theme: Theme) -> impl IntoElement {

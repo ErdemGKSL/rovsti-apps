@@ -28,7 +28,9 @@ apps/{phone,messages,contacts,stops}  GPUI views, one window per app
 crates/rovsti_ui                   glass components, tab bar, theme, data dirs
 crates/liquid_glass_kit            glass material (WGSL), springs, tokens
         │
-crates/rovsti_whatsapp             whatsapp-rust session (own Tokio thread)
+crates/rovsti_wa_ui                shared WhatsApp settings screen (two options)
+crates/rovsti_wa_client            gateway HTTP + WebSocket client, rovsti_wa_proto wire types
+services/wa_gateway                owns the whatsapp-rust sessions (server)
 crates/rovsti_android ──JNI──▶ kotlin/dev/rovsti/bridge/RovstiBridge.kt
         │                           (roles, telecom, Xiaomi settings, services)
 crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
@@ -42,9 +44,9 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   calls static Kotlin methods that take only strings, ints and bools. Android logic
   such as RoleManager, Telecom, providers and services lives in Kotlin. Desktop
   builds return `Error::Unsupported`.
-- **Async.** GPUI runs the UI on Android's main Looper. whatsapp-rust runs on a
-  dedicated Tokio runtime thread and sends `WaEvent`s through a futures channel to a
-  GPUI task.
+- **Async.** GPUI runs the UI on Android's main Looper. WhatsApp runs on the
+  gateway; `rovsti_wa_client` keeps its event WebSocket on its own thread and
+  `rovsti_wa_ui` forwards `GatewayEvent`s to the app through a GPUI task.
 - **Storage.** Each app keeps SQLite files in its no-backup directory
   (`rovsti_ui::storage::data_dir`). Nothing leaves the device unless the user shares
   it.

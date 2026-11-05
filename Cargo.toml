@@ -36,9 +36,9 @@ rovsti_core = { path = "crates/rovsti_core" }
 rovsti_ui = { path = "crates/rovsti_ui" }
 rovsti_android = { path = "crates/rovsti_android" }
 rovsti_geo = { path = "crates/rovsti_geo" }
-rovsti_whatsapp = { path = "crates/rovsti_whatsapp" }
 rovsti_wa_proto = { path = "crates/rovsti_wa_proto" }
 rovsti_wa_client = { path = "crates/rovsti_wa_client" }
+rovsti_wa_ui = { path = "crates/rovsti_wa_ui" }
 
 anyhow = "1"
 thiserror = "2"

@@ -17,7 +17,7 @@ use gpui::{App, Task};
 use rovsti_core::settings::{
     BackupFile, ImportError, ImportPreview, PrefsV1, PrefsV2, SCHEMA_VERSION, plausible_backup_size,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// The app's private data directory, created if missing.
 ///
@@ -197,14 +197,28 @@ pub fn load_prefs(dir: &Path) -> Loaded {
 /// Atomic save: write a temp file in the same directory, sync it, then
 /// rename over the old file.
 pub fn save_prefs(prefs: &Prefs, dir: &Path) -> std::io::Result<()> {
+    save_json(dir, PREFS_FILE, prefs)
+}
+
+/// Atomically writes `value` as JSON to `dir/name` (temp file, `sync_all`,
+/// rename), creating `dir` if needed. A crash leaves the old file or the new
+/// one, never half of each.
+pub fn save_json<T: Serialize>(dir: &Path, name: &str, value: &T) -> std::io::Result<()> {
     fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!("{PREFS_FILE}.tmp"));
-    let bytes = serde_json::to_vec(prefs).map_err(std::io::Error::other)?;
+    let tmp = dir.join(format!("{name}.tmp"));
+    let bytes = serde_json::to_vec(value).map_err(std::io::Error::other)?;
     let mut file = fs::File::create(&tmp)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
     drop(file);
-    fs::rename(&tmp, dir.join(PREFS_FILE))
+    fs::rename(&tmp, dir.join(name))
+}
+
+/// Reads `dir/name` as JSON. A missing, unreadable or corrupt file is `None`:
+/// callers start from their defaults.
+pub fn load_json<T: DeserializeOwned>(dir: &Path, name: &str) -> Option<T> {
+    let bytes = fs::read(dir.join(name)).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// Saves closer together than this are coalesced into one.
@@ -405,6 +419,19 @@ mod tests {
     fn write(dir: &Path, text: &str) {
         fs::create_dir_all(dir).expect("dir");
         fs::write(dir.join(PREFS_FILE), text).expect("write");
+    }
+
+    #[test]
+    fn json_round_trips_and_a_corrupt_file_is_none() {
+        let dir = temp_dir("json");
+        let value = vec![("a".to_owned(), 1_u32), ("b".to_owned(), 2)];
+        save_json(&dir, "x.json", &value).expect("save");
+        assert_eq!(load_json::<Vec<(String, u32)>>(&dir, "x.json"), Some(value));
+        assert!(!dir.join("x.json.tmp").exists(), "the temp file is renamed");
+        assert_eq!(load_json::<Vec<u32>>(&dir, "missing.json"), None);
+        fs::write(dir.join("bad.json"), "{not json").expect("write");
+        assert_eq!(load_json::<Vec<u32>>(&dir, "bad.json"), None);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

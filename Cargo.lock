@@ -6067,6 +6067,7 @@ dependencies = [
  "rovsti_android",
  "rovsti_core",
  "rovsti_ui",
+ "rovsti_wa_ui",
  "serde_json",
 ]
 
@@ -6098,7 +6099,9 @@ dependencies = [
  "rovsti_android",
  "rovsti_core",
  "rovsti_ui",
- "rovsti_whatsapp",
+ "rovsti_wa_client",
+ "rovsti_wa_proto",
+ "rovsti_wa_ui",
 ]
 
 [[package]]
@@ -6115,6 +6118,7 @@ dependencies = [
  "rovsti_android",
  "rovsti_core",
  "rovsti_ui",
+ "rovsti_wa_ui",
  "serde",
  "serde_json",
 ]
@@ -6130,6 +6134,7 @@ dependencies = [
  "rovsti_android",
  "rovsti_geo",
  "rovsti_ui",
+ "rovsti_wa_ui",
 ]
 
 [[package]]
@@ -6178,17 +6183,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "rovsti_whatsapp"
+name = "rovsti_wa_ui"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "gpui",
  "image",
  "log",
  "qrcode",
- "rovsti_core",
+ "rovsti_ui",
+ "rovsti_wa_client",
+ "rovsti_wa_proto",
+ "serde",
+ "serde_json",
  "thiserror 2.0.21",
- "tokio",
- "whatsapp-rust",
 ]
 
 [[package]]

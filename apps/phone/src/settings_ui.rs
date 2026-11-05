@@ -80,10 +80,11 @@ pub(crate) enum RowId {
     Replies,
     Blocked,
     BlockedAccess,
+    WhatsApp,
 }
 
 impl RowId {
-    const COUNT: usize = 23;
+    const COUNT: usize = 24;
 
     const fn index(self) -> usize {
         self as usize
@@ -114,6 +115,8 @@ impl RowId {
             Self::Replies => "set-replies",
             Self::Blocked => "set-blocked",
             Self::BlockedAccess => "set-bk-access",
+            // Not "set-wa-...": that prefix belongs to the WhatsApp page itself.
+            Self::WhatsApp => "set-whatsapp",
         }
     }
 }
@@ -383,6 +386,19 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
         footer: Some("Blocked numbers are shared with the phone and your messages app."),
     });
 
+    out.push(Section {
+        title: "WhatsApp",
+        rows: vec![Row::new(
+            RowId::WhatsApp,
+            "WhatsApp",
+            Control::Link {
+                value: None,
+                icon: Icon::LucideChevronRight,
+            },
+        )],
+        footer: Some("Calls and chats go through your Rovsti gateway."),
+    });
+
     if key.sims.visible() {
         out.push(Section {
             title: "SIM",
@@ -517,6 +533,7 @@ fn aria_for(row: &Row, settings: &Settings, system_tones: bool) -> SharedString 
 pub(crate) enum Sub {
     Blocked,
     Replies,
+    WhatsApp,
 }
 
 impl Sub {
@@ -525,6 +542,7 @@ impl Sub {
         match self {
             Self::Blocked => "set-bk-",
             Self::Replies => "set-qr-",
+            Self::WhatsApp => "set-wa-",
         }
     }
 
@@ -532,6 +550,7 @@ impl Sub {
         match self {
             Self::Blocked => "Blocked numbers",
             Self::Replies => "Quick replies",
+            Self::WhatsApp => "WhatsApp",
         }
     }
 }
@@ -792,6 +811,7 @@ impl PhoneApp {
         match sub {
             Sub::Blocked => self.blocked_opened(cx),
             Sub::Replies => self.replies_opened(cx),
+            Sub::WhatsApp => {}
         }
         self.presses.release_all();
         self.update_back(window);
@@ -805,6 +825,7 @@ impl PhoneApp {
         match sub {
             Sub::Blocked => self.blocked_closed(cx),
             Sub::Replies => self.replies_closed(cx),
+            Sub::WhatsApp => {}
         }
         self.presses.release_all();
         self.update_back(window);
@@ -867,7 +888,7 @@ impl PhoneApp {
             self.settings_close(window, cx);
             return;
         }
-        if id == "set-bk-back" || id == "set-qr-back" {
+        if id == "set-bk-back" || id == "set-qr-back" || id == "set-wa-back" {
             self.settings_close_sub(window, cx);
             return;
         }
@@ -965,6 +986,7 @@ impl PhoneApp {
             }
             (RowId::Blocked, _) => self.settings_open_sub(Sub::Blocked, window, cx),
             (RowId::Replies, _) => self.settings_open_sub(Sub::Replies, window, cx),
+            (RowId::WhatsApp, _) => self.settings_open_sub(Sub::WhatsApp, window, cx),
             (RowId::BlockedAccess, _) => self.blocked_grant(cx),
             (RowId::Export, _) => self.backup_export(cx),
             (RowId::Import, _) => self.backup_import(cx),
@@ -1512,6 +1534,7 @@ impl PhoneApp {
         let back_id: &'static str = match sub {
             Sub::Blocked => "set-bk-back",
             Sub::Replies => "set-qr-back",
+            Sub::WhatsApp => "set-wa-back",
         };
         let back_press = self.presses.value(back_id);
         let back = div()
@@ -1549,6 +1572,7 @@ impl PhoneApp {
         let body = match sub {
             Sub::Blocked => self.blocked_body(theme, window, cx),
             Sub::Replies => self.replies_body(theme, window, cx),
+            Sub::WhatsApp => self.whatsapp_body(),
         };
         Some(
             div()
@@ -1572,6 +1596,19 @@ impl PhoneApp {
                 )
                 .into_any_element(),
         )
+    }
+
+    /// The WhatsApp page: the shared settings screen from `rovsti_wa_ui`.
+    /// It handles its own taps, so it needs no ids of the touch router.
+    fn whatsapp_body(&self) -> AnyElement {
+        div()
+            .id("wa-scroll")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .pb(px(48.0))
+            .child(self.whatsapp.clone())
+            .into_any_element()
     }
 
     /// Opens Diagnostics as a sheet over the page (the long-press on the title).
@@ -1625,6 +1662,7 @@ mod tests {
                 "Sounds and haptics",
                 "Display",
                 "Blocking",
+                "WhatsApp",
                 "Data",
                 "System shortcuts"
             ]
@@ -1788,6 +1826,7 @@ mod tests {
             RowId::Replies,
             RowId::Blocked,
             RowId::BlockedAccess,
+            RowId::WhatsApp,
         ];
         assert_eq!(all.len(), RowId::COUNT);
         for (i, a) in all.iter().enumerate() {
@@ -1821,6 +1860,30 @@ mod tests {
             .rows[0]
             .clone();
         assert!(row.aria.contains("Unavailable"));
+    }
+
+    #[test]
+    fn second_level_pages_have_distinct_prefixes_that_row_keys_do_not_use() {
+        let subs = [Sub::Blocked, Sub::Replies, Sub::WhatsApp];
+        for (i, a) in subs.iter().enumerate() {
+            assert!(a.prefix().starts_with("set-") && a.prefix().ends_with('-'));
+            for b in &subs[i + 1..] {
+                assert!(!a.prefix().starts_with(b.prefix()));
+                assert!(!b.prefix().starts_with(a.prefix()));
+            }
+        }
+        // A row of the list must never be mistaken for a control of a page.
+        let rows = [
+            RowId::Proximity,
+            RowId::Replies,
+            RowId::Blocked,
+            RowId::WhatsApp,
+        ];
+        for row in rows {
+            assert!(subs.iter().all(|s| !row.key().starts_with(s.prefix())));
+        }
+        assert_eq!(Sub::WhatsApp.prefix(), "set-wa-");
+        assert_eq!(Sub::WhatsApp.title(), "WhatsApp");
     }
 
     #[test]

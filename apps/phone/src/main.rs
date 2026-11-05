@@ -203,6 +203,8 @@ struct PhoneApp {
     /// The reply sheet and S31 (stories 18.2, 18.7), and the Quick replies editor (18.3).
     reply: replies_ui::ReplyUi,
     replies_ed: replies_ui::ReplyEditor,
+    /// The WhatsApp settings page (the shared screen), shown by `Sub::WhatsApp`.
+    whatsapp: Entity<rovsti_wa_ui::WhatsAppSettings>,
 
     /// The Recents tab: row view-models, scroll and the seen-timer.
     recents: RecentsView,
@@ -305,6 +307,8 @@ impl PhoneApp {
         let blocked_field = blocked_ui.field.clone();
         let replies_ed = replies_ui::ReplyEditor::new(cx);
         let reply_fields = replies_ed.fields.clone();
+        let whatsapp = cx
+            .new(|cx| rovsti_wa_ui::WhatsAppSettings::new(rovsti_wa_ui::AppId::Phone, "phone", cx));
         let mut subscriptions = vec![
             cx.observe_in(&backend, window, |this, _, window, cx| {
                 this.sync_restore(cx);
@@ -433,6 +437,7 @@ impl PhoneApp {
             blocked: blocked_ui,
             reply: replies_ui::ReplyUi::default(),
             replies_ed,
+            whatsapp,
             back_enabled: false,
             recents: RecentsView::new(),
             contacts: contacts_view,

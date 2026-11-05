@@ -5,6 +5,7 @@
 //! flip later.
 
 pub mod components;
+pub mod field;
 pub mod haptics;
 pub mod moments;
 pub mod motion;

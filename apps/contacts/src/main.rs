@@ -35,6 +35,8 @@ use rovsti_ui::{
     tokens::{Theme, metrics, shadow, typography},
 };
 
+use rovsti_wa_ui::{AppId, WhatsAppSettings};
+
 use crate::field::{SearchField, input_layer, on_backspace};
 
 const TABS: [&str; 3] = ["Contacts", "Favorites", "Settings"];
@@ -111,6 +113,9 @@ struct ContactsApp {
     favorites: Vec<Row>,
     open: Option<ContactCard>,
     notice: Option<SharedString>,
+    /// The shared WhatsApp settings screen, and whether its page is showing.
+    whatsapp: Entity<WhatsAppSettings>,
+    whatsapp_open: bool,
 }
 
 impl ContactsApp {
@@ -132,6 +137,9 @@ impl ContactsApp {
             }
         })
         .detach();
+        let whatsapp = cx.new(|cx| WhatsAppSettings::new(AppId::Contacts, "contacts", cx));
+        // The Settings row shows whether WhatsApp is linked.
+        cx.observe(&whatsapp, |_, _, cx| cx.notify()).detach();
         let mut app = Self {
             tabs: TabBar::new(
                 TABS.into_iter()
@@ -149,6 +157,8 @@ impl ContactsApp {
             favorites: Vec::new(),
             open: None,
             notice: None,
+            whatsapp,
+            whatsapp_open: false,
         };
         app.reload(cx);
         app
@@ -218,6 +228,13 @@ impl ContactsApp {
             .index()
             .and_then(|index| index.all().find(|c| c.id == id))
             .map(|c| ContactCard::new(c, format));
+        self.notice = None;
+        self.page.restart();
+        cx.notify();
+    }
+
+    fn set_whatsapp_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.whatsapp_open = open;
         self.notice = None;
         self.page.restart();
         cx.notify();
@@ -575,6 +592,13 @@ impl ContactsApp {
         let style = self.style;
         let format = |format| NameStyle { format, ..style };
         let sort = |sort| NameStyle { sort, ..style };
+        let whatsapp_state = if self.whatsapp.read(cx).is_connected() {
+            "Connected"
+        } else if self.whatsapp.read(cx).link().is_some() {
+            "Linked"
+        } else {
+            "Not linked"
+        };
         div()
             .flex()
             .flex_col()
@@ -623,16 +647,41 @@ impl ContactsApp {
                     ),
                 ],
             ))
+            .child(section(
+                theme,
+                Some("WhatsApp".into()),
+                [
+                    list_row(theme, None, "WhatsApp", Some(whatsapp_state.into()), None)
+                        .id("whatsapp-open")
+                        .on_click(cx.listener(|this, _, _, cx| this.set_whatsapp_open(true, cx)))
+                        .into_any_element(),
+                ],
+            ))
             .child(
                 div()
                     .px(px(32.0))
                     .text_size(typography::FOOTNOTE.size)
                     .text_color(colors.secondary_label)
                     .child(
-                        "Contacts are read from this phone's address book. \
-                         Nothing leaves the device.",
+                        "Contacts are read from this phone's address book and stay on the device. \
+                         Only WhatsApp goes through your Rovsti gateway.",
                     ),
             )
+            .into_any_element()
+    }
+
+    /// The shared WhatsApp settings screen, pushed over Settings.
+    fn whatsapp_page(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .child(
+                div().px(px(8.0)).pt(px(48.0)).child(
+                    glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
+                        .id("whatsapp-back")
+                        .on_click(cx.listener(|this, _, _, cx| this.set_whatsapp_open(false, cx))),
+                ),
+            )
+            .child(large_title(theme, "WhatsApp", None))
+            .child(self.whatsapp.clone())
             .into_any_element()
     }
 
@@ -890,6 +939,8 @@ impl Render for ContactsApp {
 
         let page = if let Some(card) = self.open.clone() {
             self.detail(&card, theme, cx)
+        } else if self.whatsapp_open && tab == 2 {
+            self.whatsapp_page(theme, cx)
         } else {
             let body = match tab {
                 0 => self.contacts_tab(theme, window, cx),
@@ -932,8 +983,9 @@ impl Render for ContactsApp {
                     entity.update(cx, |this, cx| {
                         this.tabs.press();
                         let changed = this.tabs.select(index);
-                        if changed || this.open.is_some() {
+                        if changed || this.open.is_some() || this.whatsapp_open {
                             this.open = None;
+                            this.whatsapp_open = false;
                             this.notice = None;
                             this.page.restart();
                         }

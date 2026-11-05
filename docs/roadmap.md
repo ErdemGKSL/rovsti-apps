@@ -91,7 +91,7 @@ list in `docs/phone-acceptance.md`.
       form, create, rename, delete), vCard import and export (`rovsti_core::vcard`,
       duplicates skipped by `rovsti_core::import_plan`, files through the Storage
       Access Framework)
-- [ ] Choose or change a contact's photo
+- [x] Choose or change a contact's photo (done without a device)
 - [x] Contacts without a phone number (done without a device)
 - [x] Groups of a synced account for a new contact (done without a device)
 - [x] WhatsApp: the shared settings screen (resolved, see `docs/whatsapp-notes.md`)

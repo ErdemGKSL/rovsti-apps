@@ -7,7 +7,7 @@
 use gpui::Context;
 use rovsti_android::events::{RawEvent, kind};
 use rovsti_core::{
-    import_plan, vcard,
+    contact_photo, import_plan, vcard,
     wire::{DocumentOp, DocumentResult, WireContact},
 };
 
@@ -116,8 +116,85 @@ impl ContactsApp {
                 }
                 self.plan_import(result.text.unwrap_or_default(), cx);
             }
+            DocumentOp::ContactPhoto => {
+                self.transfer_busy = false;
+                // A cancelled picker answers `ok: false` with no error: say nothing.
+                if !result.ok {
+                    if result.error.is_some() {
+                        self.notice =
+                            Some("Can't change the photo: that image can't be read.".into());
+                    }
+                    cx.notify();
+                    return;
+                }
+                let Some(path) = result.path else {
+                    self.notice = Some("Can't change the photo: that image can't be read.".into());
+                    cx.notify();
+                    return;
+                };
+                if !contact_photo::accepts(result.mime.as_deref()) {
+                    self.notice = Some("Can't change the photo: that is not an image.".into());
+                    cx.notify();
+                    return;
+                }
+                self.photo_picked(path, cx);
+            }
             _ => {}
         }
+    }
+
+    /// Crops, scales and stores the image at `path` as the photo of contact
+    /// `id` on the background executor, then refreshes its thumbnail.
+    pub(crate) fn apply_photo(&mut self, id: i64, path: String, cx: &mut Context<Self>) {
+        self.notice = Some("Saving the photo…".into());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { backend::change_photo(id, &path) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.photo_changed(id, result.map(|()| "Photo updated."), cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Removes the photo of contact `id`.
+    pub(crate) fn clear_photo(&mut self, id: i64, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { backend::remove_photo(id) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.photo_changed(id, result.map(|()| "Photo removed."), cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// A photo write finished: say how it went, and on success load the new
+    /// thumbnail and pull again (the next pull carries the fresh `photo_uri`).
+    fn photo_changed(
+        &mut self,
+        id: i64,
+        result: Result<&'static str, String>,
+        cx: &mut Context<Self>,
+    ) {
+        match result {
+            Ok(done) => {
+                self.photos.forget(id);
+                self.notice = Some(done.into());
+                self.reload(cx);
+            }
+            Err(words) => {
+                self.notice = Some(format!("Can't change the photo: {words}.").into());
+            }
+        }
+        cx.notify();
     }
 
     /// Reads the cards of `text` and asks before adding the new ones.

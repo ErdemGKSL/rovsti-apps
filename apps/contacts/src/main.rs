@@ -44,6 +44,7 @@ use rovsti_ui::{
     components::{empty_state, glass_icon_button, glass_pill, large_title, list_row, section},
     current_theme,
     glass::{GlassSpec, glass},
+    sheet::Sheet,
     tab_bar::{Tab, TabBar, content_bottom_inset},
     theme::{self, hue_pair},
     tokens::{Theme, metrics, shadow, typography},
@@ -139,6 +140,10 @@ struct ContactsApp {
     exported: Option<usize>,
     notice: Option<SharedString>,
     photos: Photos,
+    /// The "Contact photo" sheet over the editor.
+    photo_sheet: Sheet,
+    /// System Back is routed to the app (a sheet is open).
+    back_enabled: bool,
     /// The shared WhatsApp settings screen, and whether its page is showing.
     whatsapp: Entity<WhatsAppSettings>,
     whatsapp_open: bool,
@@ -250,6 +255,8 @@ impl ContactsApp {
             exported: None,
             notice: None,
             photos: Photos::new(),
+            photo_sheet: Sheet::new(),
+            back_enabled: false,
             whatsapp,
             whatsapp_open: false,
         };
@@ -513,7 +520,11 @@ impl ContactsApp {
     /// Asks for the photos of the rows near the screen, and of the open card.
     fn request_photos(&mut self, tab: usize, cx: &mut Context<Self>) {
         let mut wanted: Vec<(i64, String)> = Vec::new();
-        if let Some(card) = &self.open {
+        if let Some(id) = self.editor.as_ref().and_then(|e| e.id) {
+            if let Some(uri) = self.photo_uri_of(id) {
+                wanted.push((id, uri.to_owned()));
+            }
+        } else if let Some(card) = &self.open {
             if let Some(uri) = self.photo_uri_of(card.id) {
                 wanted.push((card.id, uri.to_owned()));
             }
@@ -966,8 +977,12 @@ impl Render for ContactsApp {
         self.request_photos(tab, cx);
         let fading = self.photos.fading();
         let mut motion = std::mem::take(&mut self.motion);
-        motion.frame(window, |dt| {
-            self.tabs.tick(dt) | self.page.tick(dt) | fading
+        motion.frame_timed(window, |dt, real| {
+            self.tabs.tick(dt)
+                | self.page.tick(dt)
+                | fading
+                | self.photo_sheet.tick(dt)
+                | self.photo_sheet.tick_real(real)
         });
         self.motion = motion;
         let entity = cx.entity();
@@ -1065,6 +1080,7 @@ impl Render for ContactsApp {
                 )
             }))
             .children(self.confirm_view(theme, cx))
+            .children(self.photo_sheet_view(theme, window, cx))
     }
 }
 
@@ -1084,7 +1100,15 @@ fn main() {
                     ))),
                     ..Default::default()
                 },
-                |window, cx| cx.new(|cx| ContactsApp::new(window, cx)),
+                |window, cx| {
+                    let app = cx.new(|cx| ContactsApp::new(window, cx));
+                    // System Back closes the photo sheet.
+                    let weak = app.downgrade();
+                    window.on_system_back(cx, move |_, cx| {
+                        weak.update(cx, |this, cx| this.close_photo_sheet(cx)).ok();
+                    });
+                    app
+                },
             )
             .expect("failed to open the Rovsti Contacts window");
             cx.activate(true);

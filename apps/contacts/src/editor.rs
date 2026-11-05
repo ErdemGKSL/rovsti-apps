@@ -24,6 +24,7 @@ use rovsti_ui::{
 use crate::{
     ContactsApp, backend,
     field::{Config, TextField},
+    photos::photo_avatar,
     ui::{Tone, field_box, form_row, pill, tap_row},
 };
 
@@ -61,6 +62,9 @@ pub(crate) struct Editor {
     groups: BTreeSet<i64>,
     error: Option<SharedString>,
     saving: bool,
+    /// A picked image for a contact that is not saved yet; it becomes the
+    /// photo once the first save returns the id.
+    pending_photo: Option<String>,
 }
 
 /// The account a new contact starts in: the remembered one while it is still
@@ -124,6 +128,7 @@ impl Editor {
             groups: draft.groups.iter().copied().collect(),
             error: None,
             saving: false,
+            pending_photo: None,
         }
     }
 
@@ -218,6 +223,7 @@ impl ContactsApp {
     }
 
     pub(crate) fn close_editor(&mut self, cx: &mut Context<Self>) {
+        self.photo_sheet.close();
         self.editor = None;
         self.page.restart();
         cx.notify();
@@ -318,11 +324,16 @@ impl ContactsApp {
                         this.save_to = account;
                         this.save_prefs(cx);
                     }
+                    this.photo_sheet.close();
+                    let photo = this.editor.as_mut().and_then(|e| e.pending_photo.take());
                     this.editor = None;
                     this.pending_open = Some(id);
                     this.notice = Some("Saved.".into());
                     this.page.restart();
                     this.reload(cx);
+                    if let Some(path) = photo {
+                        this.apply_photo(id, path, cx);
+                    }
                 }
                 Err(words) => {
                     if let Some(editor) = this.editor.as_mut() {
@@ -335,6 +346,185 @@ impl ContactsApp {
             .ok();
         })
         .detach();
+    }
+
+    /// Whether the contact being edited has a photo, or will get one on save.
+    fn editor_has_photo(&self) -> bool {
+        self.editor.as_ref().is_some_and(|editor| {
+            editor.pending_photo.is_some()
+                || editor.id.is_some_and(|id| self.photo_uri_of(id).is_some())
+        })
+    }
+
+    /// The avatar under the title; a tap opens the photo sheet.
+    fn photo_head(&self, theme: Theme, editor: &Editor, cx: &mut Context<Self>) -> AnyElement {
+        let colors = theme::colors(theme);
+        let monogram: SharedString = editor
+            .draft(cx)
+            .display_name()
+            .chars()
+            .find(|c| c.is_alphanumeric())
+            .map(|c| c.to_uppercase().collect::<String>())
+            .unwrap_or_default()
+            .into();
+        let photo = editor
+            .id
+            .filter(|id| self.photo_uri_of(*id).is_some())
+            .and_then(|id| self.photos.get(id));
+        let caption = if self.editor_has_photo() {
+            "Change photo"
+        } else {
+            "Add photo"
+        };
+        div()
+            .id("editor-photo")
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(8.0))
+            .on_click(cx.listener(|this, _, _, cx| this.open_photo_sheet(cx)))
+            .child(photo_avatar(theme, monogram, 88.0, colors.accent, photo))
+            .child(
+                div()
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.accent)
+                    .child(caption),
+            )
+            .into_any_element()
+    }
+
+    fn open_photo_sheet(&mut self, cx: &mut Context<Self>) {
+        if self.editor.as_ref().is_none_or(|e| e.saving) {
+            return;
+        }
+        self.photo_sheet.open();
+        cx.notify();
+    }
+
+    pub(crate) fn close_photo_sheet(&mut self, cx: &mut Context<Self>) {
+        self.photo_sheet.close();
+        cx.notify();
+    }
+
+    /// "Choose photo": opens the system picker; the answer is a `document_result`.
+    fn choose_photo(&mut self, cx: &mut Context<Self>) {
+        self.photo_sheet.close();
+        if self.transfer_busy {
+            cx.notify();
+            return;
+        }
+        self.transfer_busy = true;
+        self.notice = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async { backend::start_pick_photo() })
+                .await;
+            this.update(cx, |this, cx| {
+                if let Err(words) = result {
+                    this.transfer_busy = false;
+                    this.notice = Some(format!("Can't change the photo: {words}.").into());
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// "Remove photo": a saved contact loses it at once, a new one drops the
+    /// image it was holding.
+    fn remove_photo(&mut self, cx: &mut Context<Self>) {
+        self.photo_sheet.close();
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        match editor.id {
+            Some(id) => self.clear_photo(id, cx),
+            None => editor.pending_photo = None,
+        }
+        cx.notify();
+    }
+
+    /// An image was picked and copied to `path`: a saved contact gets it now,
+    /// a new one holds it until the first save returns the id.
+    pub(crate) fn photo_picked(&mut self, path: String, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        match editor.id {
+            Some(id) => self.apply_photo(id, path, cx),
+            None => {
+                editor.pending_photo = Some(path);
+                self.notice = Some("The photo is saved with the contact.".into());
+                cx.notify();
+            }
+        }
+    }
+
+    /// The photo sheet over the page, once it is visible.
+    pub(crate) fn photo_sheet_view(
+        &mut self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        self.photo_sheet
+            .set_reduced(window.prefers_reduced_motion());
+        self.photo_sheet.set_viewport(window.viewport_size());
+        let want_back = self.photo_sheet.is_open();
+        if want_back != self.back_enabled {
+            self.back_enabled = want_back;
+            window.set_back_enabled(want_back);
+        }
+        let colors = theme::colors(theme);
+        let mut body = div().flex().flex_col().pb(px(12.0)).child(
+            div()
+                .px(px(20.0))
+                .pb(px(8.0))
+                .text_size(typography::TITLE3.size)
+                .font_weight(typography::TITLE3.weight)
+                .text_color(colors.label)
+                .child("Contact photo"),
+        );
+        body = body.child(
+            tap_row(
+                theme,
+                "photo-choose",
+                Some(Icon::LucideImagePlus),
+                "Choose photo",
+                Tone::Plain,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.choose_photo(cx))),
+        );
+        if self.editor_has_photo() {
+            body = body.child(
+                tap_row(
+                    theme,
+                    "photo-remove",
+                    Some(Icon::LucideTrash2),
+                    "Remove photo",
+                    Tone::Danger,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.remove_photo(cx))),
+            );
+        }
+        let entity = cx.entity();
+        let drag = entity.clone();
+        self.photo_sheet.render(
+            theme,
+            window,
+            "Contact photo",
+            body,
+            move |_, cx| entity.update(cx, |this, cx| this.close_photo_sheet(cx)),
+            move |phase, y, _, cx| {
+                drag.update(cx, |this, cx| {
+                    this.photo_sheet.drag_touch(phase, y);
+                    cx.notify();
+                });
+            },
+        )
     }
 
     /// The form, as the page.
@@ -448,6 +638,7 @@ impl ContactsApp {
             section(theme, Some("Save to".into()), [row])
         };
 
+        let photo_head = self.photo_head(theme, editor, cx);
         let numbers = self.field_section(theme, true, window, cx);
         let emails = self.field_section(theme, false, window, cx);
 
@@ -520,6 +711,7 @@ impl ContactsApp {
             .pb(px(24.0))
             .child(top)
             .child(large_title(theme, title, None))
+            .child(photo_head)
             .children(editor.error.clone().map(|error| {
                 div()
                     .px(px(32.0))

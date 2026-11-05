@@ -59,6 +59,14 @@ impl Photos {
         self.missing.clear();
     }
 
+    /// The photo of `id` changed: drop its decoded copy and its miss mark so
+    /// the next request loads the new thumbnail.
+    pub(crate) fn forget(&mut self, id: i64) {
+        self.cache.remove(&id);
+        self.missing.remove(&id);
+        self.pending.remove(&id);
+    }
+
     /// The photo of `id` and its opacity (0 to 1 over [`FADE`]), if decoded.
     pub(crate) fn get(&self, id: i64) -> Option<(&Arc<RenderImage>, f32)> {
         self.cache.peek(&id).map(|entry| {
@@ -198,6 +206,21 @@ mod tests {
         assert!(photos.missing.contains(&7) && photos.pending.is_empty());
         photos.forget_misses();
         assert!(photos.missing.is_empty());
+    }
+
+    #[test]
+    fn forget_clears_the_cache_and_the_miss_of_that_id_only() {
+        let mut photos = Photos::new();
+        photos.arrived(1, Some(Arc::new(render_image(image::RgbaImage::new(1, 1)))));
+        photos.arrived(2, Some(Arc::new(render_image(image::RgbaImage::new(1, 1)))));
+        photos.arrived(3, None);
+        photos.arrived(4, None);
+        photos.forget(1);
+        photos.forget(3);
+        assert!(photos.get(1).is_none(), "the old thumbnail is gone");
+        assert!(photos.get(2).is_some(), "others stay");
+        assert!(!photos.missing.contains(&3), "the miss mark is gone");
+        assert!(photos.missing.contains(&4));
     }
 
     #[test]

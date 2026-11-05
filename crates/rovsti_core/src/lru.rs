@@ -69,6 +69,11 @@ impl<K: Hash + Eq + Clone, V> Lru<K, V> {
         evicted
     }
 
+    /// Drops `key`; its value, if it was stored.
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        self.entries.remove(key).map(|(value, _)| value)
+    }
+
     pub fn clear(&mut self) {
         self.entries.clear();
     }
@@ -91,6 +96,16 @@ mod tests {
         );
         assert!(lru.contains(&1) && lru.contains(&3) && !lru.contains(&2));
         assert_eq!(lru.len(), 2);
+    }
+
+    #[test]
+    fn remove_drops_one_key() {
+        let mut lru = Lru::new(2);
+        lru.insert(1, "a");
+        lru.insert(2, "b");
+        assert_eq!(lru.remove(&1), Some("a"));
+        assert_eq!(lru.remove(&1), None);
+        assert!(lru.contains(&2));
     }
 
     #[test]

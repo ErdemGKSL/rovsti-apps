@@ -14,6 +14,7 @@ use rovsti_core::{
         Account, AccountsPayload, ContactDraft, DetailPayload, FullPayload, Group, GroupsPayload,
         ImportPayload, SavedPayload,
     },
+    contact_photo::{self, PhotoError},
     search::{ContactIndex, fold},
     vcard,
     wire::{ContactsPayload, Envelope, WireError},
@@ -36,6 +37,8 @@ enum Failed {
     /// Desktop: there is no Android to ask.
     Unsupported,
     Wire(WireError),
+    /// The picked image has no readable size.
+    Unreadable,
     Other(String),
 }
 
@@ -48,6 +51,7 @@ impl Failed {
             Self::Wire(WireError::Refused) => "Android refused the change".to_owned(),
             Self::Wire(WireError::NotFound) => "that contact is gone".to_owned(),
             Self::Wire(_) => "something went wrong".to_owned(),
+            Self::Unreadable => "that image can't be read".to_owned(),
             Self::Other(detail) => {
                 log::warn!("contacts call failed: {detail}");
                 "something went wrong".to_owned()
@@ -195,6 +199,63 @@ pub(crate) fn add_contacts(cards: Vec<ContactDraft>) -> Result<u32, String> {
         .map_err(|error| error.words())
 }
 
+/// Opens the photo picker. The answer is a `document_result` (`contact_photo`).
+pub(crate) fn start_pick_photo() -> Result<(), String> {
+    done(documents::pick_contact_photo())
+}
+
+/// Removes the contact's photo.
+pub(crate) fn remove_photo(contact_id: i64) -> Result<(), String> {
+    done(contacts_edit::remove_photo(contact_id))
+}
+
+/// Reads the pixel size out of the answer of `photo_size`: `{"w":..,"h":..}`,
+/// bare or inside an envelope. A size of zero means Android could not read it.
+fn decode_size(raw: rovsti_android::Result<String>) -> Result<(u32, u32), Failed> {
+    let json = match raw {
+        Ok(json) => json,
+        Err(Error::Unsupported) => return Err(Failed::Unsupported),
+        Err(error) => return Err(Failed::Other(error.to_string())),
+    };
+    let value: serde_json::Value =
+        serde_json::from_str(&json).map_err(|error| Failed::Other(error.to_string()))?;
+    if value.get("ok").and_then(serde_json::Value::as_bool) == Some(false) {
+        let error = value
+            .get("error")
+            .and_then(|e| serde_json::from_value(e.clone()).ok())
+            .unwrap_or_default();
+        return Err(Failed::Wire(error));
+    }
+    let body = value.get("data").unwrap_or(&value);
+    let side = |key: &str| {
+        body.get(key)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+    };
+    match (side("w"), side("h")) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => Ok((w, h)),
+        _ => Err(Failed::Unreadable),
+    }
+}
+
+/// What a refused crop plan says after "Can't change the photo: ".
+fn photo_words(error: PhotoError) -> String {
+    match error {
+        PhotoError::Empty => "that image is empty".to_owned(),
+        PhotoError::TooSmall => "that image is too small".to_owned(),
+    }
+}
+
+/// Sets the picked image at `path` as the photo of `contact_id`: asks for its
+/// size, plans the centred crop and has Android crop, scale and store it.
+pub(crate) fn change_photo(contact_id: i64, path: &str) -> Result<(), String> {
+    let (width, height) = decode_size(contacts_edit::photo_size(path)).map_err(|e| e.words())?;
+    let plan = contact_photo::plan(width, height).map_err(photo_words)?;
+    let plan =
+        serde_json::to_string(&plan).map_err(|error| Failed::Other(error.to_string()).words())?;
+    done(contacts_edit::set_photo(contact_id, path, &plan))
+}
+
 /// A contact photo thumbnail, decoded. Desktop paints nothing.
 pub(crate) fn contact_photo(uri: &str, size: u32) -> Option<image::RgbaImage> {
     match providers::contact_photo(uri, size) {
@@ -274,6 +335,48 @@ mod tests {
         let listed = with_phone(vec![google.clone(), Account::default(), google.clone()]);
         let keys: Vec<&str> = listed.iter().map(|a| a.key.as_str()).collect();
         assert_eq!(keys, ["", "com.google|a@b.com"]);
+    }
+
+    #[test]
+    fn the_size_answer_reads_bare_or_in_an_envelope() {
+        let bare = r#"{"w":4000,"h":3000}"#;
+        assert!(matches!(decode_size(Ok(bare.to_owned())), Ok((4000, 3000))));
+        let wrapped = r#"{"v":1,"ok":true,"data":{"w":300,"h":900}}"#;
+        assert!(matches!(
+            decode_size(Ok(wrapped.to_owned())),
+            Ok((300, 900))
+        ));
+    }
+
+    #[test]
+    fn a_bad_size_answer_is_a_failure() {
+        let zero = r#"{"w":0,"h":0}"#;
+        assert!(matches!(
+            decode_size(Ok(zero.to_owned())),
+            Err(Failed::Unreadable)
+        ));
+        let denied = r#"{"v":1,"ok":false,"error":"permission"}"#;
+        assert!(matches!(
+            decode_size(Ok(denied.to_owned())),
+            Err(Failed::Wire(WireError::Permission))
+        ));
+        assert!(matches!(
+            decode_size(Ok("nope".to_owned())),
+            Err(Failed::Other(_))
+        ));
+        assert!(matches!(
+            decode_size(Err(Error::Unsupported)),
+            Err(Failed::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn desktop_photo_actions_need_a_phone() {
+        let words = "this needs an Android phone";
+        assert_eq!(start_pick_photo().expect_err("no picker"), words);
+        assert_eq!(remove_photo(1).expect_err("no provider"), words);
+        assert_eq!(change_photo(1, "/c/p").expect_err("no provider"), words);
+        assert_eq!(Failed::Unreadable.words(), "that image can't be read");
     }
 
     #[test]

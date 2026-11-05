@@ -1,0 +1,26 @@
+[package]
+name = "rovsti_wa_client"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Blocking HTTP and WebSocket client for the WhatsApp gateway (rustls + graviola, builds for Android without the NDK)."
+
+[dependencies]
+futures.workspace = true
+log.workspace = true
+rovsti_wa_proto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net"] }
+getrandom = "0.3"
+# Pure-Rust crypto only: `ring` and `aws-lc-rs` need a C toolchain (the NDK).
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "logging"] }
+rustls-graviola = "0.4"
+webpki-roots = "1"
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "handshake", "__rustls-tls"] }
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "json"] }
+
+[lints]
+workspace = true

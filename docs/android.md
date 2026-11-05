@@ -85,6 +85,14 @@ The Kotlin side adds three small pieces to the bridge:
   calls `RovstiBridge.deliverWaCallAction(intent)`, which queues the event
   `wa_call_action` (`{"call_id", "action"}`); Phone answers or declines once per call
   id. Decline sends the task back (`moveTaskToBack`) so the UI does not open.
+- `call_end`: `WaPush.onMessage` handles an FCM `kind=call_end` message before it emits
+  `wa_push`: it cancels the ringing `WaIncoming` notification for `call_id`, and with
+  `missed=1` posts "Missed WhatsApp call" on channel `wa_missed` (importance default,
+  title from the same name, number or "WhatsApp call" rule; tapping it opens the launch
+  activity). `WaMissedNotice.of(data)` and `WaIncoming.missedNotificationId` are pure and
+  JVM-tested; the missed notification id differs from the ringing one for the same call.
+  The `wa_push` event then makes Phone fetch `GET /v1/calls`, which puts the call into
+  Recents.
 
 Copy `WaPush.kt`, `WaIncoming.kt` and `WaCallAudio.kt` next to `RovstiBridge.kt`. Push itself is
 optional and is a separate source set in the Phone host. Put `google-services.json` in
@@ -98,6 +106,8 @@ calls `WaPush.onMessage(message.data)`:
 
 - `kind=call`: `WaIncoming` posts the full-screen notification; Answer opens the
   activity and `wa_call_action` reaches Rust, which answers through the gateway.
+- `kind=call_end`: the ringing notification goes away; a missed call posts the
+  `wa_missed` notification.
 - `kind=message`: only the `wa_push` event; no message text is in the push, the app
   fetches it from the gateway. A host other than Phone writes the same small service.
 

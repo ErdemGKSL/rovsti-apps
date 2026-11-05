@@ -82,7 +82,9 @@ Push wakes the phone for incoming calls and messages. It is off unless
 `fcm_project_id` and `fcm_service_account` (the path of a Firebase service-account
 JSON) are both set. The gateway then sends FCM HTTP v1 data-only, high-priority
 messages with no message text:
-`{"kind":"call","call_id","from","name"}` or `{"kind":"message","chat","count"}`.
+`{"kind":"call","call_id","from","name"}`, `{"kind":"message","chat","count"}` or, when
+a ring that was pushed ends unanswered here,
+`{"kind":"call_end","call_id","missed","from","name"}` (`missed` is `"1"` or `"0"`).
 The apps must be built with Firebase for this; see
 [android.md](android.md#whatsapp-push-and-call-audio). An app registers its token
 with the gateway on connect (`POST /v1/push`); apps built without Firebase register
@@ -97,6 +99,14 @@ Incoming WhatsApp calls arrive as `call` events (`ringing`, `connecting`, `activ
 and starts the microphone; the gateway bridges the frames to whatsapp-rust's voip
 module. Mute is `POST /v1/calls/{id}/mute`, End is `POST /v1/calls/{id}/end`. The
 phone needs the `RECORD_AUDIO` permission. Audio only; video calls are not handled.
+
+`GET /v1/calls` (bearer key) returns a JSON array of the instance's calls, newest first:
+each item is the `call` event's fields (`call_id`, `peer`, `peer_name`, `direction`,
+`phase`, `is_video`) plus `started_ms` and, once over, `ended_ms` (Unix milliseconds).
+Phone reads it after a cold start or a push to learn about calls it did not see live.
+The table is in memory: ended calls are kept 24 hours, at most 64 calls are held, and a
+full table drops its oldest ended call (live calls are never dropped). A gateway restart
+empties it.
 
 ## Terms of service
 

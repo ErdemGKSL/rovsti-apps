@@ -35,6 +35,8 @@ list in `docs/phone-acceptance.md`.
 - [x] FCM incoming-call notification (full-screen, Answer and Decline) that rings a cold
       phone (done without a device)
 - [x] WhatsApp calls in Recents with a WhatsApp badge (done without a device)
+- [x] Answer from the notification after a cold start, call_end push, and missed WhatsApp
+      calls in Recents (done without a device)
 
 ## Rovsti Messages
 

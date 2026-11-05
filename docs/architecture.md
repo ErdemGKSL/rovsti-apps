@@ -124,6 +124,17 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   glass In-Call and Incoming screens show a WhatsApp call through `CallSource::WhatsApp`.
   Mute, Speaker (`call_audio_speaker`) and End work; Keypad, Hold, Add, Merge and Swap
   are dimmed with "Not available on WhatsApp calls".
+  **Call snapshot.** `GET /v1/calls` returns every call the gateway knows for the
+  instance, newest first, as `CallSummary` (a `CallUpdate` plus `started_ms` and, once
+  over, `ended_ms`). The call table is in memory only (the gateway keeps no durable call
+  log; on-device history stays the source for Recents). Ended calls stay for 24 hours
+  and are then dropped; the table holds at most 64 calls, and when it is full the
+  oldest ended call is evicted to make room. Live calls are never evicted, so a table
+  full of live calls refuses a new one. A cold Phone has missed the live `CallUpdate`
+  events (the event stream sends no replay for a fresh `after`), so it reads this
+  snapshot instead: `rovsti_wa_proto` `plan_snapshot` picks the newest live call (a
+  ringing incoming call first) when no call is tracked, and the ended calls whose id is
+  not in `wa-calls.json` yet.
 - **One call owns the screen (arbitration).** `rovsti_wa_proto::call::arbitrate`
   decides from three inputs: a cellular call is live, a cellular call is ringing, and
   the WhatsApp call. A WhatsApp call already placed or active keeps the screen, and a
@@ -139,6 +150,20 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   `{"kind":"call","call_id","from","name"}` or `{"kind":"message","chat","count"}`.
   The app wakes, opens the event socket and fetches. Firebase is optional in the app;
   see [android.md](android.md#whatsapp-push-and-call-audio).
+  **`call_end`.** For an incoming call that rang and was pushed, the gateway sends
+  `{"kind":"call_end","call_id","missed","from","name"}` when the ring ends without the
+  call being answered here. `missed` is `"1"` when the caller hung up or the ring timed
+  out, and `"0"` when this user rejected it or another device answered or ended it.
+  Answered and outgoing calls send none, and a repeat for the same call sends nothing.
+  `call_end` is high priority and never coalesced.
+  **When Phone re-syncs.** Phone fetches `GET /v1/calls` (one fetch at a time, a request
+  meanwhile runs one more afterwards) when the WhatsApp link becomes connected, on
+  every `wa_push` event, before it runs a notification's Answer or Decline, and on a
+  `Resync` event. A live call from the snapshot becomes the tracked call, so a queued
+  Answer from a cold start runs once the call is on screen ringing (a call that was
+  just declined is not shown again). Ended calls this device has not recorded are
+  added to `wa-calls.json` (missed when incoming and never answered) and their
+  notification is cancelled, so they appear in Recents.
 - **Server storage (AD-WA7).** `<data>/gateway.db` (SQLite) holds instances, hashed
   keys, push tokens, chats, messages and media; `<data>/instances/<id>/wa.db` is
   whatsapp-rust's store, one per instance. The gateway keeps message bodies, because

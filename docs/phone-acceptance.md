@@ -155,9 +155,9 @@ in `apps/phone/platforms/android/app/` (`docs/android.md`). Allow the microphone
 | W13 | Call again and tap Decline. | The call is rejected; no notification stays behind. | | |
 | **Incoming, locked, after FCM** | | | | |
 | W14 | Close the app (swipe it away), lock the phone, screen off. Call your WhatsApp. | The push wakes the phone: the screen turns on with a WhatsApp call notification (caller name or number, Answer, Decline) over the lock screen. | | |
-| W15 | Tap Answer. | The app opens, the call connects, audio works. | | |
+| W15 | Tap Answer on the locked-phone notification (app still killed from W14). | The app starts cold, the call connects without a second tap, audio works both ways. | | |
 | W16 | Repeat W14 and tap Decline. | The call is rejected and the app does not open. | | |
-| W17 | Repeat W14 and let the caller hang up. | The notification disappears. | | |
+| W17 | Repeat W14 (app killed) and let the caller hang up while the phone rings. | The ringing notification goes away and a "Missed WhatsApp call" notification (caller name or number) appears. | | |
 | **Busy rules** | | | | |
 | W18 | During a cellular call, make a WhatsApp call to yourself. | The cellular call keeps the screen. The WhatsApp offer shows as a waiting call with Decline only. | | |
 | W19 | During a WhatsApp call, call the phone by cellular. | A cellular call rings on its own screen. The WhatsApp call is not dropped. | | |
@@ -166,3 +166,4 @@ in `apps/phone/platforms/android/app/` (`docs/android.md`). Allow the microphone
 | W21 | Open Recents after W1 to W20. | Each WhatsApp call is a row with a WhatsApp badge, grouped with the same person's cellular calls. | | |
 | W22 | Miss a WhatsApp call, then open Recents. | The row is red and the tab bar badge counts it. | | |
 | W23 | Close and reopen the app. | The WhatsApp rows are still there. | | |
+| W24 | After W17, open Phone (tap the missed-call notification or the icon) and go to Recents. | The call from W17 is a red WhatsApp row and the tab bar badge counts it. | | |

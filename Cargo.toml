@@ -64,6 +64,11 @@ getrandom = "0.3"
 env_logger = "0.11"
 toml = "0.9"
 naga = { version = "30", features = ["wgsl-in"] }
+# GTFS import: pure-Rust inflate. zip 2.6.1's `deflate-flate2` forgets to enable its
+# optional flate2 dependency, hence the explicit `flate2` feature; our own flate2
+# dependency supplies the default rust_backend (no C zlib on Android).
+zip = { version = "2.6", default-features = false, features = ["deflate-flate2", "flate2"] }
+flate2 = "1.1"
 
 # gpui-fusion patches some crates.io dependencies. `[patch]` in a dependency is
 # ignored, so the consuming workspace must repeat these lines (keep in sync

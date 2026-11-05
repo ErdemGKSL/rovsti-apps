@@ -9,6 +9,9 @@ description = "Offline geometry and the arrival-alarm state machine behind Rovst
 [dependencies]
 rovsti_core.workspace = true
 serde.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+flate2.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

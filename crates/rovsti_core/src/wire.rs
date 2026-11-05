@@ -108,7 +108,7 @@ fn default_true() -> bool {
 
 /// Kotlin may send `null` for a field Rust models as a plain value: read it
 /// as the field's default instead of failing the whole payload.
-fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+pub(crate) fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: Deserialize<'de> + Default,

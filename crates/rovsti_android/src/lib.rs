@@ -22,6 +22,7 @@ pub mod providers;
 pub mod roles;
 pub mod settings;
 pub mod telecom;
+pub mod wa;
 pub mod window;
 pub mod xiaomi;
 
@@ -31,6 +32,8 @@ pub enum Error {
     Unsupported,
     #[error("RovstiBridge.nativeInit has not run; is the Kotlin bridge packaged?")]
     NotInitialized,
+    #[error(transparent)]
+    Frame(#[from] rovsti_wa_proto::audio::FrameError),
     #[cfg(target_os = "android")]
     #[error(transparent)]
     Jni(#[from] jni::errors::Error),

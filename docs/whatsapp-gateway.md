@@ -21,9 +21,74 @@ Settings come from an optional TOML file (`--config gateway.toml`) and from
 `WA_GATEWAY_*` environment variables, which win. `cargo run -p wa_gateway -- --help`
 lists them. `RUST_LOG=debug` turns on more logging.
 
-Put a TLS reverse proxy in front of it for anything beyond your own machine. An app
-accepts `http://` only for loopback, `10.0.2.2` (the Android emulator), private
-ranges and `.local` hosts.
+Put a TLS reverse proxy in front of it for anything beyond your own machine (see
+below). An app accepts `http://` only for loopback, `10.0.2.2` (the Android
+emulator), private ranges and `.local` hosts.
+
+## Configuration
+
+| TOML key | Environment | Default |
+| --- | --- | --- |
+| `bind` | `WA_GATEWAY_BIND` | `127.0.0.1:8787` |
+| `data_dir` | `WA_GATEWAY_DATA` | `./wa-gateway-data` |
+| `max_instances` | `WA_GATEWAY_MAX_INSTANCES` | `4` |
+| `fcm_project_id` | `WA_GATEWAY_FCM_PROJECT` | unset (push off) |
+| `fcm_service_account` | `WA_GATEWAY_FCM_SA` | unset (push off) |
+| `trust_proxy` | `WA_GATEWAY_TRUST_PROXY` | `false` |
+
+Creating an instance needs no key, so anyone who can reach the gateway can create one
+up to `max_instances`. Keep the address private or behind the proxy's own access
+rules. Set `trust_proxy = true` only behind a proxy that sets `X-Forwarded-For`;
+failed-key rate limiting is per client IP.
+
+## TLS reverse proxy
+
+The gateway speaks plain HTTP. Terminate TLS in front of it and forward WebSocket
+upgrades (`/v1/events` and `/v1/calls/{id}/audio`). With Caddy, which handles both:
+
+```
+wa.example.com {
+    reverse_proxy 127.0.0.1:8787
+}
+```
+
+With nginx, add `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade`,
+`proxy_set_header Connection "upgrade"` and a long `proxy_read_timeout` (an hour).
+Then enter `https://wa.example.com` as the gateway address in an app. The connect key
+is a bearer secret: anyone with it can read and send as the account, so keep the
+gateway on HTTPS and revoke keys you no longer use.
+
+## Push (FCM)
+
+Push wakes the phone for incoming calls and messages. It is off unless
+`fcm_project_id` and `fcm_service_account` (the path of a Firebase service-account
+JSON) are both set. The gateway then sends FCM HTTP v1 data-only, high-priority
+messages with no message text:
+`{"kind":"call","call_id","from","name"}` or `{"kind":"message","chat","count"}`.
+The apps must be built with Firebase for this; see
+[android.md](android.md#whatsapp-push-and-call-audio). An app registers its token
+with the gateway on connect (`POST /v1/push`); apps built without Firebase register
+nothing and rely on their open event socket.
+
+## Calls
+
+Incoming WhatsApp calls arrive as `call` events (`ringing`, `connecting`, `active`,
+`ended`). Phone shows a card with Answer and Decline. Answer calls
+`POST /v1/calls/{id}/accept`, then opens the audio WebSocket
+`/v1/calls/{id}/audio` (binary frames of 960 mono 16-bit samples at 16 kHz, 60 ms)
+and starts the microphone; the gateway bridges the frames to whatsapp-rust's voip
+module. Mute is `POST /v1/calls/{id}/mute`, End is `POST /v1/calls/{id}/end`. The
+phone needs the `RECORD_AUDIO` permission. Audio only; video calls are not handled.
+
+## Terms of service
+
+WhatsApp does not endorse third-party clients, and running one on your account may
+break its Terms of Service. WhatsApp can restrict or ban accounts that use unofficial
+clients, and a server-side session that is always online is more visible than a phone
+that sleeps. Use a number you can afford to lose, do not use it for bulk or automated
+messaging, and keep the gateway private. The gateway holds the account's keys and
+stores message bodies: protect its data directory, back it up, and treat the host
+like a phone that is always unlocked.
 
 At boot the gateway restarts every instance that is not `logged_out` or `banned`. An
 existing `wa.db` signs back in silently, so there is no QR the second time.

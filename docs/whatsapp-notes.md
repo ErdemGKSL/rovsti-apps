@@ -1,10 +1,26 @@
-# WhatsApp integration: open notes
+# WhatsApp integration: notes
 
-Status: **decided 2026-11-05: WhatsApp is fully backend-based.** A gateway service
-owns the whatsapp-rust sessions. Every Rovsti app offers two choices: *link WhatsApp
-for the first time* (QR or pairing code through the gateway), or *connect to an
-existing instance* by pasting the connect key shown in another app. Everything else
-stays local. The analysis below is kept for context.
+Status: **resolved (decided 2026-11-05, built in `_bmad-output/plans/wa-gateway.md`).**
+WhatsApp is fully backend-based. A gateway service owns the whatsapp-rust sessions,
+and every Rovsti app offers two choices: *link WhatsApp for the first time* (QR or
+pairing code through the gateway), or *connect to an existing instance* by pasting a
+connect key that another app shows. Everything else stays local. The design is in
+[architecture.md](architecture.md#whatsapp-gateway); running it is in
+[whatsapp-gateway.md](whatsapp-gateway.md). The questions below were the open
+ones; each now has its answer. The original analysis follows for context.
+
+| Question | Resolution |
+| --- | --- |
+| Who owns the session? | The gateway, not an app and not Contacts. An *instance* is shared by every app through a connect key (AD-WA1, AD-WA2). |
+| One session, one process? | Yes: one whatsapp-rust `Bot` per instance on the gateway, so the phone uses no companion slot per app and no battery for a socket. |
+| Calls? | Server-side through whatsapp-rust's `voip-mlow`. The phone only supplies microphone and speaker over a WebSocket (AD-WA5). |
+| Waking the app? | FCM data-only push from the gateway, optional and config-gated, with no message text (AD-WA6). No foreground service. |
+| `CLAUDE.md` says no backend | Updated: local except WhatsApp. The gateway is the user's own server. |
+| Terms of service | Unchanged risk, now documented: [whatsapp-gateway.md](whatsapp-gateway.md#terms-of-service). |
+| Moving the session out of Messages | Done: `rovsti_whatsapp` is removed; the session code lives in `services/wa_gateway`. |
+
+Not verified on a device: linking a real account, a real call's audio quality and
+FCM delivery on HyperOS all need hardware. Only checks and unit tests ran here.
 
 ## Owner's direction (2026-11-03)
 

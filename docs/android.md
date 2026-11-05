@@ -57,10 +57,49 @@ The project now lives in `apps/phone/platforms/android` and is owned by us. Then
 
 Later `gpuiforge` builds keep these user-owned files.
 
+## WhatsApp push and call audio
+
+WhatsApp lives on the gateway ([architecture.md](architecture.md#whatsapp-gateway)).
+The Kotlin side adds two small pieces to the bridge:
+
+- `WaPush`: `RovstiBridge.waPushToken()` reads the FCM token **by reflection** on
+  `com.google.firebase.messaging.FirebaseMessaging`, so a host without Firebase still
+  compiles and gets `""` (the app then registers nothing and the gateway sends it no
+  push). `WaPush.onMessage(data)` turns an FCM data message into the Rust event
+  `wa_push` (JSON of the data map).
+- `WaCallAudio`: `AudioRecord` (`VOICE_COMMUNICATION`) and `AudioTrack`
+  (`USAGE_VOICE_COMMUNICATION`), 16 kHz mono PCM16, 960-sample frames passed as
+  base64 through `waAudioStart`, `waAudioStop`, `waMicFrame` and `waPlayFrame`.
+  `waAudioStart` sets `AudioManager.MODE_IN_COMMUNICATION` and returns `false`
+  without `RECORD_AUDIO`. Phone declares that permission in `gpuiforge.json`.
+
+Copy `WaPush.kt` and `WaCallAudio.kt` next to `RovstiBridge.kt`. Push itself is
+optional. To enable it, add `google-services.json` and the Firebase Messaging
+dependency to the ejected app, then a service such as:
+
+```kotlin
+class RovstiMessagingService : FirebaseMessagingService() {
+    override fun onMessageReceived(message: RemoteMessage) {
+        val data = message.data
+        if (data["kind"] == "call") showIncomingCall(data) // CallStyle.forIncomingCall
+        WaPush.onMessage(data)                             // wakes Rust: event "wa_push"
+    }
+}
+```
+
+and register it in the manifest (`com.google.firebase.MESSAGING_EVENT`). For
+`kind=call`, `showIncomingCall` posts a `Notification.CallStyle.forIncomingCall`
+notification with a full-screen intent, as `CallRegistry` does for telephony calls;
+Answer opens the activity and Phone's call card does the rest. For `kind=message`
+the service may just post a plain notification. No message text is in the push, so
+the app fetches it from the gateway. The token is registered once per launch and
+link; a rotated token is picked up on the next launch.
+
 ## Checks without a device
 
 ```bash
 cargo check -p rovsti_android --target aarch64-linux-android
+cargo check -p rovsti_wa_client --target aarch64-linux-android
 ```
 
 Crates with C code (SQLite, ring) need the NDK linker, so a full Android

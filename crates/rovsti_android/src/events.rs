@@ -28,6 +28,9 @@ pub mod kind {
     pub const RINGTONE_RESULT: &str = "ringtone_result";
     pub const UI_REQUEST: &str = "ui_request";
     /// The keyguard was dismissed after `window::request_dismiss_keyguard` (no payload).
+    /// An FCM data message for WhatsApp (`{"kind":"call"|"message",..}`, AD-WA6). The
+    /// event only wakes the process; the apps' gateway stream delivers the content.
+    pub const WA_PUSH: &str = "wa_push";
     pub const KEYGUARD_DISMISSED: &str = "keyguard_dismissed";
 }
 

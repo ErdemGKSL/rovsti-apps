@@ -16,7 +16,7 @@ pub mod log;
 pub mod url;
 
 pub use api::*;
-pub use call::{CallDirection, CallInput, CallMachine, CallPhase, EndReason};
+pub use call::{CallDirection, CallInput, CallMachine, CallPhase, EndReason, WaCallView};
 pub use event::{CallUpdate, EventEnvelope, GatewayEvent};
 pub use key::{ConnectKey, KeyError, KeyHash, KeyId};
 pub use log::{EventLog, Since};

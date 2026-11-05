@@ -915,6 +915,8 @@ impl Backend {
                 self.keyguard_gen += 1;
                 cx.notify();
             }
+            // The process is awake and the gateway stream reconnects by itself.
+            kind::WA_PUSH => log::debug!("WhatsApp push received"),
             kind::SIMS_CHANGED => self.refresh_sims(cx),
             kind::DOCUMENT_RESULT => self.on_document_result(&event.json, cx),
             kind::UI_REQUEST => {

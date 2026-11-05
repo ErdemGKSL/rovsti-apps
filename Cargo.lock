@@ -6053,6 +6053,7 @@ dependencies = [
  "futures",
  "jni",
  "log",
+ "rovsti_wa_proto",
  "thiserror 2.0.21",
 ]
 
@@ -6121,6 +6122,8 @@ dependencies = [
  "rovsti_android",
  "rovsti_core",
  "rovsti_ui",
+ "rovsti_wa_client",
+ "rovsti_wa_proto",
  "rovsti_wa_ui",
  "serde",
  "serde_json",
@@ -6194,6 +6197,7 @@ dependencies = [
  "image",
  "log",
  "qrcode",
+ "rovsti_android",
  "rovsti_ui",
  "rovsti_wa_client",
  "rovsti_wa_proto",

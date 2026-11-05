@@ -9,6 +9,7 @@ description = "Android system integration for the Rovsti apps: default-app roles
 [dependencies]
 futures.workspace = true
 log.workspace = true
+rovsti_wa_proto.workspace = true
 thiserror.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]

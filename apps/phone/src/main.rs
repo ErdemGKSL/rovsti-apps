@@ -41,6 +41,7 @@ mod settings_ui;
 mod setup_ui;
 mod signature;
 mod sim_ui;
+mod wa_call;
 mod waiting_card;
 mod zone;
 mod zone_ui;
@@ -205,6 +206,8 @@ struct PhoneApp {
     replies_ed: replies_ui::ReplyEditor,
     /// The WhatsApp settings page (the shared screen), shown by `Sub::WhatsApp`.
     whatsapp: Entity<rovsti_wa_ui::WhatsAppSettings>,
+    /// WhatsApp calls: the incoming card and the live call (AD-WA5).
+    wa_call: Entity<wa_call::WaCallUi>,
 
     /// The Recents tab: row view-models, scroll and the seen-timer.
     recents: RecentsView,
@@ -309,6 +312,7 @@ impl PhoneApp {
         let reply_fields = replies_ed.fields.clone();
         let whatsapp = cx
             .new(|cx| rovsti_wa_ui::WhatsAppSettings::new(rovsti_wa_ui::AppId::Phone, "phone", cx));
+        let wa_call = cx.new(|cx| wa_call::WaCallUi::new(whatsapp.clone(), cx));
         let mut subscriptions = vec![
             cx.observe_in(&backend, window, |this, _, window, cx| {
                 this.sync_restore(cx);
@@ -438,6 +442,7 @@ impl PhoneApp {
             reply: replies_ui::ReplyUi::default(),
             replies_ed,
             whatsapp,
+            wa_call,
             back_enabled: false,
             recents: RecentsView::new(),
             contacts: contacts_view,
@@ -1288,6 +1293,7 @@ impl Render for PhoneApp {
             .children(route)
             .children(pill)
             .children(incoming)
+            .child(self.wa_call.clone())
             .children(self.reply_overlay(theme, window, cx))
             .children(self.reply_bubble(theme))
             .children(self.flight_layer(theme))

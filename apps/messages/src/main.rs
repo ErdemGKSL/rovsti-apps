@@ -55,6 +55,7 @@ impl MessagesApp {
         cx.observe(&whatsapp, |this, whatsapp, cx| {
             let events = whatsapp.update(cx, |settings, _| settings.take_events());
             let connected = whatsapp.read(cx).is_connected();
+            whatsapp.update(cx, |settings, cx| settings.register_push(cx));
             this.on_gateway_events(events, connected, cx);
             cx.notify();
         })

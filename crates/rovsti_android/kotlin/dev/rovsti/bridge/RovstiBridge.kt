@@ -278,6 +278,22 @@ object RovstiBridge {
         android.text.format.DateFormat.getDateFormatOrder(app),
     )
 
+    // ---- WhatsApp wake and call audio (AD-WA5, AD-WA6) -----------------
+
+    /** The FCM token, or "" when the host packages no Firebase. Blocks for up to 3 s; call off the UI thread. */
+    @JvmStatic fun waPushToken(): String = WaPush.token()
+
+    /** Starts the call microphone and speaker in `MODE_IN_COMMUNICATION`; false without `RECORD_AUDIO`. */
+    @JvmStatic fun waAudioStart(): Boolean = WaCallAudio.start(app)
+
+    @JvmStatic fun waAudioStop(): Boolean = WaCallAudio.stop(app)
+
+    /** The next base64 microphone frame (960 samples, 16 kHz mono), or "". */
+    @JvmStatic fun waMicFrame(): String = WaCallAudio.readFrame()
+
+    /** Plays one base64 frame of the peer's voice. */
+    @JvmStatic fun waPlayFrame(frame: String): Boolean = WaCallAudio.playFrame(frame)
+
     // ---- Permissions ---------------------------------------------------
 
     private val groups = mapOf(

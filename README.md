@@ -3,8 +3,9 @@
 A Rust monorepo of Android apps with an iOS-style liquid-glass UI, built on
 [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) through the
 [gpui-fusion](https://github.com/cradiy/gpui-fusion) fork, tuned for Xiaomi
-(MIUI / HyperOS) phones. Everything runs on the device, with one exception: WhatsApp runs on a gateway you host
-(`services/wa_gateway`). No Rovsti servers and no accounts.
+(MIUI / HyperOS) phones. Everything runs on the device except WhatsApp, which runs on your own gateway
+(`services/wa_gateway`). The gateway holds your WhatsApp session and wakes the phone for
+calls and messages; there are no Rovsti-operated servers, no analytics and no accounts.
 
 | App | Crate | What it does |
 | --- | --- | --- |
@@ -45,6 +46,23 @@ cargo run -p rovsti_phone
 ```bash
 cargo test --workspace
 ```
+
+## Run the gateway (WhatsApp)
+
+WhatsApp needs the gateway. It is a single binary that keeps its data in a directory:
+
+```bash
+cargo run -p wa_gateway            # http://127.0.0.1:8787, data in ./wa-gateway-data
+```
+
+Then open an app's WhatsApp settings (Messages: the WhatsApp tab; Phone: Settings),
+set the gateway address (the Android emulator reaches your machine at
+`http://10.0.2.2:8787`) and choose **Link WhatsApp for the first time**. Scan the QR code
+from WhatsApp, Linked devices. Every other Rovsti app joins with **Connect to an existing
+instance**: copy a connect key from a connected app (**Show connect key**) and paste it.
+For a real device put a TLS reverse proxy in front, and optionally set up FCM push; see
+[docs/whatsapp-gateway.md](docs/whatsapp-gateway.md). Unofficial WhatsApp clients can get
+an account restricted; read the warning there first.
 
 ## Android
 

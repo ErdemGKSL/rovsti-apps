@@ -9,7 +9,7 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
 - [x] Liquid-glass kit, shared tab bar and components
 - [x] Phone number normalisation and matching (`rovsti_core`)
 - [x] Arrival-alarm state machine with adaptive GPS polling (`rovsti_geo`)
-- [x] WhatsApp companion session, QR PNG rendering, share sheet hook
+- [x] WhatsApp companion session, QR PNG rendering, share sheet hook (superseded by the gateway below)
 - [x] JNI bridge: roles, place call, Xiaomi deep links, battery optimisation
 - [ ] First APK on a device through GPUiForge (needs NDK r29 + GPUiForge)
 - [ ] Eject Android hosts and add `RovstiBridge` + `Application` to each app
@@ -31,12 +31,28 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
 - [ ] SMS/MMS read and write through the Telephony provider once `ROLE_SMS` is held
 - [ ] Conversation view with glass composer, delivery reports and dual-SIM send
 - [ ] Unified inbox: one person shows SMS and WhatsApp threads, matched by number
-- [ ] WhatsApp: QR link + share (done), **pairing-code link** (number entry), history
-      sync, send text, media download, reactions, groups
-- [ ] Foreground `dataSync` service so WhatsApp stays connected, plus notifications
-      with inline reply
+- [x] WhatsApp through the gateway: link by QR or pairing code, history sync, text,
+      media, reactions, groups and presence all run server-side; Messages shows chats
+      and live messages from `rovsti_wa_client`
+- [ ] WhatsApp conversation view with composer, media and reactions in the UI
+- [x] No foreground service: FCM push wakes the app (needs `google-services.json` in
+      the host, see `docs/android.md`). Notifications with inline reply are still open.
 - [ ] OTP detection and copy, spam filter (on-device rules), scheduled send
 - [ ] Encrypted local backup and export to a user-chosen file
+
+## WhatsApp gateway (`services/wa_gateway`)
+
+- [x] `rovsti_wa_proto`, `rovsti_wa_client` (builds for Android without the NDK),
+      `rovsti_wa_ui` (two options: link for the first time, or connect with a key)
+- [x] Instances and revocable connect keys, hashed at rest
+- [x] Resumable event WebSocket, history sync, text, media, reactions, groups, presence
+- [x] Voice calls: gateway `voip-mlow` bridge, call audio over a WebSocket, Kotlin
+      `WaCallAudio`, Phone call card (Answer, Decline, Mute, End)
+- [x] FCM HTTP v1 push, config-gated; apps register tokens (`WaPush`)
+- [ ] Try it on a phone: link a real account, place and answer a call, FCM on HyperOS
+- [ ] Outgoing WhatsApp calls from Phone (`place_call` exists in the client)
+- [ ] Video calls, group calls
+- [ ] Packaging the gateway (container image, systemd unit) and key rotation UI
 
 ## Rovsti Contacts
 
@@ -57,7 +73,7 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
 - [ ] Choose or change a contact's photo
 - [ ] Contacts without a phone number (the list and the editor need a number today)
 - [ ] Groups of a synced account for a new contact (new contacts live on the phone only)
-- [ ] WhatsApp session owner? See `docs/whatsapp-notes.md`
+- [x] WhatsApp: the shared settings screen (resolved, see `docs/whatsapp-notes.md`)
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
 
 ## Rovsti Stops

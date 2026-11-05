@@ -22,7 +22,9 @@ use rovsti_ui::{
     tokens::{Theme, metrics, radius, typography},
 };
 use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway};
-use rovsti_wa_proto::{AppId, ConnectKey, GatewayEvent, GatewayUrl, InstanceState};
+use rovsti_wa_proto::{
+    AppId, ConnectKey, GatewayEvent, GatewayUrl, InstanceState, PushRegistration,
+};
 
 use crate::{
     model::{
@@ -42,6 +44,8 @@ pub struct WhatsAppSettings {
     gateway: Option<(StoredLink, Gateway)>,
     stream: Option<(StoredLink, EventStream)>,
     events: Vec<GatewayEvent>,
+    /// The link the FCM token was registered for (once per link and launch).
+    push_for: Option<StoredLink>,
     qr: Option<(String, Arc<Image>)>,
     url_field: Entity<TextField>,
     phone_field: Entity<TextField>,
@@ -100,6 +104,7 @@ impl WhatsAppSettings {
             gateway: None,
             stream: None,
             events: Vec::new(),
+            push_for: None,
             qr: None,
             url_field,
             phone_field,
@@ -127,6 +132,38 @@ impl WhatsAppSettings {
     /// entity and drain this from their observer).
     pub fn take_events(&mut self) -> Vec<GatewayEvent> {
         std::mem::take(&mut self.events)
+    }
+
+    /// Registers this app's FCM token with the gateway so it can wake the phone
+    /// for calls and messages (AD-WA6). Once per link and launch; a no-op until
+    /// the instance is connected, and when the host packages no Firebase (an
+    /// empty token) or on desktop. Apps call it from their observer.
+    pub fn register_push(&mut self, cx: &mut Context<Self>) {
+        if !self.is_connected() {
+            return;
+        }
+        let (Some(link), Some(gateway)) = (self.link().cloned(), self.gateway()) else {
+            return;
+        };
+        if self.push_for.as_ref() == Some(&link) {
+            return;
+        }
+        self.push_for = Some(link);
+        let app = self.model.app();
+        cx.background_executor()
+            .spawn(async move {
+                match rovsti_android::wa::push_token() {
+                    Ok(token) if !token.is_empty() => {
+                        if let Err(error) = gateway.register_push(&PushRegistration { app, token })
+                        {
+                            log::warn!("registering the push token failed: {error}");
+                        }
+                    }
+                    Ok(_) => log::debug!("no FCM token: Firebase is not packaged"),
+                    Err(error) => log::debug!("no push token: {error}"),
+                }
+            })
+            .detach();
     }
 
     // ---- state ------------------------------------------------------------------
@@ -216,6 +253,7 @@ impl WhatsAppSettings {
                 }
                 Effect::Forget => {
                     self.stream = None;
+                    self.push_for = None;
                     self.events.clear();
                     if let Some(dir) = &self.data_dir
                         && let Err(error) = std::fs::remove_file(dir.join(LINK_FILE))

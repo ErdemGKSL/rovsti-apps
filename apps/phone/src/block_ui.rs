@@ -410,6 +410,11 @@ impl PhoneApp {
                     self.show_notice_pill(text, None, false, cx);
                 }
             }
+            "rm-wa" if has_number && self.whatsapp.read(cx).is_connected() => {
+                self.row_menu_close(window, cx);
+                let number = target.number.to_string();
+                self.wa_call.update(cx, |ui, cx| ui.place(&number, cx));
+            }
             "rm-block" if target.block_note.is_none() => {
                 self.row_menu_close(window, cx);
                 if target.blocked {
@@ -540,6 +545,17 @@ impl PhoneApp {
                     "Message",
                     None,
                     has_number,
+                ),
+                cx,
+            ),
+            self.menu_item(
+                theme,
+                item(
+                    "rm-wa",
+                    Icon::LucidePhone,
+                    "WhatsApp call",
+                    None,
+                    has_number && self.whatsapp.read(cx).is_connected(),
                 ),
                 cx,
             ),

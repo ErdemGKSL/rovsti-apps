@@ -94,6 +94,25 @@ impl Tracker {
         }
     }
 
+    /// The gateway accepted an outgoing call: show it as ringing at once, before
+    /// its first update arrives. Ignored while any call is on screen.
+    pub fn on_placed(&mut self, call_id: &str, peer: &str, now_ms: i64) -> Change {
+        if self.current.is_some() {
+            return Change::Ignored;
+        }
+        self.on_update(
+            CallUpdate {
+                call_id: call_id.to_owned(),
+                peer: peer.to_owned(),
+                peer_name: None,
+                direction: CallDirection::Out,
+                phase: CallPhase::Ringing,
+                is_video: false,
+            },
+            now_ms,
+        )
+    }
+
     pub fn view(&self, now_ms: i64) -> Option<WaCallView> {
         self.current.as_ref().map(|t| {
             WaCallView::from_update(&t.update, now_ms)
@@ -114,6 +133,19 @@ impl Tracker {
 
     pub fn is_empty(&self) -> bool {
         self.current.is_none()
+    }
+}
+
+/// Whether a WhatsApp call may be started now; the error is shown to the user.
+pub fn can_place(connected: bool, busy: bool, number: &str) -> Result<(), &'static str> {
+    if number.trim().is_empty() {
+        Err("No number to call")
+    } else if !connected {
+        Err("WhatsApp is not connected")
+    } else if busy {
+        Err("Another call is in progress")
+    } else {
+        Ok(())
     }
 }
 
@@ -243,6 +275,18 @@ fn parse_link(link: &StoredLink) -> Result<(GatewayUrl, ConnectKey), ClientError
     ))
 }
 
+/// Opens the call audio socket and starts Kotlin's microphone and speaker.
+fn open_call_audio(link: &StoredLink, call_id: &str) -> Result<CallAudio, ClientError> {
+    let (url, key) = parse_link(link)?;
+    let audio = rovsti_wa_client::call_audio(url, key, call_id)?;
+    match rovsti_android::wa::call_audio_start() {
+        Ok(true) => {}
+        Ok(false) => log::warn!("call audio did not start: is RECORD_AUDIO granted?"),
+        Err(error) => log::debug!("no call audio on this platform: {error}"),
+    }
+    Ok(audio)
+}
+
 // ---- the entity ------------------------------------------------------------------
 
 pub struct WaCallUi {
@@ -251,6 +295,8 @@ pub struct WaCallUi {
     session: Option<Session>,
     /// Answer was pressed and the audio is being set up.
     answering: bool,
+    /// A call is being placed (the gateway has not answered yet).
+    placing: bool,
     error: Option<SharedString>,
     _tick: Option<Task<()>>,
     _clear: Option<Task<()>>,
@@ -270,6 +316,7 @@ impl WaCallUi {
             tracker: Tracker::default(),
             session: None,
             answering: false,
+            placing: false,
             error: None,
             _tick: None,
             _clear: None,
@@ -330,6 +377,7 @@ impl WaCallUi {
     /// Stops the audio: the pump, then Kotlin's microphone and speaker.
     fn finish(&mut self, cx: &mut Context<Self>) {
         self.answering = false;
+        self.placing = false;
         if self.session.take().is_some() {
             cx.background_executor()
                 .spawn(async {
@@ -363,35 +411,110 @@ impl WaCallUi {
         let call_id = view.call_id;
         let task = cx.background_executor().spawn(async move {
             gateway.accept_call(&call_id)?;
-            let (url, key) = parse_link(&link)?;
-            let audio = rovsti_wa_client::call_audio(url, key, &call_id)?;
-            match rovsti_android::wa::call_audio_start() {
-                Ok(true) => {}
-                Ok(false) => log::warn!("call audio did not start: is RECORD_AUDIO granted?"),
-                Err(error) => log::debug!("no call audio on this platform: {error}"),
-            }
-            Ok::<_, ClientError>(audio)
+            open_call_audio(&link, &call_id)
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.answering = false;
                 match result {
-                    Ok(audio) => {
-                        // The call may have ended while the audio was opening.
-                        if this.tracker.is_empty() {
-                            return;
-                        }
-                        let muted = Arc::new(AtomicBool::new(
-                            this.tracker.view(now_ms()).is_some_and(|v| v.muted),
-                        ));
-                        let executor = cx.background_executor().clone();
-                        let timers = executor.clone();
-                        let pump =
-                            executor.spawn(pump(audio, muted.clone(), move |d| timers.timer(d)));
-                        this.session = Some(Session { muted, _pump: pump });
-                    }
+                    Ok(audio) => this.attach_audio(audio, cx),
                     Err(error) => this.fail("Could not answer the call", error, cx),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Starts the pump for an opened call audio socket.
+    fn attach_audio(&mut self, audio: CallAudio, cx: &mut Context<Self>) {
+        // The call may have ended while the audio was opening.
+        if self.tracker.is_empty() {
+            return;
+        }
+        let muted = Arc::new(AtomicBool::new(
+            self.tracker.view(now_ms()).is_some_and(|v| v.muted),
+        ));
+        let executor = cx.background_executor().clone();
+        let timers = executor.clone();
+        let pump = executor.spawn(pump(audio, muted.clone(), move |d| timers.timer(d)));
+        self.session = Some(Session { muted, _pump: pump });
+    }
+
+    /// Starts an outgoing WhatsApp call to `number`.
+    pub fn place(&mut self, number: &str, cx: &mut Context<Self>) {
+        let busy = !self.tracker.is_empty() || self.placing || self.answering;
+        let connected = self.settings.read(cx).is_connected();
+        if let Err(why) = can_place(connected, busy, number) {
+            self.error = Some(why.into());
+            cx.notify();
+            return;
+        }
+        let settings = self.settings.read(cx);
+        let (Some(gateway), Some(link)) = (settings.gateway(), settings.link().cloned()) else {
+            self.error = Some("WhatsApp is not connected".into());
+            cx.notify();
+            return;
+        };
+        self.placing = true;
+        self.error = None;
+        let number = number.to_owned();
+        let place = cx.background_executor().spawn(async move {
+            let jid = rovsti_wa_proto::user_jid(&number).map_err(|e| e.to_string())?;
+            let started = gateway.place_call(&jid).map_err(|e| e.to_string())?;
+            Ok::<_, String>((jid, started.call_id, gateway))
+        });
+        cx.spawn(async move |this, cx| {
+            let placed = place.await;
+            let Ok(Some((call_id, gateway, link))) = this.update(cx, |this, cx| {
+                this.placing = false;
+                match placed {
+                    Ok((jid, call_id, gateway)) => {
+                        match this.tracker.on_placed(&call_id, &jid, now_ms()) {
+                            Change::Ignored => {
+                                // The gateway's own update may already show this call.
+                                let shown = this.tracker.view(now_ms());
+                                if shown.is_some_and(|v| v.call_id == call_id) {
+                                    cx.notify();
+                                    return Some((call_id, gateway, link));
+                                }
+                                // Something else took the screen: do not leave a ghost call.
+                                cx.background_executor()
+                                    .spawn(async move {
+                                        if let Err(error) = gateway.end_call(&call_id) {
+                                            log::debug!("ending a surplus call: {error}");
+                                        }
+                                    })
+                                    .detach();
+                                None
+                            }
+                            _ => {
+                                this.start_ticking(cx);
+                                cx.notify();
+                                Some((call_id, gateway, link))
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        this.fail("Could not place the WhatsApp call", error, cx);
+                        None
+                    }
+                }
+            }) else {
+                return;
+            };
+            drop(gateway);
+            let audio = cx
+                .background_executor()
+                .spawn(async move { open_call_audio(&link, &call_id) })
+                .await;
+            this.update(cx, |this, cx| {
+                match audio {
+                    Ok(audio) => this.attach_audio(audio, cx),
+                    Err(error) => this.fail("Could not open the call audio", error, cx),
                 }
                 cx.notify();
             })
@@ -649,6 +772,52 @@ mod tests {
         let view = t.view(68_000).unwrap();
         assert_eq!(view.elapsed_s, 65);
         assert_eq!(status_line(&view), "1:05");
+    }
+
+    #[test]
+    fn a_placed_call_shows_at_once_and_keeps_one_card() {
+        let mut t = Tracker::default();
+        assert_eq!(
+            t.on_placed("a", "905551234567@s.whatsapp.net", 0),
+            Change::Shown
+        );
+        let view = t.view(0).unwrap();
+        assert_eq!(view.direction, Out);
+        assert_eq!(status_line(&view), "Calling…");
+        assert_eq!(
+            t.on_update(update("a", Out, CallPhase::Active), 2_000),
+            Change::Shown
+        );
+        assert_eq!(t.view(5_000).unwrap().elapsed_s, 3);
+        assert_eq!(t.view(5_000).unwrap().call_id, "a");
+    }
+
+    #[test]
+    fn a_second_placed_call_while_busy_is_ignored() {
+        let mut t = Tracker::default();
+        t.on_placed("a", "x@s.whatsapp.net", 0);
+        assert_eq!(t.on_placed("b", "y@s.whatsapp.net", 1), Change::Ignored);
+        assert_eq!(t.view(1).unwrap().call_id, "a");
+        let mut incoming = Tracker::default();
+        incoming.on_update(update("i", In, CallPhase::Ringing), 0);
+        assert_eq!(
+            incoming.on_placed("b", "y@s.whatsapp.net", 1),
+            Change::Ignored
+        );
+    }
+
+    #[test]
+    fn can_place_gives_a_reason() {
+        assert_eq!(can_place(true, false, "+905551234567"), Ok(()));
+        assert_eq!(can_place(true, false, "  "), Err("No number to call"));
+        assert_eq!(
+            can_place(false, false, "1"),
+            Err("WhatsApp is not connected")
+        );
+        assert_eq!(
+            can_place(true, true, "1"),
+            Err("Another call is in progress")
+        );
     }
 
     #[test]

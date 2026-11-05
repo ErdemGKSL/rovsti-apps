@@ -21,5 +21,7 @@ pub use call::{CallDirection, CallInput, CallMachine, CallPhase, EndReason, WaCa
 pub use event::{CallUpdate, EventEnvelope, GatewayEvent};
 pub use key::{ConnectKey, KeyError, KeyHash, KeyId};
 pub use log::{EventLog, Since};
-pub use timeline::{Item, ItemState, Timeline, day_breaks, user_jid};
+pub use timeline::{
+    Item, ItemState, Timeline, TypingThrottle, day_breaks, reaction_chips, user_jid,
+};
 pub use url::{GatewayUrl, UrlError};

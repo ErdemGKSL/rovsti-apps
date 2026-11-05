@@ -155,6 +155,25 @@ impl Timeline {
         Some(text)
     }
 
+    /// Optimistically sets our own reaction on a message (`""` removes it),
+    /// replacing any earlier one of ours. The gateway's `MessageUpdate`
+    /// overwrites this later. Returns `true` when something changed.
+    pub fn set_own_reaction(&mut self, id: &str, emoji: &str) -> bool {
+        let Some(item) = self.items.iter_mut().find(|i| i.message.id == id) else {
+            return false;
+        };
+        let before = item.message.reactions.clone();
+        item.message.reactions.retain(|r| !r.from_me);
+        if !emoji.is_empty() {
+            item.message.reactions.push(Reaction {
+                sender: None,
+                from_me: true,
+                emoji: emoji.to_owned(),
+            });
+        }
+        item.message.reactions != before
+    }
+
     /// Timestamp of the oldest confirmed message, for `before_ms` paging.
     pub fn oldest_ms(&self) -> Option<i64> {
         self.items
@@ -267,6 +286,58 @@ pub fn day_breaks(items: &[Item], utc_offset_s: i32) -> Vec<(usize, i64)> {
         }
     }
     out
+}
+
+/// Reaction chips under a bubble: `(emoji, count, mine)` in order of first
+/// appearance. Empty emojis (removed reactions) are skipped.
+pub fn reaction_chips(reactions: &[Reaction]) -> Vec<(String, u32, bool)> {
+    let mut chips: Vec<(String, u32, bool)> = Vec::new();
+    for reaction in reactions.iter().filter(|r| !r.emoji.is_empty()) {
+        match chips
+            .iter_mut()
+            .find(|(emoji, ..)| *emoji == reaction.emoji)
+        {
+            Some((_, count, mine)) => {
+                *count += 1;
+                *mine |= reaction.from_me;
+            }
+            None => chips.push((reaction.emoji.clone(), 1, reaction.from_me)),
+        }
+    }
+    chips
+}
+
+/// Decides when the composer may tell the gateway "typing": at most one
+/// `Typing` per [`TypingThrottle::INTERVAL_MS`], and a `Paused` only after a
+/// `Typing` went out.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TypingThrottle {
+    last_typing_ms: Option<i64>,
+}
+
+impl TypingThrottle {
+    pub const INTERVAL_MS: i64 = 5_000;
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The composer text changed: `true` when a `Typing` should be sent now.
+    pub fn on_edit(&mut self, now_ms: i64) -> bool {
+        let due = self
+            .last_typing_ms
+            .is_none_or(|last| now_ms.saturating_sub(last) >= Self::INTERVAL_MS);
+        if due {
+            self.last_typing_ms = Some(now_ms);
+        }
+        due
+    }
+
+    /// The message was sent (or the text cleared): `true` when a `Paused`
+    /// should be sent. Resets the throttle.
+    pub fn on_send(&mut self) -> bool {
+        self.last_typing_ms.take().is_some()
+    }
 }
 
 #[cfg(test)]
@@ -454,5 +525,63 @@ mod tests {
         assert_eq!(t.restart(1).as_deref(), Some("hello"));
         assert_eq!(t.items()[0].state, ItemState::Pending { local_id: 1 });
         assert_eq!(t.restart(2), None);
+    }
+
+    fn reaction(emoji: &str, from_me: bool) -> Reaction {
+        Reaction {
+            sender: None,
+            from_me,
+            emoji: emoji.into(),
+        }
+    }
+
+    #[test]
+    fn reaction_chips_group_count_and_mark_mine() {
+        let chips = reaction_chips(&[
+            reaction("👍", false),
+            reaction("❤️", false),
+            reaction("👍", true),
+            reaction("", true),
+            reaction("👍", false),
+        ]);
+        assert_eq!(
+            chips,
+            [("👍".to_owned(), 3, true), ("❤️".to_owned(), 1, false)]
+        );
+        assert!(reaction_chips(&[]).is_empty());
+    }
+
+    #[test]
+    fn own_reaction_replaces_and_removes() {
+        let mut t = Timeline::new(CHAT);
+        t.apply_page(vec![msg("a", 10, false)], 50);
+        assert!(t.set_own_reaction("a", "👍"));
+        assert!(!t.set_own_reaction("a", "👍"));
+        assert!(t.set_own_reaction("a", "❤️"));
+        assert_eq!(t.items()[0].message.reactions.len(), 1);
+        assert!(t.set_own_reaction("a", ""));
+        assert!(t.items()[0].message.reactions.is_empty());
+        assert!(!t.set_own_reaction("missing", "👍"));
+    }
+
+    #[test]
+    fn typing_throttle_sends_once_per_interval() {
+        let mut t = TypingThrottle::new();
+        assert!(t.on_edit(1_000));
+        assert!(!t.on_edit(1_001));
+        assert!(!t.on_edit(5_999));
+        assert!(t.on_edit(6_000));
+        assert!(!t.on_edit(6_100));
+    }
+
+    #[test]
+    fn typing_throttle_paused_only_after_typing() {
+        let mut t = TypingThrottle::new();
+        assert!(!t.on_send());
+        assert!(t.on_edit(0));
+        assert!(t.on_send());
+        assert!(!t.on_send());
+        // A new burst after sending types immediately.
+        assert!(t.on_edit(10));
     }
 }

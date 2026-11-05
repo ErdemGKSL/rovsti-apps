@@ -14,10 +14,7 @@
 //! `dir` is the app data directory (`Headless.dataDir`). With no trip in
 //! progress every kind answers `{"state":"ended"}`, which stops the service.
 
-use std::{
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::path::Path;
 
 use rovsti_android::headless::{self, Handler};
 use rovsti_geo::{FixIn, NoticeDelivery, Outcome, StopsPrefs};
@@ -26,7 +23,7 @@ use rovsti_wa_ui::headless::{SendFailure, send_text_in};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::store;
+use crate::store::{self, now_ms};
 
 const ENDED: &str = "{\"state\":\"ended\"}";
 
@@ -61,14 +58,6 @@ pub fn handle(kind: &str, json: &str) -> String {
         ("trip_end", trip_end),
     ];
     headless::dispatch(kind, json, TABLE)
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
 }
 
 fn trip_fix(_: &str, json: &str) -> String {

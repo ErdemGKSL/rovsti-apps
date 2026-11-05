@@ -6163,11 +6163,13 @@ dependencies = [
 name = "rovsti_stops"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "gpui",
  "gpui_android",
  "gpui_platform",
  "log",
  "rovsti_android",
+ "rovsti_core",
  "rovsti_geo",
  "rovsti_ui",
  "rovsti_wa_ui",

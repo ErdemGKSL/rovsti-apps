@@ -1,31 +1,50 @@
 //! Rovsti Stops: set a destination, fall asleep on the bus, get woken up
 //! before your stop. Works offline: GPS fixes are compared on-device by
 //! `rovsti_geo`, no map server or account involved.
+//!
+//! * `backend`: files, permission checks, starting and stopping the trip.
+//! * `trip_ui`: the Trip tab, the live card and the alarm screen.
+//! * `picker`: the destination sheet and the shared-location confirmation.
+//! * `saved_ui`: the Saved tab.
+//! * `headless` / `store`: the trip logic Kotlin calls with no UI running.
 
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
+use futures::{StreamExt as _, channel::mpsc};
 use gpui::{
-    App, AppContext as _, Bounds, Context, Entity, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, Styled, Task, Window, WindowBounds, WindowOptions, div,
     prelude::*, px, size,
 };
-use rovsti_geo::AlarmRule;
+use rovsti_android::{
+    events::{self, RawEvent, kind},
+    trip::{AlarmAction, parse_trip_alarm},
+};
+use rovsti_core::wire::{DocumentOp, DocumentResult};
+use rovsti_geo::{ActiveTrip, Feed, History, Place, RuleChoice, SavedPlaces, StopsPrefs};
 use rovsti_ui::{
     Icon, IconAssets,
-    components::{empty_state, glass_pill, large_title, section},
+    components::large_title,
     current_theme,
-    glass::{GlassSpec, glass},
+    field::TextField,
+    motion::{Entrance, Motion},
+    notice_pill::{NoticePill, PillEvent},
+    sheet::Sheet,
     tab_bar::{Tab, TabBar, content_bottom_inset},
-    tokens::{Theme, typography},
+    tokens::{Theme, metrics},
 };
 use rovsti_wa_ui::{AppId, WhatsAppSettings};
 
-// The headless handler is reached through the JNI entry on Android only; the desktop build
-// uses it from the trip simulation (a later step).
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod backend;
 mod headless;
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod picker;
+mod saved_ui;
 mod store;
+mod trip_ui;
+
+use backend::Preflight;
+use picker::{Destination, SheetMode};
+use trip_ui::{AlarmView, Live};
 
 const TABS: [&str; 3] = ["Trip", "Saved", "Settings"];
 const TAB_ICONS: [Icon; 3] = [
@@ -34,144 +53,372 @@ const TAB_ICONS: [Icon; 3] = [
     Icon::LucideSettings,
 ];
 
-/// The choices offered in the "Wake me" picker.
-const RULES: [(&str, AlarmRule); 4] = [
-    ("300 m", AlarmRule::Radius { metres: 300.0 }),
-    ("500 m", AlarmRule::Radius { metres: 500.0 }),
-    ("1 km", AlarmRule::Radius { metres: 1_000.0 }),
-    (
-        "2 min",
-        AlarmRule::Eta {
-            before: Duration::from_secs(120),
-            min_metres: 300.0,
-        },
-    ),
-];
+/// What the Undo button on the notice pill does.
+pub(crate) enum PillAction {
+    UndoDelete(Place, usize),
+}
 
-struct StopsApp {
+pub(crate) struct StopsApp {
     tabs: TabBar,
-    motion: rovsti_ui::motion::Motion,
-    page: rovsti_ui::motion::Entrance,
-    rule: usize,
-    whatsapp: Entity<WhatsAppSettings>,
+    motion: Motion,
+    page: Entrance,
+
+    /// The app's data directory, once it is known.
+    pub(crate) dir: Option<PathBuf>,
+    /// The files have been read.
+    pub(crate) loaded: bool,
+    pub(crate) prefs: StopsPrefs,
+    pub(crate) saved: SavedPlaces,
+    pub(crate) history: History,
+    /// The imported transit feed. Searched by the stop picker (step 7).
+    #[allow(dead_code)]
+    pub(crate) gtfs: Option<Feed>,
+
+    /// The "Wake me" choice.
+    pub(crate) rule: RuleChoice,
+    /// Chosen, not started.
+    pub(crate) dest: Option<Destination>,
+    /// Text the chat when arriving, for the next trip.
+    pub(crate) notice_on: bool,
+    /// The trip in progress.
+    pub(crate) trip: Option<ActiveTrip>,
+    pub(crate) live: Option<Live>,
+    /// A start or stop is under way.
+    pub(crate) busy: bool,
+    /// A start waiting for the user to answer a permission prompt.
+    pub(crate) pending_start: Option<Destination>,
+    pub(crate) preflight: Preflight,
+    pub(crate) alarm: Option<AlarmView>,
+    /// Brings the alarm back after a snooze.
+    pub(crate) rering: Option<Task<()>>,
+
+    pub(crate) sheet: Sheet,
+    pub(crate) sheet_mode: SheetMode,
+    pub(crate) field: Entity<TextField>,
+    /// The confirmation's Save toggle.
+    pub(crate) save_place: bool,
+    pub(crate) back_enabled: bool,
+    /// The saved place whose actions are open.
+    pub(crate) expanded: Option<u64>,
+
+    pill: NoticePill,
+    pill_action: Option<(u64, PillAction)>,
+    pub(crate) whatsapp: Entity<WhatsAppSettings>,
 }
 
 impl StopsApp {
-    fn new(cx: &mut Context<Self>) -> Self {
+    fn new(
+        shares: mpsc::UnboundedReceiver<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let whatsapp = cx.new(|cx| WhatsAppSettings::new(AppId::Stops, "stops", cx));
-        WhatsAppSettings::forward_push(&whatsapp, cx);
-        Self {
+        // Linking or unlinking decides whether the "text when arriving" row shows.
+        cx.observe(&whatsapp, |_, _, cx| cx.notify()).detach();
+        let field = cx.new(TextField::new);
+        cx.observe(&field, |_, _, cx| cx.notify()).detach();
+
+        // Coming back from a permission page or the lock screen: the service
+        // may have changed the trip, and the grants may have changed.
+        cx.observe_window_activation(window, |this, window, cx| {
+            if window.is_window_active() {
+                this.refresh_preflight(cx);
+                this.refresh_trip(cx);
+            }
+        })
+        .detach();
+
+        // Kotlin events: the service's status, the alarm, permissions, files.
+        let (mut events_rx, sink) = events::install_sink_owned();
+        cx.spawn(async move |this, cx| {
+            while let Some(event) = events_rx.next().await {
+                if this
+                    .update(cx, |this, cx| this.on_event(&event, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+            events::clear_sink_if(sink);
+        })
+        .detach();
+        cx.background_executor()
+            .spawn(async {
+                let _ = rovsti_android::window::ui_attached(true);
+            })
+            .detach();
+
+        // Links opened with Stops and text shared to it.
+        let mut shares = shares;
+        cx.spawn(async move |this, cx| {
+            while let Some(text) = shares.next().await {
+                if this
+                    .update(cx, |this, cx| this.offer_text(&text, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        let data_dir = rovsti_ui::storage::data_dir("stops", cx);
+        cx.spawn(async move |this, cx| {
+            let dir = match data_dir.await {
+                Ok(dir) => dir,
+                Err(error) => {
+                    log::warn!("no data directory for Stops: {error}");
+                    return;
+                }
+            };
+            let read_from = dir.clone();
+            let data = cx
+                .background_executor()
+                .spawn(async move { backend::load(&read_from) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.dir = Some(dir);
+                this.loaded = true;
+                this.rule = data.prefs.rule;
+                this.prefs = data.prefs;
+                this.saved = data.saved;
+                this.history = data.history;
+                this.gtfs = data.gtfs;
+                this.set_saved_trip(data.trip, cx);
+                this.resume_service(cx);
+                this.start_simulation(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+
+        let app = Self {
             tabs: TabBar::new(
                 TABS.into_iter()
                     .zip(TAB_ICONS)
                     .map(|(label, icon)| Tab::new(icon, label)),
             ),
-            motion: Default::default(),
-            page: Default::default(),
-            rule: 1,
+            motion: Motion::default(),
+            page: Entrance::default(),
+            dir: None,
+            loaded: false,
+            prefs: StopsPrefs::default(),
+            saved: SavedPlaces::default(),
+            history: History::default(),
+            gtfs: None,
+            rule: RuleChoice::default(),
+            dest: None,
+            notice_on: true,
+            trip: None,
+            live: None,
+            busy: false,
+            pending_start: None,
+            preflight: Preflight::default(),
+            alarm: None,
+            rering: None,
+            sheet: Sheet::new(),
+            sheet_mode: SheetMode::Pick,
+            field,
+            save_place: false,
+            back_enabled: false,
+            expanded: None,
+            pill: NoticePill::new(),
+            pill_action: None,
             whatsapp,
+        };
+        app.refresh_preflight_later(cx);
+        app
+    }
+
+    /// `ROVSTI_STOPS_SIMULATE=1` on desktop: a synthetic fix every second,
+    /// through the same handler the Android service calls.
+    fn start_simulation(&mut self, cx: &mut Context<Self>) {
+        if !backend::simulate_requested() {
+            return;
+        }
+        log::info!("simulating location fixes");
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let Ok(dir) = this.update(cx, |this, _| this.dir.clone()) else {
+                    break;
+                };
+                let Some(dir) = dir else { continue };
+                let reply = cx
+                    .background_executor()
+                    .spawn(async move { backend::simulate_tick(&dir) })
+                    .await;
+                if let Some(json) = reply
+                    && this
+                        .update(cx, |this, cx| this.on_status_json(&json, cx))
+                        .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn refresh_preflight_later(&self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let pre = cx
+                .background_executor()
+                .spawn(async { Preflight::gather() })
+                .await;
+            this.update(cx, |this, cx| {
+                this.preflight = pre;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn refresh_preflight(&mut self, cx: &mut Context<Self>) {
+        self.refresh_preflight_later(cx);
+    }
+
+    /// One event from Kotlin.
+    fn on_event(&mut self, event: &RawEvent, cx: &mut Context<Self>) {
+        match event.kind.as_str() {
+            kind::WA_PUSH => self.whatsapp.update(cx, |w, cx| w.wake(cx)),
+            kind::TRIP_STATUS => self.on_status_json(&event.json, cx),
+            kind::TRIP_ALARM => match parse_trip_alarm(&event.json) {
+                Some(alarm) => self.on_alarm_event(alarm, cx),
+                None => log::warn!("unreadable trip_alarm event"),
+            },
+            kind::PERMISSIONS_CHANGED => {
+                self.refresh_preflight(cx);
+                self.resume_pending_start(cx);
+            }
+            kind::DOCUMENT_RESULT => match serde_json::from_str::<DocumentResult>(&event.json) {
+                // The transit feed import arrives with the stop picker.
+                Ok(result) if result.op == DocumentOp::ImportGtfs => {
+                    log::info!("a transit feed was picked; importing it is not wired yet");
+                }
+                Ok(_) => {}
+                Err(error) => log::warn!("bad document_result: {error}"),
+            },
+            _ => {}
         }
     }
 
-    fn rule_picker(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme.colors();
-        div()
-            .flex()
-            .gap(px(8.0))
-            .px(px(16.0))
-            .py(px(12.0))
-            .children(RULES.iter().enumerate().map(|(i, (label, _))| {
-                let selected = i == self.rule;
-                let chip = if selected {
-                    glass(GlassSpec::lens(theme))
-                } else {
-                    div()
-                };
-                chip.id(("rule", i))
-                    .flex_1()
-                    .h(px(40.0))
-                    .rounded_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(typography::SUBHEADLINE.size)
-                    .font_weight(typography::HEADLINE.weight)
-                    .text_color(if selected {
-                        colors.accent
-                    } else {
-                        colors.secondary_label
-                    })
-                    .child(*label)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.rule = i;
-                        cx.notify();
-                    }))
-            }))
+    /// System Back: the alarm snoozes, a sheet closes.
+    fn on_back(&mut self, cx: &mut Context<Self>) {
+        if self.alarm.is_some() {
+            self.alarm_action(AlarmAction::Snooze, cx);
+        } else if self.sheet.is_open() {
+            self.close_sheet(cx);
+        }
     }
 
-    fn trip(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme.colors();
-        let rule_text: SharedString = match RULES[self.rule].1 {
-            AlarmRule::Radius { metres } => {
-                format!("You'll be woken {metres:.0} m before the stop.").into()
-            }
-            AlarmRule::Eta { before, .. } => format!(
-                "You'll be woken about {} min before arriving.",
-                before.as_secs() / 60
-            )
-            .into(),
-            AlarmRule::BeforeStop { metres, .. } => {
-                format!("You'll be woken {metres:.0} m before the previous stop.").into()
-            }
+    // ---- files -------------------------------------------------------------------
+
+    pub(crate) fn save_prefs(&self, cx: &mut Context<Self>) {
+        let Some(dir) = self.dir.clone() else {
+            return;
         };
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(24.0))
-            .child(section(
-                theme,
-                Some("Wake me".into()),
-                [
-                    self.rule_picker(theme, cx).into_any_element(),
-                    div()
-                        .px(px(16.0))
-                        .pb(px(12.0))
-                        .text_size(typography::FOOTNOTE.size)
-                        .text_color(colors.secondary_label)
-                        .child(rule_text)
-                        .into_any_element(),
-                ],
-            ))
-            .child(empty_state(
-                theme,
-                "Where are you going?",
-                "Pick a destination from Saved, or share a location to Rovsti Stops from any maps app.",
-            ))
-            .child(div().flex().justify_center().child(glass_pill(theme, "Choose destination").id("choose")))
+        let prefs = self.prefs.clone();
+        cx.background_executor()
+            .spawn(async move { backend::save_prefs(&dir, &prefs) })
+            .detach();
+    }
+
+    pub(crate) fn save_places(&self, cx: &mut Context<Self>) {
+        let Some(dir) = self.dir.clone() else {
+            return;
+        };
+        let saved = self.saved.clone();
+        cx.background_executor()
+            .spawn(async move { backend::save_places(&dir, &saved) })
+            .detach();
+    }
+
+    // ---- notice pill ---------------------------------------------------------------
+
+    pub(crate) fn show_pill(
+        &mut self,
+        text: impl Into<SharedString>,
+        action: Option<PillAction>,
+        cx: &mut Context<Self>,
+    ) {
+        let undo = action.is_some();
+        let token = self
+            .pill
+            .show(text, undo.then(|| "Undo".into()), undo, false);
+        self.pill_action = action.map(|a| (token, a));
+        cx.notify();
+    }
+
+    fn pill_fired(&mut self, cx: &mut Context<Self>) {
+        // Only the pill the button belongs to may act.
+        let Some((token, action)) = self.pill_action.take() else {
+            return;
+        };
+        if token != self.pill.token() {
+            return;
+        }
+        match action {
+            PillAction::UndoDelete(place, index) => self.undo_delete(place, index, cx),
+        }
+    }
+
+    /// 12 px above the tab bar, or above the bottom edge over a sheet.
+    fn pill_bottom(&self) -> f32 {
+        const GAP: f32 = 12.0;
+        if self.sheet.is_visible() {
+            GAP + 10.0
+        } else {
+            f32::from(metrics::TAB_BAR_MARGIN) + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1 + GAP
+        }
+    }
+
+    fn render_pill(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let entity = cx.entity();
+        self.pill.render(
+            theme,
+            self.pill_bottom(),
+            move |pointer, position, _, cx| {
+                entity.update(cx, |this, cx| {
+                    if this.pill.pointer(pointer, position) == PillEvent::Action {
+                        this.pill_fired(cx);
+                    }
+                    cx.notify();
+                });
+            },
+        )
     }
 }
 
 impl Render for StopsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = current_theme(window);
+        self.pill.set_reduced(window.prefers_reduced_motion());
         let mut motion = std::mem::take(&mut self.motion);
-        motion.frame(window, |dt| self.tabs.tick(dt) | self.page.tick(dt));
+        motion.frame_timed(window, |dt, real| {
+            self.tabs.tick(dt)
+                | self.page.tick(dt)
+                | self.sheet.tick(dt)
+                | self.sheet.tick_real(real)
+                | self.pill.tick(dt)
+        });
         self.motion = motion;
         let tab = self.tabs.selected();
         let entity = cx.entity();
         let touch_entity = entity.clone();
 
         let body = match tab {
-            0 => self.trip(theme, cx).into_any_element(),
-            1 => empty_state(
-                theme,
-                "No Saved Stops",
-                "Stops you travel to often appear here for one-tap trips.",
-            )
-            .into_any_element(),
+            0 => self.trip_tab(theme, cx),
+            1 => self.saved_tab(theme, cx),
             // The shared WhatsApp screen brings its own sections and buttons.
             _ => self.whatsapp.clone().into_any_element(),
         };
+
+        // The keyboard covers the bottom of the screen: leave room to scroll.
+        let insets = window.insets();
+        let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
 
         div()
             .size_full()
@@ -185,14 +432,14 @@ impl Render for StopsApp {
             )
             .child(rovsti_ui::components::backdrop(
                 theme,
-                theme.colors().orange,
+                rovsti_ui::theme::colors(theme).orange,
             ))
             .child(
                 div()
                     .id("page")
                     .size_full()
                     .overflow_y_scroll()
-                    .pb(content_bottom_inset())
+                    .pb(content_bottom_inset() + keyboard)
                     .opacity(self.page.progress())
                     .child(
                         div()
@@ -202,12 +449,14 @@ impl Render for StopsApp {
                             .child(body),
                     ),
             )
+            .children(self.render_pill(theme, cx))
             .child(self.tabs.render(
                 theme,
                 move |index, _, cx| {
                     entity.update(cx, |this, cx| {
                         this.tabs.press();
                         if this.tabs.select(index) {
+                            this.expanded = None;
                             this.page.restart();
                         }
                         cx.notify();
@@ -220,6 +469,8 @@ impl Render for StopsApp {
                     });
                 },
             ))
+            .children(self.sheet_view(theme, window, cx))
+            .children(self.alarm_screen(theme, cx))
     }
 }
 
@@ -230,21 +481,45 @@ rovsti_android::headless_entry!(headless::handle);
 fn main() {
     // Keeps the JNI entry points in the final library (see `bridge::keep_symbols`).
     rovsti_android::bridge::keep_symbols();
-    gpui_platform::application()
-        .with_assets(IconAssets::new())
-        .run(|cx: &mut App| {
-            cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                        None,
-                        size(px(402.0), px(874.0)),
-                        cx,
-                    ))),
-                    ..Default::default()
-                },
-                |_, cx| cx.new(StopsApp::new),
-            )
-            .expect("failed to open the Rovsti Stops window");
-            cx.activate(true);
-        });
+    // Links opened with Stops and text shared to it, as raw strings; the
+    // window turns them into a confirmation or a notice.
+    let (share_tx, share_rx) = mpsc::unbounded::<String>();
+    let app = gpui_platform::application().with_assets(IconAssets::new());
+    let link_tx = share_tx.clone();
+    app.on_open_urls(move |urls| {
+        for url in urls {
+            let _ = link_tx.unbounded_send(url);
+        }
+    });
+    app.on_receive_share(move |share, _| match share {
+        Ok(share) => {
+            if let Some(text) = share.text {
+                let _ = share_tx.unbounded_send(text);
+            }
+        }
+        Err(error) => log::warn!("could not read the shared content: {error}"),
+    });
+    app.run(move |cx: &mut App| {
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(402.0), px(874.0)),
+                    cx,
+                ))),
+                ..Default::default()
+            },
+            |window, cx| {
+                let app = cx.new(|cx| StopsApp::new(share_rx, window, cx));
+                // System Back: snooze the alarm, close the sheet.
+                let weak = app.downgrade();
+                window.on_system_back(cx, move |_, cx| {
+                    weak.update(cx, |this, cx| this.on_back(cx)).ok();
+                });
+                app
+            },
+        )
+        .expect("failed to open the Rovsti Stops window");
+        cx.activate(true);
+    });
 }

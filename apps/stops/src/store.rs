@@ -11,6 +11,7 @@ use std::{
     io,
     path::Path,
     sync::{Mutex, MutexGuard},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use rovsti_geo::{ActiveTrip, History, Outcome, TripRecord};
@@ -34,6 +35,15 @@ static TRIP_LOCK: Mutex<()> = Mutex::new(());
 /// file on disk is always whole (atomic writes), so carrying on is safe.
 pub fn lock() -> MutexGuard<'static, ()> {
     TRIP_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Milliseconds since the Unix epoch.
+pub fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_millis()).ok())
+        .unwrap_or(0)
 }
 
 /// The trip in progress; `None` when there is none or the file is unreadable.

@@ -1,7 +1,10 @@
 # WhatsApp integration: open notes
 
-Status: **notes only, nothing decided.** These ideas need proper planning (BMAD)
-before anyone builds them.
+Status: **decided 2026-11-05: WhatsApp is fully backend-based.** A gateway service
+owns the whatsapp-rust sessions. Every Rovsti app offers two choices: *link WhatsApp
+for the first time* (QR or pairing code through the gateway), or *connect to an
+existing instance* by pasting the connect key shown in another app. Everything else
+stays local. The analysis below is kept for context.
 
 ## Owner's direction (2026-11-03)
 

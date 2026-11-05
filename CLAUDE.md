@@ -17,7 +17,10 @@
 - Android-only code goes through `rovsti_android`. Every function there must compile
   on desktop and return `Error::Unsupported` there.
 - Apps are GPUiForge binary packages: `src/main.rs`, no `[lib]`, no `[[bin]]`.
-- Everything is local and serverless. Do not add a backend, analytics or cloud sync.
+- Everything is local and serverless, with one exception: **WhatsApp runs on our own
+  backend** (`services/wa_gateway`). Apps reach it only through `rovsti_wa_client`. A
+  linked WhatsApp instance is shared by apps via a connect key (link once in any app,
+  or paste the key from another app). No other backend, analytics or cloud sync.
 - Planning uses BMAD (`/bmad-help`). Its outputs go to `_bmad-output/`, and project
   knowledge goes to `docs/`.
 

@@ -24,3 +24,12 @@ Round 2 step 2, pending at the base. Files: `crates/rovsti_wa_proto/src/{media.r
 
 Round 2 step 3, unchanged: attach button and chip in `conversation.rs`, retry from the cached
 path, roadmap and acceptance docs.
+
+## Status (re-check at `fed4ad0c86e6734d5f0c82383ca41be1050cda38`, "review fixes")
+
+Both steps landed: step 1 in `a5144fc`, step 2 in `c529631`, review fixes in `fed4ad0`.
+`git stash list` is empty. Every Rovsti Messages item in `docs/roadmap.md` is ticked, and
+`rovsti_wa_ui::WhatsAppSettings` is in Phone, Messages, Contacts and Stops. All checks pass
+at this commit (fmt, clippy `-D warnings`, workspace tests, `rovsti_android` and
+`rovsti_wa_client` for `aarch64-linux-android`). The unit is done. What remains needs a
+device (`docs/messages-acceptance.md`) or is out of scope (see "Left out" in `messages-r2.md`).

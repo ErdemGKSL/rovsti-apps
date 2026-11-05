@@ -1,0 +1,682 @@
+//! Scheduled send (AD-MSG6): the "Send later" sheet and the Scheduled strip.
+//!
+//! Long-pressing Send (or right-clicking it on desktop) opens the sheet. An SMS
+//! goes to the local `ScheduleQueue` (`scheduled.json`) and is armed as an
+//! Android alarm; a WhatsApp text goes to the gateway, which owns it. Each
+//! conversation shows a strip of what is still waiting, local and gateway
+//! items together. The parsing, matching and wording are pure and tested here;
+//! the sheet is the GPUI shell.
+
+use gpui::{
+    AnyElement, AppContext as _, Context, Entity, InteractiveElement, IntoElement, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, TextInputAction, TextInputPurpose, Window,
+    div, px,
+};
+use rovsti_core::{
+    PhoneNumber,
+    schedule::{self, FiredSms, MIN_LEAD_MS, ScheduleTarget, ScheduledSms},
+};
+use rovsti_ui::{
+    components::{glass_pill, list_row},
+    field::{TextField, field_box},
+    sheet::Sheet,
+    theme,
+    tokens::{Theme, typography},
+};
+use rovsti_wa_proto::{ScheduledState, ScheduledText};
+use serde::Deserialize;
+
+use crate::{
+    MessagesApp,
+    conversation::{civil_from_days, clock},
+};
+
+const DAY_S: i64 = 86_400;
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// How many waiting items a strip lists before it says "and N more".
+const STRIP_ROWS: usize = 3;
+
+// ---- pure: what the sheet schedules -------------------------------------------
+
+/// Where a scheduled text goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Dest {
+    Sms { to: String, sub_id: Option<i32> },
+    WhatsApp { chat: String },
+}
+
+/// The text waiting in the sheet for a time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Draft {
+    pub dest: Dest,
+    pub body: String,
+}
+
+/// The id of a new local item: the clock, or one past the largest id queued,
+/// so ids survive restarts without colliding.
+pub fn next_schedule_id(existing: &[ScheduledSms], now_ms: i64) -> u64 {
+    let clock = u64::try_from(now_ms).unwrap_or(0);
+    existing
+        .iter()
+        .map(|i| i.id.saturating_add(1))
+        .fold(clock, u64::max)
+}
+
+/// The payload `sms::arm_scheduled` takes (`{id, at_ms, to, body, sub_id}`);
+/// `None` for a WhatsApp item, which the gateway owns.
+pub fn arm_json(item: &ScheduledSms) -> Option<String> {
+    let ScheduleTarget::Sms { to, sub_id } = &item.target else {
+        return None;
+    };
+    serde_json::to_string(&serde_json::json!({
+        "id": item.id,
+        "at_ms": item.at_ms,
+        "to": to,
+        "body": item.body,
+        "sub_id": sub_id,
+    }))
+    .ok()
+}
+
+#[derive(Deserialize)]
+struct FiredWire {
+    id: u64,
+    #[serde(default)]
+    ok: bool,
+    #[serde(default)]
+    at_ms: i64,
+}
+
+/// `sms::pull_fired` answers a JSON array of `{id, ok, at_ms}`; anything
+/// unreadable counts as nothing fired.
+pub fn parse_fired(json: &str) -> Vec<FiredSms> {
+    serde_json::from_str::<Vec<FiredWire>>(json)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f| FiredSms {
+            id: f.id,
+            ok: f.ok,
+            at_ms: f.at_ms,
+        })
+        .collect()
+}
+
+/// Days since 1970-01-01 of a civil date; `None` when the date does not exist.
+fn days_from_civil(year: i64, month: i64, day: i64) -> Option<i64> {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let y = year - i64::from(month <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    // Reject 31 February and friends by reading the date back.
+    let (ry, rm, rd) = civil_from_days(days);
+    (ry == year && i64::try_from(rm).ok() == Some(month) && rd == day).then_some(days)
+}
+
+/// A time typed in the sheet: `HH:MM` (today, or tomorrow when that has
+/// passed) or `YYYY-MM-DD HH:MM`, in the phone's zone. The answer is a Unix
+/// time at least [`MIN_LEAD_MS`] away, or the reason it is not.
+pub fn parse_custom(input: &str, now_ms: i64, tz_offset_s: i32) -> Result<i64, &'static str> {
+    const BAD: &str = "Type a time like 18:30 or 2026-12-31 09:00";
+    let input = input.trim();
+    let (date, time) = match input.split_once(' ') {
+        Some((date, time)) => (Some(date.trim()), time.trim()),
+        None => (None, input),
+    };
+    let (h, m) = time.split_once(':').ok_or(BAD)?;
+    let (h, m): (i64, i64) = (h.parse().map_err(|_| BAD)?, m.parse().map_err(|_| BAD)?);
+    if !(0..24).contains(&h) || !(0..60).contains(&m) {
+        return Err(BAD);
+    }
+    let tz = i64::from(tz_offset_s);
+    let local_now_s = now_ms.div_euclid(1000) + tz;
+    let at = |day: i64| (day * DAY_S + h * 3600 + m * 60 - tz) * 1000;
+    let at_ms = match date {
+        Some(date) => {
+            let mut parts = date.split('-');
+            let mut next = || parts.next().and_then(|p| p.parse::<i64>().ok());
+            let (y, mo, d) = (next().ok_or(BAD)?, next().ok_or(BAD)?, next().ok_or(BAD)?);
+            if parts.next().is_some() {
+                return Err(BAD);
+            }
+            at(days_from_civil(y, mo, d).ok_or(BAD)?)
+        }
+        None => {
+            let today = local_now_s.div_euclid(DAY_S);
+            let first = at(today);
+            if first >= now_ms + MIN_LEAD_MS {
+                first
+            } else {
+                at(today + 1)
+            }
+        }
+    };
+    if at_ms < now_ms + MIN_LEAD_MS {
+        return Err("Pick a time at least a minute from now");
+    }
+    Ok(at_ms)
+}
+
+/// "Today 18:00", "Tomorrow 09:00" or "12 Nov 09:00".
+pub fn when_label(at_ms: i64, now_ms: i64, tz_offset_s: i32) -> String {
+    let day_of = |ms: i64| (ms.div_euclid(1000) + i64::from(tz_offset_s)).div_euclid(DAY_S);
+    let day = day_of(at_ms);
+    let time = clock(at_ms, tz_offset_s);
+    match day - day_of(now_ms) {
+        0 => format!("Today {time}"),
+        1 => format!("Tomorrow {time}"),
+        _ => {
+            let (_, month, d) = civil_from_days(day);
+            format!("{d} {} {time}", MONTHS[month.clamp(1, 12) - 1])
+        }
+    }
+}
+
+// ---- pure: the strip ----------------------------------------------------------
+
+/// Which conversation a strip belongs to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StripTarget {
+    Sms(Vec<String>),
+    WhatsApp(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StripKey {
+    /// An item of the local queue.
+    Local(u64),
+    /// A gateway item (its id).
+    Gateway(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StripItem {
+    pub key: StripKey,
+    pub at_ms: i64,
+    pub body: String,
+    /// The gateway tried and failed; the item stays so the user sees it.
+    pub failed: bool,
+}
+
+fn same_address(a: &str, b: &str) -> bool {
+    match (PhoneNumber::parse(a), PhoneNumber::parse(b)) {
+        (Ok(a), Ok(b)) => a.matches(&b),
+        _ => a.trim().eq_ignore_ascii_case(b.trim()),
+    }
+}
+
+/// The waiting items of one conversation, soonest first: the local queue's
+/// SMS to its recipient and the gateway's pending (or failed) texts to its
+/// chat. Sent gateway items are history, not waiting.
+pub fn strip_items(
+    target: &StripTarget,
+    local: &[ScheduledSms],
+    remote: &[ScheduledText],
+) -> Vec<StripItem> {
+    let mut items: Vec<StripItem> = match target {
+        StripTarget::Sms(recipients) => local
+            .iter()
+            .filter(|i| {
+                matches!(&i.target, ScheduleTarget::Sms { to, .. }
+                    if recipients.iter().any(|r| same_address(r, to)))
+            })
+            .map(|i| StripItem {
+                key: StripKey::Local(i.id),
+                at_ms: i.at_ms,
+                body: i.body.clone(),
+                failed: false,
+            })
+            .collect(),
+        StripTarget::WhatsApp(chat) => remote
+            .iter()
+            .filter(|t| t.chat == *chat && !matches!(t.state, ScheduledState::Sent { .. }))
+            .map(|t| StripItem {
+                key: StripKey::Gateway(t.id.clone()),
+                at_ms: t.send_at_ms,
+                body: t.text.clone(),
+                failed: matches!(t.state, ScheduledState::Failed { .. }),
+            })
+            .collect(),
+    };
+    items.sort_by_key(|i| i.at_ms);
+    items
+}
+
+/// Puts `item` into the gateway list, replacing the same id.
+pub fn upsert_remote(list: &mut Vec<ScheduledText>, item: ScheduledText) {
+    match list.iter_mut().find(|t| t.id == item.id) {
+        Some(slot) => *slot = item,
+        None => list.push(item),
+    }
+}
+
+/// A one-line preview of the text being scheduled.
+pub fn preview(body: &str) -> String {
+    const MAX: usize = 60;
+    let line = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.chars().count() <= MAX {
+        return line;
+    }
+    let cut: String = line.chars().take(MAX).collect();
+    format!("{cut}…")
+}
+
+// ---- GPUI: the sheet ----------------------------------------------------------
+
+/// The "Send later" sheet of [`MessagesApp`].
+pub struct ScheduleSheet {
+    pub sheet: Sheet,
+    draft: Option<Draft>,
+    custom: Entity<TextField>,
+    error: Option<SharedString>,
+}
+
+impl ScheduleSheet {
+    pub fn new(cx: &mut Context<MessagesApp>) -> Self {
+        let custom =
+            cx.new(|cx| TextField::with_input(TextInputPurpose::Text, TextInputAction::Done, cx));
+        // Typing redraws the field box.
+        cx.observe(&custom, |_, _, cx| cx.notify()).detach();
+        Self {
+            sheet: Sheet::new(),
+            draft: None,
+            custom,
+            error: None,
+        }
+    }
+
+    pub fn open(&mut self, draft: Draft, cx: &mut Context<MessagesApp>) {
+        self.draft = Some(draft);
+        self.error = None;
+        self.custom.update(cx, |field, cx| field.clear(cx));
+        self.sheet.open();
+    }
+
+    pub fn close(&mut self) {
+        self.sheet.close();
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.sheet.is_open()
+    }
+
+    pub fn draft(&self) -> Option<&Draft> {
+        self.draft.as_ref()
+    }
+
+    pub fn custom_text(&self, cx: &gpui::App) -> String {
+        self.custom.read(cx).text().to_owned()
+    }
+
+    pub fn set_error(&mut self, error: impl Into<SharedString>) {
+        self.error = Some(error.into());
+    }
+
+    /// The sheet over the page, or `None` once it is gone.
+    pub fn render(
+        &self,
+        theme: Theme,
+        window: &Window,
+        now_ms: i64,
+        tz_offset_s: i32,
+        cx: &mut Context<MessagesApp>,
+    ) -> Option<AnyElement> {
+        let draft = self.draft.as_ref()?;
+        let colors = theme::colors(theme);
+        let mut body = div().flex().flex_col().pb(px(12.0)).child(
+            div()
+                .px(px(20.0))
+                .pb(px(8.0))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(typography::TITLE3.size)
+                        .font_weight(typography::TITLE3.weight)
+                        .text_color(colors.label)
+                        .child("Send later"),
+                )
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(typography::SUBHEADLINE.size)
+                        .text_color(colors.secondary_label)
+                        .child(preview(&draft.body)),
+                ),
+        );
+        for (index, (label, at_ms)) in schedule::quick_times(now_ms, tz_offset_s)
+            .into_iter()
+            .enumerate()
+        {
+            body = body.child(
+                list_row(
+                    theme,
+                    None,
+                    label,
+                    Some(when_label(at_ms, now_ms, tz_offset_s).into()),
+                    None,
+                )
+                .id(("sched-quick", index))
+                .on_click(cx.listener(move |this, _, _, cx| this.schedule_at(at_ms, cx))),
+            );
+        }
+        let custom = div()
+            .px(px(16.0))
+            .pt(px(10.0))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(div().flex_1().min_w_0().child(field_box(
+                theme,
+                "sched-custom",
+                &self.custom,
+                "18:30 or 2026-12-31 09:00",
+                window,
+                cx,
+            )))
+            .child(
+                glass_pill(theme, "Schedule")
+                    .id("sched-custom-go")
+                    .on_click(cx.listener(|this, _, _, cx| this.schedule_custom(cx))),
+            );
+        body = body.child(custom);
+        if let Some(error) = self.error.clone() {
+            body = body.child(
+                div()
+                    .px(px(20.0))
+                    .pt(px(6.0))
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.red)
+                    .child(error),
+            );
+        }
+        let entity = cx.entity();
+        let drag = entity.clone();
+        self.sheet.render(
+            theme,
+            window,
+            "Send later",
+            body,
+            move |_, cx| entity.update(cx, |this, cx| this.close_schedule(cx)),
+            move |phase, y, _, cx| {
+                drag.update(cx, |this, cx| {
+                    this.schedule.sheet.drag_touch(phase, y);
+                    cx.notify();
+                });
+            },
+        )
+    }
+}
+
+/// The Scheduled strip above a composer: what still waits, each with Cancel.
+pub fn strip<V: 'static>(
+    theme: Theme,
+    items: &[StripItem],
+    now_ms: i64,
+    tz_offset_s: i32,
+    cx: &mut Context<V>,
+    on_cancel: fn(&mut V, StripKey, &mut Context<V>),
+) -> Option<AnyElement> {
+    if items.is_empty() {
+        return None;
+    }
+    let colors = theme::colors(theme);
+    let mut out = div()
+        .flex_none()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .px(px(16.0))
+        .pb(px(4.0))
+        .child(
+            div()
+                .text_size(typography::CAPTION.size)
+                .text_color(colors.secondary_label)
+                .child("Scheduled"),
+        );
+    for (index, item) in items.iter().take(STRIP_ROWS).enumerate() {
+        let key = item.key.clone();
+        let when = when_label(item.at_ms, now_ms, tz_offset_s);
+        let line = if item.failed {
+            format!("Not sent · {}", preview(&item.body))
+        } else {
+            format!("{when} · {}", preview(&item.body))
+        };
+        out = out.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(typography::FOOTNOTE.size)
+                        .text_color(if item.failed {
+                            colors.red
+                        } else {
+                            colors.label
+                        })
+                        .child(line),
+                )
+                .child(
+                    glass_pill(theme, "Cancel")
+                        .id(("sched-cancel", index))
+                        .h(px(30.0))
+                        .px(px(12.0))
+                        .text_size(typography::FOOTNOTE.size)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            on_cancel(this, key.clone(), cx);
+                        })),
+                ),
+        );
+    }
+    if items.len() > STRIP_ROWS {
+        out = out.child(
+            div()
+                .text_size(typography::CAPTION.size)
+                .text_color(colors.tertiary_label)
+                .child(format!("and {} more", items.len() - STRIP_ROWS)),
+        );
+    }
+    Some(out.into_any_element())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 2026-11-05 12:00:00 UTC.
+    const NOW: i64 = 1_793_880_000_000;
+
+    fn sms_item(id: u64, at_ms: i64, to: &str) -> ScheduledSms {
+        ScheduledSms {
+            id,
+            at_ms,
+            target: ScheduleTarget::Sms {
+                to: to.into(),
+                sub_id: Some(2),
+            },
+            body: "hi".into(),
+            created_ms: NOW,
+        }
+    }
+
+    fn remote(id: &str, chat: &str, at_ms: i64, state: ScheduledState) -> ScheduledText {
+        ScheduledText {
+            id: id.into(),
+            chat: chat.into(),
+            text: "later".into(),
+            send_at_ms: at_ms,
+            created_ms: NOW,
+            state,
+        }
+    }
+
+    #[test]
+    fn custom_time_forms() {
+        // 12:00 UTC now, zone +03:00 (15:00 local).
+        let tz = 3 * 3600;
+        let today_1800 = parse_custom("18:00", NOW, tz).expect("ok");
+        assert_eq!(today_1800, NOW + 3 * 3_600_000);
+        // 09:00 has passed locally: tomorrow.
+        let tomorrow_0900 = parse_custom(" 9:00 ", NOW, tz).expect("ok");
+        assert_eq!(tomorrow_0900, NOW + 18 * 3_600_000);
+        assert_eq!(
+            parse_custom("2026-11-06 09:00", NOW, tz).expect("ok"),
+            tomorrow_0900
+        );
+        // Under a minute away today rolls to tomorrow; a past date is refused.
+        assert_eq!(
+            parse_custom("15:00", NOW, tz).expect("ok"),
+            NOW + 24 * 3_600_000
+        );
+        assert!(parse_custom("2026-11-05 15:00", NOW, tz).is_err());
+        assert!(parse_custom("2026-11-05 14:00", NOW, tz).is_err());
+    }
+
+    #[test]
+    fn custom_time_rejects_nonsense() {
+        for bad in [
+            "",
+            "soon",
+            "25:00",
+            "12:60",
+            "2026-02-30 10:00",
+            "2026-13-01 10:00",
+            "2026-11 10:00",
+            "2026-11-06-01 10:00",
+            "10",
+        ] {
+            assert!(parse_custom(bad, NOW, 0).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn dates_convert_both_ways() {
+        for days in [-1, 0, 59, 60, 11_000, 20_397, 20_500] {
+            let (y, m, d) = civil_from_days(days);
+            assert_eq!(
+                days_from_civil(y, i64::try_from(m).expect("ok"), d),
+                Some(days)
+            );
+        }
+        assert_eq!(days_from_civil(2024, 2, 29), Some(19_782));
+        assert_eq!(days_from_civil(2025, 2, 29), None);
+    }
+
+    #[test]
+    fn labels_name_the_day() {
+        let tz = 3 * 3600;
+        assert_eq!(when_label(NOW + 3 * 3_600_000, NOW, tz), "Today 18:00");
+        assert_eq!(when_label(NOW + 18 * 3_600_000, NOW, tz), "Tomorrow 09:00");
+        assert_eq!(when_label(NOW + 7 * 24 * 3_600_000, NOW, 0), "12 Nov 12:00");
+    }
+
+    #[test]
+    fn ids_never_collide_with_the_queue() {
+        assert_eq!(next_schedule_id(&[], 500), 500);
+        assert_eq!(next_schedule_id(&[sms_item(900, 1, "+1")], 500), 901);
+        assert_eq!(next_schedule_id(&[sms_item(9, 1, "+1")], 500), 500);
+        assert_eq!(next_schedule_id(&[], -5), 0);
+    }
+
+    #[test]
+    fn arm_payload_is_sms_only() {
+        let json = arm_json(&sms_item(4, 99, "+905321234567")).expect("ok");
+        let v: serde_json::Value = serde_json::from_str(&json).expect("ok");
+        assert_eq!(v["id"], 4);
+        assert_eq!(v["at_ms"], 99);
+        assert_eq!(v["to"], "+905321234567");
+        assert_eq!(v["body"], "hi");
+        assert_eq!(v["sub_id"], 2);
+        let wa = ScheduledSms {
+            target: ScheduleTarget::WhatsApp {
+                chat: "a@s.whatsapp.net".into(),
+            },
+            ..sms_item(5, 1, "")
+        };
+        assert_eq!(arm_json(&wa), None);
+    }
+
+    #[test]
+    fn fired_list_parses_and_survives_junk() {
+        let fired = parse_fired(r#"[{"id":3,"ok":true,"at_ms":9},{"id":4,"ok":false,"at_ms":10}]"#);
+        assert_eq!(fired.len(), 2);
+        assert!(fired[0].ok && !fired[1].ok);
+        assert!(parse_fired("nope").is_empty());
+        assert!(parse_fired("[]").is_empty());
+    }
+
+    #[test]
+    fn strip_lists_this_conversations_waiting_items() {
+        let local = [
+            sms_item(2, NOW + 2000, "0532 123 45 67"),
+            sms_item(1, NOW + 1000, "+90 532 123 45 67"),
+            sms_item(3, NOW + 500, "+14155550100"),
+        ];
+        let items = strip_items(&StripTarget::Sms(vec!["+905321234567".into()]), &local, &[]);
+        let keys: Vec<_> = items.iter().map(|i| i.key.clone()).collect();
+        assert_eq!(keys, vec![StripKey::Local(1), StripKey::Local(2)]);
+
+        let chat = "90532@s.whatsapp.net";
+        let list = vec![
+            remote("a", chat, NOW + 20, ScheduledState::Pending),
+            remote(
+                "b",
+                chat,
+                NOW + 10,
+                ScheduledState::Failed { reason: "x".into() },
+            ),
+            remote(
+                "c",
+                chat,
+                NOW + 5,
+                ScheduledState::Sent {
+                    message_id: "M".into(),
+                },
+            ),
+            remote("d", "other@s.whatsapp.net", NOW, ScheduledState::Pending),
+        ];
+        let items = strip_items(&StripTarget::WhatsApp(chat.into()), &local, &list);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].key, StripKey::Gateway("b".into()));
+        assert!(items[0].failed && !items[1].failed);
+    }
+
+    #[test]
+    fn upsert_replaces_by_id() {
+        let mut list = vec![remote("a", "c", 1, ScheduledState::Pending)];
+        upsert_remote(
+            &mut list,
+            remote(
+                "a",
+                "c",
+                1,
+                ScheduledState::Sent {
+                    message_id: "M".into(),
+                },
+            ),
+        );
+        upsert_remote(&mut list, remote("b", "c", 2, ScheduledState::Pending));
+        assert_eq!(list.len(), 2);
+        assert!(matches!(list[0].state, ScheduledState::Sent { .. }));
+    }
+
+    #[test]
+    fn preview_collapses_and_cuts() {
+        assert_eq!(preview("a\n  b"), "a b");
+        let long = "x".repeat(100);
+        assert_eq!(preview(&long).chars().count(), 61);
+        assert!(preview(&long).ends_with('…'));
+    }
+}

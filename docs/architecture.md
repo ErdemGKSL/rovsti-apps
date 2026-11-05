@@ -64,6 +64,36 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS` for favorites); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
 | Stops | none | foreground `location` service feeding fixes to `rovsti_geo::Trip`, full-screen alarm activity, exact alarm as a fallback |
 
+### Messages: decisions (AD-MSG1 to AD-MSG8)
+
+- **AD-MSG1 Pure first.** SMS wire types, the unified inbox merge, the SMS timeline, the MMS
+  PDU codec, OTP, spam rules, the schedule queue, the notification digest and the backup
+  archive are `rovsti_core` modules with unit tests. GPUI and Kotlin only map.
+- **AD-MSG2 SMS lives in the provider.** Messages keeps no SMS database. Rust pulls through
+  `rovsti_android::sms` (JSON envelopes, off the UI thread) and pulls again on `sms_changed`.
+- **AD-MSG3 One person, one inbox row.** The key is the contact id when the number matches a
+  contact, else the canonical number; a WhatsApp chat joins by its JID's number. Groups never
+  merge.
+- **AD-MSG4, AD-MSG5** Cold paths and WhatsApp notifications, below.
+- **AD-MSG6 Scheduled send.** SMS: the local queue (`scheduled.json`) plus one Android alarm
+  per item, sent by Kotlin when it fires; the app settles what fired with `sms::pull_fired`
+  on start and on `scheduled_fired`. WhatsApp: the gateway owns the item (`POST /v1/scheduled`).
+  The sheet is opened by a long press on Send (right click on desktop) and every conversation
+  lists what still waits in a Scheduled strip, local and gateway items together.
+- **AD-MSG7 Encrypted backup.** `RMB1`: PBKDF2-HMAC-SHA256 (600 000 rounds), AES-256-GCM,
+  header as AAD. Salt and nonce come from `getrandom` in the app, so `msg_backup` stays
+  pure. The archive is written under the data dir and handed to the system "save as" by path;
+  import runs the other way, shows a restore preview, then `sms::insert_restored`. The
+  WhatsApp link key is never in a backup.
+- **AD-MSG8 Spam is on-device.** Block list (system blocklist), user rules, an allow list and
+  a fixed scorer, all in `messages-prefs.json`; the same file is what the cold receivers read.
+  Spam goes to a Spam folder and is never deleted or announced loudly.
+
+While attached, the app tells Kotlin (`uiAttached(true)`) and posts notifications itself:
+`notifications::should_notify` filters (not mine, not the open chat), a per-conversation digest
+feeds `rovsti_core::notify::build`, and `msg_reply` events go out through the channel the
+notification came from.
+
 ### Messages: cold paths (AD-MSG4, AD-MSG5)
 
 - **AD-MSG4 Cold paths stay in Kotlin, logic stays in Rust.** An SMS can arrive, an inline

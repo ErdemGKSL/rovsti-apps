@@ -26,6 +26,8 @@ use rovsti_ui::{
     tokens::{Theme, radius, typography},
 };
 use rovsti_wa_client::Gateway;
+
+use crate::schedule_ui::{self, StripItem, StripKey};
 use rovsti_wa_proto::{
     ChatState, GatewayEvent, Item, ItemState, MarkRead, MediaKind, MessageBody, SendReaction,
     SendText, Timeline, TypingState, TypingThrottle, day_breaks, jid_user, reaction_chips,
@@ -50,6 +52,12 @@ pub enum ConversationEvent {
     Back,
     /// The header's channel switch was tapped: open the person's other thread.
     Switch(ThreadId),
+    /// Long-press on Send: the text wants a time (the "Send later" sheet).
+    Schedule(String),
+    /// Cancel on a Scheduled strip row.
+    CancelScheduled(StripKey),
+    /// The header's bell: mute or unmute this chat's notifications.
+    ToggleMute,
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
@@ -85,6 +93,9 @@ pub struct Conversation {
     locale: LocaleTime,
     /// The same person's other thread, shown as a header pill.
     switch: Option<(ThreadId, crate::inbox::Badge)>,
+    /// Waiting scheduled sends of this chat, set by the page.
+    scheduled: Vec<StripItem>,
+    muted: bool,
 }
 
 impl Conversation {
@@ -123,12 +134,42 @@ impl Conversation {
             presence: None,
             locale,
             switch: None,
+            scheduled: Vec::new(),
+            muted: false,
         };
         this.load(None, cx);
         if !this.is_group {
             this.subscribe_presence(cx);
         }
         this
+    }
+
+    pub fn set_scheduled(&mut self, scheduled: Vec<StripItem>, cx: &mut Context<Self>) {
+        if self.scheduled != scheduled {
+            self.scheduled = scheduled;
+            cx.notify();
+        }
+    }
+
+    pub fn set_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
+        if self.muted != muted {
+            self.muted = muted;
+            cx.notify();
+        }
+    }
+
+    /// The text was scheduled: the composer is done with it.
+    pub fn clear_draft(&mut self, cx: &mut Context<Self>) {
+        self.composer.update(cx, |field, cx| field.clear(cx));
+        self.last_text.clear();
+    }
+
+    /// Long-press (or right-click) on Send. Only a typed text can wait.
+    fn request_schedule(&mut self, cx: &mut Context<Self>) {
+        let text = self.composer.read(cx).text().trim().to_owned();
+        if !text.is_empty() {
+            cx.emit(ConversationEvent::Schedule(text));
+        }
     }
 
     pub fn set_locale(&mut self, locale: LocaleTime, cx: &mut Context<Self>) {
@@ -412,6 +453,15 @@ impl Conversation {
         }
         self.composer.update(cx, |field, cx| field.clear(cx));
         self.last_text.clear();
+        self.send_text(text, cx);
+    }
+
+    /// Sends `text` now: the composer's, or one typed into a notification.
+    pub fn send_text(&mut self, text: String, cx: &mut Context<Self>) {
+        let text = text.trim().to_owned();
+        if text.is_empty() {
+            return;
+        }
         if self.throttle.on_send() {
             self.send_chat_state(TypingState::Paused, cx);
         }
@@ -809,7 +859,32 @@ impl Render for Conversation {
                 }))
                 .into_any_element()
         });
-        let header = header_bar(theme, back, self.title.clone(), self.subtitle(now), switch);
+        let mute = glass_icon_button(theme, Icon::LucideBellOff, 0.0, self.muted)
+            .id("conv-mute")
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::ToggleMute)))
+            .into_any_element();
+        let trailing = div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .children(switch)
+            .child(mute)
+            .into_any_element();
+        let header = header_bar(
+            theme,
+            back,
+            self.title.clone(),
+            self.subtitle(now),
+            Some(trailing),
+        );
+        let strip = schedule_ui::strip(
+            theme,
+            &self.scheduled,
+            now,
+            offset,
+            cx,
+            |_: &mut Self, key, cx| cx.emit(ConversationEvent::CancelScheduled(key)),
+        );
 
         let field = div()
             .flex_1()
@@ -828,6 +903,11 @@ impl Render for Conversation {
         let send = glass_icon_button(theme, Icon::LucideArrowUp, 0.0, false)
             .id("conv-send")
             .on_click(cx.listener(|this, _, _, cx| this.send(cx)))
+            .on_long_press(cx.listener(|this, _, _, cx| this.request_schedule(cx)))
+            .on_mouse_down(
+                gpui::MouseButton::Right,
+                cx.listener(|this, _, _, cx| this.request_schedule(cx)),
+            )
             .into_any_element();
         let composer = composer_bar(keyboard, None, field, send);
 
@@ -855,6 +935,7 @@ impl Render for Conversation {
                             .children(rows),
                     ),
             )
+            .children(strip)
             .child(composer)
     }
 }

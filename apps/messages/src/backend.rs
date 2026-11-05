@@ -12,7 +12,7 @@
 pub mod preview;
 
 use std::{
-    collections::HashMap,
+    collections::HashSet,
     path::PathBuf,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -30,17 +30,26 @@ use rovsti_android::{
 use rovsti_core::{
     blocklist::BlockSet,
     recents::LocaleTime,
+    schedule::{ScheduleError, ScheduleQueue, ScheduledSms},
     search::ContactIndex,
     sms::{
-        DeliveryState, SmsMessagesPayload, SmsSend, SmsSimsPayload, SmsStatus, SmsThreadRow,
-        SmsThreadsPayload,
+        DeliveryState, MmsRow, SmsMessagesPayload, SmsRow, SmsSend, SmsSimsPayload, SmsStatus,
+        SmsThreadRow, SmsThreadsPayload,
     },
-    spam::{SpamRule, SpamRules},
-    wire::{BlocklistPayload, ContactsPayload, DocumentOp, DocumentResult, Envelope, WireError},
+    spam::SpamRules,
+    wire::{
+        BlockedNumber, BlocklistPayload, ContactsPayload, DocumentOp, DocumentResult, Envelope,
+        WireError,
+    },
 };
 use rovsti_ui::storage;
 use serde::de::DeserializeOwned;
 
+use crate::{
+    notifications::{OpenTag, Reply, SmsReceived},
+    prefs::MessagesPrefs,
+    schedule_ui::{arm_json, parse_fired},
+};
 use preview::Preview;
 
 /// How many threads the inbox pulls.
@@ -49,8 +58,11 @@ const THREAD_LIMIT: usize = 500;
 /// The largest picture the attach button copies into the cache.
 const ATTACH_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
-/// Per-thread SIM choices, next to the WhatsApp link in the app's data dir.
-const SIM_FILE: &str = "sim-choices.json";
+/// The local scheduled-SMS queue, next to the preferences.
+const QUEUE_FILE: &str = "scheduled.json";
+
+/// Rows per provider page while a backup reads whole threads.
+const SNAPSHOT_PAGE: usize = 500;
 
 /// What the backend tells its listeners. State changes arrive by `notify`.
 #[derive(Clone, Debug)]
@@ -63,6 +75,14 @@ pub enum BackendEvent {
     Document(DocumentResult),
     /// An FCM wake-up for WhatsApp: the app reconnects its event stream.
     WaPush,
+    /// An SMS arrived while the UI is attached: the app decides on a notification.
+    SmsReceived(SmsReceived),
+    /// Text typed into a notification's reply box.
+    Reply(Reply),
+    /// A notification was tapped (its tag).
+    OpenThread(String),
+    /// Something the user should be told in a pill.
+    Notice(String),
 }
 
 impl EventEmitter<BackendEvent> for Backend {}
@@ -115,14 +135,6 @@ pub fn sim_for(sims: &SmsSimsPayload, remembered: Option<i32>) -> Option<i32> {
         .or_else(|| (sims.sims.len() == 1).then(|| sims.sims[0].sub_id))
 }
 
-/// The rules the app starts with: only unknown senders' links go to Spam.
-pub fn default_spam_rules() -> SpamRules {
-    SpamRules {
-        rules: vec![SpamRule::UnknownWithLink],
-        ..SpamRules::default()
-    }
-}
-
 pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -148,13 +160,18 @@ pub struct Backend {
     locale: LocaleTime,
     /// `None` until the first answer (the banner stays hidden meanwhile).
     sms_role: Option<bool>,
-    spam: SpamRules,
+    prefs: MessagesPrefs,
+    /// Scheduled SMS waiting for their alarm (`scheduled.json`).
+    queue: ScheduleQueue,
     blocked: Arc<BlockSet>,
+    blocked_rows: Vec<BlockedNumber>,
+    /// A write of the prefs and the queue is running; another is due after it.
+    saving: bool,
+    save_due: bool,
     /// Sample data, on desktop only.
     preview: Option<Preview>,
     preview_sims: u32,
     preview_role: bool,
-    sim_choices: HashMap<i64, i32>,
     data_dir: Option<PathBuf>,
     next_local: u64,
     pulls: Pulls,
@@ -176,15 +193,18 @@ impl Backend {
                 contacts: Arc::new(ContactIndex::default()),
                 locale: LocaleTime::default(),
                 sms_role: None,
-                spam: default_spam_rules(),
+                prefs: MessagesPrefs::default(),
+                queue: ScheduleQueue::default(),
                 blocked: Arc::new(BlockSet::default()),
+                blocked_rows: Vec::new(),
+                saving: false,
+                save_due: false,
                 preview: desktop.then(|| Preview::new(now_ms())),
                 preview_sims: std::env::var("ROVSTI_PREVIEW_SIMS")
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(2),
                 preview_role: std::env::var_os("ROVSTI_PREVIEW_NO_ROLE").is_none(),
-                sim_choices: HashMap::new(),
                 data_dir: None,
                 next_local: 1,
                 pulls: Pulls::default(),
@@ -210,22 +230,45 @@ impl Backend {
                     }
                 };
                 let read_from = dir.clone();
-                let saved =
-                    cx.background_executor()
-                        .spawn(async move {
-                            storage::load_json::<HashMap<i64, i32>>(&read_from, SIM_FILE)
-                        })
-                        .await;
+                let saved = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let prefs = MessagesPrefs::load(&read_from);
+                        let queue = storage::load_json::<ScheduleQueue>(&read_from, QUEUE_FILE)
+                            .map(|q| ScheduleQueue::from_json(&q.to_json()))
+                            .unwrap_or_default();
+                        (prefs, queue)
+                    })
+                    .await;
                 this.update(cx, |this: &mut Backend, cx| {
                     this.data_dir = Some(dir);
-                    // A choice made before the file was read is newer.
-                    for (thread, sub) in saved.unwrap_or_default() {
-                        this.sim_choices.entry(thread).or_insert(sub);
+                    // A change made before the files were read is newer.
+                    if !this.save_due {
+                        (this.prefs, this.queue) = saved;
+                    }
+                    if this.save_due {
+                        this.save_due = false;
+                        this.persist(cx);
                     }
                     cx.notify();
+                    this.reconcile_fired(cx);
                 })
                 .ok();
             });
+            // Tell Kotlin the session is live: it stops posting its own
+            // digests and hands over what queued while no UI was attached.
+            let attach = cx.background_executor().spawn(async {
+                if let Err(error) = rovsti_android::window::ui_attached(true)
+                    && !matches!(error, Error::Unsupported)
+                {
+                    log::debug!("uiAttached failed: {error}");
+                }
+            });
+            attach.detach();
+            cx.on_release(move |_, _| {
+                let _ = rovsti_android::window::ui_attached(false);
+            })
+            .detach();
             backend._tasks = vec![drain, dir];
             backend.refresh_all(cx);
             backend
@@ -261,7 +304,24 @@ impl Backend {
     }
 
     pub fn spam_rules(&self) -> &SpamRules {
-        &self.spam
+        &self.prefs.spam
+    }
+
+    pub fn prefs(&self) -> &MessagesPrefs {
+        &self.prefs
+    }
+
+    pub fn queue(&self) -> &ScheduleQueue {
+        &self.queue
+    }
+
+    /// The app's private data directory, once it is known.
+    pub fn data_dir(&self) -> Option<&std::path::Path> {
+        self.data_dir.as_deref()
+    }
+
+    pub fn blocked_rows(&self) -> &[BlockedNumber] {
+        &self.blocked_rows
     }
 
     pub fn blocked(&self) -> &Arc<BlockSet> {
@@ -273,7 +333,7 @@ impl Backend {
     }
 
     pub fn sim_choice(&self, thread_id: i64) -> Option<i32> {
-        self.sim_choices.get(&thread_id).copied()
+        self.prefs.sim_choices.get(&thread_id).copied()
     }
 
     pub fn next_local_id(&mut self) -> u64 {
@@ -465,8 +525,14 @@ impl Backend {
                     return;
                 }
                 match pulled {
-                    Pull::Ready(p) => this.blocked = Arc::new(BlockSet::from_rows(&p.numbers)),
-                    Pull::Denied | Pull::Unsupported => this.blocked = Arc::default(),
+                    Pull::Ready(p) => {
+                        this.blocked = Arc::new(BlockSet::from_rows(&p.numbers));
+                        this.blocked_rows = p.numbers;
+                    }
+                    Pull::Denied | Pull::Unsupported => {
+                        this.blocked = Arc::default();
+                        this.blocked_rows.clear();
+                    }
                     Pull::Failed(error) => log::warn!("pulling the blocklist failed: {error}"),
                 }
                 cx.notify();
@@ -516,6 +582,19 @@ impl Backend {
                 Err(error) => log::warn!("unreadable document_result: {error}"),
             },
             kind::WA_PUSH => cx.emit(BackendEvent::WaPush),
+            kind::SMS_RECEIVED => match serde_json::from_str::<SmsReceived>(&event.json) {
+                Ok(received) => cx.emit(BackendEvent::SmsReceived(received)),
+                Err(error) => log::warn!("unreadable sms_received: {error}"),
+            },
+            kind::MSG_REPLY => match serde_json::from_str::<Reply>(&event.json) {
+                Ok(reply) => cx.emit(BackendEvent::Reply(reply)),
+                Err(error) => log::warn!("unreadable msg_reply: {error}"),
+            },
+            kind::OPEN_THREAD => match serde_json::from_str::<OpenTag>(&event.json) {
+                Ok(open) => cx.emit(BackendEvent::OpenThread(open.tag)),
+                Err(error) => log::warn!("unreadable open_thread: {error}"),
+            },
+            kind::SCHEDULED_FIRED => self.reconcile_fired(cx),
             _ => {}
         }
     }
@@ -573,21 +652,170 @@ impl Backend {
     }
 
     pub fn remember_sim(&mut self, thread_id: i64, sub_id: i32, cx: &mut Context<Self>) {
-        if self.sim_choices.get(&thread_id) == Some(&sub_id) {
+        if self.prefs.sim_choices.get(&thread_id) == Some(&sub_id) {
             return;
         }
-        self.sim_choices.insert(thread_id, sub_id);
+        self.update_prefs(cx, |prefs| {
+            prefs.sim_choices.insert(thread_id, sub_id);
+        });
+    }
+
+    // ---- preferences and the schedule queue ---------------------------------
+
+    /// Applies `edit` to the preferences, tells the views and saves the file.
+    pub fn update_prefs(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut MessagesPrefs)) {
+        edit(&mut self.prefs);
+        cx.notify();
+        self.persist(cx);
+    }
+
+    /// Writes the preferences and the queue off the UI thread. Writes never
+    /// overlap: one that is asked for while another runs follows it.
+    fn persist(&mut self, cx: &mut Context<Self>) {
         let Some(dir) = self.data_dir.clone() else {
+            // The directory is not known yet: the load applies this change.
+            self.save_due = true;
             return;
         };
-        let choices = self.sim_choices.clone();
+        if self.saving {
+            self.save_due = true;
+            return;
+        }
+        self.saving = true;
+        self.save_due = false;
+        let (prefs, queue) = (self.prefs.clone(), self.queue.clone());
+        let task = cx.background_executor().spawn(async move {
+            prefs
+                .save(&dir)
+                .and_then(|()| storage::save_json(&dir, QUEUE_FILE, &queue))
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.saving = false;
+                if let Err(error) = result {
+                    log::warn!("saving the Messages preferences failed: {error}");
+                }
+                if this.save_due {
+                    this.persist(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Queues a scheduled SMS and arms its alarm. When Android refuses the
+    /// alarm the item leaves the queue again and the user is told.
+    pub fn schedule_sms(
+        &mut self,
+        item: ScheduledSms,
+        cx: &mut Context<Self>,
+    ) -> Result<(), ScheduleError> {
+        self.queue.add(item.clone())?;
+        self.persist(cx);
+        cx.notify();
+        let Some(json) = arm_json(&item) else {
+            return Ok(());
+        };
+        let task = cx
+            .background_executor()
+            .spawn(async move { sms::arm_scheduled(&json) });
+        let id = item.id;
+        cx.spawn(async move |this, cx| {
+            let armed = task.await;
+            this.update(cx, |this, cx| match armed {
+                // Desktop has no alarm service: the preview keeps the item.
+                Ok(true) | Err(Error::Unsupported) => {}
+                Ok(false) | Err(_) => {
+                    this.queue.cancel(id);
+                    this.persist(cx);
+                    cx.emit(BackendEvent::Notice(
+                        "Couldn't schedule that message".into(),
+                    ));
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+        Ok(())
+    }
+
+    /// Cancels a scheduled SMS: out of the queue now, the alarm after.
+    pub fn cancel_scheduled(&mut self, id: u64, cx: &mut Context<Self>) {
+        if !self.queue.cancel(id) {
+            return;
+        }
+        self.persist(cx);
+        cx.notify();
         cx.background_executor()
             .spawn(async move {
-                if let Err(error) = storage::save_json(&dir, SIM_FILE, &choices) {
-                    log::warn!("saving the SIM choices failed: {error}");
+                if let Err(error) = sms::disarm_scheduled(id)
+                    && !matches!(error, Error::Unsupported)
+                {
+                    log::warn!("disarming scheduled message {id} failed: {error}");
                 }
             })
             .detach();
+    }
+
+    /// Settles the sends that fired while no UI looked: they leave the queue
+    /// and failures are announced.
+    pub fn reconcile_fired(&mut self, cx: &mut Context<Self>) {
+        let task = cx.background_executor().spawn(async { sms::pull_fired() });
+        cx.spawn(async move |this, cx| {
+            let raw = task.await;
+            this.update(cx, |this, cx| {
+                let fired = match raw {
+                    Ok(json) => parse_fired(&json),
+                    Err(Error::Unsupported) => return,
+                    Err(error) => {
+                        log::warn!("pulling fired scheduled sends failed: {error}");
+                        return;
+                    }
+                };
+                if fired.is_empty() {
+                    return;
+                }
+                let failed = this.queue.reconcile(&fired);
+                this.persist(cx);
+                if !failed.is_empty() {
+                    let many = failed.len() != 1;
+                    cx.emit(BackendEvent::Notice(format!(
+                        "{} scheduled message{} couldn't be sent",
+                        failed.len(),
+                        if many { "s" } else { "" }
+                    )));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    // ---- reading everything (backup) ----------------------------------------
+
+    /// Every SMS and MMS row of every thread, off the UI thread.
+    pub fn snapshot(&self, cx: &App) -> Task<Result<Rows, String>> {
+        let ids: Vec<i64> = self.threads.iter().map(|t| t.thread_id).collect();
+        if let Some(preview) = &self.preview {
+            let result = collect_all(&ids, |thread, before| {
+                Ok(preview.messages(thread, before, SNAPSHOT_PAGE))
+            });
+            return Task::ready(result);
+        }
+        cx.background_executor().spawn(async move {
+            collect_all(&ids, |thread, before| {
+                match decode::<SmsMessagesPayload>(sms::messages(thread, before, SNAPSHOT_PAGE)) {
+                    Pull::Ready(page) => Ok(page),
+                    Pull::Denied => Err("SMS access is off".to_owned()),
+                    Pull::Unsupported => Err("this needs an Android phone".to_owned()),
+                    Pull::Failed(error) => Err(error),
+                }
+            })
+        })
     }
 
     /// Sends a text. Progress arrives as [`BackendEvent::Status`].
@@ -598,6 +826,32 @@ impl Backend {
             .background_executor()
             .spawn(async move { sms::send(&req) });
         self.settle_send(local_id, to, body, sub_id, task, cx);
+    }
+
+    /// Sends text typed into a notification to a thread nobody has open: the
+    /// provider's own row appears on the next `sms_changed`.
+    pub fn reply_sms(&mut self, thread_id: i64, text: String, cx: &mut Context<Self>) {
+        let to = self
+            .threads
+            .iter()
+            .find(|t| t.thread_id == thread_id)
+            .map(|t| t.addresses.clone())
+            .unwrap_or_default();
+        if to.is_empty() || !self.sms_role_held() {
+            cx.emit(BackendEvent::Notice("The reply was not sent".into()));
+            return;
+        }
+        let sub_id = sim_for(&self.sims, self.sim_choice(thread_id));
+        let local_id = self.next_local_id();
+        self.send_sms(
+            SmsSend {
+                local_id,
+                to,
+                body: text,
+                sub_id,
+            },
+            cx,
+        );
     }
 
     /// Sends an MMS with an optional picture (a path the app can read).
@@ -720,6 +974,51 @@ impl Backend {
     }
 }
 
+/// Every SMS and MMS row of a backup or a restore comparison.
+pub type Rows = (Vec<SmsRow>, Vec<MmsRow>);
+
+/// Pages through every thread with `fetch(thread, before_ms)` and gathers the
+/// rows once each. A page is asked again from just after its oldest stamp so
+/// rows that share it are not skipped; a page with nothing new ends the thread.
+pub fn collect_all(
+    threads: &[i64],
+    mut fetch: impl FnMut(i64, Option<i64>) -> Result<SmsMessagesPayload, String>,
+) -> Result<Rows, String> {
+    let mut sms_rows: Vec<SmsRow> = Vec::new();
+    let mut mms_rows: Vec<MmsRow> = Vec::new();
+    for &thread in threads {
+        let mut seen_sms: HashSet<i64> = HashSet::new();
+        let mut seen_mms: HashSet<i64> = HashSet::new();
+        let mut before = None;
+        loop {
+            let page = fetch(thread, before)?;
+            let mut fresh = 0usize;
+            let mut oldest: Option<i64> = None;
+            for row in page.sms {
+                oldest = Some(oldest.map_or(row.date_ms, |o| o.min(row.date_ms)));
+                if seen_sms.insert(row.id) {
+                    fresh += 1;
+                    sms_rows.push(row);
+                }
+            }
+            for row in page.mms {
+                oldest = Some(oldest.map_or(row.date_ms, |o| o.min(row.date_ms)));
+                if seen_mms.insert(row.id) {
+                    fresh += 1;
+                    mms_rows.push(row);
+                }
+            }
+            match oldest {
+                Some(oldest) if page.has_older && fresh > 0 => {
+                    before = Some(oldest.saturating_add(1));
+                }
+                _ => break,
+            }
+        }
+    }
+    Ok((sms_rows, mms_rows))
+}
+
 fn documents_import() -> bool {
     matches!(
         rovsti_android::documents::import_file(ATTACH_MAX_BYTES),
@@ -795,11 +1094,56 @@ mod tests {
         ));
     }
 
+    fn page(ids: &[i64], has_older: bool) -> SmsMessagesPayload {
+        SmsMessagesPayload {
+            sms: ids
+                .iter()
+                .map(|&id| SmsRow {
+                    id,
+                    date_ms: id * 10,
+                    ..SmsRow::default()
+                })
+                .collect(),
+            mms: Vec::new(),
+            has_older,
+        }
+    }
+
     #[test]
-    fn the_default_rules_only_catch_unknown_links() {
-        let rules = default_spam_rules();
-        assert!(rules.enabled);
-        assert_eq!(rules.rules, vec![SpamRule::UnknownWithLink]);
+    fn collect_all_pages_until_the_provider_runs_out() {
+        let mut asked = Vec::new();
+        let (sms, mms) = collect_all(&[1, 2], |thread, before| {
+            asked.push((thread, before));
+            Ok(match (thread, before) {
+                // Thread 1: newest page, then the older one (the +1 re-reads row 5).
+                (1, None) => page(&[9, 5], true),
+                (1, Some(51)) => page(&[5, 2], false),
+                (2, None) => page(&[7], false),
+                other => panic!("unexpected {other:?}"),
+            })
+        })
+        .expect("ok");
+        let mut ids: Vec<i64> = sms.iter().map(|r| r.id).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![2, 5, 7, 9], "row 5 is read once");
+        assert!(mms.is_empty());
+        assert_eq!(asked, vec![(1, None), (1, Some(51)), (2, None)]);
+    }
+
+    #[test]
+    fn collect_all_stops_on_a_page_with_nothing_new_and_passes_errors_on() {
+        let pages = collect_all(&[1], |_, _| Ok(page(&[4], true))).expect("ok");
+        assert_eq!(pages.0.len(), 1, "no endless loop on a stuck provider");
+        assert_eq!(
+            collect_all(&[1], |_, _| Err("boom".to_owned())).expect_err("err"),
+            "boom"
+        );
+        assert!(
+            collect_all(&[], |_, _| unreachable!())
+                .expect("ok")
+                .0
+                .is_empty()
+        );
     }
 
     #[test]

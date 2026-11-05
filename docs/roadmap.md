@@ -40,17 +40,25 @@ list in `docs/phone-acceptance.md`.
 
 ## Rovsti Messages
 
-- [ ] SMS/MMS read and write through the Telephony provider once `ROLE_SMS` is held
-- [ ] Conversation view with glass composer, delivery reports and dual-SIM send
-- [ ] Unified inbox: one person shows SMS and WhatsApp threads, matched by number
+- [x] SMS/MMS read and write through the Telephony provider once `ROLE_SMS` is held
+      (done without a device)
+- [x] Conversation view with glass composer, delivery reports and dual-SIM send
+      (done without a device)
+- [x] Unified inbox: one person shows SMS and WhatsApp threads, matched by number
+      (done without a device)
 - [x] WhatsApp through the gateway: link by QR or pairing code, history sync, text,
       media, reactions, groups and presence all run server-side; Messages shows chats
       and live messages from `rovsti_wa_client`
 - [x] WhatsApp conversation view with composer, media and reactions in the UI
 - [x] No foreground service: FCM push wakes the app (needs `google-services.json` in
-      the host, see `docs/android.md`). Notifications with inline reply are still open.
-- [ ] OTP detection and copy, spam filter (on-device rules), scheduled send
-- [ ] Encrypted local backup and export to a user-chosen file
+      the host, see `docs/android.md`)
+- [x] Notifications with inline reply, for SMS and WhatsApp, cold and while the app is
+      open; a bell in each conversation mutes it (done without a device)
+- [x] OTP detection and copy, spam filter (on-device rules, allow list, system
+      blocklist), scheduled send for SMS (alarm) and WhatsApp (gateway), with a
+      Scheduled strip per conversation (done without a device)
+- [x] Encrypted local backup and export to a user-chosen file, and import with a
+      preview (done without a device)
 
 ## WhatsApp gateway (`services/wa_gateway`)
 

@@ -32,3 +32,33 @@ APK: build with `gpuiforge build android` in `apps/messages`. Put `google-servic
 | 14 | `adb logcat` while doing row 4 from a cold process. | No `UnsatisfiedLinkError`. `System.loadLibrary("rovsti_messages")` succeeds in `SmsDeliverReceiver` and the passcode/spam answer is used (row 5 and 7). | | |
 | 15 | Receive a picture message (MMS) with the app force-stopped. | The message is downloaded, stored in the thread with its picture, and a notification shows the text or "Photo". | | |
 | 16 | Share text and a photo to Rovsti Messages from another app, and tap an `sms:` link. | The app opens a new conversation (SMS link) or the chooser for the shared item. | | |
+| **G. Notifications while the app is open** | | | | |
+| 17 | Open the app on the inbox. Have the second phone send an SMS. | One notification from the app itself (no duplicate from Kotlin) with the text, a Reply action and Mark read. | | |
+| 18 | Open that conversation, then receive another SMS. | No notification for the open thread. Leaving the thread and receiving again notifies. | | |
+| 19 | Receive an SMS from a number in your contacts and from an unknown number with a link. | The contact notifies. The unknown link goes to Spam and does not alert. | | |
+| 20 | Tap the bell in a conversation, then receive a message there. | No notification; Settings, Notifications lists it as muted. Tap it there to unmute. | | |
+| 21 | Open a conversation that has a notification. | The notification is removed. | | |
+| 22 | With the app open, reply from an SMS notification and from a WhatsApp notification. | Both go out. If that conversation is open the reply shows in its timeline. | | |
+| **H. Send later** | | | | |
+| 23 | Type text in an SMS conversation and long-press Send. | The "Send later" sheet lists In 1 hour, This evening or Tomorrow evening, and Tomorrow morning, with a custom time field. | | |
+| 24 | Pick a time. | The text leaves the composer, a Scheduled strip shows it with Cancel, and a pill says when. | | |
+| 25 | Type 18:30 or 2026-12-31 09:00 as a custom time; then a time in the past. | The first is accepted; the second shows "Pick a time at least a minute from now". | | |
+| 26 | Cancel the scheduled item from the strip, force stop, wait past its time. | Nothing is sent. | | |
+| 27 | Do the same in a WhatsApp conversation, then close the app. | The strip shows the gateway item; it is sent on time; Cancel removes it. | | |
+| 28 | Schedule an SMS a few minutes ahead, switch to airplane mode through its time, then reopen the app. | A pill says the scheduled message could not be sent, and it is gone from the strip. | | |
+| **I. Settings** | | | | |
+| 29 | Settings tab with Rovsti Messages not default. | "Default SMS app" says Off; tapping it asks for the role. | | |
+| 30 | Add a Sender rule (PROMO*) and a Text contains rule; delete one. | Rules list and persist after a restart. A matching SMS from a non-contact goes to Spam. | | |
+| 31 | Add a sender to the allow list. | Messages from it never go to Spam. | | |
+| 32 | Block a number; unblock it from the list. | It appears in Phone's blocked numbers too, and leaves when unblocked. | | |
+| 33 | Switch off Copy code, then receive "Your code is 482913". | A notification without the Copy action and without Reply. | | |
+| **J. Encrypted backup** | | | | |
+| 34 | Export: type two different passphrases. | "The two passphrases are different." | | |
+| 35 | Export with a short passphrase twice. | The first press warns it is weak; pressing Export again continues. | | |
+| 36 | Export with a strong passphrase and choose a folder. | A `rovsti-messages-YYYYMMDD.rmb` file is saved and the page says so. The file is not readable text. | | |
+| 37 | Import that file with a wrong passphrase. | "Wrong passphrase, or the backup was changed." and the field stays for another try. | | |
+| 38 | Import it with the right passphrase on the same phone. | The preview says 0 messages will be added and N already on this phone. | | |
+| 39 | Delete a thread, import the file again (role held). | The preview lists the missing messages; Restore brings them back, once. | | |
+| 40 | Open the file in a text editor, change a byte, import. | "Wrong passphrase, or the backup was changed." | | |
+| **K. Desktop preview** | | | | |
+| 41 | `cargo run -p rovsti_messages`: open Settings, right-click Send with text in a conversation, export a backup. | Settings sections show; the sheet opens; the export writes `cache/rovsti-messages-*.rmb` in `~/.local/share/rovsti/messages` and the page names the path. | | |

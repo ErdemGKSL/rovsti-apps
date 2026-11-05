@@ -191,6 +191,16 @@ Every add, send and failure publishes `{"type":"scheduled", ...item}` on
 `/v1/events`; clients that do not know the event skip it. A cancel publishes
 nothing, so clients refetch the list when they need to see cancellations.
 
+### How Rovsti Messages uses it
+
+`rovsti_wa_client::Gateway` has `schedule_text(&ScheduleText)`, `scheduled()` and
+`cancel_scheduled(id)`. Long-pressing Send in a WhatsApp chat opens the "Send later"
+sheet (`apps/messages/src/schedule_ui.rs`); the pick becomes a `POST /v1/scheduled`.
+The chat's Scheduled strip lists the pending (and failed) items of that chat from
+`GET /v1/scheduled` and applies `scheduled` events as they arrive; Cancel is
+`DELETE /v1/scheduled/{id}`, and a 404 (it was just sent) only refreshes the list.
+SMS never goes through the gateway: it is queued locally and armed as an Android alarm.
+
 ## Not run here
 
 Nothing in this repository links a real account: linking needs a phone. The unit tests

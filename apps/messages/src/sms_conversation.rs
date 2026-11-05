@@ -29,6 +29,7 @@ use crate::{
     backend::{Backend, BackendEvent, now_ms, sim_for},
     conversation::{clock, composer_bar, day_label, header_bar},
     inbox::Badge,
+    schedule_ui::{self, StripItem, StripKey},
 };
 
 /// Messages per provider page.
@@ -43,6 +44,16 @@ pub enum SmsConversationEvent {
     Back,
     /// The header's channel switch: open the person's other thread.
     Switch(ThreadId),
+    /// Long-press on Send: the text wants a time (the "Send later" sheet).
+    Schedule {
+        to: Vec<String>,
+        body: String,
+        sub_id: Option<i32>,
+    },
+    /// Cancel on a Scheduled strip row.
+    CancelScheduled(StripKey),
+    /// The header's bell: mute or unmute this thread's notifications.
+    ToggleMute,
 }
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
@@ -68,6 +79,9 @@ pub struct SmsConversation {
     /// `local_id -> (text, image path)` of MMS sends, so a retry resends the picture.
     mms_sends: HashMap<u64, (String, String)>,
     switch: Option<(ThreadId, Badge)>,
+    /// Waiting scheduled sends of this thread, set by the page.
+    scheduled: Vec<StripItem>,
+    muted: bool,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -106,6 +120,8 @@ impl SmsConversation {
             awaiting_attachment: false,
             mms_sends: HashMap::new(),
             switch: None,
+            scheduled: Vec::new(),
+            muted: false,
             _subscriptions: subscriptions,
         };
         this.load(None, cx);
@@ -123,6 +139,43 @@ impl SmsConversation {
         }
     }
 
+    pub fn recipients(&self) -> &[String] {
+        &self.recipients
+    }
+
+    pub fn set_scheduled(&mut self, scheduled: Vec<StripItem>, cx: &mut Context<Self>) {
+        if self.scheduled != scheduled {
+            self.scheduled = scheduled;
+            cx.notify();
+        }
+    }
+
+    pub fn set_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
+        if self.muted != muted {
+            self.muted = muted;
+            cx.notify();
+        }
+    }
+
+    /// The text was scheduled: the composer is done with it.
+    pub fn clear_draft(&mut self, cx: &mut Context<Self>) {
+        self.composer.update(cx, |field, cx| field.clear(cx));
+    }
+
+    /// Long-press (or right-click) on Send. Only a typed text can wait.
+    fn request_schedule(&mut self, cx: &mut Context<Self>) {
+        let body = self.composer.read(cx).text().trim().to_owned();
+        if body.is_empty() || !self.backend.read(cx).sms_role_held() {
+            return;
+        }
+        let sub_id = self.current_sim(cx);
+        cx.emit(SmsConversationEvent::Schedule {
+            to: self.recipients.clone(),
+            body,
+            sub_id,
+        });
+    }
+
     fn is_draft(&self) -> bool {
         self.thread_id < 0
     }
@@ -135,7 +188,7 @@ impl SmsConversation {
             BackendEvent::Document(result) if result.op == DocumentOp::ImportMessages => {
                 self.on_attachment(result.ok, result.path.clone(), cx);
             }
-            BackendEvent::Document(_) | BackendEvent::WaPush => {}
+            _ => {}
         }
     }
 
@@ -243,6 +296,19 @@ impl SmsConversation {
         self.composer.update(cx, |field, cx| field.clear(cx));
         self.attachment = None;
         self.notice = None;
+        self.dispatch(text, attachment, cx);
+    }
+
+    /// Sends text typed into a notification as if it came from the composer.
+    pub fn send_reply(&mut self, text: String, cx: &mut Context<Self>) {
+        let text = text.trim().to_owned();
+        if can_send(&text, false, self.backend.read(cx).sms_role_held()) {
+            self.dispatch(text, None, cx);
+        }
+    }
+
+    /// Puts the bubble in the timeline and hands the send to the backend.
+    fn dispatch(&mut self, text: String, attachment: Option<String>, cx: &mut Context<Self>) {
         let sub_id = self.current_sim(cx);
         let local_id = self
             .backend
@@ -483,12 +549,31 @@ impl Render for SmsConversation {
                 }))
                 .into_any_element()
         });
+        let mute = glass_icon_button(theme, Icon::LucideBellOff, 0.0, self.muted)
+            .id("sms-mute")
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(SmsConversationEvent::ToggleMute)))
+            .into_any_element();
+        let trailing = div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .children(switch)
+            .child(mute)
+            .into_any_element();
         let header = header_bar(
             theme,
             back,
             self.title.clone(),
             header_subtitle(&self.title, &self.recipients),
-            switch,
+            Some(trailing),
+        );
+        let strip = schedule_ui::strip(
+            theme,
+            &self.scheduled,
+            now,
+            offset,
+            cx,
+            |_: &mut Self, key, cx| cx.emit(SmsConversationEvent::CancelScheduled(key)),
         );
 
         let current_sim = self.current_sim(cx);
@@ -560,6 +645,11 @@ impl Render for SmsConversation {
             let send = glass_icon_button(theme, Icon::LucideArrowUp, 0.0, false)
                 .id("sms-send")
                 .on_click(cx.listener(|this, _, _, cx| this.send(cx)))
+                .on_long_press(cx.listener(|this, _, _, cx| this.request_schedule(cx)))
+                .on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(|this, _, _, cx| this.request_schedule(cx)),
+                )
                 .into_any_element();
             composer_bar(keyboard, Some(attach), field, send).into_any_element()
         } else {
@@ -605,6 +695,7 @@ impl Render for SmsConversation {
                             .children(rows),
                     ),
             )
+            .children(strip)
             .children(has_info.then_some(info))
             .child(bottom)
     }

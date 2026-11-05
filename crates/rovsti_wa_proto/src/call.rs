@@ -116,6 +116,8 @@ pub const FALLBACK_PEER_LABEL: &str = "WhatsApp call";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WaCallView {
     pub call_id: String,
+    /// The peer's JID.
+    pub peer: String,
     pub peer_label: String,
     pub direction: CallDirection,
     pub phase: CallPhase,
@@ -130,6 +132,7 @@ impl WaCallView {
     pub fn from_update(update: &CallUpdate, _now_ms: i64) -> Self {
         Self {
             call_id: update.call_id.clone(),
+            peer: update.peer.clone(),
             peer_label: peer_label(update.peer_name.as_deref(), &update.peer),
             direction: update.direction,
             phase: update.phase.clone(),
@@ -175,6 +178,112 @@ pub fn peer_label(name: Option<&str>, peer: &str) -> String {
         format!("+{user}")
     } else {
         FALLBACK_PEER_LABEL.to_owned()
+    }
+}
+
+/// A button on the WhatsApp call screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaControl {
+    Mute,
+    Speaker,
+    Keypad,
+    Hold,
+    AddCall,
+    End,
+}
+
+/// What the call screen shows as its state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WaScreenPhase {
+    /// An incoming call is ringing.
+    Ringing,
+    /// Our outgoing call is ringing at the peer.
+    Calling,
+    Connecting,
+    Active,
+    Ended(EndReason),
+}
+
+/// The pure model behind the WhatsApp call screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WaScreen {
+    pub call_id: String,
+    pub title: String,
+    pub phase: WaScreenPhase,
+    pub incoming: bool,
+    pub muted: bool,
+    pub speaker: bool,
+    pub elapsed_s: u64,
+}
+
+impl WaScreen {
+    pub fn from_view(view: &WaCallView, speaker: bool) -> Self {
+        let incoming = view.direction == CallDirection::In;
+        let phase = match &view.phase {
+            CallPhase::Ringing if incoming => WaScreenPhase::Ringing,
+            CallPhase::Ringing => WaScreenPhase::Calling,
+            CallPhase::Connecting => WaScreenPhase::Connecting,
+            CallPhase::Active => WaScreenPhase::Active,
+            CallPhase::Ended(reason) => WaScreenPhase::Ended(reason.clone()),
+        };
+        Self {
+            call_id: view.call_id.clone(),
+            title: view.peer_label.clone(),
+            phase,
+            incoming,
+            muted: view.muted,
+            speaker,
+            elapsed_s: view.elapsed_s,
+        }
+    }
+
+    /// Whether a control can be pressed. Keypad, hold and add-call have no
+    /// WhatsApp equivalent and are always off.
+    pub fn enabled(&self, control: WaControl) -> bool {
+        match control {
+            WaControl::Keypad | WaControl::Hold | WaControl::AddCall => false,
+            WaControl::Mute | WaControl::Speaker => {
+                matches!(
+                    self.phase,
+                    WaScreenPhase::Connecting | WaScreenPhase::Active
+                )
+            }
+            WaControl::End => !matches!(self.phase, WaScreenPhase::Ended(_)),
+        }
+    }
+}
+
+/// Who owns the call screen when a WhatsApp call meets the cellular one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Arbitration {
+    ShowWa,
+    /// Keep the cellular screen and show the WhatsApp offer as waiting.
+    WaWaiting,
+    /// Decline the WhatsApp offer: a cellular call is ringing.
+    RejectWaBusy,
+    Telecom,
+}
+
+/// Decides which call owns the screen. A WhatsApp call already in progress
+/// (outgoing, connecting or active) keeps it; only an incoming ringing call
+/// is an offer to arbitrate.
+pub fn arbitrate(
+    telecom_live: bool,
+    telecom_ringing: bool,
+    wa: Option<&WaCallView>,
+) -> Arbitration {
+    let Some(wa) = wa.filter(|w| !w.phase.is_ended()) else {
+        return Arbitration::Telecom;
+    };
+    if !wa.is_ringing_in() {
+        return Arbitration::ShowWa;
+    }
+    if telecom_ringing {
+        Arbitration::RejectWaBusy
+    } else if telecom_live {
+        Arbitration::WaWaiting
+    } else {
+        Arbitration::ShowWa
     }
 }
 
@@ -413,5 +522,107 @@ mod tests {
         }
         assert_eq!(serde_json::to_string(&In).unwrap(), "\"in\"");
         assert_eq!(serde_json::to_string(&Out).unwrap(), "\"out\"");
+    }
+}
+
+#[cfg(test)]
+mod screen_tests {
+    use super::*;
+
+    fn view(direction: CallDirection, phase: CallPhase) -> WaCallView {
+        WaCallView {
+            call_id: "c1".into(),
+            peer: "1@s.whatsapp.net".into(),
+            peer_label: "Ann".into(),
+            direction,
+            phase,
+            is_video: false,
+            muted: true,
+            elapsed_s: 7,
+        }
+    }
+
+    #[test]
+    fn screen_phase_mapping() {
+        use CallDirection::{In, Out};
+        let cases = [
+            (In, CallPhase::Ringing, WaScreenPhase::Ringing),
+            (Out, CallPhase::Ringing, WaScreenPhase::Calling),
+            (In, CallPhase::Connecting, WaScreenPhase::Connecting),
+            (Out, CallPhase::Active, WaScreenPhase::Active),
+            (
+                In,
+                CallPhase::Ended(EndReason::Missed),
+                WaScreenPhase::Ended(EndReason::Missed),
+            ),
+        ];
+        for (dir, phase, expected) in cases {
+            let s = WaScreen::from_view(&view(dir, phase), true);
+            assert_eq!(s.phase, expected);
+            assert_eq!(s.incoming, dir == In);
+            assert_eq!(s.title, "Ann");
+            assert!(s.muted && s.speaker);
+            assert_eq!(s.elapsed_s, 7);
+        }
+    }
+
+    #[test]
+    fn controls_enabled() {
+        let screen = |p| WaScreen::from_view(&view(CallDirection::Out, p), false);
+        for p in [
+            CallPhase::Ringing,
+            CallPhase::Connecting,
+            CallPhase::Active,
+            CallPhase::Ended(EndReason::Hangup),
+        ] {
+            let s = screen(p);
+            for c in [WaControl::Keypad, WaControl::Hold, WaControl::AddCall] {
+                assert!(!s.enabled(c));
+            }
+        }
+        let calling = screen(CallPhase::Ringing);
+        assert!(!calling.enabled(WaControl::Mute));
+        assert!(!calling.enabled(WaControl::Speaker));
+        assert!(calling.enabled(WaControl::End));
+        let active = screen(CallPhase::Active);
+        assert!(active.enabled(WaControl::Mute));
+        assert!(active.enabled(WaControl::Speaker));
+        assert!(active.enabled(WaControl::End));
+        let ended = screen(CallPhase::Ended(EndReason::Remote));
+        assert!(!ended.enabled(WaControl::Mute));
+        assert!(!ended.enabled(WaControl::End));
+    }
+
+    #[test]
+    fn arbitration_table() {
+        use Arbitration::{RejectWaBusy, ShowWa, Telecom, WaWaiting};
+        use CallDirection::{In, Out};
+        let offer = view(In, CallPhase::Ringing);
+        let active = view(In, CallPhase::Active);
+        let outgoing = view(Out, CallPhase::Ringing);
+        let ended = view(In, CallPhase::Ended(EndReason::Missed));
+        // (live, ringing, wa, expected)
+        let table = [
+            (false, false, None, Telecom),
+            (true, false, None, Telecom),
+            (true, true, None, Telecom),
+            (false, false, Some(&offer), ShowWa),
+            (true, false, Some(&offer), WaWaiting),
+            (false, true, Some(&offer), RejectWaBusy),
+            (true, true, Some(&offer), RejectWaBusy),
+            (false, false, Some(&active), ShowWa),
+            (true, false, Some(&active), ShowWa),
+            (false, true, Some(&active), ShowWa),
+            (true, false, Some(&outgoing), ShowWa),
+            (true, false, Some(&ended), Telecom),
+            (false, false, Some(&ended), Telecom),
+        ];
+        for (live, ringing, wa, expected) in table {
+            assert_eq!(
+                arbitrate(live, ringing, wa),
+                expected,
+                "{live} {ringing} {wa:?}"
+            );
+        }
     }
 }

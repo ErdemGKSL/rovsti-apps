@@ -9,21 +9,43 @@ use serde::Deserialize;
 /// Why the gateway woke the app.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Wake {
-    Call { call_id: String },
-    Message { chat: String },
+    Call {
+        call_id: String,
+        from: Option<String>,
+        name: Option<String>,
+    },
+    Message {
+        chat: String,
+    },
 }
 
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Payload {
-    Call { call_id: String },
-    Message { chat: String },
+    Call {
+        call_id: String,
+        #[serde(default)]
+        from: Option<String>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    Message {
+        chat: String,
+    },
 }
 
 /// Decodes a push payload; `None` for an unknown kind or malformed JSON.
 pub fn parse_wake(json: &str) -> Option<Wake> {
     match serde_json::from_str::<Payload>(json).ok()? {
-        Payload::Call { call_id } => Some(Wake::Call { call_id }),
+        Payload::Call {
+            call_id,
+            from,
+            name,
+        } => Some(Wake::Call {
+            call_id,
+            from,
+            name,
+        }),
         Payload::Message { chat } => Some(Wake::Message { chat }),
     }
 }
@@ -38,7 +60,21 @@ mod tests {
         assert_eq!(
             parse_wake(json),
             Some(Wake::Call {
-                call_id: "abc".into()
+                call_id: "abc".into(),
+                from: Some("1@s.whatsapp.net".into()),
+                name: Some("Ann".into()),
+            })
+        );
+    }
+
+    #[test]
+    fn call_payload_without_details() {
+        assert_eq!(
+            parse_wake(r#"{"kind":"call","call_id":"abc"}"#),
+            Some(Wake::Call {
+                call_id: "abc".into(),
+                from: None,
+                name: None,
             })
         );
     }

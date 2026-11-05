@@ -27,6 +27,7 @@ pub mod settings;
 pub mod setup;
 pub mod sim;
 pub mod small_text;
+pub mod speed_dial;
 pub mod t9;
 pub mod thread;
 pub mod vcard;

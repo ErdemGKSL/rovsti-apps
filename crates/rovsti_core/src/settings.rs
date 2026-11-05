@@ -24,7 +24,7 @@ pub const MAX_REPLY_CHARS: usize = 100;
 /// Speed-dial digits that can hold a number (1 is voicemail).
 pub const SPEED_DIAL_DIGITS: std::ops::RangeInclusive<u8> = 2..=9;
 /// Longest name or lookup key kept in a speed-dial entry.
-const MAX_FIELD_CHARS: usize = 200;
+pub(crate) const MAX_FIELD_CHARS: usize = 200;
 /// A backup bigger than this is "not a backup".
 pub const MAX_BACKUP_BYTES: usize = 256 * 1024;
 /// More favourites than this is not a plausible order.

@@ -25,6 +25,7 @@ pub mod routes {
     pub const PRESENCE: &str = "/v1/presence";
     pub const PRESENCE_SUBSCRIBE: &str = "/v1/presence/subscribe";
     pub const CHAT_STATE: &str = "/v1/chatstate";
+    pub const CONTACTS_LOOKUP: &str = "/v1/contacts/lookup";
     pub const GROUPS: &str = "/v1/groups";
     pub const GROUP: &str = "/v1/groups/{jid}";
     pub const CALLS: &str = "/v1/calls";

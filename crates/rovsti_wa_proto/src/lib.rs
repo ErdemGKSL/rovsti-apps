@@ -14,7 +14,9 @@ pub mod history;
 pub mod key;
 pub mod limit;
 pub mod log;
+pub mod lookup;
 pub mod media;
+pub mod presence;
 pub mod push;
 pub mod timeline;
 pub mod url;
@@ -28,7 +30,9 @@ pub use event::{CallSummary, CallUpdate, EventEnvelope, GatewayEvent};
 pub use history::{SnapshotPlan, WaCallHistory, WaCallRecord, plan_snapshot};
 pub use key::{ConnectKey, KeyError, KeyHash, KeyId};
 pub use log::{EventLog, Since};
+pub use lookup::{LookupCache, LookupUsers, MAX_LOOKUP, WaTarget, WaUser, chat_users, wa_target};
 pub use media::{MAX_SEND_BYTES, MediaTooLarge, check_size, classify};
+pub use presence::{PresenceBook, presence_label};
 pub use push::{Wake, parse_wake};
 pub use timeline::{
     Item, ItemState, Timeline, TypingThrottle, day_breaks, reaction_chips, user_jid,

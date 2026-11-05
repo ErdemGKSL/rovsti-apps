@@ -962,9 +962,64 @@ pub type CallLogResponse = Envelope<CallLogPayload>;
 pub type ContactsResponse = Envelope<ContactsPayload>;
 pub type FavoritesResponse = Envelope<FavoritesPayload>;
 
+/// What a handoff from another app asks for (the intent extras of AD-10).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HandoffAction {
+    WaCall,
+    WaChat,
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// A WhatsApp action handed from one Rovsti app to another.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Handoff {
+    pub action: HandoffAction,
+    pub jid: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+/// Parses a handoff payload; `None` for bad JSON or a JID that is empty or
+/// not a `@s.whatsapp.net` user.
+pub fn parse_handoff(json: &str) -> Option<Handoff> {
+    let handoff: Handoff = serde_json::from_str(json).ok()?;
+    let user = handoff.jid.strip_suffix("@s.whatsapp.net")?;
+    (!user.is_empty()).then_some(handoff)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn handoff_round_trips() {
+        let h = Handoff {
+            action: HandoffAction::WaCall,
+            jid: "905321234567@s.whatsapp.net".into(),
+            name: Some("Ayse".into()),
+        };
+        let json = serde_json::to_string(&h).expect("parses");
+        assert!(json.contains(r#""action":"wa_call""#));
+        assert_eq!(parse_handoff(&json), Some(h));
+        let chat =
+            parse_handoff(r#"{"action":"wa_chat","jid":"1@s.whatsapp.net"}"#).expect("parses");
+        assert_eq!((chat.action, chat.name), (HandoffAction::WaChat, None));
+        let odd =
+            parse_handoff(r#"{"action":"teleport","jid":"1@s.whatsapp.net"}"#).expect("parses");
+        assert_eq!(odd.action, HandoffAction::Unknown);
+    }
+
+    #[test]
+    fn handoff_rejects_bad_jids() {
+        for jid in ["", "@s.whatsapp.net", "123@g.us", "123", "123@lid"] {
+            let json = format!(r#"{{"action":"wa_chat","jid":"{jid}"}}"#);
+            assert_eq!(parse_handoff(&json), None, "{jid}");
+        }
+        assert_eq!(parse_handoff("nope"), None);
+    }
 
     #[test]
     fn null_plain_fields_read_as_their_defaults() {

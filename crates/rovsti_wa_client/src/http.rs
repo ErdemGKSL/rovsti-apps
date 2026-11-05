@@ -9,9 +9,9 @@ use std::time::Duration;
 use rovsti_wa_proto::api::routes;
 use rovsti_wa_proto::{
     CallStarted, CallSummary, ChatState, ChatSummary, ConnectKey, CreateInstance, CreatedInstance,
-    GatewayUrl, GroupInfo, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, MarkRead, MediaKind,
-    MintKey, PlaceCall, PushRegistration, ScheduleText, ScheduledText, SendReaction, SendText,
-    Sent, SetMuted, SetPresence, SubscribePresence, WaMessage,
+    GatewayUrl, GroupInfo, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, LookupUsers, MarkRead,
+    MediaKind, MintKey, PlaceCall, PushRegistration, ScheduleText, ScheduledText, SendReaction,
+    SendText, Sent, SetMuted, SetPresence, SubscribePresence, WaMessage, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -342,6 +342,18 @@ impl Gateway {
 
     pub fn groups(&self) -> Result<Vec<GroupInfo>, ClientError> {
         self.get(routes::GROUPS)
+    }
+
+    /// Which of the user `jids` (`number@s.whatsapp.net`, at most
+    /// `MAX_LOOKUP`) are on WhatsApp. The gateway caches answers and limits
+    /// how many numbers an instance may look up.
+    pub fn lookup_users(&self, jids: &[String]) -> Result<Vec<WaUser>, ClientError> {
+        self.post(
+            routes::CONTACTS_LOOKUP,
+            &LookupUsers {
+                jids: jids.to_vec(),
+            },
+        )
     }
 
     pub fn place_call(&self, to: &str) -> Result<CallStarted, ClientError> {

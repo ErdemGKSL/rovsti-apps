@@ -160,6 +160,29 @@ instead", and type the code.
 - A temporary WhatsApp ban shows as `banned`. The gateway does not restart a banned
   instance at boot; relink once the ban is over.
 
+## Is this number on WhatsApp?
+
+`POST /v1/contacts/lookup` with `{"jids": ["905321234567@s.whatsapp.net", ...]}`
+answers `[{jid, on_whatsapp, business, verified_name}]`, one entry per distinct JID
+in request order. `business` and `verified_name` are optional in the reply.
+
+- Needs the bearer key. Send 1 to 50 user JIDs (`number@s.whatsapp.net`, no
+  device part); an empty list, more than 50, a group or any other JID is a 400
+  `bad_request`.
+- A number WhatsApp does not know comes back with `on_whatsapp: false`. If WhatsApp
+  answers with a LID, the answer is reported under the queried number.
+- Answers are cached per instance for 24 hours (4096 entries) and served from the
+  cache without asking WhatsApp.
+- To protect the account from WhatsApp's abuse limits, every number that is not
+  cached costs one token of a per-instance bucket (60 tokens, one comes back every
+  second). A request that needs more tokens than are left is refused whole with
+  429 `rate_limited`; retry later or ask for fewer numbers. Cached numbers are
+  always answered.
+- The instance must be connected, else the usual `not_connected` error.
+
+`rovsti_wa_client::Gateway::lookup_users(&[String])` wraps it. Apps look up one
+contact's numbers when its card opens, never the whole address book.
+
 ## Scheduled texts
 
 The gateway can send a text later, so the phone may be off at that time.

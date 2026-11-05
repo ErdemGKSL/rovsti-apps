@@ -14,8 +14,9 @@ use rovsti_wa_proto::api::routes as r;
 use rovsti_wa_proto::{
     ChatState, ChatSummary, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope,
     GatewayEvent, GroupInfo, InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest,
-    MarkRead, MediaKind, MessageBody, MintKey, PushRegistration, ScheduleText, ScheduledState,
-    ScheduledText, SendReaction, SendText, Sent, SetPresence, SubscribePresence, WaMessage,
+    LookupUsers, MAX_LOOKUP, MarkRead, MediaKind, MessageBody, MintKey, PushRegistration,
+    ScheduleText, ScheduledState, ScheduledText, SendReaction, SendText, Sent, SetPresence,
+    SubscribePresence, WaMessage, WaUser,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -71,6 +72,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(r::MESSAGE_MEDIA, get(message_media))
         .route(r::REACT, post(react))
+        .route(r::CONTACTS_LOOKUP, post(lookup_users))
         .route(r::GROUPS, get(groups))
         .route(r::GROUP, get(group))
         .merge(crate::wa::calls::routes())
@@ -223,6 +225,7 @@ async fn delete_instance(State(state): State<AppState>, auth: Authed) -> ApiResu
     state.store().delete_instance(auth.instance.clone()).await?;
     state.hub().remove(&auth.instance);
     state.forget_calls(&auth.instance);
+    state.forget_lookups(&auth.instance);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -709,6 +712,57 @@ async fn react(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// A one-to-one user JID (`<number>@s.whatsapp.net`), trimmed. Groups,
+/// devices and other servers are not looked up.
+fn user_jid(jid: &str) -> ApiResult<String> {
+    let jid = jid.trim();
+    let parsed = crate::wa::convert::parse_jid(jid)?;
+    if parsed.server != "s.whatsapp.net" || parsed.user.is_empty() || jid.contains(':') {
+        return Err(HttpError::bad_request(format!(
+            "{jid:?} is not a user jid (number@s.whatsapp.net)"
+        )));
+    }
+    Ok(jid.to_owned())
+}
+
+/// Validates a lookup body: 1 to `MAX_LOOKUP` user JIDs. Returns them
+/// trimmed.
+fn check_lookup(req: LookupUsers) -> ApiResult<Vec<String>> {
+    if req.jids.is_empty() || req.jids.len() > MAX_LOOKUP {
+        return Err(HttpError::bad_request(format!(
+            "jids must hold 1 to {MAX_LOOKUP} user jids"
+        )));
+    }
+    req.jids.iter().map(|jid| user_jid(jid)).collect()
+}
+
+async fn lookup_users(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<LookupUsers>,
+) -> ApiResult<Json<Vec<WaUser>>> {
+    let jids = check_lookup(req)?;
+    let (mut users, misses) = state
+        .lookup_cached(&auth.instance, &jids)
+        .ok_or_else(|| HttpError::new(ErrorCode::RateLimited, "too many number lookups"))?;
+    if !misses.is_empty() {
+        let fresh = state.driver().lookup_users(&auth.instance, misses).await?;
+        state.lookup_store(&auth.instance, &fresh);
+        users.extend(fresh);
+    }
+    // Answer in request order, each JID once.
+    let mut ordered: Vec<WaUser> = Vec::with_capacity(jids.len());
+    for jid in &jids {
+        if ordered.iter().any(|u| &u.jid == jid) {
+            continue;
+        }
+        if let Some(user) = users.iter().find(|u| &u.jid == jid) {
+            ordered.push(user.clone());
+        }
+    }
+    Ok(Json(ordered))
+}
+
 async fn groups(State(state): State<AppState>, auth: Authed) -> ApiResult<Json<Vec<GroupInfo>>> {
     Ok(Json(state.driver().groups(&auth.instance).await?))
 }
@@ -725,6 +779,29 @@ async fn group(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lookup_jids_must_be_plain_users() {
+        assert_eq!(
+            user_jid(" 905321234567@s.whatsapp.net ").unwrap(),
+            "905321234567@s.whatsapp.net"
+        );
+        for bad in [
+            "120363-1@g.us",
+            "905321234567",
+            "905321234567:3@s.whatsapp.net",
+            "@s.whatsapp.net",
+            "123@lid",
+            "",
+        ] {
+            assert!(user_jid(bad).is_err(), "{bad}");
+        }
+        let many = (0..=MAX_LOOKUP)
+            .map(|n| format!("{n}@s.whatsapp.net"))
+            .collect();
+        assert!(check_lookup(LookupUsers { jids: many }).is_err());
+        assert!(check_lookup(LookupUsers { jids: vec![] }).is_err());
+    }
 
     #[test]
     fn mime_types_are_checked() {

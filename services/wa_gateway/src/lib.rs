@@ -21,7 +21,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rovsti_wa_proto::InstanceState;
-use rovsti_wa_proto::limit::AuthLimiter;
+use rovsti_wa_proto::LookupCache;
+use rovsti_wa_proto::limit::{AuthLimiter, TokenBucket};
 
 use crate::config::Config;
 use crate::driver::{EventSink, WaDriver};
@@ -35,6 +36,29 @@ use crate::wa::calls::{CallTable, RING_TIMEOUT};
 const AUTH_BURST: u32 = 10;
 const AUTH_REFILL_PER_SEC: f64 = 0.2;
 const AUTH_TRACKED_IPS: usize = 4096;
+
+/// Lookup answers are kept 24 hours, 4096 per instance.
+const LOOKUP_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+const LOOKUP_CACHE_ENTRIES: usize = 4096;
+/// WhatsApp lookups one instance may ask for in a burst (one token per JID),
+/// and how fast the allowance comes back (per second).
+const LOOKUP_BURST: u32 = 60;
+const LOOKUP_REFILL_PER_SEC: f64 = 1.0;
+
+/// What the lookup route remembers about one instance.
+struct Lookups {
+    cache: LookupCache,
+    bucket: TokenBucket,
+}
+
+impl Lookups {
+    fn new() -> Self {
+        Self {
+            cache: LookupCache::new(LOOKUP_CACHE_ENTRIES, LOOKUP_TTL_MS),
+            bucket: TokenBucket::new(LOOKUP_BURST, LOOKUP_REFILL_PER_SEC),
+        }
+    }
+}
 
 pub fn now_ms() -> i64 {
     SystemTime::now()
@@ -54,6 +78,7 @@ struct Inner {
     pusher: Arc<dyn Pusher>,
     limiter: Mutex<AuthLimiter>,
     calls: Mutex<HashMap<InstanceId, Arc<CallTable>>>,
+    lookups: Mutex<HashMap<InstanceId, Lookups>>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -86,6 +111,7 @@ impl AppState {
                 AUTH_TRACKED_IPS,
             )),
             calls: Mutex::new(HashMap::new()),
+            lookups: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -132,6 +158,45 @@ impl AppState {
     pub fn forget_calls(&self, instance: &InstanceId) {
         self.0
             .calls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(instance);
+    }
+
+    /// Splits `jids` into cached lookup answers and the JIDs still to ask
+    /// WhatsApp for. The misses are charged to the instance's lookup bucket,
+    /// all or nothing: `None` means the instance is over its allowance.
+    pub fn lookup_cached(
+        &self,
+        instance: &InstanceId,
+        jids: &[String],
+    ) -> Option<(Vec<rovsti_wa_proto::WaUser>, Vec<String>)> {
+        let now = now_ms();
+        let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
+        let (hits, misses) = entry.cache.split(jids, now);
+        let cost = u32::try_from(misses.len()).unwrap_or(u32::MAX);
+        let paid = cost == 0
+            || entry
+                .bucket
+                .try_take_n(cost, u64::try_from(now).unwrap_or(0));
+        paid.then_some((hits, misses))
+    }
+
+    /// Remembers what WhatsApp answered for `instance`.
+    pub fn lookup_store(&self, instance: &InstanceId, users: &[rovsti_wa_proto::WaUser]) {
+        let now = now_ms();
+        let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
+        for user in users {
+            entry.cache.put(user.clone(), now);
+        }
+    }
+
+    /// Forgets the lookups of a deleted instance.
+    pub fn forget_lookups(&self, instance: &InstanceId) {
+        self.0
+            .lookups
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(instance);

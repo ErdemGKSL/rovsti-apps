@@ -6,7 +6,7 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use rovsti_wa_proto::{
     ChatState, GatewayEvent, GroupInfo, LinkRequest, MarkRead, MediaKind, Reaction, SendReaction,
-    SendText, Sent, WaMessage,
+    SendText, Sent, WaMessage, WaUser,
 };
 
 use crate::hub::Hub;
@@ -313,6 +313,16 @@ pub trait WaDriver: Send + Sync + 'static {
         jid: String,
     ) -> BoxFuture<'_, Result<GroupInfo, DriverError>>;
 
+    /// Asks WhatsApp which of the user `jids` have an account. Every queried
+    /// JID is answered, with `on_whatsapp: false` when WhatsApp did not know it.
+    fn lookup_users(
+        &self,
+        _instance: &InstanceId,
+        _jids: Vec<String>,
+    ) -> BoxFuture<'_, Result<Vec<WaUser>, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
     /// What the voice-call table asks of WhatsApp for `instance`.
     fn call_backend(&self, _instance: &InstanceId) -> Result<Arc<dyn CallBackend>, DriverError> {
         Err(DriverError::NotConnected)
@@ -445,6 +455,7 @@ mod fake {
         started: Mutex<Vec<(InstanceId, Option<LinkRequest>)>>,
         ops: Mutex<Vec<String>>,
         groups: Mutex<Vec<GroupInfo>>,
+        registered: Mutex<Vec<String>>,
         send_error: Mutex<Option<DriverError>>,
         calls: Arc<FakeCalls>,
         counter: AtomicU64,
@@ -477,6 +488,11 @@ mod fake {
         /// The groups `groups()` and `group()` report.
         pub fn set_groups(&self, groups: Vec<GroupInfo>) {
             *self.groups.lock().unwrap_or_else(|e| e.into_inner()) = groups;
+        }
+
+        /// The JIDs `lookup_users` reports as being on WhatsApp.
+        pub fn set_registered(&self, jids: Vec<String>) {
+            *self.registered.lock().unwrap_or_else(|e| e.into_inner()) = jids;
         }
 
         /// Makes every `send_text` fail with `error` (`None` restores it).
@@ -773,6 +789,27 @@ mod fake {
                         .find(|g| g.jid == jid)
                         .cloned()
                         .ok_or_else(|| DriverError::BadRequest(format!("unknown group {jid}")))
+                });
+            Box::pin(async move { result })
+        }
+
+        fn lookup_users(
+            &self,
+            instance: &InstanceId,
+            jids: Vec<String>,
+        ) -> BoxFuture<'_, Result<Vec<WaUser>, DriverError>> {
+            let result = self
+                .record(instance, format!("lookup {}", jids.len()))
+                .map(|()| {
+                    let registered = self.registered.lock().unwrap_or_else(|e| e.into_inner());
+                    jids.into_iter()
+                        .map(|jid| WaUser {
+                            on_whatsapp: registered.contains(&jid),
+                            jid,
+                            business: false,
+                            verified_name: None,
+                        })
+                        .collect()
                 });
             Box::pin(async move { result })
         }

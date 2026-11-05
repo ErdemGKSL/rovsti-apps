@@ -678,6 +678,111 @@ async fn groups_are_listed() {
     assert_eq!(blocking(move || g.groups()).await.unwrap(), vec![group]);
 }
 
+fn wa_jid(n: u32) -> String {
+    format!("9053212{n:05}@s.whatsapp.net")
+}
+
+#[tokio::test]
+async fn lookup_answers_registered_and_caches() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    let (yes, no) = (wa_jid(1), wa_jid(2));
+    server.driver.set_registered(vec![yes.clone()]);
+    let ask = vec![yes.clone(), no.clone(), yes.clone()];
+
+    let g = gateway.clone();
+    let first = blocking({
+        let ask = ask.clone();
+        move || g.lookup_users(&ask)
+    })
+    .await
+    .unwrap();
+    assert_eq!(first.len(), 2);
+    assert_eq!(
+        (first[0].jid.as_str(), first[0].on_whatsapp),
+        (yes.as_str(), true)
+    );
+    assert_eq!(
+        (first[1].jid.as_str(), first[1].on_whatsapp),
+        (no.as_str(), false)
+    );
+    let lookups = |s: &Server| {
+        s.driver
+            .ops()
+            .iter()
+            .filter(|o| o.starts_with("lookup"))
+            .count()
+    };
+    assert_eq!(server.driver.ops().last().unwrap(), "lookup 2");
+
+    let g = gateway.clone();
+    let second = blocking(move || g.lookup_users(&ask)).await.unwrap();
+    assert_eq!(second, first);
+    assert_eq!(lookups(&server), 1);
+}
+
+#[tokio::test]
+async fn lookup_rejects_bad_and_too_many_jids() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    let too_many: Vec<String> = (0..=50).map(wa_jid).collect();
+    let cases = vec![
+        vec![],
+        vec!["120363-1@g.us".to_owned()],
+        vec!["nonsense".to_owned()],
+        too_many,
+    ];
+    for jids in cases {
+        let g = gateway.clone();
+        let err = blocking(move || g.lookup_users(&jids)).await.unwrap_err();
+        assert!(is_code(&err, ErrorCode::BadRequest), "{err:?}");
+    }
+    assert!(server.driver.ops().iter().all(|o| !o.starts_with("lookup")));
+}
+
+#[tokio::test]
+async fn lookup_is_rate_limited() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    // 60 tokens: one call of 50 and one of 10 use them all.
+    for (from, to) in [(0u32, 50u32), (50, 60)] {
+        let g = gateway.clone();
+        let jids: Vec<String> = (from..to).map(wa_jid).collect();
+        assert_eq!(
+            blocking(move || g.lookup_users(&jids)).await.unwrap().len(),
+            (to - from) as usize
+        );
+    }
+    let g = gateway.clone();
+    let fresh = vec![wa_jid(100)];
+    let err = blocking(move || g.lookup_users(&fresh)).await.unwrap_err();
+    assert!(is_code(&err, ErrorCode::RateLimited), "{err:?}");
+    // Cached numbers are still answered.
+    let g = gateway.clone();
+    let cached = vec![wa_jid(3)];
+    assert_eq!(
+        blocking(move || g.lookup_users(&cached))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn lookup_needs_a_key() {
+    let server = start(4).await;
+    let (_, _created) = create(&server).await;
+    let none = Gateway::new(server.url.clone(), None);
+    let jids = vec![wa_jid(1)];
+    assert_eq!(
+        blocking(move || none.lookup_users(&jids))
+            .await
+            .unwrap_err(),
+        ClientError::Unauthorized
+    );
+}
+
 const PEER: &str = "905321234567@s.whatsapp.net";
 
 fn frame(seed: i16) -> Vec<i16> {

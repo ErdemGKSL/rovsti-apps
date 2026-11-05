@@ -2,7 +2,7 @@
 //! path ([`message`]) and the history path ([`crate::wa::history`]) both go
 //! through [`convert`], so a message looks the same however it arrived.
 
-use rovsti_wa_proto::{MediaKind, MessageBody, Reaction, WaMessage};
+use rovsti_wa_proto::{MediaKind, MessageBody, Reaction, WaMessage, WaUser};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::wacore::types::message::MessageSource;
 use whatsapp_rust::waproto::buffa::Message as _;
@@ -17,6 +17,30 @@ pub fn parse_jid(text: &str) -> Result<Jid, DriverError> {
     }
     text.parse::<Jid>()
         .map_err(|e| DriverError::BadRequest(format!("invalid jid {text:?}: {e}")))
+}
+
+/// One usync answer: `(queried number JID, registered, business, verified name)`.
+pub type LookupAnswer = (String, bool, bool, Option<String>);
+
+/// Builds one [`WaUser`] per queried JID, in query order. A JID WhatsApp did
+/// not answer comes back with `on_whatsapp: false`.
+pub fn lookup_answers(
+    queried: &[String],
+    answers: impl IntoIterator<Item = LookupAnswer>,
+) -> Vec<WaUser> {
+    let answers: Vec<LookupAnswer> = answers.into_iter().collect();
+    queried
+        .iter()
+        .map(|jid| {
+            let answer = answers.iter().find(|(a, ..)| a == jid);
+            WaUser {
+                jid: jid.clone(),
+                on_whatsapp: answer.is_some_and(|(_, on, ..)| *on),
+                business: answer.is_some_and(|(_, on, business, _)| *on && *business),
+                verified_name: answer.and_then(|(.., name)| name.clone()),
+            }
+        })
+        .collect()
 }
 
 /// True for group chat JIDs.
@@ -407,5 +431,23 @@ mod tests {
             parse_jid("a@b@c@d"),
             Err(DriverError::BadRequest(_))
         ));
+    }
+
+    #[test]
+    fn unanswered_jids_are_not_on_whatsapp() {
+        let queried = vec!["1@s.whatsapp.net".to_owned(), "2@s.whatsapp.net".to_owned()];
+        let users = lookup_answers(
+            &queried,
+            [(
+                "2@s.whatsapp.net".to_owned(),
+                true,
+                true,
+                Some("Shop".into()),
+            )],
+        );
+        assert_eq!(users.len(), 2);
+        assert!(!users[0].on_whatsapp);
+        assert!(users[1].on_whatsapp && users[1].business);
+        assert_eq!(users[1].verified_name.as_deref(), Some("Shop"));
     }
 }

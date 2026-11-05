@@ -12,7 +12,7 @@ use std::time::Duration;
 use futures::future::BoxFuture;
 use rovsti_wa_proto::{
     ChatState, GatewayEvent, GroupInfo, InstanceState, InstanceStatus, LinkRequest, MarkRead,
-    MessageBody, Reaction, SendReaction, SendText, Sent, TypingState, WaMessage,
+    MessageBody, Reaction, SendReaction, SendText, Sent, TypingState, WaMessage, WaUser,
     event::ReceiptKind,
 };
 use whatsapp_rust::pair_code::PairCodeOptions;
@@ -765,6 +765,32 @@ impl WaDriver for WaRuntime {
     fn groups(&self, instance: &InstanceId) -> BoxFuture<'_, Result<Vec<GroupInfo>, DriverError>> {
         let instance = instance.clone();
         Box::pin(async move { self.group_infos(&instance, None).await })
+    }
+
+    fn lookup_users(
+        &self,
+        instance: &InstanceId,
+        jids: Vec<String>,
+    ) -> BoxFuture<'_, Result<Vec<WaUser>, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let parsed = jids
+                .iter()
+                .map(|jid| convert::parse_jid(jid))
+                .collect::<Result<Vec<_>, _>>()?;
+            let (client, _) = self.client_of(&instance)?;
+            let found = client
+                .contacts()
+                .is_on_whatsapp(&parsed)
+                .await
+                .map_err(failed)?;
+            let answers = found.into_iter().map(|r| {
+                let jid = r.pn_jid.unwrap_or(r.jid).to_non_ad().to_string();
+                let verified_name = r.verified_name.and_then(|v| v.name);
+                (jid, r.is_registered, r.is_business, verified_name)
+            });
+            Ok(convert::lookup_answers(&jids, answers))
+        })
     }
 
     fn call_backend(&self, instance: &InstanceId) -> Result<Arc<dyn CallBackend>, DriverError> {

@@ -32,9 +32,15 @@ impl TokenBucket {
 
     /// Takes one token if available.
     pub fn try_take(&mut self, now_ms: u64) -> bool {
+        self.try_take_n(1, now_ms)
+    }
+
+    /// Takes `n` tokens at once, or none when fewer are available.
+    pub fn try_take_n(&mut self, n: u32, now_ms: u64) -> bool {
         self.refill(now_ms);
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
+        let wanted = f64::from(n);
+        if self.tokens >= wanted {
+            self.tokens -= wanted;
             true
         } else {
             false
@@ -109,6 +115,16 @@ pub fn backoff_ms(attempt: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn taking_several_is_all_or_nothing() {
+        let mut b = TokenBucket::new(5, 1.0);
+        assert!(b.try_take_n(3, 0));
+        assert!(!b.try_take_n(3, 0));
+        assert!(b.try_take_n(2, 0));
+        assert!(!b.try_take_n(1, 0));
+        assert!(b.try_take_n(2, 2_000));
+    }
 
     #[test]
     fn bucket_drains_and_refills() {

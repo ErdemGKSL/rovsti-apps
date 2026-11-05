@@ -134,6 +134,19 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   it is the user's own server and history sync needs them. Creating an instance needs
   no key, so the number of instances is capped (`max_instances`, default 4), and
   failed bearer authentication is rate limited per IP.
+- **Key management and relink (AD-WA8).** The settings widget lists the instance's
+  connect keys (`GET /v1/keys`) and revokes any of them, the current one marked.
+  After a logout it offers "Link again" (QR or pairing code through
+  `POST /v1/instance/link`, `Gateway::relink`) and "Delete instance".
+- **Wake (AD-WA9).** When an FCM push arrives, the app calls the event stream's
+  `reconnect_now`, which skips the reconnect backoff; the widget's `wake` falls back to
+  a verify when no stream exists yet.
+- **Outgoing calls (AD-WA10).** Phone places a WhatsApp call with the client's
+  `place_call`; the gateway starts it through `voip-mlow` and the same audio WebSocket
+  (AD-WA5) carries the media.
+- **Conversation view (AD-WA11).** Messages opens a chat from `GET /v1/chats` and the
+  stored history, sends text, media and reactions through the client, and applies live
+  events from the resumable stream.
 
 WhatsApp does not endorse third-party clients; see the warning in
 [whatsapp-gateway.md](whatsapp-gateway.md#terms-of-service).

@@ -34,7 +34,7 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
 - [x] WhatsApp through the gateway: link by QR or pairing code, history sync, text,
       media, reactions, groups and presence all run server-side; Messages shows chats
       and live messages from `rovsti_wa_client`
-- [ ] WhatsApp conversation view with composer, media and reactions in the UI
+- [x] WhatsApp conversation view with composer, media and reactions in the UI
 - [x] No foreground service: FCM push wakes the app (needs `google-services.json` in
       the host, see `docs/android.md`). Notifications with inline reply are still open.
 - [ ] OTP detection and copy, spam filter (on-device rules), scheduled send
@@ -50,9 +50,10 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
       `WaCallAudio`, Phone call card (Answer, Decline, Mute, End)
 - [x] FCM HTTP v1 push, config-gated; apps register tokens (`WaPush`)
 - [ ] Try it on a phone: link a real account, place and answer a call, FCM on HyperOS
-- [ ] Outgoing WhatsApp calls from Phone (`place_call` exists in the client)
+- [x] Outgoing WhatsApp calls from Phone (`place_call` in the client)
 - [ ] Video calls, group calls
-- [ ] Packaging the gateway (container image, systemd unit) and key rotation UI
+- [x] Packaging the gateway (Dockerfile, systemd unit, Caddyfile, example config in
+      `services/wa_gateway/deploy/`) and the key list/revoke UI
 
 ## Rovsti Contacts
 

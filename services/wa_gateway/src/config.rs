@@ -302,6 +302,37 @@ mod tests {
         assert!(bad(Some("bind = ["), &[]).contains("config file"));
     }
 
+    const EXAMPLE: &str = include_str!("../deploy/config.example.toml");
+
+    #[test]
+    fn example_config_parses_with_defaults_except_data_dir() {
+        let c = Config::from_parts(Some(EXAMPLE), &env_of(&[])).unwrap();
+        assert_eq!(c.bind, DEFAULT_BIND.parse().unwrap());
+        assert_eq!(c.data_dir, PathBuf::from("/var/lib/wa-gateway"));
+        assert_eq!(c.max_instances, DEFAULT_MAX_INSTANCES);
+        assert!(!c.trust_proxy);
+        assert_eq!(c.fcm, None);
+    }
+
+    #[test]
+    fn example_config_fcm_lines_work_when_uncommented() {
+        let text: String = EXAMPLE
+            .lines()
+            .map(|l| {
+                l.strip_prefix("# fcm_")
+                    .map_or_else(|| l.to_owned(), |rest| format!("fcm_{rest}"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let c = Config::from_parts(Some(&text), &env_of(&[])).unwrap();
+        let fcm = c.fcm.expect("fcm configured");
+        assert_eq!(fcm.project_id, "my-firebase-project");
+        assert_eq!(
+            fcm.service_account,
+            PathBuf::from("/etc/wa-gateway/service-account.json")
+        );
+    }
+
     #[test]
     fn cli() {
         let args = |a: &[&str]| Cli::parse(a.iter().map(|s| (*s).to_owned()));

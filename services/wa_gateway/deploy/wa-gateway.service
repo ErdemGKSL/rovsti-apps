@@ -1,0 +1,36 @@
+# Install: copy the binary to /usr/local/bin/wa_gateway, this file to
+# /etc/systemd/system/wa-gateway.service, and config.example.toml to
+# /etc/wa-gateway/config.toml. Then: systemctl enable --now wa-gateway
+[Unit]
+Description=Rovsti WhatsApp gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+User=wagateway
+# Creates /var/lib/wa-gateway owned by the service user (config: data_dir).
+StateDirectory=wa-gateway
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/wa-gateway
+ExecStart=/usr/local/bin/wa_gateway --config /etc/wa-gateway/config.toml
+Restart=on-failure
+RestartSec=5
+Environment=RUST_LOG=info
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

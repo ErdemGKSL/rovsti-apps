@@ -25,6 +25,24 @@ Put a TLS reverse proxy in front of it for anything beyond your own machine (see
 below). An app accepts `http://` only for loopback, `10.0.2.2` (the Android
 emulator), private ranges and `.local` hosts.
 
+## Deploy
+
+Ready-made files live in [`services/wa_gateway/deploy/`](../services/wa_gateway/deploy):
+
+- `Dockerfile`: multi-stage build (`rust:1.94-bookworm`, then `debian:bookworm-slim` with
+  `ca-certificates`), runs as a non-root user, keeps its data in the `/data` volume and
+  exposes 8787. From the repository root:
+  `docker build -f services/wa_gateway/deploy/Dockerfile -t wa-gateway .`, then
+  `docker run -d -p 127.0.0.1:8787:8787 -v wa-gateway-data:/data wa-gateway`. Mount a
+  config file and add `--config` to use one (the image sets `WA_GATEWAY_BIND` and
+  `WA_GATEWAY_DATA`, which win over the file).
+- `wa-gateway.service`: a hardened systemd unit (dedicated user, `StateDirectory=`,
+  `NoNewPrivileges=yes`, `ProtectSystem=strict`). Copy the binary to
+  `/usr/local/bin/wa_gateway` and `config.example.toml` to `/etc/wa-gateway/config.toml`.
+- `Caddyfile.example`: TLS and WebSocket proxying, with a note on `trust_proxy`.
+- `config.example.toml`: every key with its default. A unit test parses it with the real
+  loader, so it cannot drift from `config.rs`.
+
 ## Configuration
 
 | TOML key | Environment | Default |

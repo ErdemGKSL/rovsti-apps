@@ -1,0 +1,14 @@
+# TLS in front of the gateway. Caddy gets the certificate itself and forwards the
+# WebSocket upgrades (/v1/events and /v1/calls/{id}/audio) without extra settings.
+wa.example.com {
+	# Caddy sets X-Forwarded-For and overwrites any value a client sends, so with
+	# this proxy it is safe to set `trust_proxy = true` in config.toml (failed-key
+	# rate limiting is then per real client IP). Without it, every client shares the
+	# proxy's address. Never set trust_proxy when the gateway is reachable directly.
+	reverse_proxy 127.0.0.1:8787 {
+		# Keep long-lived call-audio sockets open.
+		transport http {
+			read_timeout 1h
+		}
+	}
+}

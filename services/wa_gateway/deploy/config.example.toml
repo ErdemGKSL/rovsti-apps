@@ -1,0 +1,18 @@
+# Every key the gateway reads, with its default. Pass the file with --config.
+# WA_GATEWAY_* environment variables win over this file.
+
+# Address to listen on. Plain HTTP: keep it on loopback behind a TLS proxy.
+bind = "127.0.0.1:8787"
+
+# Holds gateway.db and instances/<id>/wa.db (the Signal keys). Back it up.
+data_dir = "/var/lib/wa-gateway"
+
+# Linked accounts allowed. Creating an instance needs no key, so keep this small.
+max_instances = 4
+
+# Believe X-Forwarded-For. Only behind a proxy that overwrites the header.
+trust_proxy = false
+
+# FCM push for incoming calls and messages. Set both keys or neither.
+# fcm_project_id = "my-firebase-project"
+# fcm_service_account = "/etc/wa-gateway/service-account.json"

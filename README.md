@@ -60,7 +60,9 @@ set the gateway address (the Android emulator reaches your machine at
 `http://10.0.2.2:8787`) and choose **Link WhatsApp for the first time**. Scan the QR code
 from WhatsApp, Linked devices. Every other Rovsti app joins with **Connect to an existing
 instance**: copy a connect key from a connected app (**Show connect key**) and paste it.
-For a real device put a TLS reverse proxy in front, and optionally set up FCM push; see
+For a real device deploy it with the files in
+[services/wa_gateway/deploy](services/wa_gateway/deploy) (Dockerfile, systemd unit, Caddy
+proxy, example config) and optionally set up FCM push; see
 [docs/whatsapp-gateway.md](docs/whatsapp-gateway.md). Unofficial WhatsApp clients can get
 an account restricted; read the warning there first.
 

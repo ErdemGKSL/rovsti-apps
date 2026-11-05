@@ -14,6 +14,8 @@ use crate::Coord;
 use crate::csv::CsvReader;
 
 pub const MAX_STOPS: usize = 100_000;
+pub const MAX_ROUTES: usize = 50_000;
+pub const MAX_TRIPS: usize = 2_000_000;
 pub const MAX_PATTERNS: usize = 20_000;
 pub const MAX_STOP_TIMES: u64 = 8_000_000;
 
@@ -314,6 +316,9 @@ impl FeedBuilder {
                 self.report.skipped_rows += 1;
                 continue;
             }
+            if self.routes.len() >= MAX_ROUTES {
+                return Err(GtfsError::TooLarge("routes"));
+            }
             self.route_ix
                 .insert(rid.to_owned(), self.routes.len() as u32);
             self.routes.push(Route {
@@ -340,6 +345,9 @@ impl FeedBuilder {
                 self.report.skipped_rows += 1;
                 continue;
             };
+            if self.trips.len() >= MAX_TRIPS {
+                return Err(GtfsError::TooLarge("trips"));
+            }
             let headsign = head.map_or("", |i| cell(rec, i)).trim().to_owned();
             self.trips
                 .insert(cell(rec, trip).to_owned(), (ri, headsign));
@@ -587,6 +595,16 @@ mod tests {
         assert!(matches!(
             b.stops(csv.as_bytes()),
             Err(GtfsError::TooLarge("stops"))
+        ));
+
+        let mut b = FeedBuilder::new();
+        let mut routes = String::from("route_id\n");
+        for i in 0..=MAX_ROUTES {
+            routes.push_str(&format!("r{i}\n"));
+        }
+        assert!(matches!(
+            b.routes(routes.as_bytes()),
+            Err(GtfsError::TooLarge("routes"))
         ));
 
         // Patterns: each trip a distinct two-stop sequence on one route.

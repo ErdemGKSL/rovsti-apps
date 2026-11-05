@@ -748,7 +748,10 @@ impl Render for Conversation {
                 .child(label)
                 .on_click(cx.listener(|this, _, _, cx| {
                     if let Some(oldest) = this.timeline.oldest_ms() {
-                        this.load(Some(oldest), cx);
+                        // The gateway's bound is exclusive and WhatsApp stamps whole
+                        // seconds: +1 re-reads messages that share the oldest
+                        // stamp (the timeline dedups by id) instead of skipping them.
+                        this.load(Some(oldest.saturating_add(1)), cx);
                     }
                 }))
         });

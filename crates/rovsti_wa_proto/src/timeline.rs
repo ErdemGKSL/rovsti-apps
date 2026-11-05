@@ -3,7 +3,7 @@
 
 use rovsti_core::PhoneNumber;
 
-use crate::api::{LinkError, MessageBody, Reaction, Sent, WaMessage};
+use crate::api::{LinkError, MediaKind, MessageBody, Reaction, Sent, WaMessage};
 use crate::event::{GatewayEvent, ReceiptKind};
 
 /// Delivery state of one timeline item. The order of `Sent < Delivered < Read`
@@ -116,6 +116,40 @@ impl Timeline {
         });
     }
 
+    /// Adds an optimistic outgoing media message. Dedups like
+    /// [`Self::push_pending`].
+    pub fn push_pending_media(
+        &mut self,
+        local_id: u64,
+        kind: MediaKind,
+        mime: String,
+        caption: Option<String>,
+        size: u64,
+        now_ms: i64,
+    ) {
+        if self.position_of_local(local_id).is_some() {
+            return;
+        }
+        let message = WaMessage {
+            id: format!("pending-{local_id}"),
+            chat: self.chat.clone(),
+            sender: None,
+            from_me: true,
+            timestamp_ms: now_ms,
+            body: MessageBody::Media {
+                kind,
+                caption,
+                mime,
+                size,
+            },
+            reactions: Vec::new(),
+        };
+        self.insert_sorted(Item {
+            message,
+            state: ItemState::Pending { local_id },
+        });
+    }
+
     /// Swaps the pending item for the real id. If our own echo already arrived
     /// under that id, the pending item is simply dropped.
     pub fn confirm(&mut self, local_id: u64, sent: &Sent) {
@@ -153,6 +187,17 @@ impl Timeline {
         let text = text.clone();
         self.items[pos].state = ItemState::Pending { local_id };
         Some(text)
+    }
+
+    /// Takes any failed send (text or media) back to pending and returns its
+    /// body so the caller can resend it. `None` when `local_id` is not failed.
+    pub fn restart_body(&mut self, local_id: u64) -> Option<MessageBody> {
+        let pos = self
+            .items
+            .iter()
+            .position(|i| i.state == ItemState::Failed { local_id })?;
+        self.items[pos].state = ItemState::Pending { local_id };
+        Some(self.items[pos].message.body.clone())
     }
 
     /// Optimistically sets our own reaction on a message (`""` removes it),
@@ -583,5 +628,68 @@ mod tests {
         assert!(!t.on_send());
         // A new burst after sending types immediately.
         assert!(t.on_edit(10));
+    }
+
+    fn pending_image(t: &mut Timeline, local_id: u64) {
+        t.push_pending_media(
+            local_id,
+            MediaKind::Image,
+            "image/jpeg".into(),
+            Some("cap".into()),
+            42,
+            100,
+        );
+    }
+
+    fn sent(id: &str) -> Sent {
+        Sent {
+            message_id: id.into(),
+            timestamp_ms: 200,
+        }
+    }
+
+    #[test]
+    fn pending_media_confirm_keeps_body() {
+        let mut t = Timeline::new(CHAT);
+        pending_image(&mut t, 1);
+        pending_image(&mut t, 1);
+        assert_eq!(t.items().len(), 1);
+        t.confirm(1, &sent("real"));
+        let item = &t.items()[0];
+        assert_eq!(item.message.id, "real");
+        assert_eq!(item.state, ItemState::Sent);
+        assert_eq!(
+            item.message.body,
+            MessageBody::Media {
+                kind: MediaKind::Image,
+                caption: Some("cap".into()),
+                mime: "image/jpeg".into(),
+                size: 42,
+            }
+        );
+    }
+
+    #[test]
+    fn media_echo_first_drops_pending() {
+        let mut t = Timeline::new(CHAT);
+        pending_image(&mut t, 1);
+        let mut echo = msg("real", 150, true);
+        echo.body = t.items()[0].message.body.clone();
+        assert!(t.apply_event(&GatewayEvent::Message(echo)));
+        t.confirm(1, &sent("real"));
+        assert_eq!(ids(&t), ["real"]);
+    }
+
+    #[test]
+    fn restart_body_returns_media_and_text_restart_refuses_it() {
+        let mut t = Timeline::new(CHAT);
+        pending_image(&mut t, 1);
+        assert_eq!(t.restart_body(1), None);
+        t.fail(1);
+        assert_eq!(t.restart(1), None);
+        assert_eq!(t.items()[0].state, ItemState::Failed { local_id: 1 });
+        let body = t.restart_body(1).unwrap();
+        assert!(matches!(body, MessageBody::Media { size: 42, .. }));
+        assert_eq!(t.items()[0].state, ItemState::Pending { local_id: 1 });
     }
 }

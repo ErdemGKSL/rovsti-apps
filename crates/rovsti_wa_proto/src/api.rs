@@ -138,6 +138,9 @@ pub struct KeyInfo {
     pub label: String,
     pub created_ms: i64,
     pub last_used_ms: Option<i64>,
+    /// True for the key that made this request. Older gateways omit it.
+    #[serde(default)]
+    pub current: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

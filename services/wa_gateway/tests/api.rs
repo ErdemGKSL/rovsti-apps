@@ -193,8 +193,16 @@ async fn a_second_key_sees_the_same_instance() {
     assert_eq!(status_a, status_b);
     assert_eq!(status_b.instance_id, created.instance_id);
 
-    let keys = blocking(move || second.keys()).await.unwrap();
+    let (s2, f2) = (second.clone(), first.clone());
+    let keys = blocking(move || s2.keys()).await.unwrap();
     assert_eq!(keys.len(), 2);
+    let current: Vec<_> = keys.iter().filter(|k| k.current).collect();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].key_id, issued.key_id);
+    let keys_first = blocking(move || f2.keys()).await.unwrap();
+    let current: Vec<_> = keys_first.iter().filter(|k| k.current).collect();
+    assert_eq!(current.len(), 1);
+    assert_eq!(current[0].key_id, created.key_id);
     assert!(keys.iter().any(|k| k.key_id == created.key_id));
     assert!(keys.iter().any(|k| k.key_id == issued.key_id));
     assert!(
@@ -783,4 +791,60 @@ async fn an_incoming_call_rings_and_is_answered_over_the_api() {
         Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::NotFound),
         other => panic!("expected not found, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn revoking_your_own_key_is_allowed() {
+    let server = start(4).await;
+    let (first, created) = create(&server).await;
+    let (a, b) = (first.clone(), first.clone());
+    let own = created.key_id.clone();
+    blocking(move || a.revoke_key(&own)).await.unwrap();
+    assert_eq!(
+        blocking(move || b.status()).await.unwrap_err(),
+        ClientError::Unauthorized
+    );
+}
+
+#[tokio::test]
+async fn relinking_after_a_logout_shows_a_new_qr() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, Some(0));
+    assert_eq!(events.next().await, ClientEvent::Connected);
+    // Qr, then Connected.
+    events.next_event().await;
+    events.next_event().await;
+
+    let id = wa_gateway::store::InstanceId::new(created.instance_id.clone());
+    wa_gateway::driver::WaDriver::logout(&*server.driver, &id)
+        .await
+        .unwrap();
+    match events.next_event().await.event {
+        GatewayEvent::State(status) => assert_eq!(status.state, InstanceState::LoggedOut),
+        other => panic!("expected LoggedOut, got {other:?}"),
+    }
+    let g = gateway.clone();
+    assert_eq!(
+        blocking(move || g.status()).await.unwrap().state,
+        InstanceState::LoggedOut
+    );
+
+    let g = gateway.clone();
+    blocking(move || g.relink(&LinkRequest::Qr)).await.unwrap();
+    let mut saw_qr = false;
+    for _ in 0..4 {
+        match events.next_event().await.event {
+            GatewayEvent::Qr { payload, .. } => {
+                assert!(payload.starts_with("fake-qr:"));
+                saw_qr = true;
+            }
+            GatewayEvent::State(s) if s.state == InstanceState::Connected => break,
+            _ => {}
+        }
+    }
+    assert!(saw_qr, "relink must emit a Qr");
+    // The same key still works: nothing was re-created.
+    let status = blocking(move || gateway.status()).await.unwrap();
+    assert_eq!(status.instance_id, created.instance_id);
 }

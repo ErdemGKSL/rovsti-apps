@@ -23,17 +23,20 @@ use rovsti_ui::{
 };
 use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway};
 use rovsti_wa_proto::{
-    AppId, ConnectKey, GatewayEvent, GatewayUrl, InstanceState, PushRegistration,
+    AppId, ConnectKey, GatewayEvent, GatewayUrl, InstanceState, KeyInfo, LinkRequest,
+    PushRegistration,
 };
 
 use crate::{
     model::{
         ACTION_SHOW_KEY, ACTION_UNLINK, Effect, Input, LINK_FILE, LinkMethodChoice, LinkModel,
-        OPTION_CONNECT_EXISTING, OPTION_LINK_NEW, Screen, StoredLink,
+        OPTION_CONNECT_EXISTING, OPTION_LINK_NEW, Screen, StoredLink, last_used_text,
     },
     qr::qr_png,
 };
 
+const ACTION_CONNECTED_APPS: &str = "Connected apps";
+const ACTION_DELETE: &str = "Delete instance…";
 const QR_FILE: &str = "rovsti-whatsapp-link.png";
 /// Events kept for the app between two calls of `take_events`.
 const EVENT_BACKLOG: usize = 1024;
@@ -232,6 +235,35 @@ impl WhatsAppSettings {
                     };
                     self.call(cx, move || gateway.mint_key(&label), Input::ShowKey);
                 }
+                Effect::ListKeys => {
+                    let Some(gateway) = self.gateway() else {
+                        continue;
+                    };
+                    self.call(cx, move || gateway.keys(), Input::KeysLoaded);
+                }
+                Effect::RevokeKey(key_id) => {
+                    let Some(gateway) = self.gateway() else {
+                        continue;
+                    };
+                    let id = key_id.clone();
+                    self.call(
+                        cx,
+                        move || gateway.revoke_key(&key_id),
+                        move |()| Input::Revoked(id),
+                    );
+                }
+                Effect::Relink(link, request) => self.call_quiet(cx, move || {
+                    let (url, key) = parse_link(&link)?;
+                    Gateway::new(url, Some(key)).relink(&request)
+                }),
+                Effect::DeleteInstance(link) => self.call(
+                    cx,
+                    move || {
+                        let (url, key) = parse_link(&link)?;
+                        Gateway::new(url, Some(key)).delete_instance()
+                    },
+                    |()| Input::Deleted,
+                ),
                 Effect::AbandonInstance(link) => {
                     cx.background_executor()
                         .spawn(async move {
@@ -285,6 +317,23 @@ impl WhatsAppSettings {
                 Err(error) => error_input(error),
             };
             this.update(cx, |this, cx| this.dispatch(input, cx)).ok();
+        })
+        .detach();
+    }
+
+    /// Like [`Self::call`] for a call whose success needs no input: the
+    /// gateway answers with events. Only a failure is fed back.
+    fn call_quiet(
+        &mut self,
+        cx: &mut Context<Self>,
+        job: impl FnOnce() -> Result<(), ClientError> + Send + 'static,
+    ) {
+        let task = cx.background_executor().spawn(async move { job() });
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = task.await {
+                this.update(cx, |this, cx| this.dispatch(error_input(error), cx))
+                    .ok();
+            }
         })
         .detach();
     }
@@ -688,6 +737,9 @@ impl WhatsAppSettings {
             Self::button(theme, "wa-show-key", ACTION_SHOW_KEY, cx, |this, cx| {
                 this.dispatch(Input::RequestShareKey, cx);
             }),
+            Self::button(theme, "wa-keys", ACTION_CONNECTED_APPS, cx, |this, cx| {
+                this.dispatch(Input::OpenKeys, cx);
+            }),
             Self::button(theme, "wa-unlink", ACTION_UNLINK, cx, |this, cx| {
                 this.dispatch(Input::Unlink, cx);
             }),
@@ -696,6 +748,133 @@ impl WhatsAppSettings {
                 "Unlinking only removes WhatsApp from this app. The instance keeps running \
                  on the gateway for your other apps.",
             ),
+            Self::danger_button(theme, "wa-delete", ACTION_DELETE, cx, |this, cx| {
+                this.dispatch(Input::RequestDelete, cx);
+            }),
+        ])
+    }
+
+    fn danger_button(
+        theme: Theme,
+        id: &'static str,
+        label: &'static str,
+        cx: &mut Context<Self>,
+        tap: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+    ) -> AnyElement {
+        glass_pill(theme, label)
+            .id(id)
+            .mx(metrics::ROW_INSET)
+            .text_color(theme.colors().red)
+            .on_click(cx.listener(move |this, _, _, cx| tap(this, cx)))
+            .into_any_element()
+    }
+
+    fn keys_screen(&self, theme: Theme, keys: &[KeyInfo], cx: &mut Context<Self>) -> AnyElement {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+        let mut children = vec![Self::note(
+            theme,
+            "Every app that can use this WhatsApp instance. Revoking a key signs that app out. \
+             Revoking this app's own key unlinks it.",
+        )];
+        for info in keys {
+            let used = last_used_text(info.last_used_ms, now);
+            let subtitle = if info.current {
+                format!("this app · {used}")
+            } else {
+                used
+            };
+            let key_id = info.key_id.clone();
+            children.push(
+                section(
+                    theme,
+                    None,
+                    [
+                        list_row(theme, None, info.label.clone(), Some(subtitle.into()), None)
+                            .into_any_element(),
+                    ],
+                )
+                .into_any_element(),
+            );
+            children.push(
+                glass_pill(theme, "Revoke")
+                    .id(SharedString::from(format!("wa-revoke-{}", info.key_id)))
+                    .mx(metrics::ROW_INSET)
+                    .text_color(theme.colors().red)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.dispatch(Input::Revoke(key_id.clone()), cx);
+                    }))
+                    .into_any_element(),
+            );
+        }
+        children.push(Self::back_button(theme, cx));
+        Self::page(children)
+    }
+
+    fn logged_out(&self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        Self::page(vec![
+            Self::note(
+                theme,
+                "WhatsApp logged this instance out. Link it again; your other apps keep their keys.",
+            ),
+            Self::button(
+                theme,
+                "wa-relink-qr",
+                "Link again with a QR code",
+                cx,
+                |this, cx| {
+                    this.dispatch(Input::Relink(LinkRequest::Qr), cx);
+                },
+            ),
+            Self::note(
+                theme,
+                "Or get a pairing code: enter the number with its country code, for example +90 532 111 22 33.",
+            ),
+            div()
+                .px(metrics::ROW_INSET)
+                .child(field_box(
+                    theme,
+                    "wa-phone-field",
+                    &self.phone_field,
+                    "+90 …",
+                    window,
+                    cx,
+                ))
+                .into_any_element(),
+            Self::button(
+                theme,
+                "wa-relink-code",
+                "Link again with a pairing code",
+                cx,
+                |this, cx| {
+                    let number = this.phone_field.read(cx).text().to_owned();
+                    this.dispatch(Input::Relink(LinkRequest::PhoneNumber { number }), cx);
+                },
+            ),
+            Self::button(theme, "wa-unlink", ACTION_UNLINK, cx, |this, cx| {
+                this.dispatch(Input::Unlink, cx);
+            }),
+        ])
+    }
+
+    fn confirm_delete(theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        Self::page(vec![
+            Self::note(
+                theme,
+                "This logs WhatsApp out and deletes the instance, its history and every connect key \
+                 on the gateway. All your Rovsti apps lose WhatsApp. This cannot be undone.",
+            ),
+            Self::danger_button(
+                theme,
+                "wa-delete-confirm",
+                "Delete instance",
+                cx,
+                |this, cx| {
+                    this.dispatch(Input::ConfirmDelete, cx);
+                },
+            ),
+            Self::back_button(theme, cx),
         ])
     }
 
@@ -762,6 +941,9 @@ impl Render for WhatsAppSettings {
             Screen::Connecting => Self::waiting(theme),
             Screen::Connected { status } => self.connected(theme, &status, cx),
             Screen::ShareKey { key } => self.share_key(theme, &key, cx),
+            Screen::Keys { keys } => self.keys_screen(theme, &keys, cx),
+            Screen::LoggedOut => self.logged_out(theme, window, cx),
+            Screen::ConfirmDelete => Self::confirm_delete(theme, cx),
             Screen::Failed { message, .. } => Self::failed(theme, &message, cx),
         }
     }

@@ -9,7 +9,7 @@ use std::fmt;
 
 use rovsti_wa_proto::{
     AppId, ConnectKey, CreateInstance, CreatedInstance, GatewayEvent, GatewayUrl, InstanceState,
-    InstanceStatus, IssuedKey, LinkRequest,
+    InstanceStatus, IssuedKey, KeyInfo, LinkRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +26,6 @@ pub const ACTION_SHOW_KEY: &str = "Show connect key";
 pub const ACTION_UNLINK: &str = "Unlink this app";
 
 pub const MSG_KEY_REJECTED: &str = "This key was revoked or is wrong";
-pub const MSG_LOGGED_OUT: &str = "WhatsApp logged this instance out. Link it again.";
 pub const MSG_BANNED: &str = "WhatsApp has banned this account from linked devices.";
 
 /// What an app keeps to reach its instance. The key is a bearer secret.
@@ -77,6 +76,14 @@ pub enum Screen {
     ShareKey {
         key: String,
     },
+    /// The apps that hold a connect key of this instance.
+    Keys {
+        keys: Vec<KeyInfo>,
+    },
+    /// WhatsApp logged the instance out; it can be linked again.
+    LoggedOut,
+    /// "Delete instance" waits for a second tap.
+    ConfirmDelete,
     Failed {
         message: String,
         back: Box<Screen>,
@@ -108,6 +115,16 @@ pub enum Input {
     Cancel,
     /// "Try again" on a failure.
     Retry,
+    OpenKeys,
+    KeysLoaded(Vec<KeyInfo>),
+    /// Revoke the key with this id.
+    Revoke(String),
+    Revoked(String),
+    /// "Link again" on the logged-out page.
+    Relink(LinkRequest),
+    RequestDelete,
+    ConfirmDelete,
+    Deleted,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -129,6 +146,14 @@ pub enum Effect {
     /// `POST /v1/keys`, labelled with this text.
     MintKey(String),
     CopyToClipboard(String),
+    /// `GET /v1/keys`; the answer is `KeysLoaded`.
+    ListKeys,
+    /// `DELETE /v1/keys/{id}`; the answer is `Revoked(id)`.
+    RevokeKey(String),
+    /// `POST /v1/instance/link` on the same instance. Its answer arrives as events.
+    Relink(StoredLink, LinkRequest),
+    /// `DELETE /v1/instance`; the answer is `Deleted`.
+    DeleteInstance(StoredLink),
 }
 
 #[derive(Clone, Debug)]
@@ -140,6 +165,9 @@ pub struct LinkModel {
     gateway_url: String,
     /// A pasted key being verified.
     pending_key: Option<String>,
+    /// A QR or code on screen belongs to a relink of a shared instance, which
+    /// "Cancel" must not delete.
+    relinking: bool,
 }
 
 fn app_name(app: AppId) -> &'static str {
@@ -148,6 +176,20 @@ fn app_name(app: AppId) -> &'static str {
         AppId::Messages => "Messages",
         AppId::Contacts => "Contacts",
         AppId::Stops => "Stops",
+    }
+}
+
+/// "never used", "just now", "5 min ago", "3 h ago", "2 d ago".
+pub fn last_used_text(last_used_ms: Option<i64>, now_ms: i64) -> String {
+    let Some(then) = last_used_ms else {
+        return "never used".to_owned();
+    };
+    let minutes = (now_ms - then).max(0) / 60_000;
+    match minutes {
+        0 => "just now".to_owned(),
+        1..=59 => format!("{minutes} min ago"),
+        60..=1439 => format!("{} h ago", minutes / 60),
+        _ => format!("{} d ago", minutes / 1440),
     }
 }
 
@@ -175,6 +217,7 @@ impl LinkModel {
             status: None,
             gateway_url,
             pending_key: None,
+            relinking: false,
         }
     }
 
@@ -209,6 +252,9 @@ impl LinkModel {
     /// Where "back" lands: the connected page when linked, else the two options.
     fn home(&self) -> Screen {
         match (&self.link, &self.status) {
+            (Some(_), Some(status)) if status.state == InstanceState::LoggedOut => {
+                Screen::LoggedOut
+            }
             (Some(_), Some(status)) => Screen::Connected {
                 status: status.clone(),
             },
@@ -228,11 +274,16 @@ impl LinkModel {
         self.link = None;
         self.status = None;
         self.pending_key = None;
+        self.relinking = false;
     }
 
     /// Shows what the instance is doing. `Linking` keeps waiting for a QR.
     fn show_status(&mut self, status: InstanceStatus) {
+        if status.state == InstanceState::Connected {
+            self.relinking = false;
+        }
         self.screen = match status.state {
+            InstanceState::LoggedOut => Screen::LoggedOut,
             InstanceState::Linking => match self.screen {
                 Screen::ShowQr { .. } | Screen::ShowCode { .. } => return,
                 _ => Screen::Connecting,
@@ -355,13 +406,21 @@ impl LinkModel {
                     Screen::EnterUrl | Screen::LinkNew { .. } | Screen::PasteKey => {
                         self.screen = Screen::Choose;
                     }
-                    Screen::ShareKey { .. } => self.screen = self.home(),
+                    Screen::ShareKey { .. } | Screen::Keys { .. } | Screen::ConfirmDelete => {
+                        self.screen = self.home();
+                    }
                     Screen::Failed { back, .. } => self.screen = (**back).clone(),
                     _ => {}
                 }
                 Vec::new()
             }
             Input::Cancel => match self.screen {
+                Screen::ShowQr { .. } | Screen::ShowCode { .. } if self.relinking => {
+                    // The instance is shared: stay linked, offer "Link again".
+                    self.relinking = false;
+                    self.screen = Screen::LoggedOut;
+                    Vec::new()
+                }
                 Screen::ShowQr { .. } | Screen::ShowCode { .. } => {
                     let abandoned = self.link.clone();
                     self.drop_link();
@@ -383,7 +442,71 @@ impl LinkModel {
                 }
                 _ => Vec::new(),
             },
+            Input::OpenKeys => match self.link {
+                Some(_) => {
+                    self.screen = Screen::Connecting;
+                    vec![Effect::ListKeys]
+                }
+                None => Vec::new(),
+            },
+            Input::KeysLoaded(keys) => {
+                if self.link.is_some() && self.screen == Screen::Connecting {
+                    self.screen = Screen::Keys { keys };
+                }
+                Vec::new()
+            }
+            Input::Revoke(key_id) => match (&self.screen, &self.link) {
+                (Screen::Keys { .. }, Some(_)) => vec![Effect::RevokeKey(key_id)],
+                _ => Vec::new(),
+            },
+            Input::Revoked(key_id) => self.revoked(&key_id),
+            Input::Relink(request) => self.relink(request),
+            Input::RequestDelete => {
+                if self.link.is_some() {
+                    self.screen = Screen::ConfirmDelete;
+                }
+                Vec::new()
+            }
+            Input::ConfirmDelete => match (&self.screen, self.link.clone()) {
+                (Screen::ConfirmDelete, Some(link)) => {
+                    self.screen = Screen::Connecting;
+                    vec![Effect::DeleteInstance(link)]
+                }
+                _ => Vec::new(),
+            },
+            Input::Deleted => {
+                self.drop_link();
+                self.screen = Screen::Choose;
+                vec![Effect::Forget]
+            }
         }
+    }
+
+    fn revoked(&mut self, key_id: &str) -> Vec<Effect> {
+        let Screen::Keys { keys } = &mut self.screen else {
+            return Vec::new();
+        };
+        if keys.iter().any(|k| k.key_id == key_id && k.current) {
+            // This app's own key: the link is gone.
+            self.drop_link();
+            self.screen = Screen::Choose;
+            return vec![Effect::Forget];
+        }
+        keys.retain(|k| k.key_id != key_id);
+        Vec::new()
+    }
+
+    fn relink(&mut self, request: LinkRequest) -> Vec<Effect> {
+        let (Screen::LoggedOut, Some(link)) = (&self.screen, self.link.clone()) else {
+            return Vec::new();
+        };
+        if let Err(error) = request.pair_phone() {
+            self.screen = failed(error.to_string(), Screen::LoggedOut);
+            return Vec::new();
+        }
+        self.relinking = true;
+        self.screen = Screen::Connecting;
+        vec![Effect::Relink(link, request)]
     }
 
     fn create(&mut self, link: LinkRequest) -> Vec<Effect> {
@@ -431,18 +554,11 @@ impl LinkModel {
         let Some(link) = self.link.clone() else {
             return effects;
         };
-        match status.state {
-            InstanceState::LoggedOut => {
-                self.drop_link();
-                self.screen = failed(MSG_LOGGED_OUT, Screen::Choose);
-                return vec![Effect::Forget];
-            }
-            InstanceState::Banned => {
-                self.drop_link();
-                self.screen = failed(MSG_BANNED, Screen::Choose);
-                return vec![Effect::Forget];
-            }
-            _ => {}
+        // LoggedOut keeps the link: the page offers "Link again".
+        if status.state == InstanceState::Banned {
+            self.drop_link();
+            self.screen = failed(MSG_BANNED, Screen::Choose);
+            return vec![Effect::Forget];
         }
         self.show_status(status);
         effects.push(Effect::Subscribe(link));
@@ -465,9 +581,9 @@ impl LinkModel {
             }
             GatewayEvent::State(status) if self.link.is_some() => match status.state {
                 InstanceState::LoggedOut => {
-                    self.drop_link();
-                    self.screen = failed(MSG_LOGGED_OUT, Screen::Choose);
-                    vec![Effect::Forget]
+                    self.relinking = false;
+                    self.show_status(status);
+                    Vec::new()
                 }
                 InstanceState::Banned => {
                     self.drop_link();
@@ -477,7 +593,17 @@ impl LinkModel {
                 _ => {
                     // A status never pulls the user out of a form they are
                     // filling in (the key on screen, an error).
-                    if matches!(self.screen, Screen::ShareKey { .. } | Screen::Failed { .. }) {
+                    let busy = matches!(
+                        self.screen,
+                        Screen::ShareKey { .. }
+                            | Screen::Failed { .. }
+                            | Screen::Keys { .. }
+                            | Screen::ConfirmDelete
+                    );
+                    // After a logout only a real reconnection ends the page.
+                    let logged_out = self.screen == Screen::LoggedOut
+                        && status.state != InstanceState::Connected;
+                    if busy || logged_out {
                         self.status = Some(status);
                     } else {
                         self.show_status(status);
@@ -815,9 +941,19 @@ mod tests {
         ))));
         assert!(!m.is_connected());
         assert!(matches!(m.screen, Screen::Connected { .. }));
-        assert_eq!(
+        // Logged out: the link stays so the app can link again.
+        assert!(
             m.apply(Input::Event(GatewayEvent::State(status(
                 InstanceState::LoggedOut
+            ))))
+            .is_empty()
+        );
+        assert_eq!(m.screen, Screen::LoggedOut);
+        assert!(m.link.is_some());
+        // Banned is final.
+        assert_eq!(
+            m.apply(Input::Event(GatewayEvent::State(status(
+                InstanceState::Banned
             )))),
             vec![Effect::Forget]
         );
@@ -825,6 +961,183 @@ mod tests {
         // Chatter that is not about linking changes nothing.
         let mut m = linked();
         assert!(m.apply(Input::Event(GatewayEvent::Resync)).is_empty());
+    }
+
+    fn key(id: &str, current: bool) -> KeyInfo {
+        KeyInfo {
+            key_id: id.into(),
+            label: format!("app {id}"),
+            created_ms: 1,
+            last_used_ms: None,
+            current,
+        }
+    }
+
+    fn open_keys(m: &mut LinkModel) {
+        assert_eq!(m.apply(Input::OpenKeys), vec![Effect::ListKeys]);
+        m.apply(Input::KeysLoaded(vec![key("k1", true), key("k2", false)]));
+    }
+
+    #[test]
+    fn old_key_info_json_deserializes_without_current() {
+        let old = r#"{"key_id":"k1","label":"Phone","created_ms":5,"last_used_ms":null}"#;
+        let info: KeyInfo = serde_json::from_str(old).unwrap();
+        assert!(!info.current);
+    }
+
+    #[test]
+    fn revoking_another_key_shrinks_the_list() {
+        let mut m = linked();
+        open_keys(&mut m);
+        assert!(matches!(&m.screen, Screen::Keys { keys } if keys.len() == 2));
+        assert_eq!(
+            m.apply(Input::Revoke("k2".into())),
+            vec![Effect::RevokeKey("k2".into())]
+        );
+        assert!(m.apply(Input::Revoked("k2".into())).is_empty());
+        assert_eq!(
+            m.screen,
+            Screen::Keys {
+                keys: vec![key("k1", true)]
+            }
+        );
+        assert!(m.link.is_some());
+        m.apply(Input::Back);
+        assert!(matches!(m.screen, Screen::Connected { .. }));
+    }
+
+    #[test]
+    fn revoking_the_current_key_forgets_the_link() {
+        let mut m = linked();
+        open_keys(&mut m);
+        assert_eq!(
+            m.apply(Input::Revoke("k1".into())),
+            vec![Effect::RevokeKey("k1".into())]
+        );
+        assert_eq!(m.apply(Input::Revoked("k1".into())), vec![Effect::Forget]);
+        assert_eq!(m.screen, Screen::Choose);
+        assert!(m.link.is_none());
+    }
+
+    #[test]
+    fn logged_out_then_link_again_by_qr_keeps_the_same_link() {
+        let mut m = linked();
+        let link = m.link.clone().unwrap();
+        assert!(
+            m.apply(Input::Event(GatewayEvent::State(status(
+                InstanceState::LoggedOut
+            ))))
+            .is_empty()
+        );
+        assert_eq!(m.screen, Screen::LoggedOut);
+        // Other status chatter does not leave the page.
+        m.apply(Input::Event(GatewayEvent::State(status(
+            InstanceState::Disconnected,
+        ))));
+        assert_eq!(m.screen, Screen::LoggedOut);
+        assert_eq!(
+            m.apply(Input::Relink(LinkRequest::Qr)),
+            vec![Effect::Relink(link.clone(), LinkRequest::Qr)]
+        );
+        assert_eq!(m.screen, Screen::Connecting);
+        m.apply(Input::Event(GatewayEvent::State(status(
+            InstanceState::Linking,
+        ))));
+        m.apply(Input::Event(GatewayEvent::Qr {
+            payload: "2@new".into(),
+            valid_for_ms: 20_000,
+        }));
+        assert_eq!(
+            m.screen,
+            Screen::ShowQr {
+                payload: "2@new".into()
+            }
+        );
+        let effects = m.apply(Input::Event(GatewayEvent::State(status(
+            InstanceState::Connected,
+        ))));
+        assert!(effects.is_empty(), "no new link is saved: {effects:?}");
+        assert!(matches!(m.screen, Screen::Connected { .. }));
+        assert_eq!(m.link, Some(link));
+    }
+
+    #[test]
+    fn logged_out_on_start_offers_link_again_and_unlink() {
+        let mut m = linked();
+        m.screen = Screen::Connecting;
+        let effects = m.apply(Input::StatusOk(status(InstanceState::LoggedOut)));
+        assert!(matches!(&effects[..], [Effect::Subscribe(_)]));
+        assert_eq!(m.screen, Screen::LoggedOut);
+        assert_eq!(m.apply(Input::Unlink), vec![Effect::Forget]);
+        assert_eq!(m.screen, Screen::Choose);
+    }
+
+    #[test]
+    fn relink_by_pairing_code_checks_the_number_and_cancel_keeps_the_instance() {
+        let mut m = linked();
+        m.apply(Input::Event(GatewayEvent::State(status(
+            InstanceState::LoggedOut,
+        ))));
+        let bad = LinkRequest::PhoneNumber {
+            number: "0532 111 22 33".into(),
+        };
+        assert!(m.apply(Input::Relink(bad)).is_empty());
+        assert!(matches!(&m.screen, Screen::Failed { back, .. } if **back == Screen::LoggedOut));
+        m.apply(Input::Back);
+        assert_eq!(m.screen, Screen::LoggedOut);
+        let good = LinkRequest::PhoneNumber {
+            number: "+90 532 111 22 33".into(),
+        };
+        assert!(matches!(
+            &m.apply(Input::Relink(good))[..],
+            [Effect::Relink(..)]
+        ));
+        m.apply(Input::Event(GatewayEvent::PairCode {
+            code: "ABCD-1234".into(),
+            valid_for_ms: 60_000,
+        }));
+        assert!(matches!(m.screen, Screen::ShowCode { .. }));
+        // The instance is shared: Cancel must not delete it or the link.
+        assert!(m.apply(Input::Cancel).is_empty());
+        assert_eq!(m.screen, Screen::LoggedOut);
+        assert!(m.link.is_some());
+        // Relink only makes sense on the logged-out page.
+        assert!(linked().apply(Input::Relink(LinkRequest::Qr)).is_empty());
+    }
+
+    #[test]
+    fn deleting_the_instance_needs_a_confirmation() {
+        let mut m = linked();
+        let link = m.link.clone().unwrap();
+        // Skipping the confirmation does nothing.
+        assert!(m.apply(Input::ConfirmDelete).is_empty());
+        assert!(m.apply(Input::RequestDelete).is_empty());
+        assert_eq!(m.screen, Screen::ConfirmDelete);
+        // Back out first.
+        m.apply(Input::Back);
+        assert!(matches!(m.screen, Screen::Connected { .. }));
+        m.apply(Input::RequestDelete);
+        assert_eq!(
+            m.apply(Input::ConfirmDelete),
+            vec![Effect::DeleteInstance(link)]
+        );
+        assert_eq!(m.screen, Screen::Connecting);
+        assert_eq!(m.apply(Input::Deleted), vec![Effect::Forget]);
+        assert_eq!(m.screen, Screen::Choose);
+        assert!(m.link.is_none());
+        // Nothing to delete without a link.
+        assert!(model().apply(Input::RequestDelete).is_empty());
+    }
+
+    #[test]
+    fn last_used_is_human() {
+        let now = 10 * 86_400_000;
+        assert_eq!(last_used_text(None, now), "never used");
+        assert_eq!(last_used_text(Some(now - 5_000), now), "just now");
+        assert_eq!(last_used_text(Some(now + 5_000), now), "just now");
+        assert_eq!(last_used_text(Some(now - 5 * 60_000), now), "5 min ago");
+        assert_eq!(last_used_text(Some(now - 3 * 3_600_000), now), "3 h ago");
+        assert_eq!(last_used_text(Some(now - 2 * 86_400_000), now), "2 d ago");
     }
 
     #[test]

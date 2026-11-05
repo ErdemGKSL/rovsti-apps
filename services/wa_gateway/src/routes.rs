@@ -220,7 +220,11 @@ async fn delete_instance(State(state): State<AppState>, auth: Authed) -> ApiResu
 }
 
 async fn list_keys(State(state): State<AppState>, auth: Authed) -> ApiResult<Json<Vec<KeyInfo>>> {
-    Ok(Json(state.store().list_keys(auth.instance).await?))
+    let mut keys = state.store().list_keys(auth.instance).await?;
+    for key in &mut keys {
+        key.current = key.key_id == auth.key_id.as_str();
+    }
+    Ok(Json(keys))
 }
 
 async fn mint_key(

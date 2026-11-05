@@ -449,6 +449,7 @@ impl Store {
                     label: r.get(1)?,
                     created_ms: r.get(2)?,
                     last_used_ms: r.get(3)?,
+                    current: false,
                 })
             })?;
             Ok(rows.collect::<Result<Vec<_>, _>>()?)

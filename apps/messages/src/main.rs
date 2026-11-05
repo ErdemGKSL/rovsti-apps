@@ -5,6 +5,8 @@
 //! an instance, and chats and live messages come from the gateway through
 //! `rovsti_wa_client`. SMS stays on the phone.
 
+mod conversation;
+
 use gpui::{
     App, AppContext as _, Bounds, Context, Entity, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div, prelude::*, px,
@@ -18,6 +20,7 @@ use rovsti_ui::{
     tokens::Theme,
 };
 
+use conversation::{Conversation, ConversationEvent};
 use rovsti_wa_client::ClientError;
 use rovsti_wa_proto::{ChatSummary, GatewayEvent, to_rovsti};
 use rovsti_wa_ui::{AppId, WhatsAppSettings};
@@ -35,6 +38,10 @@ struct MessagesApp {
     page: rovsti_ui::motion::Entrance,
     whatsapp: Entity<WhatsAppSettings>,
     threads: Vec<rovsti_core::Message>,
+    /// The gateway's chat list, kept for titles and the group flag.
+    chat_list: Vec<ChatSummary>,
+    /// The WhatsApp conversation pushed over the tabs.
+    open: Option<Entity<Conversation>>,
     /// The chat list is being fetched, or was fetched for this link.
     chats: ChatsState,
 }
@@ -70,6 +77,8 @@ impl MessagesApp {
             page: Default::default(),
             whatsapp,
             threads: Vec::new(),
+            chat_list: Vec::new(),
+            open: None,
             chats: ChatsState::Needed,
         }
     }
@@ -86,6 +95,9 @@ impl MessagesApp {
         cx: &mut Context<Self>,
     ) {
         for event in events {
+            if let Some(open) = &self.open {
+                open.update(cx, |conversation, cx| conversation.on_event(&event, cx));
+            }
             match event {
                 GatewayEvent::Message(message) => self.fold(to_rovsti(&message)),
                 // The stream missed events: fetch the chat list again.
@@ -97,6 +109,8 @@ impl MessagesApp {
             // Unlinked: WhatsApp chats leave the inbox.
             self.threads
                 .retain(|m| m.thread.channel() != rovsti_core::Channel::WhatsApp);
+            self.chat_list.clear();
+            self.open = None;
             self.chats = ChatsState::Needed;
         } else if connected && self.chats == ChatsState::Needed {
             self.load_chats(cx);
@@ -136,6 +150,7 @@ impl MessagesApp {
     /// Chats that are already in the inbox (a live message arrived first) keep
     /// whichever message is newer.
     fn merge_chats(&mut self, chats: &[ChatSummary]) {
+        self.chat_list = chats.to_vec();
         for message in chats.iter().filter_map(|c| c.last.as_ref()).map(to_rovsti) {
             let newer = self
                 .threads
@@ -150,7 +165,38 @@ impl MessagesApp {
             .sort_by_key(|m| std::cmp::Reverse(m.timestamp_ms));
     }
 
-    fn chats(&self, theme: Theme) -> impl IntoElement {
+    /// Title and group flag of a chat: the chat's name, else `+user`.
+    fn chat_title(&self, jid: &str) -> (String, bool) {
+        let summary = self.chat_list.iter().find(|c| c.jid == jid);
+        let title = summary
+            .and_then(|c| c.name.clone().filter(|n| !n.is_empty()))
+            .unwrap_or_else(|| format!("+{}", jid.split(['@', ':']).next().unwrap_or(jid)));
+        let is_group = summary.map_or_else(|| jid.ends_with("@g.us"), |c| c.is_group);
+        (title, is_group)
+    }
+
+    fn open_chat(&mut self, jid: String, cx: &mut Context<Self>) {
+        let Some(gateway) = self.whatsapp.read(cx).gateway() else {
+            return;
+        };
+        let (title, is_group) = self.chat_title(&jid);
+        let conversation = cx.new(|cx| Conversation::new(jid, title, is_group, gateway, cx));
+        cx.subscribe(&conversation, |this, _, event, cx| match event {
+            ConversationEvent::Back => this.close_chat(cx),
+        })
+        .detach();
+        self.open = Some(conversation);
+        self.page.restart();
+        cx.notify();
+    }
+
+    fn close_chat(&mut self, cx: &mut Context<Self>) {
+        self.open = None;
+        self.page.restart();
+        cx.notify();
+    }
+
+    fn chats(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme.colors();
         if self.threads.is_empty() {
             return empty_state(
@@ -161,11 +207,18 @@ impl MessagesApp {
             .into_any_element();
         }
         div()
-            .children(self.threads.iter().map(|message| {
-                let title = message
-                    .sender
-                    .as_ref()
-                    .map_or_else(|| "Me".to_owned(), ToString::to_string);
+            .children(self.threads.iter().enumerate().map(|(index, message)| {
+                let jid = match &message.thread {
+                    rovsti_core::ThreadId::WhatsApp(jid) => Some(jid.clone()),
+                    rovsti_core::ThreadId::Sms(_) => None,
+                };
+                let title = match &jid {
+                    Some(jid) => self.chat_title(jid).0,
+                    None => message
+                        .sender
+                        .as_ref()
+                        .map_or_else(|| "Me".to_owned(), ToString::to_string),
+                };
                 let badge = match message.thread.channel() {
                     rovsti_core::Channel::Sms => colors.accent,
                     rovsti_core::Channel::WhatsApp => colors.green,
@@ -176,13 +229,23 @@ impl MessagesApp {
                     .rev()
                     .take(2)
                     .collect();
-                list_row(
+                let row = list_row(
                     theme,
                     Some(avatar(theme, initials, 44.0, badge).into_any_element()),
                     title,
                     Some(message.body.clone().into()),
                     None,
-                )
+                );
+                // WhatsApp rows open the conversation; SMS rows stay inert.
+                match jid {
+                    Some(jid) => row
+                        .id(("thread", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_chat(jid.clone(), cx);
+                        }))
+                        .into_any_element(),
+                    None => row.into_any_element(),
+                }
             }))
             .into_any_element()
     }
@@ -194,12 +257,25 @@ impl Render for MessagesApp {
         let mut motion = std::mem::take(&mut self.motion);
         motion.frame(window, |dt| self.tabs.tick(dt) | self.page.tick(dt));
         self.motion = motion;
+        if let Some(conversation) = self.open.clone() {
+            return div()
+                .size_full()
+                .relative()
+                .child(rovsti_ui::components::backdrop(theme, theme.colors().green))
+                .child(
+                    div()
+                        .size_full()
+                        .opacity(self.page.progress())
+                        .child(conversation),
+                )
+                .into_any_element();
+        }
         let tab = self.tabs.selected();
         let entity = cx.entity();
         let touch_entity = entity.clone();
 
         let body = match tab {
-            0 => self.chats(theme).into_any_element(),
+            0 => self.chats(theme, cx).into_any_element(),
             1 => self.whatsapp.clone().into_any_element(),
             _ => empty_state(
                 theme,
@@ -256,6 +332,7 @@ impl Render for MessagesApp {
                     });
                 },
             ))
+            .into_any_element()
     }
 }
 

@@ -3,7 +3,7 @@
 
 use rovsti_core::PhoneNumber;
 
-use crate::api::{LinkError, Reaction, Sent, WaMessage};
+use crate::api::{LinkError, MessageBody, Reaction, Sent, WaMessage};
 use crate::event::{GatewayEvent, ReceiptKind};
 
 /// Delivery state of one timeline item. The order of `Sent < Delivered < Read`
@@ -107,7 +107,7 @@ impl Timeline {
             sender: None,
             from_me: true,
             timestamp_ms: now_ms,
-            body: crate::api::MessageBody::Text(text),
+            body: MessageBody::Text(text),
             reactions: Vec::new(),
         };
         self.insert_sorted(Item {
@@ -138,6 +138,21 @@ impl Timeline {
         if let Some(pos) = self.position_of_local(local_id) {
             self.items[pos].state = ItemState::Failed { local_id };
         }
+    }
+
+    /// Takes a failed send back to pending (the retry tap) and returns its
+    /// text. `None` when `local_id` is not a failed text item.
+    pub fn restart(&mut self, local_id: u64) -> Option<String> {
+        let pos = self
+            .items
+            .iter()
+            .position(|i| i.state == ItemState::Failed { local_id })?;
+        let MessageBody::Text(text) = &self.items[pos].message.body else {
+            return None;
+        };
+        let text = text.clone();
+        self.items[pos].state = ItemState::Pending { local_id };
+        Some(text)
     }
 
     /// Timestamp of the oldest confirmed message, for `before_ms` paging.
@@ -257,7 +272,6 @@ pub fn day_breaks(items: &[Item], utc_offset_s: i32) -> Vec<(usize, i64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::MessageBody;
 
     const CHAT: &str = "1@s.whatsapp.net";
 
@@ -429,5 +443,16 @@ mod tests {
             [(0, -3 * 3_600_000), (1, day - 3 * 3_600_000)]
         );
         assert!(day_breaks(&[], 0).is_empty());
+    }
+
+    #[test]
+    fn restart_returns_the_text_of_a_failed_send_only() {
+        let mut t = Timeline::new(CHAT);
+        t.push_pending(1, "hello".into(), 10);
+        assert_eq!(t.restart(1), None);
+        t.fail(1);
+        assert_eq!(t.restart(1).as_deref(), Some("hello"));
+        assert_eq!(t.items()[0].state, ItemState::Pending { local_id: 1 });
+        assert_eq!(t.restart(2), None);
     }
 }

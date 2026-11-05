@@ -660,8 +660,11 @@ impl WaCallUi {
         };
         match action {
             WaCallAction::Answer => self.answer(cx),
+            // A stale Decline must not end a call that is already answered.
             WaCallAction::Decline if shown.is_some_and(|(id, _)| id == call_id) => {
-                self.hang_up(true, cx);
+                if shown.is_some_and(|(_, ringing)| ringing) {
+                    self.hang_up(true, cx);
+                }
             }
             WaCallAction::Decline => {
                 // The app has not seen this call (cold start): reject it by id.

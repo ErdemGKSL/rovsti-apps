@@ -72,6 +72,8 @@ object WaIncoming {
                 .setSmallIcon(context.applicationInfo.icon)
                 .setCategory(Notification.CATEGORY_CALL)
                 .setOngoing(true)
+                // A cold process never learns that the caller hung up: do not leave an ongoing notice behind.
+                .setTimeoutAfter(RING_TIMEOUT_MS)
                 .setOnlyAlertOnce(true)
                 .setContentIntent(open)
                 .setFullScreenIntent(open, true)

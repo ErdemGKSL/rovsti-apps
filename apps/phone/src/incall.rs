@@ -32,6 +32,7 @@ use rovsti_ui::{
     tokens::{Theme, mix, typography},
     touch::{pointer_surface, touch_surface},
 };
+use rovsti_wa_proto::{Arbitration, EndReason, WaControl, WaScreen, WaScreenPhase, arbitrate};
 
 use crate::{
     PhoneApp,
@@ -79,11 +80,33 @@ pub(crate) const REASON_AFTER_MS: u64 = 450;
 
 // ---- The call as the screen draws it ------------------------------------
 
+/// Which stack owns a call: Telecom (a cellular call, by Android's id) or the
+/// WhatsApp gateway (by call id).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum CallSource {
+    Telecom(i32),
+    WhatsApp(String),
+}
+
+impl CallSource {
+    /// Android's call id, for the commands only Telecom understands.
+    pub(crate) fn telecom_id(&self) -> Option<i32> {
+        match self {
+            Self::Telecom(id) => Some(*id),
+            Self::WhatsApp(_) => None,
+        }
+    }
+
+    pub(crate) fn is_whatsapp(&self) -> bool {
+        matches!(self, Self::WhatsApp(_))
+    }
+}
+
 /// Everything the screen needs about the foreground call. Built only when a
 /// snapshot arrives, so rendering never formats or allocates a name.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CallView {
-    pub id: i32,
+    pub source: CallSource,
     pub state: CallState,
     /// The call came in (rang) rather than being placed here.
     pub incoming: bool,
@@ -102,7 +125,10 @@ pub struct CallView {
 /// The second caller of a waiting call (stories 9.2, 15.8) and what the card may offer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WaitingView {
+    /// Telecom's call id; `-1` for a WhatsApp offer (see `wa_call_id`).
     pub id: i32,
+    /// The WhatsApp call id when the waiting call is a WhatsApp offer: Decline only.
+    pub wa_call_id: Option<String>,
     pub name: SharedString,
     pub monogram: Option<SharedString>,
     pub hue: Option<usize>,
@@ -137,6 +163,7 @@ impl WaitingView {
             .filter(|r| matches!(r, DisabledReason::Emergency | DisabledReason::Pending));
         Some(Self {
             id: call.id,
+            wa_call_id: None,
             name: middle_truncate(&label, 22).into(),
             monogram: call
                 .display_name
@@ -152,6 +179,23 @@ impl WaitingView {
             hold_reason,
             end_reason,
         })
+    }
+}
+
+impl WaitingView {
+    /// A WhatsApp offer that rings beside a cellular call: only Decline works.
+    pub(crate) fn from_wa(screen: &WaScreen) -> Self {
+        Self {
+            id: -1,
+            wa_call_id: Some(screen.call_id.clone()),
+            name: middle_truncate(&screen.title, 22).into(),
+            monogram: avatar::monogram(&screen.title).map(|c| SharedString::from(c.to_string())),
+            hue: avatar::avatar_hue(avatar::AvatarKey::Unknown),
+            ends: SharedString::default(),
+            relabelled: false,
+            hold_reason: Some(DisabledReason::WhatsAppCall),
+            end_reason: Some(DisabledReason::WhatsAppCall),
+        }
     }
 }
 
@@ -184,7 +228,7 @@ impl CallView {
             .and_then(|_| rovsti_core::PhoneNumber::parse(&call.number_raw).ok())
             .map(|n| SharedString::from(middle_truncate(&format_number(&n), 28)));
         Some(Self {
-            id: call.id,
+            source: CallSource::Telecom(call.id),
             state: call.call_state(),
             incoming: call.is_incoming,
             name: middle_truncate(&label, 22).into(),
@@ -208,6 +252,47 @@ impl CallView {
         })
     }
 
+    /// The WhatsApp call as the In-Call and Incoming screens draw it.
+    pub(crate) fn from_wa(screen: &WaScreen) -> Self {
+        Self::from_wa_at(screen, backend::now_ms())
+    }
+
+    /// [`Self::from_wa`] with the clock passed in.
+    pub(crate) fn from_wa_at(screen: &WaScreen, now_ms: i64) -> Self {
+        let state = match &screen.phase {
+            WaScreenPhase::Ringing => CallState::Ringing,
+            WaScreenPhase::Calling | WaScreenPhase::Connecting => CallState::Dialing,
+            WaScreenPhase::Active => CallState::Active,
+            WaScreenPhase::Ended(reason) => CallState::Disconnected {
+                cause: wa_cause(reason),
+            },
+        };
+        let connect_time_ms = if screen.phase == WaScreenPhase::Active {
+            let elapsed_ms = i64::try_from(screen.elapsed_s.saturating_mul(1000)).unwrap_or(0);
+            now_ms - elapsed_ms
+        } else {
+            0
+        };
+        Self {
+            source: CallSource::WhatsApp(screen.call_id.clone()),
+            state,
+            incoming: screen.incoming,
+            name: middle_truncate(&screen.title, 22).into(),
+            number: SharedString::default(),
+            secondary: Some(WA_CAPTION.into()),
+            monogram: avatar::monogram(&screen.title).map(|c| SharedString::from(c.to_string())),
+            hue: avatar::avatar_hue(avatar::AvatarKey::Unknown),
+            can_hold: false,
+            connect_time_ms,
+            muted: screen.muted,
+            route: if screen.speaker {
+                AudioRoute::Speaker
+            } else {
+                AudioRoute::Earpiece
+            },
+        }
+    }
+
     pub(crate) fn phase(&self) -> Phase {
         match self.state {
             CallState::Active => Phase::Active,
@@ -221,6 +306,21 @@ impl CallView {
             }
             _ => Phase::Dialing,
         }
+    }
+}
+
+/// The caption under a WhatsApp caller's name, on both call screens.
+pub(crate) const WA_CAPTION: &str = "WhatsApp";
+
+/// How a WhatsApp call's end reads as a Telecom cause (colour of the ring, status text).
+fn wa_cause(reason: &EndReason) -> DisconnectCause {
+    match reason {
+        EndReason::Hangup => DisconnectCause::Local,
+        EndReason::Remote => DisconnectCause::Remote,
+        EndReason::Missed => DisconnectCause::Missed,
+        EndReason::Rejected => DisconnectCause::Rejected,
+        EndReason::ElsewhereAnswered => DisconnectCause::Canceled,
+        EndReason::Failed(_) => DisconnectCause::Error,
     }
 }
 
@@ -444,12 +544,17 @@ pub struct InCall {
     pending_gen: u64,
     /// What the keypad shows of `digits`, rebuilt only when a key is pressed.
     digit_line: SharedString,
-    pub(crate) last_id: Option<i32>,
+    pub(crate) last_id: Option<CallSource>,
     /// The call that just ended; a lagging snapshot of it must not reopen the screen.
-    pub(crate) done_id: Option<i32>,
+    pub(crate) done_id: Option<CallSource>,
     /// The owner pressed Back for this call: stay on the tabs until the
     /// app is opened again.
-    hidden_for: Option<i32>,
+    hidden_for: Option<CallSource>,
+    /// What the zone was last built from when a WhatsApp call owned the screen
+    /// (call id and the enablement of its live controls); `None` for Telecom.
+    wa_zone: Option<(String, bool, bool)>,
+    /// The WhatsApp offer already declined for want of a free line.
+    busy_rejected: Option<String>,
     began_locked: bool,
     /// Locked with a call: only call screens may show (AD-3).
     pub call_only: bool,
@@ -525,6 +630,8 @@ impl InCall {
             last_id: None,
             done_id: None,
             hidden_for: None,
+            wa_zone: None,
+            busy_rejected: None,
             began_locked: false,
             call_only: false,
             blank: false,
@@ -648,7 +755,12 @@ impl InCall {
     fn set_waiting(&mut self, waiting: Option<WaitingView>) {
         match waiting {
             Some(w) => {
-                let new = self.waiting.as_ref().map(|k| k.id) != Some(w.id) || !self.waiting_open;
+                let new = self
+                    .waiting
+                    .as_ref()
+                    .map(|k| (k.id, k.wa_call_id.as_deref()))
+                    != Some((w.id, w.wa_call_id.as_deref()))
+                    || !self.waiting_open;
                 self.waiting = Some(w);
                 self.waiting_open = true;
                 if new {
@@ -686,6 +798,47 @@ impl InCall {
     }
 }
 
+// ---- Cellular and WhatsApp calls side by side ----------------------------------
+
+/// What `arbitrate` needs to know of the cellular side: (a call is live, a call rings).
+/// A waiting call rings; a dialing, active or held foreground call is live.
+pub(crate) fn telecom_flags(view: Option<&CallView>, waiting: bool) -> (bool, bool) {
+    let state = view.map(|v| v.state);
+    let ringing = waiting || state == Some(CallState::Ringing);
+    let live = matches!(
+        state,
+        Some(CallState::Dialing | CallState::Active | CallState::Holding)
+    );
+    (live, ringing)
+}
+
+/// The control a press id stands for on the grid, if it is a grid slot.
+fn slot_of_id(id: &str) -> Option<Slot> {
+    match id {
+        "ic-mute" => Some(Slot::Mute),
+        "ic-keypad" => Some(Slot::Keypad),
+        "ic-audio" => Some(Slot::Audio),
+        _ => None,
+    }
+}
+
+/// The WhatsApp control a press id acts on: End, or a grid slot that has an equivalent.
+fn wa_control_of_id(id: &str) -> Option<WaControl> {
+    if id == "ic-end" {
+        return Some(WaControl::End);
+    }
+    slot_of_id(id).and_then(zone::wa_control)
+}
+
+/// Whether `id` is the first sight of `call_id`; remembers it.
+fn first_time(seen: &mut Option<String>, call_id: &str) -> bool {
+    if seen.as_deref() == Some(call_id) {
+        return false;
+    }
+    *seen = Some(call_id.to_owned());
+    true
+}
+
 // ---- Behaviour on PhoneApp ----------------------------------------------------
 
 impl PhoneApp {
@@ -694,7 +847,12 @@ impl PhoneApp {
     pub(crate) fn sync_calls(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let diff = self.backend.update(cx, |b, _| b.take_scene_diff());
         let full = !self.incall.zone.synced;
-        let (view, locked, call_only, waiting, scene_in) = {
+        let leaving_wa = self.incall.wa_zone.is_some();
+        let (wa_screen, wa_view) = {
+            let wa = self.wa_call.read(cx);
+            (wa.screen(), wa.view())
+        };
+        let (telecom_view, locked, call_only, telecom_waiting, telecom_scene) = {
             let backend = self.backend.read(cx);
             let model = backend.calls();
             let scene = CallScene::of(model.snapshot());
@@ -703,22 +861,78 @@ impl PhoneApp {
                 model.keyguard_locked(),
                 model.is_call_only_mode(),
                 WaitingView::from_scene(&scene),
-                (diff.changed() || full)
+                (diff.changed() || full || leaving_wa)
                     .then(|| zone::SceneIn::of(&scene, model.snapshot().pending_failed)),
             )
         };
         self.incall.call_only = call_only;
+        let mut view = telecom_view;
+        let mut waiting = telecom_waiting;
+        let mut scene_in = telecom_scene;
+        let mut wa_front = None;
+        let (live, ringing) = telecom_flags(view.as_ref(), waiting.is_some());
+        let mut arbitration = arbitrate(live, ringing, wa_view.as_ref());
+        if arbitration == Arbitration::Telecom
+            && let Some(w) = wa_view.as_ref().filter(|w| w.phase.is_ended())
+            && self.wa_owns_screen(&w.call_id)
+        {
+            // The call this screen showed has ended: its "Call ended" still plays here.
+            arbitration = Arbitration::ShowWa;
+        }
+        match (arbitration, &wa_screen) {
+            (Arbitration::ShowWa, Some(screen)) => {
+                let wa_ringing = screen.phase == WaScreenPhase::Ringing;
+                if !wa_ringing
+                    && let Some(ringing_call) = view.take_if(|v| v.state == CallState::Ringing)
+                {
+                    // A cellular call rings beside a running WhatsApp call: its own screen.
+                    self.route_incoming(ringing_call, locked, window, cx);
+                }
+                let wa = CallView::from_wa(screen);
+                let key = zone::wa_key(screen);
+                let changed = self.incall.wa_zone.as_ref() != Some(&key) || full;
+                scene_in = changed.then(|| zone::SceneIn::whatsapp(screen, &wa));
+                self.incall.wa_zone = Some(key);
+                view = Some(wa);
+                wa_front = Some(screen.clone());
+            }
+            (Arbitration::WaWaiting, Some(screen)) => {
+                if waiting.is_none() {
+                    waiting = Some(WaitingView::from_wa(screen));
+                }
+            }
+            (Arbitration::RejectWaBusy, Some(screen)) => self.reject_wa_busy(&screen.call_id, cx),
+            _ => {}
+        }
+        if wa_front.is_none() {
+            self.incall.wa_zone = None;
+        }
+        let diff = if wa_front.is_some() {
+            rovsti_core::scene::SceneDiff {
+                applied: true,
+                primary: true,
+                ..Default::default()
+            }
+        } else {
+            diff
+        };
         // The route list and the Audio control's face come first: `apply_view`
         // reads whether the control is on from them.
-        let route = self
-            .backend
-            .read(cx)
-            .calls()
-            .foreground()
-            .map(|_| self.backend.read(cx).calls().audio().route);
-        match route {
-            Some(route) => self.route_sync(route, cx),
-            None => self.route.reset(),
+        if let Some(wa) = &view
+            && wa_front.is_some()
+        {
+            self.route_sync_wa(wa.route);
+        } else {
+            let route = self
+                .backend
+                .read(cx)
+                .calls()
+                .foreground()
+                .map(|_| self.backend.read(cx).calls().audio().route);
+            match route {
+                Some(route) => self.route_sync(route, cx),
+                None => self.route.reset(),
+            }
         }
         if let Some(scene_in) = scene_in {
             self.apply_scene(scene_in, diff, window, cx);
@@ -740,8 +954,8 @@ impl PhoneApp {
             self.waiting_left(waiting_before, cx);
         }
         let ic = &mut self.incall;
-        let view = view.filter(|v| Some(v.id) != ic.done_id);
-        if view.is_none() && !self.backend.read(cx).calls().has_calls() {
+        let view = view.filter(|v| Some(&v.source) != ic.done_id.as_ref());
+        if view.is_none() && wa_view.is_none() && !self.backend.read(cx).calls().has_calls() {
             self.incall.done_id = None;
         }
         // Ringing calls (and their unanswered end) belong to the Incoming Call screen.
@@ -756,9 +970,9 @@ impl PhoneApp {
         let ic = &mut self.incall;
         match view {
             Some(view) => {
-                let is_new = ic.last_id != Some(view.id);
+                let is_new = ic.last_id.as_ref() != Some(&view.source);
                 if ic.last_id.is_none() {
-                    ic.last_id = Some(view.id);
+                    ic.last_id = Some(view.source.clone());
                     ic.ending = None;
                     ic.hidden_for = None;
                     ic.began_locked = locked;
@@ -786,7 +1000,7 @@ impl PhoneApp {
                 } else if is_new {
                     // The foreground call changed inside one conversation (a swap, a
                     // split, a hang-up beside a held call): the screen stays up.
-                    ic.last_id = Some(view.id);
+                    ic.last_id = Some(view.source.clone());
                     ic.ending = None;
                 }
                 let ic = &mut self.incall;
@@ -811,6 +1025,71 @@ impl PhoneApp {
         self.zone_lines(cx);
         self.sync_add_call(window, cx);
         self.relock_closes(locked, window, cx);
+    }
+
+    /// This WhatsApp call is the one the In-Call or the Incoming screen has been showing.
+    fn wa_owns_screen(&self, call_id: &str) -> bool {
+        let mine = |source: Option<&CallSource>| matches!(source, Some(CallSource::WhatsApp(id)) if id == call_id);
+        mine(self.incall.last_id.as_ref()) || mine(self.incoming.source())
+    }
+
+    /// A WhatsApp offer while a cellular call rings: the gateway declines it, once per call.
+    fn reject_wa_busy(&mut self, call_id: &str, cx: &mut Context<Self>) {
+        if !first_time(&mut self.incall.busy_rejected, call_id) {
+            return;
+        }
+        let Some(gateway) = self.whatsapp.read(cx).gateway() else {
+            return;
+        };
+        let call_id = call_id.to_owned();
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(error) = gateway.reject_call(&call_id) {
+                    log::debug!("declining a WhatsApp call while busy: {error}");
+                }
+            })
+            .detach();
+    }
+
+    /// The press `id` on a WhatsApp call: Mute, Audio (as a `tap`) and End go to the gateway.
+    /// Returns whether it was handled (Keypad, Hold, Add call and Merge are dimmed
+    /// by the zone's enablement and explain themselves).
+    fn wa_press(
+        &mut self,
+        id: &str,
+        tap: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let on_wa = self
+            .incall
+            .view
+            .as_ref()
+            .is_some_and(|v| v.source.is_whatsapp());
+        if !on_wa {
+            return false;
+        }
+        match wa_control_of_id(id) {
+            Some(WaControl::End) if self.incall.ending.is_none() => {
+                self.wa_call.update(cx, |w, cx| w.hang_up(false, cx));
+                true
+            }
+            Some(WaControl::Mute)
+                if self.incall.ending.is_none()
+                    && self.incall.zone.enablement.enabled(Slot::Mute) =>
+            {
+                self.start_pending(Slot::Mute, window, cx);
+                self.wa_call.update(cx, |w, cx| w.toggle_mute(cx));
+                true
+            }
+            // On touch the Audio control acts through `audio_pointer`; only a tap lands here.
+            Some(WaControl::Speaker) if tap => {
+                self.incall_toggle_speaker(window, cx);
+                true
+            }
+            Some(WaControl::End | WaControl::Mute) => true,
+            _ => false,
+        }
     }
 
     /// A re-lock closes any open sheet or popover (AD-3): the lock screen shows only the call.
@@ -1000,7 +1279,7 @@ impl PhoneApp {
 
     /// The waiting caller left without our answer or decline: a pill says so for 2 s.
     fn waiting_left(&mut self, was: Option<WaitingView>, cx: &mut Context<Self>) {
-        let Some(was) = was else {
+        let Some(was) = was.filter(|w| w.wa_call_id.is_none()) else {
             return;
         };
         // Still there and no longer ringing: it was answered (here or elsewhere).
@@ -1128,13 +1407,14 @@ impl PhoneApp {
             cx.notify();
             return;
         }
-        ic.done_id = ic.last_id;
+        ic.done_id = ic.last_id.take();
         // Story 17.4: a short answered call from somebody calling in offers "Block".
         let offer = ic
             .view
             .as_ref()
             .filter(|v| {
                 v.incoming
+                    && v.source.telecom_id().is_some()
                     && !ic.began_locked
                     && v.connect_time_ms > 0
                     && backend::now_ms() - v.connect_time_ms < SHORT_CALL_MS
@@ -1189,7 +1469,7 @@ impl PhoneApp {
             ic.keypad_open = false;
             ic.keypad_t.set_target(0.0);
         } else {
-            ic.hidden_for = ic.last_id;
+            ic.hidden_for = ic.last_id.clone();
             ic.set_shown(false);
             let state = ic.view.as_ref().map(|v| (v.state, v.connect_time_ms));
             if let Some((state, connect)) = state {
@@ -1213,11 +1493,20 @@ impl PhoneApp {
         let Some(view) = self.incall.view.clone() else {
             return;
         };
+        if self.wa_press(id, false, window, cx) {
+            cx.notify();
+            return;
+        }
         let live = self.incall.ending.is_none();
         let zone = self.incall.zone.enablement;
+        let CallSource::Telecom(call_id) = view.source else {
+            // Keypad, Hold, Add call, Merge: dimmed on WhatsApp calls.
+            cx.notify();
+            return;
+        };
         match id {
             "ic-end" if live => {
-                self.send(CallCommand::Disconnect(view.id), cx);
+                self.send(CallCommand::Disconnect(call_id), cx);
             }
             "ic-mute" if live && zone.enabled(Slot::Mute) => {
                 self.start_pending(Slot::Mute, window, cx);
@@ -1256,6 +1545,10 @@ impl PhoneApp {
             self.waiting_act(id, window, cx);
             return;
         }
+        if self.wa_press(id, true, window, cx) {
+            cx.notify();
+            return;
+        }
         let en = self.incall.zone.enablement;
         match id {
             "ix-add" => {
@@ -1278,7 +1571,9 @@ impl PhoneApp {
                 } else if let Some(view) = self.incall.view.clone() {
                     let on = view.state != CallState::Holding;
                     self.start_pending(Slot::HoldSwap, window, cx);
-                    self.send(CallCommand::Hold(view.id, on), cx);
+                    if let Some(call_id) = view.source.telecom_id() {
+                        self.send(CallCommand::Hold(call_id, on), cx);
+                    }
                 }
             }
             "ix-merge" => {
@@ -1335,6 +1630,17 @@ impl PhoneApp {
             return;
         }
         self.start_pending(Slot::Audio, window, cx);
+        if self
+            .incall
+            .view
+            .as_ref()
+            .is_some_and(|v| v.source.is_whatsapp())
+        {
+            let on = self.incall.route() != AudioRoute::Speaker;
+            self.wa_call.update(cx, |w, cx| w.set_speaker(on, cx));
+            cx.notify();
+            return;
+        }
         let target = if self.incall.route() == AudioRoute::Speaker {
             AudioRoute::Earpiece
         } else {
@@ -2163,5 +2469,142 @@ mod tests {
         let wait = ms_to_next_second(now_ms() - 400);
         assert!((500..=700).contains(&wait), "{wait}");
         assert_eq!(ms_to_next_second(0), 1000);
+    }
+
+    // ---- WhatsApp calls on the screen -----------------------------------------
+
+    fn wa_screen(phase: WaScreenPhase, incoming: bool) -> WaScreen {
+        WaScreen {
+            call_id: "wa1".into(),
+            title: "Ayşe Demir".into(),
+            phase,
+            incoming,
+            muted: false,
+            speaker: false,
+            elapsed_s: 0,
+        }
+    }
+
+    #[test]
+    fn a_ringing_whatsapp_call_is_an_incoming_call_with_a_caption() {
+        let view = CallView::from_wa_at(&wa_screen(WaScreenPhase::Ringing, true), 90_000);
+        assert_eq!(view.source, CallSource::WhatsApp("wa1".into()));
+        assert_eq!(view.state, CallState::Ringing);
+        assert!(view.incoming);
+        assert_eq!(&*view.name, "Ayşe Demir");
+        assert_eq!(view.secondary.as_deref(), Some(WA_CAPTION));
+        assert_eq!(view.monogram.as_deref(), Some("A"));
+        assert!(view.number.is_empty());
+        assert_eq!(view.connect_time_ms, 0);
+        assert!(!view.can_hold);
+    }
+
+    #[test]
+    fn our_outgoing_whatsapp_call_dials_until_it_is_up() {
+        for phase in [WaScreenPhase::Calling, WaScreenPhase::Connecting] {
+            let view = CallView::from_wa_at(&wa_screen(phase, false), 90_000);
+            assert_eq!(view.state, CallState::Dialing);
+            assert!(!view.incoming);
+            assert_eq!(view.connect_time_ms, 0);
+            assert_eq!(view.phase(), Phase::Dialing);
+        }
+    }
+
+    #[test]
+    fn an_active_whatsapp_call_counts_from_now_minus_elapsed() {
+        let mut screen = wa_screen(WaScreenPhase::Active, true);
+        screen.elapsed_s = 65;
+        screen.muted = true;
+        screen.speaker = true;
+        let view = CallView::from_wa_at(&screen, 100_000);
+        assert_eq!(view.state, CallState::Active);
+        assert_eq!(view.connect_time_ms, 35_000);
+        assert!(view.muted);
+        assert_eq!(view.route, AudioRoute::Speaker);
+        screen.speaker = false;
+        assert_eq!(
+            CallView::from_wa_at(&screen, 100_000).route,
+            AudioRoute::Earpiece
+        );
+        assert_eq!(view.phase(), Phase::Active);
+    }
+
+    #[test]
+    fn an_ended_whatsapp_call_maps_its_reason() {
+        let cases = [
+            (EndReason::Hangup, DisconnectCause::Local, Phase::Ended),
+            (EndReason::Remote, DisconnectCause::Remote, Phase::Ended),
+            (EndReason::Rejected, DisconnectCause::Rejected, Phase::Ended),
+            (EndReason::Missed, DisconnectCause::Missed, Phase::Ended),
+            (
+                EndReason::ElsewhereAnswered,
+                DisconnectCause::Canceled,
+                Phase::Ended,
+            ),
+            (
+                EndReason::Failed("x".into()),
+                DisconnectCause::Error,
+                Phase::Failed,
+            ),
+        ];
+        for (reason, cause, phase) in cases {
+            let view =
+                CallView::from_wa_at(&wa_screen(WaScreenPhase::Ended(reason.clone()), true), 5);
+            assert_eq!(view.state, CallState::Disconnected { cause }, "{reason:?}");
+            assert_eq!(view.phase(), phase, "{reason:?}");
+            assert_eq!(view.connect_time_ms, 0);
+        }
+    }
+
+    #[test]
+    fn a_whatsapp_offer_waits_with_decline_only() {
+        let waiting = WaitingView::from_wa(&wa_screen(WaScreenPhase::Ringing, true));
+        assert_eq!(waiting.wa_call_id.as_deref(), Some("wa1"));
+        assert_eq!(waiting.hold_reason, Some(DisabledReason::WhatsAppCall));
+        assert_eq!(waiting.end_reason, Some(DisabledReason::WhatsAppCall));
+    }
+
+    #[test]
+    fn the_cellular_side_is_live_or_ringing() {
+        let view = |state| {
+            let mut v = CallView::from_wa_at(&wa_screen(WaScreenPhase::Active, false), 0);
+            v.source = CallSource::Telecom(1);
+            v.state = state;
+            v
+        };
+        assert_eq!(telecom_flags(None, false), (false, false));
+        assert_eq!(telecom_flags(None, true), (false, true));
+        for live in [CallState::Dialing, CallState::Active, CallState::Holding] {
+            assert_eq!(telecom_flags(Some(&view(live)), false), (true, false));
+        }
+        assert_eq!(
+            telecom_flags(Some(&view(CallState::Ringing)), false),
+            (false, true)
+        );
+        assert_eq!(
+            telecom_flags(Some(&view(CallState::Active)), true),
+            (true, true)
+        );
+        let over = CallState::Disconnected {
+            cause: DisconnectCause::Local,
+        };
+        assert_eq!(telecom_flags(Some(&view(over)), false), (false, false));
+    }
+
+    #[test]
+    fn grid_presses_find_their_whatsapp_control() {
+        assert_eq!(wa_control_of_id("ic-end"), Some(WaControl::End));
+        assert_eq!(wa_control_of_id("ic-mute"), Some(WaControl::Mute));
+        assert_eq!(wa_control_of_id("ic-audio"), Some(WaControl::Speaker));
+        assert_eq!(wa_control_of_id("ic-keypad"), Some(WaControl::Keypad));
+        assert_eq!(wa_control_of_id("ik-5"), None);
+    }
+
+    #[test]
+    fn a_busy_offer_is_declined_once_per_call() {
+        let mut seen = None;
+        assert!(first_time(&mut seen, "a"));
+        assert!(!first_time(&mut seen, "a"));
+        assert!(first_time(&mut seen, "b"));
     }
 }

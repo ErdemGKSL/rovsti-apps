@@ -541,6 +541,13 @@ impl PhoneApp {
         self.sync_audio_on();
     }
 
+    /// The Audio control's face for a WhatsApp call: only Phone and Speaker exist.
+    pub(crate) fn route_sync_wa(&mut self, route: AudioRoute) {
+        // A revision no Android list ever has, so the cellular list is rebuilt after.
+        self.route.sync(&EndpointList::default(), u64::MAX, route);
+        self.sync_audio_on();
+    }
+
     fn sync_audio_on(&mut self) {
         let on = self.route.face.on || self.route.open;
         let reduced = self.reduced;

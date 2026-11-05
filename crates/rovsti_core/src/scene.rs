@@ -391,6 +391,8 @@ pub enum DisabledReason {
     OnHold,
     /// The call is still dialing.
     Connecting,
+    /// The control has no WhatsApp equivalent (keypad, hold, add call, merge).
+    WhatsAppCall,
 }
 
 impl DisabledReason {
@@ -408,6 +410,7 @@ impl DisabledReason {
             Self::CurrentCallCannotHold => "Ends the current call instead: it can't be held",
             Self::OnHold => "Resume the call first",
             Self::Connecting => "Wait for the call to connect",
+            Self::WhatsAppCall => "Not available on WhatsApp calls",
         }
     }
 }
@@ -921,6 +924,7 @@ mod tests {
             CurrentCallCannotHold,
             OnHold,
             Connecting,
+            WhatsAppCall,
         ];
         for (i, a) in all.iter().enumerate() {
             assert!(!a.text().is_empty());
@@ -934,6 +938,7 @@ mod tests {
             "Your carrier doesn't allow merging calls"
         );
         assert_eq!(TwoCalls.text(), "Two calls are already in progress");
+        assert_eq!(WhatsAppCall.text(), "Not available on WhatsApp calls");
     }
 
     #[test]

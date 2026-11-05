@@ -47,6 +47,18 @@ impl PhoneApp {
             "iw-end" => w.end_reason,
             _ => None,
         };
+        if w.wa_call_id.is_some() {
+            // A WhatsApp offer: Decline is the only action.
+            match id {
+                "iw-decline" => {
+                    self.incall.waiting_acted = true;
+                    self.wa_call.update(cx, |ui, cx| ui.hang_up(true, cx));
+                }
+                _ => self.show_notice_pill(DisabledReason::WhatsAppCall.text(), None, false, cx),
+            }
+            cx.notify();
+            return;
+        }
         if id == "iw-msg" {
             // Story 18.7: the reply sheet over the call; choosing a reply declines the
             // waiting call with that text and leaves the call underneath alone.
@@ -198,7 +210,8 @@ impl PhoneApp {
         } else {
             "Hold and answer"
         };
-        let no_replies = self.backend.read(cx).prefs().quick_replies.is_empty();
+        let wa_offer = w.wa_call_id.is_some();
+        let no_replies = !wa_offer && self.backend.read(cx).prefs().quick_replies.is_empty();
         let hold_dim = w.hold_reason.is_some();
         let end_dim = w.end_reason.is_some();
         let grid = div()
@@ -258,7 +271,7 @@ impl PhoneApp {
                         Some(Icon::LucideMessageSquare),
                         None,
                         colors.label,
-                        no_replies,
+                        no_replies || wa_offer,
                         3,
                         cx,
                     )),

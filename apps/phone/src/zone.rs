@@ -18,6 +18,7 @@ use rovsti_core::{
     wire::WireCall,
 };
 use rovsti_ui::{current_theme, motion_tokens, spring::Spring, theme, tokens::typography};
+use rovsti_wa_proto::{WaControl, WaScreen};
 
 use crate::backend::now_ms;
 
@@ -148,7 +149,7 @@ impl Party {
     /// "Held call: {name}, on hold 1:12. Double tap to swap" (TalkBack).
     pub(crate) fn of_view(view: &crate::incall::CallView) -> Self {
         Self {
-            id: view.id,
+            id: view.source.telecom_id().unwrap_or(-1),
             name: view.name.clone(),
             secondary: view.secondary.clone(),
             monogram: view.monogram.clone(),
@@ -334,6 +335,50 @@ impl Enablement {
     pub(crate) fn enabled(&self, slot: Slot) -> bool {
         self.reason(slot).is_none()
     }
+}
+
+// ---- WhatsApp calls in the zone ----------------------------------------------------
+
+/// The WhatsApp control a grid slot stands for. Merge has none.
+pub(crate) fn wa_control(slot: Slot) -> Option<WaControl> {
+    match slot {
+        Slot::Mute => Some(WaControl::Mute),
+        Slot::Keypad => Some(WaControl::Keypad),
+        Slot::Audio => Some(WaControl::Speaker),
+        Slot::AddCall => Some(WaControl::AddCall),
+        Slot::HoldSwap => Some(WaControl::Hold),
+        Slot::Merge => None,
+    }
+}
+
+impl Enablement {
+    /// The grid for a WhatsApp call: Mute and Audio follow the call, the rest are
+    /// dimmed because WhatsApp has no such control.
+    pub(crate) fn of_wa(screen: &WaScreen) -> Self {
+        let mut reasons = [None; 6];
+        for slot in Slot::ALL {
+            reasons[slot.index()] = match wa_control(slot) {
+                None | Some(WaControl::Keypad | WaControl::Hold | WaControl::AddCall) => {
+                    Some(DisabledReason::WhatsAppCall)
+                }
+                Some(control) if screen.enabled(control) => None,
+                Some(_) => Some(DisabledReason::Connecting),
+            };
+        }
+        Self {
+            reasons,
+            swap: false,
+        }
+    }
+}
+
+/// What the zone was built from: a new key means a rebuild.
+pub(crate) fn wa_key(screen: &WaScreen) -> (String, bool, bool) {
+    (
+        screen.call_id.clone(),
+        screen.enabled(WaControl::Mute),
+        screen.enabled(WaControl::Speaker),
+    )
 }
 
 // ---- The ticking elapsed line --------------------------------------------------
@@ -586,6 +631,21 @@ pub(crate) struct SceneIn {
 }
 
 impl SceneIn {
+    /// A WhatsApp call alone in front: one party, no moments (its ids are `None`).
+    pub(crate) fn whatsapp(screen: &WaScreen, view: &crate::incall::CallView) -> Self {
+        Self {
+            face: Face::Single,
+            fg_id: None,
+            bg_id: None,
+            primary: Some(Party::of_view(view)),
+            held: None,
+            ended: None,
+            conference: None,
+            enablement: Enablement::of_wa(screen),
+            failed: None,
+        }
+    }
+
     pub(crate) fn of(scene: &CallScene<'_>, failed: Option<rovsti_core::wire::PendingOp>) -> Self {
         Self {
             face: face_of(scene),
@@ -859,5 +919,64 @@ mod tests {
         assert_eq!(conf.rows.len(), 6);
         assert_eq!(conf.stack.len(), 3);
         assert_eq!(conf.extra, 3);
+    }
+
+    // ---- WhatsApp ------------------------------------------------------------
+
+    fn wa_screen(phase: rovsti_wa_proto::WaScreenPhase) -> WaScreen {
+        WaScreen {
+            call_id: "wa1".into(),
+            title: "Ayşe".into(),
+            phase,
+            incoming: false,
+            muted: false,
+            speaker: false,
+            elapsed_s: 0,
+        }
+    }
+
+    #[test]
+    fn grid_slots_map_to_whatsapp_controls() {
+        assert_eq!(wa_control(Slot::Mute), Some(WaControl::Mute));
+        assert_eq!(wa_control(Slot::Keypad), Some(WaControl::Keypad));
+        assert_eq!(wa_control(Slot::Audio), Some(WaControl::Speaker));
+        assert_eq!(wa_control(Slot::AddCall), Some(WaControl::AddCall));
+        assert_eq!(wa_control(Slot::HoldSwap), Some(WaControl::Hold));
+        assert_eq!(wa_control(Slot::Merge), None);
+    }
+
+    #[test]
+    fn an_active_whatsapp_call_enables_mute_and_audio_only() {
+        use rovsti_wa_proto::WaScreenPhase;
+        let e = Enablement::of_wa(&wa_screen(WaScreenPhase::Active));
+        assert!(e.enabled(Slot::Mute) && e.enabled(Slot::Audio));
+        for slot in [Slot::Keypad, Slot::AddCall, Slot::HoldSwap, Slot::Merge] {
+            assert_eq!(
+                e.reason(slot),
+                Some(DisabledReason::WhatsAppCall),
+                "{slot:?}"
+            );
+        }
+        assert!(!e.swap);
+    }
+
+    #[test]
+    fn mute_and_audio_wait_until_the_whatsapp_call_connects() {
+        use rovsti_wa_proto::WaScreenPhase;
+        for phase in [WaScreenPhase::Calling, WaScreenPhase::Ringing] {
+            let e = Enablement::of_wa(&wa_screen(phase));
+            assert_eq!(e.reason(Slot::Mute), Some(DisabledReason::Connecting));
+            assert_eq!(e.reason(Slot::Audio), Some(DisabledReason::Connecting));
+        }
+        let e = Enablement::of_wa(&wa_screen(WaScreenPhase::Connecting));
+        assert!(e.enabled(Slot::Mute));
+    }
+
+    #[test]
+    fn the_whatsapp_zone_rebuilds_when_controls_change() {
+        use rovsti_wa_proto::WaScreenPhase;
+        let calling = wa_key(&wa_screen(WaScreenPhase::Calling));
+        assert_eq!(calling, wa_key(&wa_screen(WaScreenPhase::Calling)));
+        assert_ne!(calling, wa_key(&wa_screen(WaScreenPhase::Active)));
     }
 }

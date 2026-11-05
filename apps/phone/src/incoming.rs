@@ -42,7 +42,7 @@ use crate::{
     backend::{self, CallCommand},
     flight::{ButtonFrom, Look},
     fx::{A_ANSWER, A_INCOMING_AVATAR, Marks},
-    incall::CallView,
+    incall::{CallSource, CallView},
 };
 
 /// The "Missed call from ..." line is held this long before the screen leaves.
@@ -495,7 +495,12 @@ impl Incoming {
     }
 
     pub fn call_id(&self) -> Option<i32> {
-        self.view.as_ref().map(|v| v.id)
+        self.view.as_ref().and_then(|v| v.source.telecom_id())
+    }
+
+    /// Which call the screen shows, whichever stack it comes from.
+    pub(crate) fn source(&self) -> Option<&CallSource> {
+        self.view.as_ref().map(|v| &v.source)
     }
 
     pub fn is_ringing(&self) -> bool {
@@ -571,18 +576,18 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<CallView> {
-        let owns = self.incoming.call_id() == Some(view.id);
+        let owns = self.incoming.source() == Some(&view.source);
         match view.state {
             CallState::Ringing => {
                 self.incoming_ring(view, locked, window, cx);
                 None
             }
             CallState::Disconnected { cause }
-                if view.incoming && self.incall.last_id != Some(view.id) =>
+                if view.incoming && self.incall.last_id.as_ref() != Some(&view.source) =>
             {
                 // It never reached the In-Call screen: it ended while ringing. The In-Call
                 // screen must not flash "Call ended" for it.
-                self.incall.done_id = Some(view.id);
+                self.incall.done_id = Some(view.source.clone());
                 if owns {
                     self.incoming_ended(cause, cx);
                 } else if locked {
@@ -611,7 +616,7 @@ impl PhoneApp {
     ) {
         let reduced = window.prefers_reduced_motion();
         // The first calls teach the drag: a counter in `ui.hint_counters`.
-        let new_call = self.incoming.call_id() != Some(view.id) || !self.incoming.shown;
+        let new_call = self.incoming.source() != Some(&view.source) || !self.incoming.shown;
         let hint = new_call
             && self
                 .backend
@@ -632,7 +637,7 @@ impl PhoneApp {
         }
         let inc = &mut self.incoming;
         inc.locked = locked;
-        let is_new = inc.call_id() != Some(view.id) || !inc.shown;
+        let is_new = inc.source() != Some(&view.source) || !inc.shown;
         if is_new {
             inc.began_locked = locked;
             inc.state = RingState::Ringing;
@@ -842,7 +847,9 @@ impl PhoneApp {
     /// Silence: the ringer stops, the call stays answerable (S30). The look follows the snapshot.
     fn incoming_silence(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let inc = &self.incoming;
-        if !inc.is_ringing()
+        // Silencing is Telecom's ringer; a WhatsApp call rings from the gateway's push.
+        if inc.call_id().is_none()
+            || !inc.is_ringing()
             || inc.acted.is_some()
             || inc.silenced.is_some()
             || self.backend.read(cx).silence_refused()
@@ -978,21 +985,35 @@ impl PhoneApp {
             _ => {}
         }
         let inc = &self.incoming;
-        let Some(call_id) = inc.call_id() else {
+        let Some(source) = inc.source().cloned() else {
             return;
         };
         if !inc.is_ringing() || inc.acted.is_some() {
             return;
         }
-        let (act, command) = match id {
-            "in-answer" => (Act::Answer, CallCommand::Answer(call_id)),
-            "in-decline" => (Act::Decline, CallCommand::Reject(call_id)),
+        let act = match id {
+            "in-answer" => Act::Answer,
+            "in-decline" => Act::Decline,
             _ => return,
         };
         // The command first; the animation only runs beside it.
-        let outcome = self
-            .backend
-            .update(cx, |backend, cx| backend.send(command, cx));
+        let outcome = match source {
+            CallSource::Telecom(call_id) => {
+                let command = match act {
+                    Act::Answer => CallCommand::Answer(call_id),
+                    Act::Decline => CallCommand::Reject(call_id),
+                };
+                self.backend
+                    .update(cx, |backend, cx| backend.send(command, cx))
+            }
+            CallSource::WhatsApp(_) => {
+                self.wa_call.update(cx, |ui, cx| match act {
+                    Act::Answer => ui.answer(cx),
+                    Act::Decline => ui.hang_up(true, cx),
+                });
+                backend::Outcome::Done
+            }
+        };
         rovsti_ui::haptics::perform(
             window,
             match act {
@@ -1332,9 +1353,11 @@ impl PhoneApp {
             return Some(root.into_any_element());
         };
         // The first frame of this call's screen is on its way: tell Kotlin (ring-latency log).
-        if self.incoming.reported != Some(view.id) {
-            self.incoming.reported = Some(view.id);
-            backend::incoming_frame(view.id);
+        if let Some(id) = view.source.telecom_id()
+            && self.incoming.reported != Some(id)
+        {
+            self.incoming.reported = Some(id);
+            backend::incoming_frame(id);
         }
 
         let inc = &self.incoming;

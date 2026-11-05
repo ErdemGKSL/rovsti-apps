@@ -33,7 +33,7 @@ use rovsti_ui::{
 use rovsti_wa_client::{CallAudio, ClientError};
 use rovsti_wa_proto::{
     CallDirection, CallPhase, CallUpdate, ConnectKey, EndReason, GatewayEvent, GatewayUrl,
-    WaCallView,
+    WaCallView, WaScreen,
 };
 use rovsti_wa_ui::{StoredLink, WhatsAppSettings};
 
@@ -208,6 +208,15 @@ pub fn play_available(played: &rovsti_android::Result<bool>) -> bool {
     )
 }
 
+/// Whether a speaker request took effect. Without Android (desktop) there is
+/// nothing to switch, so the screen still shows the chosen state.
+pub fn speaker_applied(result: &rovsti_android::Result<bool>) -> bool {
+    matches!(
+        result,
+        Ok(true) | Err(AndroidError::Unsupported | AndroidError::NotInitialized)
+    )
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -297,6 +306,10 @@ pub struct WaCallUi {
     answering: bool,
     /// A call is being placed (the gateway has not answered yet).
     placing: bool,
+    /// The loudspeaker is on for the current call.
+    speaker: bool,
+    /// The glass In-Call screen draws the call; this entity draws nothing itself.
+    incall_mounted: bool,
     error: Option<SharedString>,
     _tick: Option<Task<()>>,
     _clear: Option<Task<()>>,
@@ -317,10 +330,58 @@ impl WaCallUi {
             session: None,
             answering: false,
             placing: false,
+            speaker: false,
+            incall_mounted: false,
             error: None,
             _tick: None,
             _clear: None,
         }
+    }
+
+    /// The In-Call screen is mounted and draws WhatsApp calls; the card is only
+    /// the fallback for a build without it.
+    pub fn set_incall_mounted(&mut self, mounted: bool) {
+        self.incall_mounted = mounted;
+    }
+
+    /// What the glass screens draw for the current call, if any.
+    pub fn screen(&self) -> Option<WaScreen> {
+        self.tracker
+            .view(now_ms())
+            .map(|view| WaScreen::from_view(&view, self.speaker))
+    }
+
+    /// The raw call view, for arbitration against the cellular call.
+    pub(crate) fn view(&self) -> Option<WaCallView> {
+        self.tracker.view(now_ms())
+    }
+
+    /// Switches the loudspeaker; the screen follows at once and reverts if Android refuses.
+    pub fn set_speaker(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.tracker.is_empty() || self.speaker == on {
+            return;
+        }
+        self.speaker = on;
+        let task = cx
+            .background_executor()
+            .spawn(async move { rovsti_android::wa::call_audio_speaker(on) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            if speaker_applied(&result) {
+                return;
+            }
+            this.update(cx, |this, cx| {
+                this.speaker = !on;
+                let why = result.err().map_or_else(
+                    || "the speaker was not switched".to_owned(),
+                    |e| e.to_string(),
+                );
+                this.fail("Could not change the speaker", why, cx);
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
     }
 
     fn on_events(&mut self, events: Vec<GatewayEvent>, linked: bool, cx: &mut Context<Self>) {
@@ -378,6 +439,7 @@ impl WaCallUi {
     fn finish(&mut self, cx: &mut Context<Self>) {
         self.answering = false;
         self.placing = false;
+        self.speaker = false;
         if self.session.take().is_some() {
             cx.background_executor()
                 .spawn(async {
@@ -395,7 +457,7 @@ impl WaCallUi {
         cx.notify();
     }
 
-    fn answer(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn answer(&mut self, cx: &mut Context<Self>) {
         let Some(view) = self.tracker.view(now_ms()) else {
             return;
         };
@@ -442,6 +504,16 @@ impl WaCallUi {
         let timers = executor.clone();
         let pump = executor.spawn(pump(audio, muted.clone(), move |d| timers.timer(d)));
         self.session = Some(Session { muted, _pump: pump });
+        if self.speaker {
+            // Starting the audio may have reset the route: set it again.
+            cx.background_executor()
+                .spawn(async {
+                    if let Err(error) = rovsti_android::wa::call_audio_speaker(true) {
+                        log::debug!("speaker: {error}");
+                    }
+                })
+                .detach();
+        }
     }
 
     /// Starts an outgoing WhatsApp call to `number`.
@@ -525,7 +597,7 @@ impl WaCallUi {
     }
 
     /// Decline, or End: the gateway answers with a phase update.
-    fn hang_up(&mut self, decline: bool, cx: &mut Context<Self>) {
+    pub(crate) fn hang_up(&mut self, decline: bool, cx: &mut Context<Self>) {
         let Some(view) = self.tracker.view(now_ms()) else {
             return;
         };
@@ -552,7 +624,7 @@ impl WaCallUi {
         .detach();
     }
 
-    fn toggle_mute(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn toggle_mute(&mut self, cx: &mut Context<Self>) {
         let Some(view) = self.tracker.view(now_ms()) else {
             return;
         };
@@ -616,7 +688,7 @@ impl WaCallUi {
 
 impl Render for WaCallUi {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(view) = self.tracker.view(now_ms()) else {
+        let Some(view) = self.tracker.view(now_ms()).filter(|_| !self.incall_mounted) else {
             return div().into_any_element();
         };
         let theme = current_theme(window);
@@ -720,6 +792,14 @@ impl Render for WaCallUi {
 mod tests {
     use super::*;
     use CallDirection::{In, Out};
+
+    #[test]
+    fn a_speaker_request_counts_unless_android_refuses_it() {
+        assert!(speaker_applied(&Ok(true)));
+        assert!(speaker_applied(&Err(AndroidError::Unsupported)));
+        assert!(speaker_applied(&Err(AndroidError::NotInitialized)));
+        assert!(!speaker_applied(&Ok(false)));
+    }
 
     fn update(id: &str, direction: CallDirection, phase: CallPhase) -> CallUpdate {
         CallUpdate {

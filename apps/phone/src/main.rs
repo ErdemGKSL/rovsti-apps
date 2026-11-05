@@ -319,6 +319,8 @@ impl PhoneApp {
         let whatsapp = cx
             .new(|cx| rovsti_wa_ui::WhatsAppSettings::new(rovsti_wa_ui::AppId::Phone, "phone", cx));
         let wa_call = cx.new(|cx| wa_call::WaCallUi::new(whatsapp.clone(), cx));
+        // The glass In-Call and Incoming screens draw WhatsApp calls.
+        wa_call.update(cx, |ui, _| ui.set_incall_mounted(true));
         let mut subscriptions = vec![
             cx.observe_in(&backend, window, |this, backend, window, cx| {
                 let pushes = backend.read(cx).wa_pushes();
@@ -336,6 +338,10 @@ impl PhoneApp {
                 this.sync_contacts(cx);
                 this.update_back(window);
                 cx.notify();
+            }),
+            // A WhatsApp call changed: the call screens follow it like a Telecom snapshot.
+            cx.observe_in(&wa_call, window, |this, _, window, cx| {
+                this.sync_calls(window, cx);
             }),
             cx.observe_window_appearance(window, |_, _, cx| cx.notify()),
             // Typing in the add field of the Blocked numbers page clears its error.

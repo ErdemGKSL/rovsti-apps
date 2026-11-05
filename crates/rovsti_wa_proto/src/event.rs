@@ -1,0 +1,208 @@
+//! Events the gateway pushes over `GET /v1/events`.
+
+use crate::api::{InstanceStatus, Reaction, TypingState, WaMessage};
+use crate::call::{CallDirection, CallPhase};
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EventEnvelope {
+    pub seq: u64,
+    pub at_ms: i64,
+    pub event: GatewayEvent,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReceiptKind {
+    Delivered,
+    Read,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CallUpdate {
+    pub call_id: String,
+    pub peer: String,
+    pub peer_name: Option<String>,
+    pub direction: CallDirection,
+    pub phase: CallPhase,
+    pub is_video: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GatewayEvent {
+    Qr {
+        payload: String,
+        valid_for_ms: u64,
+    },
+    PairCode {
+        code: String,
+        valid_for_ms: u64,
+    },
+    State(InstanceStatus),
+    Message(WaMessage),
+    MessageUpdate {
+        chat: String,
+        id: String,
+        reactions: Vec<Reaction>,
+        read: bool,
+    },
+    Receipt {
+        chat: String,
+        ids: Vec<String>,
+        kind: ReceiptKind,
+    },
+    Presence {
+        jid: String,
+        available: bool,
+        last_seen_ms: Option<i64>,
+    },
+    Typing {
+        chat: String,
+        jid: String,
+        state: TypingState,
+    },
+    HistorySynced {
+        chats: u32,
+        progress: Option<u32>,
+    },
+    GroupChanged {
+        jid: String,
+    },
+    Call(CallUpdate),
+    /// The client missed events; refetch chats.
+    Resync,
+    /// The key used for this socket was revoked.
+    KeyRevoked,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::InstanceState;
+
+    fn json(e: &GatewayEvent) -> String {
+        serde_json::to_string(e).unwrap()
+    }
+
+    #[test]
+    fn events_are_pinned() {
+        let cases: Vec<(GatewayEvent, &str)> = vec![
+            (
+                GatewayEvent::Qr {
+                    payload: "p".into(),
+                    valid_for_ms: 20000,
+                },
+                r#"{"type":"qr","payload":"p","valid_for_ms":20000}"#,
+            ),
+            (
+                GatewayEvent::PairCode {
+                    code: "ABCD-1234".into(),
+                    valid_for_ms: 1,
+                },
+                r#"{"type":"pair_code","code":"ABCD-1234","valid_for_ms":1}"#,
+            ),
+            (
+                GatewayEvent::State(InstanceStatus {
+                    instance_id: "i".into(),
+                    state: InstanceState::LoggedOut,
+                    own_jid: None,
+                    push_name: None,
+                }),
+                r#"{"type":"state","instance_id":"i","state":"logged_out","own_jid":null,"push_name":null}"#,
+            ),
+            (
+                GatewayEvent::MessageUpdate {
+                    chat: "c".into(),
+                    id: "m".into(),
+                    reactions: vec![],
+                    read: true,
+                },
+                r#"{"type":"message_update","chat":"c","id":"m","reactions":[],"read":true}"#,
+            ),
+            (
+                GatewayEvent::Receipt {
+                    chat: "c".into(),
+                    ids: vec!["a".into()],
+                    kind: ReceiptKind::Read,
+                },
+                r#"{"type":"receipt","chat":"c","ids":["a"],"kind":"read"}"#,
+            ),
+            (
+                GatewayEvent::Presence {
+                    jid: "j".into(),
+                    available: true,
+                    last_seen_ms: Some(5),
+                },
+                r#"{"type":"presence","jid":"j","available":true,"last_seen_ms":5}"#,
+            ),
+            (
+                GatewayEvent::Typing {
+                    chat: "c".into(),
+                    jid: "j".into(),
+                    state: TypingState::Recording,
+                },
+                r#"{"type":"typing","chat":"c","jid":"j","state":"recording"}"#,
+            ),
+            (
+                GatewayEvent::HistorySynced {
+                    chats: 3,
+                    progress: None,
+                },
+                r#"{"type":"history_synced","chats":3,"progress":null}"#,
+            ),
+            (
+                GatewayEvent::GroupChanged { jid: "g".into() },
+                r#"{"type":"group_changed","jid":"g"}"#,
+            ),
+            (
+                GatewayEvent::Call(CallUpdate {
+                    call_id: "k".into(),
+                    peer: "p".into(),
+                    peer_name: None,
+                    direction: CallDirection::In,
+                    phase: CallPhase::Ringing,
+                    is_video: false,
+                }),
+                r#"{"type":"call","call_id":"k","peer":"p","peer_name":null,"direction":"in","phase":"ringing","is_video":false}"#,
+            ),
+            (GatewayEvent::Resync, r#"{"type":"resync"}"#),
+            (GatewayEvent::KeyRevoked, r#"{"type":"key_revoked"}"#),
+        ];
+        for (event, text) in cases {
+            assert_eq!(json(&event), text);
+            assert_eq!(serde_json::from_str::<GatewayEvent>(text).unwrap(), event);
+        }
+    }
+
+    #[test]
+    fn message_event_and_envelope() {
+        let msg = WaMessage {
+            id: "m1".into(),
+            chat: "c@s.whatsapp.net".into(),
+            sender: None,
+            from_me: true,
+            timestamp_ms: 9,
+            body: crate::api::MessageBody::Text("hi".into()),
+            reactions: vec![],
+        };
+        let env = EventEnvelope {
+            seq: 4,
+            at_ms: 10,
+            event: GatewayEvent::Message(msg),
+        };
+        let text = serde_json::to_string(&env).unwrap();
+        assert_eq!(
+            text,
+            r#"{"seq":4,"at_ms":10,"event":{"type":"message","id":"m1","chat":"c@s.whatsapp.net","sender":null,"from_me":true,"timestamp_ms":9,"body":{"text":"hi"},"reactions":[]}}"#
+        );
+        assert_eq!(serde_json::from_str::<EventEnvelope>(&text).unwrap(), env);
+    }
+
+    #[test]
+    fn receipt_kind_pinned() {
+        assert_eq!(
+            serde_json::to_string(&ReceiptKind::Delivered).unwrap(),
+            "\"delivered\""
+        );
+    }
+}

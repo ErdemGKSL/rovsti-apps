@@ -1,0 +1,23 @@
+#![cfg_attr(test, allow(clippy::unwrap_used))]
+
+//! Wire and domain types for the WhatsApp gateway.
+//!
+//! Everything here is pure: no I/O, no clock and no randomness. Callers pass
+//! in random bytes and timestamps, so the gateway, the client and the apps
+//! share one tested definition of the protocol.
+
+pub mod api;
+pub mod audio;
+pub mod call;
+pub mod event;
+pub mod key;
+pub mod limit;
+pub mod log;
+pub mod url;
+
+pub use api::*;
+pub use call::{CallDirection, CallInput, CallMachine, CallPhase, EndReason};
+pub use event::{CallUpdate, EventEnvelope, GatewayEvent};
+pub use key::{ConnectKey, KeyError, KeyHash, KeyId};
+pub use log::{EventLog, Since};
+pub use url::{GatewayUrl, UrlError};

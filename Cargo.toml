@@ -37,12 +37,15 @@ rovsti_ui = { path = "crates/rovsti_ui" }
 rovsti_android = { path = "crates/rovsti_android" }
 rovsti_geo = { path = "crates/rovsti_geo" }
 rovsti_whatsapp = { path = "crates/rovsti_whatsapp" }
+rovsti_wa_proto = { path = "crates/rovsti_wa_proto" }
 
 anyhow = "1"
 thiserror = "2"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 futures = "0.3"
 jni = "0.21.1"

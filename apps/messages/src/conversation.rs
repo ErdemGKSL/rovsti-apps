@@ -15,9 +15,10 @@ use gpui::{
     ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
     div, img, prelude::*, px,
 };
+use rovsti_core::{ThreadId, recents::LocaleTime};
 use rovsti_ui::{
     Icon,
-    components::glass_icon_button,
+    components::{glass_icon_button, glass_pill},
     current_theme,
     field::{TextField, field_box},
     glass::{GlassSpec, glass},
@@ -33,10 +34,6 @@ use rovsti_wa_proto::{
 /// Messages per history request.
 const PAGE: u32 = 50;
 
-/// Offset of the local clock from UTC, in seconds. The platform seam has no
-/// time-zone call yet, so times show in UTC; this is the one place to wire it.
-const LOCAL_OFFSET_S: i32 = 0;
-
 /// The quick reactions offered by the long-press strip.
 const QUICK_EMOJIS: [&str; 6] = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
 
@@ -47,10 +44,12 @@ const MEDIA_CACHE: usize = 16;
 const TYPING_SHOW_MS: i64 = 6_000;
 
 /// What a conversation tells the page that hosts it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConversationEvent {
     /// The back button was tapped.
     Back,
+    /// The header's channel switch was tapped: open the person's other thread.
+    Switch(ThreadId),
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
@@ -82,6 +81,10 @@ pub struct Conversation {
     typing_until: Option<i64>,
     /// `(available, last_seen_ms)` of the peer in a 1:1 chat.
     presence: Option<(bool, Option<i64>)>,
+    /// The phone's clock, from the backend.
+    locale: LocaleTime,
+    /// The same person's other thread, shown as a header pill.
+    switch: Option<(ThreadId, crate::inbox::Badge)>,
 }
 
 impl Conversation {
@@ -90,6 +93,7 @@ impl Conversation {
         title: impl Into<SharedString>,
         is_group: bool,
         gateway: Gateway,
+        locale: LocaleTime,
         cx: &mut Context<Self>,
     ) -> Self {
         let composer =
@@ -117,12 +121,32 @@ impl Conversation {
             last_text: String::new(),
             typing_until: None,
             presence: None,
+            locale,
+            switch: None,
         };
         this.load(None, cx);
         if !this.is_group {
             this.subscribe_presence(cx);
         }
         this
+    }
+
+    pub fn set_locale(&mut self, locale: LocaleTime, cx: &mut Context<Self>) {
+        if self.locale != locale {
+            self.locale = locale;
+            cx.notify();
+        }
+    }
+
+    pub fn set_switch(
+        &mut self,
+        switch: Option<(ThreadId, crate::inbox::Badge)>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.switch != switch {
+            self.switch = switch;
+            cx.notify();
+        }
     }
 
     fn subscribe_presence(&self, cx: &mut Context<Self>) {
@@ -378,7 +402,7 @@ impl Conversation {
             return None;
         }
         let (available, last_seen) = self.presence?;
-        presence_label(available, last_seen, now, LOCAL_OFFSET_S)
+        presence_label(available, last_seen, now, self.locale.tz_offset_s)
     }
 
     fn send(&mut self, cx: &mut Context<Self>) {
@@ -465,7 +489,7 @@ impl Conversation {
         let meta: SharedString = if failed {
             "Not sent · Tap to retry".into()
         } else {
-            bubble_meta(item, now).into()
+            bubble_meta(item, now, self.locale.tz_offset_s).into()
         };
 
         let mut bubble = div()
@@ -713,7 +737,8 @@ impl Render for Conversation {
         let insets = window.insets();
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
 
-        let breaks = day_breaks(self.timeline.items(), LOCAL_OFFSET_S);
+        let offset = self.locale.tz_offset_s;
+        let breaks = day_breaks(self.timeline.items(), offset);
         let mut rows: Vec<gpui::AnyElement> = Vec::new();
         let mut next_break = breaks.iter().peekable();
         for (index, item) in self.timeline.items().iter().enumerate() {
@@ -725,7 +750,7 @@ impl Render for Conversation {
                         .py(px(6.0))
                         .text_size(typography::CAPTION.size)
                         .text_color(colors.secondary_label)
-                        .child(day_label(day_ms, now, LOCAL_OFFSET_S))
+                        .child(day_label(day_ms, now, offset))
                         .into_any_element(),
                 );
             }
@@ -772,63 +797,39 @@ impl Render for Conversation {
                 .child("No messages yet")
         });
 
-        let header = div()
-            .flex_none()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .px(px(8.0))
-            .pt(px(48.0))
-            .pb(px(8.0))
-            .child(
-                glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
-                    .id("conv-back")
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::Back))),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(typography::TITLE3.size)
-                            .font_weight(typography::TITLE3.weight)
-                            .text_color(colors.label)
-                            .child(self.title.clone()),
-                    )
-                    .children(self.subtitle(now).map(|line| {
-                        div()
-                            .truncate()
-                            .text_size(typography::CAPTION.size)
-                            .text_color(colors.secondary_label)
-                            .child(line)
-                    })),
-            );
+        let back = glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
+            .id("conv-back")
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::Back)))
+            .into_any_element();
+        let switch = self.switch.clone().map(|(thread, badge)| {
+            glass_pill(theme, badge.label())
+                .id("conv-switch")
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(ConversationEvent::Switch(thread.clone()));
+                }))
+                .into_any_element()
+        });
+        let header = header_bar(theme, back, self.title.clone(), self.subtitle(now), switch);
 
-        let composer = div()
-            .flex_none()
+        let field = div()
+            .flex_1()
+            .min_w_0()
             .flex()
-            .items_center()
-            .gap(px(8.0))
-            .px(px(12.0))
-            .pt(px(8.0))
-            .pb(px(12.0) + keyboard)
-            .child(div().flex_1().min_w_0().flex().flex_col().child(field_box(
+            .flex_col()
+            .child(field_box(
                 theme,
                 "conv-field",
                 &self.composer,
                 "Message",
                 window,
                 cx,
-            )))
-            .child(
-                glass_icon_button(theme, Icon::LucideArrowUp, 0.0, false)
-                    .id("conv-send")
-                    .on_click(cx.listener(|this, _, _, cx| this.send(cx))),
-            );
+            ))
+            .into_any_element();
+        let send = glass_icon_button(theme, Icon::LucideArrowUp, 0.0, false)
+            .id("conv-send")
+            .on_click(cx.listener(|this, _, _, cx| this.send(cx)))
+            .into_any_element();
+        let composer = composer_bar(keyboard, None, field, send);
 
         div()
             .size_full()
@@ -858,14 +859,80 @@ impl Render for Conversation {
     }
 }
 
-fn now_ms() -> i64 {
+/// The strip above a conversation, shared by the WhatsApp and SMS views: back
+/// button, title with an optional line under it, and an optional trailing
+/// control (the channel switch).
+pub(crate) fn header_bar(
+    theme: Theme,
+    back: gpui::AnyElement,
+    title: SharedString,
+    subtitle: Option<String>,
+    trailing: Option<gpui::AnyElement>,
+) -> gpui::Div {
+    let colors = theme::colors(theme);
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(8.0))
+        .pt(px(48.0))
+        .pb(px(8.0))
+        .child(back)
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(typography::TITLE3.size)
+                        .font_weight(typography::TITLE3.weight)
+                        .text_color(colors.label)
+                        .child(title),
+                )
+                .children(subtitle.map(|line| {
+                    div()
+                        .truncate()
+                        .text_size(typography::CAPTION.size)
+                        .text_color(colors.secondary_label)
+                        .child(line)
+                })),
+        )
+        .children(trailing)
+}
+
+/// The strip under a conversation: an optional leading button (attach), the
+/// message field and the send button, lifted by the keyboard.
+pub(crate) fn composer_bar(
+    keyboard: gpui::Pixels,
+    leading: Option<gpui::AnyElement>,
+    field: gpui::AnyElement,
+    send: gpui::AnyElement,
+) -> gpui::Div {
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(12.0))
+        .pt(px(8.0))
+        .pb(px(12.0) + keyboard)
+        .children(leading)
+        .child(field)
+        .child(send)
+}
+
+pub(crate) fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
 /// `HH:MM` of a timestamp at `offset_s` from UTC.
-fn clock(ms: i64, offset_s: i32) -> String {
+pub(crate) fn clock(ms: i64, offset_s: i32) -> String {
     let secs = (ms.div_euclid(1000) + i64::from(offset_s)).rem_euclid(86_400);
     format!("{:02}:{:02}", secs / 3600, secs % 3600 / 60)
 }
@@ -873,8 +940,8 @@ fn clock(ms: i64, offset_s: i32) -> String {
 /// The line under a bubble's text: the time, then "Sending…", "Not sent" or
 /// the delivery ticks for our own messages. Within a minute the time reads
 /// "Now".
-pub fn bubble_meta(item: &Item, now_ms: i64) -> String {
-    meta_at(item, now_ms, LOCAL_OFFSET_S)
+pub fn bubble_meta(item: &Item, now_ms: i64, offset_s: i32) -> String {
+    meta_at(item, now_ms, offset_s)
 }
 
 fn meta_at(item: &Item, now_ms: i64, offset_s: i32) -> String {
@@ -973,7 +1040,7 @@ fn body_text(body: &MessageBody) -> String {
 }
 
 /// Days since 1970-01-01 as (year, month 1..=12, day).
-fn civil_from_days(days: i64) -> (i64, usize, i64) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, usize, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -987,7 +1054,7 @@ fn civil_from_days(days: i64) -> (i64, usize, i64) {
 }
 
 /// The separator above a day: "Today", "Yesterday" or "5 Nov 2026".
-fn day_label(day_start_ms: i64, now_ms: i64, offset_s: i32) -> String {
+pub(crate) fn day_label(day_start_ms: i64, now_ms: i64, offset_s: i32) -> String {
     const MONTHS: [&str; 12] = [
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
@@ -1061,7 +1128,7 @@ mod tests {
             "17:05"
         );
         assert_eq!(
-            bubble_meta(&item(T, false, ItemState::Sent), later),
+            bubble_meta(&item(T, false, ItemState::Sent), later, 0),
             "14:05"
         );
     }

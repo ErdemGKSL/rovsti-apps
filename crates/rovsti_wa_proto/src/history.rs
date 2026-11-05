@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 
 use crate::call::{CallDirection, CallPhase, EndReason, WaCallView};
-use crate::event::CallSummary;
+use crate::event::{CallSummary, CallUpdate};
 
 /// The most records kept; older ones are dropped.
 pub const MAX_RECORDS: usize = 200;
@@ -24,6 +24,45 @@ pub struct WaCallRecord {
 fn is_missed(direction: CallDirection, elapsed_s: u64, reason: &EndReason) -> bool {
     let answered = elapsed_s > 0 || matches!(reason, EndReason::Hangup | EndReason::Remote);
     direction == CallDirection::In && !answered
+}
+
+/// What to feed the tracker and the history from `GET /v1/calls`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SnapshotPlan {
+    /// The live call to show, when the tracker holds none.
+    pub show: Option<CallUpdate>,
+    /// Ended calls this device has not recorded yet.
+    pub ended: Vec<CallSummary>,
+}
+
+/// Picks what a gateway snapshot changes. `show` is the newest live call while
+/// the tracker is empty, a ringing incoming call before any other; `ended` are
+/// the ended summaries whose call id is not in `history` yet.
+pub fn plan_snapshot(
+    tracker_busy: bool,
+    summaries: &[CallSummary],
+    history: &WaCallHistory,
+) -> SnapshotPlan {
+    let live = || summaries.iter().filter(|s| !s.update.phase.is_ended());
+    let show = if tracker_busy {
+        None
+    } else {
+        let ringing_in = |s: &&CallSummary| {
+            s.update.direction == CallDirection::In && s.update.phase == CallPhase::Ringing
+        };
+        live()
+            .filter(ringing_in)
+            .max_by_key(|s| s.started_ms)
+            .or_else(|| live().max_by_key(|s| s.started_ms))
+            .map(|s| s.update.clone())
+    };
+    let ended = summaries
+        .iter()
+        .filter(|s| s.update.phase.is_ended())
+        .filter(|s| !history.iter().any(|r| r.call_id == s.update.call_id))
+        .cloned()
+        .collect();
+    SnapshotPlan { show, ended }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -230,6 +269,68 @@ mod tests {
         assert!(!h.record_summary(&s, "Ann"));
         assert_eq!(h.len(), 1);
         assert_eq!(h.iter().next().unwrap().duration_s, 7);
+    }
+
+    fn at(id: &str, direction: CallDirection, phase: CallPhase, started_ms: i64) -> CallSummary {
+        let mut s = summary(id, direction, phase);
+        s.started_ms = started_ms;
+        s
+    }
+
+    #[test]
+    fn an_empty_snapshot_plans_nothing() {
+        let plan = plan_snapshot(false, &[], &WaCallHistory::new());
+        assert_eq!(plan.show, None);
+        assert!(plan.ended.is_empty());
+    }
+
+    #[test]
+    fn a_ringing_incoming_call_is_preferred() {
+        use CallDirection::{In, Out};
+        let list = [
+            at("out", Out, CallPhase::Active, 9),
+            at("in", In, CallPhase::Ringing, 1),
+        ];
+        let plan = plan_snapshot(false, &list, &WaCallHistory::new());
+        assert_eq!(plan.show.unwrap().call_id, "in");
+        let list = [
+            at("old", Out, CallPhase::Active, 1),
+            at("new", Out, CallPhase::Ringing, 2),
+        ];
+        let plan = plan_snapshot(false, &list, &WaCallHistory::new());
+        assert_eq!(plan.show.unwrap().call_id, "new");
+    }
+
+    #[test]
+    fn a_busy_tracker_shows_nothing_but_ended_calls_still_count() {
+        let list = [
+            at("in", CallDirection::In, CallPhase::Ringing, 1),
+            at(
+                "gone",
+                CallDirection::In,
+                CallPhase::Ended(EndReason::Missed),
+                0,
+            ),
+        ];
+        let plan = plan_snapshot(true, &list, &WaCallHistory::new());
+        assert_eq!(plan.show, None);
+        assert_eq!(plan.ended.len(), 1);
+    }
+
+    #[test]
+    fn ended_calls_already_in_the_history_are_skipped() {
+        let missed = at(
+            "m",
+            CallDirection::In,
+            CallPhase::Ended(EndReason::Missed),
+            1,
+        );
+        let mut history = WaCallHistory::new();
+        let plan = plan_snapshot(false, std::slice::from_ref(&missed), &history);
+        assert_eq!(plan.ended, vec![missed.clone()]);
+        assert!(history.record_summary(&missed, "Ayse"));
+        let plan = plan_snapshot(false, &[missed], &history);
+        assert!(plan.ended.is_empty());
     }
 
     #[test]

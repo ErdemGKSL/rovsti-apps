@@ -24,7 +24,7 @@ pub use call::{
     WaControl, WaScreen, WaScreenPhase, arbitrate,
 };
 pub use event::{CallSummary, CallUpdate, EventEnvelope, GatewayEvent};
-pub use history::{WaCallHistory, WaCallRecord};
+pub use history::{SnapshotPlan, WaCallHistory, WaCallRecord, plan_snapshot};
 pub use key::{ConnectKey, KeyError, KeyHash, KeyId};
 pub use log::{EventLog, Since};
 pub use push::{Wake, parse_wake};

@@ -132,7 +132,7 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   oldest ended call is evicted to make room. Live calls are never evicted, so a table
   full of live calls refuses a new one. A cold Phone has missed the live `CallUpdate`
   events (the event stream sends no replay for a fresh `after`), so it reads this
-  snapshot instead: `rovsti_wa_proto` `plan_snapshot` picks the newest live call (a
+  snapshot instead: `rovsti_wa_proto::plan_snapshot` picks the newest live call (a
   ringing incoming call first) when no call is tracked, and the ended calls whose id is
   not in `wa-calls.json` yet.
 - **One call owns the screen (arbitration).** `rovsti_wa_proto::call::arbitrate`

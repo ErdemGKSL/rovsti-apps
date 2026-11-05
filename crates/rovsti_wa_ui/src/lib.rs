@@ -8,6 +8,7 @@
 //! connect key that another app shows. [`model`] is the pure state machine,
 //! [`view`] the GPUI entity that runs its effects, [`qr`] renders pairing codes.
 
+pub mod headless;
 pub mod model;
 pub mod qr;
 pub mod view;

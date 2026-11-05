@@ -876,6 +876,10 @@ pub enum DocumentOp {
     ExportContacts,
     /// Rovsti Contacts: a `.vcf` was picked and read.
     ImportContacts,
+    /// Rovsti Messages: an encrypted archive was saved from a file.
+    ExportMessages,
+    /// Rovsti Messages: an archive was picked and copied to `path`.
+    ImportMessages,
     #[default]
     #[serde(other)]
     Unknown,
@@ -894,6 +898,9 @@ pub struct DocumentResult {
     /// The text read from an import.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// An import by file: where Kotlin copied the document (app cache).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<WireError>,
 }

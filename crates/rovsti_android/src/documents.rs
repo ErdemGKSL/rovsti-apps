@@ -34,6 +34,24 @@ pub fn import_contacts() -> Result<bool> {
     bridge::call_bool0("importContactsDocument")
 }
 
+/// Opens "save as" for the file at `path` (copied by stream, no size limit in
+/// the seam) under the suggested `name` and `mime`. The answer is a
+/// `document_result` with op `export_messages`.
+pub fn export_file(name: &str, mime: &str, path: &str) -> Result<bool> {
+    bridge::call_bool(
+        "exportFile",
+        &[Arg::Str(name), Arg::Str(mime), Arg::Str(path)],
+    )
+}
+
+/// Opens the file picker; the chosen file is copied into the app's cache and
+/// the `document_result` (op `import_messages`) carries its `path`. Files
+/// longer than `max_bytes` are refused (Kotlin caps this at 64 MB).
+pub fn import_file(max_bytes: u64) -> Result<bool> {
+    let max = i32::try_from(max_bytes).unwrap_or(i32::MAX);
+    bridge::call_bool("importFile", &[Arg::Int(max)])
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -48,5 +66,10 @@ mod tests {
             Err(Error::Unsupported)
         ));
         assert!(matches!(import_contacts(), Err(Error::Unsupported)));
+        assert!(matches!(
+            export_file("m.rmb", "application/octet-stream", "/c/m.rmb"),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(import_file(1024), Err(Error::Unsupported)));
     }
 }

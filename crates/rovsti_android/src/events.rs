@@ -35,6 +35,18 @@ pub mod kind {
     pub const WA_CALL_ACTION: &str = "wa_call_action";
     /// The keyguard was dismissed after `window::request_dismiss_keyguard` (no payload).
     pub const KEYGUARD_DISMISSED: &str = "keyguard_dismissed";
+    /// The Telephony provider changed (`sms`/`mms` URIs); Rust re-pulls its threads.
+    pub const SMS_CHANGED: &str = "sms_changed";
+    /// A send moved along (`rovsti_core::sms::SmsStatus`).
+    pub const SMS_STATUS: &str = "sms_status";
+    /// An SMS arrived while the UI is attached (`{thread_id, address, body, date_ms}`).
+    pub const SMS_RECEIVED: &str = "sms_received";
+    /// An inline reply typed in a notification while the UI is attached (`{tag, text}`).
+    pub const MSG_REPLY: &str = "msg_reply";
+    /// An alarm for a scheduled SMS fired; Rust calls `sms::pull_fired`.
+    pub const SCHEDULED_FIRED: &str = "scheduled_fired";
+    /// A notification was tapped (`{tag}`): open that conversation.
+    pub const OPEN_THREAD: &str = "open_thread";
 }
 
 /// What the user chose on a WhatsApp incoming-call notification.

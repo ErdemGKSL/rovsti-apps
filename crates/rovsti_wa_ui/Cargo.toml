@@ -9,6 +9,7 @@ description = "Shared WhatsApp settings screen for the Rovsti apps: link a new i
 [dependencies]
 gpui.workspace = true
 rovsti_android.workspace = true
+rovsti_core.workspace = true
 rovsti_ui.workspace = true
 rovsti_wa_client.workspace = true
 rovsti_wa_proto.workspace = true

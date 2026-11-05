@@ -59,6 +59,13 @@ object RovstiBridge {
     @JvmStatic external fun nativeOnEvent(kind: String, json: String)
 
     /**
+     * Headless request/answer (AD-MSG4), implemented by the app with `rovsti_android::headless_entry!`.
+     * Callable from a receiver with no activity once the library is loaded; go through [Headless.call],
+     * which treats a missing library or symbol as "no decision".
+     */
+    @JvmStatic external fun nativeHeadless(kind: String, json: String): String
+
+    /**
      * The only way Kotlin delivers an event to Rust (AD-5). A silent no-op
      * until [attachNative] has run, and swallows a missing native symbol, so a
      * registry mutation never throws out of a Telecom callback.
@@ -266,6 +273,83 @@ object RovstiBridge {
     fun importContactsDocument(): Boolean {
         val activity = foreground ?: return false
         activity.runOnUiThread { Documents.startContacts(activity, false, "", "") }
+        return true
+    }
+
+    // ---- SMS, MMS, message notifications, scheduled SMS (Rovsti Messages) ----
+    // Ids and timestamps cross the seam as decimal strings; "" means "none" for an optional one.
+
+    @JvmStatic fun pullSmsThreads(limit: Int): String = SmsQuery.threadsJson(app, limit)
+
+    @JvmStatic
+    fun pullSmsMessages(threadId: String, beforeMs: String, limit: Int): String {
+        val thread = threadId.toLongOrNull() ?: return SmsJson.error("unknown")
+        return SmsQuery.messagesJson(app, thread, beforeMs.toLongOrNull(), limit)
+    }
+
+    @JvmStatic fun pullSmsSims(): String = SmsQuery.simsJson(app)
+
+    /** `{local_id, to[], body, sub_id?}`; progress arrives as `sms_status`. */
+    @JvmStatic fun smsSend(json: String): Boolean = SmsSend.send(app, json)
+
+    /**
+     * `{local_id, to[], text, image_path?, sub_id?}`. Rust builds the PDU (`nativeHeadless("mms_encode")`
+     * answers `{"pdu_b64":..}`), [MmsCodec] only moves the file. False when no PDU came back.
+     */
+    @JvmStatic
+    fun smsSendMms(json: String): Boolean {
+        val request = try { JSONObject(json) } catch (_: org.json.JSONException) { return false }
+        val pdu = Headless.call("mms_encode", json)?.let {
+            try { JSONObject(it).optString("pdu_b64", "") } catch (_: org.json.JSONException) { "" }
+        }.orEmpty()
+        if (pdu.isEmpty()) return false
+        val sub = if (request.has("sub_id") && !request.isNull("sub_id")) request.optInt("sub_id") else null
+        return MmsCodec.send(app, request.optLong("local_id", 0), pdu, sub)
+    }
+
+    @JvmStatic fun smsMarkRead(threadId: String): Boolean = threadId.toLongOrNull()?.let { SmsQuery.markRead(app, it) } ?: false
+
+    @JvmStatic fun smsDeleteThread(threadId: String): Boolean = threadId.toLongOrNull()?.let { SmsQuery.deleteThread(app, it) } ?: false
+
+    @JvmStatic fun smsInsertRestored(json: String): String = SmsQuery.insertRestored(app, json)
+
+    @JvmStatic fun armScheduledSms(json: String): Boolean = ScheduledSms.arm(app, json)
+
+    @JvmStatic fun disarmScheduledSms(id: String): Boolean = id.toLongOrNull()?.let { ScheduledSms.disarm(app, it) } ?: false
+
+    @JvmStatic fun pullFiredSms(): String = ScheduledSms.pullFired(app)
+
+    @JvmStatic fun showMessageNotification(specJson: String): Boolean = MessageNotifications.show(app, specJson)
+
+    @JvmStatic fun cancelMessageNotification(tag: String): Boolean = MessageNotifications.cancel(app, tag)
+
+    @JvmStatic fun copyToClipboard(text: String, sensitive: Boolean): Boolean = MessageNotifications.copyToClipboard(app, text, sensitive)
+
+    /** Save-as for the file at [path]; the answer is a `document_result` with op `export_messages`. */
+    @JvmStatic
+    fun exportFile(name: String, mime: String, path: String): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startFileExport(activity, name, mime, path) }
+        return true
+    }
+
+    /** Picker for an archive of at most [maxBytes]; the answer is `document_result` op `import_messages` with `path`. */
+    @JvmStatic
+    fun importFile(maxBytes: Int): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startFileImport(activity, maxBytes) }
+        return true
+    }
+
+    /**
+     * Call from the launch activity's `onCreate` and `onNewIntent`: a tap on a message notification
+     * queues `open_thread` `{tag}` (through the mailbox, so it survives a cold start). True when it did.
+     */
+    fun deliverOpenThread(intent: Intent?): Boolean {
+        val tag = intent?.getStringExtra(MessageNotifications.EXTRA_TAG) ?: return false
+        intent.removeExtra(MessageNotifications.EXTRA_TAG)
+        postOneShot("open_thread", JSONObject().put("tag", tag).toString())
+        MessageNotifications.cancel(app, tag)
         return true
     }
 

@@ -16,15 +16,21 @@ pub mod contacts_edit;
 pub mod diagnostics;
 pub mod documents;
 pub mod events;
+pub mod headless;
+pub mod notify;
 pub mod perf;
 pub mod permissions;
 pub mod providers;
 pub mod roles;
 pub mod settings;
+pub mod sms;
 pub mod telecom;
 pub mod wa;
 pub mod window;
 pub mod xiaomi;
+
+#[cfg(target_os = "android")]
+pub use jni;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

@@ -213,6 +213,7 @@ object RovstiBridge {
 
     @JvmStatic fun pullCallLog(limit: Int): String = CallLogQuery.json(app, limit)
     @JvmStatic fun pullContacts(): String = ContactsQuery.contactsJson(app)
+    @JvmStatic fun pullContactsAll(): String = ContactsQuery.allContactsJson(app)
     @JvmStatic fun pullFavorites(): String = ContactsQuery.favoritesJson(app)
 
     // ---- The system blocklist (AD-27, story 17.1) ----------------------
@@ -254,8 +255,47 @@ object RovstiBridge {
     @JvmStatic fun contactGroups(): String = ContactsEdit.groupsJson(app)
 
     /** [groupId] "0" creates a group; the answer is `{id}`. */
-    @JvmStatic fun saveContactGroup(groupId: String, title: String): String =
-        groupId.toLongOrNull()?.let { ContactsEdit.saveGroup(app, it, title) } ?: ProviderJson.error("not_found")
+    @JvmStatic fun saveContactGroup(groupId: String, title: String, account: String): String =
+        groupId.toLongOrNull()?.let { ContactsEdit.saveGroup(app, it, title, account) } ?: ProviderJson.error("not_found")
+
+    /** The accounts contacts can be saved to; the answer is `{accounts}`. */
+    @JvmStatic fun contactAccounts(): String = ContactsEdit.accountsJson(app)
+
+    /** `{"w":..,"h":..}` of the image at [path], rotation applied. */
+    @JvmStatic fun contactPhotoSize(path: String): String = ContactPhotos.sizeJson(path)
+
+    /** [contactId] is a decimal string; [planJson] is a `PhotoPlan`. The cached file at [path] is deleted. */
+    @JvmStatic fun setContactPhoto(contactId: String, path: String, planJson: String): Boolean =
+        contactId.toLongOrNull()?.let { ContactPhotos.set(app, it, path, planJson) } ?: false
+
+    @JvmStatic fun removeContactPhoto(contactId: String): Boolean =
+        contactId.toLongOrNull()?.let { ContactPhotos.remove(app, it) } ?: false
+
+    /** Photo Picker for a contact photo; the answer is `document_result` op `contact_photo` with `path` and `mime`. */
+    @JvmStatic
+    fun pickContactPhoto(): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startPhotoPick(activity) }
+        return true
+    }
+
+    /** Asks a signature-matching sibling app to handle [action] (WhatsApp call or chat); false when none does. */
+    @JvmStatic fun handoff(action: String, jid: String, name: String): Boolean = Handoff.start(app, action, jid, name)
+
+    /**
+     * Call from the launch activity's `onCreate` and `onNewIntent`. When the intent is a hand-off from a
+     * sibling app, queues a one-shot `handoff` `{action, jid, name}` (through the mailbox, so it survives
+     * a cold start) and removes the extras. True when it did.
+     */
+    fun deliverHandoff(intent: Intent?): Boolean {
+        val json = Handoff.payload(intent?.action, intent?.getStringExtra(Handoff.EXTRA_JID), intent?.getStringExtra(Handoff.EXTRA_NAME))
+            ?: return false
+        intent?.removeExtra(Handoff.EXTRA_JID)
+        intent?.removeExtra(Handoff.EXTRA_NAME)
+        intent?.action = null
+        postOneShot("handoff", json)
+        return true
+    }
 
     @JvmStatic fun deleteContactGroup(groupId: String): Boolean =
         groupId.toLongOrNull()?.let { ContactsEdit.deleteGroup(app, it) } ?: false

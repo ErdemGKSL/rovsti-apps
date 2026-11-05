@@ -16,6 +16,7 @@ pub mod contacts_edit;
 pub mod diagnostics;
 pub mod documents;
 pub mod events;
+pub mod handoff;
 pub mod headless;
 pub mod notify;
 pub mod perf;

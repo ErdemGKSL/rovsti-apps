@@ -42,12 +42,47 @@ pub fn groups() -> Result<String> {
     bridge::call_string("contactGroups", &[])
 }
 
-/// Creates a phone-only group (`group_id` 0) or renames one; answers `{id}`.
-pub fn save_group(group_id: i64, title: &str) -> Result<String> {
+/// Creates a group in `account` (`group_id` 0; `type|name`, empty for the phone)
+/// or renames one (the account is then ignored); answers `{id}`.
+pub fn save_group(group_id: i64, title: &str, account: &str) -> Result<String> {
     bridge::call_string(
         "saveContactGroup",
-        &[Arg::Str(&group_id.to_string()), Arg::Str(title)],
+        &[
+            Arg::Str(&group_id.to_string()),
+            Arg::Str(title),
+            Arg::Str(account),
+        ],
     )
+}
+
+/// The accounts a contact can be saved to (`{accounts: [Account]}`): the ones
+/// with contacts or groups whose sync adapter uploads. Needs no `GET_ACCOUNTS`.
+pub fn accounts() -> Result<String> {
+    bridge::call_string("contactAccounts", &[])
+}
+
+/// The pixel size of the image at `path` as `{"w":..,"h":..}`, rotation applied.
+pub fn photo_size(path: &str) -> Result<String> {
+    bridge::call_string("contactPhotoSize", &[Arg::Str(path)])
+}
+
+/// Crops the image at `path` by `plan_json` (`rovsti_core::contact_photo::PhotoPlan`),
+/// scales it, and stores it as the contact's photo; the cached file is deleted
+/// afterwards. `false` when Android refused or the image cannot be decoded.
+pub fn set_photo(contact_id: i64, path: &str, plan_json: &str) -> Result<bool> {
+    bridge::call_bool(
+        "setContactPhoto",
+        &[
+            Arg::Str(&contact_id.to_string()),
+            Arg::Str(path),
+            Arg::Str(plan_json),
+        ],
+    )
+}
+
+/// Removes the contact's photo. `false` when Android refused.
+pub fn remove_photo(contact_id: i64) -> Result<bool> {
+    bridge::call_bool("removeContactPhoto", &[Arg::Str(&contact_id.to_string())])
 }
 
 /// Deletes a group (its contacts stay). `false` when Android refused.
@@ -68,7 +103,17 @@ mod tests {
         assert!(matches!(delete(1), Err(Error::Unsupported)));
         assert!(matches!(import("{}"), Err(Error::Unsupported)));
         assert!(matches!(groups(), Err(Error::Unsupported)));
-        assert!(matches!(save_group(0, "Family"), Err(Error::Unsupported)));
+        assert!(matches!(
+            save_group(0, "Family", ""),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(accounts(), Err(Error::Unsupported)));
+        assert!(matches!(photo_size("/c/p"), Err(Error::Unsupported)));
+        assert!(matches!(
+            set_photo(1, "/c/p", "{}"),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(remove_photo(1), Err(Error::Unsupported)));
         assert!(matches!(delete_group(1), Err(Error::Unsupported)));
     }
 }

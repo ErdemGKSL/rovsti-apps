@@ -5,7 +5,9 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.ContactsContract
+import android.provider.ContactsContract.CommonDataKinds.Email
 import android.provider.ContactsContract.CommonDataKinds.Phone
+import android.provider.ContactsContract.Contacts
 
 /** Contacts pulls and number lookup (AD-9): one row per number, grouped in [ProviderJson.contacts]. */
 object ContactsQuery {
@@ -27,6 +29,80 @@ object ContactsQuery {
     )
 
     fun contactsJson(context: Context): String = pull(context, starredOnly = false)
+
+    /**
+     * Every visible contact, with or without a number: the [Phone] rows plus the first email,
+     * in the same envelope as [contactsJson] (`numbers` may be empty, `email` set).
+     */
+    fun allContactsJson(context: Context): String = try {
+        ProviderJson.contacts(allRows(context))
+    } catch (_: SecurityException) {
+        ProviderJson.error("permission")
+    } catch (_: Exception) {
+        ProviderJson.error("unknown")
+    }
+
+    private val CONTACT_PROJECTION = arrayOf(
+        Contacts._ID,
+        Contacts.DISPLAY_NAME_PRIMARY,
+        Contacts.STARRED,
+        Contacts.PHOTO_THUMBNAIL_URI,
+        Contacts.LOOKUP_KEY,
+        Contacts.DISPLAY_NAME_ALTERNATIVE,
+        Contacts.SORT_KEY_PRIMARY,
+        Contacts.SORT_KEY_ALTERNATIVE,
+    )
+
+    private fun allRows(context: Context): List<ProviderJson.PhoneRow> {
+        val phones = HashMap<Long, MutableList<ProviderJson.PhoneRow>>()
+        for (row in rows(context, starredOnly = false)) phones.getOrPut(row.contactId) { ArrayList() }.add(row)
+        val emails = firstEmails(context)
+        val out = ArrayList<ProviderJson.PhoneRow>()
+        context.contentResolver.query(
+            Contacts.CONTENT_URI, CONTACT_PROJECTION, "${Contacts.IN_VISIBLE_GROUP} = 1", null,
+            "${Contacts.DISPLAY_NAME_PRIMARY} COLLATE LOCALIZED ASC, ${Contacts._ID} ASC",
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val id = c.getLong(0)
+                val email = emails[id]
+                val own = phones[id]
+                if (own != null) {
+                    own.mapTo(out) { it.copy(email = email) }
+                } else {
+                    out.add(
+                        ProviderJson.PhoneRow(
+                            contactId = id,
+                            displayName = c.getString(1) ?: "",
+                            numberRaw = "",
+                            starred = c.getInt(2) != 0,
+                            photoUri = c.getString(3),
+                            lookupKey = c.getString(4),
+                            displayNameAlt = c.getString(5),
+                            sortKey = c.getString(6),
+                            sortKeyAlt = c.getString(7),
+                            email = email,
+                        )
+                    )
+                }
+            }
+        }
+        return out
+    }
+
+    /** The first email per contact: the primary one when marked, else the oldest row. */
+    private fun firstEmails(context: Context): Map<Long, String> {
+        val out = HashMap<Long, String>()
+        context.contentResolver.query(
+            Email.CONTENT_URI, arrayOf(Email.CONTACT_ID, Email.ADDRESS), null, null,
+            "${Email.IS_SUPER_PRIMARY} DESC, ${Email._ID} ASC",
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val address = c.getString(1)?.trim().orEmpty()
+                if (address.isNotEmpty()) out.putIfAbsent(c.getLong(0), address)
+            }
+        }
+        return out
+    }
 
     fun favoritesJson(context: Context): String = pull(context, starredOnly = true)
 

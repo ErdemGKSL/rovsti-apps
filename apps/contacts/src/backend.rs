@@ -123,7 +123,7 @@ pub(crate) fn delete(contact_id: i64) -> Result<(), String> {
 
 /// Creates (`group_id` 0) or renames a group.
 pub(crate) fn save_group(group_id: i64, title: &str) -> Result<i64, String> {
-    decode::<SavedPayload>(contacts_edit::save_group(group_id, title))
+    decode::<SavedPayload>(contacts_edit::save_group(group_id, title, ""))
         .map(|saved| saved.id)
         .map_err(|error| error.words())
 }

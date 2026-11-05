@@ -350,6 +350,8 @@ object ProviderJson {
         val displayNameAlt: String? = null,
         val sortKey: String? = null,
         val sortKeyAlt: String? = null,
+        /** The contact's first email; [numberRaw] is "" for a contact with no number. */
+        val email: String? = null,
     )
 
     fun error(code: String): String =
@@ -418,6 +420,7 @@ object ProviderJson {
             val numbers = JSONArray()
             val seen = HashSet<String>()
             for (n in group.sortedByDescending { it.superPrimary }) {
+                if (n.numberRaw.isEmpty()) continue
                 if (!seen.add(normalize(n.numberRaw).ifEmpty { n.numberRaw })) continue
                 val no = JSONObject().put("raw", n.numberRaw)
                 n.label?.let { no.put("label", it) }
@@ -432,6 +435,7 @@ object ProviderJson {
             if (group.any { it.starred }) o.put("starred", true)
             group.firstNotNullOfOrNull { it.photoUri }?.let { o.put("photo_uri", it) }
             first.lookupKey?.let { o.put("lookup_key", it) }
+            group.firstNotNullOfOrNull { it.email?.takeIf { e -> e.isNotEmpty() } }?.let { o.put("email", it) }
             first.displayNameAlt?.takeIf { it.isNotEmpty() }?.let { o.put("display_name_alt", it) }
             first.sortKey?.takeIf { it.isNotEmpty() }?.let { o.put("sort_key", it) }
             first.sortKeyAlt?.takeIf { it.isNotEmpty() }?.let { o.put("sort_key_alt", it) }

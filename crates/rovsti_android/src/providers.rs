@@ -22,6 +22,13 @@ pub fn contacts() -> Result<String> {
     bridge::call_string("pullContacts", &[])
 }
 
+/// Every visible contact, with or without a number: the `Phone` rows plus the
+/// first email, in the same `contacts` envelope as [`contacts`] (`numbers` may be
+/// empty, `email` set). Phone keeps [`contacts`].
+pub fn contacts_all() -> Result<String> {
+    bridge::call_string("pullContactsAll", &[])
+}
+
 /// Starred contacts.
 pub fn favorites() -> Result<String> {
     bridge::call_string("pullFavorites", &[])
@@ -68,6 +75,7 @@ mod tests {
     fn desktop_is_unsupported() {
         assert!(matches!(call_log(500), Err(Error::Unsupported)));
         assert!(matches!(contacts(), Err(Error::Unsupported)));
+        assert!(matches!(contacts_all(), Err(Error::Unsupported)));
         assert!(matches!(favorites(), Err(Error::Unsupported)));
         assert!(matches!(set_starred(1, true), Err(Error::Unsupported)));
         assert!(matches!(local_time_info(), Err(Error::Unsupported)));

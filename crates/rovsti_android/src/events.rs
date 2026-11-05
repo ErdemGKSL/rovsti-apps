@@ -47,6 +47,9 @@ pub mod kind {
     pub const SCHEDULED_FIRED: &str = "scheduled_fired";
     /// A notification was tapped (`{tag}`): open that conversation.
     pub const OPEN_THREAD: &str = "open_thread";
+    /// A sibling app asked this one to call or chat on WhatsApp
+    /// (`{action, jid, name}`); one-shot, queued until the UI attaches.
+    pub const HANDOFF: &str = "handoff";
 }
 
 /// What the user chose on a WhatsApp incoming-call notification.

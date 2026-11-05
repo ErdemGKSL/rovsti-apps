@@ -27,6 +27,11 @@ object Documents {
     const val REQUEST_IMPORT_FILE = 0x4946 // "IF"
     const val REQUEST_ATTACH_FILE = 0x4146 // "AF"
 
+    const val REQUEST_CONTACT_PHOTO = 0x4350 // "CP"
+
+    /** A picked contact photo larger than this (20 MiB) is refused. */
+    const val MAX_PHOTO_BYTES = 20 * 1024 * 1024
+
     /** The cap for a file import: an encrypted message archive can be large (AD-MSG7). */
     const val MAX_FILE_BYTES = 64 * 1024 * 1024
 
@@ -74,6 +79,50 @@ object Documents {
             if (export) exportContactsIntent(name) else importContactsIntent(),
             if (export) REQUEST_EXPORT_CONTACTS else REQUEST_IMPORT_CONTACTS,
         )
+
+    /** The system Photo Picker, images only; needs no permission. */
+    fun photoPickIntent(): Intent =
+        Intent(android.provider.MediaStore.ACTION_PICK_IMAGES).setType("image/*")
+
+    /** Opens the Photo Picker; the answer is `document_result` op `contact_photo` with `path` and `mime`. */
+    fun startPhotoPick(activity: Activity): Boolean = try {
+        @Suppress("DEPRECATION")
+        activity.startActivityForResult(photoPickIntent(), REQUEST_CONTACT_PHOTO)
+        true
+    } catch (_: android.content.ActivityNotFoundException) {
+        false
+    }
+
+    private fun handlePhoto(
+        context: Context, resultCode: Int, data: Intent?, worker: java.util.concurrent.Executor, emit: (String) -> Unit,
+    ) {
+        val op = "contact_photo"
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            emit(resultJson(op, false))
+            return
+        }
+        worker.execute {
+            emit(
+                try {
+                    val target = File(context.cacheDir, "contact-photo-${System.currentTimeMillis()}.bin")
+                    val fits = context.contentResolver.openInputStream(uri)?.use { input ->
+                        target.outputStream().use { copyLimited(input, it, MAX_PHOTO_BYTES) }
+                    }
+                    if (fits == true) {
+                        resultJson(op, true, path = target.absolutePath, mime = context.contentResolver.getType(uri))
+                    } else {
+                        target.delete()
+                        resultJson(op, false, error = if (fits == null) "unavailable" else "too_large")
+                    }
+                } catch (_: SecurityException) {
+                    resultJson(op, false, error = "permission")
+                } catch (_: java.io.IOException) {
+                    resultJson(op, false, error = "unknown")
+                },
+            )
+        }
+    }
 
     /** Pure: the byte cap for a file import, [requested] limited to [MAX_FILE_BYTES]; non-positive means the cap. */
     fun fileCap(requested: Int): Int = if (requested <= 0) MAX_FILE_BYTES else minOf(requested, MAX_FILE_BYTES)
@@ -238,6 +287,10 @@ object Documents {
     ): Boolean {
         if (requestCode == REQUEST_EXPORT_FILE || requestCode == REQUEST_IMPORT_FILE || requestCode == REQUEST_ATTACH_FILE) {
             handleFile(context, requestCode, resultCode, data, worker, emit)
+            return true
+        }
+        if (requestCode == REQUEST_CONTACT_PHOTO) {
+            handlePhoto(context, resultCode, data, worker, emit)
             return true
         }
         val export = requestCode == REQUEST_EXPORT || requestCode == REQUEST_EXPORT_CONTACTS

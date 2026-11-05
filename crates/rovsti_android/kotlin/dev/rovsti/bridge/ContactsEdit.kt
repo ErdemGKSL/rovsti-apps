@@ -1,6 +1,7 @@
 package dev.rovsti.bridge
 
 import android.content.ContentProviderOperation
+import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
@@ -53,9 +54,25 @@ object ContactsEdit {
     private fun accountKey(type: String?, name: String?): String =
         if (type.isNullOrEmpty() && name.isNullOrEmpty()) "" else "${type.orEmpty()}|${name.orEmpty()}"
 
+    /**
+     * Splits a Rust account key at the first `|` into (type, name); an empty key, or one with
+     * no type and no name, is the phone-only (null, null) account.
+     */
+    fun splitAccount(key: String): Pair<String?, String?> {
+        if (key.isEmpty()) return null to null
+        val bar = key.indexOf('|')
+        val type = if (bar < 0) "" else key.substring(0, bar)
+        val name = if (bar < 0) key else key.substring(bar + 1)
+        if (type.isEmpty() && name.isEmpty()) return null to null
+        return type.ifEmpty { null } to name.ifEmpty { null }
+    }
+
     private class Raw(val id: Long, val account: String)
 
     // ---- Reading ------------------------------------------------------------
+
+    /** The raw contact a contact is edited through (see the class comment), or null when it is gone. */
+    fun primaryRawId(context: Context, contactId: Long): Long? = primaryRaw(context, contactId)?.id
 
     private fun primaryRaw(context: Context, contactId: Long): Raw? {
         val resolver = context.contentResolver
@@ -318,7 +335,7 @@ object ContactsEdit {
 
     private fun create(context: Context, draft: JSONObject): String {
         val ops = ArrayList<ContentProviderOperation>()
-        val rawIndex = appendNew(ops, draft, context)
+        val rawIndex = appendNew(ops, draft, context, account = str(draft, "account"))
         val results = context.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
         val rawId = ContentUris.parseId(results[rawIndex].uri ?: return ProviderJson.error("unknown"))
         val id = contactIdOfRaw(context, rawId) ?: return ProviderJson.error("unknown")
@@ -326,17 +343,21 @@ object ContactsEdit {
     }
 
     /** Appends the operations for a new phone-only contact; returns the index of its raw-contact insert. */
-    private fun appendNew(ops: ArrayList<ContentProviderOperation>, draft: JSONObject, context: Context, local: Set<Long>? = null): Int {
+    private fun appendNew(
+        ops: ArrayList<ContentProviderOperation>, draft: JSONObject, context: Context,
+        local: Set<Long>? = null, account: String = "",
+    ): Int {
         val rawIndex = ops.size
+        val (accountType, accountName) = splitAccount(account)
         ops.add(
             ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
-                .withValue(RawContacts.ACCOUNT_TYPE, null)
-                .withValue(RawContacts.ACCOUNT_NAME, null)
+                .withValue(RawContacts.ACCOUNT_TYPE, accountType)
+                .withValue(RawContacts.ACCOUNT_NAME, accountName)
                 .withValue(RawContacts.STARRED, if (draft.optBoolean("starred")) 1 else 0)
                 .build(),
         )
         insertData(ops, draft, null, rawIndex)
-        val visible = local ?: groupIdsOf(context, "")
+        val visible = local ?: groupIdsOf(context, accountKey(accountType, accountName))
         for (group in longs(draft.optJSONArray("groups")).toSet()) {
             if (group !in visible) continue
             ops.add(
@@ -423,17 +444,21 @@ object ContactsEdit {
         ProviderJson.ok(JSONObject().put("groups", groups))
     }
 
-    /** Creates a phone-only group ([groupId] 0) or renames one; the answer is `{id}`. */
-    fun saveGroup(context: Context, groupId: Long, title: String): String = guard {
+    /**
+     * Creates a group in [account] (`type|name`, empty for the phone) when [groupId] is 0, or
+     * renames one; the answer is `{id}`.
+     */
+    fun saveGroup(context: Context, groupId: Long, title: String, account: String): String = guard {
         val resolver = context.contentResolver
         if (groupId > 0) {
             val values = ContentValues().apply { put(Groups.TITLE, title) }
             val n = resolver.update(ContentUris.withAppendedId(Groups.CONTENT_URI, groupId), values, null, null)
             if (n > 0) ProviderJson.ok(JSONObject().put("id", groupId)) else ProviderJson.error("not_found")
         } else {
+            val (accountType, accountName) = splitAccount(account)
             val values = ContentValues().apply {
-                putNull(Groups.ACCOUNT_TYPE)
-                putNull(Groups.ACCOUNT_NAME)
+                put(Groups.ACCOUNT_TYPE, accountType)
+                put(Groups.ACCOUNT_NAME, accountName)
                 put(Groups.TITLE, title)
                 put(Groups.GROUP_VISIBLE, 1)
             }
@@ -448,5 +473,43 @@ object ContactsEdit {
         false
     } catch (_: Exception) {
         false
+    }
+
+    // ---- Accounts -----------------------------------------------------------
+
+    /** Accounts whose sync adapter for the contacts authority uploads changes, as `type` to `name`. */
+    private fun accountsOf(context: Context): List<Pair<String, String>> {
+        val uploading = ContentResolver.getSyncAdapterTypes()
+            .filter { it.authority == ContactsContract.AUTHORITY && it.supportsUploading() }
+            .map { it.accountType }.toSet()
+        val found = LinkedHashSet<Pair<String, String>>()
+        fun collect(uri: android.net.Uri, typeColumn: String, nameColumn: String) {
+            context.contentResolver.query(
+                uri, arrayOf(typeColumn, nameColumn), "$typeColumn IS NOT NULL AND $nameColumn IS NOT NULL", null, null,
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val type = c.getString(0).orEmpty()
+                    val name = c.getString(1).orEmpty()
+                    if (type in uploading && name.isNotEmpty()) found.add(type to name)
+                }
+            }
+        }
+        collect(Groups.CONTENT_URI, Groups.ACCOUNT_TYPE, Groups.ACCOUNT_NAME)
+        collect(RawContacts.CONTENT_URI, RawContacts.ACCOUNT_TYPE, RawContacts.ACCOUNT_NAME)
+        return found.toList()
+    }
+
+    /**
+     * `{accounts: [{key, name, kind}]}`: the phone itself (empty key) first, then every account
+     * seen in the Groups and RawContacts tables whose sync adapter uploads contacts. No
+     * `GET_ACCOUNTS` is needed because the accounts come from the providers.
+     */
+    fun accountsJson(context: Context): String = guard {
+        val accounts = JSONArray()
+        accounts.put(JSONObject().put("key", "").put("name", "").put("kind", ""))
+        for ((type, name) in accountsOf(context).sortedWith(compareBy({ it.first }, { it.second }))) {
+            accounts.put(JSONObject().put("key", accountKey(type, name)).put("name", name).put("kind", type))
+        }
+        ProviderJson.ok(JSONObject().put("accounts", accounts))
     }
 }

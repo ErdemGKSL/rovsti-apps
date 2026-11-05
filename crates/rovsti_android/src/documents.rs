@@ -61,6 +61,13 @@ pub fn pick_attachment(max_bytes: u64) -> Result<bool> {
     bridge::call_bool("pickAttachment", &[Arg::Int(max)])
 }
 
+/// Opens the system Photo Picker (images only). The chosen image is copied into
+/// the app's cache (at most 20 MiB); the `document_result` (op `contact_photo`)
+/// carries its `path` and `mime`.
+pub fn pick_contact_photo() -> Result<bool> {
+    bridge::call_bool0("pickContactPhoto")
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -81,5 +88,6 @@ mod tests {
         ));
         assert!(matches!(import_file(1024), Err(Error::Unsupported)));
         assert!(matches!(pick_attachment(1024), Err(Error::Unsupported)));
+        assert!(matches!(pick_contact_photo(), Err(Error::Unsupported)));
     }
 }

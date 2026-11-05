@@ -794,6 +794,32 @@ async fn an_incoming_call_rings_and_is_answered_over_the_api() {
 }
 
 #[tokio::test]
+async fn the_call_list_needs_a_key_and_shows_the_instance_calls() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let none = Gateway::new(server.url.clone(), None);
+    assert_eq!(
+        blocking(move || none.calls()).await.unwrap_err(),
+        ClientError::Unauthorized
+    );
+    let g = gateway.clone();
+    assert!(blocking(move || g.calls()).await.unwrap().is_empty());
+
+    let instance = wa_gateway::store::InstanceId::new(&created.instance_id);
+    server.driver.ring(&instance, "LISTED1", PEER, Some("Ayse"));
+    assert_eq!(next_call_phase(&mut events).await, CallPhase::Ringing);
+    let g = gateway.clone();
+    let calls = blocking(move || g.calls()).await.unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].update.call_id, "LISTED1");
+    assert_eq!(calls[0].update.phase, CallPhase::Ringing);
+    assert_eq!(calls[0].ended_ms, None);
+}
+
+#[tokio::test]
 async fn revoking_your_own_key_is_allowed() {
     let server = start(4).await;
     let (first, created) = create(&server).await;

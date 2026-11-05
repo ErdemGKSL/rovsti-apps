@@ -25,8 +25,8 @@ use futures::future::BoxFuture;
 use rovsti_wa_proto::api::routes as r;
 use rovsti_wa_proto::audio::{decode_frame, encode_frame};
 use rovsti_wa_proto::{
-    CallDirection, CallInput, CallMachine, CallPhase, CallStarted, CallUpdate, ErrorCode,
-    GatewayEvent, PlaceCall, SetMuted,
+    CallDirection, CallInput, CallMachine, CallPhase, CallStarted, CallSummary, CallUpdate,
+    ErrorCode, GatewayEvent, PlaceCall, SetMuted,
 };
 use whatsapp_rust::CallError as WaCallError;
 use whatsapp_rust::voip::{CallEvent, CallHandle};
@@ -47,7 +47,7 @@ pub const RING_TIMEOUT: Duration = Duration::from_secs(60);
 /// Frames each audio channel holds (about half a second).
 pub const AUDIO_QUEUE: usize = 8;
 /// Ended calls stay queryable this long.
-const KEEP_ENDED: Duration = Duration::from_secs(300);
+const KEEP_ENDED: Duration = Duration::from_secs(24 * 60 * 60);
 /// Calls (live and recently ended) one instance may hold.
 const MAX_CALLS: usize = 64;
 const MAX_CALL_ID_LEN: usize = 128;
@@ -224,7 +224,13 @@ struct CallEntry {
     spk_tx: Sender<Frame>,
     spk_rx: Receiver<Frame>,
     audio_attached: bool,
+    /// Wall clock of the first sighting, for the call list.
+    started_ms: i64,
+    /// Wall clock of the end, for the call list.
+    ended_ms: Option<i64>,
     ended_at: Option<Instant>,
+    /// A ring push went out, so the phone also hears how the call ended.
+    pushed: bool,
 }
 
 impl CallEntry {
@@ -245,7 +251,21 @@ impl CallEntry {
             spk_tx,
             spk_rx,
             audio_attached: false,
+            started_ms: now_ms(),
+            ended_ms: None,
             ended_at: None,
+            pushed: false,
+        }
+    }
+
+    fn update(&self, call_id: &str) -> CallUpdate {
+        CallUpdate {
+            call_id: call_id.to_owned(),
+            peer: self.peer.clone(),
+            peer_name: self.peer_name.clone(),
+            direction: self.machine.direction(),
+            phase: self.machine.phase().clone(),
+            is_video: self.is_video,
         }
     }
 
@@ -322,28 +342,61 @@ impl CallTable {
         self.hub.publish(
             &self.instance,
             now_ms(),
-            GatewayEvent::Call(CallUpdate {
-                call_id: call_id.to_owned(),
-                peer: entry.peer.clone(),
-                peer_name: entry.peer_name.clone(),
-                direction: entry.machine.direction(),
-                phase: entry.machine.phase().clone(),
-                is_video: entry.is_video,
-            }),
+            GatewayEvent::Call(entry.update(call_id)),
         );
+    }
+
+    /// Every known call, newest first.
+    pub fn list(&self) -> Vec<CallSummary> {
+        let mut calls: Vec<_> = self
+            .lock()
+            .iter()
+            .map(|(id, e)| CallSummary {
+                update: e.update(id),
+                started_ms: e.started_ms,
+                ended_ms: e.ended_ms,
+            })
+            .collect();
+        calls.sort_by(|a, b| {
+            b.started_ms
+                .cmp(&a.started_ms)
+                .then_with(|| a.update.call_id.cmp(&b.update.call_id))
+        });
+        calls
     }
 
     /// Applies `input` to `entry`; publishes and, when the call ends, closes
     /// its audio channels so the socket and the engine stop.
     fn apply(&self, call_id: &str, entry: &mut CallEntry, input: CallInput) -> Option<CallPhase> {
-        let phase = entry.machine.apply(input)?;
+        let was_ringing = *entry.machine.phase() == CallPhase::Ringing;
+        let phase = entry.machine.apply(input.clone())?;
         if phase.is_ended() {
             entry.ended_at = Some(Instant::now());
+            entry.ended_ms = Some(now_ms());
             entry.mic_tx.close();
             entry.spk_tx.close();
+            if was_ringing && entry.pushed && entry.machine.direction() == CallDirection::In {
+                self.push_call_end(call_id, entry, &input);
+            }
         }
         self.publish(call_id, entry);
         Some(phase)
+    }
+
+    /// Tells the phone a ring it was woken for is over. Missed when the
+    /// caller gave up or nobody answered; not when the user or another device
+    /// dealt with it.
+    fn push_call_end(&self, call_id: &str, entry: &CallEntry, input: &CallInput) {
+        let missed = matches!(input, CallInput::RemoteTerminate | CallInput::Timeout);
+        self.pusher.notify(
+            &self.instance,
+            PushKind::CallEnd {
+                call_id: call_id.to_owned(),
+                missed,
+                from: entry.peer.clone(),
+                name: entry.peer_name.clone().unwrap_or_default(),
+            },
+        );
     }
 
     fn transition(&self, call_id: &str, input: CallInput) -> Option<CallPhase> {
@@ -357,8 +410,20 @@ impl CallTable {
     fn insert(&self, call_id: &str, entry: CallEntry) -> bool {
         let mut calls = self.lock();
         calls.retain(|_, e| e.ended_at.is_none_or(|at| at.elapsed() < KEEP_ENDED));
-        if calls.len() >= MAX_CALLS || calls.contains_key(call_id) {
+        if calls.contains_key(call_id) {
             return false;
+        }
+        // Full: the oldest finished call makes room; live calls never do.
+        while calls.len() >= MAX_CALLS {
+            let oldest = calls
+                .iter()
+                .filter_map(|(id, e)| e.ended_at.map(|at| (at, id)))
+                .min()
+                .map(|(_, id)| id.clone());
+            match oldest {
+                Some(id) => calls.remove(&id),
+                None => return false,
+            };
         }
         let entry = calls.entry(call_id.to_owned()).or_insert(entry);
         self.publish(call_id, entry);
@@ -469,6 +534,9 @@ impl CallTable {
                 entry.is_video = *is_video;
                 let name = entry.peer_name.clone().unwrap_or_default();
                 entry.incoming = Some(call.clone());
+                // Set before the entry is visible, so an end racing the push
+                // below is still reported.
+                entry.pushed = true;
                 if !self.insert(call_id, entry) {
                     return;
                 }
@@ -684,7 +752,7 @@ async fn audio_socket(mut socket: WebSocket, ports: AudioPorts) {
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route(r::CALLS, post(place))
+        .route(r::CALLS, post(place).get(list))
         .route(r::CALL_ACCEPT, post(accept))
         .route(r::CALL_REJECT, post(reject))
         .route(r::CALL_END, post(end))
@@ -717,6 +785,10 @@ async fn place(
     let backend = state.driver().call_backend(&auth.instance)?;
     let started = state.calls(&auth.instance).place(&*backend, to).await?;
     Ok(Json(started))
+}
+
+async fn list(State(state): State<AppState>, auth: Authed) -> Json<Vec<CallSummary>> {
+    Json(state.calls(&auth.instance).list())
 }
 
 async fn accept(
@@ -1554,6 +1626,157 @@ mod tests {
         assert!(check_call_id("").is_err());
         assert!(check_call_id("a/b").is_err());
         assert!(check_call_id(&"a".repeat(MAX_CALL_ID_LEN + 1)).is_err());
+    }
+
+    fn ends(rig: &Rig) -> Vec<PushKind> {
+        rig.pushes
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|k| matches!(k, PushKind::CallEnd { .. }))
+            .cloned()
+            .collect()
+    }
+
+    fn call_end(id: &str, missed: bool) -> PushKind {
+        PushKind::CallEnd {
+            call_id: id.into(),
+            missed,
+            from: FROM.into(),
+            name: "Ayse".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_list_has_live_and_ended_calls_newest_first() {
+        let rig = rig();
+        ring(&rig, "C1");
+        let listed = rig.table.list();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].update.call_id, "C1");
+        assert_eq!(listed[0].update.phase, CallPhase::Ringing);
+        assert_eq!(listed[0].update.peer_name.as_deref(), Some("Ayse"));
+        assert!(listed[0].started_ms > 0);
+        assert_eq!(listed[0].ended_ms, None);
+
+        rig.table.on_missed("C1");
+        let listed = rig.table.list();
+        assert_eq!(listed[0].update.phase, CallPhase::Ended(EndReason::Missed));
+        assert!(listed[0].ended_ms.unwrap() >= listed[0].started_ms);
+
+        // Newest first.
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        ring(&rig, "C2");
+        let ids: Vec<_> = rig
+            .table
+            .list()
+            .into_iter()
+            .map(|c| c.update.call_id)
+            .collect();
+        assert_eq!(ids, ["C2", "C1"]);
+    }
+
+    #[tokio::test]
+    async fn a_full_table_evicts_the_oldest_ended_call() {
+        let rig = rig();
+        for n in 0..MAX_CALLS {
+            ring(&rig, &format!("C{n}"));
+        }
+        // Everything is live: refused.
+        ring(&rig, "EXTRA");
+        assert_eq!(rig.table.phase("EXTRA"), None);
+
+        // End two; the one that ended first goes.
+        rig.table.on_missed("C5");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        rig.table.on_missed("C3");
+        ring(&rig, "EXTRA");
+        assert_eq!(rig.table.phase("EXTRA"), Some(CallPhase::Ringing));
+        assert_eq!(rig.table.phase("C5"), None);
+        assert!(rig.table.phase("C3").is_some());
+        assert_eq!(rig.table.list().len(), MAX_CALLS);
+    }
+
+    #[tokio::test]
+    async fn a_table_full_of_ended_calls_still_takes_new_ones() {
+        let rig = rig();
+        for n in 0..MAX_CALLS {
+            ring(&rig, &format!("C{n}"));
+            rig.table.on_missed(&format!("C{n}"));
+        }
+        ring(&rig, "NEW");
+        assert_eq!(rig.table.phase("NEW"), Some(CallPhase::Ringing));
+        assert_eq!(rig.table.phase("C0"), None);
+        assert_eq!(rig.table.list().len(), MAX_CALLS);
+    }
+
+    #[tokio::test]
+    async fn a_full_table_of_live_calls_refuses_an_outgoing_call() {
+        let rig = rig();
+        for n in 0..MAX_CALLS {
+            ring(&rig, &format!("C{n}"));
+        }
+        assert!(matches!(
+            rig.table.place(&rig.calls, FROM).await,
+            Err(CallError::Conflict(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn the_caller_cancelling_pushes_a_missed_call_end() {
+        let rig = rig();
+        ring(&rig, "C1");
+        assert!(ends(&rig).is_empty());
+        rig.table.on_missed("C1");
+        assert_eq!(ends(&rig), [call_end("C1", true)]);
+        // A repeat does not push again.
+        rig.table.on_missed("C1");
+        assert_eq!(ends(&rig).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_ring_timeout_pushes_a_missed_call_end() {
+        let rig = rig_with(Duration::from_millis(40));
+        ring(&rig, "C1");
+        wait_phase(&rig.table, "C1", CallPhase::Ended(EndReason::Missed)).await;
+        assert_eq!(ends(&rig), [call_end("C1", true)]);
+    }
+
+    #[tokio::test]
+    async fn rejecting_or_answering_elsewhere_pushes_not_missed() {
+        let rig = rig();
+        ring(&rig, "C1");
+        rig.table.reject(&rig.calls, "C1").await.unwrap();
+        ring(&rig, "C2");
+        rig.table.on_ended_elsewhere("C2");
+        ring(&rig, "C3");
+        rig.table.end(&rig.calls, "C3").await.unwrap();
+        assert_eq!(
+            ends(&rig),
+            [
+                call_end("C1", false),
+                call_end("C2", false),
+                call_end("C3", false)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn answered_and_outgoing_calls_push_no_call_end() {
+        let rig = rig();
+        ring(&rig, "C1");
+        rig.table.accept(&rig.calls, "C1").await.unwrap();
+        let live = rig.calls.lives().pop().unwrap();
+        live.emit(LiveEvent::MediaUp);
+        wait_phase(&rig.table, "C1", CallPhase::Active).await;
+        rig.table.end(&rig.calls, "C1").await.unwrap();
+
+        let out = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
+        rig.table.on_missed(&out);
+        let out2 = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
+        rig.table.end(&rig.calls, &out2).await.unwrap();
+        assert!(ends(&rig).is_empty());
     }
 
     #[tokio::test]

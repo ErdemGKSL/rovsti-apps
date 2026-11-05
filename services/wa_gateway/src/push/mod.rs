@@ -37,6 +37,14 @@ pub enum PushKind {
         from: String,
         name: String,
     },
+    /// A ring the phone was woken for is over. Never coalesced.
+    CallEnd {
+        call_id: String,
+        /// The caller gave up or nobody answered.
+        missed: bool,
+        from: String,
+        name: String,
+    },
 }
 
 impl PushKind {
@@ -58,12 +66,27 @@ impl PushKind {
                 ("from".to_owned(), from.clone()),
                 ("name".to_owned(), name.clone()),
             ]),
+            Self::CallEnd {
+                call_id,
+                missed,
+                from,
+                name,
+            } => BTreeMap::from([
+                ("kind".to_owned(), "call_end".to_owned()),
+                ("call_id".to_owned(), call_id.clone()),
+                (
+                    "missed".to_owned(),
+                    if *missed { "1" } else { "0" }.to_owned(),
+                ),
+                ("from".to_owned(), from.clone()),
+                ("name".to_owned(), name.clone()),
+            ]),
         }
     }
 
     pub fn high_priority(&self) -> bool {
         match self {
-            Self::Message { .. } | Self::Call { .. } => true,
+            Self::Message { .. } | Self::Call { .. } | Self::CallEnd { .. } => true,
         }
     }
 }
@@ -191,7 +214,7 @@ impl Pusher for FcmPusher {
                     Decision::Send { count } => PushKind::Message { chat, count },
                 }
             }
-            call @ PushKind::Call { .. } => call,
+            call @ (PushKind::Call { .. } | PushKind::CallEnd { .. }) => call,
         };
         let sender = Arc::clone(&self.sender);
         let store = self.store.clone();
@@ -331,6 +354,25 @@ mod tests {
             r#"{"call_id":"ABC","from":"905321234567@s.whatsapp.net","kind":"call","name":"Ayse"}"#
         );
         assert!(kind.high_priority());
+    }
+
+    #[test]
+    fn call_end_push_is_high_priority_and_flags_missed() {
+        let mut kind = PushKind::CallEnd {
+            call_id: "ABC".into(),
+            missed: true,
+            from: "905321234567@s.whatsapp.net".into(),
+            name: "Ayse".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&kind.data()).unwrap(),
+            r#"{"call_id":"ABC","from":"905321234567@s.whatsapp.net","kind":"call_end","missed":"1","name":"Ayse"}"#
+        );
+        assert!(kind.high_priority());
+        if let PushKind::CallEnd { missed, .. } = &mut kind {
+            *missed = false;
+        }
+        assert_eq!(kind.data()["missed"], "0");
     }
 
     #[test]

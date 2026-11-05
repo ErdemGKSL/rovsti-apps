@@ -8,9 +8,9 @@ use std::time::Duration;
 
 use rovsti_wa_proto::api::routes;
 use rovsti_wa_proto::{
-    CallStarted, ChatState, ChatSummary, ConnectKey, CreateInstance, CreatedInstance, GatewayUrl,
-    GroupInfo, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, MarkRead, MediaKind, MintKey,
-    PlaceCall, PushRegistration, SendReaction, SendText, Sent, SetMuted, SetPresence,
+    CallStarted, CallSummary, ChatState, ChatSummary, ConnectKey, CreateInstance, CreatedInstance,
+    GatewayUrl, GroupInfo, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, MarkRead, MediaKind,
+    MintKey, PlaceCall, PushRegistration, SendReaction, SendText, Sent, SetMuted, SetPresence,
     SubscribePresence, WaMessage,
 };
 use serde::Serialize;
@@ -331,6 +331,11 @@ impl Gateway {
         self.post(routes::CALLS, &PlaceCall { to: to.to_owned() })
     }
 
+    /// The instance's recent calls, newest first.
+    pub fn calls(&self) -> Result<Vec<CallSummary>, ClientError> {
+        self.get(routes::CALLS)
+    }
+
     pub fn accept_call(&self, call_id: &str) -> Result<(), ClientError> {
         self.call_action(routes::CALL_ACCEPT, call_id)
     }
@@ -452,6 +457,19 @@ mod tests {
             let wire = serde_json::to_string(&kind).unwrap();
             assert_eq!(wire, format!("\"{}\"", kind_name(kind)));
         }
+    }
+
+    #[test]
+    fn call_list_decodes_and_uses_the_calls_route() {
+        let req = request(Method::GET, &url(), routes::CALLS, None, ()).unwrap();
+        assert_eq!(req.uri().to_string(), "https://wa.example.com/v1/calls");
+        let body = r#"[{"call_id":"C1","peer":"9053@s.whatsapp.net","peer_name":null,
+            "direction":"in","phase":"ringing","is_video":false,"started_ms":5}]"#;
+        let resp = Response::new(Body::builder().data(body));
+        let calls: Vec<CallSummary> = decode(resp).unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].update.call_id, "C1");
+        assert_eq!((calls[0].started_ms, calls[0].ended_ms), (5, None));
     }
 
     #[test]

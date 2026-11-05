@@ -24,6 +24,8 @@ pub use history::{History, Outcome, Stats, TripRecord};
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};
 pub use places::{Place, PlaceError, SavedPlaces};
 pub use prefs::{NoticePrefs, NoticeWhen, RuleChoice, StopsPrefs};
-pub use session::{ActiveTrip, FixIn, FixOut, FixOutcome, NoticeDelivery, NoticeState, Track};
+pub use session::{
+    ActiveTrip, FixIn, FixOut, FixOutcome, FixPos, NoticeDelivery, NoticeState, Track,
+};
 pub use trip::{AlarmRule, Fix, Trip, TripState, TripUpdate};
 pub use view::Viewport;

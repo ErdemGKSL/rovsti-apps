@@ -8,7 +8,7 @@
 //! * `saved_ui`: the Saved tab.
 //! * `headless` / `store`: the trip logic Kotlin calls with no UI running.
 
-use std::{path::PathBuf, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use futures::{StreamExt as _, channel::mpsc};
 use gpui::{
@@ -37,9 +37,11 @@ use rovsti_wa_ui::{AppId, WhatsAppSettings};
 
 mod backend;
 mod headless;
+mod map;
 mod picker;
 mod saved_ui;
 mod store;
+mod transit;
 mod trip_ui;
 
 use backend::Preflight;
@@ -70,9 +72,14 @@ pub(crate) struct StopsApp {
     pub(crate) prefs: StopsPrefs,
     pub(crate) saved: SavedPlaces,
     pub(crate) history: History,
-    /// The imported transit feed. Searched by the stop picker (step 7).
-    #[allow(dead_code)]
-    pub(crate) gtfs: Option<Feed>,
+    /// The imported transit feed: searched by the stop picker, drawn on the map.
+    pub(crate) gtfs: Option<Arc<Feed>>,
+    pub(crate) transit: transit::Transit,
+    pub(crate) map: map::MapState,
+    /// The stop search result for the text in the picker field.
+    pub(crate) stop_hits: picker::StopHits,
+    /// The line chosen in the stop sheet.
+    pub(crate) stop_pattern: Option<u32>,
 
     /// The "Wake me" choice.
     pub(crate) rule: RuleChoice,
@@ -183,7 +190,7 @@ impl StopsApp {
                 this.prefs = data.prefs;
                 this.saved = data.saved;
                 this.history = data.history;
-                this.gtfs = data.gtfs;
+                this.set_feed(data.gtfs);
                 this.set_saved_trip(data.trip, cx);
                 this.resume_service(cx);
                 this.start_simulation(cx);
@@ -207,6 +214,10 @@ impl StopsApp {
             saved: SavedPlaces::default(),
             history: History::default(),
             gtfs: None,
+            transit: transit::Transit::default(),
+            map: map::MapState::default(),
+            stop_hits: picker::StopHits::default(),
+            stop_pattern: None,
             rule: RuleChoice::default(),
             dest: None,
             notice_on: true,
@@ -294,9 +305,8 @@ impl StopsApp {
                 self.resume_pending_start(cx);
             }
             kind::DOCUMENT_RESULT => match serde_json::from_str::<DocumentResult>(&event.json) {
-                // The transit feed import arrives with the stop picker.
                 Ok(result) if result.op == DocumentOp::ImportGtfs => {
-                    log::info!("a transit feed was picked; importing it is not wired yet");
+                    self.on_feed_picked(&result, cx);
                 }
                 Ok(_) => {}
                 Err(error) => log::warn!("bad document_result: {error}"),
@@ -412,8 +422,14 @@ impl Render for StopsApp {
         let body = match tab {
             0 => self.trip_tab(theme, cx),
             1 => self.saved_tab(theme, cx),
-            // The shared WhatsApp screen brings its own sections and buttons.
-            _ => self.whatsapp.clone().into_any_element(),
+            // Transit data, then the shared WhatsApp screen with its own sections.
+            _ => div()
+                .flex()
+                .flex_col()
+                .gap(px(24.0))
+                .child(self.transit_section(theme, cx))
+                .child(self.whatsapp.clone())
+                .into_any_element(),
         };
 
         // The keyboard covers the bottom of the screen: leave room to scroll.

@@ -16,7 +16,14 @@ use rovsti_ui::{
     tokens::{Theme, typography},
 };
 
-use crate::{StopsApp, trip_ui};
+use crate::{
+    StopsApp,
+    transit::{self, MAX_LINES},
+    trip_ui,
+};
+
+/// Stops listed for a search.
+const MAX_STOP_HITS: usize = 20;
 
 /// Where a trip is headed.
 #[derive(Clone, Debug, PartialEq)]
@@ -25,6 +32,10 @@ pub struct Destination {
     pub coord: Coord,
     /// A saved place's own rule; `None` follows the "Wake me" chips.
     pub rule: Option<AlarmRule>,
+    /// The transit stop this is, when it came from an imported feed.
+    pub gtfs_stop: Option<String>,
+    /// The line it was chosen on ("N stops before"), drawn on the map.
+    pub pattern: Option<u32>,
 }
 
 impl Destination {
@@ -33,6 +44,8 @@ impl Destination {
             label: place.name.clone(),
             coord: place.coord,
             rule: place.rule,
+            gtfs_stop: place.gtfs_stop.clone(),
+            pattern: None,
         }
     }
 
@@ -41,6 +54,8 @@ impl Destination {
             label: label.into(),
             coord,
             rule: None,
+            gtfs_stop: None,
+            pattern: None,
         }
     }
 
@@ -94,6 +109,16 @@ pub enum SheetMode {
     Confirm(Destination),
     /// A new name for a saved place.
     Rename(u64),
+    /// A transit stop (index into the feed): its lines and "N stops before".
+    Stop(u32),
+}
+
+/// The stop search for one query, so typing searches once and not once per
+/// frame of the sheet's animation.
+#[derive(Default)]
+pub struct StopHits {
+    query: String,
+    hits: Vec<u32>,
 }
 
 const PICKER_LABEL: &str = "Choose destination";
@@ -138,13 +163,19 @@ impl StopsApp {
     }
 
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.sheet_mode, SheetMode::Stop(_)) {
+            // A line looked at but not chosen leaves the map again.
+            self.map.pattern = self.dest.as_ref().and_then(|d| d.pattern);
+        }
         self.sheet.close();
         cx.notify();
     }
 
     /// A saved or recent destination was tapped: it becomes the trip's
     /// destination, ready for Start.
-    fn choose_destination(&mut self, dest: Destination, cx: &mut Context<Self>) {
+    pub(crate) fn choose_destination(&mut self, dest: Destination, cx: &mut Context<Self>) {
+        self.map.pattern = dest.pattern;
+        self.map.follow = true;
         self.dest = Some(dest);
         self.sheet.close();
         cx.notify();
@@ -186,6 +217,7 @@ impl StopsApp {
             SheetMode::Pick => (PICKER_LABEL, self.pick_body(theme, window, cx)),
             SheetMode::Confirm(dest) => ("Wake me", self.confirm_body(theme, &dest, cx)),
             SheetMode::Rename(id) => ("Rename place", self.rename_body(theme, id, window, cx)),
+            SheetMode::Stop(stop) => ("Transit stop", self.stop_body(theme, stop, cx)),
         };
         let body = div()
             .flex()
@@ -269,6 +301,10 @@ impl StopsApp {
             }
         }
 
+        if let Some(rows) = self.stop_rows(theme, &query, cx) {
+            body = body.child(section(theme, Some("Stops".into()), rows));
+        }
+
         let saved: Vec<_> = self
             .saved
             .search(&query)
@@ -313,6 +349,220 @@ impl StopsApp {
             ));
         }
         body.into_any_element()
+    }
+
+    /// Rows for the stops whose name matches `query`, nearest the last
+    /// position first. `None` without a feed, a query or a match.
+    fn stop_rows(
+        &mut self,
+        theme: Theme,
+        query: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<AnyElement>> {
+        let feed = self.gtfs.clone()?;
+        if query.is_empty() {
+            return None;
+        }
+        if self.stop_hits.query != query {
+            let near = self.map.position.map(|p| p.0);
+            self.stop_hits = StopHits {
+                query: query.to_owned(),
+                hits: feed.search(query, near, MAX_STOP_HITS),
+            };
+        }
+        if self.stop_hits.hits.is_empty() {
+            return None;
+        }
+        let near = self.map.position.map(|p| p.0);
+        let rows = self
+            .stop_hits
+            .hits
+            .iter()
+            .filter_map(|&index| {
+                let stop = feed.stops.get(index as usize)?;
+                let lines = transit::lines_through(&feed, index, MAX_LINES).len();
+                let mut detail = match lines {
+                    0 => "No lines".to_owned(),
+                    1 => "1 line".to_owned(),
+                    n => format!("{n} lines"),
+                };
+                if let Some(here) = near {
+                    detail = format!(
+                        "{}, {detail}",
+                        trip_ui::distance_text(here.distance_m(stop.coord))
+                    );
+                }
+                Some(
+                    list_row(theme, None, stop.name.clone(), Some(detail.into()), None)
+                        .id(("pick-stop", index as usize))
+                        .on_click(cx.listener(move |this, _, _, cx| this.open_stop(index, cx)))
+                        .into_any_element(),
+                )
+            })
+            .collect();
+        Some(rows)
+    }
+
+    /// A stop of the feed: wake near it, or a few stops before it on a line.
+    fn stop_body(&mut self, theme: Theme, stop: u32, cx: &mut Context<Self>) -> AnyElement {
+        let colors = theme::colors(theme);
+        let Some(feed) = self.gtfs.clone() else {
+            return Self::footnote(theme, "The transit data is gone.");
+        };
+        let Some(info) = feed.stops.get(stop as usize) else {
+            return Self::footnote(theme, "That stop is not in the transit data.");
+        };
+        let name = info.name.clone();
+        let coord = info.coord;
+        let gtfs_id = info.id.clone();
+        let here = Destination {
+            gtfs_stop: Some(gtfs_id),
+            ..Destination::new(name.clone(), coord)
+        };
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(Self::sheet_title(theme, name.clone()))
+            .child(Self::footnote(theme, coord_text(coord)));
+
+        let chosen = self
+            .stop_pattern
+            .filter(|&p| !transit::wake_options(&feed, p, stop).is_empty());
+        match chosen {
+            Some(pattern) => {
+                let line = feed
+                    .patterns
+                    .get(pattern as usize)
+                    .and_then(|p| Some((p, feed.routes.get(p.route as usize)?)));
+                let title = line.map_or_else(String::new, |(p, route)| {
+                    format!("Line {} to {}", transit::route_name(route), p.headsign)
+                });
+                let rows = transit::wake_options(&feed, pattern, stop)
+                    .into_iter()
+                    .map(|(n, wake)| {
+                        let dest = Destination {
+                            rule: Some(wake.rule),
+                            pattern: Some(pattern),
+                            gtfs_stop: here.gtfs_stop.clone(),
+                            ..Destination::new(wake.label.clone(), coord)
+                        };
+                        let text = if n == 1 {
+                            "Wake me 1 stop before".to_owned()
+                        } else {
+                            format!("Wake me {n} stops before")
+                        };
+                        list_row(theme, None, text, Some(wake.label.into()), None)
+                            .id(("stop-before", n))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.choose_destination(dest.clone(), cx);
+                            }))
+                            .into_any_element()
+                    })
+                    .chain(std::iter::once(
+                        list_row(theme, None, "Choose another line", None, None)
+                            .id("stop-other-line")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.stop_pattern = None;
+                                this.map.pattern = None;
+                                cx.notify();
+                            }))
+                            .into_any_element(),
+                    ));
+                body = body.child(section(theme, Some(title.into()), rows));
+            }
+            None => {
+                let lines = transit::lines_through(&feed, stop, MAX_LINES);
+                if !lines.is_empty() {
+                    let rows = lines.into_iter().map(|line| {
+                        let pattern = line.pattern;
+                        let title = if line.headsign.is_empty() {
+                            format!("Line {}", line.name)
+                        } else {
+                            format!("Line {} to {}", line.name, line.headsign)
+                        };
+                        let stops = if line.before == 1 {
+                            "1 stop before".to_owned()
+                        } else {
+                            format!("{} stops before", line.before)
+                        };
+                        list_row(theme, None, title, Some(stops.into()), None)
+                            .id(("stop-line", pattern as usize))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.stop_pattern = Some(pattern);
+                                this.map.pattern = Some(pattern);
+                                cx.notify();
+                            }))
+                            .into_any_element()
+                    });
+                    body = body.child(section(
+                        theme,
+                        Some("Wake me before this stop on".into()),
+                        rows,
+                    ));
+                } else {
+                    body = body.child(Self::footnote(
+                        theme,
+                        "No line in the feed arrives here after another stop.",
+                    ));
+                }
+            }
+        }
+
+        let near_dest = here.clone();
+        let save_dest = here;
+        let rule = trip_ui::rule_text(self.rule.to_rule());
+        body = body.child(section(
+            theme,
+            Some("Or".into()),
+            [
+                list_row(
+                    theme,
+                    None,
+                    "Wake me near this stop",
+                    Some(rule.into()),
+                    None,
+                )
+                .id("stop-near")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.choose_destination(near_dest.clone(), cx);
+                }))
+                .into_any_element(),
+                list_row(theme, None, "Save this stop", None, None)
+                    .id("stop-save")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.save_stop(&save_dest, cx);
+                    }))
+                    .into_any_element(),
+            ],
+        ));
+        body.child(
+            div().flex().justify_end().px(px(16.0)).pt(px(4.0)).child(
+                glass_pill(theme, "Close")
+                    .id("stop-close")
+                    .text_color(colors.secondary_label)
+                    .on_click(cx.listener(|this, _, _, cx| this.close_sheet(cx))),
+            ),
+        )
+        .into_any_element()
+    }
+
+    /// Keeps a transit stop in Saved, remembering which stop of the feed it is.
+    fn save_stop(&mut self, dest: &Destination, cx: &mut Context<Self>) {
+        match self.saved.add(&dest.label, dest.coord) {
+            Ok(id) => {
+                if let Some(place) = self.saved.get_mut(id) {
+                    place.gtfs_stop.clone_from(&dest.gtfs_stop);
+                }
+                self.save_places(cx);
+                self.show_pill("Saved.", None, cx);
+            }
+            Err(rovsti_geo::PlaceError::Duplicate(_)) => {
+                self.show_pill("You already saved a place here.", None, cx);
+            }
+            Err(error) => self.show_pill(error.message(), None, cx),
+        }
+        cx.notify();
     }
 
     fn confirm_body(

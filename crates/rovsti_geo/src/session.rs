@@ -75,6 +75,8 @@ pub enum NoticeDelivery {
 #[derive(Clone, Debug, PartialEq)]
 pub struct FixOutcome {
     pub update: TripUpdate,
+    /// The fix that produced `update`.
+    pub fix: Fix,
     /// Rendered notice text to send now.
     pub send_notice: Option<String>,
 }
@@ -123,6 +125,17 @@ pub struct FixOut {
     pub title: String,
     pub text: String,
     pub notice_sent: bool,
+    /// Where the phone was, for the map. Absent in answers from older builds.
+    #[serde(default)]
+    pub at: Option<FixPos>,
+}
+
+/// A position with its uncertainty, as shown on the map.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FixPos {
+    pub lat: f64,
+    pub lon: f64,
+    pub accuracy_m: f64,
 }
 
 impl ActiveTrip {
@@ -159,6 +172,7 @@ impl ActiveTrip {
         };
         FixOutcome {
             update,
+            fix,
             send_notice,
         }
     }
@@ -215,6 +229,11 @@ impl ActiveTrip {
             },
             text,
             notice_sent: self.notice.as_ref().is_some_and(|n| n.sent),
+            at: Some(FixPos {
+                lat: outcome.fix.at.lat,
+                lon: outcome.fix.at.lon,
+                accuracy_m: outcome.fix.accuracy_m,
+            }),
         }
     }
 }
@@ -365,6 +384,21 @@ mod tests {
         assert!(out.ring && !out.high_accuracy);
         assert_eq!(out.title, "Arriving at Kadikoy");
         assert_eq!(out.text, "50 m to Kadikoy");
+    }
+
+    #[test]
+    fn fix_out_carries_the_position_and_reads_old_answers() {
+        let mut t = trip(AlarmRule::Radius { metres: 100.0 });
+        let f = fix(700.0, 12.0, None);
+        let o = t.on_fix(f, 0);
+        let out = t.fix_out(&o);
+        let at = out.at.unwrap();
+        assert_eq!((at.lat, at.lon, at.accuracy_m), (f.at.lat, f.at.lon, 12.0));
+        // An answer without `at` (an older build) still parses.
+        let mut json: serde_json::Value = serde_json::to_value(&out).unwrap();
+        json.as_object_mut().unwrap().remove("at");
+        let old: FixOut = serde_json::from_value(json).unwrap();
+        assert_eq!(old.at, None);
     }
 
     #[test]

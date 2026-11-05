@@ -221,6 +221,9 @@ impl StopsApp {
         } else {
             page = page.child(self.setup_cards(theme, cx));
         }
+        if let Some(map) = self.map_card(theme, cx) {
+            page = page.child(map);
+        }
         if self.preflight.full_screen_missing() {
             let row = list_row(
                 theme,
@@ -517,7 +520,12 @@ impl StopsApp {
         }
         if save {
             match self.saved.add(&dest.label, dest.coord) {
-                Ok(_) => self.save_places(cx),
+                Ok(id) => {
+                    if let Some(place) = self.saved.get_mut(id) {
+                        place.gtfs_stop.clone_from(&dest.gtfs_stop);
+                    }
+                    self.save_places(cx);
+                }
                 Err(PlaceError::Duplicate(_)) => {}
                 Err(error) => self.show_pill(error.message(), None, cx),
             }
@@ -588,6 +596,7 @@ impl StopsApp {
             notice.as_ref(),
         );
         let session = trip.clone();
+        let line = dest.pattern;
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -599,6 +608,8 @@ impl StopsApp {
                     Ok(()) => {
                         this.trip = Some(session);
                         this.live = None;
+                        this.map.pattern = line;
+                        this.map.follow = true;
                         this.dest = None;
                         this.alarm = None;
                         this.tabs.jump_to(0);
@@ -638,6 +649,7 @@ impl StopsApp {
 
     /// The trip is gone: clear it and read the history again.
     pub(crate) fn trip_over(&mut self, cx: &mut Context<Self>) {
+        self.map.reset();
         self.trip = None;
         self.live = None;
         self.alarm = None;
@@ -727,6 +739,9 @@ impl StopsApp {
                     return;
                 }
                 self.live = Some(Live::from_out(&out));
+                if let Some(at) = out.at {
+                    self.map_fix(at);
+                }
                 if out.ring {
                     self.show_alarm(&out.title, Some(out.distance_m), cx);
                 }

@@ -6,7 +6,7 @@
 //! The decisions inside (what is missing before a trip, how a trip is built,
 //! how a reply is read) are plain functions with unit tests.
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use rovsti_android::{
     Error as AndroidError, permissions,
@@ -34,7 +34,7 @@ pub struct Data {
     pub saved: SavedPlaces,
     pub history: History,
     pub trip: Option<ActiveTrip>,
-    pub gtfs: Option<Feed>,
+    pub gtfs: Option<Arc<Feed>>,
 }
 
 /// Reads every file. A missing or corrupt file gives its default.
@@ -44,7 +44,11 @@ pub fn load(dir: &Path) -> Data {
         saved: storage::load_json(dir, store::SAVED_FILE).unwrap_or_default(),
         history: storage::load_json(dir, store::HISTORY_FILE).unwrap_or_default(),
         trip: store::load_trip(dir),
-        gtfs: storage::load_json(dir, store::GTFS_FILE),
+        gtfs: storage::load_json::<Feed>(dir, store::GTFS_FILE).map(|feed| {
+            // Build the lookup index here, off the UI thread, not on the first search.
+            let _ = feed.patterns_through(0);
+            Arc::new(feed)
+        }),
     }
 }
 

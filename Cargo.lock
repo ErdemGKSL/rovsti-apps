@@ -6175,6 +6175,7 @@ dependencies = [
  "rovsti_wa_ui",
  "serde",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

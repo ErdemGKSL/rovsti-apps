@@ -6171,6 +6171,8 @@ dependencies = [
  "rovsti_geo",
  "rovsti_ui",
  "rovsti_wa_ui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

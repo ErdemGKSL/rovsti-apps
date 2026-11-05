@@ -14,6 +14,8 @@ rovsti_geo.workspace = true
 rovsti_ui.workspace = true
 rovsti_wa_ui.workspace = true
 log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true

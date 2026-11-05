@@ -11,7 +11,7 @@ use rovsti_core::{
     notify::{self, Incoming, NotificationSpec},
     thread::MessageDirection,
 };
-use rovsti_wa_client::Gateway;
+use rovsti_wa_client::{ClientError, Gateway};
 use rovsti_wa_proto::{
     ChatSummary, ConnectKey, GatewayUrl, MessageBody, SendText, WaMessage, jid_user, to_rovsti,
 };
@@ -37,7 +37,7 @@ struct ReplyIn {
 
 /// The gateway for the link saved in `dir`; `None` when there is none or it
 /// no longer parses.
-fn gateway_in(dir: &str) -> Option<Gateway> {
+pub fn gateway_in(dir: &str) -> Option<Gateway> {
     let link: StoredLink = rovsti_ui::storage::load_json(Path::new(dir), LINK_FILE)?;
     let url = GatewayUrl::parse(&link.gateway_url).ok()?;
     let key = ConnectKey::parse(&link.key).ok()?;
@@ -114,16 +114,42 @@ fn reply(json: &str) -> Option<()> {
     if input.text.trim().is_empty() || input.chat.is_empty() {
         return None;
     }
-    let gateway = gateway_in(&input.dir)?;
+    send_text_in(&input.dir, &input.chat, &input.text)
+        .map_err(|e| log::warn!("wa_reply: send failed: {e:?}"))
+        .ok()
+}
+
+/// Why [`send_text_in`] failed, split by whether trying again can help.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SendFailure {
+    /// No usable WhatsApp link in the data directory.
+    NoLink,
+    /// The request never got an answer (transport or TLS): a later attempt may work.
+    Retryable(String),
+    /// The gateway answered with a refusal, or the link is unusable: do not retry.
+    Fatal(String),
+}
+
+impl From<ClientError> for SendFailure {
+    fn from(error: ClientError) -> Self {
+        match error {
+            ClientError::Http(_) | ClientError::Tls(_) => Self::Retryable(error.to_string()),
+            other => Self::Fatal(other.to_string()),
+        }
+    }
+}
+
+/// Sends `text` to `chat` through the gateway linked in `dir`. Blocks.
+pub fn send_text_in(dir: &str, chat: &str, text: &str) -> Result<(), SendFailure> {
+    let gateway = gateway_in(dir).ok_or(SendFailure::NoLink)?;
     gateway
         .send_text(&SendText {
-            chat: input.chat,
-            text: input.text,
+            chat: chat.to_owned(),
+            text: text.to_owned(),
             quoted_id: None,
         })
-        .map_err(|e| log::warn!("wa_reply: send failed: {e}"))
-        .ok()
         .map(drop)
+        .map_err(SendFailure::from)
 }
 
 #[cfg(test)]
@@ -184,6 +210,31 @@ mod tests {
             wa_reply("{\"dir\":\"/nonexistent\",\"chat\":\"c\",\"text\":\"hi\"}"),
             "{\"ok\":false}"
         );
+    }
+
+    #[test]
+    fn send_failures_split_by_retryability() {
+        use rovsti_wa_proto::{ApiError, ErrorCode};
+        let retry = |e| matches!(SendFailure::from(e), SendFailure::Retryable(_));
+        assert!(retry(ClientError::Http("reset".into())));
+        assert!(retry(ClientError::Tls("handshake".into())));
+        assert!(!retry(ClientError::Unauthorized));
+        assert!(!retry(ClientError::Decode("x".into())));
+        assert!(!retry(ClientError::Closed));
+        assert!(!retry(ClientError::Api(ApiError {
+            code: ErrorCode::Unauthorized,
+            message: "no".into(),
+        })));
+    }
+
+    #[test]
+    fn send_without_a_link_is_no_link() {
+        let dir = tmp("sendnolink");
+        assert_eq!(
+            send_text_in(dir.to_str().unwrap(), "c", "hi"),
+            Err(SendFailure::NoLink)
+        );
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

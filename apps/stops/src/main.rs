@@ -20,6 +20,13 @@ use rovsti_ui::{
 };
 use rovsti_wa_ui::{AppId, WhatsAppSettings};
 
+// The headless handler is reached through the JNI entry on Android only; the desktop build
+// uses it from the trip simulation (a later step).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod headless;
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod store;
+
 const TABS: [&str; 3] = ["Trip", "Saved", "Settings"];
 const TAB_ICONS: [Icon; 3] = [
     Icon::LucideNavigation,
@@ -216,8 +223,13 @@ impl Render for StopsApp {
     }
 }
 
+// Exports the headless JNI entry the trip service and alarm call (no UI process needed).
+rovsti_android::headless_entry!(headless::handle);
+
 #[gpui_platform::main]
 fn main() {
+    // Keeps the JNI entry points in the final library (see `bridge::keep_symbols`).
+    rovsti_android::bridge::keep_symbols();
     gpui_platform::application()
         .with_assets(IconAssets::new())
         .run(|cx: &mut App| {

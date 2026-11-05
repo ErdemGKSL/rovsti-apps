@@ -5,10 +5,18 @@
   },
   "platforms": {
     "android": {
-      "abis": ["arm64-v8a", "x86_64"],
+      "abis": [
+        "arm64-v8a",
+        "x86_64"
+      ],
       "application-id": "dev.rovsti.stops",
-      "features": ["notifications", "audio-playback"],
+      "features": [
+        "notifications",
+        "audio-playback"
+      ],
       "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.FOREGROUND_SERVICE",
@@ -17,14 +25,46 @@
         "android.permission.USE_FULL_SCREEN_INTENT",
         "android.permission.VIBRATE",
         "android.permission.WAKE_LOCK",
-        "android.permission.SCHEDULE_EXACT_ALARM",
-        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+        "android.permission.USE_EXACT_ALARM",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
       ],
-      "url-schemes": ["geo"]
+      "url-schemes": [
+        "geo"
+      ],
+      "management": "manual",
+      "project-dir": "platforms/android",
+      "variables": {
+        "min_sdk": "34",
+        "target_sdk": "36"
+      },
+      "activity": "dev.rovsti.stops.MainActivity"
     },
     "desktop": {
-      "build": [{ "program": "cargo", "args": ["build", "-p", "rovsti_stops", "--profile", "{{cargo_profile}}"] }],
-      "run": [{ "program": "cargo", "args": ["run", "-p", "rovsti_stops", "--profile", "{{cargo_profile}}"] }]
+      "build": [
+        {
+          "program": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "rovsti_stops",
+            "--profile",
+            "{{cargo_profile}}"
+          ]
+        }
+      ],
+      "run": [
+        {
+          "program": "cargo",
+          "args": [
+            "run",
+            "-p",
+            "rovsti_stops",
+            "--profile",
+            "{{cargo_profile}}"
+          ]
+        }
+      ]
     }
   }
 }

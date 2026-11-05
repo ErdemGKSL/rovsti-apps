@@ -888,6 +888,8 @@ pub enum DocumentOp {
     /// Rovsti Messages: a file to attach was picked and copied to `path`
     /// (its type is in `mime`).
     Attachment,
+    /// Rovsti Stops: a GTFS `.zip` was picked and copied to `path`.
+    ImportGtfs,
     #[default]
     #[serde(other)]
     Unknown,
@@ -1228,6 +1230,18 @@ mod tests {
         assert_eq!(r.op, DocumentOp::Attachment);
         assert_eq!(r.mime.as_deref(), Some("image/jpeg"));
         assert_eq!(r.path.as_deref(), Some("/c/x.bin"));
+    }
+
+    #[test]
+    fn import_gtfs_op_round_trips() {
+        let g: DocumentResult =
+            serde_json::from_str(r#"{"op":"import_gtfs","ok":true,"path":"/c/g.bin"}"#)
+                .expect("parse");
+        assert_eq!(g.op, DocumentOp::ImportGtfs);
+        assert_eq!(
+            serde_json::to_string(&DocumentOp::ImportGtfs).expect("serialize"),
+            r#""import_gtfs""#
+        );
     }
 
     #[test]

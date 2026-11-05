@@ -19,10 +19,13 @@ pub enum Group {
     /// `BLUETOOTH_CONNECT`: only ever asked for by the route popover's "Show
     /// device names" row (story 14.7), never at startup and never in Setup.
     Bluetooth,
+    /// `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION`, asked by Rovsti Stops
+    /// only; not in [`Group::ALL`].
+    Location,
 }
 
 impl Group {
-    /// The groups Setup tracks. [`Group::Bluetooth`] is requested on demand only.
+    /// The groups Setup tracks. [`Group::Bluetooth`] and [`Group::Location`] are requested on demand only.
     pub const ALL: [Group; 3] = [Group::Phone, Group::Contacts, Group::Notifications];
 
     /// The key `RovstiBridge` understands.
@@ -32,6 +35,7 @@ impl Group {
             Self::Contacts => "contacts",
             Self::Notifications => "notifications",
             Self::Bluetooth => "bluetooth",
+            Self::Location => "location",
         }
     }
 }
@@ -111,6 +115,12 @@ mod tests {
         assert_eq!(Access::from_code(9), Access::Denied);
         assert!(Access::Granted.is_granted());
         assert!(!Access::PermanentlyDenied.is_granted());
+    }
+
+    #[test]
+    fn location_is_a_key_but_not_in_setup() {
+        assert_eq!(Group::Location.key(), "location");
+        assert!(!Group::ALL.contains(&Group::Location));
     }
 
     #[cfg(not(target_os = "android"))]

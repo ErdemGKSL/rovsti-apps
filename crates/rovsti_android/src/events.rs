@@ -50,6 +50,11 @@ pub mod kind {
     /// A sibling app asked this one to call or chat on WhatsApp
     /// (`{action, jid, name}`); one-shot, queued until the UI attaches.
     pub const HANDOFF: &str = "handoff";
+    /// Rovsti Stops: the trip service applied a fix (`rovsti_geo::session::FixOut`).
+    pub const TRIP_STATUS: &str = "trip_status";
+    /// Rovsti Stops: the alarm rang, snoozed or was dismissed; see
+    /// [`crate::trip::parse_trip_alarm`].
+    pub const TRIP_ALARM: &str = "trip_alarm";
 }
 
 /// What the user chose on a WhatsApp incoming-call notification.

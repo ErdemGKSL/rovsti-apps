@@ -52,6 +52,14 @@ pub fn import_file(max_bytes: u64) -> Result<bool> {
     bridge::call_bool("importFile", &[Arg::Int(max)])
 }
 
+/// Opens the file picker for a GTFS feed (`.zip`). The chosen file is copied into
+/// the app's cache and the `document_result` (op `import_gtfs`) carries its
+/// `path`. Files longer than `max_bytes` are refused (Kotlin caps this at 64 MiB).
+pub fn import_gtfs(max_bytes: u64) -> Result<bool> {
+    let max = i32::try_from(max_bytes).unwrap_or(i32::MAX);
+    bridge::call_bool("importGtfs", &[Arg::Int(max)])
+}
+
 /// Opens the file picker for a file to attach to a message. The chosen file is
 /// copied into the app's cache; the `document_result` (op `attachment`) carries
 /// its `path` and `mime`. Files longer than `max_bytes` are refused (Kotlin
@@ -87,6 +95,7 @@ mod tests {
             Err(Error::Unsupported)
         ));
         assert!(matches!(import_file(1024), Err(Error::Unsupported)));
+        assert!(matches!(import_gtfs(1024), Err(Error::Unsupported)));
         assert!(matches!(pick_attachment(1024), Err(Error::Unsupported)));
         assert!(matches!(pick_contact_photo(), Err(Error::Unsupported)));
     }

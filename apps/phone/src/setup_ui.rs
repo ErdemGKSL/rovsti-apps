@@ -256,8 +256,8 @@ impl PhoneApp {
                         Group::Phone => p.phone,
                         Group::Contacts => p.contacts,
                         Group::Notifications => p.notifications,
-                        // Never a Setup row: only the route popover asks for it.
-                        Group::Bluetooth => Access::Denied,
+                        // Never a Setup row: asked on demand (route popover, Stops).
+                        Group::Bluetooth | Group::Location => Access::Denied,
                     }
                 };
                 let requested = if access == Access::PermanentlyDenied {

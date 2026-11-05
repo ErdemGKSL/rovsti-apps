@@ -385,6 +385,14 @@ object RovstiBridge {
         return true
     }
 
+    /** Picker for a GTFS `.zip` of at most [maxBytes]; the answer is `document_result` op `import_gtfs` with `path`. */
+    @JvmStatic
+    fun importGtfs(maxBytes: Int): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startFileImport(activity, maxBytes, gtfs = true) }
+        return true
+    }
+
     /** Picker for a file to attach of at most [maxBytes]; the answer is `document_result` op `attachment` with `path` and `mime`. */
     @JvmStatic
     fun pickAttachment(maxBytes: Int): Boolean {
@@ -471,6 +479,10 @@ object RovstiBridge {
         ),
         "notifications" to listOf(android.Manifest.permission.POST_NOTIFICATIONS),
         "bluetooth" to listOf(android.Manifest.permission.BLUETOOTH_CONNECT),
+        "location" to listOf(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        ),
     )
 
     private fun missing(group: String): List<String>? =
@@ -498,6 +510,31 @@ object RovstiBridge {
         activity.runOnUiThread { activity.requestPermissions(missing.toTypedArray(), REQUEST_PERMISSION) }
         return true
     }
+
+    // ---- Rovsti Stops: trip service and alarm --------------------------
+
+    /** Starts or updates the trip service; [specJson] is `{dir,title,text,next_fix_ms,high_accuracy}`. */
+    @JvmStatic fun tripStart(specJson: String): Boolean = TripService.start(app, specJson)
+
+    @JvmStatic fun tripStop(): Boolean = TripService.stop(app)
+
+    @JvmStatic fun tripRunning(): Boolean = TripService.running
+
+    /** [action] is `dismiss`, `snooze` or `test`. */
+    @JvmStatic
+    fun tripAlarm(action: String): Boolean = when (action) {
+        "dismiss" -> { TripAlarm.dismiss(app); true }
+        "snooze" -> { TripAlarm.snooze(app); true }
+        "test" -> { TripAlarm.ring(app, test = true); true }
+        else -> false
+    }
+
+    /** Arms the snooze re-ring at [atMs], epoch milliseconds as a string (the seam has no 64-bit argument). */
+    @JvmStatic
+    fun tripSnooze(atMs: String): Boolean = atMs.toLongOrNull()?.takeIf { it > 0 }?.let { TripAlarm.armSnooze(app, it) } ?: false
+
+    @JvmStatic
+    fun canScheduleExactAlarms(): Boolean = app.getSystemService(android.app.AlarmManager::class.java)?.exactAllowed() == true
 
     @JvmStatic
     fun openAppDetails(): Boolean =

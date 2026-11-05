@@ -26,6 +26,7 @@ object Documents {
     const val REQUEST_EXPORT_FILE = 0x4546 // "EF"
     const val REQUEST_IMPORT_FILE = 0x4946 // "IF"
     const val REQUEST_ATTACH_FILE = 0x4146 // "AF"
+    const val REQUEST_IMPORT_GTFS = 0x4947 // "IG"
 
     const val REQUEST_CONTACT_PHOTO = 0x4350 // "CP"
 
@@ -146,19 +147,28 @@ object Documents {
     fun fileOp(requestCode: Int): String = when (requestCode) {
         REQUEST_EXPORT_FILE -> "export_messages"
         REQUEST_ATTACH_FILE -> "attachment"
+        REQUEST_IMPORT_GTFS -> "import_gtfs"
         else -> "import_messages"
     }
 
     /**
      * The picker for a file of at most [maxBytes]; the result's `path` is a copy in the app cache.
-     * With [attachment] the answer is op `attachment` (with `mime`), else `import_messages`.
+     * With [attachment] the answer is op `attachment` (with `mime`), with [gtfs] op `import_gtfs`, else
+     * `import_messages`.
      */
-    fun startFileImport(activity: Activity, maxBytes: Int, attachment: Boolean = false): Boolean {
+    fun startFileImport(activity: Activity, maxBytes: Int, attachment: Boolean = false, gtfs: Boolean = false): Boolean {
         pendingFileMax = fileCap(maxBytes)
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
         return try {
             @Suppress("DEPRECATION")
-            activity.startActivityForResult(intent, if (attachment) REQUEST_ATTACH_FILE else REQUEST_IMPORT_FILE)
+            activity.startActivityForResult(
+                intent,
+                when {
+                    attachment -> REQUEST_ATTACH_FILE
+                    gtfs -> REQUEST_IMPORT_GTFS
+                    else -> REQUEST_IMPORT_FILE
+                },
+            )
             true
         } catch (_: android.content.ActivityNotFoundException) {
             false
@@ -285,7 +295,9 @@ object Documents {
         worker: java.util.concurrent.Executor,
         emit: (String) -> Unit,
     ): Boolean {
-        if (requestCode == REQUEST_EXPORT_FILE || requestCode == REQUEST_IMPORT_FILE || requestCode == REQUEST_ATTACH_FILE) {
+        if (requestCode == REQUEST_EXPORT_FILE || requestCode == REQUEST_IMPORT_FILE ||
+            requestCode == REQUEST_ATTACH_FILE || requestCode == REQUEST_IMPORT_GTFS
+        ) {
             handleFile(context, requestCode, resultCode, data, worker, emit)
             return true
         }

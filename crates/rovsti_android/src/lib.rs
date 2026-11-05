@@ -26,6 +26,7 @@ pub mod roles;
 pub mod settings;
 pub mod sms;
 pub mod telecom;
+pub mod trip;
 pub mod wa;
 pub mod window;
 pub mod xiaomi;

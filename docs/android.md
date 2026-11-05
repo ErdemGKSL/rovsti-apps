@@ -60,7 +60,7 @@ Later `gpuiforge` builds keep these user-owned files.
 ## WhatsApp push and call audio
 
 WhatsApp lives on the gateway ([architecture.md](architecture.md#whatsapp-gateway)).
-The Kotlin side adds two small pieces to the bridge:
+The Kotlin side adds three small pieces to the bridge:
 
 - `WaPush`: `RovstiBridge.waPushToken()` reads the FCM token **by reflection** on
   `com.google.firebase.messaging.FirebaseMessaging`, so a host without Firebase still
@@ -71,29 +71,38 @@ The Kotlin side adds two small pieces to the bridge:
   (`USAGE_VOICE_COMMUNICATION`), 16 kHz mono PCM16, 960-sample frames passed as
   base64 through `waAudioStart`, `waAudioStop`, `waMicFrame` and `waPlayFrame`.
   `waAudioStart` sets `AudioManager.MODE_IN_COMMUNICATION` and returns `false`
-  without `RECORD_AUDIO`. Phone declares that permission in `gpuiforge.json`.
+  without `RECORD_AUDIO`. Phone declares that permission in `gpuiforge.json`. The
+  speaker toggle is `rovsti_android::wa::call_audio_speaker`.
+- `WaIncoming`: the incoming WhatsApp call notification, `CallStyle.forIncomingCall`
+  on channel `wa_calls` with a full-screen intent and Answer and Decline actions.
+  `WaIncomingNotice.of(data)` (pure, JVM-tested) reads an FCM `kind=call` message and
+  picks the title: `name`, else the number in `from`, else "WhatsApp call".
+  `WaPush.onMessage` shows it before it emits `wa_push`, so a cold process rings.
+  Rust can show or cancel it through `rovsti_android::wa::show_incoming` and
+  `cancel_incoming`.
+- `wa_call_action`: each notification button opens the launch activity with the extras
+  `wa_call_id` and `wa_call_action` (`answer` or `decline`). The host's `MainActivity`
+  calls `RovstiBridge.deliverWaCallAction(intent)`, which queues the event
+  `wa_call_action` (`{"call_id", "action"}`); Phone answers or declines once per call
+  id. Decline sends the task back (`moveTaskToBack`) so the UI does not open.
 
-Copy `WaPush.kt` and `WaCallAudio.kt` next to `RovstiBridge.kt`. Push itself is
-optional. To enable it, add `google-services.json` and the Firebase Messaging
-dependency to the ejected app, then a service such as:
+Copy `WaPush.kt`, `WaIncoming.kt` and `WaCallAudio.kt` next to `RovstiBridge.kt`. Push itself is
+optional and is a separate source set in the Phone host. Put `google-services.json` in
+`apps/phone/platforms/android/app/`. Only when that file exists, `app/build.gradle.kts`
+applies the `com.google.gms.google-services` plugin, adds `firebase-messaging`, adds
+the source directory `src/firebase/kotlin` and merges `src/firebase/AndroidManifest.xml`.
+Without the file the build is unchanged and no Firebase code is compiled.
 
-```kotlin
-class RovstiMessagingService : FirebaseMessagingService() {
-    override fun onMessageReceived(message: RemoteMessage) {
-        val data = message.data
-        if (data["kind"] == "call") showIncomingCall(data) // CallStyle.forIncomingCall
-        WaPush.onMessage(data)                             // wakes Rust: event "wa_push"
-    }
-}
-```
+The source set holds `RovstiMessagingService`, a `FirebaseMessagingService` that only
+calls `WaPush.onMessage(message.data)`:
 
-and register it in the manifest (`com.google.firebase.MESSAGING_EVENT`). For
-`kind=call`, `showIncomingCall` posts a `Notification.CallStyle.forIncomingCall`
-notification with a full-screen intent, as `CallRegistry` does for telephony calls;
-Answer opens the activity and Phone's call card does the rest. For `kind=message`
-the service may just post a plain notification. No message text is in the push, so
-the app fetches it from the gateway. The token is registered once per launch and
-link; a rotated token is picked up on the next launch.
+- `kind=call`: `WaIncoming` posts the full-screen notification; Answer opens the
+  activity and `wa_call_action` reaches Rust, which answers through the gateway.
+- `kind=message`: only the `wa_push` event; no message text is in the push, the app
+  fetches it from the gateway. A host other than Phone writes the same small service.
+
+The token is registered once per launch and link; a rotated token is picked up on the
+next launch.
 
 ## Checks without a device
 

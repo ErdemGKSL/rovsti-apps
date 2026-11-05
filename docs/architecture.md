@@ -119,8 +119,19 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   `WaCallAudio` (`AudioRecord` and `AudioTrack` with the voice-communication
   attributes, `MODE_IN_COMMUNICATION`) hands frames to Rust as base64 strings across
   the strings-only JNI seam, about 2.6 KB seventeen times a second each way. Phone's
-  `wa_call.rs` shows the card (Answer, Decline, Mute, End) and runs one pump task
-  between `rovsti_android::wa` and the client's `CallAudio`.
+  `wa_call.rs` owns the gateway and audio work (one pump task between
+  `rovsti_android::wa` and the client's `CallAudio`) but draws nothing itself: the
+  glass In-Call and Incoming screens show a WhatsApp call through `CallSource::WhatsApp`.
+  Mute, Speaker (`call_audio_speaker`) and End work; Keypad, Hold, Add, Merge and Swap
+  are dimmed with "Not available on WhatsApp calls".
+- **One call owns the screen (arbitration).** `rovsti_wa_proto::call::arbitrate`
+  decides from three inputs: a cellular call is live, a cellular call is ringing, and
+  the WhatsApp call. A WhatsApp call already placed or active keeps the screen, and a
+  cellular call that rings beside it gets its own banner. A ringing WhatsApp offer is
+  shown when no cellular call exists, shown as a waiting call (Decline only) while a
+  cellular call is live, and declined at once (`reject_call`, once per call id) while a
+  cellular call rings. The cellular call always wins; the WhatsApp offer never
+  interrupts it.
 - **Push (AD-WA6).** FCM is on only when the gateway has `fcm_project_id` and
   `fcm_service_account`; otherwise push is a no-op. Phone and Messages register their
   FCM token per instance (`POST /v1/push`). The gateway sends data-only,
@@ -143,7 +154,10 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
   a verify when no stream exists yet.
 - **Outgoing calls (AD-WA10).** Phone places a WhatsApp call with the client's
   `place_call`; the gateway starts it through `voip-mlow` and the same audio WebSocket
-  (AD-WA5) carries the media.
+  (AD-WA5) carries the media. The entry points are the Recents row menu, the Contact
+  sheet (a WhatsApp circle per number) and a WhatsApp chip on the keypad; all shown
+  only while WhatsApp is connected. Ended calls are kept in `wa-calls.json` and Recents
+  merges them into the grouped list with a WhatsApp badge.
 - **Conversation view (AD-WA11).** Messages opens a chat from `GET /v1/chats` and the
   stored history, sends text, media and reactions through the client, and applies live
   events from the resumable stream.

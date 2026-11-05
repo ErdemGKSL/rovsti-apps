@@ -17,14 +17,24 @@ This file is the seed backlog. Done means it works on a physical Xiaomi device.
 
 ## Rovsti Phone
 
-- [ ] InCallService with a glass in-call screen (mute, speaker, keypad, hold, swap, merge)
-- [ ] Full-screen incoming-call UI, including on the lock screen
-- [ ] Call log (`CallLog.Calls`) grouped by person, with missed-call badges
-- [ ] Contacts (`ContactsContract`) with search, favourites and T9 search on the keypad
-- [ ] Speed dial, long-press `1` for voicemail
-- [ ] Dual-SIM picker (`PhoneAccountHandle`), which Xiaomi phones commonly have
-- [ ] Blocklist through `BlockedNumberContract`
-- [ ] Audio routing (earpiece, speaker, Bluetooth) through GPUiForge `audio-routing`
+Ticked here means built and covered by tests; the on-phone check is the acceptance
+list in `docs/phone-acceptance.md`.
+
+- [x] InCallService with a glass in-call screen (mute, speaker, keypad, hold, swap, merge)
+- [x] Full-screen incoming-call UI, including on the lock screen
+- [x] Call log (`CallLog.Calls`) grouped by person, with missed-call badges
+- [x] Contacts (`ContactsContract`) with search and favourites
+- [x] T9 search on the keypad (`rovsti_core::t9`)
+- [x] Speed dial, long-press `1` for voicemail
+- [x] Dual-SIM picker (`PhoneAccountHandle`), which Xiaomi phones commonly have
+- [x] Blocklist through `BlockedNumberContract`
+- [x] Audio routing (earpiece, speaker, Bluetooth) through GPUiForge `audio-routing`
+- [x] WhatsApp calls on the In-Call screen (Mute, Speaker, End), placed from Recents,
+      the Contact sheet or the keypad chip; one arbitration rule against cellular calls
+      (done without a device)
+- [x] FCM incoming-call notification (full-screen, Answer and Decline) that rings a cold
+      phone (done without a device)
+- [x] WhatsApp calls in Recents with a WhatsApp badge (done without a device)
 
 ## Rovsti Messages
 

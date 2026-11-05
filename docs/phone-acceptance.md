@@ -127,3 +127,42 @@ phone to call this one; its number goes into the S6, S7 and S8 steps below.
 | Q4 | Reset to defaults. | A confirm sheet; Reset restores the three defaults. | | |
 | **Diagnostics (long-press the Settings title)** | | | | |
 | D1 | Blocking (after B2 and B4), Reject text (call this phone within 40 s of Run), Silence (three rings within 75 s: tap Silence, volume key, flip), TalkBack/system (with TalkBack on, walk the flows). | Copy the report and fill the PENDING tables in `docs/spikes/s6-blocklist.md`, `s7-reject-text.md`, `s8-silence.md` and `s14-system.md`. | | |
+
+## WhatsApp calls
+
+Needs the gateway running (`docs/whatsapp-gateway.md`), WhatsApp linked or connected under
+Settings, WhatsApp, and a second WhatsApp account to call from and to. For the locked-phone
+rows the gateway needs FCM configured and the APK must be built with `google-services.json`
+in `apps/phone/platforms/android/app/` (`docs/android.md`). Allow the microphone when asked.
+
+| # | Step | Expected | Pass / Fail | Notes |
+|---|---|---|---|---|
+| **Place** | | | | |
+| W1 | Recents: open a row's menu, tap "WhatsApp call". | The In-Call screen shows the name with a "WhatsApp" caption and the status connecting, then the timer once answered. | | |
+| W2 | Contacts: open a contact with a number. | A WhatsApp circle, outlined, sits beside Call for each number. | | |
+| W3 | Tap that circle. | Same as W1. | | |
+| W4 | Keypad: type a valid number. | A "WhatsApp" chip appears under the number; it is gone for an empty or invalid number. | | |
+| W5 | Tap the chip. | Same as W1. | | |
+| W6 | Settings, WhatsApp: disconnect (or use a build with no instance). | No WhatsApp circle on the contact sheet, no chip on the keypad. | | |
+| **Controls** | | | | |
+| W7 | During an answered WhatsApp call tap Mute. | The other side hears nothing; the button shows it is on. | | |
+| W8 | Tap Speaker. | The audio moves to the loudspeaker and back. | | |
+| W9 | Look at Keypad, Hold, Add, Merge and Swap. | Dimmed; Hold explains "Not available on WhatsApp calls". | | |
+| W10 | Tap End. | The call ends on both sides; "Call ended" shows and the app returns to the tabs. | | |
+| **Incoming, app open** | | | | |
+| W11 | App open and unlocked. Call your WhatsApp from the other account. | The Incoming screen shows the caller with a "WhatsApp" caption, Answer and Decline. | | |
+| W12 | Tap Answer. | In-Call screen, audio both ways. End it. | | |
+| W13 | Call again and tap Decline. | The call is rejected; no notification stays behind. | | |
+| **Incoming, locked, after FCM** | | | | |
+| W14 | Close the app (swipe it away), lock the phone, screen off. Call your WhatsApp. | The push wakes the phone: the screen turns on with a WhatsApp call notification (caller name or number, Answer, Decline) over the lock screen. | | |
+| W15 | Tap Answer. | The app opens, the call connects, audio works. | | |
+| W16 | Repeat W14 and tap Decline. | The call is rejected and the app does not open. | | |
+| W17 | Repeat W14 and let the caller hang up. | The notification disappears. | | |
+| **Busy rules** | | | | |
+| W18 | During a cellular call, make a WhatsApp call to yourself. | The cellular call keeps the screen. The WhatsApp offer shows as a waiting call with Decline only. | | |
+| W19 | During a WhatsApp call, call the phone by cellular. | A cellular call rings on its own screen. The WhatsApp call is not dropped. | | |
+| W20 | While a cellular call is ringing, make a WhatsApp call to the phone. | The WhatsApp call is declined at once; the cellular ring is not interrupted. | | |
+| **Recents** | | | | |
+| W21 | Open Recents after W1 to W20. | Each WhatsApp call is a row with a WhatsApp badge, grouped with the same person's cellular calls. | | |
+| W22 | Miss a WhatsApp call, then open Recents. | The row is red and the tab bar badge counts it. | | |
+| W23 | Close and reopen the app. | The WhatsApp rows are still there. | | |

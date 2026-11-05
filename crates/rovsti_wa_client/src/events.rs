@@ -9,12 +9,14 @@ use std::io;
 use std::thread;
 use std::time::Duration;
 
-use futures::StreamExt;
 use futures::channel::mpsc;
+use futures::{FutureExt, StreamExt};
 use rovsti_wa_proto::api::routes;
 use rovsti_wa_proto::limit::backoff_ms;
 use rovsti_wa_proto::{ConnectKey, EventEnvelope, GatewayUrl};
-use tokio::sync::oneshot;
+use std::sync::Arc;
+
+use tokio::sync::{Notify, oneshot};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::{Message, handshake::client::Request};
@@ -39,9 +41,16 @@ pub enum ClientEvent {
 #[derive(Debug)]
 pub struct EventStream {
     shutdown: Option<oneshot::Sender<()>>,
+    kick: Arc<Notify>,
 }
 
 impl EventStream {
+    /// Ends the backoff wait and reconnects at once (a push says the gateway
+    /// has news). Has no effect while the socket is connected.
+    pub fn reconnect_now(&self) {
+        self.kick.notify_one();
+    }
+
     pub fn stop(&mut self) {
         if let Some(shutdown) = self.shutdown.take() {
             let _ = shutdown.send(());
@@ -84,6 +93,12 @@ pub(crate) fn with_jitter(base_ms: u64, random: u32) -> u64 {
     base_ms + u64::from(random) % (base_ms / 4 + 1)
 }
 
+/// How long to wait before the next attempt: nothing when a wake kicked the
+/// stream, the (jittered) backoff otherwise.
+pub(crate) fn next_delay(kicked: bool, backoff_ms: u64) -> u64 {
+    if kicked { 0 } else { backoff_ms }
+}
+
 fn random_u32() -> u32 {
     getrandom::u32().unwrap_or(0)
 }
@@ -109,6 +124,8 @@ pub fn subscribe(
 
     let (events, receiver) = mpsc::unbounded();
     let (shutdown, stop) = oneshot::channel();
+    let kick = Arc::new(Notify::new());
+    let kicked = kick.clone();
     thread::Builder::new()
         .name("wa-events".into())
         .spawn(move || {
@@ -119,12 +136,13 @@ pub fn subscribe(
                     return;
                 }
             };
-            runtime.block_on(run(url, key, after, connector, events, stop));
+            runtime.block_on(run(url, key, after, connector, events, stop, kicked));
         })
         .map_err(|e| ClientError::Ws(e.to_string()))?;
     Ok((
         EventStream {
             shutdown: Some(shutdown),
+            kick,
         },
         receiver,
     ))
@@ -143,12 +161,13 @@ async fn run(
     connector: Connector,
     events: mpsc::UnboundedSender<ClientEvent>,
     mut stop: oneshot::Receiver<()>,
+    kick: Arc<Notify>,
 ) {
     let mut attempt = 0u32;
     loop {
         let ended = tokio::select! {
             _ = &mut stop => Ended::Stopped,
-            ended = session(&url, &key, &mut last, &connector, &events, &mut attempt) => ended,
+            ended = session(&url, &key, &mut last, &connector, &events, &mut attempt, &kick) => ended,
         };
         match ended {
             Ended::Stopped => return,
@@ -166,11 +185,18 @@ async fn run(
                 }
             }
         }
-        let delay = with_jitter(backoff_ms(attempt), random_u32());
+        // The session swallows kicks while connected, so a pending one means
+        // the push raced the drop: retry at once.
+        let raced = kick.notified().now_or_never().is_some();
+        let delay = next_delay(raced, with_jitter(backoff_ms(attempt), random_u32()));
         attempt = attempt.saturating_add(1);
-        tokio::select! {
+        let kicked = tokio::select! {
             _ = &mut stop => return,
-            _ = tokio::time::sleep(Duration::from_millis(delay)) => {}
+            () = kick.notified() => true,
+            _ = tokio::time::sleep(Duration::from_millis(delay)) => false,
+        };
+        if kicked {
+            attempt = 0;
         }
     }
 }
@@ -183,6 +209,7 @@ async fn session(
     connector: &Connector,
     events: &mpsc::UnboundedSender<ClientEvent>,
     attempt: &mut u32,
+    kick: &Notify,
 ) -> Ended {
     let request = match ws_request(url, &events_path(*last), key) {
         Ok(request) => request,
@@ -207,6 +234,8 @@ async fn session(
     ping.tick().await;
     loop {
         let next = tokio::select! {
+            // Already connected: a wake has nothing to do.
+            () = kick.notified() => continue,
             _ = ping.tick() => {
                 if let Err(error) = futures::SinkExt::send(&mut socket, Message::Ping(Vec::new().into())).await {
                     return Ended::Lost(from_ws(error).to_string());
@@ -268,6 +297,13 @@ mod tests {
         let url = GatewayUrl::parse("http://10.0.2.2:8787").unwrap();
         let req = ws_request(&url, &events_path(None), &key()).unwrap();
         assert_eq!(req.uri().to_string(), "ws://10.0.2.2:8787/v1/events");
+    }
+
+    #[test]
+    fn kick_skips_the_backoff() {
+        assert_eq!(next_delay(true, 30_000), 0);
+        assert_eq!(next_delay(false, 30_000), 30_000);
+        assert_eq!(next_delay(false, 0), 0);
     }
 
     #[test]

@@ -59,6 +59,7 @@ impl MessagesApp {
         let whatsapp = cx.new(|cx| WhatsAppSettings::new(AppId::Messages, "messages", cx));
         // Fold WhatsApp messages into the unified inbox as they arrive, and
         // load the chat list once the instance is connected.
+        WhatsAppSettings::forward_push(&whatsapp, cx);
         cx.observe(&whatsapp, |this, whatsapp, cx| {
             let events = whatsapp.update(cx, |settings, _| settings.take_events());
             let connected = whatsapp.read(cx).is_connected();

@@ -51,6 +51,8 @@ struct StopsApp {
 
 impl StopsApp {
     fn new(cx: &mut Context<Self>) -> Self {
+        let whatsapp = cx.new(|cx| WhatsAppSettings::new(AppId::Stops, "stops", cx));
+        WhatsAppSettings::forward_push(&whatsapp, cx);
         Self {
             tabs: TabBar::new(
                 TABS.into_iter()
@@ -60,7 +62,7 @@ impl StopsApp {
             motion: Default::default(),
             page: Default::default(),
             rule: 1,
-            whatsapp: cx.new(|cx| WhatsAppSettings::new(AppId::Stops, "stops", cx)),
+            whatsapp,
         }
     }
 

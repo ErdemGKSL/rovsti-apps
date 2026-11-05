@@ -208,6 +208,8 @@ struct PhoneApp {
     whatsapp: Entity<rovsti_wa_ui::WhatsAppSettings>,
     /// WhatsApp calls: the incoming card and the live call (AD-WA5).
     wa_call: Entity<wa_call::WaCallUi>,
+    /// WhatsApp wake-ups already forwarded to `whatsapp`.
+    wa_pushes_seen: u64,
 
     /// The Recents tab: row view-models, scroll and the seen-timer.
     recents: RecentsView,
@@ -314,7 +316,12 @@ impl PhoneApp {
             .new(|cx| rovsti_wa_ui::WhatsAppSettings::new(rovsti_wa_ui::AppId::Phone, "phone", cx));
         let wa_call = cx.new(|cx| wa_call::WaCallUi::new(whatsapp.clone(), cx));
         let mut subscriptions = vec![
-            cx.observe_in(&backend, window, |this, _, window, cx| {
+            cx.observe_in(&backend, window, |this, backend, window, cx| {
+                let pushes = backend.read(cx).wa_pushes();
+                if pushes != this.wa_pushes_seen {
+                    this.wa_pushes_seen = pushes;
+                    this.whatsapp.update(cx, |w, cx| w.wake(cx));
+                }
                 this.sync_restore(cx);
                 this.sync_calls(window, cx);
                 this.sync_documents(window, cx);
@@ -443,6 +450,7 @@ impl PhoneApp {
             replies_ed,
             whatsapp,
             wa_call,
+            wa_pushes_seen: 0,
             back_enabled: false,
             recents: RecentsView::new(),
             contacts: contacts_view,

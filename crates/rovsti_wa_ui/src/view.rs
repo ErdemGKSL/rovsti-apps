@@ -9,7 +9,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use futures::StreamExt;
 use gpui::{
-    AnyElement, AppContext as _, ClipboardItem, Context, Entity, Image, ImageFormat,
+    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, Image, ImageFormat,
     InteractiveElement, IntoElement, ParentElement, Render, SelectedFile, ShareOptions,
     SharedString, StatefulInteractiveElement, Styled, TextInputAction, TextInputPurpose, Window,
     div, img, px,
@@ -167,6 +167,35 @@ impl WhatsAppSettings {
                 }
             })
             .detach();
+    }
+
+    /// An FCM wake-up arrived (AD-WA6): reconnect the event stream at once, or
+    /// verify the link when no stream runs (the process was cold-started).
+    pub fn wake(&mut self, cx: &mut Context<Self>) {
+        if let Some((_, stream)) = &self.stream {
+            stream.reconnect_now();
+        } else if let Some(link) = self.model.link.clone() {
+            self.run(vec![Effect::Verify(link)], cx);
+        }
+    }
+
+    /// Installs the app's event sink and forwards `WA_PUSH` events to
+    /// [`Self::wake`]. For apps with no other Kotlin events (Messages, Stops).
+    pub fn forward_push(this: &Entity<Self>, cx: &mut App) {
+        let (mut events_rx, sink) = rovsti_android::events::install_sink_owned();
+        let this = this.downgrade();
+        cx.spawn(async move |cx| {
+            while let Some(event) = events_rx.next().await {
+                if event.kind != rovsti_android::events::kind::WA_PUSH {
+                    continue;
+                }
+                if this.update(cx, |this, cx| this.wake(cx)).is_err() {
+                    break;
+                }
+            }
+            rovsti_android::events::clear_sink_if(sink);
+        })
+        .detach();
     }
 
     // ---- state ------------------------------------------------------------------

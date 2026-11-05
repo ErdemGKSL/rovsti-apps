@@ -265,6 +265,9 @@ pub struct Backend {
     scene_diff: SceneDiff,
     /// Bumped when the system confirms the keyguard was dismissed (Add call, 15.5).
     keyguard_gen: u64,
+    /// Counts WhatsApp FCM wake-ups; the app root forwards new ones to the
+    /// WhatsApp settings entity, which owns the gateway stream.
+    wa_pushes: u64,
     last_place: Option<Instant>,
     /// A number waiting for the Phone permission, and the permission pull
     /// number it was requested at (only newer pulls may judge the answer).
@@ -364,6 +367,7 @@ impl Backend {
                 keyguard_gen: 0,
                 last_place: None,
                 pending_call: None,
+                wa_pushes: 0,
                 call_blocked: false,
                 call_log: Load::Loading,
                 contacts: Load::Loading,
@@ -875,6 +879,11 @@ impl Backend {
         }
     }
 
+    /// How many WhatsApp wake-ups have arrived so far.
+    pub fn wa_pushes(&self) -> u64 {
+        self.wa_pushes
+    }
+
     /// The Phone permission was refused (or cannot be asked) for a call.
     pub fn call_blocked(&self) -> bool {
         self.call_blocked
@@ -915,8 +924,10 @@ impl Backend {
                 self.keyguard_gen += 1;
                 cx.notify();
             }
-            // The process is awake and the gateway stream reconnects by itself.
-            kind::WA_PUSH => log::debug!("WhatsApp push received"),
+            kind::WA_PUSH => {
+                self.wa_pushes += 1;
+                cx.notify();
+            }
             kind::SIMS_CHANGED => self.refresh_sims(cx),
             kind::DOCUMENT_RESULT => self.on_document_result(&event.json, cx),
             kind::UI_REQUEST => {

@@ -11,7 +11,9 @@ use gpui::{
     AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::contact_edit::{ContactDraft, DraftField, FieldKind, MAX_FIELDS};
+use rovsti_core::contact_edit::{
+    Account, ContactDraft, DraftField, FieldKind, MAX_FIELDS, account_label, retain_account_groups,
+};
 use rovsti_ui::{
     Icon,
     components::{large_title, section},
@@ -59,6 +61,29 @@ pub(crate) struct Editor {
     groups: BTreeSet<i64>,
     error: Option<SharedString>,
     saving: bool,
+}
+
+/// The account a new contact starts in: the remembered one while it is still
+/// listed, else the phone (the empty key).
+pub(crate) fn default_account(accounts: &[Account], preferred: &str) -> String {
+    accounts
+        .iter()
+        .find(|a| a.key == preferred)
+        .map(|a| a.key.clone())
+        .unwrap_or_default()
+}
+
+/// The account after `current` in `accounts`, wrapping round. An account that
+/// is not listed moves to the first one.
+pub(crate) fn next_account(accounts: &[Account], current: &str) -> String {
+    let next = accounts
+        .iter()
+        .position(|a| a.key == current)
+        .map_or(0, |i| (i + 1) % accounts.len());
+    accounts
+        .get(next)
+        .map(|a| a.key.clone())
+        .unwrap_or_default()
 }
 
 fn make_field(config: Config, text: &str, cx: &mut Context<ContactsApp>) -> Entity<TextField> {
@@ -138,7 +163,31 @@ impl Editor {
 
 impl ContactsApp {
     pub(crate) fn open_new_editor(&mut self, cx: &mut Context<Self>) {
-        self.start_editor(&ContactDraft::blank(), cx);
+        let draft = ContactDraft {
+            account: default_account(&self.accounts, &self.save_to),
+            ..ContactDraft::blank()
+        };
+        self.start_editor(&draft, cx);
+    }
+
+    /// "Save to" on a new contact: the next account. Group ticks of the old
+    /// account go, since a contact only joins the groups of its own account.
+    fn cycle_account(&mut self, cx: &mut Context<Self>) {
+        let Some(editor) = self.editor.as_mut() else {
+            return;
+        };
+        if editor.id.is_some() {
+            return;
+        }
+        let mut draft = ContactDraft {
+            account: next_account(&self.accounts, &editor.account),
+            groups: editor.groups.iter().copied().collect(),
+            ..ContactDraft::default()
+        };
+        retain_account_groups(&mut draft, &self.groups);
+        editor.account = draft.account;
+        editor.groups = draft.groups.into_iter().collect();
+        cx.notify();
     }
 
     /// Opens the form on contact `id`, read fresh so a change made since the
@@ -253,6 +302,8 @@ impl ContactsApp {
         };
         editor.error = None;
         editor.saving = true;
+        // A new contact's account becomes the default for the next one.
+        let remember = editor.id.is_none().then(|| draft.account.clone());
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -261,6 +312,12 @@ impl ContactsApp {
                 .await;
             this.update(cx, |this, cx| match result {
                 Ok(id) => {
+                    if let Some(account) = remember
+                        && this.save_to != account
+                    {
+                        this.save_to = account;
+                        this.save_prefs(cx);
+                    }
                     this.editor = None;
                     this.pending_open = Some(id);
                     this.notice = Some("Saved.".into());
@@ -357,6 +414,40 @@ impl ContactsApp {
             ],
         );
 
+        let save_to = {
+            let label = SharedString::from(account_label(&editor.account));
+            let row = if editor.id.is_none() && self.accounts.len() > 1 {
+                tap_row(theme, "editor-save-to", None, "Save to", Tone::Plain)
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(typography::FOOTNOTE.size)
+                            .text_color(colors.accent)
+                            .child(label),
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.cycle_account(cx)))
+                    .into_any_element()
+            } else {
+                // An existing contact stays in its account.
+                form_row(theme)
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(typography::BODY.size)
+                            .text_color(colors.label)
+                            .child("Account"),
+                    )
+                    .child(
+                        div()
+                            .text_size(typography::FOOTNOTE.size)
+                            .text_color(colors.secondary_label)
+                            .child(label),
+                    )
+                    .into_any_element()
+            };
+            section(theme, Some("Save to".into()), [row])
+        };
+
         let numbers = self.field_section(theme, true, window, cx);
         let emails = self.field_section(theme, false, window, cx);
 
@@ -437,6 +528,7 @@ impl ContactsApp {
                     .child(error)
             }))
             .child(name)
+            .child(save_to)
             .child(numbers)
             .child(emails)
             .children((!groups.is_empty()).then(|| section(theme, Some("Groups".into()), groups)))
@@ -546,5 +638,40 @@ impl ContactsApp {
             );
         }
         section(theme, Some(header.into()), children).into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(key: &str) -> Account {
+        Account {
+            key: key.to_owned(),
+            ..Account::default()
+        }
+    }
+
+    fn listed() -> Vec<Account> {
+        vec![account(""), account("com.google|a@b.com")]
+    }
+
+    #[test]
+    fn the_remembered_account_is_the_default_while_listed() {
+        assert_eq!(
+            default_account(&listed(), "com.google|a@b.com"),
+            "com.google|a@b.com"
+        );
+        assert_eq!(default_account(&listed(), "com.google|gone@b.com"), "");
+        assert_eq!(default_account(&[], "com.google|a@b.com"), "");
+    }
+
+    #[test]
+    fn save_to_cycles_and_wraps() {
+        let accounts = listed();
+        assert_eq!(next_account(&accounts, ""), "com.google|a@b.com");
+        assert_eq!(next_account(&accounts, "com.google|a@b.com"), "");
+        assert_eq!(next_account(&accounts, "org.gone|x"), "");
+        assert_eq!(next_account(&[], "x"), "");
     }
 }

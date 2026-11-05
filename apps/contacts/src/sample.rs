@@ -1,9 +1,12 @@
 //! Sample address book for desktop runs, where there is no provider to ask.
 
 use rovsti_core::{
-    contact_edit::{ContactDraft, DraftField, FieldKind, Group},
+    contact_edit::{Account, ContactDraft, DraftField, FieldKind, Group},
     wire::{WireContact, WireNumber},
 };
+
+/// The key of the sample Google account (`type|name`).
+pub(crate) const GOOGLE_ACCOUNT: &str = "com.google|sample@gmail.com";
 
 fn number(raw: &str, label: Option<&str>, default: bool) -> WireNumber {
     WireNumber {
@@ -100,11 +103,25 @@ pub(crate) fn contacts() -> Vec<WireContact> {
             false,
         ),
     ];
+    // Saved to the Google account with an email only: no number to call.
+    all.push(WireContact {
+        email: Some("selin.aksoy@example.com".to_owned()),
+        ..contact(11, "Selin Aksoy", Vec::new(), false)
+    });
     all.sort_by_cached_key(|c| (rovsti_core::search::fold(&c.display_name), c.id));
     all
 }
 
-/// The sample groups: two labels with a few members each.
+/// The accounts besides the phone: one Google account.
+pub(crate) fn accounts() -> Vec<Account> {
+    vec![Account {
+        key: GOOGLE_ACCOUNT.to_owned(),
+        name: "sample@gmail.com".to_owned(),
+        kind: "com.google".to_owned(),
+    }]
+}
+
+/// The sample groups: two on the phone, one in the Google account.
 pub(crate) fn groups() -> Vec<Group> {
     vec![
         Group {
@@ -118,6 +135,12 @@ pub(crate) fn groups() -> Vec<Group> {
             title: "Work".to_owned(),
             members: vec![3, 9],
             ..Group::default()
+        },
+        Group {
+            id: 3,
+            title: "Friends".to_owned(),
+            members: vec![11],
+            account: GOOGLE_ACCOUNT.to_owned(),
         },
     ]
 }
@@ -149,7 +172,51 @@ pub(crate) fn draft(id: i64) -> Option<ContactDraft> {
             .filter(|g| g.members.contains(&id))
             .map(|g| g.id)
             .collect(),
+        emails: wire
+            .email
+            .iter()
+            .map(|e| DraftField::new(e.clone(), FieldKind::Home))
+            .collect(),
         starred: wire.starred,
+        account: groups()
+            .iter()
+            .find(|g| g.members.contains(&id))
+            .map(|g| g.account.clone())
+            .unwrap_or_default(),
         ..ContactDraft::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use rovsti_core::contacts_view::{NameStyle, build_rows_styled};
+
+    use super::*;
+
+    #[test]
+    fn the_number_less_sample_builds_a_row_with_its_email() {
+        let all = contacts();
+        let rows = build_rows_styled(&all, "", NameStyle::default());
+        let row = rows
+            .iter()
+            .find(|r| r.name == "Selin Aksoy")
+            .expect("the sample has a number-less contact");
+        assert!(row.numbers.is_empty());
+        assert_eq!(row.subtitle.as_deref(), Some("selin.aksoy@example.com"));
+    }
+
+    #[test]
+    fn the_number_less_sample_is_a_valid_draft_in_the_google_account() {
+        let mut draft = draft(11).expect("sample draft");
+        assert_eq!(draft.account, GOOGLE_ACCOUNT);
+        assert_eq!(draft.groups, [3]);
+        draft.clean();
+        assert_eq!(draft.validate(), Ok(()));
+    }
+
+    #[test]
+    fn the_sample_google_group_belongs_to_the_listed_account() {
+        let account = &accounts()[0];
+        assert!(groups().iter().any(|g| g.account == account.key));
+    }
 }

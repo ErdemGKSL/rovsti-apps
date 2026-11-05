@@ -92,8 +92,8 @@ list in `docs/phone-acceptance.md`.
       duplicates skipped by `rovsti_core::import_plan`, files through the Storage
       Access Framework)
 - [ ] Choose or change a contact's photo
-- [ ] Contacts without a phone number (the list and the editor need a number today)
-- [ ] Groups of a synced account for a new contact (new contacts live on the phone only)
+- [x] Contacts without a phone number (done without a device)
+- [x] Groups of a synced account for a new contact (done without a device)
 - [x] WhatsApp: the shared settings screen (resolved, see `docs/whatsapp-notes.md`)
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
 

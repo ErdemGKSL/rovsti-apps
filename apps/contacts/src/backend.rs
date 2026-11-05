@@ -11,7 +11,8 @@ use std::sync::Arc;
 use rovsti_android::{Error, contacts_edit, documents, providers};
 use rovsti_core::{
     contact_edit::{
-        ContactDraft, DetailPayload, FullPayload, Group, GroupsPayload, ImportPayload, SavedPayload,
+        Account, AccountsPayload, ContactDraft, DetailPayload, FullPayload, Group, GroupsPayload,
+        ImportPayload, SavedPayload,
     },
     search::{ContactIndex, fold},
     vcard,
@@ -77,7 +78,7 @@ fn done(result: rovsti_android::Result<bool>) -> Result<(), String> {
 
 /// Pulls and indexes the contacts.
 pub(crate) fn pull_book() -> Book {
-    match decode::<ContactsPayload>(providers::contacts()) {
+    match decode::<ContactsPayload>(providers::contacts_all()) {
         Ok(payload) => Book::Ready(Arc::new(ContactIndex::new(payload.contacts))),
         Err(Failed::Wire(WireError::Permission)) => Book::Denied,
         Err(Failed::Unsupported) => Book::Ready(Arc::new(ContactIndex::new(sample::contacts()))),
@@ -95,6 +96,30 @@ pub(crate) fn pull_groups() -> Vec<Group> {
         Err(Failed::Unsupported) => sample::groups(),
         Err(_) => Vec::new(),
     }
+}
+
+/// The accounts a new contact can be saved to. The phone itself is always
+/// first; desktop has the phone and one sample Google account.
+pub(crate) fn pull_accounts() -> Vec<Account> {
+    match decode::<AccountsPayload>(contacts_edit::accounts()) {
+        Ok(payload) => with_phone(payload.accounts),
+        Err(Failed::Unsupported) => with_phone(sample::accounts()),
+        Err(error) => {
+            log::warn!("accounts pull failed: {}", error.words());
+            with_phone(Vec::new())
+        }
+    }
+}
+
+/// `accounts` without repeats, with "on this phone" (the empty key) first.
+fn with_phone(accounts: Vec<Account>) -> Vec<Account> {
+    let mut out = vec![Account::default()];
+    for account in accounts {
+        if !out.iter().any(|a| a.key == account.key) {
+            out.push(account);
+        }
+    }
+    out
 }
 
 /// One contact in editable form.
@@ -121,9 +146,10 @@ pub(crate) fn delete(contact_id: i64) -> Result<(), String> {
     done(contacts_edit::delete(contact_id))
 }
 
-/// Creates (`group_id` 0) or renames a group.
-pub(crate) fn save_group(group_id: i64, title: &str) -> Result<i64, String> {
-    decode::<SavedPayload>(contacts_edit::save_group(group_id, title, ""))
+/// Creates (`group_id` 0, in `account`) or renames a group (`account` is then
+/// ignored).
+pub(crate) fn save_group(group_id: i64, title: &str, account: &str) -> Result<i64, String> {
+    decode::<SavedPayload>(contacts_edit::save_group(group_id, title, account))
         .map(|saved| saved.id)
         .map_err(|error| error.words())
 }
@@ -229,6 +255,25 @@ mod tests {
             decode::<SavedPayload>(Ok("<html>".to_owned())),
             Err(Failed::Other(_))
         ));
+    }
+
+    #[test]
+    fn desktop_accounts_are_the_phone_and_a_sample_google_account() {
+        let accounts = pull_accounts();
+        assert_eq!(accounts.len(), 2);
+        assert_eq!(accounts[0].key, "", "the phone comes first");
+        assert_eq!(accounts[1].key, sample::GOOGLE_ACCOUNT);
+    }
+
+    #[test]
+    fn the_phone_is_listed_once_and_first() {
+        let google = Account {
+            key: "com.google|a@b.com".to_owned(),
+            ..Account::default()
+        };
+        let listed = with_phone(vec![google.clone(), Account::default(), google.clone()]);
+        let keys: Vec<&str> = listed.iter().map(|a| a.key.as_str()).collect();
+        assert_eq!(keys, ["", "com.google|a@b.com"]);
     }
 
     #[test]

@@ -21,7 +21,7 @@ use rovsti_ui::{
 };
 
 use crate::{
-    ContactsApp, Row, backend,
+    ContactsApp, Row, backend, editor,
     field::{Config, TextField},
     ui::{Tone, field_box, form_row, pill, tap_row},
 };
@@ -112,6 +112,8 @@ impl ContactsApp {
             return;
         }
         let id = edit.id;
+        // A new group goes where a new contact does.
+        let account = editor::default_account(&self.accounts, &self.save_to);
         let text = edit.field.read(cx).text().to_owned();
         let title = match group_title(&text, &self.groups, id) {
             Ok(title) => title,
@@ -131,7 +133,7 @@ impl ContactsApp {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { backend::save_group(id.unwrap_or(0), &title) })
+                .spawn(async move { backend::save_group(id.unwrap_or(0), &title, &account) })
                 .await;
             this.update(cx, |this, cx| match result {
                 Ok(_) => {

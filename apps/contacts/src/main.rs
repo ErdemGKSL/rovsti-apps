@@ -33,7 +33,7 @@ use rovsti_android::{
 };
 use rovsti_core::{
     contact_card::{self, ContactCard},
-    contact_edit::{ContactDraft, Group},
+    contact_edit::{Account, ContactDraft, Group},
     contacts_prefs::ContactsPrefs,
     contacts_view::{self, ContactVm, NameStyle},
     settings::SortBy,
@@ -111,6 +111,10 @@ struct ContactsApp {
     book: Book,
     pulls: u64,
     groups: Vec<Group>,
+    /// The accounts a new contact or group can be saved to.
+    accounts: Vec<Account>,
+    /// The account key new contacts start in (from the saved preferences).
+    save_to: String,
     style: NameStyle,
     /// Where `contacts-prefs.json` lives, once the data directory is known.
     prefs_dir: Option<PathBuf>,
@@ -198,6 +202,7 @@ impl ContactsApp {
                 .await;
             this.update(cx, |this, cx| {
                 this.prefs_dir = Some(dir);
+                this.save_to.clone_from(&saved.save_to);
                 if this.style_touched {
                     // The owner chose before the file was read: theirs wins.
                     this.save_prefs(cx);
@@ -226,6 +231,8 @@ impl ContactsApp {
             book: Book::Loading,
             pulls: 0,
             groups: Vec::new(),
+            accounts: Vec::new(),
+            save_to: String::new(),
             style: NameStyle::default(),
             prefs_dir: None,
             style_touched: false,
@@ -256,14 +263,21 @@ impl ContactsApp {
         self.pulls += 1;
         let pull_id = self.pulls;
         cx.spawn(async move |this, cx| {
-            let (book, groups) = cx
+            let (book, groups, accounts) = cx
                 .background_executor()
-                .spawn(async { (backend::pull_book(), backend::pull_groups()) })
+                .spawn(async {
+                    (
+                        backend::pull_book(),
+                        backend::pull_groups(),
+                        backend::pull_accounts(),
+                    )
+                })
                 .await;
             this.update(cx, |this, cx| {
                 if this.pulls == pull_id {
                     this.book = book;
                     this.groups = groups;
+                    this.accounts = accounts;
                     this.photos.forget_misses();
                     this.rebuild(cx);
                     if let Some(id) = this.pending_open.take() {
@@ -481,7 +495,10 @@ impl ContactsApp {
         let Some(dir) = self.prefs_dir.clone() else {
             return;
         };
-        let saved = ContactsPrefs::from_style(self.style);
+        let saved = ContactsPrefs {
+            save_to: self.save_to.clone(),
+            ..ContactsPrefs::from_style(self.style)
+        };
         cx.background_executor()
             .spawn(async move {
                 if let Err(error) = prefs::save(&dir, saved) {

@@ -83,6 +83,19 @@ mod tests {
     }
 
     #[test]
+    fn save_to_survives_a_round_trip() {
+        let dir = scratch("save-to");
+        let prefs = ContactsPrefs {
+            save_to: "com.google|a@b.com".to_owned(),
+            ..ContactsPrefs::default()
+        };
+        save(&dir, prefs.clone()).expect("writes");
+        assert_eq!(load(&dir).save_to, "com.google|a@b.com");
+        assert_eq!(load(&dir), prefs);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
     fn a_second_save_replaces_the_first() {
         let dir = scratch("replace");
         save(&dir, ContactsPrefs::default()).expect("first");

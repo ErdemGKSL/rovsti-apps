@@ -14,6 +14,7 @@ pub mod routes;
 pub mod store;
 pub mod wa;
 
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -26,6 +27,7 @@ use crate::driver::{EventSink, WaDriver};
 use crate::hub::Hub;
 use crate::push::{NoopPusher, Pusher};
 use crate::store::{InstanceId, Store};
+use crate::wa::calls::{CallTable, RING_TIMEOUT};
 
 /// Failed authentications one address may make in a burst, and how fast the
 /// allowance comes back (per second).
@@ -50,6 +52,7 @@ struct Inner {
     driver: Arc<dyn WaDriver>,
     pusher: Arc<dyn Pusher>,
     limiter: Mutex<AuthLimiter>,
+    calls: Mutex<HashMap<InstanceId, Arc<CallTable>>>,
 }
 
 impl std::fmt::Debug for AppState {
@@ -81,6 +84,7 @@ impl AppState {
                 AUTH_REFILL_PER_SEC,
                 AUTH_TRACKED_IPS,
             )),
+            calls: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -106,7 +110,30 @@ impl AppState {
             Arc::clone(&self.0.hub),
             self.0.store.clone(),
             Arc::clone(&self.0.pusher),
+            self.calls(instance),
         )
+    }
+
+    /// The voice calls of `instance`.
+    pub fn calls(&self, instance: &InstanceId) -> Arc<CallTable> {
+        let mut tables = self.0.calls.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(tables.entry(instance.clone()).or_insert_with(|| {
+            CallTable::new(
+                instance.clone(),
+                Arc::clone(&self.0.hub),
+                Arc::clone(&self.0.pusher),
+                RING_TIMEOUT,
+            )
+        }))
+    }
+
+    /// Forgets the calls of a deleted instance.
+    pub fn forget_calls(&self, instance: &InstanceId) {
+        self.0
+            .calls
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(instance);
     }
 
     /// Records a failed authentication from `ip`; false once it is over the

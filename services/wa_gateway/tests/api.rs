@@ -6,13 +6,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt;
 use futures::channel::mpsc::UnboundedReceiver;
-use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway, subscribe};
+use futures::{SinkExt, StreamExt};
+use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway, call_audio, subscribe};
 use rovsti_wa_proto::{
-    AppId, ChatState, ConnectKey, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope,
-    GatewayEvent, GatewayUrl, GroupInfo, InstanceState, LinkRequest, MarkRead, MediaKind,
-    MessageBody, Participant, SendReaction, SendText, TypingState,
+    AppId, CallPhase, ChatState, ConnectKey, CreateInstance, CreatedInstance, EndReason, ErrorCode,
+    EventEnvelope, GatewayEvent, GatewayUrl, GroupInfo, InstanceState, LinkRequest, MarkRead,
+    MediaKind, MessageBody, Participant, SendReaction, SendText, TypingState,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wa_gateway::config::Config;
@@ -663,4 +663,124 @@ async fn groups_are_listed() {
     server.driver.set_groups(vec![group.clone()]);
     let g = gateway.clone();
     assert_eq!(blocking(move || g.groups()).await.unwrap(), vec![group]);
+}
+
+const PEER: &str = "905321234567@s.whatsapp.net";
+
+fn frame(seed: i16) -> Vec<i16> {
+    (0..960)
+        .map(|n| seed.wrapping_mul(31).wrapping_add(n))
+        .collect()
+}
+
+async fn next_call_phase(events: &mut Events) -> CallPhase {
+    loop {
+        if let GatewayEvent::Call(update) = events.next_event().await.event {
+            return update.phase;
+        }
+    }
+}
+
+#[tokio::test]
+async fn call_audio_echoes_frames_and_drops_wrong_sizes() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let g = gateway.clone();
+    let call_id = blocking(move || g.place_call(PEER)).await.unwrap().call_id;
+    assert_eq!(next_call_phase(&mut events).await, CallPhase::Ringing);
+    assert_eq!(server.driver.calls().ops(), [format!("place {PEER}")]);
+
+    let key = ConnectKey::parse(&created.key).unwrap();
+    let (url, id) = (server.url.clone(), call_id.clone());
+    let mut audio = blocking(move || call_audio(url, key.clone(), &id))
+        .await
+        .unwrap();
+
+    // One socket per call: a second one is refused with 409 at the handshake.
+    let key = ConnectKey::parse(&created.key).unwrap();
+    let (url, id) = (server.url.clone(), call_id.clone());
+    let second = blocking(move || call_audio(url, key, &id)).await;
+    match second {
+        Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::Conflict),
+        other => panic!("expected a conflict, got {other:?}"),
+    }
+
+    // The wrong size never leaves the client; the fake echoes the rest.
+    let frames = [frame(1), frame(2), frame(3)];
+    audio.mic.send(frames[0].clone()).await.unwrap();
+    audio.mic.send(vec![0; 959]).await.unwrap();
+    audio.mic.send(frames[1].clone()).await.unwrap();
+    audio.mic.send(vec![0; 961]).await.unwrap();
+    audio.mic.send(frames[2].clone()).await.unwrap();
+    for want in &frames {
+        let got = tokio::time::timeout(Duration::from_secs(10), audio.speaker.next())
+            .await
+            .expect("timed out waiting for an echoed frame")
+            .expect("audio ended");
+        assert_eq!(&got, want);
+    }
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), audio.speaker.next())
+            .await
+            .is_err(),
+        "wrong-size frames must not come back"
+    );
+
+    // Hanging up ends the call and closes the audio socket.
+    let (g, id) = (gateway.clone(), call_id.clone());
+    blocking(move || g.end_call(&id)).await.unwrap();
+    assert_eq!(
+        next_call_phase(&mut events).await,
+        CallPhase::Ended(EndReason::Hangup)
+    );
+    let end = tokio::time::timeout(Duration::from_secs(10), audio.speaker.next())
+        .await
+        .expect("the audio socket stayed open");
+    assert!(end.is_none());
+}
+
+#[tokio::test]
+async fn an_incoming_call_rings_and_is_answered_over_the_api() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let instance = wa_gateway::store::InstanceId::new(&created.instance_id);
+    server
+        .driver
+        .ring(&instance, "INCOMING1", PEER, Some("Ayse"));
+    loop {
+        if let GatewayEvent::Call(update) = events.next_event().await.event {
+            assert_eq!(update.call_id, "INCOMING1");
+            assert_eq!(update.peer, PEER);
+            assert_eq!(update.peer_name.as_deref(), Some("Ayse"));
+            assert_eq!(update.phase, CallPhase::Ringing);
+            break;
+        }
+    }
+
+    let g = gateway.clone();
+    blocking(move || g.accept_call("INCOMING1")).await.unwrap();
+    assert_eq!(next_call_phase(&mut events).await, CallPhase::Connecting);
+    let g = gateway.clone();
+    blocking(move || g.set_muted("INCOMING1", true))
+        .await
+        .unwrap();
+    assert!(server.driver.calls().lives()[0].is_muted());
+
+    // Answering twice, and unknown calls, are refused.
+    let g = gateway.clone();
+    match blocking(move || g.accept_call("INCOMING1")).await {
+        Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::Conflict),
+        other => panic!("expected a conflict, got {other:?}"),
+    }
+    let g = gateway.clone();
+    match blocking(move || g.reject_call("NOPE")).await {
+        Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::NotFound),
+        other => panic!("expected not found, got {other:?}"),
+    }
 }

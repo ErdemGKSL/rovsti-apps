@@ -31,6 +31,12 @@ pub enum PushKind {
     /// New message(s) in `chat`. Producers pass `count: 1`; the pusher
     /// replaces it with the number of messages the push stands for.
     Message { chat: String, count: u32 },
+    /// A call is ringing. Never coalesced: the phone must wake at once.
+    Call {
+        call_id: String,
+        from: String,
+        name: String,
+    },
 }
 
 impl PushKind {
@@ -42,12 +48,22 @@ impl PushKind {
                 ("chat".to_owned(), chat.clone()),
                 ("count".to_owned(), count.to_string()),
             ]),
+            Self::Call {
+                call_id,
+                from,
+                name,
+            } => BTreeMap::from([
+                ("kind".to_owned(), "call".to_owned()),
+                ("call_id".to_owned(), call_id.clone()),
+                ("from".to_owned(), from.clone()),
+                ("name".to_owned(), name.clone()),
+            ]),
         }
     }
 
     pub fn high_priority(&self) -> bool {
         match self {
-            Self::Message { .. } => true,
+            Self::Message { .. } | Self::Call { .. } => true,
         }
     }
 }
@@ -175,6 +191,7 @@ impl Pusher for FcmPusher {
                     Decision::Send { count } => PushKind::Message { chat, count },
                 }
             }
+            call @ PushKind::Call { .. } => call,
         };
         let sender = Arc::clone(&self.sender);
         let store = self.store.clone();
@@ -298,6 +315,20 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&kind.data()).unwrap(),
             r#"{"chat":"905321234567@s.whatsapp.net","count":"3","kind":"message"}"#
+        );
+        assert!(kind.high_priority());
+    }
+
+    #[test]
+    fn call_push_is_high_priority_and_carries_no_text() {
+        let kind = PushKind::Call {
+            call_id: "ABC".into(),
+            from: "905321234567@s.whatsapp.net".into(),
+            name: "Ayse".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&kind.data()).unwrap(),
+            r#"{"call_id":"ABC","from":"905321234567@s.whatsapp.net","kind":"call","name":"Ayse"}"#
         );
         assert!(kind.high_priority());
     }

@@ -1,5 +1,6 @@
 //! The whatsapp-rust driver: one `Bot` per instance, all in this process.
 
+pub mod calls;
 pub mod convert;
 pub mod groups;
 pub mod history;

@@ -22,6 +22,7 @@ use whatsapp_rust::wacore::types::events::ConnectFailureReason;
 use whatsapp_rust::wacore::types::presence::{ChatPresence, ChatPresenceMedia, ReceiptType};
 use whatsapp_rust::waproto::buffa::Message as _;
 
+use super::calls::{CallBackend, WaCalls};
 use super::convert::{self, Converted};
 use super::{groups, history, media, reaction};
 use crate::driver::{DriverError, EventSink, SendMedia, WaDriver};
@@ -304,6 +305,9 @@ impl WaRuntime {
                     EventKind::StreamReplaced,
                     EventKind::TemporaryBan,
                     EventKind::ConnectFailure,
+                    EventKind::IncomingCall,
+                    EventKind::MissedCall,
+                    EventKind::CallEndedElsewhere,
                 ],
                 {
                     let sink = sink.clone();
@@ -585,6 +589,9 @@ async fn handle_event(
                     .await;
             }
         }
+        Event::IncomingCall(call) => sink.calls().on_incoming(call),
+        Event::MissedCall(missed) => sink.calls().on_missed(&missed.call_id),
+        Event::CallEndedElsewhere(ended) => sink.calls().on_ended_elsewhere(&ended.call_id),
         Event::StreamReplaced(_) => {
             log::warn!("{instance}: another client took over this WhatsApp session");
             sink.emit(status(instance, InstanceState::Disconnected, None, None))
@@ -758,6 +765,11 @@ impl WaDriver for WaRuntime {
     fn groups(&self, instance: &InstanceId) -> BoxFuture<'_, Result<Vec<GroupInfo>, DriverError>> {
         let instance = instance.clone();
         Box::pin(async move { self.group_infos(&instance, None).await })
+    }
+
+    fn call_backend(&self, instance: &InstanceId) -> Result<Arc<dyn CallBackend>, DriverError> {
+        let (client, _) = self.client_of(instance)?;
+        Ok(Arc::new(WaCalls::new(client)))
     }
 
     fn group(

@@ -29,7 +29,8 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
 ureq = { version = "3", features = ["json"] }
-whatsapp-rust.workspace = true
+# `voip-mlow` is pure Rust; `voip` and `voip-libopus` would need C libopus.
+whatsapp-rust = { workspace = true, features = ["voip-mlow"] }
 
 [dev-dependencies]
 rovsti_wa_client.workspace = true

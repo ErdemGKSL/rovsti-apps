@@ -66,6 +66,7 @@ pub fn router(state: AppState) -> Router {
         .route(r::REACT, post(react))
         .route(r::GROUPS, get(groups))
         .route(r::GROUP, get(group))
+        .merge(crate::wa::calls::routes())
         .with_state(state)
 }
 
@@ -214,6 +215,7 @@ async fn delete_instance(State(state): State<AppState>, auth: Authed) -> ApiResu
     state.driver().stop(&auth.instance).await;
     state.store().delete_instance(auth.instance.clone()).await?;
     state.hub().remove(&auth.instance);
+    state.forget_calls(&auth.instance);
     Ok(StatusCode::NO_CONTENT)
 }
 

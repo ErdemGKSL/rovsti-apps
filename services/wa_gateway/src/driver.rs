@@ -13,6 +13,7 @@ use crate::hub::Hub;
 use crate::now_ms;
 use crate::push::{PushKind, Pusher, should_push};
 use crate::store::{InstanceId, Store};
+use crate::wa::calls::{CallBackend, CallTable};
 
 /// A file to send as a media message.
 #[derive(Clone)]
@@ -44,6 +45,7 @@ pub struct EventSink {
     hub: Arc<Hub>,
     store: Store,
     pusher: Arc<dyn Pusher>,
+    calls: Arc<CallTable>,
 }
 
 impl std::fmt::Debug for EventSink {
@@ -53,13 +55,25 @@ impl std::fmt::Debug for EventSink {
 }
 
 impl EventSink {
-    pub fn new(instance: InstanceId, hub: Arc<Hub>, store: Store, pusher: Arc<dyn Pusher>) -> Self {
+    pub fn new(
+        instance: InstanceId,
+        hub: Arc<Hub>,
+        store: Store,
+        pusher: Arc<dyn Pusher>,
+        calls: Arc<CallTable>,
+    ) -> Self {
         Self {
             instance,
             hub,
             store,
             pusher,
+            calls,
         }
+    }
+
+    /// The instance's voice calls: drivers report call events here.
+    pub fn calls(&self) -> &Arc<CallTable> {
+        &self.calls
     }
 
     pub fn instance(&self) -> &InstanceId {
@@ -298,6 +312,11 @@ pub trait WaDriver: Send + Sync + 'static {
         instance: &InstanceId,
         jid: String,
     ) -> BoxFuture<'_, Result<GroupInfo, DriverError>>;
+
+    /// What the voice-call table asks of WhatsApp for `instance`.
+    fn call_backend(&self, _instance: &InstanceId) -> Result<Arc<dyn CallBackend>, DriverError> {
+        Err(DriverError::NotConnected)
+    }
 }
 
 /// Refuses to start sessions, so the gateway can serve its API without
@@ -416,6 +435,7 @@ mod fake {
     use rovsti_wa_proto::{InstanceState, InstanceStatus, MessageBody};
 
     use super::*;
+    use crate::wa::calls::fake::{FakeCalls, offer};
 
     /// Scripted in-memory driver: linking emits a `Qr` (or `PairCode`) and
     /// then `State(Connected)`; sent texts come back as `Message` events.
@@ -425,6 +445,7 @@ mod fake {
         started: Mutex<Vec<(InstanceId, Option<LinkRequest>)>>,
         ops: Mutex<Vec<String>>,
         groups: Mutex<Vec<GroupInfo>>,
+        calls: Arc<FakeCalls>,
         counter: AtomicU64,
     }
 
@@ -455,6 +476,18 @@ mod fake {
         /// The groups `groups()` and `group()` report.
         pub fn set_groups(&self, groups: Vec<GroupInfo>) {
             *self.groups.lock().unwrap_or_else(|e| e.into_inner()) = groups;
+        }
+
+        /// The scripted call backend every instance shares.
+        pub fn calls(&self) -> &Arc<FakeCalls> {
+            &self.calls
+        }
+
+        /// Makes `instance` ring: an incoming call `call_id` from `from`.
+        pub fn ring(&self, instance: &InstanceId, call_id: &str, from: &str, name: Option<&str>) {
+            if let Some(sink) = self.sink(instance) {
+                sink.calls().on_incoming(&offer(call_id, from, name));
+            }
         }
 
         fn record(&self, instance: &InstanceId, op: String) -> Result<(), DriverError> {
@@ -728,6 +761,11 @@ mod fake {
                         .ok_or_else(|| DriverError::BadRequest(format!("unknown group {jid}")))
                 });
             Box::pin(async move { result })
+        }
+
+        fn call_backend(&self, instance: &InstanceId) -> Result<Arc<dyn CallBackend>, DriverError> {
+            self.sink(instance).ok_or(DriverError::NotConnected)?;
+            Ok(Arc::clone(&self.calls) as Arc<dyn CallBackend>)
         }
     }
 }

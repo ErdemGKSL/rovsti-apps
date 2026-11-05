@@ -113,6 +113,44 @@ Pure Kotlin (`ComposeRequest`, the Rust answers) has JVM tests in
 `app/src/test/kotlin/dev/rovsti/messages`. Build: `gpuiforge build android` in `apps/messages`.
 Device checks are in [messages-acceptance.md](messages-acceptance.md).
 
+## Stops host
+
+`apps/stops/platforms/android` is ejected like Contacts and Messages: `gpuiforge.json` has
+`management: manual`, `project-dir: platforms/android`, activity `dev.rovsti.stops.MainActivity`,
+`min_sdk` 34 and `target_sdk` 36. The shared Kotlin bridge is a Gradle source directory
+(`crates/rovsti_android/kotlin`), not a copy. Permissions: `ACCESS_FINE_LOCATION`,
+`ACCESS_COARSE_LOCATION`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS`,
+`USE_FULL_SCREEN_INTENT`, `VIBRATE`, `WAKE_LOCK`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`,
+`USE_EXACT_ALARM` (Stops is an alarm app; no `SCHEDULE_EXACT_ALARM`), `RECEIVE_BOOT_COMPLETED`,
+`ACCESS_NETWORK_STATE` and `INTERNET` (gateway, arriving-soon message only).
+
+| Component | Does |
+| --- | --- |
+| `TripService` (`foregroundServiceType="location"`) | location updates; each fix goes to `Headless.call("trip_fix", ...)`, the answer sets the next interval, the ongoing notification and the ring |
+| `TripWatchdogReceiver` | exact alarm that asks for a fix when none arrived (Doze) |
+| `AlarmActivity` | plain Views over the lock screen: Dismiss and Snooze; Back snoozes |
+| `TripAlarmReceiver` | snooze fire and the notification's Dismiss/Snooze actions, through `Headless.call("trip_alarm", ...)` |
+| `BootReceiver` | ends a trip left running before a reboot (`trip_end`, `cancelled`) |
+| `MainActivity` | `VIEW` for `geo:` and the maps hosts (`maps.google.com`, `www.google.com/maps`, `www.openstreetmap.org`, `maps.apple.com`), `SEND text/plain`; both reach Rust through `Application::on_open_urls` and `on_receive_share` |
+
+`RovstiStopsApp.onCreate` installs the bridge and sets `Headless.libName = "rovsti_stops"`. Kinds and
+JSON of the headless call are documented at the top of `apps/stops/src/headless.rs`.
+
+**Settings that reach Kotlin.** Sound and vibration are read by `TripAlarm.ring` from
+`stops-prefs.json` in the data directory of the last trip (both on when the file is missing or
+unreadable, so a test ring before the first trip uses the defaults). The snooze length is applied in
+Rust (`trip_alarm`, `snooze_min`). The Settings tab also offers the battery exemption
+(`xiaomi::request_ignore_battery_optimizations`), the Xiaomi autostart page when `xiaomi::detect()`
+finds MIUI or HyperOS, and the exact-alarm status.
+
+**Doze.** Snooze uses `setAlarmClock`, which Doze lets through; the watchdog is an exact alarm. If
+`canScheduleExactAlarms()` is false they fall back to `setExactAndAllowWhileIdle`, which may be late.
+HyperOS can still delay location for a foreground service; the battery and autostart rows are the
+mitigation. None of this has run on a phone: the open item is in [roadmap.md](roadmap.md#rovsti-stops).
+
+Desktop: `ROVSTI_STOPS_SIMULATE=1 cargo run -p rovsti_stops` feeds synthetic fixes through the same
+headless handler. Build on Android: `gpuiforge build android` in `apps/stops`.
+
 ## WhatsApp push and call audio
 
 WhatsApp lives on the gateway ([architecture.md](architecture.md#whatsapp-gateway)).

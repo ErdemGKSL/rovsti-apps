@@ -103,9 +103,16 @@ list in `docs/phone-acceptance.md`.
 
 ## Rovsti Stops
 
-- [ ] Foreground location service → `Trip::update`, using `next_fix_in` for battery
-- [ ] Full-screen alarm with sound, vibration and snooze, which survives Doze
-- [ ] Pick destination: from shared `geo:` URIs and maps links, saved stops, and the last trips
-- [ ] Offline map tiles or a minimal vector map (decide: bundled region vs user import)
-- [ ] Optional GTFS import for stop names and line-aware alarms ("2 stops before")
-- [ ] Trip history and statistics, all local
+- [x] Foreground location service → `Trip::update`, using `next_fix_in` for battery
+      (done without a device)
+- [x] Full-screen alarm with sound, vibration and snooze, which survives Doze
+      (done without a device)
+- [x] Pick destination: from shared `geo:` URIs and maps links, saved stops, and the last trips
+      (done without a device)
+- [x] Offline map tiles or a minimal vector map (decided: vector radar map, no tiles)
+- [x] Optional GTFS import for stop names and line-aware alarms ("2 stops before")
+      (done without a device)
+- [x] Trip history and statistics, all local (done without a device)
+- [x] Arriving-soon WhatsApp message: one chat, a template, with the alarm or 5/10/15 min
+      before, through the gateway (done without a device)
+- [ ] Check the trip, alarm and Doze on a phone: written without a device

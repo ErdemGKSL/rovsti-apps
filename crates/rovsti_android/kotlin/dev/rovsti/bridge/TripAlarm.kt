@@ -57,6 +57,20 @@ internal fun tripAlarmEventJson(event: String, atMs: Long? = null): String {
 internal fun tripAlarmRequestJson(dir: String, action: String): String =
     JSONObject().put("dir", dir).put("action", action).toString()
 
+/** Pure: which parts of the alarm the user kept on, from `stops-prefs.json` (both on when unreadable). */
+internal fun alarmChannels(prefsJson: String?): Pair<Boolean, Boolean> {
+    if (prefsJson.isNullOrBlank()) return true to true
+    return try {
+        val o = JSONObject(prefsJson)
+        val sound = o.optBoolean("sound", true)
+        val vibrate = o.optBoolean("vibrate", true)
+        // Never silent: Stops refuses to turn both off, and a hand-edited file gets the sound back.
+        if (!sound && !vibrate) true to vibrate else sound to vibrate
+    } catch (_: JSONException) {
+        true to true
+    }
+}
+
 /**
  * The destination alarm (AD-ST3). Needs no GPUI: a `CATEGORY_ALARM` notification with a full-screen intent
  * to [AlarmActivity], an alarm-stream ringtone, a looping vibration and a wake lock capped at 10 minutes.
@@ -95,8 +109,9 @@ object TripAlarm {
             testRing = test
             cancelSnooze(app)
             postNotification(app)
-            startSound(app)
-            startVibration(app)
+            val (sound, vibrate) = alarmChannels(readPrefs(app))
+            if (sound) startSound(app)
+            if (vibrate) startVibration(app)
             holdWakeLock(app)
             val cap = Runnable { silence(app) }
             capTask = cap
@@ -179,6 +194,13 @@ object TripAlarm {
 
     /** The title and text the activity shows. */
     fun message(): Pair<String, String> = "Wake up" to "You are close to your destination"
+
+    /** The Stops preferences file in the data directory of the last trip; null before the first trip. */
+    private fun readPrefs(context: Context): String? = try {
+        TripPrefs.dir(context)?.let { java.io.File(it, "stops-prefs.json").takeIf { f -> f.isFile }?.readText() }
+    } catch (_: java.io.IOException) {
+        null
+    }
 
     private fun silence(context: Context) {
         synchronized(lock) {

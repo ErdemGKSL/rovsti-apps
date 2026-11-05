@@ -6,6 +6,7 @@
 //! * `trip_ui`: the Trip tab, the live card and the alarm screen.
 //! * `picker`: the destination sheet and the shared-location confirmation.
 //! * `saved_ui`: the Saved tab.
+//! * `settings_ui`: the Settings list, History, and the arriving-soon message page.
 //! * `headless` / `store`: the trip logic Kotlin calls with no UI running.
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -40,12 +41,14 @@ mod headless;
 mod map;
 mod picker;
 mod saved_ui;
+mod settings_ui;
 mod store;
 mod transit;
 mod trip_ui;
 
 use backend::Preflight;
 use picker::{Destination, SheetMode};
+use settings_ui::{ChatList, SettingsPage};
 use trip_ui::{AlarmView, Live};
 
 const TABS: [&str; 3] = ["Trip", "Saved", "Settings"];
@@ -111,6 +114,15 @@ pub(crate) struct StopsApp {
     pill: NoticePill,
     pill_action: Option<(u64, PillAction)>,
     pub(crate) whatsapp: Entity<WhatsAppSettings>,
+
+    /// The page open in the Settings tab.
+    pub(crate) settings_page: SettingsPage,
+    /// The arriving-soon template being edited.
+    pub(crate) template_field: Entity<TextField>,
+    /// The chats the message can go to.
+    pub(crate) chats: ChatList,
+    /// Clear history was tapped once.
+    pub(crate) confirm_clear: bool,
 }
 
 impl StopsApp {
@@ -124,6 +136,9 @@ impl StopsApp {
         cx.observe(&whatsapp, |_, _, cx| cx.notify()).detach();
         let field = cx.new(TextField::new);
         cx.observe(&field, |_, _, cx| cx.notify()).detach();
+        let template_field = cx.new(TextField::new);
+        cx.observe(&template_field, |this, _, cx| this.on_template_edited(cx))
+            .detach();
 
         // Coming back from a permission page or the lock screen: the service
         // may have changed the trip, and the grants may have changed.
@@ -237,6 +252,10 @@ impl StopsApp {
             pill: NoticePill::new(),
             pill_action: None,
             whatsapp,
+            settings_page: SettingsPage::default(),
+            template_field,
+            chats: ChatList::default(),
+            confirm_clear: false,
         };
         app.refresh_preflight_later(cx);
         app
@@ -321,6 +340,8 @@ impl StopsApp {
             self.alarm_action(AlarmAction::Snooze, cx);
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
+        } else if self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main {
+            self.open_settings(SettingsPage::Main, cx);
         }
     }
 
@@ -422,15 +443,10 @@ impl Render for StopsApp {
         let body = match tab {
             0 => self.trip_tab(theme, cx),
             1 => self.saved_tab(theme, cx),
-            // Transit data, then the shared WhatsApp screen with its own sections.
-            _ => div()
-                .flex()
-                .flex_col()
-                .gap(px(24.0))
-                .child(self.transit_section(theme, cx))
-                .child(self.whatsapp.clone())
-                .into_any_element(),
+            _ => self.settings_tab(theme, window, cx),
         };
+        // A Settings page brings its own back button and title.
+        let titled = tab != 2 || self.settings_page == SettingsPage::Main;
 
         // The keyboard covers the bottom of the screen: leave room to scroll.
         let insets = window.insets();
@@ -461,7 +477,7 @@ impl Render for StopsApp {
                         div()
                             .relative()
                             .top(px(self.page.offset(24.0)))
-                            .child(large_title(theme, TABS[tab], None))
+                            .children(titled.then(|| large_title(theme, TABS[tab], None)))
                             .child(body),
                     ),
             )
@@ -474,6 +490,9 @@ impl Render for StopsApp {
                         if this.tabs.select(index) {
                             this.expanded = None;
                             this.page.restart();
+                            if index == 2 {
+                                this.refresh_preflight(cx);
+                            }
                         }
                         cx.notify();
                     });

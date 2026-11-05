@@ -12,6 +12,7 @@ use rovsti_android::{
     Error as AndroidError, permissions,
     permissions::{Access, Group},
     trip::{self, AlarmAction},
+    xiaomi,
 };
 use rovsti_geo::{
     ActiveTrip, AlarmRule, Coord, EARTH_RADIUS_M, Feed, FixIn, History, NoticePrefs, Outcome,
@@ -70,6 +71,17 @@ pub fn save_places(dir: &Path, saved: &SavedPlaces) {
     log_save(storage::save_json(dir, store::SAVED_FILE, saved));
 }
 
+/// Empties the history. Holds the trip lock like `store::end_trip`, which
+/// appends to the same file from the service's thread.
+pub fn clear_history(dir: &Path) {
+    let _guard = store::lock();
+    log_save(storage::save_json(
+        dir,
+        store::HISTORY_FILE,
+        &History::default(),
+    ));
+}
+
 fn log_save(result: std::io::Result<()>) {
     if let Err(error) = result {
         log::warn!("could not save a Stops file: {error}");
@@ -85,6 +97,12 @@ pub struct Preflight {
     pub location: Option<Access>,
     pub notifications: Option<Access>,
     pub full_screen: Option<bool>,
+    /// The app may run in the background without battery limits.
+    pub unrestricted_battery: Option<bool>,
+    /// The system lets the app set exact alarms (snooze, watchdog).
+    pub exact_alarms: Option<bool>,
+    /// MIUI or HyperOS: the autostart page matters.
+    pub xiaomi_os: bool,
 }
 
 /// The one thing to do next before a trip can start.
@@ -142,6 +160,9 @@ impl Preflight {
             location: answer(permissions::state(Group::Location)),
             notifications: answer(permissions::state(Group::Notifications)),
             full_screen: answer(permissions::can_use_full_screen_intent()),
+            unrestricted_battery: answer(xiaomi::is_ignoring_battery_optimizations()),
+            exact_alarms: answer(trip::can_schedule_exact_alarms()),
+            xiaomi_os: xiaomi::detect().is_some(),
         }
     }
 
@@ -358,8 +379,30 @@ mod tests {
         Preflight {
             location: l,
             notifications: n,
-            full_screen: None,
+            ..Preflight::default()
         }
+    }
+
+    #[test]
+    fn clearing_the_history_empties_the_file_and_keeps_the_trip() {
+        let dir = tmp("backend-clear");
+        let trip = build_trip(
+            4,
+            "Home",
+            DEST,
+            AlarmRule::Radius { metres: 500.0 },
+            1,
+            None,
+        );
+        store::save_trip(&dir, &trip).unwrap();
+        store::end_trip(&dir, Outcome::Arrived, 9).unwrap();
+        store::save_trip(&dir, &trip).unwrap();
+        assert_eq!(reload_trip(&dir).1.records.len(), 1);
+
+        clear_history(&dir);
+        let (running, history) = reload_trip(&dir);
+        assert!(history.records.is_empty());
+        assert_eq!(running.unwrap().id, 4);
     }
 
     #[test]
@@ -386,6 +429,7 @@ mod tests {
             location: Some(Access::Granted),
             notifications: Some(Access::Granted),
             full_screen: Some(false),
+            ..Preflight::default()
         };
         assert_eq!(p.next_step(), None);
         assert!(p.full_screen_missing());

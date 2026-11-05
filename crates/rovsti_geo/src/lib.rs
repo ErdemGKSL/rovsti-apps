@@ -23,7 +23,7 @@ pub use gtfs::{Feed, FeedBuilder, FeedReport, GtfsError, Pattern, Route, Stop, r
 pub use history::{History, Outcome, Stats, TripRecord};
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};
 pub use places::{Place, PlaceError, SavedPlaces};
-pub use prefs::{NoticePrefs, NoticeWhen, RuleChoice, StopsPrefs};
+pub use prefs::{NOTICE_MINUTES, NoticePrefs, NoticeWhen, RuleChoice, SNOOZE_CHOICES, StopsPrefs};
 pub use session::{
     ActiveTrip, FixIn, FixOut, FixOutcome, FixPos, NoticeDelivery, NoticeState, Track,
 };

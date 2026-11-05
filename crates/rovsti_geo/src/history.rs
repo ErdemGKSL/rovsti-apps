@@ -98,6 +98,17 @@ pub struct Stats {
     pub top: Vec<(String, u32)>,
 }
 
+impl Stats {
+    /// Share of trips that ended with the alarm, rounded; 0 without trips.
+    pub fn arrived_percent(&self) -> u32 {
+        if self.trips == 0 {
+            return 0;
+        }
+        let share = f64::from(self.arrived) * 100.0 / f64::from(self.trips);
+        share.round() as u32
+    }
+}
+
 impl History {
     /// Adds a record at the front and drops the oldest beyond the cap.
     pub fn push(&mut self, record: TripRecord) {
@@ -235,6 +246,17 @@ mod tests {
                 ("Home".to_owned(), 1)
             ]
         );
+    }
+
+    #[test]
+    fn arrived_percent_rounds() {
+        let mut s = Stats::default();
+        assert_eq!(s.arrived_percent(), 0);
+        s.trips = 3;
+        s.arrived = 2;
+        assert_eq!(s.arrived_percent(), 67);
+        s.arrived = 3;
+        assert_eq!(s.arrived_percent(), 100);
     }
 
     #[test]

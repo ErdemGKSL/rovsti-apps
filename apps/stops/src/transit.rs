@@ -265,7 +265,7 @@ pub struct Transit {
     pub skipped_rows: u64,
 }
 
-fn note(theme: Theme, text: impl Into<SharedString>, error: bool) -> AnyElement {
+pub(crate) fn note(theme: Theme, text: impl Into<SharedString>, error: bool) -> AnyElement {
     let colors = theme::colors(theme);
     div()
         .px(px(20.0))

@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::AlarmRule;
-use crate::notice::DEFAULT_TEMPLATE;
+use crate::notice::{DEFAULT_TEMPLATE, TemplateError, validate};
 use crate::session::NoticeState;
 
 /// The "Wake me" choices.
@@ -49,6 +49,11 @@ impl RuleChoice {
     }
 }
 
+/// Snooze lengths the Settings row cycles through, minutes.
+pub const SNOOZE_CHOICES: [u8; 5] = [1, 3, 5, 10, 15];
+/// "Minutes before" choices for the arriving-soon message.
+pub const NOTICE_MINUTES: [u8; 3] = [5, 10, 15];
+
 /// When the "arriving soon" message goes out.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NoticeWhen {
@@ -57,6 +62,23 @@ pub enum NoticeWhen {
     WithAlarm,
     /// This many minutes before arrival.
     MinutesBefore(u8),
+}
+
+impl NoticeWhen {
+    /// The choices in the order the page lists them.
+    pub const ALL: [Self; 4] = [
+        Self::WithAlarm,
+        Self::MinutesBefore(NOTICE_MINUTES[0]),
+        Self::MinutesBefore(NOTICE_MINUTES[1]),
+        Self::MinutesBefore(NOTICE_MINUTES[2]),
+    ];
+
+    pub fn label(self) -> String {
+        match self {
+            Self::WithAlarm => "With the alarm".to_owned(),
+            Self::MinutesBefore(m) => format!("{m} min before"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +104,14 @@ impl Default for NoticePrefs {
 }
 
 impl NoticePrefs {
+    /// Takes `text` as the template when it passes [`validate`]; otherwise
+    /// the old template stays and the reason comes back.
+    pub fn set_template(&mut self, text: &str) -> Result<(), TemplateError> {
+        validate(text)?;
+        self.template = text.trim().to_owned();
+        Ok(())
+    }
+
     /// The notice for a new trip whose own alarm is `alarm`. "With the
     /// alarm" copies that rule; "N minutes before" is an ETA rule of its own,
     /// which falls back to a distance when the speed is unusable.
@@ -126,10 +156,87 @@ impl Default for StopsPrefs {
     }
 }
 
+impl StopsPrefs {
+    /// Flips the alarm sound. The last of sound and vibration cannot be
+    /// turned off (a silent alarm would not wake anyone): returns `false`
+    /// and changes nothing then.
+    pub fn toggle_sound(&mut self) -> bool {
+        if self.sound && !self.vibrate {
+            return false;
+        }
+        self.sound = !self.sound;
+        true
+    }
+
+    /// Flips the vibration, with the same rule as [`Self::toggle_sound`].
+    pub fn toggle_vibrate(&mut self) -> bool {
+        if self.vibrate && !self.sound {
+            return false;
+        }
+        self.vibrate = !self.vibrate;
+        true
+    }
+
+    /// The next snooze length in [`SNOOZE_CHOICES`] (wrapping); a stored
+    /// value outside the list moves to the first choice that is longer.
+    pub fn next_snooze(&self) -> u8 {
+        SNOOZE_CHOICES
+            .into_iter()
+            .find(|m| *m > self.snooze_min)
+            .unwrap_or(SNOOZE_CHOICES[0])
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sound_and_vibration_are_never_both_off() {
+        let mut p = StopsPrefs::default();
+        assert!(p.toggle_sound());
+        assert!(!p.sound && p.vibrate);
+        assert!(!p.toggle_vibrate());
+        assert!(p.vibrate);
+        assert!(p.toggle_sound());
+        assert!(p.toggle_vibrate());
+        assert!(p.sound && !p.vibrate);
+    }
+
+    #[test]
+    fn snooze_cycles_and_wraps() {
+        let mut p = StopsPrefs::default();
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            p.snooze_min = p.next_snooze();
+            seen.push(p.snooze_min);
+        }
+        assert_eq!(seen, [10, 15, 1, 3, 5, 10]);
+        p.snooze_min = 7;
+        assert_eq!(p.next_snooze(), 10);
+        p.snooze_min = 200;
+        assert_eq!(p.next_snooze(), 1);
+    }
+
+    #[test]
+    fn template_is_kept_only_when_valid() {
+        let mut n = NoticePrefs::default();
+        assert!(n.set_template("  Almost at {stop}  ").is_ok());
+        assert_eq!(n.template, "Almost at {stop}");
+        assert_eq!(n.set_template("   "), Err(TemplateError::Empty));
+        assert_eq!(
+            n.set_template(&"x".repeat(501)),
+            Err(TemplateError::TooLong)
+        );
+        assert_eq!(n.template, "Almost at {stop}");
+    }
+
+    #[test]
+    fn notice_when_choices() {
+        assert_eq!(NoticeWhen::ALL[0].label(), "With the alarm");
+        assert_eq!(NoticeWhen::ALL[2].label(), "10 min before");
+    }
 
     #[test]
     fn defaults() {

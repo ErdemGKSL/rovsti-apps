@@ -12,6 +12,22 @@ import java.io.ByteArrayOutputStream
 
 /** The pure JSON and decision helpers of the Messages seam (step 5). */
 class MessagesSeamTest {
+    // ---- Documents (attachment pick) -------------------------------------------------------
+
+    @Test fun attachmentPickHasItsOwnOp() {
+        assertEquals("attachment", Documents.fileOp(Documents.REQUEST_ATTACH_FILE))
+        assertEquals("import_messages", Documents.fileOp(Documents.REQUEST_IMPORT_FILE))
+        assertEquals("export_messages", Documents.fileOp(Documents.REQUEST_EXPORT_FILE))
+        assertTrue(Documents.REQUEST_ATTACH_FILE != Documents.REQUEST_IMPORT_FILE)
+    }
+
+    @Test fun documentResultCarriesMimeOnlyWhenGiven() {
+        val o = JSONObject(Documents.resultJson("attachment", true, "a.jpg", path = "/c/x.bin", mime = "image/jpeg"))
+        assertEquals("attachment", o.getString("op"))
+        assertEquals("image/jpeg", o.getString("mime"))
+        assertFalse(JSONObject(Documents.resultJson("import_messages", true, path = "/c/m")).has("mime"))
+    }
+
     // ---- SmsJson ----------------------------------------------------------------------------
 
     @Test fun deliveryFollowsBoxAndStatus() {

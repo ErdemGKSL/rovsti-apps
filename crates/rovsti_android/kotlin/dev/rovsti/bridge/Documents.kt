@@ -25,6 +25,7 @@ object Documents {
 
     const val REQUEST_EXPORT_FILE = 0x4546 // "EF"
     const val REQUEST_IMPORT_FILE = 0x4946 // "IF"
+    const val REQUEST_ATTACH_FILE = 0x4146 // "AF"
 
     /** The cap for a file import: an encrypted message archive can be large (AD-MSG7). */
     const val MAX_FILE_BYTES = 64 * 1024 * 1024
@@ -92,13 +93,23 @@ object Documents {
         }
     }
 
-    /** The picker for a file of at most [maxBytes]; the result's `path` is a copy in the app cache. */
-    fun startFileImport(activity: Activity, maxBytes: Int): Boolean {
+    /** Pure: the `document_result` op a file picker request code answers with. */
+    fun fileOp(requestCode: Int): String = when (requestCode) {
+        REQUEST_EXPORT_FILE -> "export_messages"
+        REQUEST_ATTACH_FILE -> "attachment"
+        else -> "import_messages"
+    }
+
+    /**
+     * The picker for a file of at most [maxBytes]; the result's `path` is a copy in the app cache.
+     * With [attachment] the answer is op `attachment` (with `mime`), else `import_messages`.
+     */
+    fun startFileImport(activity: Activity, maxBytes: Int, attachment: Boolean = false): Boolean {
         pendingFileMax = fileCap(maxBytes)
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
         return try {
             @Suppress("DEPRECATION")
-            activity.startActivityForResult(intent, REQUEST_IMPORT_FILE)
+            activity.startActivityForResult(intent, if (attachment) REQUEST_ATTACH_FILE else REQUEST_IMPORT_FILE)
             true
         } catch (_: android.content.ActivityNotFoundException) {
             false
@@ -122,7 +133,7 @@ object Documents {
         context: Context, requestCode: Int, resultCode: Int, data: Intent?, worker: java.util.concurrent.Executor, emit: (String) -> Unit,
     ) {
         val export = requestCode == REQUEST_EXPORT_FILE
-        val op = if (export) "export_messages" else "import_messages"
+        val op = fileOp(requestCode)
         val uri = data?.data
         val source = pendingFilePath
         val max = pendingFileMax
@@ -148,7 +159,10 @@ object Documents {
                             target.outputStream().use { copyLimited(input, it, max) }
                         }
                         if (fits == true) {
-                            resultJson(op, true, name, path = target.absolutePath)
+                            resultJson(
+                                op, true, name, path = target.absolutePath,
+                                mime = if (op == "attachment") context.contentResolver.getType(uri) else null,
+                            )
                         } else {
                             target.delete()
                             resultJson(op, false, name, error = if (fits == null) "unavailable" else "too_large")
@@ -191,11 +205,12 @@ object Documents {
     }
 
     /** `rovsti_core::wire::DocumentResult`. */
-    fun resultJson(op: String, ok: Boolean, name: String? = null, text: String? = null, error: String? = null, path: String? = null): String {
+    fun resultJson(op: String, ok: Boolean, name: String? = null, text: String? = null, error: String? = null, path: String? = null, mime: String? = null): String {
         val o = JSONObject().put("op", op).put("ok", ok)
         name?.let { o.put("name", it) }
         text?.let { o.put("text", it) }
         path?.let { o.put("path", it) }
+        mime?.let { o.put("mime", it) }
         error?.let { o.put("error", it) }
         return o.toString()
     }
@@ -221,7 +236,7 @@ object Documents {
         worker: java.util.concurrent.Executor,
         emit: (String) -> Unit,
     ): Boolean {
-        if (requestCode == REQUEST_EXPORT_FILE || requestCode == REQUEST_IMPORT_FILE) {
+        if (requestCode == REQUEST_EXPORT_FILE || requestCode == REQUEST_IMPORT_FILE || requestCode == REQUEST_ATTACH_FILE) {
             handleFile(context, requestCode, resultCode, data, worker, emit)
             return true
         }

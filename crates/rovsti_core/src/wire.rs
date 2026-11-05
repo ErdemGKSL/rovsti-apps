@@ -880,6 +880,9 @@ pub enum DocumentOp {
     ExportMessages,
     /// Rovsti Messages: an archive was picked and copied to `path`.
     ImportMessages,
+    /// Rovsti Messages: a file to attach was picked and copied to `path`
+    /// (its type is in `mime`).
+    Attachment,
     #[default]
     #[serde(other)]
     Unknown,
@@ -901,6 +904,9 @@ pub struct DocumentResult {
     /// An import by file: where Kotlin copied the document (app cache).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+    /// An attachment pick: the MIME type the provider reports, when it does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<WireError>,
 }
@@ -1151,5 +1157,34 @@ mod tests {
         assert_eq!(s.accept(), Err(NewerVersion(2)));
         let ok: CallSnapshot = serde_json::from_str(r#"{"v":1}"#).expect("parse");
         assert!(ok.accept().is_ok());
+    }
+
+    #[test]
+    fn attachment_result_carries_its_mime() {
+        let r: DocumentResult = serde_json::from_str(
+            r#"{"op":"attachment","ok":true,"name":"a.jpg","path":"/c/x.bin","mime":"image/jpeg"}"#,
+        )
+        .expect("parse");
+        assert_eq!(r.op, DocumentOp::Attachment);
+        assert_eq!(r.mime.as_deref(), Some("image/jpeg"));
+        assert_eq!(r.path.as_deref(), Some("/c/x.bin"));
+    }
+
+    #[test]
+    fn old_document_result_has_no_mime() {
+        let r: DocumentResult =
+            serde_json::from_str(r#"{"op":"import_messages","ok":true,"path":"/c/m.rmb"}"#)
+                .expect("parse");
+        assert_eq!(r.op, DocumentOp::ImportMessages);
+        assert_eq!(r.mime, None);
+        let json = serde_json::to_string(&r).expect("serialize");
+        assert!(!json.contains("mime"));
+    }
+
+    #[test]
+    fn unknown_document_op_stays_unknown() {
+        let r: DocumentResult =
+            serde_json::from_str(r#"{"op":"teleport","ok":false}"#).expect("parse");
+        assert_eq!(r.op, DocumentOp::Unknown);
     }
 }

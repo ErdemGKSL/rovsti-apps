@@ -953,16 +953,18 @@ impl Backend {
         .detach();
     }
 
-    /// Opens the system picker for a picture. The answer is a
+    /// Opens the system picker for a file to attach. The answer is a
     /// [`BackendEvent::Document`]; where there is no picker it is a refusal.
     pub fn pick_attachment(&mut self, cx: &mut Context<Self>) {
-        let task = cx.background_executor().spawn(async { documents_import() });
+        let task = cx
+            .background_executor()
+            .spawn(async { documents_pick_attachment() });
         cx.spawn(async move |this, cx| {
             let started = task.await;
             this.update(cx, |_, cx| {
                 if !started {
                     cx.emit(BackendEvent::Document(DocumentResult {
-                        op: DocumentOp::ImportMessages,
+                        op: DocumentOp::Attachment,
                         ok: false,
                         ..DocumentResult::default()
                     }));
@@ -1019,9 +1021,9 @@ pub fn collect_all(
     Ok((sms_rows, mms_rows))
 }
 
-fn documents_import() -> bool {
+fn documents_pick_attachment() -> bool {
     matches!(
-        rovsti_android::documents::import_file(ATTACH_MAX_BYTES),
+        rovsti_android::documents::pick_attachment(ATTACH_MAX_BYTES),
         Ok(true)
     )
 }

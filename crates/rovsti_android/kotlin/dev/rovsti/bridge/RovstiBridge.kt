@@ -337,7 +337,15 @@ object RovstiBridge {
     @JvmStatic
     fun importFile(maxBytes: Int): Boolean {
         val activity = foreground ?: return false
-        activity.runOnUiThread { Documents.startFileImport(activity, maxBytes) }
+        activity.runOnUiThread { Documents.startFileImport(activity, maxBytes, attachment = false) }
+        return true
+    }
+
+    /** Picker for a file to attach of at most [maxBytes]; the answer is `document_result` op `attachment` with `path` and `mime`. */
+    @JvmStatic
+    fun pickAttachment(maxBytes: Int): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startFileImport(activity, maxBytes, attachment = true) }
         return true
     }
 

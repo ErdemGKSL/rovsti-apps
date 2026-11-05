@@ -185,7 +185,7 @@ impl SmsConversation {
             BackendEvent::Status(status) => self.on_status(status, cx),
             // New messages may have arrived: read the newest page again.
             BackendEvent::SmsChanged => self.load(None, cx),
-            BackendEvent::Document(result) if result.op == DocumentOp::ImportMessages => {
+            BackendEvent::Document(result) if result.op == DocumentOp::Attachment => {
                 self.on_attachment(result.ok, result.path.clone(), cx);
             }
             _ => {}

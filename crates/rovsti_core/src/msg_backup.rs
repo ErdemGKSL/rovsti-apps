@@ -18,7 +18,9 @@ use sha2::Sha256;
 use thiserror::Error;
 
 use crate::phone_number::PhoneNumber;
+use crate::schedule::ScheduledSms;
 use crate::sms::{MmsRow, SmsRow};
+use crate::spam::SpamRules;
 
 pub const MAGIC: &[u8; 4] = b"RMB1";
 pub const VERSION: u8 = 1;
@@ -38,12 +40,10 @@ pub struct BackupBody {
     pub sms: Vec<SmsRow>,
     /// Text parts only; see [`text_only_mms`].
     pub mms: Vec<MmsRow>,
-    /// Typed in a later step.
     #[serde(default)]
-    pub spam: serde_json::Value,
-    /// Typed in a later step.
+    pub spam: SpamRules,
     #[serde(default)]
-    pub scheduled: serde_json::Value,
+    pub scheduled: Vec<ScheduledSms>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Error)]
@@ -240,7 +240,9 @@ pub fn restore_plan(backup: &BackupBody, existing: &[SmsRow]) -> RestorePlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::schedule::ScheduleTarget;
     use crate::sms::MmsPart;
+    use crate::spam::SpamRule;
 
     const FAST: u32 = 1000;
     const SALT: [u8; SALT_LEN] = [7; SALT_LEN];
@@ -270,8 +272,23 @@ mod tests {
                 }],
                 ..MmsRow::default()
             }],
-            spam: serde_json::json!({"rules": []}),
-            scheduled: serde_json::Value::Null,
+            spam: SpamRules {
+                rules: vec![SpamRule::Keyword {
+                    text: "bahis".into(),
+                }],
+                allow: vec!["PTT".into()],
+                ..SpamRules::default()
+            },
+            scheduled: vec![ScheduledSms {
+                id: 1,
+                at_ms: 1_700_000_100_000,
+                target: ScheduleTarget::Sms {
+                    to: "+905321234567".into(),
+                    sub_id: None,
+                },
+                body: "later".into(),
+                created_ms: 1_700_000_000_000,
+            }],
         }
     }
 
@@ -281,6 +298,15 @@ mod tests {
         assert_eq!(&sealed[..4], MAGIC);
         assert_eq!(sealed[4], VERSION);
         assert_eq!(open(&sealed, "correct horse"), Ok(body()));
+    }
+
+    #[test]
+    fn old_backups_without_spam_or_schedule_still_open() {
+        let body: BackupBody =
+            serde_json::from_str(r#"{"created_ms":1,"app_version":"0","sms":[],"mms":[]}"#)
+                .expect("de");
+        assert!(body.spam.enabled && body.spam.rules.is_empty());
+        assert!(body.scheduled.is_empty());
     }
 
     #[test]

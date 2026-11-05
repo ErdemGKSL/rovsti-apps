@@ -3,6 +3,7 @@ package dev.rovsti.bridge
 import android.media.AudioDeviceInfo
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -28,6 +29,27 @@ class WaIncomingTest {
         assertNull(WaIncomingNotice.of(mapOf("kind" to "message", "call_id" to "c1")))
         assertNull(WaIncomingNotice.of(mapOf("kind" to "call")))
         assertNull(WaIncomingNotice.of(mapOf("kind" to "call", "call_id" to " ")))
+    }
+
+    private fun end(vararg pairs: Pair<String, String>) =
+        mapOf("kind" to "call_end", "call_id" to "c1", "missed" to "1") + pairs
+
+    @Test fun missedNoticeNeedsMissedCallEndWithAnId() {
+        assertEquals(WaMissedNotice("c1", "Ayse"), WaMissedNotice.of(end("name" to "Ayse")))
+        assertNull(WaMissedNotice.of(end("missed" to "0")))
+        assertNull(WaMissedNotice.of(mapOf("kind" to "call_end", "call_id" to "c1")))
+        assertNull(WaMissedNotice.of(end("kind" to "call")))
+        assertNull(WaMissedNotice.of(end("call_id" to " ")))
+        assertNull(WaMissedNotice.of(mapOf("kind" to "call_end", "missed" to "1")))
+    }
+
+    @Test fun missedTitleFollowsTheSameFallbacks() {
+        assertEquals("905551234567", WaMissedNotice.of(end("from" to "905551234567:4@s.whatsapp.net"))?.title)
+        assertEquals("WhatsApp call", WaMissedNotice.of(end())?.title)
+    }
+
+    @Test fun missedNotificationIdDiffersFromTheRingingOne() {
+        assertNotEquals(WaIncoming.notificationId("c1"), WaIncoming.missedNotificationId("c1"))
     }
 
     @Test fun actionJsonCarriesIdAndAction() {

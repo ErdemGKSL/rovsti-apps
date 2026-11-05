@@ -33,11 +33,16 @@ object WaPush {
     /**
      * Call from the host's `FirebaseMessagingService.onMessageReceived` with `remoteMessage.data`.
      * A `kind=call` message shows the incoming-call notification first (the process may have no UI), then
-     * Rust gets a `wa_push` event.
+     * Rust gets a `wa_push` event. A `kind=call_end` message cancels the ringing notification and, when
+     * `missed=1`, posts a missed-call notification.
      */
     @JvmStatic
     fun onMessage(data: Map<String, String>) {
         WaIncomingNotice.of(data)?.let { WaIncoming.show(RovstiBridge.application(), it) }
+        if (data["kind"] == "call_end") {
+            data["call_id"]?.takeIf { it.isNotBlank() }?.let { WaIncoming.cancel(RovstiBridge.application(), it) }
+            WaMissedNotice.of(data)?.let { WaIncoming.showMissed(RovstiBridge.application(), it) }
+        }
         RovstiBridge.emit("wa_push", payload(data))
     }
 }

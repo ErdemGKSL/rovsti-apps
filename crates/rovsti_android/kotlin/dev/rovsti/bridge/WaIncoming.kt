@@ -11,21 +11,38 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import org.json.JSONObject
 
+/**
+ * Pure: the caller title for an FCM data message: `name`, else the user part of `from`
+ * (`123:4@s.whatsapp.net` gives `123`), else [WaIncomingNotice.FALLBACK_TITLE].
+ */
+internal fun waCallerTitle(data: Map<String, String>): String {
+    val name = data["name"]?.trim().orEmpty()
+    val user = data["from"].orEmpty().substringBefore('@').substringBefore(':').trim()
+    return name.ifEmpty { user.ifEmpty { WaIncomingNotice.FALLBACK_TITLE } }
+}
+
 /** What an FCM `kind=call` data message says about an incoming WhatsApp call. */
 data class WaIncomingNotice(val callId: String, val title: String) {
     companion object {
         const val FALLBACK_TITLE = "WhatsApp call"
 
-        /**
-         * Pure: the notice for [data], or null when it is not a call or has no `call_id`. The title is
-         * `name`, else the user part of `from` (`123:4@s.whatsapp.net` gives `123`), else [FALLBACK_TITLE].
-         */
+        /** Pure: the notice for [data], or null when it is not a call or has no `call_id`. */
         fun of(data: Map<String, String>): WaIncomingNotice? {
             if (data["kind"] != "call") return null
             val id = data["call_id"]?.takeIf { it.isNotBlank() } ?: return null
-            val name = data["name"]?.trim().orEmpty()
-            val user = data["from"].orEmpty().substringBefore('@').substringBefore(':').trim()
-            return WaIncomingNotice(id, name.ifEmpty { user.ifEmpty { FALLBACK_TITLE } })
+            return WaIncomingNotice(id, waCallerTitle(data))
+        }
+    }
+}
+
+/** What an FCM `kind=call_end` data message with `missed=1` says about a call nobody answered. */
+data class WaMissedNotice(val callId: String, val title: String) {
+    companion object {
+        /** Pure: the notice for [data], or null when it is not a missed `call_end` or has no `call_id`. */
+        fun of(data: Map<String, String>): WaMissedNotice? {
+            if (data["kind"] != "call_end" || data["missed"] != "1") return null
+            val id = data["call_id"]?.takeIf { it.isNotBlank() } ?: return null
+            return WaMissedNotice(id, waCallerTitle(data))
         }
     }
 }
@@ -37,10 +54,12 @@ data class WaIncomingNotice(val callId: String, val title: String) {
  */
 object WaIncoming {
     const val CHANNEL = "wa_calls"
+    const val MISSED_CHANNEL = "wa_missed"
     const val EXTRA_CALL_ID = "wa_call_id"
     const val EXTRA_ACTION = "wa_call_action"
     const val ANSWER = "answer"
     const val DECLINE = "decline"
+    private const val MISSED_ID_MASK = 0x5A5A5A5A
 
     /** Pure: the `wa_call_action` payload, or null for an unknown [action] or empty [callId]. */
     fun actionJson(callId: String, action: String): String? {
@@ -50,6 +69,9 @@ object WaIncoming {
 
     /** Pure: a stable notification id per call. */
     fun notificationId(callId: String): Int = callId.hashCode()
+
+    /** Pure: the missed-call notification id, distinct from [notificationId] for the same call. */
+    fun missedNotificationId(callId: String): Int = notificationId(callId) xor MISSED_ID_MASK
 
     fun show(context: Context, callId: String, title: String): Boolean =
         show(context, WaIncomingNotice(callId, title))
@@ -86,6 +108,37 @@ object WaIncoming {
                     .addAction(Notification.Action.Builder(null as Icon?, "Answer", answer).build())
             }
             manager.notify(notificationId(notice.callId), builder.build())
+            true
+        } catch (_: RuntimeException) {
+            false
+        }
+    }
+
+    /** Posts the "Missed WhatsApp call" notification; tapping it opens the launch activity. */
+    fun showMissed(context: Context, notice: WaMissedNotice): Boolean {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        if (!manager.areNotificationsEnabled()) return false
+        return try {
+            manager.createNotificationChannel(
+                NotificationChannel(MISSED_CHANNEL, "Missed WhatsApp call", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "WhatsApp calls that were not answered"
+                },
+            )
+            val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent()
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val open = PendingIntent.getActivity(
+                context, missedNotificationId(notice.callId), launch,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val notification = Notification.Builder(context, MISSED_CHANNEL)
+                .setSmallIcon(context.applicationInfo.icon)
+                .setCategory(Notification.CATEGORY_MISSED_CALL)
+                .setContentTitle(notice.title)
+                .setContentText("Missed WhatsApp call")
+                .setAutoCancel(true)
+                .setContentIntent(open)
+                .build()
+            manager.notify(missedNotificationId(notice.callId), notification)
             true
         } catch (_: RuntimeException) {
             false

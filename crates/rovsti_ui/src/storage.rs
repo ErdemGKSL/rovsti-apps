@@ -207,11 +207,25 @@ pub fn save_json<T: Serialize>(dir: &Path, name: &str, value: &T) -> std::io::Re
     fs::create_dir_all(dir)?;
     let tmp = dir.join(format!("{name}.tmp"));
     let bytes = serde_json::to_vec(value).map_err(std::io::Error::other)?;
-    let mut file = fs::File::create(&tmp)?;
+    let _ = fs::remove_file(&tmp); // a stale temp file would keep its old mode
+    let mut file = private_create(&tmp)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
     drop(file);
     fs::rename(&tmp, dir.join(name))
+}
+
+/// Creates `path` readable by the owner only: saved JSON can hold a connect
+/// key, which is a bearer secret.
+fn private_create(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 /// Reads `dir/name` as JSON. A missing, unreadable or corrupt file is `None`:

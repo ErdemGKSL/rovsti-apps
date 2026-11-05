@@ -34,6 +34,13 @@ async fn run(config_path: Option<&std::path::Path>) -> Result<(), String> {
     let config = Config::load(config_path).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&config.data_dir)
         .map_err(|e| format!("cannot create {}: {e}", config.data_dir.display()))?;
+    // WhatsApp sessions and key hashes live here: owner only.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&config.data_dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| format!("cannot restrict {}: {e}", config.data_dir.display()))?;
+    }
     let store = Store::open(&config.db_path()).map_err(|e| e.to_string())?;
 
     let pusher = wa_gateway::push::from_config(config.fcm.as_ref(), store.clone())

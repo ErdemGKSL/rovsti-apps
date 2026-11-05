@@ -669,7 +669,12 @@ impl Conversation {
 
     fn media_sent(&mut self, local_id: u64, sent: &Sent, shown: Option<Arc<Image>>) {
         self.timeline.confirm(local_id, sent);
-        self.pending_paths.remove(&local_id);
+        // The cache copy of the picked file has done its job.
+        if let Some(path) = self.pending_paths.remove(&local_id)
+            && let Err(error) = std::fs::remove_file(&path)
+        {
+            log::debug!("removing the sent attachment copy failed: {error}");
+        }
         let pending = format!("pending-{local_id}");
         self.media_cache.retain(|(cached, _)| *cached != pending);
         if let Some(image) = shown {

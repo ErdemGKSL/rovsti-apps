@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -13,6 +14,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.WRITE_CALL_LOG" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+
+    <permission
+        android:name="dev.rovsti.permission.HANDOFF"
+        android:protectionLevel="signature" />
 
     <uses-feature android:name="android.hardware.vulkan.level" android:version="0" android:required="false" />
 
@@ -65,6 +70,18 @@
                 <data android:scheme="tel" />
             </intent-filter>
         </activity>
+
+        <!-- WhatsApp handoff from a sibling Rovsti app: only same-signed apps hold the permission. -->
+        <activity-alias
+            android:name=".WaHandoff"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:permission="dev.rovsti.permission.HANDOFF">
+            <intent-filter>
+                <action android:name="dev.rovsti.action.WA_CALL" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
 
         <service
             android:name=".RovstiInCallService"

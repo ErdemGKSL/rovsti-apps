@@ -14,6 +14,10 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SEND_SMS" />
 
+    <permission
+        android:name="dev.rovsti.permission.HANDOFF"
+        android:protectionLevel="signature" />
+
     <uses-feature android:name="android.hardware.vulkan.level" android:version="0" android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
@@ -52,6 +56,18 @@
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
+
+        <!-- WhatsApp handoff from a sibling Rovsti app: only same-signed apps hold the permission. -->
+        <activity-alias
+            android:name=".WaHandoff"
+            android:targetActivity=".MainActivity"
+            android:exported="true"
+            android:permission="dev.rovsti.permission.HANDOFF">
+            <intent-filter>
+                <action android:name="dev.rovsti.action.WA_CHAT" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
 
         <!-- SMS role components (AD-MSG4): all four are required for Android to offer the role. -->
         <receiver

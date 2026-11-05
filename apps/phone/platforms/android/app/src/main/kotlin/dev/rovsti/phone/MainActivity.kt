@@ -42,6 +42,7 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
         super.onCreate(state)
         // GpuiActivity loaded the library; now resolve the JNI bridge (AD-8).
         RovstiBridge.attachNative()
+        RovstiBridge.deliverHandoff(intent)
         handleWaCallIntent(intent)
         registerDebugKill()
         showCurtainIfRinging()
@@ -50,6 +51,7 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(DialIntents.rewrite(intent))
         setLockScreenFlags(CallRegistry.hasLiveCall())
+        RovstiBridge.deliverHandoff(intent)
         handleCallIntent(intent)
         handleWaCallIntent(intent)
     }

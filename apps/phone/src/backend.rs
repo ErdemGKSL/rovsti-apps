@@ -270,6 +270,8 @@ pub struct Backend {
     wa_pushes: u64,
     /// Answer / Decline taps on a WhatsApp call notification, not yet applied.
     wa_call_actions: Vec<(String, rovsti_android::events::WaCallAction)>,
+    /// A WhatsApp handoff from a sibling app, not yet taken by the app root.
+    handoff: Option<rovsti_core::wire::Handoff>,
     last_place: Option<Instant>,
     /// A number waiting for the Phone permission, and the permission pull
     /// number it was requested at (only newer pulls may judge the answer).
@@ -407,6 +409,7 @@ impl Backend {
                 blocked_pull: 0,
                 silence_refused: false,
                 ui_request: None,
+                handoff: None,
                 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
                 preview_locked: false,
                 #[cfg(any(not(target_os = "android"), feature = "perf", test))]
@@ -935,6 +938,11 @@ impl Backend {
         std::mem::take(&mut self.wa_call_actions)
     }
 
+    /// The pending WhatsApp handoff, if any; the app root takes it once.
+    pub fn take_handoff(&mut self) -> Option<rovsti_core::wire::Handoff> {
+        self.handoff.take()
+    }
+
     /// The Phone permission was refused (or cannot be asked) for a call.
     pub fn call_blocked(&self) -> bool {
         self.call_blocked
@@ -988,6 +996,13 @@ impl Backend {
                     None => log::warn!("bad wa_call_action event"),
                 }
             }
+            kind::HANDOFF => match rovsti_core::wire::parse_handoff(&event.json) {
+                Some(handoff) => {
+                    self.handoff = Some(handoff);
+                    cx.notify();
+                }
+                None => log::warn!("ignoring a bad handoff"),
+            },
             kind::SIMS_CHANGED => self.refresh_sims(cx),
             kind::DOCUMENT_RESULT => self.on_document_result(&event.json, cx),
             kind::UI_REQUEST => {

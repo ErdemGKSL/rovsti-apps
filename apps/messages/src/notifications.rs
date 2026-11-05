@@ -12,7 +12,9 @@ use rovsti_core::{
     Message, MessageDirection, ThreadId,
     notify::{self, Incoming, MAX_LINES, NotificationSpec},
     otp,
+    wire::{Handoff, HandoffAction},
 };
+use rovsti_wa_proto::jid_user;
 use serde::Deserialize;
 
 /// The notification tag and conversation key: `sms:<id>` or `wa:<jid>`.
@@ -31,6 +33,27 @@ pub fn parse_tag(tag: &str) -> Option<ThreadId> {
     tag.strip_prefix("wa:")
         .filter(|jid| !jid.is_empty())
         .map(|jid| ThreadId::WhatsApp(jid.to_owned()))
+}
+
+/// The conversation tag a WhatsApp chat handoff opens (`wa:<jid>`); `None` for any other action.
+pub fn handoff_tag(handoff: &Handoff) -> Option<String> {
+    (handoff.action == HandoffAction::WaChat).then(|| format!("wa:{}", handoff.jid))
+}
+
+/// The title of a conversation opened from a handoff: the name of a known thread, else the name the
+/// other app sent, else the number part of the JID.
+pub fn handoff_title(known: Option<String>, handoff: &Handoff) -> String {
+    known
+        .filter(|title| !title.is_empty())
+        .or_else(|| {
+            handoff
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| jid_user(&handoff.jid).to_owned())
 }
 
 /// Whether a message deserves a notification: it came from someone else and
@@ -181,6 +204,43 @@ mod tests {
         for bad in ["", "sms:", "sms:x", "wa:", "mail:1"] {
             assert_eq!(parse_tag(bad), None, "{bad}");
         }
+    }
+
+    fn handoff(action: HandoffAction, name: Option<&str>) -> Handoff {
+        Handoff {
+            action,
+            jid: "905321234567@s.whatsapp.net".into(),
+            name: name.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn a_chat_handoff_opens_its_wa_tag_with_the_given_name() {
+        let chat = handoff(HandoffAction::WaChat, Some("Ayse"));
+        let tag = handoff_tag(&chat).expect("a chat");
+        assert_eq!(tag, "wa:905321234567@s.whatsapp.net");
+        assert_eq!(
+            parse_tag(&tag),
+            Some(ThreadId::WhatsApp("905321234567@s.whatsapp.net".into()))
+        );
+        assert_eq!(handoff_title(None, &chat), "Ayse");
+        // A thread the inbox already knows keeps its own title.
+        assert_eq!(handoff_title(Some("Ayse K.".into()), &chat), "Ayse K.");
+        // No chat yet and no name: fall back to the number.
+        assert_eq!(
+            handoff_title(None, &handoff(HandoffAction::WaChat, Some("  "))),
+            "905321234567"
+        );
+        assert_eq!(
+            handoff_title(None, &handoff(HandoffAction::WaChat, None)),
+            "905321234567"
+        );
+    }
+
+    #[test]
+    fn other_handoff_actions_open_nothing_here() {
+        assert_eq!(handoff_tag(&handoff(HandoffAction::WaCall, None)), None);
+        assert_eq!(handoff_tag(&handoff(HandoffAction::Unknown, None)), None);
     }
 
     #[test]

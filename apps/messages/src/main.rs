@@ -32,6 +32,7 @@ use rovsti_core::{
     notify::NotificationSpec,
     schedule::{self, ScheduleTarget, ScheduledSms},
     spam,
+    wire::Handoff,
 };
 use rovsti_ui::{
     Icon, IconAssets,
@@ -140,7 +141,8 @@ impl MessagesApp {
                 }
                 BackendEvent::SmsReceived(received) => this.on_sms_received(received, cx),
                 BackendEvent::Reply(reply) => this.on_reply(reply, cx),
-                BackendEvent::OpenThread(tag) => this.on_open_tag(tag, cx),
+                BackendEvent::OpenThread(tag) => this.on_open_tag(tag, None, cx),
+                BackendEvent::Handoff(handoff) => this.on_handoff(handoff, cx),
                 BackendEvent::Notice(text) => this.show_pill(text.clone()),
                 BackendEvent::SmsChanged | BackendEvent::Status(_) | BackendEvent::Document(_) => {}
             }),
@@ -642,12 +644,30 @@ impl MessagesApp {
     }
 
     /// A tapped notification opens its conversation.
-    fn on_open_tag(&mut self, tag: &str, cx: &mut Context<Self>) {
+    fn on_open_tag(&mut self, tag: &str, name: Option<&Handoff>, cx: &mut Context<Self>) {
         let Some(thread) = notifications::parse_tag(tag) else {
             return;
         };
-        let title = self.title_of(&thread).unwrap_or_default();
+        let known = self.title_of(&thread);
+        let title = match name {
+            Some(handoff) => notifications::handoff_title(known, handoff),
+            None => known.unwrap_or_default(),
+        };
         self.open_thread(thread, title, cx);
+    }
+
+    /// A sibling app (Contacts) asked for a WhatsApp chat. A JID with no chat yet opens an empty
+    /// conversation titled with the contact's name.
+    fn on_handoff(&mut self, handoff: &Handoff, cx: &mut Context<Self>) {
+        let Some(tag) = notifications::handoff_tag(handoff) else {
+            return;
+        };
+        if self.whatsapp.read(cx).gateway().is_none() {
+            self.show_pill("Connect WhatsApp in Settings first");
+            cx.notify();
+            return;
+        }
+        self.on_open_tag(&tag, Some(handoff), cx);
     }
 
     fn toggle_open_mute(&mut self, cx: &mut Context<Self>) {

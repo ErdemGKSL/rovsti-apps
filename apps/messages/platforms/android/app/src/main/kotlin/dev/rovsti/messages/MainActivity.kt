@@ -26,6 +26,7 @@ class MainActivity : GpuiActivity() {
      * `Mailbox`, so they survive a cold start and reach Rust right after its snapshot (AD-5).
      */
     private fun forward(intent: Intent?) {
+        if (RovstiBridge.deliverHandoff(intent)) return
         if (RovstiBridge.deliverOpenThread(intent)) return
         val json = ComposeRequest.fromIntent(intent) ?: return
         // A launcher restore replays the same intent; forward each one once.

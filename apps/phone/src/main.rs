@@ -329,6 +329,13 @@ impl PhoneApp {
                     this.whatsapp.update(cx, |w, cx| w.wake(cx));
                     this.wa_call.update(cx, |ui, cx| ui.sync_calls(cx));
                 }
+                if let Some(number) = backend
+                    .update(cx, |b, _| b.take_handoff())
+                    .as_ref()
+                    .and_then(wa_call::handoff_number)
+                {
+                    this.place_whatsapp(&number, cx);
+                }
                 let actions = backend.update(cx, |b, _| b.take_wa_call_actions());
                 if !actions.is_empty() {
                     this.wa_call.update(cx, |ui, cx| {

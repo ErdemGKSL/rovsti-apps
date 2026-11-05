@@ -39,7 +39,7 @@ use rovsti_core::{
     spam::SpamRules,
     wire::{
         BlockedNumber, BlocklistPayload, ContactsPayload, DocumentOp, DocumentResult, Envelope,
-        WireError,
+        Handoff, WireError, parse_handoff,
     },
 };
 use rovsti_ui::storage;
@@ -81,6 +81,8 @@ pub enum BackendEvent {
     Reply(Reply),
     /// A notification was tapped (its tag).
     OpenThread(String),
+    /// A sibling app asked to open a WhatsApp chat (`handoff`).
+    Handoff(Handoff),
     /// Something the user should be told in a pill.
     Notice(String),
 }
@@ -593,6 +595,10 @@ impl Backend {
             kind::OPEN_THREAD => match serde_json::from_str::<OpenTag>(&event.json) {
                 Ok(open) => cx.emit(BackendEvent::OpenThread(open.tag)),
                 Err(error) => log::warn!("unreadable open_thread: {error}"),
+            },
+            kind::HANDOFF => match parse_handoff(&event.json) {
+                Some(handoff) => cx.emit(BackendEvent::Handoff(handoff)),
+                None => log::warn!("ignoring a bad handoff"),
             },
             kind::SCHEDULED_FIRED => self.reconcile_fired(cx),
             _ => {}

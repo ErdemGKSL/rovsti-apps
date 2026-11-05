@@ -26,7 +26,10 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Task, Window, div, px,
 };
 use rovsti_android::{Error as AndroidError, events::WaCallAction};
-use rovsti_core::recents::ExtraCall;
+use rovsti_core::{
+    recents::ExtraCall,
+    wire::{Handoff, HandoffAction},
+};
 use rovsti_ui::{
     components::flat_glass,
     current_theme,
@@ -255,6 +258,14 @@ pub fn dial_number(peer: &str) -> Option<String> {
     let user = user.split(':').next()?;
     (server == "s.whatsapp.net" && !user.is_empty() && user.bytes().all(|b| b.is_ascii_digit()))
         .then(|| format!("+{user}"))
+}
+
+/// The number to call for a handoff from a sibling app: only `WaCall` handoffs for a phone JID
+/// qualify (`+<digits>`); chats, unknown actions and `@lid` peers give `None`.
+pub fn handoff_number(handoff: &Handoff) -> Option<String> {
+    (handoff.action == HandoffAction::WaCall)
+        .then(|| dial_number(&handoff.jid))
+        .flatten()
 }
 
 /// The history as Recents rows. Calls with a peer that has no phone number
@@ -1411,6 +1422,41 @@ mod tests {
         assert_eq!(dial_number("123@lid"), None);
         assert_eq!(dial_number("abc@s.whatsapp.net"), None);
         assert_eq!(dial_number("905551234567"), None);
+    }
+
+    #[test]
+    fn handoff_numbers_need_a_call_to_a_phone_jid() {
+        let handoff = |action, jid: &str| Handoff {
+            action,
+            jid: jid.into(),
+            name: Some("Ayse".into()),
+        };
+        assert_eq!(
+            handoff_number(&handoff(
+                HandoffAction::WaCall,
+                "905551234567@s.whatsapp.net"
+            ))
+            .as_deref(),
+            Some("+905551234567")
+        );
+        assert_eq!(
+            handoff_number(&handoff(
+                HandoffAction::WaChat,
+                "905551234567@s.whatsapp.net"
+            )),
+            None
+        );
+        assert_eq!(
+            handoff_number(&handoff(
+                HandoffAction::Unknown,
+                "905551234567@s.whatsapp.net"
+            )),
+            None
+        );
+        assert_eq!(
+            handoff_number(&handoff(HandoffAction::WaCall, "12@lid")),
+            None
+        );
     }
 
     #[test]

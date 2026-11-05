@@ -35,8 +35,8 @@ use rovsti_ui::{
 };
 use rovsti_wa_client::{CallAudio, ClientError};
 use rovsti_wa_proto::{
-    CallDirection, CallPhase, CallUpdate, ConnectKey, EndReason, GatewayEvent, GatewayUrl,
-    WaCallHistory, WaCallView, WaScreen,
+    CallDirection, CallPhase, CallSummary, CallUpdate, ConnectKey, EndReason, GatewayEvent,
+    GatewayUrl, WaCallHistory, WaCallView, WaScreen,
 };
 use rovsti_wa_ui::{StoredLink, WhatsAppSettings};
 
@@ -231,6 +231,11 @@ impl AnswerOnce {
         Some((call_id, action))
     }
 
+    /// An action for this call already ran (a snapshot must not show it again).
+    pub fn handled(&self, call_id: &str) -> bool {
+        self.done.iter().any(|id| id == call_id)
+    }
+
     /// The call is over: a waiting Answer for it is pointless now.
     pub fn call_ended(&mut self, call_id: &str) {
         if self
@@ -241,6 +246,45 @@ impl AnswerOnce {
             self.pending = None;
         }
     }
+}
+
+/// What to feed the tracker and the history from `GET /v1/calls`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SnapshotPlan {
+    /// The live call to show, when the tracker holds none.
+    pub show: Option<CallUpdate>,
+    /// Ended calls this device has not recorded yet.
+    pub ended: Vec<CallSummary>,
+}
+
+/// Picks what a gateway snapshot changes. `show` is the newest live call while
+/// the tracker is empty, a ringing incoming call before any other; `ended` are
+/// the ended summaries whose call id is not in `history` yet.
+pub fn plan_snapshot(
+    tracker_busy: bool,
+    summaries: &[CallSummary],
+    history: &WaCallHistory,
+) -> SnapshotPlan {
+    let live = || summaries.iter().filter(|s| !s.update.phase.is_ended());
+    let show = if tracker_busy {
+        None
+    } else {
+        let ringing_in = |s: &&CallSummary| {
+            s.update.direction == CallDirection::In && s.update.phase == CallPhase::Ringing
+        };
+        live()
+            .filter(ringing_in)
+            .max_by_key(|s| s.started_ms)
+            .or_else(|| live().max_by_key(|s| s.started_ms))
+            .map(|s| s.update.clone())
+    };
+    let ended = summaries
+        .iter()
+        .filter(|s| s.update.phase.is_ended())
+        .filter(|s| !history.iter().any(|r| r.call_id == s.update.call_id))
+        .cloned()
+        .collect();
+    SnapshotPlan { show, ended }
 }
 
 /// `+905551234567` for a phone JID (`905551234567:12@s.whatsapp.net`); `None`
@@ -440,6 +484,11 @@ pub struct WaCallUi {
     /// Latest write wins: an older queued write skips itself.
     write_gen: Arc<AtomicU64>,
     error: Option<SharedString>,
+    /// A snapshot fetch is running; another request only sets `resync`.
+    syncing: bool,
+    resync: bool,
+    /// The link was connected at the last settings change.
+    was_connected: bool,
     _tick: Option<Task<()>>,
     _clear: Option<Task<()>>,
 }
@@ -450,7 +499,13 @@ impl WaCallUi {
             settings.update(cx, |settings, cx| settings.register_push(cx));
             let events = settings.update(cx, |settings, _| settings.take_events());
             let linked = settings.read(cx).link().is_some();
+            let connected = settings.read(cx).is_connected();
+            let resync = events.iter().any(|e| matches!(e, GatewayEvent::Resync));
             this.on_events(events, linked, cx);
+            if connected && (!this.was_connected || resync) {
+                this.sync_calls(cx);
+            }
+            this.was_connected = connected;
         })
         .detach();
         // The history is a small file: read it off the UI thread, then show it.
@@ -491,6 +546,9 @@ impl WaCallUi {
             history_dir: None,
             write_gen: Arc::new(AtomicU64::new(0)),
             error: None,
+            syncing: false,
+            resync: false,
+            was_connected: false,
             _tick: None,
             _clear: None,
         }
@@ -608,6 +666,11 @@ impl WaCallUi {
             return;
         }
         self.history_rev += 1;
+        self.save_history(cx);
+    }
+
+    /// Saves the history off the UI thread; the latest save wins.
+    fn save_history(&mut self, cx: &mut Context<Self>) {
         let Some(dir) = self.history_dir.clone() else {
             return;
         };
@@ -626,6 +689,59 @@ impl WaCallUi {
             .detach();
     }
 
+    /// Fetches the gateway's call snapshot and folds it in: a live call becomes
+    /// the tracked one (so a cold-start Answer can run), ended calls this device
+    /// missed go to the history. One fetch runs at a time; a request meanwhile
+    /// runs one more fetch afterwards.
+    pub fn sync_calls(&mut self, cx: &mut Context<Self>) {
+        if self.syncing {
+            self.resync = true;
+            return;
+        }
+        let Some(gateway) = self.settings.read(cx).gateway() else {
+            return;
+        };
+        self.syncing = true;
+        let task = cx
+            .background_executor()
+            .spawn(async move { gateway.calls() });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.syncing = false;
+                match result {
+                    Ok(summaries) => this.apply_snapshot(&summaries, cx),
+                    Err(error) => log::warn!("fetching the WhatsApp calls failed: {error}"),
+                }
+                if std::mem::take(&mut this.resync) {
+                    this.sync_calls(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn apply_snapshot(&mut self, summaries: &[CallSummary], cx: &mut Context<Self>) {
+        let plan = plan_snapshot(!self.tracker.is_empty(), summaries, &self.history);
+        // A call that was just declined may still ring in the snapshot.
+        if let Some(update) = plan.show.filter(|u| !self.once.handled(&u.call_id)) {
+            self.on_call(update, cx);
+        }
+        let mut recorded = false;
+        for summary in &plan.ended {
+            let label = WaCallView::from_update(&summary.update, now_ms()).peer_label;
+            recorded |= self.history.record_summary(summary, &label);
+            self.cancel_notice(&summary.update.call_id, cx);
+            self.once.call_ended(&summary.update.call_id);
+        }
+        if recorded {
+            self.history_rev += 1;
+            self.save_history(cx);
+            cx.notify();
+        }
+    }
+
     /// The WhatsApp calls as Recents rows.
     pub fn recents_extras(&self) -> Vec<ExtraCall> {
         extra_calls(&self.history)
@@ -638,6 +754,7 @@ impl WaCallUi {
 
     /// The notification's Answer for `call_id` (idempotent, see [`AnswerOnce`]).
     pub fn answer_id(&mut self, call_id: &str, cx: &mut Context<Self>) {
+        self.sync_calls(cx);
         if self.once.offer(call_id, WaCallAction::Answer, now_ms()) {
             self.run_due_actions(cx);
         }
@@ -645,6 +762,7 @@ impl WaCallUi {
 
     /// The notification's Decline for `call_id` (idempotent, see [`AnswerOnce`]).
     pub fn decline_id(&mut self, call_id: &str, cx: &mut Context<Self>) {
+        self.sync_calls(cx);
         if self.once.offer(call_id, WaCallAction::Decline, now_ms()) {
             self.run_due_actions(cx);
         }
@@ -1288,6 +1406,80 @@ mod tests {
         }
         assert!(once.offer("c0", WaCallAction::Decline, 0));
         assert!(!once.offer(&format!("c{ONCE_MEMORY}"), WaCallAction::Decline, 0));
+    }
+
+    fn summary(
+        id: &str,
+        direction: CallDirection,
+        phase: CallPhase,
+        started_ms: i64,
+    ) -> CallSummary {
+        let ended = phase.is_ended();
+        CallSummary {
+            update: update(id, direction, phase),
+            started_ms,
+            ended_ms: ended.then_some(started_ms + 5_000),
+        }
+    }
+
+    #[test]
+    fn an_empty_snapshot_plans_nothing() {
+        let plan = plan_snapshot(false, &[], &WaCallHistory::new());
+        assert_eq!(plan.show, None);
+        assert!(plan.ended.is_empty());
+    }
+
+    #[test]
+    fn a_ringing_incoming_call_is_preferred() {
+        let list = [
+            summary("out", Out, CallPhase::Active, 9),
+            summary("in", In, CallPhase::Ringing, 1),
+        ];
+        let plan = plan_snapshot(false, &list, &WaCallHistory::new());
+        assert_eq!(plan.show.unwrap().call_id, "in");
+        let list = [
+            summary("old", Out, CallPhase::Active, 1),
+            summary("new", Out, CallPhase::Ringing, 2),
+        ];
+        let plan = plan_snapshot(false, &list, &WaCallHistory::new());
+        assert_eq!(plan.show.unwrap().call_id, "new");
+    }
+
+    #[test]
+    fn a_busy_tracker_shows_nothing_but_ended_calls_still_count() {
+        let list = [
+            summary("in", In, CallPhase::Ringing, 1),
+            summary("gone", In, CallPhase::Ended(EndReason::Missed), 0),
+        ];
+        let plan = plan_snapshot(true, &list, &WaCallHistory::new());
+        assert_eq!(plan.show, None);
+        assert_eq!(plan.ended.len(), 1);
+    }
+
+    #[test]
+    fn ended_calls_already_in_the_history_are_skipped() {
+        let missed = summary("m", In, CallPhase::Ended(EndReason::Missed), 1);
+        let mut history = WaCallHistory::new();
+        let plan = plan_snapshot(false, std::slice::from_ref(&missed), &history);
+        assert_eq!(plan.ended, vec![missed.clone()]);
+        assert!(history.record_summary(&missed, "Ayse"));
+        let plan = plan_snapshot(false, &[missed], &history);
+        assert!(plan.ended.is_empty());
+    }
+
+    #[test]
+    fn an_answer_queued_before_the_snapshot_runs_when_it_shows_the_call() {
+        let mut once = AnswerOnce::default();
+        let mut tracker = Tracker::default();
+        once.offer("a", WaCallAction::Answer, 0);
+        assert_eq!(once.due(None, 1), None);
+        let list = [summary("a", In, CallPhase::Ringing, 1)];
+        let plan = plan_snapshot(!tracker.is_empty(), &list, &WaCallHistory::new());
+        assert_eq!(tracker.on_update(plan.show.unwrap(), 2), Change::Shown);
+        let view = tracker.view(2).unwrap();
+        let shown = Some((view.call_id.as_str(), view.is_ringing_in()));
+        assert_eq!(once.due(shown, 2), Some(("a".into(), WaCallAction::Answer)));
+        assert!(once.handled("a"));
     }
 
     #[test]

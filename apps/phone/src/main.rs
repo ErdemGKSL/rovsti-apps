@@ -327,6 +327,7 @@ impl PhoneApp {
                 if pushes != this.wa_pushes_seen {
                     this.wa_pushes_seen = pushes;
                     this.whatsapp.update(cx, |w, cx| w.wake(cx));
+                    this.wa_call.update(cx, |ui, cx| ui.sync_calls(cx));
                 }
                 let actions = backend.update(cx, |b, _| b.take_wa_call_actions());
                 if !actions.is_empty() {

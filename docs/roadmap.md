@@ -49,7 +49,7 @@ list in `docs/phone-acceptance.md`.
 - [x] WhatsApp through the gateway: link by QR or pairing code, history sync, text,
       media, reactions, groups and presence all run server-side; Messages shows chats
       and live messages from `rovsti_wa_client`
-- [x] WhatsApp conversation view with composer, media and reactions in the UI
+- [x] WhatsApp conversation view with composer, media and reactions in the UI; send pictures, video, audio and documents
 - [x] No foreground service: FCM push wakes the app (needs `google-services.json` in
       the host, see `docs/android.md`)
 - [x] Notifications with inline reply, for SMS and WhatsApp, cold and while the app is

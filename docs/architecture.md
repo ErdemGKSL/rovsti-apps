@@ -64,7 +64,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS` for favorites); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
 | Stops | none | foreground `location` service feeding fixes to `rovsti_geo::Trip`, full-screen alarm activity, exact alarm as a fallback |
 
-### Messages: decisions (AD-MSG1 to AD-MSG8)
+### Messages: decisions (AD-MSG1 to AD-MSG9)
 
 - **AD-MSG1 Pure first.** SMS wire types, the unified inbox merge, the SMS timeline, the MMS
   PDU codec, OTP, spam rules, the schedule queue, the notification digest and the backup
@@ -88,6 +88,9 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 - **AD-MSG8 Spam is on-device.** Block list (system blocklist), user rules, an allow list and
   a fixed scorer, all in `messages-prefs.json`; the same file is what the cold receivers read.
   Spam goes to a Spam folder and is never deleted or announced loudly.
+- **AD-MSG9 WhatsApp media goes up through the gateway.** Messages picks a file (`DocumentOp::Attachment`),
+  `rovsti_wa_proto::media` sizes (16 MiB) and classifies it, and `Gateway::send_media` uploads it; the
+  bubble is optimistic (`push_pending_media`) and a retry re-reads the cached file. Inline reply stays text.
 
 While attached, the app tells Kotlin (`uiAttached(true)`) and posts notifications itself:
 `notifications::should_notify` filters (not mine, not the open chat), a per-conversation digest

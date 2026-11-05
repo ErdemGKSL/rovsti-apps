@@ -339,8 +339,9 @@ impl MessagesApp {
             .map_or_else(|| jid.ends_with("@g.us"), |t| t.is_group);
         let locale = self.backend.read(cx).locale();
         let chat = jid.clone();
+        let backend = self.backend.clone();
         let conversation =
-            cx.new(|cx| Conversation::new(chat, title, is_group, gateway, locale, cx));
+            cx.new(|cx| Conversation::new(chat, title, is_group, gateway, locale, backend, cx));
         cx.subscribe(&conversation, |this, _, event, cx| match event {
             ConversationEvent::Back => this.close_page(cx),
             ConversationEvent::Switch(thread) => this.switch_to(thread.clone(), cx),

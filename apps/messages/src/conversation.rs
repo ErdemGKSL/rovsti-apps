@@ -3,7 +3,7 @@
 //! module is the thin GPUI shell around it plus a few pure text helpers.
 
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -15,7 +15,7 @@ use gpui::{
     ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
     div, img, prelude::*, px,
 };
-use rovsti_core::{ThreadId, recents::LocaleTime};
+use rovsti_core::{ThreadId, recents::LocaleTime, wire::DocumentOp};
 use rovsti_ui::{
     Icon,
     components::{glass_icon_button, glass_pill},
@@ -27,10 +27,14 @@ use rovsti_ui::{
 };
 use rovsti_wa_client::Gateway;
 
-use crate::schedule_ui::{self, StripItem, StripKey};
+use crate::{
+    backend::{Backend, BackendEvent},
+    schedule_ui::{self, StripItem, StripKey},
+};
 use rovsti_wa_proto::{
     ChatState, GatewayEvent, Item, ItemState, MarkRead, MediaKind, MessageBody, SendReaction,
-    SendText, Timeline, TypingState, TypingThrottle, day_breaks, jid_user, reaction_chips,
+    SendText, Sent, Timeline, TypingState, TypingThrottle, check_size, classify, day_breaks,
+    jid_user, reaction_chips,
 };
 
 /// Messages per history request.
@@ -61,6 +65,31 @@ pub enum ConversationEvent {
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
+
+/// A picked file waiting in the chip above the composer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Attached {
+    path: String,
+    name: String,
+    /// The picker's MIME type, when it reported one.
+    mime: Option<String>,
+    kind: MediaKind,
+}
+
+/// Why a media send stopped before the gateway had it.
+enum MediaError {
+    /// The cached copy of the file is missing.
+    Gone,
+    TooLarge,
+    Gateway(String),
+}
+
+/// A file read, classified and ready to upload.
+struct Prepared {
+    bytes: Vec<u8>,
+    kind: MediaKind,
+    mime: String,
+}
 
 pub struct Conversation {
     chat: String,
@@ -96,6 +125,15 @@ pub struct Conversation {
     /// Waiting scheduled sends of this chat, set by the page.
     scheduled: Vec<StripItem>,
     muted: bool,
+    backend: Entity<Backend>,
+    /// The file picker is open and its answer is ours.
+    awaiting_attachment: bool,
+    attachment: Option<Attached>,
+    /// Cached file of each pending or failed media send, by local id.
+    pending_paths: HashMap<u64, String>,
+    /// A line above the composer (attach and send problems).
+    notice: Option<SharedString>,
+    _subscriptions: Vec<gpui::Subscription>,
 }
 
 impl Conversation {
@@ -105,6 +143,7 @@ impl Conversation {
         is_group: bool,
         gateway: Gateway,
         locale: LocaleTime,
+        backend: Entity<Backend>,
         cx: &mut Context<Self>,
     ) -> Self {
         let composer =
@@ -112,6 +151,19 @@ impl Conversation {
         // Typing re-renders the composer box.
         cx.observe(&composer, |this, _, cx| this.on_composer_changed(cx))
             .detach();
+        let subscriptions = vec![cx.subscribe(&backend, |this, _, event, cx| {
+            if let BackendEvent::Document(result) = event
+                && result.op == DocumentOp::Attachment
+            {
+                this.on_attachment(
+                    result.ok,
+                    result.path.clone(),
+                    result.name.clone(),
+                    result.mime.clone(),
+                    cx,
+                );
+            }
+        })];
         let mut this = Self {
             timeline: Timeline::new(chat.clone()),
             chat,
@@ -136,6 +188,12 @@ impl Conversation {
             switch: None,
             scheduled: Vec::new(),
             muted: false,
+            backend,
+            awaiting_attachment: false,
+            attachment: None,
+            pending_paths: HashMap::new(),
+            notice: None,
+            _subscriptions: subscriptions,
         };
         this.load(None, cx);
         if !this.is_group {
@@ -277,6 +335,15 @@ impl Conversation {
             .map(|(_, image)| image.clone())
     }
 
+    /// Keeps a decoded picture, dropping the oldest beyond [`MEDIA_CACHE`].
+    fn cache_image(&mut self, id: String, image: Arc<Image>) {
+        self.media_cache.retain(|(cached, _)| *cached != id);
+        self.media_cache.push((id, image));
+        if self.media_cache.len() > MEDIA_CACHE {
+            self.media_cache.remove(0);
+        }
+    }
+
     /// Downloads the media of an image or sticker message off the UI thread.
     fn fetch_media(&mut self, id: String, mime: String, cx: &mut Context<Self>) {
         if self.media_loading.contains(&id) || self.cached_image(&id).is_some() {
@@ -300,12 +367,7 @@ impl Conversation {
                 this.media_loading.remove(&id);
                 match result {
                     Ok(bytes) => {
-                        this.media_cache.retain(|(cached, _)| *cached != id);
-                        this.media_cache
-                            .push((id, Arc::new(Image::from_bytes(format, bytes))));
-                        if this.media_cache.len() > MEDIA_CACHE {
-                            this.media_cache.remove(0);
-                        }
+                        this.cache_image(id, Arc::new(Image::from_bytes(format, bytes)));
                     }
                     Err(error) => {
                         log::warn!("downloading WhatsApp media failed: {error}");
@@ -448,12 +510,188 @@ impl Conversation {
 
     fn send(&mut self, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).text().trim().to_owned();
-        if text.is_empty() {
+        match send_plan(&text, self.attachment.is_some()) {
+            Plan::Nothing => {}
+            Plan::Text => {
+                self.composer.update(cx, |field, cx| field.clear(cx));
+                self.last_text.clear();
+                self.send_text(text, cx);
+            }
+            Plan::Media { caption } => {
+                let Some(attached) = self.attachment.take() else {
+                    return;
+                };
+                self.composer.update(cx, |field, cx| field.clear(cx));
+                self.last_text.clear();
+                self.send_media(attached, caption, cx);
+            }
+        }
+    }
+
+    /// The paperclip: opens the system file picker.
+    fn pick_attachment(&mut self, cx: &mut Context<Self>) {
+        self.awaiting_attachment = true;
+        self.notice = None;
+        self.backend
+            .update(cx, |backend, cx| backend.pick_attachment(cx));
+        cx.notify();
+    }
+
+    fn on_attachment(
+        &mut self,
+        ok: bool,
+        path: Option<String>,
+        name: Option<String>,
+        mime: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if !std::mem::take(&mut self.awaiting_attachment) {
             return;
         }
-        self.composer.update(cx, |field, cx| field.clear(cx));
-        self.last_text.clear();
-        self.send_text(text, cx);
+        match path.filter(|_| ok) {
+            Some(path) => {
+                let name = name
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| crate::sms_conversation::attachment_label(&path));
+                let (kind, _) = classify(mime.as_deref(), &name, &[]);
+                self.attachment = Some(Attached {
+                    path,
+                    name,
+                    mime,
+                    kind,
+                });
+                self.notice = None;
+            }
+            None => {
+                let words = if self.backend.read(cx).is_preview() {
+                    "Attachments need an Android phone"
+                } else {
+                    "Couldn't attach that file"
+                };
+                self.notice = Some(words.into());
+            }
+        }
+        cx.notify();
+    }
+
+    /// Shows the bubble at once, then uploads the file off the UI thread.
+    fn send_media(&mut self, attached: Attached, caption: Option<String>, cx: &mut Context<Self>) {
+        if self.throttle.on_send() {
+            self.send_chat_state(TypingState::Paused, cx);
+        }
+        let local_id = self.next_local;
+        self.next_local += 1;
+        let (kind, mime) = classify(attached.mime.as_deref(), &attached.name, &[]);
+        let size = std::fs::metadata(&attached.path).map_or(0, |m| m.len());
+        self.timeline.push_pending_media(
+            local_id,
+            kind,
+            mime.clone(),
+            caption.clone(),
+            size,
+            now_ms(),
+        );
+        self.pending_paths.insert(local_id, attached.path.clone());
+        self.scroll.scroll_to_bottom();
+        self.dispatch_media(
+            local_id,
+            attached.path,
+            attached.name,
+            Some(mime),
+            caption,
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// Reads, checks and classifies the file, then sends it; settles the bubble.
+    fn dispatch_media(
+        &mut self,
+        local_id: u64,
+        path: String,
+        name: String,
+        mime: Option<String>,
+        caption: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let read = cx.background_executor().spawn(async move {
+            let bytes = std::fs::read(&path).map_err(|_| MediaError::Gone)?;
+            check_size(bytes.len() as u64).map_err(|_| MediaError::TooLarge)?;
+            let head = &bytes[..bytes.len().min(16)];
+            let (kind, mime) = classify(mime.as_deref(), &name, head);
+            Ok::<_, MediaError>(Prepared { bytes, kind, mime })
+        });
+        let gateway = self.gateway.clone();
+        let chat = self.chat.clone();
+        cx.spawn(async move |this, cx| {
+            let prepared = match read.await {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    this.update(cx, |this, cx| this.media_failed_send(local_id, error, cx))
+                        .ok();
+                    return;
+                }
+            };
+            // The picture shows under the pending id while it uploads.
+            let shown = this
+                .update(cx, |this, cx| {
+                    let format = (prepared.kind == MediaKind::Image)
+                        .then(|| image_format(&prepared.mime))
+                        .flatten();
+                    let shown = format
+                        .map(|format| Arc::new(Image::from_bytes(format, prepared.bytes.clone())));
+                    if let Some(image) = &shown {
+                        this.cache_image(format!("pending-{local_id}"), image.clone());
+                        cx.notify();
+                    }
+                    shown
+                })
+                .ok()
+                .flatten();
+            let Prepared { bytes, kind, mime } = prepared;
+            let send = cx.background_executor().spawn(async move {
+                gateway
+                    .send_media(&chat, kind, &mime, caption.as_deref(), bytes)
+                    .map_err(|error| MediaError::Gateway(error.to_string()))
+            });
+            let result = send.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(sent) => this.media_sent(local_id, &sent, shown),
+                    Err(error) => this.media_failed_send(local_id, error, cx),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn media_sent(&mut self, local_id: u64, sent: &Sent, shown: Option<Arc<Image>>) {
+        self.timeline.confirm(local_id, sent);
+        self.pending_paths.remove(&local_id);
+        let pending = format!("pending-{local_id}");
+        self.media_cache.retain(|(cached, _)| *cached != pending);
+        if let Some(image) = shown {
+            self.cache_image(sent.message_id.clone(), image);
+        }
+    }
+
+    fn media_failed_send(&mut self, local_id: u64, error: MediaError, cx: &mut Context<Self>) {
+        self.timeline.fail(local_id);
+        self.notice = Some(match error {
+            MediaError::Gone => "The file is gone; attach it again".into(),
+            MediaError::TooLarge => format!(
+                "That file is over {} MB",
+                rovsti_wa_proto::MAX_SEND_BYTES / (1024 * 1024)
+            )
+            .into(),
+            MediaError::Gateway(message) => {
+                log::warn!("sending WhatsApp media failed: {message}");
+                "Couldn't send the file".into()
+            }
+        });
+        cx.notify();
     }
 
     /// Sends `text` now: the composer's, or one typed into a notification.
@@ -474,10 +712,22 @@ impl Conversation {
     }
 
     fn retry(&mut self, local_id: u64, cx: &mut Context<Self>) {
-        if let Some(text) = self.timeline.restart(local_id) {
-            self.dispatch(local_id, text, cx);
-            cx.notify();
+        match self.timeline.restart_body(local_id) {
+            Some(MessageBody::Text(text)) => self.dispatch(local_id, text, cx),
+            Some(MessageBody::Media { caption, mime, .. }) => {
+                match self.pending_paths.get(&local_id).cloned() {
+                    Some(path) => {
+                        let name = crate::sms_conversation::attachment_label(&path);
+                        self.notice = None;
+                        self.dispatch_media(local_id, path, name, Some(mime), caption, cx);
+                    }
+                    None => self.media_failed_send(local_id, MediaError::Gone, cx),
+                }
+            }
+            Some(MessageBody::Unsupported) => self.timeline.fail(local_id),
+            None => return,
         }
+        cx.notify();
     }
 
     /// Sends one pending text off the UI thread and settles its bubble.
@@ -909,7 +1159,42 @@ impl Render for Conversation {
                 cx.listener(|this, _, _, cx| this.request_schedule(cx)),
             )
             .into_any_element();
-        let composer = composer_bar(keyboard, None, field, send);
+        let attach = glass_icon_button(theme, Icon::LucidePlus, 0.0, false)
+            .id("conv-attach")
+            .on_click(cx.listener(|this, _, _, cx| this.pick_attachment(cx)))
+            .into_any_element();
+        let composer = composer_bar(keyboard, Some(attach), field, send);
+        let colors = theme::colors(theme);
+        let info = (self.attachment.is_some() || self.notice.is_some()).then(|| {
+            let chip = self.attachment.as_ref().map(|attached| {
+                glass_pill(
+                    theme,
+                    format!("{} ✕", attach_chip_label(&attached.name, attached.kind)),
+                )
+                .id("conv-attached")
+                .h(px(30.0))
+                .px(px(12.0))
+                .text_size(typography::FOOTNOTE.size)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.attachment = None;
+                    cx.notify();
+                }))
+            });
+            div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .items_start()
+                .gap(px(4.0))
+                .px(px(16.0))
+                .children(chip)
+                .children(self.notice.clone().map(|notice| {
+                    div()
+                        .text_size(typography::CAPTION.size)
+                        .text_color(colors.red)
+                        .child(notice)
+                }))
+        });
 
         div()
             .size_full()
@@ -936,6 +1221,7 @@ impl Render for Conversation {
                     ),
             )
             .children(strip)
+            .children(info)
             .child(composer)
     }
 }
@@ -1093,6 +1379,34 @@ fn format_size(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
+}
+
+/// What Send does with the composer text and the attachment chip.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Plan {
+    Nothing,
+    Text,
+    /// The text, when there is any, becomes the caption.
+    Media {
+        caption: Option<String>,
+    },
+}
+
+fn send_plan(text: &str, has_chip: bool) -> Plan {
+    let text = text.trim();
+    match (has_chip, text.is_empty()) {
+        (true, true) => Plan::Media { caption: None },
+        (true, false) => Plan::Media {
+            caption: Some(text.to_owned()),
+        },
+        (false, false) => Plan::Text,
+        (false, true) => Plan::Nothing,
+    }
+}
+
+/// The chip's text: the file name and what it will be sent as.
+fn attach_chip_label(name: &str, kind: MediaKind) -> String {
+    format!("{name} · {}", media_label(kind))
 }
 
 fn media_label(kind: MediaKind) -> &'static str {
@@ -1261,6 +1575,37 @@ mod tests {
         assert_eq!(format_size(12), "12 B");
         assert_eq!(format_size(2048), "2 KB");
         assert_eq!(format_size(1_572_864), "1.5 MB");
+    }
+
+    #[test]
+    fn send_plans() {
+        assert_eq!(send_plan("", false), Plan::Nothing);
+        assert_eq!(send_plan("  \n", false), Plan::Nothing);
+        assert_eq!(send_plan(" hi ", false), Plan::Text);
+        assert_eq!(send_plan("", true), Plan::Media { caption: None });
+        assert_eq!(send_plan("  ", true), Plan::Media { caption: None });
+        assert_eq!(
+            send_plan(" look ", true),
+            Plan::Media {
+                caption: Some("look".into())
+            }
+        );
+    }
+
+    #[test]
+    fn chip_labels() {
+        assert_eq!(
+            attach_chip_label("a.jpg", MediaKind::Image),
+            "a.jpg · Photo"
+        );
+        assert_eq!(
+            attach_chip_label("cv.pdf", MediaKind::Document),
+            "cv.pdf · Document"
+        );
+        assert_eq!(
+            attach_chip_label("v.mp4", MediaKind::Video),
+            "v.mp4 · Video"
+        );
     }
 
     #[test]

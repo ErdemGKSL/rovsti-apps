@@ -62,3 +62,7 @@ APK: build with `gpuiforge build android` in `apps/messages`. Put `google-servic
 | 40 | Open the file in a text editor, change a byte, import. | "Wrong passphrase, or the backup was changed." | | |
 | **K. Desktop preview** | | | | |
 | 41 | `cargo run -p rovsti_messages`: open Settings, right-click Send with text in a conversation, export a backup. | Settings sections show; the sheet opens; the export writes `cache/rovsti-messages-*.rmb` in `~/.local/share/rovsti/messages` and the page names the path. | | |
+| **L. WhatsApp media** | | | | |
+| 42 | In a WhatsApp chat tap the attach button, pick a 5 MB photo, type a caption, press Send. Then attach a PDF and send it. | A chip with the name and "Photo" shows above the composer; the photo shows in the bubble at once; both arrive on the other phone (the caption with the photo). |  | |
+| 43 | Try to attach a 20 MB file. | It is refused ("Couldn't attach that file" from the picker's 8 MB cap, or "That file is over 16 MB"); nothing is sent. | | |
+| 44 | Attach a file, switch the gateway off, press Send, switch it on, tap the bubble. | "Not sent · Tap to retry"; the retry sends the file. | | |

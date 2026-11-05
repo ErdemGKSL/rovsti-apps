@@ -717,7 +717,11 @@ async fn react(
 fn user_jid(jid: &str) -> ApiResult<String> {
     let jid = jid.trim();
     let parsed = crate::wa::convert::parse_jid(jid)?;
-    if parsed.server != "s.whatsapp.net" || parsed.user.is_empty() || jid.contains(':') {
+    if parsed.server != "s.whatsapp.net"
+        || parsed.user.is_empty()
+        || !parsed.user.bytes().all(|b| b.is_ascii_digit())
+        || jid.contains(':')
+    {
         return Err(HttpError::bad_request(format!(
             "{jid:?} is not a user jid (number@s.whatsapp.net)"
         )));
@@ -733,7 +737,14 @@ fn check_lookup(req: LookupUsers) -> ApiResult<Vec<String>> {
             "jids must hold 1 to {MAX_LOOKUP} user jids"
         )));
     }
-    req.jids.iter().map(|jid| user_jid(jid)).collect()
+    let mut jids: Vec<String> = Vec::with_capacity(req.jids.len());
+    for jid in &req.jids {
+        let jid = user_jid(jid)?;
+        if !jids.contains(&jid) {
+            jids.push(jid);
+        }
+    }
+    Ok(jids)
 }
 
 async fn lookup_users(
@@ -792,6 +803,7 @@ mod tests {
             "905321234567:3@s.whatsapp.net",
             "@s.whatsapp.net",
             "123@lid",
+            "12ab@s.whatsapp.net",
             "",
         ] {
             assert!(user_jid(bad).is_err(), "{bad}");

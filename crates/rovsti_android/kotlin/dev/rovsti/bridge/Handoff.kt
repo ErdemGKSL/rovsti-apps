@@ -18,6 +18,9 @@ object Handoff {
     const val EXTRA_NAME = "dev.rovsti.extra.NAME"
     const val PERMISSION = "dev.rovsti.permission.HANDOFF"
 
+    /** Class-name suffix of the permission-guarded `activity-alias` that receives hand-offs. */
+    const val ALIAS_SUFFIX = ".WaHandoff"
+
     /** Pure: whether [action] is one this bridge hands off. */
     fun isHandoffAction(action: String?): Boolean = action == ACTION_WA_CALL || action == ACTION_WA_CHAT
 

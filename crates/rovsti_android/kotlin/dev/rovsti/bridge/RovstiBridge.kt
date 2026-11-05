@@ -288,6 +288,10 @@ object RovstiBridge {
      * a cold start) and removes the extras. True when it did.
      */
     fun deliverHandoff(intent: Intent?): Boolean {
+        // Only the permission-guarded `.WaHandoff` alias may start a hand-off. An explicit intent
+        // straight at the (unguarded, exported) launcher activity carries the same action, so the
+        // component is checked too.
+        if (intent?.component?.className?.endsWith(Handoff.ALIAS_SUFFIX) != true) return false
         val json = Handoff.payload(intent?.action, intent?.getStringExtra(Handoff.EXTRA_JID), intent?.getStringExtra(Handoff.EXTRA_NAME))
             ?: return false
         intent?.removeExtra(Handoff.EXTRA_JID)

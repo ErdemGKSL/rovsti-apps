@@ -27,6 +27,19 @@ pub struct CallUpdate {
     pub is_video: bool,
 }
 
+/// One call as `GET /v1/calls` reports it: the latest [`CallUpdate`] plus the
+/// gateway's wall-clock timestamps.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CallSummary {
+    #[serde(flatten)]
+    pub update: CallUpdate,
+    /// Wall clock when the gateway first saw the call.
+    pub started_ms: i64,
+    /// Wall clock when the call ended; `None` while it is live.
+    #[serde(default)]
+    pub ended_ms: Option<i64>,
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum GatewayEvent {
@@ -82,6 +95,31 @@ mod tests {
 
     fn json(e: &GatewayEvent) -> String {
         serde_json::to_string(e).unwrap()
+    }
+
+    #[test]
+    fn call_summary_flattens_update() {
+        let s = CallSummary {
+            update: CallUpdate {
+                call_id: "c".into(),
+                peer: "1@s.whatsapp.net".into(),
+                peer_name: None,
+                direction: CallDirection::In,
+                phase: CallPhase::Ringing,
+                is_video: false,
+            },
+            started_ms: 5,
+            ended_ms: None,
+        };
+        let text = serde_json::to_string(&s).unwrap();
+        assert!(text.contains(r#""call_id":"c""#) && text.contains(r#""started_ms":5"#));
+        assert!(!text.contains("update"));
+        assert_eq!(serde_json::from_str::<CallSummary>(&text).unwrap(), s);
+        let no_end: CallSummary = serde_json::from_str(
+            r#"{"call_id":"c","peer":"p","peer_name":null,"direction":"in","phase":"ringing","is_video":false,"started_ms":5}"#,
+        )
+        .unwrap();
+        assert_eq!(no_end.ended_ms, None);
     }
 
     #[test]

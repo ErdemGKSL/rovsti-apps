@@ -17,6 +17,11 @@ pub enum Wake {
     Message {
         chat: String,
     },
+    /// The call stopped ringing; `missed` when nobody answered it.
+    CallEnd {
+        call_id: String,
+        missed: bool,
+    },
 }
 
 #[derive(Deserialize)]
@@ -31,6 +36,11 @@ enum Payload {
     },
     Message {
         chat: String,
+    },
+    CallEnd {
+        call_id: String,
+        #[serde(default)]
+        missed: String,
     },
 }
 
@@ -47,6 +57,11 @@ pub fn parse_wake(json: &str) -> Option<Wake> {
             name,
         }),
         Payload::Message { chat } => Some(Wake::Message { chat }),
+        Payload::CallEnd { call_id, missed } if !call_id.is_empty() => Some(Wake::CallEnd {
+            call_id,
+            missed: missed == "1",
+        }),
+        Payload::CallEnd { .. } => None,
     }
 }
 
@@ -87,6 +102,37 @@ mod tests {
             Some(Wake::Message {
                 chat: "123@g.us".into()
             })
+        );
+    }
+
+    #[test]
+    fn call_end_payload() {
+        let end = |missed: &str| {
+            parse_wake(&format!(
+                r#"{{"kind":"call_end","call_id":"abc","missed":"{missed}"}}"#
+            ))
+        };
+        let want = |missed| {
+            Some(Wake::CallEnd {
+                call_id: "abc".into(),
+                missed,
+            })
+        };
+        assert_eq!(end("1"), want(true));
+        assert_eq!(end("0"), want(false));
+        assert_eq!(end("true"), want(false));
+        assert_eq!(
+            parse_wake(r#"{"kind":"call_end","call_id":"abc"}"#),
+            want(false)
+        );
+    }
+
+    #[test]
+    fn call_end_without_id() {
+        assert_eq!(parse_wake(r#"{"kind":"call_end","missed":"1"}"#), None);
+        assert_eq!(
+            parse_wake(r#"{"kind":"call_end","call_id":"","missed":"1"}"#),
+            None
         );
     }
 

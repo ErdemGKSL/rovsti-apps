@@ -23,7 +23,7 @@ pub use call::{
     Arbitration, CallDirection, CallInput, CallMachine, CallPhase, EndReason, WaCallView,
     WaControl, WaScreen, WaScreenPhase, arbitrate,
 };
-pub use event::{CallUpdate, EventEnvelope, GatewayEvent};
+pub use event::{CallSummary, CallUpdate, EventEnvelope, GatewayEvent};
 pub use history::{WaCallHistory, WaCallRecord};
 pub use key::{ConnectKey, KeyError, KeyHash, KeyId};
 pub use log::{EventLog, Since};

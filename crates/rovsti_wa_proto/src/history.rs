@@ -2,7 +2,8 @@
 
 use std::collections::VecDeque;
 
-use crate::call::{CallDirection, EndReason, WaCallView};
+use crate::call::{CallDirection, CallPhase, EndReason, WaCallView};
+use crate::event::CallSummary;
 
 /// The most records kept; older ones are dropped.
 pub const MAX_RECORDS: usize = 200;
@@ -16,6 +17,13 @@ pub struct WaCallRecord {
     pub started_ms: i64,
     pub duration_s: u64,
     pub missed: bool,
+}
+
+/// A call is missed when it was incoming and never became active: `Hangup`
+/// and `Remote` only follow a call we answered.
+fn is_missed(direction: CallDirection, elapsed_s: u64, reason: &EndReason) -> bool {
+    let answered = elapsed_s > 0 || matches!(reason, EndReason::Hangup | EndReason::Remote);
+    direction == CallDirection::In && !answered
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -35,8 +43,6 @@ impl WaCallHistory {
         if self.records.iter().any(|r| r.call_id == view.call_id) {
             return false;
         }
-        let answered =
-            view.elapsed_s > 0 || matches!(reason, EndReason::Hangup | EndReason::Remote);
         self.records.push_front(WaCallRecord {
             call_id: view.call_id.clone(),
             peer: view.peer.clone(),
@@ -44,7 +50,37 @@ impl WaCallHistory {
             direction: view.direction,
             started_ms,
             duration_s: view.elapsed_s,
-            missed: view.direction == CallDirection::In && !answered,
+            missed: is_missed(view.direction, view.elapsed_s, reason),
+        });
+        self.records.truncate(MAX_RECORDS);
+        true
+    }
+
+    /// Records an ended call from a gateway snapshot, for calls this device
+    /// never saw end. Live summaries and known `call_id`s return `false`. The
+    /// snapshot carries no talk time, so the duration is the whole span when
+    /// the call was answered and zero when missed.
+    pub fn record_summary(&mut self, s: &CallSummary, peer_label: &str) -> bool {
+        let CallPhase::Ended(reason) = &s.update.phase else {
+            return false;
+        };
+        if self.records.iter().any(|r| r.call_id == s.update.call_id) {
+            return false;
+        }
+        let missed = is_missed(s.update.direction, 0, reason);
+        let span_ms = s.ended_ms.map_or(0, |end| end.saturating_sub(s.started_ms));
+        self.records.push_front(WaCallRecord {
+            call_id: s.update.call_id.clone(),
+            peer: s.update.peer.clone(),
+            peer_label: peer_label.to_owned(),
+            direction: s.update.direction,
+            started_ms: s.started_ms,
+            duration_s: if missed {
+                0
+            } else {
+                span_ms.max(0).unsigned_abs() / 1000
+            },
+            missed,
         });
         self.records.truncate(MAX_RECORDS);
         true
@@ -139,6 +175,61 @@ mod tests {
                 ("m", true)
             ]
         );
+    }
+
+    fn summary(id: &str, direction: CallDirection, phase: CallPhase) -> CallSummary {
+        CallSummary {
+            update: crate::event::CallUpdate {
+                call_id: id.into(),
+                peer: "1@s.whatsapp.net".into(),
+                peer_name: None,
+                direction,
+                phase,
+                is_video: false,
+            },
+            started_ms: 1_000,
+            ended_ms: Some(31_000),
+        }
+    }
+
+    #[test]
+    fn summary_live_call_is_not_recorded() {
+        let mut h = WaCallHistory::new();
+        let s = summary("a", CallDirection::In, CallPhase::Ringing);
+        assert!(!h.record_summary(&s, "Ann"));
+        assert!(h.is_empty());
+    }
+
+    #[test]
+    fn summary_missed_incoming_once() {
+        let mut h = WaCallHistory::new();
+        let s = summary("a", CallDirection::In, CallPhase::Ended(EndReason::Missed));
+        assert!(h.record_summary(&s, "Ann"));
+        assert!(!h.record_summary(&s, "Ann"));
+        let r = h.iter().next().unwrap();
+        assert_eq!(
+            (r.missed, r.started_ms, r.duration_s, r.peer_label.as_str()),
+            (true, 1_000, 0, "Ann")
+        );
+    }
+
+    #[test]
+    fn summary_answered_call_has_duration() {
+        let mut h = WaCallHistory::new();
+        let s = summary("a", CallDirection::In, CallPhase::Ended(EndReason::Remote));
+        assert!(h.record_summary(&s, "Ann"));
+        let r = h.iter().next().unwrap();
+        assert_eq!((r.missed, r.duration_s), (false, 30));
+    }
+
+    #[test]
+    fn summary_skips_call_recorded_by_end() {
+        let mut h = WaCallHistory::new();
+        assert!(h.record_end(&view("a", CallDirection::In, 7), 5, &EndReason::Remote));
+        let s = summary("a", CallDirection::In, CallPhase::Ended(EndReason::Missed));
+        assert!(!h.record_summary(&s, "Ann"));
+        assert_eq!(h.len(), 1);
+        assert_eq!(h.iter().next().unwrap().duration_s, 7);
     }
 
     #[test]

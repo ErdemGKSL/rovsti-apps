@@ -3,22 +3,26 @@
 //! first frame; the synthesised mouse-down that follows a tap is ignored once
 //! a touch screen has been seen.
 
-use std::time::Duration;
+use std::{ops::Range, sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, Context, HapticFeedback, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*,
-    px, svg,
+    AnyElement, Context, FontWeight, HapticFeedback, HighlightStyle, InteractiveElement,
+    IntoElement, MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement,
+    Styled, StyledText, Window, div, prelude::*, px, svg,
 };
-use rovsti_core::dial::{self, Push};
+use rovsti_core::{
+    dial::{self, Push},
+    names,
+    t9::{T9Hit, T9Scratch},
+};
 use rovsti_ui::{
     Icon,
-    glass::{GlassGrid, GlassInteraction, GlassSpec, glass_interactive, paint_glass_grid},
+    glass::{GlassGrid, GlassInteraction, GlassSpec, glass, glass_interactive, paint_glass_grid},
     motion::press_scale,
     motion_tokens::scale,
     spring::Spring,
     theme::{self, call_colors},
-    tokens::{Theme, mix, typography},
+    tokens::{Theme, mix, radius, shadow, typography},
     touch::touch_surface,
 };
 
@@ -61,6 +65,77 @@ pub(crate) struct DialMatch {
     index: usize,
     found: Option<Found>,
     task: Option<gpui::Task<()>>,
+}
+
+/// Most T9 suggestions shown above the field.
+const T9_SHOWN: usize = 3;
+/// Height of one suggestion row and the gap between rows.
+const T9_ROW_H: f32 = 48.0;
+const T9_GAP: f32 = 6.0;
+
+/// The T9 suggestions for the digits in the field, computed like
+/// [`DialMatch`]: off the UI thread whenever the field or the contact index
+/// changes. The scratch (the previous query's candidates) travels into the
+/// task and back, so each extra digit only narrows the last answer.
+#[derive(Default)]
+pub(crate) struct T9Match {
+    /// The typed text the hits are for (or being fetched for).
+    query: String,
+    /// Address of the contact index they were asked of.
+    index: usize,
+    /// The name format the spans were computed under.
+    format: rovsti_core::wire::NameFormat,
+    hits: Vec<T9Hit>,
+    /// `None` while a task holds it.
+    scratch: Option<T9Scratch>,
+    task: Option<gpui::Task<()>>,
+}
+
+/// The digits worth a T9 lookup: at least one, and nothing but digits (`+`,
+/// `*` and `#` are not T9).
+fn t9_digits(dialed: &str) -> Option<&str> {
+    (!dialed.is_empty() && dialed.bytes().all(|b| b.is_ascii_digit())).then_some(dialed)
+}
+
+/// What the strip shows: the hits without the contact the status line already
+/// names, at most [`T9_SHOWN`], and how many more there are. `exact` is that
+/// contact's position in the contacts payload (a [`T9Hit::contact_idx`]).
+pub(crate) fn visible_suggestions(hits: &[T9Hit], exact: Option<i64>) -> (Vec<T9Hit>, usize) {
+    let mut rest = hits
+        .iter()
+        .filter(|hit| exact != Some(i64::from(hit.contact_idx)));
+    let shown: Vec<T9Hit> = rest.by_ref().take(T9_SHOWN).copied().collect();
+    (shown, rest.count())
+}
+
+/// Byte range of the characters `span` of `name`, clamped to the name.
+fn byte_range(name: &str, span: (u16, u16)) -> Option<Range<usize>> {
+    let (start, end) = (usize::from(span.0), usize::from(span.1));
+    if start >= end {
+        return None;
+    }
+    let mut offsets = name
+        .char_indices()
+        .map(|(i, _)| i)
+        .chain(std::iter::once(name.len()));
+    let from = offsets.by_ref().nth(start)?;
+    let to = if end - start == 1 {
+        offsets.next()?
+    } else {
+        offsets.nth(end - start - 1).unwrap_or(name.len())
+    };
+    Some(from..to)
+}
+
+/// One row of the strip, resolved from a hit.
+struct Suggestion {
+    name: SharedString,
+    span: Option<Range<usize>>,
+    number: SharedString,
+    raw: SharedString,
+    label: SharedString,
+    monogram: Option<SharedString>,
+    hue: Option<usize>,
 }
 
 /// S2: the digit that was just deleted. It stays in the row, narrowing to
@@ -575,6 +650,207 @@ impl PhoneApp {
         }));
     }
 
+    /// Once per render: if the typed digits or the contact index changed,
+    /// asks the index for T9 suggestions on the background executor.
+    pub(crate) fn sync_t9_match(&mut self, cx: &mut Context<Self>) {
+        let load = self.backend.read(cx).contacts();
+        let format = self.backend.read(cx).settings().name_format;
+        let index_id = match &load {
+            Load::Ready(index) => Arc::as_ptr(index) as usize,
+            _ => 0,
+        };
+        let m = &mut self.t9;
+        if m.query == self.dialed && m.index == index_id && m.format == format {
+            return;
+        }
+        m.query.clone_from(&self.dialed);
+        m.index = index_id;
+        m.format = format;
+        m.task = None;
+        let (Load::Ready(index), Some(digits)) = (load, t9_digits(&self.dialed)) else {
+            m.hits.clear();
+            if let Some(scratch) = &mut m.scratch {
+                scratch.forget();
+            }
+            return;
+        };
+        let digits = digits.to_owned();
+        let mut scratch = m.scratch.take().unwrap_or_default();
+        scratch.set_format(format);
+        m.task = Some(cx.spawn(async move |this, cx| {
+            let (scratch, hits) = cx
+                .background_executor()
+                .spawn(async move {
+                    let hits = index.t9(digits.as_bytes(), &mut scratch).to_vec();
+                    (scratch, hits)
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.t9.task = None;
+                this.t9.scratch = Some(scratch);
+                if this.t9.hits != hits {
+                    this.t9.hits = hits;
+                    cx.notify();
+                }
+            })
+            .ok();
+        }));
+    }
+
+    /// The rows to draw above the field, empty when the strip is hidden, with
+    /// how many more hits there are.
+    fn t9_rows(&self, cx: &Context<Self>) -> (Vec<Suggestion>, usize) {
+        if t9_digits(&self.dialed).is_none() || self.t9.query != self.dialed {
+            return (Vec::new(), 0);
+        }
+        let Load::Ready(index) = self.backend.read(cx).contacts() else {
+            return (Vec::new(), 0);
+        };
+        let format = self.t9.format;
+        let exact = self
+            .dial_match
+            .found
+            .as_ref()
+            .and_then(|found| index.all().position(|c| c.id == found.id))
+            .and_then(|i| i64::try_from(i).ok());
+        let (shown, more) = visible_suggestions(&self.t9.hits, exact);
+        let rows = shown
+            .iter()
+            .filter_map(|hit| {
+                let contact = index.contact(hit.contact_idx)?;
+                let number = contact.numbers.get(usize::from(hit.number_idx))?;
+                let name = names::display(contact, format).into_owned();
+                let span = hit.name_span.and_then(|s| byte_range(&name, s));
+                Some(Suggestion {
+                    monogram: rovsti_core::avatar::monogram(&name).map(|c| c.to_string().into()),
+                    hue: rovsti_core::avatar::hue_index(Some(contact.id)),
+                    label: format!("Call {name}, {}", number.raw).into(),
+                    number: number.raw.clone().into(),
+                    raw: number.raw.clone().into(),
+                    span,
+                    name: name.into(),
+                })
+            })
+            .collect();
+        (rows, more)
+    }
+
+    /// A tap on suggestion `slot`: calls its number.
+    pub(crate) fn t9_tap(&mut self, slot: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let (rows, _) = self.t9_rows(cx);
+        if let Some(row) = rows.get(slot) {
+            let number = row.raw.clone();
+            self.place_call_from(&number, window, cx);
+        }
+    }
+
+    /// A tap on "N more": Contacts with the search prefilled.
+    pub(crate) fn t9_more(&mut self, cx: &mut Context<Self>) {
+        let query = self.dialed.clone();
+        self.contacts.field.update(cx, |f, cx| f.set(&query, cx));
+        self.select_tab(crate::CONTACTS_TAB, cx);
+    }
+
+    fn t9_strip(&self, theme: Theme, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        let (rows, more) = self.t9_rows(cx);
+        if rows.is_empty() {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        const IDS: [&str; T9_SHOWN] = ["t9-0", "t9-1", "t9-2"];
+        let mut strip = div().flex().flex_col().gap(px(T9_GAP)).w(px(320.0));
+        for (slot, row) in rows.into_iter().enumerate() {
+            let id = IDS[slot];
+            let press = self.presses.value(id).clamp(0.0, 1.0);
+            let highlights: Vec<_> = row
+                .span
+                .into_iter()
+                .map(|r| {
+                    (
+                        r,
+                        HighlightStyle {
+                            font_weight: Some(FontWeight::BOLD),
+                            color: Some(colors.accent),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
+            strip = strip.child(
+                glass(GlassSpec::control(theme))
+                    .id(id)
+                    .role(Role::Button)
+                    .aria_label(row.label)
+                    .relative()
+                    .h(px(T9_ROW_H))
+                    .px(px(12.0))
+                    .rounded(radius::CARD)
+                    .shadow(shadow::glass(theme.is_dark()))
+                    .opacity(1.0 - 0.3 * press)
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(person_avatar(
+                        theme,
+                        row.hue,
+                        row.monogram.as_ref(),
+                        30.0,
+                        None,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(typography::SUBHEADLINE.size)
+                            .text_color(colors.label)
+                            .child(StyledText::new(row.name).with_highlights(highlights)),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_size(typography::FOOTNOTE.size)
+                            .text_color(colors.secondary_label)
+                            .child(row.number),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| this.t9_tap(slot, window, cx)),
+                    )
+                    .child(touch_surface(Self::touch_listener(cx, Some(id.into())))),
+            );
+        }
+        if more > 0 {
+            let press = self.presses.value("t9-more").clamp(0.0, 1.0);
+            let text = format!("{more} more");
+            strip = strip.child(
+                div()
+                    .id("t9-more")
+                    .role(Role::Button)
+                    .aria_label(format!("{text} contacts"))
+                    .relative()
+                    .h(px(36.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(typography::FOOTNOTE.size)
+                    .font_weight(typography::HEADLINE.weight)
+                    .text_color(colors.accent)
+                    .opacity(1.0 - 0.5 * press)
+                    .child(text)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| this.t9_more(cx)),
+                    )
+                    .child(touch_surface(Self::touch_listener(
+                        cx,
+                        Some("t9-more".into()),
+                    ))),
+            );
+        }
+        Some(strip)
+    }
+
     // ---- Rendering --------------------------------------------------------
 
     /// One glass key in a fixed slot, so neighbours never move while it shrinks.
@@ -865,6 +1141,17 @@ impl PhoneApp {
                     .flex()
                     .justify_center()
                     .child(self.number_display(theme))
+                    .children(self.t9_strip(theme, cx).map(|strip| {
+                        // Floats over the title area so the keys never move.
+                        div()
+                            .absolute()
+                            .bottom_full()
+                            .pb(px(T9_GAP))
+                            .w_full()
+                            .flex()
+                            .justify_center()
+                            .child(strip)
+                    }))
                     .when(self.dialed.is_empty(), |el| {
                         el.child(self.paste_pill(theme, cx))
                     }),
@@ -960,6 +1247,71 @@ mod tests {
                     .join(" ")
             ),
         }
+    }
+
+    fn hit(contact_idx: u32) -> T9Hit {
+        T9Hit {
+            contact_idx,
+            number_idx: 0,
+            name_span: None,
+            rank: 1,
+        }
+    }
+
+    fn idxs(hits: &[T9Hit]) -> Vec<u32> {
+        hits.iter().map(|h| h.contact_idx).collect()
+    }
+
+    #[test]
+    fn suggestions_cap_at_three_and_count_the_rest() {
+        let hits: Vec<_> = (0..7).map(hit).collect();
+        let (shown, more) = visible_suggestions(&hits, None);
+        assert_eq!(idxs(&shown), [0, 1, 2]);
+        assert_eq!(more, 4);
+    }
+
+    #[test]
+    fn suggestions_drop_the_exact_contact_before_capping() {
+        let hits: Vec<_> = (0..5).map(hit).collect();
+        let (shown, more) = visible_suggestions(&hits, Some(1));
+        assert_eq!(idxs(&shown), [0, 2, 3]);
+        assert_eq!(more, 1);
+    }
+
+    #[test]
+    fn suggestions_with_few_hits_have_no_remainder() {
+        let hits = [hit(4), hit(9)];
+        assert_eq!(visible_suggestions(&hits, None).1, 0);
+        let (shown, more) = visible_suggestions(&hits, Some(4));
+        assert_eq!((idxs(&shown), more), (vec![9], 0));
+        let (shown, more) = visible_suggestions(&[], Some(4));
+        assert!(shown.is_empty());
+        assert_eq!(more, 0);
+        // An exact match that is not among the hits changes nothing.
+        let (shown, _) = visible_suggestions(&hits, Some(77));
+        assert_eq!(shown.len(), 2);
+    }
+
+    #[test]
+    fn t9_needs_plain_digits() {
+        assert_eq!(t9_digits("5"), Some("5"));
+        assert_eq!(t9_digits("0532"), Some("0532"));
+        for bad in ["", "+90", "*21#", "12#", "1*"] {
+            assert_eq!(t9_digits(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn spans_become_byte_ranges() {
+        assert_eq!(byte_range("Ayse Yilmaz", (0, 2)), Some(0..2));
+        assert_eq!(byte_range("Ayse Yilmaz", (5, 11)), Some(5..11));
+        // Multi-byte characters: the span counts characters.
+        assert_eq!(byte_range("Şeyma Öz", (0, 1)), Some(0..2));
+        assert_eq!(byte_range("Şeyma Öz", (6, 8)), Some(7..10));
+        // Past the end is clamped, empty or out of range is nothing.
+        assert_eq!(byte_range("Ali", (1, 9)), Some(1..3));
+        assert_eq!(byte_range("Ali", (2, 2)), None);
+        assert_eq!(byte_range("Ali", (5, 6)), None);
     }
 
     #[test]

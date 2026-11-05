@@ -125,6 +125,7 @@ struct PhoneApp {
     status: Option<Status>,
     /// Whose number is typed (story 10.1); shown in the status line.
     dial_match: keypad::DialMatch,
+    t9: keypad::T9Match,
     backend: Entity<Backend>,
     xiaomi: Option<XiaomiOs>,
     _subscriptions: Vec<Subscription>,
@@ -408,6 +409,7 @@ impl PhoneApp {
             ),
             status: None,
             dial_match: keypad::DialMatch::default(),
+            t9: keypad::T9Match::default(),
             _subscriptions: subscriptions,
             incall: InCall::new(cx),
             incoming: Incoming::new(cx, marks.clone()),
@@ -1220,6 +1222,7 @@ impl Render for PhoneApp {
         self.sync_reply(window, cx);
         self.sync_settings_frame(window, cx);
         self.sync_dial_match(cx);
+        self.sync_t9_match(cx);
         let mut motion = std::mem::take(&mut self.motion);
         motion.frame_timed(window, |dt, real| self.tick(dt, real));
         self.flights_ready(cx);

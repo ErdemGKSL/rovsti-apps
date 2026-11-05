@@ -18,6 +18,8 @@ pub mod gesture;
 pub mod import_plan;
 pub mod inbox;
 pub mod lru;
+pub mod mms_pdu;
+pub mod msg_backup;
 pub mod names;
 pub mod perf;
 pub mod phone_number;

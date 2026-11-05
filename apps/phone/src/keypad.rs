@@ -32,6 +32,8 @@ use crate::{
 
 pub const KEY_SIZE: f32 = 78.0;
 const LONG_ZERO: u64 = 400;
+/// Holding a digit key for speed dial or voicemail.
+const LONG_DIGIT: u64 = 500;
 const LONG_DELETE: u64 = 500;
 
 /// Fewest typed characters worth looking up (the shortest emergency codes).
@@ -153,6 +155,8 @@ pub const KEYS: [Key; 12] = [
 #[derive(Clone, Copy)]
 pub(crate) enum HoldAction {
     Plus,
+    /// A digit 1..=9 was held on an empty field: voicemail or speed dial.
+    Digit(u8),
     /// Delete is held: erase the next character from the right (after this
     /// many repeats), then arm the next erase while the finger stays down.
     Erase(u32),
@@ -273,6 +277,7 @@ impl PhoneApp {
                     self.digit_pop.set_target(1.0);
                 }
             }
+            HoldAction::Digit(d) => self.speed_dial_hold(d, window, cx),
             HoldAction::Erase(step) => self.erase_step(step, window, cx),
             HoldAction::Diagnostics => {
                 if self.sheet.is_open() && self.sheet_kind == crate::SheetKind::Setup {
@@ -317,6 +322,13 @@ impl PhoneApp {
                 rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
                 if key == '0' {
                     self.arm_hold(LONG_ZERO, HoldAction::Plus, window, cx);
+                } else if let Some(d) = key
+                    .to_digit(10)
+                    .and_then(|d| u8::try_from(d).ok())
+                    .filter(|d| *d >= 1 && self.dialed.len() == 1)
+                {
+                    // Speed dial only applies to the first digit of a number.
+                    self.arm_hold(LONG_DIGIT, HoldAction::Digit(d), window, cx);
                 } else {
                     self.hold_gen += 1;
                 }
@@ -467,6 +479,27 @@ impl PhoneApp {
                 }
                 self.flights.home = None;
                 self.bloom_ring(window, cx);
+            }
+            Placement::Debounced => {}
+            Placement::Blocked => self.status = Some(Status::NeedsPhone),
+            Placement::Failed => self.set_status("The call could not be placed"),
+        }
+    }
+
+    /// Calls voicemail and says how it went, like the Call button does.
+    pub(crate) fn voicemail_press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        match self
+            .backend
+            .update(cx, |backend, cx| backend.call_voicemail(cx))
+        {
+            Placement::Placed | Placement::Requesting => {
+                if self.backend.read(cx).is_default_dialer() {
+                    self.set_status("Calling voicemail...");
+                } else {
+                    self.set_status("Placed through the system phone app");
+                }
+                self.flights.home = None;
             }
             Placement::Debounced => {}
             Placement::Blocked => self.status = Some(Status::NeedsPhone),

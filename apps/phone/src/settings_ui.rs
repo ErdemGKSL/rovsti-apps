@@ -81,10 +81,11 @@ pub(crate) enum RowId {
     Blocked,
     BlockedAccess,
     WhatsApp,
+    SpeedDial,
 }
 
 impl RowId {
-    const COUNT: usize = 24;
+    const COUNT: usize = 25;
 
     const fn index(self) -> usize {
         self as usize
@@ -117,6 +118,7 @@ impl RowId {
             Self::BlockedAccess => "set-bk-access",
             // Not "set-wa-...": that prefix belongs to the WhatsApp page itself.
             Self::WhatsApp => "set-whatsapp",
+            Self::SpeedDial => "set-speed-dial",
         }
     }
 }
@@ -211,6 +213,8 @@ pub(crate) struct RowsKey {
     /// The call log permission is missing (the Blocked calls view needs it).
     pub call_log_missing: bool,
     pub replies: usize,
+    /// Digits with a speed-dial contact.
+    pub speed_dial: usize,
 }
 
 impl PartialEq for RowsKey {
@@ -225,6 +229,7 @@ impl PartialEq for RowsKey {
             && self.can_block == other.can_block
             && self.call_log_missing == other.call_log_missing
             && self.replies == other.replies
+            && self.speed_dial == other.speed_dial
     }
 }
 
@@ -291,6 +296,15 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
                 },
             )
             .note("Texts to decline a call with"),
+            Row::new(
+                RowId::SpeedDial,
+                "Speed dial",
+                Control::Link {
+                    value: Some(key.speed_dial.to_string().into()),
+                    icon: Icon::LucideChevronRight,
+                },
+            )
+            .note("Hold a digit on the keypad to call"),
             Row::new(
                 RowId::VibrateConnect,
                 "Vibrate when call connects",
@@ -534,6 +548,7 @@ pub(crate) enum Sub {
     Blocked,
     Replies,
     WhatsApp,
+    SpeedDial,
 }
 
 impl Sub {
@@ -543,6 +558,7 @@ impl Sub {
             Self::Blocked => "set-bk-",
             Self::Replies => "set-qr-",
             Self::WhatsApp => "set-wa-",
+            Self::SpeedDial => "set-sd-",
         }
     }
 
@@ -551,6 +567,7 @@ impl Sub {
             Self::Blocked => "Blocked numbers",
             Self::Replies => "Quick replies",
             Self::WhatsApp => "WhatsApp",
+            Self::SpeedDial => "Speed dial",
         }
     }
 }
@@ -811,7 +828,7 @@ impl PhoneApp {
         match sub {
             Sub::Blocked => self.blocked_opened(cx),
             Sub::Replies => self.replies_opened(cx),
-            Sub::WhatsApp => {}
+            Sub::WhatsApp | Sub::SpeedDial => {}
         }
         self.presses.release_all();
         self.update_back(window);
@@ -825,6 +842,7 @@ impl PhoneApp {
         match sub {
             Sub::Blocked => self.blocked_closed(cx),
             Sub::Replies => self.replies_closed(cx),
+            Sub::SpeedDial => self.speed_dial_closed(),
             Sub::WhatsApp => {}
         }
         self.presses.release_all();
@@ -850,6 +868,7 @@ impl PhoneApp {
             can_block: backend.can_block_here(),
             call_log_missing: !backend.permissions().phone.is_granted(),
             replies: backend.prefs().quick_replies.len(),
+            speed_dial: backend.prefs().speed_dial.len(),
         };
         let system_tones = key.facts.system_keypad_tones;
         for row in [
@@ -888,7 +907,10 @@ impl PhoneApp {
             self.settings_close(window, cx);
             return;
         }
-        if id == "set-bk-back" || id == "set-qr-back" || id == "set-wa-back" {
+        if matches!(
+            id,
+            "set-bk-back" | "set-qr-back" | "set-wa-back" | "set-sd-back"
+        ) {
             self.settings_close_sub(window, cx);
             return;
         }
@@ -913,6 +935,8 @@ impl PhoneApp {
                 self.blocked_tap(id, window, cx);
             } else if id.starts_with("set-qr-") {
                 self.replies_tap(id, window, cx);
+            } else if id.starts_with(Sub::SpeedDial.prefix()) {
+                self.speed_dial_tap(id, window, cx);
             }
             return;
         };
@@ -987,6 +1011,7 @@ impl PhoneApp {
             (RowId::Blocked, _) => self.settings_open_sub(Sub::Blocked, window, cx),
             (RowId::Replies, _) => self.settings_open_sub(Sub::Replies, window, cx),
             (RowId::WhatsApp, _) => self.settings_open_sub(Sub::WhatsApp, window, cx),
+            (RowId::SpeedDial, _) => self.settings_open_sub(Sub::SpeedDial, window, cx),
             (RowId::BlockedAccess, _) => self.blocked_grant(cx),
             (RowId::Export, _) => self.backup_export(cx),
             (RowId::Import, _) => self.backup_import(cx),
@@ -1535,6 +1560,7 @@ impl PhoneApp {
             Sub::Blocked => "set-bk-back",
             Sub::Replies => "set-qr-back",
             Sub::WhatsApp => "set-wa-back",
+            Sub::SpeedDial => "set-sd-back",
         };
         let back_press = self.presses.value(back_id);
         let back = div()
@@ -1573,6 +1599,7 @@ impl PhoneApp {
             Sub::Blocked => self.blocked_body(theme, window, cx),
             Sub::Replies => self.replies_body(theme, window, cx),
             Sub::WhatsApp => self.whatsapp_body(),
+            Sub::SpeedDial => self.speed_dial_body(theme, cx),
         };
         Some(
             div()
@@ -1644,6 +1671,7 @@ mod tests {
             can_block: true,
             call_log_missing: false,
             replies: 3,
+            speed_dial: 2,
         }
     }
 
@@ -1827,6 +1855,7 @@ mod tests {
             RowId::Blocked,
             RowId::BlockedAccess,
             RowId::WhatsApp,
+            RowId::SpeedDial,
         ];
         assert_eq!(all.len(), RowId::COUNT);
         for (i, a) in all.iter().enumerate() {
@@ -1864,7 +1893,7 @@ mod tests {
 
     #[test]
     fn second_level_pages_have_distinct_prefixes_that_row_keys_do_not_use() {
-        let subs = [Sub::Blocked, Sub::Replies, Sub::WhatsApp];
+        let subs = [Sub::Blocked, Sub::Replies, Sub::WhatsApp, Sub::SpeedDial];
         for (i, a) in subs.iter().enumerate() {
             assert!(a.prefix().starts_with("set-") && a.prefix().ends_with('-'));
             for b in &subs[i + 1..] {
@@ -1878,10 +1907,12 @@ mod tests {
             RowId::Replies,
             RowId::Blocked,
             RowId::WhatsApp,
+            RowId::SpeedDial,
         ];
         for row in rows {
             assert!(subs.iter().all(|s| !row.key().starts_with(s.prefix())));
         }
+        assert_eq!(Sub::SpeedDial.prefix(), "set-sd-");
         assert_eq!(Sub::WhatsApp.prefix(), "set-wa-");
         assert_eq!(Sub::WhatsApp.title(), "WhatsApp");
     }

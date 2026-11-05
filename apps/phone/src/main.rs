@@ -41,6 +41,7 @@ mod settings_ui;
 mod setup_ui;
 mod signature;
 mod sim_ui;
+mod speed_dial_ui;
 mod wa_call;
 mod waiting_card;
 mod zone;
@@ -197,6 +198,8 @@ struct PhoneApp {
     pill: NoticePill,
     /// What the pill's trailing button does, with the token of the pill it belongs to.
     pill_action: Option<(u64, block_ui::PillAction)>,
+    /// The Speed dial page and a digit waiting for a contact.
+    speed_dial: speed_dial_ui::SpeedDialUi,
     /// The Recents row menu and S27 (Epic 17).
     row_menu: block_ui::RowMenu,
     /// The Blocked numbers page behind Settings (stories 17.5, 17.6).
@@ -444,6 +447,7 @@ impl PhoneApp {
             sim: sim_ui::SimUi::default(),
             pill: NoticePill::new(),
             pill_action: None,
+            speed_dial: speed_dial_ui::SpeedDialUi::default(),
             row_menu: block_ui::RowMenu::new(),
             blocked: blocked_ui,
             reply: replies_ui::ReplyUi::default(),
@@ -707,6 +711,9 @@ impl PhoneApp {
             self.row_menu.close();
             cx.notify();
             return;
+        }
+        if index != CONTACTS_TAB {
+            self.speed_dial.pick = None;
         }
         self.tabs.press();
         let from = self.tabs.selected();

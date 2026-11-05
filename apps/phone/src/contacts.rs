@@ -653,7 +653,9 @@ impl PhoneApp {
                 self.contacts.last_pressed = Some(index);
                 self.presses.down(format!("ct-{index}"));
                 if let Some(row) = self.contacts.rows.get(index).cloned() {
-                    self.open_contact_sheet(row, false, window, cx);
+                    // Choosing a speed-dial contact shows only the numbers.
+                    let chooser = self.speed_dial.pick.is_some();
+                    self.open_contact_sheet(row, chooser, window, cx);
                 }
             }
         }
@@ -951,8 +953,13 @@ impl PhoneApp {
         {
             if let Some(number) = sheet.contact.numbers.get(index) {
                 let raw = number.raw.clone();
+                let name = sheet.contact.name.to_string();
                 self.close_sheet(cx);
-                let _ = self.place_call_from(&raw, window, cx);
+                if self.speed_dial.pick.is_some() {
+                    self.speed_dial_assign(&name, &raw, window, cx);
+                } else {
+                    let _ = self.place_call_from(&raw, window, cx);
+                }
             }
             return;
         }
@@ -1523,7 +1530,10 @@ impl PhoneApp {
                         .line_height(typography::TITLE2.line)
                         .font_weight(typography::TITLE2.weight)
                         .text_color(colors.label)
-                        .child(SharedString::from(format!("Call {}", contact.name))),
+                        .child(SharedString::from(match self.speed_dial.pick {
+                            Some(digit) => format!("Speed dial {digit}: {}", contact.name),
+                            None => format!("Call {}", contact.name),
+                        })),
                 )
                 .child(
                     div()

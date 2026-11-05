@@ -859,6 +859,48 @@ impl Backend {
         self.place_now(raw, cx)
     }
 
+    /// Calls the voicemail box (long-press on 1). Shares the debounce and the
+    /// Phone permission rules of [`Self::place_call`]; on desktop the preview
+    /// starts a call so the flow can be seen.
+    pub fn call_voicemail(&mut self, cx: &mut Context<Self>) -> Placement {
+        let now = Instant::now();
+        if self
+            .last_place
+            .is_some_and(|t| now.duration_since(t) < PLACE_DEBOUNCE)
+        {
+            return Placement::Debounced;
+        }
+        self.last_place = Some(now);
+        self.call_blocked = false;
+        if !self.permissions.phone.is_granted() {
+            match permissions::request(Group::Phone) {
+                // The owner holds the digit again once it is granted.
+                Ok(true) => return Placement::Requesting,
+                // Nothing to ask on desktop: the preview just places the call.
+                Err(Error::Unsupported) => {}
+                _ => {
+                    self.call_blocked = true;
+                    cx.notify();
+                    return Placement::Blocked;
+                }
+            }
+        }
+        match telecom::call_voicemail() {
+            Ok(true) => Placement::Placed,
+            Ok(false) => Placement::Failed,
+            Err(Error::Unsupported) => {
+                #[cfg(not(target_os = "android"))]
+                self.preview_start("voicemail", cx);
+                let _ = cx;
+                Placement::Placed
+            }
+            Err(error) => {
+                log::warn!("calling voicemail failed: {error}");
+                Placement::Failed
+            }
+        }
+    }
+
     fn place_now(&mut self, raw: &str, cx: &mut Context<Self>) -> Placement {
         self.place_with_account(raw, cx)
     }

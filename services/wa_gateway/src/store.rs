@@ -79,6 +79,23 @@ pub fn parse_key_id(s: &str) -> Option<KeyId> {
     serde_json::from_value(serde_json::Value::String(s.to_owned())).ok()
 }
 
+/// A chat as a history sync describes it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistoryChat {
+    pub jid: String,
+    pub name: Option<String>,
+    pub is_group: bool,
+    pub unread: u32,
+    pub last_ms: i64,
+    pub messages: Vec<HistoryMessage>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistoryMessage {
+    pub message: WaMessage,
+    pub raw_proto: Option<Vec<u8>>,
+}
+
 /// The 32 raw bytes of a hash (stored as a BLOB).
 fn hash_bytes(hash: &KeyHash) -> Vec<u8> {
     let hex = hash.to_hex();
@@ -585,6 +602,112 @@ impl Store {
                 )?;
             }
             Ok(())
+        })
+        .await
+    }
+
+    pub async fn clear_unread(&self, instance: InstanceId, chat: String) -> Result<(), StoreError> {
+        self.run(move |conn| {
+            conn.execute(
+                "UPDATE chats SET unread = 0 WHERE instance_id = ?1 AND jid = ?2",
+                params![instance.as_str(), chat],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// One message of a chat, with its reactions.
+    pub async fn message(
+        &self,
+        instance: InstanceId,
+        chat: String,
+        id: String,
+    ) -> Result<Option<WaMessage>, StoreError> {
+        self.run(move |conn| {
+            let row = conn
+                .query_row(
+                    "SELECT sender, from_me, ts_ms, body_json FROM messages
+                     WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                    params![instance.as_str(), chat, id],
+                    |r| {
+                        Ok((
+                            r.get::<_, Option<String>>(0)?,
+                            r.get::<_, bool>(1)?,
+                            r.get::<_, i64>(2)?,
+                            r.get::<_, String>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((sender, from_me, timestamp_ms, body)) = row else {
+                return Ok(None);
+            };
+            let mut reactions = reactions_of(conn, &instance, &chat)?;
+            Ok(Some(WaMessage {
+                reactions: reactions.remove(&id).unwrap_or_default(),
+                id,
+                chat,
+                sender,
+                from_me,
+                timestamp_ms,
+                body: serde_json::from_str(&body)?,
+            }))
+        })
+        .await
+    }
+
+    /// Chats and messages from a history sync, written in one transaction.
+    /// Messages already stored are kept as they are. Returns how many chats
+    /// were written.
+    pub async fn import_history(
+        &self,
+        instance: InstanceId,
+        chats: Vec<HistoryChat>,
+    ) -> Result<u32, StoreError> {
+        self.run(move |conn| {
+            let tx = conn.transaction()?;
+            let mut written = 0u32;
+            for chat in &chats {
+                tx.execute(
+                    "INSERT INTO chats (instance_id, jid, name, is_group, unread, last_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(instance_id, jid) DO UPDATE SET
+                        name = COALESCE(excluded.name, name),
+                        is_group = excluded.is_group,
+                        unread = MAX(unread, excluded.unread),
+                        last_ms = MAX(last_ms, excluded.last_ms)",
+                    params![
+                        instance.as_str(),
+                        chat.jid,
+                        chat.name,
+                        chat.is_group,
+                        chat.unread,
+                        chat.last_ms
+                    ],
+                )?;
+                for row in &chat.messages {
+                    let m = &row.message;
+                    tx.execute(
+                        "INSERT OR IGNORE INTO messages
+                         (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        params![
+                            instance.as_str(),
+                            chat.jid,
+                            m.id,
+                            m.sender,
+                            m.from_me,
+                            m.timestamp_ms,
+                            serde_json::to_string(&m.body)?,
+                            row.raw_proto
+                        ],
+                    )?;
+                }
+                written += 1;
+            }
+            tx.commit()?;
+            Ok(written)
         })
         .await
     }

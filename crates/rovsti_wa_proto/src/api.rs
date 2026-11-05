@@ -18,10 +18,11 @@ pub mod routes {
     pub const SEND_TEXT: &str = "/v1/messages/text";
     pub const SEND_MEDIA: &str = "/v1/messages/media";
     pub const REACT: &str = "/v1/messages/reaction";
-    pub const MARK_READ: &str = "/v1/messages/read";
+    pub const MARK_READ: &str = "/v1/read";
     pub const MESSAGE_MEDIA: &str = "/v1/messages/{message_id}/media";
     pub const PRESENCE: &str = "/v1/presence";
-    pub const CHAT_STATE: &str = "/v1/chat-state";
+    pub const PRESENCE_SUBSCRIBE: &str = "/v1/presence/subscribe";
+    pub const CHAT_STATE: &str = "/v1/chatstate";
     pub const GROUPS: &str = "/v1/groups";
     pub const CALLS: &str = "/v1/calls";
     pub const CALL_ACCEPT: &str = "/v1/calls/{call_id}/accept";
@@ -185,6 +186,11 @@ pub enum TypingState {
     Typing,
     Recording,
     Paused,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SubscribePresence {
+    pub jid: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -10,6 +10,7 @@ pub mod error;
 pub mod hub;
 pub mod routes;
 pub mod store;
+pub mod wa;
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};

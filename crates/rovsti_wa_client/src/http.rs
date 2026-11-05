@@ -10,7 +10,8 @@ use rovsti_wa_proto::api::routes;
 use rovsti_wa_proto::{
     CallStarted, ChatState, ChatSummary, ConnectKey, CreateInstance, CreatedInstance, GatewayUrl,
     GroupInfo, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, MarkRead, MediaKind, MintKey,
-    PlaceCall, PushRegistration, SendReaction, SendText, Sent, SetMuted, SetPresence, WaMessage,
+    PlaceCall, PushRegistration, SendReaction, SendText, Sent, SetMuted, SetPresence,
+    SubscribePresence, WaMessage,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -305,6 +306,17 @@ impl Gateway {
 
     pub fn set_presence(&self, available: bool) -> Result<(), ClientError> {
         self.post_unit(routes::PRESENCE, &SetPresence { available })
+    }
+
+    /// Starts receiving presence updates for a contact; call it the first time
+    /// a chat is opened.
+    pub fn subscribe_presence(&self, jid: &str) -> Result<(), ClientError> {
+        self.post_unit(
+            routes::PRESENCE_SUBSCRIBE,
+            &SubscribePresence {
+                jid: jid.to_owned(),
+            },
+        )
     }
 
     pub fn chat_state(&self, req: &ChatState) -> Result<(), ClientError> {

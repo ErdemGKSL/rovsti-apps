@@ -1,10 +1,12 @@
-//! The seam between the gateway and WhatsApp itself. The real driver (step 4)
-//! wraps whatsapp-rust; [`FakeDriver`] scripts the same events for tests.
+//! The seam between the gateway and WhatsApp itself. The real driver
+//! ([`crate::wa::WaRuntime`]) wraps whatsapp-rust; [`FakeDriver`] scripts the same events for tests.
 
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use rovsti_wa_proto::{GatewayEvent, LinkRequest, SendText, Sent, WaMessage};
+use rovsti_wa_proto::{
+    ChatState, GatewayEvent, LinkRequest, MarkRead, Reaction, SendText, Sent, WaMessage,
+};
 
 use crate::hub::Hub;
 use crate::now_ms;
@@ -16,6 +18,8 @@ pub enum DriverError {
     NotConnected,
     #[error("not supported by this driver")]
     Unsupported,
+    #[error("{0}")]
+    BadRequest(String),
     #[error("{0}")]
     Failed(String),
 }
@@ -88,6 +92,90 @@ impl EventSink {
         self.hub.publish(&self.instance, now_ms(), event);
     }
 
+    /// Records a reaction (an empty emoji removes it) and publishes the
+    /// message's new reaction list.
+    pub async fn emit_reaction(&self, chat: String, id: String, reaction: Reaction) {
+        let saved = self
+            .store
+            .set_reaction(self.instance.clone(), chat.clone(), id.clone(), reaction)
+            .await;
+        if let Err(e) = saved {
+            log::warn!("{}: saving reaction failed: {e}", self.instance);
+            return;
+        }
+        match self
+            .store
+            .message(self.instance.clone(), chat.clone(), id.clone())
+            .await
+        {
+            Ok(Some(message)) => {
+                self.hub.publish(
+                    &self.instance,
+                    now_ms(),
+                    GatewayEvent::MessageUpdate {
+                        chat,
+                        id,
+                        reactions: message.reactions,
+                        read: false,
+                    },
+                );
+            }
+            // The reacted-to message is not in history; nothing to update.
+            Ok(None) => {}
+            Err(e) => log::warn!("{}: reading message failed: {e}", self.instance),
+        }
+    }
+
+    /// Zeroes the unread counter of `chat` once the user has read it.
+    pub async fn mark_chat_read(&self, chat: &str) {
+        if let Err(e) = self
+            .store
+            .clear_unread(self.instance.clone(), chat.to_owned())
+            .await
+        {
+            log::warn!("{}: clearing unread failed: {e}", self.instance);
+        }
+    }
+
+    /// A stored message, for quoting.
+    pub async fn find_message(&self, chat: &str, id: &str) -> Option<WaMessage> {
+        self.store
+            .message(self.instance.clone(), chat.to_owned(), id.to_owned())
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("{}: reading message failed: {e}", self.instance);
+                None
+            })
+    }
+
+    /// Stores history-sync chats in one transaction and announces them with a
+    /// single `HistorySynced` event (not one event per message).
+    pub async fn import_history(
+        &self,
+        chats: Vec<crate::store::HistoryChat>,
+        progress: Option<u32>,
+    ) {
+        match self
+            .store
+            .import_history(self.instance.clone(), chats)
+            .await
+        {
+            Ok(chats) => {
+                self.hub.publish(
+                    &self.instance,
+                    now_ms(),
+                    GatewayEvent::HistorySynced { chats, progress },
+                );
+            }
+            Err(e) => log::warn!("{}: saving history failed: {e}", self.instance),
+        }
+    }
+
+    /// Publishes without persisting (receipts, presence, typing, ...).
+    pub fn publish(&self, event: GatewayEvent) {
+        self.hub.publish(&self.instance, now_ms(), event);
+    }
+
     pub async fn emit_message(&self, message: WaMessage, raw_proto: Option<Vec<u8>>) {
         self.emit_with_raw(GatewayEvent::Message(message), raw_proto)
             .await;
@@ -116,10 +204,38 @@ pub trait WaDriver: Send + Sync + 'static {
         instance: &InstanceId,
         req: SendText,
     ) -> BoxFuture<'_, Result<Sent, DriverError>>;
+
+    /// Sends read receipts for `req.ids`.
+    fn mark_read(
+        &self,
+        instance: &InstanceId,
+        req: MarkRead,
+    ) -> BoxFuture<'_, Result<(), DriverError>>;
+
+    /// Announces this account as online or offline.
+    fn set_presence(
+        &self,
+        instance: &InstanceId,
+        available: bool,
+    ) -> BoxFuture<'_, Result<(), DriverError>>;
+
+    /// Typing / recording / paused indicator in a chat.
+    fn chat_state(
+        &self,
+        instance: &InstanceId,
+        req: ChatState,
+    ) -> BoxFuture<'_, Result<(), DriverError>>;
+
+    /// Starts receiving presence updates for a contact.
+    fn subscribe_presence(
+        &self,
+        instance: &InstanceId,
+        jid: String,
+    ) -> BoxFuture<'_, Result<(), DriverError>>;
 }
 
-/// Stand-in until the whatsapp-rust driver lands: it refuses to start
-/// sessions, so the gateway can run and serve its API without pretending.
+/// Refuses to start sessions, so the gateway can serve its API without
+/// WhatsApp (tests and builds without a driver).
 #[derive(Debug, Default)]
 pub struct UnlinkedDriver;
 
@@ -132,7 +248,7 @@ impl WaDriver for UnlinkedDriver {
     ) -> BoxFuture<'_, Result<(), DriverError>> {
         Box::pin(async {
             Err(DriverError::Failed(
-                "this build has no WhatsApp driver yet".to_owned(),
+                "this build has no WhatsApp driver".to_owned(),
             ))
         })
     }
@@ -150,6 +266,38 @@ impl WaDriver for UnlinkedDriver {
         _instance: &InstanceId,
         _req: SendText,
     ) -> BoxFuture<'_, Result<Sent, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    fn mark_read(
+        &self,
+        _instance: &InstanceId,
+        _req: MarkRead,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    fn set_presence(
+        &self,
+        _instance: &InstanceId,
+        _available: bool,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    fn chat_state(
+        &self,
+        _instance: &InstanceId,
+        _req: ChatState,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    fn subscribe_presence(
+        &self,
+        _instance: &InstanceId,
+        _jid: String,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
         Box::pin(async { Err(DriverError::NotConnected) })
     }
 }
@@ -173,6 +321,7 @@ mod fake {
     pub struct FakeDriver {
         running: Mutex<HashMap<InstanceId, EventSink>>,
         started: Mutex<Vec<(InstanceId, Option<LinkRequest>)>>,
+        ops: Mutex<Vec<String>>,
         counter: AtomicU64,
     }
 
@@ -193,6 +342,17 @@ mod fake {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone()
+        }
+
+        /// Receipts, presence and chat-state calls so far, as short strings.
+        pub fn ops(&self) -> Vec<String> {
+            self.ops.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        }
+
+        fn record(&self, instance: &InstanceId, op: String) -> Result<(), DriverError> {
+            self.sink(instance).ok_or(DriverError::NotConnected)?;
+            self.ops.lock().unwrap_or_else(|e| e.into_inner()).push(op);
+            Ok(())
         }
 
         fn sink(&self, instance: &InstanceId) -> Option<EventSink> {
@@ -312,6 +472,42 @@ mod fake {
                     timestamp_ms,
                 })
             })
+        }
+
+        fn mark_read(
+            &self,
+            instance: &InstanceId,
+            req: MarkRead,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(instance, format!("read {} {}", req.chat, req.ids.join(",")));
+            Box::pin(async move { result })
+        }
+
+        fn set_presence(
+            &self,
+            instance: &InstanceId,
+            available: bool,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(instance, format!("presence {available}"));
+            Box::pin(async move { result })
+        }
+
+        fn chat_state(
+            &self,
+            instance: &InstanceId,
+            req: ChatState,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(instance, format!("chatstate {} {:?}", req.chat, req.state));
+            Box::pin(async move { result })
+        }
+
+        fn subscribe_presence(
+            &self,
+            instance: &InstanceId,
+            jid: String,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(instance, format!("subscribe {jid}"));
+            Box::pin(async move { result })
         }
     }
 }

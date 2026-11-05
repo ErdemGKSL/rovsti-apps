@@ -10,9 +10,9 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use rovsti_wa_proto::api::routes as r;
 use rovsti_wa_proto::{
-    ChatSummary, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope, GatewayEvent,
-    InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest, MintKey,
-    PushRegistration, SendText, Sent, WaMessage,
+    ChatState, ChatSummary, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope,
+    GatewayEvent, InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest, MarkRead,
+    MintKey, PushRegistration, SendText, Sent, SetPresence, SubscribePresence, WaMessage,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -27,6 +27,7 @@ use crate::{AppState, store::StoreError};
 const MAX_LABEL_CHARS: usize = 64;
 const MAX_PUSH_TOKEN_BYTES: usize = 4096;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
+const MAX_READ_IDS: usize = 200;
 const DEFAULT_PAGE: u32 = 50;
 const MAX_PAGE: u32 = 200;
 const SERVER_PING: Duration = Duration::from_secs(30);
@@ -44,6 +45,10 @@ pub fn router(state: AppState) -> Router {
         .route(r::CHATS, get(chats))
         .route(r::CHAT_MESSAGES, get(chat_messages))
         .route(r::SEND_TEXT, post(send_text))
+        .route(r::MARK_READ, post(mark_read))
+        .route(r::PRESENCE, post(set_presence))
+        .route(r::CHAT_STATE, post(chat_state))
+        .route(r::PRESENCE_SUBSCRIBE, post(subscribe_presence))
         .with_state(state)
 }
 
@@ -412,6 +417,66 @@ async fn send_text(
     Ok(Json(state.driver().send_text(&auth.instance, req).await?))
 }
 
+/// Rejects a malformed JID before it reaches the driver.
+fn check_jid(jid: &str) -> ApiResult<()> {
+    crate::wa::convert::parse_jid(jid)
+        .map(drop)
+        .map_err(HttpError::from)
+}
+
+async fn mark_read(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<MarkRead>,
+) -> ApiResult<StatusCode> {
+    check_jid(&req.chat)?;
+    if let Some(sender) = req.sender.as_deref().filter(|s| !s.trim().is_empty()) {
+        check_jid(sender)?;
+    }
+    if req.ids.is_empty() || req.ids.len() > MAX_READ_IDS || req.ids.iter().any(String::is_empty) {
+        return Err(HttpError::bad_request(format!(
+            "ids must hold 1 to {MAX_READ_IDS} message ids"
+        )));
+    }
+    state.driver().mark_read(&auth.instance, req).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn set_presence(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<SetPresence>,
+) -> ApiResult<StatusCode> {
+    state
+        .driver()
+        .set_presence(&auth.instance, req.available)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn chat_state(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<ChatState>,
+) -> ApiResult<StatusCode> {
+    check_jid(&req.chat)?;
+    state.driver().chat_state(&auth.instance, req).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn subscribe_presence(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<SubscribePresence>,
+) -> ApiResult<StatusCode> {
+    check_jid(&req.jid)?;
+    state
+        .driver()
+        .subscribe_presence(&auth.instance, req.jid)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +506,13 @@ mod tests {
         let number = |n: &str| LinkRequest::PhoneNumber { number: n.into() };
         assert!(check_link(&number("+90 532 123 45 67")).is_ok());
         assert!(check_link(&number("0532 123 45 67")).is_err());
+    }
+
+    #[test]
+    fn jids_are_checked() {
+        assert!(check_jid("905321234567@s.whatsapp.net").is_ok());
+        let err = check_jid("").unwrap_err();
+        assert_eq!(err.0.code, ErrorCode::BadRequest);
     }
 
     #[test]

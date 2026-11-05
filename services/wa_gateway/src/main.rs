@@ -36,8 +36,7 @@ async fn run(config_path: Option<&std::path::Path>) -> Result<(), String> {
         .map_err(|e| format!("cannot create {}: {e}", config.data_dir.display()))?;
     let store = Store::open(&config.db_path()).map_err(|e| e.to_string())?;
 
-    // The whatsapp-rust driver replaces this in step 4.
-    let driver = Arc::new(wa_gateway::driver::UnlinkedDriver);
+    let driver = Arc::new(wa_gateway::wa::WaRuntime::new(config.data_dir.clone()));
     let listener = tokio::net::TcpListener::bind(config.bind)
         .await
         .map_err(|e| format!("cannot bind {}: {e}", config.bind))?;

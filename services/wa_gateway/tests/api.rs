@@ -10,8 +10,9 @@ use futures::StreamExt;
 use futures::channel::mpsc::UnboundedReceiver;
 use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway, subscribe};
 use rovsti_wa_proto::{
-    AppId, ConnectKey, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope, GatewayEvent,
-    GatewayUrl, InstanceState, LinkRequest, MessageBody, SendText,
+    AppId, ChatState, ConnectKey, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope,
+    GatewayEvent, GatewayUrl, InstanceState, LinkRequest, MarkRead, MessageBody, SendText,
+    TypingState,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wa_gateway::config::Config;
@@ -314,6 +315,67 @@ async fn send_text_echoes_and_is_stored() {
     assert_eq!(chats[0].jid, chat);
     assert_eq!(chats[0].unread, 0);
     assert_eq!(chats[0].last.as_ref().unwrap().id, sent.message_id);
+}
+
+#[tokio::test]
+async fn read_presence_and_chat_state_reach_the_driver_and_bad_jids_are_rejected() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    let chat = "905321234567@s.whatsapp.net";
+
+    let g = gateway.clone();
+    let results = blocking(move || {
+        (
+            g.mark_read(&MarkRead {
+                chat: chat.into(),
+                sender: None,
+                ids: vec!["A".into(), "B".into()],
+            }),
+            g.set_presence(true),
+            g.chat_state(&ChatState {
+                chat: chat.into(),
+                state: TypingState::Recording,
+            }),
+            g.subscribe_presence(chat),
+        )
+    })
+    .await;
+    results.0.unwrap();
+    results.1.unwrap();
+    results.2.unwrap();
+    results.3.unwrap();
+    assert_eq!(
+        server.driver.ops(),
+        [
+            format!("read {chat} A,B"),
+            "presence true".to_owned(),
+            format!("chatstate {chat} Recording"),
+            format!("subscribe {chat}"),
+        ]
+    );
+
+    let g = gateway.clone();
+    let (bad_chat, bad_subscribe, no_ids) = blocking(move || {
+        (
+            g.chat_state(&ChatState {
+                chat: " ".into(),
+                state: TypingState::Typing,
+            }),
+            g.subscribe_presence(""),
+            g.mark_read(&MarkRead {
+                chat: chat.into(),
+                sender: None,
+                ids: vec![],
+            }),
+        )
+    })
+    .await;
+    for result in [bad_chat, bad_subscribe, no_ids] {
+        match result {
+            Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::BadRequest),
+            other => panic!("expected BadRequest, got {other:?}"),
+        }
+    }
 }
 
 #[tokio::test]

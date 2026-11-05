@@ -69,6 +69,7 @@ impl From<DriverError> for HttpError {
                 Self::new(ErrorCode::NotConnected, "WhatsApp is not connected")
             }
             DriverError::Unsupported => Self::bad_request("not supported"),
+            DriverError::BadRequest(msg) => Self::bad_request(msg),
             DriverError::Failed(msg) => {
                 log::error!("driver: {msg}");
                 Self::new(ErrorCode::Internal, "WhatsApp request failed")

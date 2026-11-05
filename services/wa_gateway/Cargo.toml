@@ -24,6 +24,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
+whatsapp-rust.workspace = true
 
 [dev-dependencies]
 rovsti_wa_client.workspace = true

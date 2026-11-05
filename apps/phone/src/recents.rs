@@ -104,6 +104,8 @@ pub(crate) struct RowVm {
     hue: Option<usize>,
     monogram: Option<SharedString>,
     named: bool,
+    /// A WhatsApp call: the row shows a WhatsApp badge.
+    whatsapp: bool,
     /// The SIM the newest call used, resolved once per call-log swap (never per frame).
     /// `None` with one SIM or when the log's key matches no account (the slot stays empty).
     sim: Option<SimBadge>,
@@ -134,6 +136,7 @@ impl RowVm {
             hue: None,
             monogram: None,
             named,
+            whatsapp: false,
         }
     }
 
@@ -165,6 +168,7 @@ impl RowVm {
             hue: v.hue,
             monogram: v.monogram.map(|c| c.to_string().into()),
             named: v.named,
+            whatsapp: v.whatsapp,
         }
     }
 }
@@ -212,6 +216,8 @@ pub(crate) struct RecentsView {
     missed: u32,
     /// A call log has been counted already: only then may a bigger count pop the badge (S13).
     missed_counted: bool,
+    /// The WhatsApp call history revision the rows were built from.
+    wa_history_seen: u64,
     /// A long press already opened the info sheet: swallow the tap after it.
     suppress_click: bool,
     tap: TapGuard,
@@ -245,6 +251,7 @@ impl RecentsView {
             long_task: None,
             missed: 0,
             missed_counted: false,
+            wa_history_seen: 0,
             suppress_click: false,
             tap: TapGuard::default(),
             inserted: 0,
@@ -409,10 +416,12 @@ impl PhoneApp {
     /// The Recents tab announces its missed calls: "Recents, 2 missed calls".
     fn sync_missed_label(&mut self, cx: &mut Context<Self>) {
         let missed = match &self.recents.log {
-            Some(log) => rovsti_core::call_log::missed_badge(
-                &log.entries,
-                self.backend.read(cx).prefs().ui.missed_seen_ms,
-            ),
+            Some(log) => {
+                let seen = self.backend.read(cx).prefs().ui.missed_seen_ms;
+                rovsti_core::call_log::missed_badge(&log.entries, seen).saturating_add(
+                    recents::missed_extras(&self.wa_call.read(cx).recents_extras(), seen),
+                )
+            }
             None => 0,
         };
         let counted = self.recents.log.is_some();
@@ -440,6 +449,20 @@ impl PhoneApp {
         }
     }
 
+    /// The WhatsApp call history changed: its rows and the missed count follow.
+    pub(crate) fn sync_wa_history(&mut self, cx: &mut Context<Self>) {
+        if self.wa_call.read(cx).history_rev() == self.recents.wa_history_seen {
+            return;
+        }
+        if let Some(log) = self.recents.log.clone() {
+            self.rebuild_recents(log, cx);
+            self.sync_missed_label(cx);
+        } else {
+            self.recents.wa_history_seen = self.wa_call.read(cx).history_rev();
+        }
+        cx.notify();
+    }
+
     fn recents_failed(&mut self, state: State) {
         self.recents.state = state;
         self.recents.rows = Arc::from(Vec::new());
@@ -450,7 +473,10 @@ impl PhoneApp {
 
     fn rebuild_recents(&mut self, log: Arc<CallLog>, cx: &gpui::App) {
         let started = Instant::now();
-        let views = recents::build(&log.rows, backend::now_ms(), log.locale);
+        let wa = self.wa_call.read(cx);
+        self.recents.wa_history_seen = wa.history_rev();
+        let merged = recents::merge_extras(&log.rows, &wa.recents_extras());
+        let views = recents::build(&merged, backend::now_ms(), log.locale);
         let sims = self.backend.read(cx).sims();
         let format = self.backend.read(cx).settings().name_format;
         let contacts = match self.backend.read(cx).contacts() {
@@ -1238,6 +1264,21 @@ pub(crate) fn avatar_view(theme: Theme, row: &RowVm, size: f32) -> gpui::Div {
     }
 }
 
+/// The small "WhatsApp" pill in front of a WhatsApp call's subtitle.
+fn whatsapp_badge(theme: Theme) -> AnyElement {
+    let green = call_colors(theme).answer;
+    div()
+        .flex_none()
+        .px(px(5.0))
+        .rounded_full()
+        .bg(gpui::Hsla { a: 0.16, ..green })
+        .text_size(typography::CAPTION2.size)
+        .font_weight(typography::CAPTION2.weight)
+        .text_color(green)
+        .child("WhatsApp")
+        .into_any_element()
+}
+
 /// The SIM slot: a 36 px column holding the dot and the short label (or nothing).
 fn sim_slot_el(theme: Theme, vm: &RowVm) -> AnyElement {
     let colors = theme::colors(theme);
@@ -1398,6 +1439,7 @@ fn recents_row(
                                         .flex_none()
                                         .text_color(sub_ink),
                                 )
+                                .children(vm.whatsapp.then(|| whatsapp_badge(theme)))
                                 .child(
                                     div()
                                         .min_w_0()

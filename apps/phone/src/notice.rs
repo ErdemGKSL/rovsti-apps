@@ -38,6 +38,8 @@ pub(crate) enum Notice {
     /// `CALL_PHONE` was refused.
     NeedsPhone,
     Failed,
+    /// A WhatsApp call could not start; the text says why.
+    WhatsApp(&'static str),
 }
 
 impl Notice {
@@ -47,6 +49,7 @@ impl Notice {
             Self::System => "Placed through the system phone app",
             Self::NeedsPhone => "Allow Phone access to place calls",
             Self::Failed => "The call could not be placed",
+            Self::WhatsApp(why) => why,
         }
     }
 
@@ -54,14 +57,14 @@ impl Notice {
         match self {
             Self::Preview => Some("Fix"),
             Self::NeedsPhone => Some("Grant"),
-            Self::System | Self::Failed => None,
+            Self::System | Self::Failed | Self::WhatsApp(_) => None,
         }
     }
 
     fn icon(self) -> Icon {
         match self {
             Self::Preview | Self::System => Icon::LucideSmartphone,
-            Self::NeedsPhone | Self::Failed => Icon::LucideTriangleAlert,
+            Self::NeedsPhone | Self::Failed | Self::WhatsApp(_) => Icon::LucideTriangleAlert,
         }
     }
 }
@@ -103,7 +106,7 @@ impl PhoneApp {
         let colors = theme::colors(theme);
         let tint = match notice {
             Notice::Preview | Notice::System => call_colors(theme).warning,
-            Notice::NeedsPhone | Notice::Failed => call_colors(theme).danger,
+            Notice::NeedsPhone | Notice::Failed | Notice::WhatsApp(_) => call_colors(theme).danger,
         };
         let press = self.presses.value("notice-act").clamp(0.0, 1.0);
         let spec = GlassSpec::control(theme).lerp(GlassSpec::lens(theme), press * 0.6);

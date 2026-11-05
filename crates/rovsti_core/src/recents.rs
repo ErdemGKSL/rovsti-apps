@@ -7,6 +7,7 @@
 use crate::{
     avatar,
     call_log::{CallType, DateOrder, RecentsRow, TimeFormat, relative_time},
+    phone_number::PhoneNumber,
 };
 
 /// What the leading glyph in the subtitle shows.
@@ -70,6 +71,8 @@ pub struct RowView {
     pub named: bool,
     /// The SIM the newest call used (AD-26); the view resolves it to a chip.
     pub account_key: Option<String>,
+    /// A WhatsApp call: the row draws a WhatsApp badge.
+    pub whatsapp: bool,
 }
 
 /// Time-zone offset and clock style of the phone, injected so tests and the
@@ -195,6 +198,9 @@ fn view(row: &RecentsRow, now_ms: i64, locale: LocaleTime) -> RowView {
     if row.count > 1 {
         aria.push_str(&format!(", {} calls", row.count));
     }
+    if row.whatsapp {
+        aria.push_str(", WhatsApp");
+    }
     aria.push_str(", ");
     aria.push_str(time.as_str());
     if let Some(label) = label {
@@ -221,7 +227,117 @@ fn view(row: &RecentsRow, now_ms: i64, locale: LocaleTime) -> RowView {
         monogram: name.and_then(avatar::monogram),
         named,
         account_key: row.account_key.clone(),
+        whatsapp: row.whatsapp,
     }
+}
+
+/// A call that did not come from the phone's call log (WhatsApp, kept by the
+/// app itself), in the terms Recents needs. Generic on purpose: `rovsti_core`
+/// knows nothing about where such calls come from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExtraCall {
+    /// The number as it should be dialed (`+905551234567`).
+    pub number_raw: String,
+    pub started_ms: i64,
+    pub duration_s: u64,
+    pub missed: bool,
+    /// The peer's name when known; `None` shows the number as the title.
+    pub label: Option<String>,
+}
+
+impl ExtraCall {
+    fn into_row(self) -> RecentsRow {
+        let number: String = self
+            .number_raw
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '+')
+            .collect();
+        RecentsRow {
+            callable: !number.is_empty(),
+            normalized: number,
+            number_raw: self.number_raw,
+            call_type: if self.missed {
+                CallType::Missed
+            } else {
+                CallType::Unknown
+            },
+            count: 1,
+            first_ms: self.started_ms,
+            last_ms: self.started_ms,
+            name: self.label,
+            label: None,
+            contact_id: None,
+            account_key: None,
+            whatsapp: true,
+        }
+    }
+}
+
+fn same_line(a: &RecentsRow, b: &RecentsRow) -> bool {
+    match (
+        PhoneNumber::parse(&a.normalized),
+        PhoneNumber::parse(&b.normalized),
+    ) {
+        (Ok(x), Ok(y)) => x.matches(&y),
+        _ => a.normalized == b.normalized,
+    }
+}
+
+/// Merges `extras` (WhatsApp calls) into the grouped call-log `rows`, newest
+/// first. A row sits where its newest call sits (ties keep the call-log row
+/// first). Consecutive WhatsApp calls of one number and type collapse into one
+/// row like call-log runs do; a WhatsApp row never merges with a cellular one.
+pub fn merge_extras(rows: &[RecentsRow], extras: &[ExtraCall]) -> Vec<RecentsRow> {
+    if extras.is_empty() {
+        return rows.to_vec();
+    }
+    let mut extra_rows: Vec<RecentsRow> = extras.iter().cloned().map(ExtraCall::into_row).collect();
+    extra_rows.sort_by_key(|row| std::cmp::Reverse(row.last_ms));
+
+    let mut merged: Vec<RecentsRow> = Vec::with_capacity(rows.len() + extra_rows.len());
+    let mut log = rows.iter().peekable();
+    let mut extra = extra_rows.into_iter().peekable();
+    loop {
+        let take_log = match (log.peek(), extra.peek()) {
+            (Some(l), Some(e)) => l.last_ms >= e.last_ms,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => break,
+        };
+        let next = if take_log {
+            log.next().cloned()
+        } else {
+            extra.next()
+        };
+        let Some(next) = next else { break };
+        match merged.last_mut() {
+            Some(prev)
+                if prev.whatsapp
+                    && next.whatsapp
+                    && prev.call_type == next.call_type
+                    && same_line(prev, &next) =>
+            {
+                prev.count += next.count;
+                prev.first_ms = prev.first_ms.min(next.first_ms);
+                prev.last_ms = prev.last_ms.max(next.last_ms);
+                if prev.name.is_none() {
+                    prev.name = next.name;
+                }
+            }
+            _ => merged.push(next),
+        }
+    }
+    merged
+}
+
+/// Missed extra calls newer than `last_seen_ms` (strictly); adds to
+/// [`crate::call_log::missed_badge`].
+pub fn missed_extras(extras: &[ExtraCall], last_seen_ms: i64) -> u32 {
+    let n = extras
+        .iter()
+        .filter(|e| e.missed && e.started_ms > last_seen_ms)
+        .count();
+    u32::try_from(n).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
@@ -423,5 +539,95 @@ mod tests {
     fn a_row_without_an_account_has_none() {
         let rows = group(&[entry(1, "0555 111 22 33", CallLogKind::Missed, MIN, None)]);
         assert_eq!(rows[0].account_key, None);
+    }
+    fn extra(number: &str, ago: i64, missed: bool, label: Option<&str>) -> ExtraCall {
+        ExtraCall {
+            number_raw: number.to_owned(),
+            started_ms: NOW - ago,
+            duration_s: 10,
+            missed,
+            label: label.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn extras_interleave_by_time_with_the_call_log() {
+        let rows = group(&[
+            entry(2, "0555 111 22 33", CallLogKind::Incoming, MIN, None),
+            entry(1, "0850 123 45 67", CallLogKind::Outgoing, 5 * MIN, None),
+        ]);
+        let merged = merge_extras(
+            &rows,
+            &[
+                extra("+905321112233", 3 * MIN, false, Some("Ayse")),
+                extra("+905321112233", 9 * MIN, false, Some("Ayse")),
+            ],
+        );
+        let kinds: Vec<_> = merged.iter().map(|r| (r.whatsapp, r.count)).collect();
+        // newest cellular, WhatsApp (3 min), cellular (5 min), WhatsApp (9 min)
+        assert_eq!(kinds, [(false, 1), (true, 1), (false, 1), (true, 1)]);
+        assert_eq!(merged[1].name.as_deref(), Some("Ayse"));
+    }
+
+    #[test]
+    fn extras_group_with_each_other_but_not_across_other_calls_or_cellular() {
+        let rows = group(&[entry(
+            1,
+            "+905321112233",
+            CallLogKind::Incoming,
+            4 * MIN,
+            None,
+        )]);
+        let merged = merge_extras(
+            &rows,
+            &[
+                extra("+90 532 111 22 33", MIN, false, None),
+                extra("0532 111 22 33", 2 * MIN, false, Some("Ayse")),
+                extra("+905321112233", 6 * MIN, false, None),
+            ],
+        );
+        // Two collapsed, then the same-number cellular call, then the older one.
+        assert_eq!(merged.len(), 3);
+        assert_eq!((merged[0].whatsapp, merged[0].count), (true, 2));
+        assert_eq!(merged[0].first_ms, NOW - 2 * MIN);
+        assert_eq!(merged[0].last_ms, NOW - MIN);
+        assert_eq!(merged[0].name.as_deref(), Some("Ayse"));
+        assert!(!merged[1].whatsapp);
+        assert_eq!((merged[2].whatsapp, merged[2].count), (true, 1));
+    }
+
+    #[test]
+    fn missed_and_answered_whatsapp_calls_do_not_group() {
+        let merged = merge_extras(
+            &[],
+            &[
+                extra("+905321112233", MIN, true, None),
+                extra("+905321112233", 2 * MIN, false, None),
+            ],
+        );
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].call_type, CallType::Missed);
+        let v = build(&merged, NOW, LocaleTime::default());
+        assert!(v[0].missed && v[0].whatsapp);
+        assert!(v[0].aria.contains(", WhatsApp, "));
+        assert!(!v[1].missed);
+    }
+
+    #[test]
+    fn no_extras_leave_the_rows_alone() {
+        let rows = group(&[entry(1, "0850 123 45 67", CallLogKind::Missed, MIN, None)]);
+        assert_eq!(merge_extras(&rows, &[]), rows);
+    }
+
+    #[test]
+    fn missed_extras_count_only_new_misses() {
+        let calls = [
+            extra("+1", MIN, true, None),
+            extra("+1", 2 * MIN, true, None),
+            extra("+1", 3 * MIN, false, None),
+            extra("+1", 10 * MIN, true, None),
+        ];
+        assert_eq!(missed_extras(&calls, NOW - 5 * MIN), 2);
+        assert_eq!(missed_extras(&calls, NOW), 0);
     }
 }

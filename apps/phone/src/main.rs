@@ -328,6 +328,21 @@ impl PhoneApp {
                     this.wa_pushes_seen = pushes;
                     this.whatsapp.update(cx, |w, cx| w.wake(cx));
                 }
+                let actions = backend.update(cx, |b, _| b.take_wa_call_actions());
+                if !actions.is_empty() {
+                    this.wa_call.update(cx, |ui, cx| {
+                        for (call_id, action) in actions {
+                            match action {
+                                rovsti_android::events::WaCallAction::Answer => {
+                                    ui.answer_id(&call_id, cx);
+                                }
+                                rovsti_android::events::WaCallAction::Decline => {
+                                    ui.decline_id(&call_id, cx);
+                                }
+                            }
+                        }
+                    });
+                }
                 this.sync_restore(cx);
                 this.sync_calls(window, cx);
                 this.sync_documents(window, cx);
@@ -342,6 +357,12 @@ impl PhoneApp {
             // A WhatsApp call changed: the call screens follow it like a Telecom snapshot.
             cx.observe_in(&wa_call, window, |this, _, window, cx| {
                 this.sync_calls(window, cx);
+                this.sync_wa_history(cx);
+                if this.wa_call.update(cx, |ui, _| ui.take_error()).is_some() {
+                    this.call_note = Some(notice::Notice::WhatsApp(
+                        "The WhatsApp call could not be placed",
+                    ));
+                }
             }),
             cx.observe_window_appearance(window, |_, _, cx| cx.notify()),
             // Typing in the add field of the Blocked numbers page clears its error.
@@ -858,6 +879,13 @@ impl PhoneApp {
         if id.is_none() && !self.incall.covers() {
             self.tabs.touch(phase);
         }
+        cx.notify();
+    }
+
+    /// Places a WhatsApp call to `number`; what stops it from starting shows as a notice.
+    pub(crate) fn place_whatsapp(&mut self, number: &str, cx: &mut Context<Self>) {
+        let placed = self.wa_call.update(cx, |ui, cx| ui.place(number, cx));
+        self.call_note = placed.err().map(notice::Notice::WhatsApp);
         cx.notify();
     }
 

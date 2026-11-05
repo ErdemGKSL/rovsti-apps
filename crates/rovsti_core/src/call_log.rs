@@ -59,6 +59,9 @@ pub struct RecentsRow {
     /// The account of the newest entry that carried one (AD-26); resolved to a
     /// SIM chip by `sim::SimInfo`, never parsed.
     pub account_key: Option<String>,
+    /// A call made over WhatsApp (merged in from the app's own history, never
+    /// from the provider); such a row only groups with other WhatsApp rows.
+    pub whatsapp: bool,
 }
 
 /// How an entry's number is compared. Parsed once per entry.
@@ -141,6 +144,7 @@ pub fn group(entries: &[CallLogEntry]) -> Vec<RecentsRow> {
             contact_id: entry.contact_id,
             callable: !matches!(key, Key::Private),
             account_key: entry.account_key.clone(),
+            whatsapp: false,
         });
         last_key = Some(key);
     }

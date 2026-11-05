@@ -11,9 +11,11 @@
 //! and unit tested; [`WaCallUi`] is the thin GPUI entity around them.
 
 use std::{
+    collections::VecDeque,
+    path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -23,7 +25,8 @@ use gpui::{
     AnyElement, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Role,
     SharedString, StatefulInteractiveElement, Styled, Task, Window, div, px,
 };
-use rovsti_android::Error as AndroidError;
+use rovsti_android::{Error as AndroidError, events::WaCallAction};
+use rovsti_core::recents::ExtraCall;
 use rovsti_ui::{
     components::flat_glass,
     current_theme,
@@ -33,7 +36,7 @@ use rovsti_ui::{
 use rovsti_wa_client::{CallAudio, ClientError};
 use rovsti_wa_proto::{
     CallDirection, CallPhase, CallUpdate, ConnectKey, EndReason, GatewayEvent, GatewayUrl,
-    WaCallView, WaScreen,
+    WaCallHistory, WaCallView, WaScreen,
 };
 use rovsti_wa_ui::{StoredLink, WhatsAppSettings};
 
@@ -43,6 +46,12 @@ const ENDED_HOLD: Duration = Duration::from_millis(2000);
 const MIC_POLL: Duration = Duration::from_millis(20);
 /// Frames moved per poll at most, so a stalled consumer cannot spin the pump.
 const MIC_BURST: usize = 8;
+/// The local WhatsApp call history, next to `prefs.json`.
+const HISTORY_FILE: &str = "wa-calls.json";
+/// A notification action waits this long for its call to reach the app.
+const ACTION_TTL_MS: i64 = 60_000;
+/// How many handled call ids the guard remembers.
+const ONCE_MEMORY: usize = 16;
 
 // ---- pure ------------------------------------------------------------------------
 
@@ -60,6 +69,7 @@ pub enum Change {
 #[derive(Clone, Debug, PartialEq)]
 struct Tracked {
     update: CallUpdate,
+    started_ms: i64,
     active_since_ms: Option<i64>,
     muted: bool,
 }
@@ -76,6 +86,7 @@ impl Tracker {
             None if update.phase.is_ended() => Change::Ignored,
             None => {
                 self.current = Some(Tracked {
+                    started_ms: now_ms,
                     active_since_ms: (update.phase == CallPhase::Active).then_some(now_ms),
                     update,
                     muted: false,
@@ -121,6 +132,11 @@ impl Tracker {
         })
     }
 
+    /// When the tracked call first showed (its start, for the call history).
+    pub fn started_ms(&self) -> Option<i64> {
+        self.current.as_ref().map(|t| t.started_ms)
+    }
+
     pub fn set_muted(&mut self, muted: bool) {
         if let Some(tracked) = &mut self.current {
             tracked.muted = muted;
@@ -147,6 +163,112 @@ pub fn can_place(connected: bool, busy: bool, number: &str) -> Result<(), &'stat
     } else {
         Ok(())
     }
+}
+
+/// Makes a notification action (Answer, Decline) take effect once per call,
+/// however often Android redelivers its intent (`onCreate` and `onNewIntent`
+/// both see it, and so does a recreated activity).
+///
+/// An Answer may arrive before the gateway has told the app about the call (a
+/// cold start): it waits, up to [`ACTION_TTL_MS`], until that call rings. A
+/// Decline needs no call on screen, the gateway can reject by id.
+#[derive(Debug, Default)]
+pub struct AnswerOnce {
+    done: VecDeque<String>,
+    pending: Option<PendingAction>,
+}
+
+#[derive(Debug)]
+struct PendingAction {
+    call_id: String,
+    action: WaCallAction,
+    at_ms: i64,
+}
+
+impl AnswerOnce {
+    /// Registers an action. `false` when this call already had one (the first
+    /// action wins, a late Decline cannot undo an Answer).
+    pub fn offer(&mut self, call_id: &str, action: WaCallAction, now_ms: i64) -> bool {
+        if self.done.iter().any(|id| id == call_id)
+            || self.pending.as_ref().is_some_and(|p| p.call_id == call_id)
+        {
+            return false;
+        }
+        self.pending = Some(PendingAction {
+            call_id: call_id.to_owned(),
+            action,
+            at_ms: now_ms,
+        });
+        true
+    }
+
+    /// The action that may run now, consumed: `shown` is the call on screen
+    /// (`(call id, ringing incoming)`).
+    pub fn due(
+        &mut self,
+        shown: Option<(&str, bool)>,
+        now_ms: i64,
+    ) -> Option<(String, WaCallAction)> {
+        let pending = self.pending.as_ref()?;
+        if now_ms.saturating_sub(pending.at_ms) > ACTION_TTL_MS {
+            self.pending = None;
+            return None;
+        }
+        let ready = match pending.action {
+            WaCallAction::Decline => true,
+            WaCallAction::Answer => shown == Some((pending.call_id.as_str(), true)),
+        };
+        if !ready {
+            return None;
+        }
+        let PendingAction {
+            call_id, action, ..
+        } = self.pending.take()?;
+        self.done.push_back(call_id.clone());
+        if self.done.len() > ONCE_MEMORY {
+            self.done.pop_front();
+        }
+        Some((call_id, action))
+    }
+
+    /// The call is over: a waiting Answer for it is pointless now.
+    pub fn call_ended(&mut self, call_id: &str) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.call_id == call_id && p.action == WaCallAction::Answer)
+        {
+            self.pending = None;
+        }
+    }
+}
+
+/// `+905551234567` for a phone JID (`905551234567:12@s.whatsapp.net`); `None`
+/// for anything that is not a phone number (`@lid`, groups).
+pub fn dial_number(peer: &str) -> Option<String> {
+    let (user, server) = peer.split_once('@')?;
+    let user = user.split(':').next()?;
+    (server == "s.whatsapp.net" && !user.is_empty() && user.bytes().all(|b| b.is_ascii_digit()))
+        .then(|| format!("+{user}"))
+}
+
+/// The history as Recents rows. Calls with a peer that has no phone number
+/// cannot be called back from Recents and are left out.
+pub fn extra_calls(history: &WaCallHistory) -> Vec<ExtraCall> {
+    history
+        .iter()
+        .filter_map(|record| {
+            let number = dial_number(&record.peer)?;
+            let label = (record.peer_label != number).then(|| record.peer_label.clone());
+            Some(ExtraCall {
+                number_raw: number,
+                started_ms: record.started_ms,
+                duration_s: record.duration_s,
+                missed: record.missed,
+                label,
+            })
+        })
+        .collect()
 }
 
 /// `m:ss`, or `h:mm:ss` from an hour on.
@@ -310,6 +432,13 @@ pub struct WaCallUi {
     speaker: bool,
     /// The glass In-Call screen draws the call; this entity draws nothing itself.
     incall_mounted: bool,
+    once: AnswerOnce,
+    history: WaCallHistory,
+    /// Bumped when the history changed; Recents rebuilds on a new value.
+    history_rev: u64,
+    history_dir: Option<PathBuf>,
+    /// Latest write wins: an older queued write skips itself.
+    write_gen: Arc<AtomicU64>,
     error: Option<SharedString>,
     _tick: Option<Task<()>>,
     _clear: Option<Task<()>>,
@@ -324,6 +453,30 @@ impl WaCallUi {
             this.on_events(events, linked, cx);
         })
         .detach();
+        // The history is a small file: read it off the UI thread, then show it.
+        let dir = rovsti_ui::storage::data_dir("phone", cx);
+        cx.spawn(async move |this, cx| {
+            let Ok(dir) = dir.await else { return };
+            let read = {
+                let dir = dir.clone();
+                cx.background_executor()
+                    .spawn(async move { std::fs::read_to_string(dir.join(HISTORY_FILE)) })
+                    .await
+            };
+            this.update(cx, |this, cx| {
+                this.history_dir = Some(dir);
+                if let Ok(text) = read {
+                    // Calls ended while the file was being read stay on top.
+                    let mut loaded = WaCallHistory::from_json(&text);
+                    loaded.extend_newest(&this.history);
+                    this.history = loaded;
+                    this.history_rev += 1;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
         Self {
             settings,
             tracker: Tracker::default(),
@@ -332,6 +485,11 @@ impl WaCallUi {
             placing: false,
             speaker: false,
             incall_mounted: false,
+            once: AnswerOnce::default(),
+            history: WaCallHistory::new(),
+            history_rev: 0,
+            history_dir: None,
+            write_gen: Arc::new(AtomicU64::new(0)),
             error: None,
             _tick: None,
             _clear: None,
@@ -401,8 +559,17 @@ impl WaCallUi {
     fn on_call(&mut self, update: CallUpdate, cx: &mut Context<Self>) {
         match self.tracker.on_update(update, now_ms()) {
             Change::Ignored => return,
-            Change::Shown => self.start_ticking(cx),
+            Change::Shown => {
+                self.start_ticking(cx);
+                // A notification Answer may have been waiting for this call.
+                self.run_due_actions(cx);
+            }
             Change::Ended => {
+                if let Some(view) = self.tracker.view(now_ms()) {
+                    self.once.call_ended(&view.call_id);
+                    self.cancel_notice(&view.call_id, cx);
+                    self.record_history(&view, cx);
+                }
                 self.finish(cx);
                 self._tick = None;
                 self._clear = Some(cx.spawn(async move |this, cx| {
@@ -417,6 +584,105 @@ impl WaCallUi {
             }
         }
         cx.notify();
+    }
+
+    /// Takes the incoming-call notification down (it may not exist).
+    fn cancel_notice(&self, call_id: &str, cx: &mut Context<Self>) {
+        let call_id = call_id.to_owned();
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(error) = rovsti_android::wa::cancel_incoming(&call_id) {
+                    log::debug!("no notification to cancel: {error}");
+                }
+            })
+            .detach();
+    }
+
+    /// Writes the ended call to the history, once, and saves it.
+    fn record_history(&mut self, view: &WaCallView, cx: &mut Context<Self>) {
+        let CallPhase::Ended(reason) = &view.phase else {
+            return;
+        };
+        let started = self.tracker.started_ms().unwrap_or_else(now_ms);
+        if !self.history.record_end(view, started, reason) {
+            return;
+        }
+        self.history_rev += 1;
+        let Some(dir) = self.history_dir.clone() else {
+            return;
+        };
+        let records: Vec<_> = self.history.iter().cloned().collect();
+        let generation = self.write_gen.fetch_add(1, Ordering::SeqCst) + 1;
+        let latest = self.write_gen.clone();
+        cx.background_executor()
+            .spawn(async move {
+                if latest.load(Ordering::SeqCst) != generation {
+                    return; // a newer snapshot is queued behind this one
+                }
+                if let Err(error) = rovsti_ui::storage::save_json(&dir, HISTORY_FILE, &records) {
+                    log::warn!("saving the WhatsApp call history failed: {}", error.kind());
+                }
+            })
+            .detach();
+    }
+
+    /// The WhatsApp calls as Recents rows.
+    pub fn recents_extras(&self) -> Vec<ExtraCall> {
+        extra_calls(&self.history)
+    }
+
+    /// Changes whenever [`Self::recents_extras`] would.
+    pub fn history_rev(&self) -> u64 {
+        self.history_rev
+    }
+
+    /// The notification's Answer for `call_id` (idempotent, see [`AnswerOnce`]).
+    pub fn answer_id(&mut self, call_id: &str, cx: &mut Context<Self>) {
+        if self.once.offer(call_id, WaCallAction::Answer, now_ms()) {
+            self.run_due_actions(cx);
+        }
+    }
+
+    /// The notification's Decline for `call_id` (idempotent, see [`AnswerOnce`]).
+    pub fn decline_id(&mut self, call_id: &str, cx: &mut Context<Self>) {
+        if self.once.offer(call_id, WaCallAction::Decline, now_ms()) {
+            self.run_due_actions(cx);
+        }
+    }
+
+    fn run_due_actions(&mut self, cx: &mut Context<Self>) {
+        let view = self.tracker.view(now_ms());
+        let shown = view
+            .as_ref()
+            .map(|v| (v.call_id.as_str(), v.is_ringing_in()));
+        let Some((call_id, action)) = self.once.due(shown, now_ms()) else {
+            return;
+        };
+        match action {
+            WaCallAction::Answer => self.answer(cx),
+            WaCallAction::Decline if shown.is_some_and(|(id, _)| id == call_id) => {
+                self.hang_up(true, cx);
+            }
+            WaCallAction::Decline => {
+                // The app has not seen this call (cold start): reject it by id.
+                let Some(gateway) = self.settings.read(cx).gateway() else {
+                    return;
+                };
+                self.cancel_notice(&call_id, cx);
+                let task = cx
+                    .background_executor()
+                    .spawn(async move { gateway.reject_call(&call_id) });
+                cx.spawn(async move |this, cx| {
+                    if let Err(error) = task.await {
+                        this.update(cx, |this, cx| {
+                            this.fail("The gateway did not decline the call", error, cx);
+                        })
+                        .ok();
+                    }
+                })
+                .detach();
+            }
+        }
     }
 
     /// Redraws once a second while the call is on screen, for the timer.
@@ -471,6 +737,7 @@ impl WaCallUi {
         self.answering = true;
         self.error = None;
         let call_id = view.call_id;
+        self.cancel_notice(&call_id, cx);
         let task = cx.background_executor().spawn(async move {
             gateway.accept_call(&call_id)?;
             open_call_audio(&link, &call_id)
@@ -516,20 +783,15 @@ impl WaCallUi {
         }
     }
 
-    /// Starts an outgoing WhatsApp call to `number`.
-    pub fn place(&mut self, number: &str, cx: &mut Context<Self>) {
+    /// Starts an outgoing WhatsApp call to `number`. `Err` is the reason it
+    /// cannot start at all; a failure after that shows up in [`Self::take_error`].
+    pub fn place(&mut self, number: &str, cx: &mut Context<Self>) -> Result<(), &'static str> {
         let busy = !self.tracker.is_empty() || self.placing || self.answering;
         let connected = self.settings.read(cx).is_connected();
-        if let Err(why) = can_place(connected, busy, number) {
-            self.error = Some(why.into());
-            cx.notify();
-            return;
-        }
+        can_place(connected, busy, number)?;
         let settings = self.settings.read(cx);
         let (Some(gateway), Some(link)) = (settings.gateway(), settings.link().cloned()) else {
-            self.error = Some("WhatsApp is not connected".into());
-            cx.notify();
-            return;
+            return Err("WhatsApp is not connected");
         };
         self.placing = true;
         self.error = None;
@@ -594,6 +856,12 @@ impl WaCallUi {
         })
         .detach();
         cx.notify();
+        Ok(())
+    }
+
+    /// The last failure, once: the app shows it as a notice.
+    pub fn take_error(&mut self) -> Option<SharedString> {
+        self.error.take()
     }
 
     /// Decline, or End: the gateway answers with a phase update.
@@ -606,6 +874,7 @@ impl WaCallUi {
         };
         self.finish(cx);
         let call_id = view.call_id;
+        self.cancel_notice(&call_id, cx);
         let task = cx.background_executor().spawn(async move {
             if decline {
                 gateway.reject_call(&call_id)
@@ -959,5 +1228,119 @@ mod tests {
         assert!(play_available(&Ok(true)));
         assert!(play_available(&Ok(false)));
         assert!(!play_available(&Err(AndroidError::Unsupported)));
+    }
+    #[test]
+    fn an_action_runs_once_per_call() {
+        let mut once = AnswerOnce::default();
+        assert!(once.offer("a", WaCallAction::Answer, 0));
+        // The same intent seen again (onCreate, then onNewIntent) is dropped.
+        assert!(!once.offer("a", WaCallAction::Answer, 1));
+        assert_eq!(
+            once.due(Some(("a", true)), 2),
+            Some(("a".into(), WaCallAction::Answer))
+        );
+        assert!(!once.offer("a", WaCallAction::Answer, 3));
+        assert!(!once.offer("a", WaCallAction::Decline, 3));
+        assert_eq!(once.due(Some(("a", true)), 4), None);
+    }
+
+    #[test]
+    fn an_answer_waits_for_its_call_to_ring() {
+        let mut once = AnswerOnce::default();
+        once.offer("a", WaCallAction::Answer, 0);
+        assert_eq!(once.due(None, 1), None);
+        assert_eq!(once.due(Some(("other", true)), 2), None);
+        assert_eq!(once.due(Some(("a", false)), 3), None);
+        assert_eq!(
+            once.due(Some(("a", true)), 4),
+            Some(("a".into(), WaCallAction::Answer))
+        );
+    }
+
+    #[test]
+    fn a_decline_needs_no_call_on_screen() {
+        let mut once = AnswerOnce::default();
+        once.offer("a", WaCallAction::Decline, 0);
+        assert_eq!(once.due(None, 1), Some(("a".into(), WaCallAction::Decline)));
+    }
+
+    #[test]
+    fn a_stale_or_moot_answer_is_dropped() {
+        let mut once = AnswerOnce::default();
+        once.offer("a", WaCallAction::Answer, 0);
+        assert_eq!(once.due(Some(("a", true)), ACTION_TTL_MS + 1), None);
+        // Expired: nothing is left, and the call may be offered again.
+        assert!(once.offer("a", WaCallAction::Answer, ACTION_TTL_MS + 2));
+        once.call_ended("a");
+        assert_eq!(once.due(Some(("a", true)), ACTION_TTL_MS + 3), None);
+    }
+
+    #[test]
+    fn the_guard_forgets_old_calls() {
+        let mut once = AnswerOnce::default();
+        for n in 0..=ONCE_MEMORY {
+            let id = format!("c{n}");
+            once.offer(&id, WaCallAction::Decline, 0);
+            once.due(None, 0);
+        }
+        assert!(once.offer("c0", WaCallAction::Decline, 0));
+        assert!(!once.offer(&format!("c{ONCE_MEMORY}"), WaCallAction::Decline, 0));
+    }
+
+    #[test]
+    fn dial_numbers_come_from_phone_jids_only() {
+        assert_eq!(
+            dial_number("905551234567@s.whatsapp.net").as_deref(),
+            Some("+905551234567")
+        );
+        assert_eq!(
+            dial_number("905551234567:12@s.whatsapp.net").as_deref(),
+            Some("+905551234567")
+        );
+        assert_eq!(dial_number("123@lid"), None);
+        assert_eq!(dial_number("abc@s.whatsapp.net"), None);
+        assert_eq!(dial_number("905551234567"), None);
+    }
+
+    #[test]
+    fn history_becomes_recents_extras() {
+        let mut history = WaCallHistory::new();
+        let ended = |id: &str, peer: &str, name: Option<&str>, phase| {
+            let mut u = update(id, In, phase);
+            u.peer = peer.into();
+            u.peer_name = name.map(str::to_owned);
+            WaCallView::from_update(&u, 0)
+        };
+        history.record_end(
+            &ended(
+                "a",
+                "905551234567@s.whatsapp.net",
+                Some("Ayşe"),
+                CallPhase::Ended(EndReason::Missed),
+            ),
+            10,
+            &EndReason::Missed,
+        );
+        history.record_end(
+            &ended(
+                "b",
+                "905550000000@s.whatsapp.net",
+                None,
+                CallPhase::Ended(EndReason::Rejected),
+            ),
+            20,
+            &EndReason::Rejected,
+        );
+        history.record_end(
+            &ended("c", "9@lid", None, CallPhase::Ended(EndReason::Missed)),
+            30,
+            &EndReason::Missed,
+        );
+        let extras = extra_calls(&history);
+        assert_eq!(extras.len(), 2, "the @lid peer has no number");
+        assert_eq!(extras[0].number_raw, "+905550000000");
+        assert_eq!(extras[0].label, None);
+        assert_eq!(extras[1].label.as_deref(), Some("Ayşe"));
+        assert!(extras[1].missed);
     }
 }

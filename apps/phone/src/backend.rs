@@ -268,6 +268,8 @@ pub struct Backend {
     /// Counts WhatsApp FCM wake-ups; the app root forwards new ones to the
     /// WhatsApp settings entity, which owns the gateway stream.
     wa_pushes: u64,
+    /// Answer / Decline taps on a WhatsApp call notification, not yet applied.
+    wa_call_actions: Vec<(String, rovsti_android::events::WaCallAction)>,
     last_place: Option<Instant>,
     /// A number waiting for the Phone permission, and the permission pull
     /// number it was requested at (only newer pulls may judge the answer).
@@ -368,6 +370,7 @@ impl Backend {
                 last_place: None,
                 pending_call: None,
                 wa_pushes: 0,
+                wa_call_actions: Vec::new(),
                 call_blocked: false,
                 call_log: Load::Loading,
                 contacts: Load::Loading,
@@ -926,6 +929,12 @@ impl Backend {
         self.wa_pushes
     }
 
+    /// Notification actions on WhatsApp calls that arrived since the last call;
+    /// the app root hands them to the WhatsApp call entity.
+    pub fn take_wa_call_actions(&mut self) -> Vec<(String, rovsti_android::events::WaCallAction)> {
+        std::mem::take(&mut self.wa_call_actions)
+    }
+
     /// The Phone permission was refused (or cannot be asked) for a call.
     pub fn call_blocked(&self) -> bool {
         self.call_blocked
@@ -969,6 +978,15 @@ impl Backend {
             kind::WA_PUSH => {
                 self.wa_pushes += 1;
                 cx.notify();
+            }
+            kind::WA_CALL_ACTION => {
+                match rovsti_android::events::parse_wa_call_action(&event.json) {
+                    Some(action) => {
+                        self.wa_call_actions.push(action);
+                        cx.notify();
+                    }
+                    None => log::warn!("bad wa_call_action event"),
+                }
             }
             kind::SIMS_CHANGED => self.refresh_sims(cx),
             kind::DOCUMENT_RESULT => self.on_document_result(&event.json, cx),

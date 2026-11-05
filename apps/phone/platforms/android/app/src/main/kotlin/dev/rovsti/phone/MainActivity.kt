@@ -17,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import dev.gpui.android.GpuiActivity
 import dev.rovsti.bridge.RovstiBridge
+import dev.rovsti.bridge.WaIncoming
 
 class MainActivity : GpuiActivity(), CallRegistry.Surface {
     private var debugKill: BroadcastReceiver? = null
@@ -41,6 +42,7 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
         super.onCreate(state)
         // GpuiActivity loaded the library; now resolve the JNI bridge (AD-8).
         RovstiBridge.attachNative()
+        handleWaCallIntent(intent)
         registerDebugKill()
         showCurtainIfRinging()
     }
@@ -49,6 +51,7 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
         super.onNewIntent(DialIntents.rewrite(intent))
         setLockScreenFlags(CallRegistry.hasLiveCall())
         handleCallIntent(intent)
+        handleWaCallIntent(intent)
     }
 
     override fun onResume() {
@@ -142,6 +145,16 @@ class MainActivity : GpuiActivity(), CallRegistry.Surface {
         intent.removeExtra(CallNotifications.EXTRA_ANSWER_TOKEN)
         if (token != CallNotifications.answerToken) return
         if (answerOnce.accept(id, CallRegistry.isRinging(id))) CallRegistry.answerRinging(id)
+    }
+
+    /**
+     * Answer and Decline on a WhatsApp call notification (the bridge queues `wa_call_action`; Rust
+     * acts once per call). Decline sends the task straight back so it does not open the UI, like
+     * a telephony Decline.
+     */
+    private fun handleWaCallIntent(intent: Intent) {
+        val decline = intent.getStringExtra(WaIncoming.EXTRA_ACTION) == WaIncoming.DECLINE
+        if (RovstiBridge.deliverWaCallAction(intent) && decline) moveTaskToBack(true)
     }
 
     /**

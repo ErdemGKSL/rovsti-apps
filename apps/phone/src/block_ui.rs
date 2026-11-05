@@ -422,7 +422,7 @@ impl PhoneApp {
             "rm-wa" if has_number && self.whatsapp.read(cx).is_connected() => {
                 self.row_menu_close(window, cx);
                 let number = target.number.to_string();
-                self.wa_call.update(cx, |ui, cx| ui.place(&number, cx));
+                self.place_whatsapp(&number, cx);
             }
             "rm-block" if target.block_note.is_none() => {
                 self.row_menu_close(window, cx);

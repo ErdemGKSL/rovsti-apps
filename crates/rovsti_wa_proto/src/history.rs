@@ -50,6 +50,17 @@ impl WaCallHistory {
         true
     }
 
+    /// Puts `newer` (calls ended since this history was read from disk) on top
+    /// of this one, skipping call ids already present.
+    pub fn extend_newest(&mut self, newer: &WaCallHistory) {
+        for record in newer.records.iter().rev() {
+            if !self.records.iter().any(|r| r.call_id == record.call_id) {
+                self.records.push_front(record.clone());
+            }
+        }
+        self.records.truncate(MAX_RECORDS);
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &WaCallRecord> {
         self.records.iter()
     }
@@ -154,5 +165,17 @@ mod tests {
         for bad in ["", "garbage", "{}", "[1,2]", "[{\"call_id\":1}]", "null"] {
             assert!(WaCallHistory::from_json(bad).is_empty(), "{bad}");
         }
+    }
+    #[test]
+    fn newer_records_go_on_top_without_duplicates() {
+        let mut old = WaCallHistory::new();
+        old.record_end(&view("a", CallDirection::Out, 5), 1, &EndReason::Hangup);
+        old.record_end(&view("b", CallDirection::Out, 5), 2, &EndReason::Hangup);
+        let mut new = WaCallHistory::new();
+        new.record_end(&view("b", CallDirection::Out, 5), 2, &EndReason::Hangup);
+        new.record_end(&view("c", CallDirection::Out, 5), 3, &EndReason::Hangup);
+        old.extend_newest(&new);
+        let ids: Vec<_> = old.iter().map(|r| r.call_id.as_str()).collect();
+        assert_eq!(ids, ["c", "b", "a"]);
     }
 }

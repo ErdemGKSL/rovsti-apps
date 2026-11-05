@@ -963,6 +963,17 @@ impl PhoneApp {
             }
             return;
         }
+        if let Some(index) = id
+            .strip_prefix("sheet-cw-")
+            .and_then(|i| i.parse::<usize>().ok())
+        {
+            if let Some(number) = sheet.contact.numbers.get(index) {
+                let raw = number.raw.clone();
+                self.close_sheet(cx);
+                self.place_whatsapp(&raw, cx);
+            }
+            return;
+        }
         match id {
             "sheet-cstar" => {
                 let next = !sheet.starred;
@@ -1723,6 +1734,8 @@ fn number_row(
     let act_id = id.clone();
     // Story 17.4: a blocked number carries the glyph; the word is in the label too.
     let blocked = app.backend.read(cx).is_blocked(&n.display);
+    let whatsapp = app.whatsapp.read(cx).is_connected();
+    let wa_id: SharedString = format!("sheet-cw-{index}").into();
     div()
         .id(id.clone())
         .role(Role::Button)
@@ -1791,6 +1804,44 @@ fn number_row(
                         })),
                 ),
         )
+        .children(whatsapp.then(|| {
+            // The WhatsApp circle: outlined, so it never reads as the cellular call.
+            let wa_press = app.presses.value(&wa_id).clamp(0.0, 1.0);
+            let act = wa_id.clone();
+            div()
+                .id(wa_id.clone())
+                .role(Role::Button)
+                .aria_label(SharedString::from(format!(
+                    "WhatsApp call {} {}",
+                    n.label, n.display
+                )))
+                .flex_none()
+                .size(px(36.0 * press_scale(wa_press, scale::PRESS_CARD)))
+                .rounded_full()
+                .border(px(1.5))
+                .border_color(answer)
+                .bg(gpui::Hsla {
+                    a: 0.12 + 0.2 * wa_press,
+                    ..answer
+                })
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    svg()
+                        .path(Icon::LucidePhone.path())
+                        .size(px(18.0))
+                        .text_color(answer),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.presses.down(act.clone());
+                        this.contact_sheet_act(&act, window, cx);
+                    }),
+                )
+        }))
         .child(
             div()
                 .flex_none()

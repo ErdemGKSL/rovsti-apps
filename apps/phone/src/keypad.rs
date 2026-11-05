@@ -285,7 +285,7 @@ impl PhoneApp {
         id.starts_with("key-")
             || id.starts_with("ik-")
             || id.starts_with("ic-")
-            || matches!(id, "delete" | "paste" | "grant")
+            || matches!(id, "delete" | "paste" | "grant" | "wa-call")
     }
 
     pub(crate) fn activate(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -293,6 +293,7 @@ impl PhoneApp {
             "delete" => self.delete_press(window, cx),
             "call" => self.call_press(window, cx),
             "paste" => self.paste_press(window, cx),
+            "wa-call" => self.whatsapp_press(window, cx),
             "grant" => {
                 let raw = self.dialed.clone();
                 self.backend
@@ -559,6 +560,48 @@ impl PhoneApp {
             Placement::Blocked => self.status = Some(Status::NeedsPhone),
             Placement::Failed => self.set_status("The call could not be placed"),
         }
+    }
+
+    /// Whether the WhatsApp chip is offered: WhatsApp is connected, a number
+    /// that validates is typed, and no status line is in the way.
+    fn whatsapp_chip_shown(&self, cx: &Context<Self>) -> bool {
+        self.status.is_none()
+            && self.whatsapp.read(cx).is_connected()
+            && dial::validate(&self.dialed).is_ok()
+    }
+
+    /// The WhatsApp chip: calls the typed number over WhatsApp.
+    fn whatsapp_press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let raw = self.dialed.clone();
+        if dial::validate(&raw).is_err() {
+            self.invalid(window);
+            return;
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        self.place_whatsapp(&raw, cx);
+    }
+
+    fn whatsapp_chip(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let press = self.presses.value("wa-call").clamp(0.0, 1.0);
+        let pill = rovsti_ui::components::glass_pill(theme, "WhatsApp")
+            .text_color(call_colors(theme).answer)
+            .opacity(1.0 - 0.3 * press);
+        div()
+            .id("wa-call")
+            .role(Role::Button)
+            .aria_label("Call over WhatsApp")
+            .absolute()
+            .top_full()
+            .mt(px(4.0))
+            .child(pill)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| this.mouse_down("wa-call", window, cx)),
+            )
+            .child(touch_surface(Self::touch_listener(
+                cx,
+                Some("wa-call".into()),
+            )))
     }
 
     /// Calls voicemail and says how it went, like the Call button does.
@@ -1154,6 +1197,9 @@ impl PhoneApp {
                     }))
                     .when(self.dialed.is_empty(), |el| {
                         el.child(self.paste_pill(theme, cx))
+                    })
+                    .when(self.whatsapp_chip_shown(cx), |el| {
+                        el.child(self.whatsapp_chip(theme, cx))
                     }),
             )
             .child(self.status_line(theme, cx))

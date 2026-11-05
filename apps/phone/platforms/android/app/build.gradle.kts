@@ -7,7 +7,18 @@ import javax.xml.transform.stream.StreamResult
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier
 import org.w3c.dom.Element
 
+// Optional FCM wake for WhatsApp calls (AD-WA6). Everything Firebase needs lives behind the
+// existence of app/google-services.json: without the file nothing below changes the build.
+buildscript {
+    if (file("google-services.json").exists()) {
+        repositories { google(); mavenCentral() }
+        dependencies { classpath("com.google.gms:google-services:4.4.2") }
+    }
+}
+
 plugins { id("com.android.application") }
+
+val firebaseEnabled = file("google-services.json").exists()
 
 val gpuiAbis = providers.gradleProperty("gpuiAbis").getOrElse("arm64-v8a,x86_64")
     .split(',').map { it.trim() }.distinct()
@@ -99,8 +110,18 @@ for (profile in listOf("debug", "release")) {
     tasks.matching { it.name == "pre${variant}Build" }.configureEach { dependsOn(rustBuilds) }
 }
 
+if (firebaseEnabled) {
+    apply(plugin = "com.google.gms.google-services")
+    // RovstiMessagingService and its MESSAGING_EVENT manifest entry only exist in this build.
+    android.sourceSets.getByName("main").java.directories.add(file("src/firebase/kotlin").absolutePath)
+    for (type in listOf("debug", "release")) {
+        android.sourceSets.getByName(type).manifest.srcFile(file("src/firebase/AndroidManifest.xml"))
+    }
+}
+
 dependencies {
     implementation(project(":host"))
+    if (firebaseEnabled) implementation("com.google.firebase:firebase-messaging:24.1.0")
     // JVM unit tests (WireFixturesTest): the android.jar org.json is a stub, so use the real one.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

@@ -11,6 +11,7 @@ pub mod hub;
 pub mod media_cache;
 pub mod push;
 pub mod routes;
+pub mod schedule;
 pub mod store;
 pub mod wa;
 

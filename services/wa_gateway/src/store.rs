@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rovsti_wa_proto::{
     AppId, ChatSummary, InstanceState, InstanceStatus, KeyHash, KeyId, KeyInfo, MessageBody,
-    Reaction, WaMessage,
+    Reaction, ScheduledState, ScheduledText, WaMessage,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -180,6 +180,20 @@ const MIGRATIONS: &[&str] = &[
         PRIMARY KEY (instance_id, chat, id, sender)
     );
     ",
+    // v2
+    "
+    CREATE TABLE scheduled (
+        id TEXT PRIMARY KEY,
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        chat TEXT NOT NULL,
+        text TEXT NOT NULL,
+        send_at_ms INTEGER NOT NULL,
+        created_ms INTEGER NOT NULL,
+        state_json TEXT NOT NULL
+    );
+    CREATE INDEX scheduled_due ON scheduled(state_json, send_at_ms);
+    CREATE INDEX scheduled_by_instance ON scheduled(instance_id, send_at_ms);
+    ",
 ];
 
 /// Brings `conn` to the latest schema using `PRAGMA user_version`.
@@ -268,6 +282,143 @@ impl Store {
             insert_key(&tx, &id, &first_key, now_ms)?;
             tx.commit()?;
             Ok(())
+        })
+        .await
+    }
+
+    /// Stores a pending scheduled text. Fails with `LimitReached` when the
+    /// instance already holds `max_pending` pending ones.
+    pub async fn add_scheduled(
+        &self,
+        instance: InstanceId,
+        item: ScheduledText,
+        max_pending: u32,
+    ) -> Result<(), StoreError> {
+        let state = pending_json()?;
+        self.run(move |conn| {
+            let tx = conn.transaction()?;
+            let count: u32 = tx.query_row(
+                "SELECT COUNT(*) FROM scheduled WHERE instance_id = ?1 AND state_json = ?2",
+                params![instance.as_str(), state],
+                |r| r.get(0),
+            )?;
+            if count >= max_pending {
+                return Err(StoreError::LimitReached);
+            }
+            tx.execute(
+                "INSERT INTO scheduled
+                 (id, instance_id, chat, text, send_at_ms, created_ms, state_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    item.id,
+                    instance.as_str(),
+                    item.chat,
+                    item.text,
+                    item.send_at_ms,
+                    item.created_ms,
+                    serde_json::to_string(&item.state)?
+                ],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Every pending item, plus finished ones that were due at or after
+    /// `finished_since_ms`, soonest first.
+    pub async fn list_scheduled(
+        &self,
+        instance: InstanceId,
+        finished_since_ms: i64,
+    ) -> Result<Vec<ScheduledText>, StoreError> {
+        let pending = pending_json()?;
+        self.run(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, chat, text, send_at_ms, created_ms, state_json FROM scheduled
+                 WHERE instance_id = ?1 AND (state_json = ?2 OR send_at_ms >= ?3)
+                 ORDER BY send_at_ms, id",
+            )?;
+            let rows = stmt.query_map(
+                params![instance.as_str(), pending, finished_since_ms],
+                scheduled_row,
+            )?;
+            rows.map(|row| row?.into_item()).collect()
+        })
+        .await
+    }
+
+    /// Removes a pending item. False when there is none (unknown id, or it
+    /// was sent or failed already).
+    pub async fn cancel_scheduled(
+        &self,
+        instance: InstanceId,
+        id: String,
+    ) -> Result<bool, StoreError> {
+        let pending = pending_json()?;
+        self.run(move |conn| {
+            let n = conn.execute(
+                "DELETE FROM scheduled WHERE id = ?1 AND instance_id = ?2 AND state_json = ?3",
+                params![id, instance.as_str(), pending],
+            )?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    /// Pending items of every instance whose time has come, oldest first.
+    pub async fn due_scheduled(
+        &self,
+        now_ms: i64,
+        limit: u32,
+    ) -> Result<Vec<(InstanceId, ScheduledText)>, StoreError> {
+        let pending = pending_json()?;
+        self.run(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, chat, text, send_at_ms, created_ms, state_json, instance_id
+                 FROM scheduled WHERE state_json = ?1 AND send_at_ms <= ?2
+                 ORDER BY send_at_ms, id LIMIT ?3",
+            )?;
+            let rows = stmt.query_map(params![pending, now_ms, limit], |r| {
+                Ok((scheduled_row(r)?, r.get::<_, String>(6)?))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (row, instance) = row?;
+                out.push((InstanceId::new(instance), row.into_item()?));
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    /// Records the outcome of a pending item. False when it is no longer
+    /// pending (cancelled meanwhile).
+    pub async fn finish_scheduled(
+        &self,
+        id: String,
+        state: ScheduledState,
+    ) -> Result<bool, StoreError> {
+        let pending = pending_json()?;
+        let state = serde_json::to_string(&state)?;
+        self.run(move |conn| {
+            let n = conn.execute(
+                "UPDATE scheduled SET state_json = ?1 WHERE id = ?2 AND state_json = ?3",
+                params![state, id, pending],
+            )?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    /// Deletes finished items that were due before `before_ms`.
+    pub async fn prune_scheduled(&self, before_ms: i64) -> Result<usize, StoreError> {
+        let pending = pending_json()?;
+        self.run(move |conn| {
+            Ok(conn.execute(
+                "DELETE FROM scheduled WHERE state_json != ?1 AND send_at_ms < ?2",
+                params![pending, before_ms],
+            )?)
         })
         .await
     }
@@ -875,6 +1026,43 @@ impl Store {
     }
 }
 
+fn pending_json() -> Result<String, StoreError> {
+    Ok(serde_json::to_string(&ScheduledState::Pending)?)
+}
+
+struct ScheduledRow {
+    id: String,
+    chat: String,
+    text: String,
+    send_at_ms: i64,
+    created_ms: i64,
+    state_json: String,
+}
+
+fn scheduled_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ScheduledRow> {
+    Ok(ScheduledRow {
+        id: r.get(0)?,
+        chat: r.get(1)?,
+        text: r.get(2)?,
+        send_at_ms: r.get(3)?,
+        created_ms: r.get(4)?,
+        state_json: r.get(5)?,
+    })
+}
+
+impl ScheduledRow {
+    fn into_item(self) -> Result<ScheduledText, StoreError> {
+        Ok(ScheduledText {
+            state: serde_json::from_str(&self.state_json)?,
+            id: self.id,
+            chat: self.chat,
+            text: self.text,
+            send_at_ms: self.send_at_ms,
+            created_ms: self.created_ms,
+        })
+    }
+}
+
 fn insert_key(
     tx: &Transaction<'_>,
     instance: &InstanceId,
@@ -1062,9 +1250,144 @@ mod tests {
             "messages",
             "push_tokens",
             "reactions",
+            "scheduled",
         ] {
             assert!(tables.iter().any(|n| n == t), "missing {t}: {tables:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn v1_database_upgrades_to_v2_and_keeps_its_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+            let tx = conn.transaction().unwrap();
+            tx.execute_batch(MIGRATIONS[0]).unwrap();
+            tx.execute_batch("PRAGMA user_version = 1").unwrap();
+            tx.execute(
+                "INSERT INTO instances (id, created_ms, state) VALUES ('old', 1, 'connected')",
+                [],
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.count_instances().await.unwrap(), 1);
+        let item = sched("s1", 100);
+        store
+            .add_scheduled(InstanceId::new("old"), item.clone(), 5)
+            .await
+            .unwrap();
+        drop(store);
+        // A second open must not migrate again or lose anything.
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.count_instances().await.unwrap(), 1);
+        assert_eq!(
+            store
+                .list_scheduled(InstanceId::new("old"), 0)
+                .await
+                .unwrap(),
+            vec![item]
+        );
+        let conn = Connection::open(&path).unwrap();
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+    }
+
+    fn sched(id: &str, at: i64) -> ScheduledText {
+        ScheduledText {
+            id: id.into(),
+            chat: "c@s.whatsapp.net".into(),
+            text: format!("t-{id}"),
+            send_at_ms: at,
+            created_ms: 1,
+            state: ScheduledState::Pending,
+        }
+    }
+
+    #[tokio::test]
+    async fn scheduled_lifecycle() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 1, 4)
+            .await
+            .unwrap();
+        store
+            .create_instance(id(2), new_key(2, "b").1, 1, 4)
+            .await
+            .unwrap();
+        store
+            .add_scheduled(id(1), sched("a", 300), 2)
+            .await
+            .unwrap();
+        store
+            .add_scheduled(id(1), sched("b", 100), 2)
+            .await
+            .unwrap();
+        // The cap counts pending items of one instance only.
+        assert!(matches!(
+            store.add_scheduled(id(1), sched("c", 1), 2).await,
+            Err(StoreError::LimitReached)
+        ));
+        store.add_scheduled(id(2), sched("d", 50), 2).await.unwrap();
+
+        let ids = |v: Vec<ScheduledText>| v.into_iter().map(|s| s.id).collect::<Vec<_>>();
+        assert_eq!(
+            ids(store.list_scheduled(id(1), 0).await.unwrap()),
+            ["b", "a"]
+        );
+
+        let due = store.due_scheduled(200, 10).await.unwrap();
+        let due_ids: Vec<_> = due.iter().map(|(i, s)| (i.clone(), s.id.clone())).collect();
+        assert_eq!(due_ids, [(id(2), "d".to_owned()), (id(1), "b".to_owned())]);
+        assert_eq!(store.due_scheduled(200, 1).await.unwrap().len(), 1);
+
+        let sent = ScheduledState::Sent {
+            message_id: "M".into(),
+        };
+        assert!(
+            store
+                .finish_scheduled("b".into(), sent.clone())
+                .await
+                .unwrap()
+        );
+        // Only a pending item can finish or be cancelled.
+        assert!(
+            !store
+                .finish_scheduled("b".into(), sent.clone())
+                .await
+                .unwrap()
+        );
+        assert!(!store.cancel_scheduled(id(1), "b".into()).await.unwrap());
+        assert!(!store.cancel_scheduled(id(2), "a".into()).await.unwrap());
+        assert!(store.cancel_scheduled(id(1), "a".into()).await.unwrap());
+        assert!(!store.cancel_scheduled(id(1), "a".into()).await.unwrap());
+
+        let left = store.list_scheduled(id(1), 0).await.unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].state, sent);
+        // Finished items older than the window drop out of the list and are pruned.
+        assert!(store.list_scheduled(id(1), 101).await.unwrap().is_empty());
+        assert_eq!(store.prune_scheduled(101).await.unwrap(), 1);
+        assert!(store.list_scheduled(id(1), 0).await.unwrap().is_empty());
+        // Room again after the pending ones are gone.
+        store.add_scheduled(id(1), sched("e", 1), 2).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn deleting_an_instance_removes_its_scheduled_texts() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 1, 4)
+            .await
+            .unwrap();
+        store.add_scheduled(id(1), sched("a", 1), 5).await.unwrap();
+        assert!(store.delete_instance(id(1)).await.unwrap());
+        assert!(store.due_scheduled(i64::MAX, 10).await.unwrap().is_empty());
     }
 
     #[test]

@@ -10,8 +10,8 @@ use rovsti_wa_proto::api::routes;
 use rovsti_wa_proto::{
     CallStarted, CallSummary, ChatState, ChatSummary, ConnectKey, CreateInstance, CreatedInstance,
     GatewayUrl, GroupInfo, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, MarkRead, MediaKind,
-    MintKey, PlaceCall, PushRegistration, SendReaction, SendText, Sent, SetMuted, SetPresence,
-    SubscribePresence, WaMessage,
+    MintKey, PlaceCall, PushRegistration, ScheduleText, ScheduledText, SendReaction, SendText,
+    Sent, SetMuted, SetPresence, SubscribePresence, WaMessage,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -273,6 +273,23 @@ impl Gateway {
         self.post(routes::SEND_TEXT, req)
     }
 
+    /// Schedules a text; the gateway sends it at `req.send_at_ms`.
+    pub fn schedule_text(&self, req: &ScheduleText) -> Result<ScheduledText, ClientError> {
+        self.post(routes::SCHEDULED, req)
+    }
+
+    /// Pending scheduled texts plus those finished in the last 7 days.
+    pub fn scheduled(&self) -> Result<Vec<ScheduledText>, ClientError> {
+        self.get(routes::SCHEDULED)
+    }
+
+    /// Cancels a pending scheduled text; `NotFound` once it was sent.
+    pub fn cancel_scheduled(&self, id: &str) -> Result<(), ClientError> {
+        let path = routes::fill(routes::SCHEDULED_ONE, "id", id);
+        self.exec(Method::DELETE, &path, true, Payload::None)
+            .map(drop)
+    }
+
     pub fn send_media(
         &self,
         chat: &str,
@@ -470,6 +487,25 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].update.call_id, "C1");
         assert_eq!((calls[0].started_ms, calls[0].ended_ms), (5, None));
+    }
+
+    #[test]
+    fn scheduled_paths_and_decoding() {
+        let path = routes::fill(routes::SCHEDULED_ONE, "id", "ab/12");
+        let req = request(Method::DELETE, &url(), &path, None, ()).unwrap();
+        assert_eq!(
+            req.uri().to_string(),
+            "https://wa.example.com/v1/scheduled/ab%2F12"
+        );
+        let body = r#"[{"id":"a","chat":"c","text":"t","send_at_ms":9,"created_ms":1,
+            "state":{"status":"sent","message_id":"M"}}]"#;
+        let list: Vec<ScheduledText> = decode(Response::new(Body::builder().data(body))).unwrap();
+        assert_eq!(
+            list[0].state,
+            rovsti_wa_proto::ScheduledState::Sent {
+                message_id: "M".into()
+            }
+        );
     }
 
     #[test]

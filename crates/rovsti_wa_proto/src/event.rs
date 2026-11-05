@@ -1,6 +1,6 @@
 //! Events the gateway pushes over `GET /v1/events`.
 
-use crate::api::{InstanceStatus, Reaction, TypingState, WaMessage};
+use crate::api::{InstanceStatus, Reaction, ScheduledText, TypingState, WaMessage};
 use crate::call::{CallDirection, CallPhase};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -82,6 +82,8 @@ pub enum GatewayEvent {
         jid: String,
     },
     Call(CallUpdate),
+    /// A scheduled text was added, sent or failed. Older clients skip it.
+    Scheduled(ScheduledText),
     /// The client missed events; refetch chats.
     Resync,
     /// The key used for this socket was revoked.
@@ -202,6 +204,17 @@ mod tests {
                     is_video: false,
                 }),
                 r#"{"type":"call","call_id":"k","peer":"p","peer_name":null,"direction":"in","phase":"ringing","is_video":false}"#,
+            ),
+            (
+                GatewayEvent::Scheduled(ScheduledText {
+                    id: "s".into(),
+                    chat: "c".into(),
+                    text: "t".into(),
+                    send_at_ms: 9,
+                    created_ms: 1,
+                    state: crate::api::ScheduledState::Pending,
+                }),
+                r#"{"type":"scheduled","id":"s","chat":"c","text":"t","send_at_ms":9,"created_ms":1,"state":{"status":"pending"}}"#,
             ),
             (GatewayEvent::Resync, r#"{"type":"resync"}"#),
             (GatewayEvent::KeyRevoked, r#"{"type":"key_revoked"}"#),

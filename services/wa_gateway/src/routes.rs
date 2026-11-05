@@ -14,8 +14,8 @@ use rovsti_wa_proto::api::routes as r;
 use rovsti_wa_proto::{
     ChatState, ChatSummary, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope,
     GatewayEvent, GroupInfo, InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest,
-    MarkRead, MediaKind, MessageBody, MintKey, PushRegistration, SendReaction, SendText, Sent,
-    SetPresence, SubscribePresence, WaMessage,
+    MarkRead, MediaKind, MessageBody, MintKey, PushRegistration, ScheduleText, ScheduledState,
+    ScheduledText, SendReaction, SendText, Sent, SetPresence, SubscribePresence, WaMessage,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -32,6 +32,11 @@ use crate::{AppState, store::StoreError};
 const MAX_LABEL_CHARS: usize = 64;
 const MAX_PUSH_TOKEN_BYTES: usize = 4096;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
+/// Pending scheduled texts one instance may hold.
+const MAX_PENDING_SCHEDULED: u32 = 200;
+/// A scheduled text must be due between these offsets from now.
+const MIN_SCHEDULE_LEAD_MS: i64 = 30_000;
+const MAX_SCHEDULE_LEAD_MS: i64 = 365 * 24 * 60 * 60 * 1000;
 const MAX_READ_IDS: usize = 200;
 const MAX_MIME_BYTES: usize = 127;
 const MAX_CAPTION_BYTES: usize = 8 * 1024;
@@ -54,6 +59,8 @@ pub fn router(state: AppState) -> Router {
         .route(r::CHATS, get(chats))
         .route(r::CHAT_MESSAGES, get(chat_messages))
         .route(r::SEND_TEXT, post(send_text))
+        .route(r::SCHEDULED, get(list_scheduled).post(schedule_text))
+        .route(r::SCHEDULED_ONE, delete(cancel_scheduled))
         .route(r::MARK_READ, post(mark_read))
         .route(r::PRESENCE, post(set_presence))
         .route(r::CHAT_STATE, post(chat_state))
@@ -440,6 +447,81 @@ async fn send_text(
     Ok(Json(state.driver().send_text(&auth.instance, req).await?))
 }
 
+/// Checks that `send_at_ms` is 30 s to 365 days after `now`.
+fn check_send_at(send_at_ms: i64, now: i64) -> ApiResult<()> {
+    let lead = send_at_ms.saturating_sub(now);
+    if (MIN_SCHEDULE_LEAD_MS..=MAX_SCHEDULE_LEAD_MS).contains(&lead) {
+        Ok(())
+    } else {
+        Err(HttpError::bad_request(
+            "send_at_ms must be 30 seconds to 365 days from now",
+        ))
+    }
+}
+
+async fn schedule_text(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<ScheduleText>,
+) -> ApiResult<(StatusCode, Json<ScheduledText>)> {
+    check_jid(&req.chat)?;
+    if req.text.is_empty() || req.text.len() > MAX_TEXT_BYTES {
+        return Err(HttpError::bad_request("text must be 1 byte to 64 KiB"));
+    }
+    let now = now_ms();
+    check_send_at(req.send_at_ms, now)?;
+    let mut id = [0u8; 12];
+    getrandom::fill(&mut id).map_err(|e| {
+        log::error!("no randomness: {e}");
+        HttpError::new(ErrorCode::Internal, "internal error")
+    })?;
+    let item = ScheduledText {
+        id: InstanceId::from_bytes(&id).to_string(),
+        chat: req.chat,
+        text: req.text,
+        send_at_ms: req.send_at_ms,
+        created_ms: now,
+        state: ScheduledState::Pending,
+    };
+    state
+        .store()
+        .add_scheduled(auth.instance.clone(), item.clone(), MAX_PENDING_SCHEDULED)
+        .await
+        .map_err(|e| match e {
+            StoreError::LimitReached => HttpError::new(
+                ErrorCode::LimitReached,
+                format!("at most {MAX_PENDING_SCHEDULED} texts can be scheduled at once"),
+            ),
+            other => other.into(),
+        })?;
+    state
+        .hub()
+        .publish(&auth.instance, now, GatewayEvent::Scheduled(item.clone()));
+    Ok((StatusCode::CREATED, Json(item)))
+}
+
+async fn list_scheduled(
+    State(state): State<AppState>,
+    auth: Authed,
+) -> ApiResult<Json<Vec<ScheduledText>>> {
+    let since = now_ms().saturating_sub(crate::schedule::KEEP_FINISHED_MS);
+    Ok(Json(
+        state.store().list_scheduled(auth.instance, since).await?,
+    ))
+}
+
+async fn cancel_scheduled(
+    State(state): State<AppState>,
+    auth: Authed,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    if state.store().cancel_scheduled(auth.instance, id).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(HttpError::not_found("no such pending scheduled text"))
+    }
+}
+
 /// Rejects a malformed JID before it reaches the driver.
 fn check_jid(jid: &str) -> ApiResult<()> {
     crate::wa::convert::parse_jid(jid)
@@ -695,6 +777,18 @@ mod tests {
         assert!(check_jid("905321234567@s.whatsapp.net").is_ok());
         let err = check_jid("").unwrap_err();
         assert_eq!(err.0.code, ErrorCode::BadRequest);
+    }
+
+    #[test]
+    fn send_time_window() {
+        let now = 1_000_000;
+        assert!(check_send_at(now + 29_999, now).is_err());
+        assert!(check_send_at(now + 30_000, now).is_ok());
+        assert!(check_send_at(now + MAX_SCHEDULE_LEAD_MS, now).is_ok());
+        assert!(check_send_at(now + MAX_SCHEDULE_LEAD_MS + 1, now).is_err());
+        assert!(check_send_at(now - 1, now).is_err());
+        assert!(check_send_at(i64::MIN, now).is_err());
+        assert!(check_send_at(i64::MAX, i64::MIN).is_err());
     }
 
     #[test]

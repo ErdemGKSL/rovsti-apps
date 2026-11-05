@@ -12,17 +12,20 @@ use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway, call_audi
 use rovsti_wa_proto::{
     AppId, CallPhase, ChatState, ConnectKey, CreateInstance, CreatedInstance, EndReason, ErrorCode,
     EventEnvelope, GatewayEvent, GatewayUrl, GroupInfo, InstanceState, LinkRequest, MarkRead,
-    MediaKind, MessageBody, Participant, SendReaction, SendText, TypingState,
+    MediaKind, MessageBody, Participant, ScheduleText, ScheduledState, ScheduledText, SendReaction,
+    SendText, TypingState,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wa_gateway::config::Config;
+use wa_gateway::driver::DriverError;
 use wa_gateway::driver::FakeDriver;
-use wa_gateway::store::Store;
+use wa_gateway::store::{InstanceId, Store};
 use wa_gateway::{AppState, serve};
 
 struct Server {
     url: GatewayUrl,
     driver: Arc<FakeDriver>,
+    state: AppState,
     dir: tempfile::TempDir,
 }
 
@@ -43,14 +46,16 @@ async fn start_with(max_instances: u32, max_media_bytes: usize) -> Server {
     let store = Store::open(&config.db_path()).unwrap();
     let driver = Arc::new(FakeDriver::new());
     let state = AppState::new(config, store, driver.clone());
+    let served = state.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move {
-        serve(listener, state).await.unwrap();
+        serve(listener, served).await.unwrap();
     });
     Server {
         url: GatewayUrl::parse(&format!("http://127.0.0.1:{port}")).unwrap(),
         driver,
+        state,
         dir,
     }
 }
@@ -873,4 +878,282 @@ async fn relinking_after_a_logout_shows_a_new_qr() {
     // The same key still works: nothing was re-created.
     let status = blocking(move || gateway.status()).await.unwrap();
     assert_eq!(status.instance_id, created.instance_id);
+}
+
+fn is_code(e: &ClientError, code: ErrorCode) -> bool {
+    matches!(e, ClientError::Api(a) if a.code == code)
+}
+
+fn in_ms(ms: i64) -> i64 {
+    wa_gateway::now_ms() + ms
+}
+
+fn schedule_req(text: &str, send_at_ms: i64) -> ScheduleText {
+    ScheduleText {
+        chat: "905321234567@s.whatsapp.net".into(),
+        text: text.into(),
+        send_at_ms,
+    }
+}
+
+async fn schedule(gateway: &Gateway, req: ScheduleText) -> Result<ScheduledText, ClientError> {
+    let g = gateway.clone();
+    blocking(move || g.schedule_text(&req)).await
+}
+
+async fn scheduled(gateway: &Gateway) -> Vec<ScheduledText> {
+    let g = gateway.clone();
+    blocking(move || g.scheduled()).await.unwrap()
+}
+
+/// Stores an item that is already due, which the API itself refuses.
+async fn add_due(server: &Server, created: &CreatedInstance, id: &str, text: &str) {
+    let item = ScheduledText {
+        id: id.into(),
+        chat: "905321234567@s.whatsapp.net".into(),
+        text: text.into(),
+        send_at_ms: in_ms(-1_000),
+        created_ms: in_ms(-2_000),
+        state: ScheduledState::Pending,
+    };
+    server
+        .state
+        .store()
+        .add_scheduled(InstanceId::new(created.instance_id.clone()), item, 10)
+        .await
+        .unwrap();
+}
+
+async fn wait_for(
+    gateway: &Gateway,
+    id: &str,
+    done: impl Fn(&ScheduledState) -> bool,
+) -> ScheduledText {
+    for _ in 0..200 {
+        if let Some(item) = scheduled(gateway).await.into_iter().find(|s| s.id == id)
+            && done(&item.state)
+        {
+            return item;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("scheduled text {id} never reached the expected state");
+}
+
+#[tokio::test]
+async fn schedule_list_and_cancel() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let at = in_ms(3_600_000);
+    let item = schedule(&gateway, schedule_req("later", at)).await.unwrap();
+    assert_eq!(item.state, ScheduledState::Pending);
+    assert_eq!((item.text.as_str(), item.send_at_ms), ("later", at));
+    assert_eq!(item.id.len(), 24);
+    loop {
+        if let GatewayEvent::Scheduled(e) = events.next_event().await.event {
+            assert_eq!(e, item);
+            break;
+        }
+    }
+    assert_eq!(scheduled(&gateway).await, vec![item.clone()]);
+    // Nothing is sent before its time.
+    assert!(server.driver.ops().is_empty());
+
+    let (g, id) = (gateway.clone(), item.id.clone());
+    blocking(move || g.cancel_scheduled(&id)).await.unwrap();
+    assert!(scheduled(&gateway).await.is_empty());
+    let (g, id) = (gateway.clone(), item.id.clone());
+    let again = blocking(move || g.cancel_scheduled(&id)).await.unwrap_err();
+    assert!(is_code(&again, ErrorCode::NotFound), "{again:?}");
+}
+
+#[tokio::test]
+async fn bad_schedules_are_rejected() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    let bad = |e: ClientError| is_code(&e, ErrorCode::BadRequest);
+
+    let past = schedule(&gateway, schedule_req("x", in_ms(-5_000))).await;
+    assert!(bad(past.unwrap_err()));
+    let soon = schedule(&gateway, schedule_req("x", in_ms(10_000))).await;
+    assert!(bad(soon.unwrap_err()));
+    let far = schedule(&gateway, schedule_req("x", in_ms(366 * 24 * 3_600_000))).await;
+    assert!(bad(far.unwrap_err()));
+    let empty = schedule(&gateway, schedule_req("", in_ms(3_600_000))).await;
+    assert!(bad(empty.unwrap_err()));
+    let big = schedule(
+        &gateway,
+        schedule_req(&"a".repeat(64 * 1024 + 1), in_ms(3_600_000)),
+    )
+    .await;
+    assert!(bad(big.unwrap_err()));
+    let mut req = schedule_req("x", in_ms(3_600_000));
+    req.chat = "nonsense".into();
+    assert!(bad(schedule(&gateway, req).await.unwrap_err()));
+    assert!(scheduled(&gateway).await.is_empty());
+
+    // Exactly 64 KiB is fine.
+    let ok = schedule(
+        &gateway,
+        schedule_req(&"a".repeat(64 * 1024), in_ms(3_600_000)),
+    )
+    .await;
+    assert!(ok.is_ok());
+}
+
+#[tokio::test]
+async fn at_most_200_pending_per_instance() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    for n in 0..200 {
+        schedule(&gateway, schedule_req(&format!("m{n}"), in_ms(3_600_000)))
+            .await
+            .unwrap();
+    }
+    let over = schedule(&gateway, schedule_req("one too many", in_ms(3_600_000))).await;
+    assert!(is_code(&over.unwrap_err(), ErrorCode::LimitReached));
+    // Another instance has its own allowance.
+    let (other, _) = create(&server).await;
+    schedule(&other, schedule_req("fine", in_ms(3_600_000)))
+        .await
+        .unwrap();
+    assert!(scheduled(&other).await.len() == 1);
+}
+
+#[tokio::test]
+async fn the_sweeper_sends_a_due_text_once_and_marks_it_sent() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+    add_due(&server, &created, "due1", "hello later").await;
+
+    let sweeper = wa_gateway::schedule::spawn_sweeper_with(
+        server.state.clone(),
+        Duration::from_millis(20),
+        Duration::from_secs(60),
+    );
+    let item = wait_for(&gateway, "due1", |s| {
+        matches!(s, ScheduledState::Sent { .. })
+    })
+    .await;
+    let ScheduledState::Sent { message_id } = &item.state else {
+        unreachable!()
+    };
+    loop {
+        if let GatewayEvent::Scheduled(e) = events.next_event().await.event
+            && e.state != ScheduledState::Pending
+        {
+            assert_eq!(e.id, "due1");
+            break;
+        }
+    }
+    // Let several more ticks pass: it must not be sent again.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    sweeper.abort();
+    let g = gateway.clone();
+    let history = blocking(move || g.messages("905321234567@s.whatsapp.net", None, 10))
+        .await
+        .unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(&history[0].id, message_id);
+    assert_eq!(history[0].body, MessageBody::Text("hello later".into()));
+    // A sent item cannot be cancelled.
+    let g = gateway.clone();
+    let err = blocking(move || g.cancel_scheduled("due1"))
+        .await
+        .unwrap_err();
+    assert!(is_code(&err, ErrorCode::NotFound));
+}
+
+#[tokio::test]
+async fn a_driver_error_is_retried_once_then_fails() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    add_due(&server, &created, "bad1", "never arrives").await;
+    server
+        .driver
+        .fail_sends(Some(DriverError::Failed("boom".into())));
+
+    let sweeper = wa_gateway::schedule::spawn_sweeper_with(
+        server.state.clone(),
+        Duration::from_millis(20),
+        Duration::from_millis(200),
+    );
+    // Within the retry delay it is still pending.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(scheduled(&gateway).await[0].state, ScheduledState::Pending);
+    let item = wait_for(&gateway, "bad1", |s| {
+        matches!(s, ScheduledState::Failed { .. })
+    })
+    .await;
+    assert_eq!(
+        item.state,
+        ScheduledState::Failed {
+            reason: "boom".into()
+        }
+    );
+    sweeper.abort();
+}
+
+#[tokio::test]
+async fn a_retry_that_works_is_sent() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    add_due(&server, &created, "flaky", "second time lucky").await;
+    server.driver.fail_sends(Some(DriverError::NotConnected));
+    let sweeper = wa_gateway::schedule::spawn_sweeper_with(
+        server.state.clone(),
+        Duration::from_millis(20),
+        Duration::from_millis(300),
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    server.driver.fail_sends(None);
+    wait_for(&gateway, "flaky", |s| {
+        matches!(s, ScheduledState::Sent { .. })
+    })
+    .await;
+    sweeper.abort();
+}
+
+#[tokio::test]
+async fn deleting_the_instance_removes_its_scheduled_texts() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    schedule(&gateway, schedule_req("x", in_ms(3_600_000)))
+        .await
+        .unwrap();
+    let id = InstanceId::new(created.instance_id.clone());
+    assert_eq!(
+        server
+            .state
+            .store()
+            .list_scheduled(id.clone(), 0)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    blocking(move || gateway.delete_instance()).await.unwrap();
+    assert!(
+        server
+            .state
+            .store()
+            .list_scheduled(id, 0)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        server
+            .state
+            .store()
+            .due_scheduled(i64::MAX, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }

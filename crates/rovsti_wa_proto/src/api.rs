@@ -16,6 +16,8 @@ pub mod routes {
     pub const CHATS: &str = "/v1/chats";
     pub const CHAT_MESSAGES: &str = "/v1/chats/{jid}/messages";
     pub const SEND_TEXT: &str = "/v1/messages/text";
+    pub const SCHEDULED: &str = "/v1/scheduled";
+    pub const SCHEDULED_ONE: &str = "/v1/scheduled/{id}";
     pub const SEND_MEDIA: &str = "/v1/messages/media";
     pub const REACT: &str = "/v1/messages/reaction";
     pub const MARK_READ: &str = "/v1/read";
@@ -154,6 +156,33 @@ pub struct SendText {
     pub chat: String,
     pub text: String,
     pub quoted_id: Option<String>,
+}
+
+/// Asks the gateway to send a text at `send_at_ms` (unix milliseconds).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ScheduleText {
+    pub chat: String,
+    pub text: String,
+    pub send_at_ms: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ScheduledState {
+    Pending,
+    Sent { message_id: String },
+    Failed { reason: String },
+}
+
+/// A text the gateway will send (or has tried to send) later.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ScheduledText {
+    pub id: String,
+    pub chat: String,
+    pub text: String,
+    pub send_at_ms: i64,
+    pub created_ms: i64,
+    pub state: ScheduledState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -453,6 +482,27 @@ mod tests {
             r#"{"code":"not_connected","message":"offline"}"#,
         )]);
         pinned(&[(SetMuted { muted: true }, r#"{"muted":true}"#)]);
+        pinned(&[
+            (ScheduledState::Pending, r#"{"status":"pending"}"#),
+            (
+                ScheduledState::Sent {
+                    message_id: "M".into(),
+                },
+                r#"{"status":"sent","message_id":"M"}"#,
+            ),
+            (
+                ScheduledState::Failed { reason: "x".into() },
+                r#"{"status":"failed","reason":"x"}"#,
+            ),
+        ]);
+        pinned(&[(
+            ScheduleText {
+                chat: "c".into(),
+                text: "t".into(),
+                send_at_ms: 5,
+            },
+            r#"{"chat":"c","text":"t","send_at_ms":5}"#,
+        )]);
         pinned(&[(
             ChatState {
                 chat: "c".into(),
@@ -496,6 +546,10 @@ mod tests {
             "/v1/chats/9053%40s.whatsapp.net/messages"
         );
         assert_eq!(routes::fill(routes::KEY, "key_id", "ab12"), "/v1/keys/ab12");
+        assert_eq!(
+            routes::fill(routes::SCHEDULED_ONE, "id", "ab12"),
+            "/v1/scheduled/ab12"
+        );
     }
 
     fn wa(from_me: bool, sender: Option<&str>, body: MessageBody) -> WaMessage {

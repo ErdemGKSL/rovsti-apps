@@ -445,6 +445,7 @@ mod fake {
         started: Mutex<Vec<(InstanceId, Option<LinkRequest>)>>,
         ops: Mutex<Vec<String>>,
         groups: Mutex<Vec<GroupInfo>>,
+        send_error: Mutex<Option<DriverError>>,
         calls: Arc<FakeCalls>,
         counter: AtomicU64,
     }
@@ -476,6 +477,11 @@ mod fake {
         /// The groups `groups()` and `group()` report.
         pub fn set_groups(&self, groups: Vec<GroupInfo>) {
             *self.groups.lock().unwrap_or_else(|e| e.into_inner()) = groups;
+        }
+
+        /// Makes every `send_text` fail with `error` (`None` restores it).
+        pub fn fail_sends(&self, error: Option<DriverError>) {
+            *self.send_error.lock().unwrap_or_else(|e| e.into_inner()) = error;
         }
 
         /// The scripted call backend every instance shares.
@@ -591,6 +597,14 @@ mod fake {
         ) -> BoxFuture<'_, Result<Sent, DriverError>> {
             let instance = instance.clone();
             Box::pin(async move {
+                let failure = self
+                    .send_error
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                if let Some(error) = failure {
+                    return Err(error);
+                }
                 let sink = self.sink(&instance).ok_or(DriverError::NotConnected)?;
                 let n = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
                 let timestamp_ms = now_ms();

@@ -160,6 +160,37 @@ instead", and type the code.
 - A temporary WhatsApp ban shows as `banned`. The gateway does not restart a banned
   instance at boot; relink once the ban is over.
 
+## Scheduled texts
+
+The gateway can send a text later, so the phone may be off at that time.
+
+| Request | Meaning |
+| --- | --- |
+| `POST /v1/scheduled` `{chat, text, send_at_ms}` | Schedule a text. 201 with the item. |
+| `GET /v1/scheduled` | Pending items plus items finished in the last 7 days, soonest first. |
+| `DELETE /v1/scheduled/{id}` | Cancel a pending item. 204. |
+
+An item is `{id, chat, text, send_at_ms, created_ms, state}` where `state` is
+`{"status":"pending"}`, `{"status":"sent","message_id":...}` or
+`{"status":"failed","reason":...}`.
+
+Rules: `chat` must be a valid JID; `text` is 1 byte to 64 KiB;
+`send_at_ms` (unix milliseconds) must be 30 seconds to 365 days from now,
+else 400. At most 200 items may be pending per instance (409
+`limit_reached`). `DELETE` works on pending items only: an unknown, sent or
+failed id gives 404, so cancelling twice gives 404.
+
+A sweeper checks every 15 seconds and sends due items with the normal text
+path, so a sent item also appears as a `message` event and in the chat. A
+failed send is retried once after 60 seconds; a second failure (for example
+WhatsApp is not connected) stores `failed`. The retry timer lives in memory,
+so a gateway restart gives a pending item a fresh attempt. Finished items
+are deleted after 7 days, and deleting the instance deletes all its items.
+
+Every add, send and failure publishes `{"type":"scheduled", ...item}` on
+`/v1/events`; clients that do not know the event skip it. A cancel publishes
+nothing, so clients refetch the list when they need to see cancellations.
+
 ## Not run here
 
 Nothing in this repository links a real account: linking needs a phone. The unit tests

@@ -6100,6 +6100,7 @@ dependencies = [
 name = "rovsti_messages"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "futures",
  "gpui",
  "gpui_android",
@@ -6111,6 +6112,8 @@ dependencies = [
  "rovsti_wa_client",
  "rovsti_wa_proto",
  "rovsti_wa_ui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

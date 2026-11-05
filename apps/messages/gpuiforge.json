@@ -5,9 +5,18 @@
   },
   "platforms": {
     "android": {
-      "abis": ["arm64-v8a", "x86_64"],
+      "abis": [
+        "arm64-v8a",
+        "x86_64"
+      ],
+      "activity": "dev.rovsti.messages.MainActivity",
       "application-id": "dev.rovsti.messages",
-      "features": ["network", "sharing", "notifications", "data-sync"],
+      "features": [
+        "network",
+        "sharing",
+        "notifications"
+      ],
+      "management": "manual",
       "permissions": [
         "android.permission.READ_SMS",
         "android.permission.SEND_SMS",
@@ -17,17 +26,52 @@
         "android.permission.READ_CONTACTS",
         "android.permission.READ_PHONE_STATE",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
         "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.INTERNET"
       ],
-      "share-mime-types": ["text/plain", "image/*"],
-      "url-schemes": ["sms", "smsto"]
+      "project-dir": "platforms/android",
+      "share-mime-types": [
+        "text/plain",
+        "image/*"
+      ],
+      "url-schemes": [
+        "sms",
+        "smsto",
+        "mms",
+        "mmsto"
+      ],
+      "variables": {
+        "min_sdk": "34",
+        "target_sdk": "36"
+      }
     },
     "desktop": {
-      "build": [{ "program": "cargo", "args": ["build", "-p", "rovsti_messages", "--profile", "{{cargo_profile}}"] }],
-      "run": [{ "program": "cargo", "args": ["run", "-p", "rovsti_messages", "--profile", "{{cargo_profile}}"] }]
+      "build": [
+        {
+          "program": "cargo",
+          "args": [
+            "build",
+            "-p",
+            "rovsti_messages",
+            "--profile",
+            "{{cargo_profile}}"
+          ]
+        }
+      ],
+      "run": [
+        {
+          "program": "cargo",
+          "args": [
+            "run",
+            "-p",
+            "rovsti_messages",
+            "--profile",
+            "{{cargo_profile}}"
+          ]
+        }
+      ]
     }
   }
 }

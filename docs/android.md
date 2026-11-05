@@ -57,6 +57,62 @@ The project now lives in `apps/phone/platforms/android` and is owned by us. Then
 
 Later `gpuiforge` builds keep these user-owned files.
 
+## Messages host
+
+`apps/messages/platforms/android` is ejected like Contacts: `gpuiforge.json` has
+`management: manual`, `project-dir: platforms/android`, activity
+`dev.rovsti.messages.MainActivity`, `min_sdk` 34 and `target_sdk` 36. The shared Kotlin bridge is a
+Gradle source directory (`crates/rovsti_android/kotlin`, added in `app/build.gradle.kts`), not a
+symlink and not a copy. Permissions: the SMS/MMS set, `READ_CONTACTS`, `READ_PHONE_STATE`,
+`POST_NOTIFICATIONS`, `ACCESS_NETWORK_STATE`, `INTERNET` (gateway), `SCHEDULE_EXACT_ALARM` and
+`RECEIVE_BOOT_COMPLETED`. There is no foreground service and no battery-optimization request.
+
+**Role components** (all four are needed for Android to offer `ROLE_SMS`), declared in
+`app/src/main/AndroidManifest.xml`:
+
+| Component | Intent | Does |
+| --- | --- | --- |
+| `SmsDeliverReceiver` (`BROADCAST_SMS`) | `SMS_DELIVER` | writes `Telephony.Sms.Inbox`, `sms_classify`, notifies unless spam, emits `sms_received` and `sms_changed` |
+| `MmsWapPushReceiver` (`BROADCAST_WAP_PUSH`) | `WAP_PUSH_DELIVER`, `application/vnd.wap.mms-message` | `mms_notification`, `MmsCodec.download`; the result goes to `MmsInbox` (`mms_retrieved`, `Telephony.Mms`, notify) |
+| `HeadlessSmsSendService` (`SEND_RESPOND_VIA_MESSAGE`) | `RESPOND_VIA_MESSAGE`, `sms`/`smsto`/`mms`/`mmsto` | sends the quick reply through `SmsSend` |
+| `MainActivity` | `SENDTO` (the same four schemes), `SEND` (`text/plain`, `image/*`) | `SENDTO`/`SEND` become the one-shot `open_thread` `{tag: "new"\|"share", to[], body?, stream_uri?, mime?}`; a notification tap is `open_thread` `{tag: "sms:<id>"\|"wa:<jid>"}` |
+
+The rest: `ReplyReceiver` (inline reply, copy code, mark read), `ScheduledSmsReceiver` (alarm target),
+`BootReceiver` (re-arms stored alarms after boot or an app update), `SmsStatusReceiver`,
+`MmsResultReceiver` and `MmsFileProvider` (MMS PDU files), none exported. `MainActivity` posts
+`open_thread` through `RovstiBridge.postOneShot`, so it reaches Rust after its snapshot even on a cold
+start, and forwards `onActivityResult` to `RovstiBridge.handleActivityResult` (backup file pickers).
+`RovstiMessagesApp.onCreate` installs the bridge, sets `Headless.libName = "rovsti_messages"` and
+registers `MmsInbox` as the MMS download handler, so a cold receiver has both before `onReceive`.
+The app icon is a vector (`ic_stat_message`); `MessageNotifications` uses `applicationInfo.icon` as the
+small icon, so a host without an icon cannot post.
+
+**Headless call and fallback.** Receivers call `Headless.call(kind, json)` on their own worker thread
+(`goAsync`). It loads the library once (`System.loadLibrary`) and calls
+`RovstiBridge.nativeHeadless`. Kinds and JSON are documented at the top of
+`apps/messages/src/headless.rs`. Any failure (no library, no symbol, panic, blank answer) is `null`
+and every caller has a plain path: SMS is stored and notified without a passcode chip or spam check,
+an MMS push is ignored, an inline reply on a WhatsApp notification is dropped. Spam rules are read
+from `<data dir>/messages-prefs.json` (`spam` key); a missing or corrupt file means defaults.
+
+**Exact-alarm fallback.** Scheduled SMS use one `AlarmManager` alarm per item. `ScheduledSms.arm`
+uses `setExactAndAllowWhileIdle` when `canScheduleExactAlarms()` is true. If the user denied
+"Alarms & reminders" (or the call throws `SecurityException`) it uses `setAndAllowWhileIdle`, so the
+SMS still goes out, possibly a few minutes late, and the UI says so. The payload is kept in
+SharedPreferences and sent by `SmsSend` from the receiver, so no native library is needed;
+`BootReceiver` re-arms after a reboot.
+
+**FCM flavor.** Same as Phone: put `google-services.json` in `apps/messages/platforms/android/app/`.
+Only then does `app/build.gradle.kts` apply the Google services plugin, add `firebase-messaging`, the
+source directory `src/firebase/kotlin` and the manifest `src/firebase/AndroidManifest.xml`.
+`RovstiMessagingService` calls `WaPush.onMessage(message.data)`; for `kind=message` while the UI is
+not attached it calls `nativeHeadless("wa_digest", {dir, chat})` and renders the answer with
+`MessageNotifications` (AD-MSG5). With the UI attached the app posts from the event stream.
+
+Pure Kotlin (`ComposeRequest`, the Rust answers) has JVM tests in
+`app/src/test/kotlin/dev/rovsti/messages`. Build: `gpuiforge build android` in `apps/messages`.
+Device checks are in [messages-acceptance.md](messages-acceptance.md).
+
 ## WhatsApp push and call audio
 
 WhatsApp lives on the gateway ([architecture.md](architecture.md#whatsapp-gateway)).
@@ -108,8 +164,9 @@ calls `WaPush.onMessage(message.data)`:
   activity and `wa_call_action` reaches Rust, which answers through the gateway.
 - `kind=call_end`: the ringing notification goes away; a missed call posts the
   `wa_missed` notification.
-- `kind=message`: only the `wa_push` event; no message text is in the push, the app
-  fetches it from the gateway. A host other than Phone writes the same small service.
+- `kind=message`: the `wa_push` event; no message text is in the push, the app fetches it from
+  the gateway. Phone stops there. Messages also builds the notification with
+  `nativeHeadless("wa_digest")` while its UI is not attached (see [Messages host](#messages-host)).
 
 The token is registered once per launch and link; a rotated token is picked up on the
 next launch.

@@ -13,7 +13,6 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.telephony.SmsManager
 import android.util.Base64
-import org.json.JSONObject
 import java.io.File
 
 /**
@@ -29,6 +28,17 @@ object MmsCodec {
     const val ACTION_DOWNLOADED = "dev.rovsti.bridge.MMS_DOWNLOADED"
     const val EXTRA_LOCAL_ID = "local_id"
     const val EXTRA_FILE = "file"
+
+    /**
+     * What happens to a downloaded PDU (base64 `m-retrieve-conf`): the host persists and notifies it. Set by the
+     * host's `Application.onCreate`, so a cold receiver has it too. Runs on a worker thread. With none set the
+     * PDU is dropped.
+     */
+    fun interface DownloadedHandler {
+        fun onDownloaded(context: Context, localId: Long, pduBase64: String)
+    }
+
+    @Volatile var downloadedHandler: DownloadedHandler? = null
 
     /** Largest PDU accepted from Rust (carrier limits are far lower). */
     const val MAX_PDU_BYTES = 8 * 1024 * 1024
@@ -153,12 +163,12 @@ class MmsResultReceiver : BroadcastReceiver() {
                 val name = intent.getStringExtra(MmsCodec.EXTRA_FILE) ?: return
                 val pdu = if (ok) MmsCodec.takeDownloaded(context, name) else null
                 if (pdu != null) {
-                    // Rust parses the PDU and stores it; without a library the file is simply dropped.
-                    val body = JSONObject().put("local_id", localId).put("pdu_b64", pdu).toString()
+                    // The host decodes the PDU through `mms_retrieved`, persists it and notifies.
+                    val app = context.applicationContext
                     val result = goAsync()
                     Thread {
                         try {
-                            Headless.call("mms_downloaded", body)
+                            MmsCodec.downloadedHandler?.onDownloaded(app, localId, pdu)
                             RovstiBridge.emit("sms_changed", "{}")
                         } finally {
                             result.finish()

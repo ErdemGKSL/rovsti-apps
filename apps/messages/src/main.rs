@@ -6,6 +6,9 @@
 //! `rovsti_wa_client`. SMS stays on the phone.
 
 mod conversation;
+// Only the Android JNI entry calls `handle`; desktop builds exercise it from the tests.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod headless;
 
 use gpui::{
     App, AppContext as _, Bounds, Context, Entity, IntoElement, ParentElement, Render,
@@ -336,6 +339,9 @@ impl Render for MessagesApp {
             .into_any_element()
     }
 }
+
+// Cold receivers (SMS, inline reply, FCM digest) ask Rust for decisions here (AD-MSG4).
+rovsti_android::headless_entry!(headless::handle);
 
 #[gpui_platform::main]
 fn main() {

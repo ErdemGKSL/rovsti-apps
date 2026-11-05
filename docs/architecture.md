@@ -60,9 +60,31 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | App | Role / service | Kotlin components (in the ejected host) |
 | --- | --- | --- |
 | Phone | `ROLE_DIALER` | `InCallService` (in-call UI + ringing via full-screen intent), `ACTION_DIAL` activity filter, call log and contacts providers; `RECORD_AUDIO` for WhatsApp calls |
-| Messages | `ROLE_SMS` | `SMS_DELIVER` receiver, `WAP_PUSH_DELIVER` (MMS) receiver, `RESPOND_VIA_MESSAGE` service, `SENDTO` activity; WhatsApp wakes through optional FCM push (see [WhatsApp gateway](#whatsapp-gateway)), no foreground service |
+| Messages | `ROLE_SMS` | `SMS_DELIVER` receiver, `WAP_PUSH_DELIVER` (MMS) receiver, `RESPOND_VIA_MESSAGE` service, `SENDTO`/`SEND` activity filters, inline-reply, scheduled-SMS and boot receivers; one headless JNI call into Rust for cold decisions (AD-MSG4); WhatsApp wakes through optional FCM push and fetches its text through that same call (AD-MSG5); no foreground service |
 | Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS` for favorites); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
 | Stops | none | foreground `location` service feeding fixes to `rovsti_geo::Trip`, full-screen alarm activity, exact alarm as a fallback |
+
+### Messages: cold paths (AD-MSG4, AD-MSG5)
+
+- **AD-MSG4 Cold paths stay in Kotlin, logic stays in Rust.** An SMS can arrive, an inline
+  reply can be sent and a scheduled SMS can fire with no activity and no UI process. Those
+  paths are Kotlin receivers (`SmsDeliverReceiver`, `MmsWapPushReceiver`, `ReplyReceiver`,
+  `ScheduledSmsReceiver`). When one needs a decision it calls
+  `RovstiBridge.nativeHeadless(kind, json)`, which `apps/messages/src/main.rs` exports with
+  `rovsti_android::headless_entry!(headless::handle)`. `System.loadLibrary` from a receiver
+  only runs `JNI_OnLoad`, which registers native methods and does not start GPUI. The handler
+  is plain blocking Rust (`apps/messages/src/headless.rs`): `sms_classify` (spam rules from
+  `messages-prefs.json` plus passcode detection), `mms_notification`, `mms_retrieved`,
+  `mms_send_req`, `wa_digest`, `wa_reply`. The seam stays strings: JSON in, JSON out. **Fallback:**
+  if the library cannot be loaded, the symbol is missing, Rust panics or the answer is empty,
+  Kotlin gets no decision and posts a plain notification (no passcode chip, no spam filter,
+  no MMS decode). The message itself is always stored first.
+- **AD-MSG5 WhatsApp notifications.** The FCM payload carries no text (AD-WA6). On a
+  `kind=message` push `RovstiMessagingService` calls `WaPush.onMessage`, and when the UI is not
+  attached it asks `nativeHeadless("wa_digest", {dir, chat})`; Rust reads `whatsapp-link.json`,
+  fetches the last messages from the gateway and answers a `NotificationSpec`. Inline reply is
+  `nativeHeadless("wa_reply", {dir, chat, text})`. While the UI is attached the app posts
+  notifications itself from the event stream and Kotlin posts nothing.
 
 ### Phone: incoming calls
 

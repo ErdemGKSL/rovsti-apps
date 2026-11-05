@@ -293,13 +293,13 @@ object RovstiBridge {
     @JvmStatic fun smsSend(json: String): Boolean = SmsSend.send(app, json)
 
     /**
-     * `{local_id, to[], text, image_path?, sub_id?}`. Rust builds the PDU (`nativeHeadless("mms_encode")`
+     * `{local_id, to[], text, image_path?, sub_id?}`. Rust builds the PDU (`nativeHeadless("mms_send_req")`
      * answers `{"pdu_b64":..}`), [MmsCodec] only moves the file. False when no PDU came back.
      */
     @JvmStatic
     fun smsSendMms(json: String): Boolean {
         val request = try { JSONObject(json) } catch (_: org.json.JSONException) { return false }
-        val pdu = Headless.call("mms_encode", json)?.let {
+        val pdu = Headless.call("mms_send_req", json)?.let {
             try { JSONObject(it).optString("pdu_b64", "") } catch (_: org.json.JSONException) { "" }
         }.orEmpty()
         if (pdu.isEmpty()) return false

@@ -37,6 +37,9 @@ object RovstiBridge {
     private lateinit var app: Application
     private var foreground: Activity? = null
 
+    /** The application installed by [install]; for services (FCM) that run without an activity. */
+    fun application(): Application = app
+
     /** True once `nativeInit` has run; guards [emit] (AD-5). */
     @Volatile private var nativeReady = false
 
@@ -294,6 +297,29 @@ object RovstiBridge {
     /** Plays one base64 frame of the peer's voice. */
     @JvmStatic fun waPlayFrame(frame: String): Boolean = WaCallAudio.playFrame(frame)
 
+    /** Loudspeaker (true) or earpiece (false) for the call audio; false when no such route exists. */
+    @JvmStatic fun waSpeaker(on: Boolean): Boolean = WaCallAudio.setSpeaker(app, on)
+
+    /** Posts the incoming WhatsApp call notification (full-screen, Answer, Decline). */
+    @JvmStatic fun waShowIncoming(callId: String, title: String): Boolean = WaIncoming.show(app, callId, title)
+
+    @JvmStatic fun waCancelIncoming(callId: String): Boolean = WaIncoming.cancel(app, callId)
+
+    /**
+     * Call from the launch activity's `onCreate` and `onNewIntent` with the intent it received. When it
+     * carries an Answer or Decline from the incoming-call notification, queues `wa_call_action`
+     * (through the mailbox, so it survives a cold start) and dismisses the notification. True when it did.
+     */
+    fun deliverWaCallAction(intent: Intent?): Boolean {
+        val id = intent?.getStringExtra(WaIncoming.EXTRA_CALL_ID) ?: return false
+        val action = intent.getStringExtra(WaIncoming.EXTRA_ACTION) ?: return false
+        val json = WaIncoming.actionJson(id, action) ?: return false
+        intent.removeExtra(WaIncoming.EXTRA_ACTION)
+        WaIncoming.cancel(app, id)
+        postOneShot("wa_call_action", json)
+        return true
+    }
+
     // ---- Permissions ---------------------------------------------------
 
     private val groups = mapOf(
@@ -437,6 +463,19 @@ object RovstiBridge {
             SimAccounts.handleFor(app, accountKey)?.let { extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, it) }
         }
         app.getSystemService(TelecomManager::class.java)?.placeCall(uri, extras) ?: return false
+        return true
+    }
+
+    /** Calls the voicemail box; without `CALL_PHONE` opens the dial pad on the voicemail URI instead. */
+    @JvmStatic
+    @SuppressLint("MissingPermission")
+    fun callVoicemail(): Boolean {
+        val uri = Uri.fromParts("voicemail", "", null)
+        if (app.checkSelfPermission(android.Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+            start(Intent(Intent.ACTION_DIAL, uri))
+            return false
+        }
+        app.getSystemService(TelecomManager::class.java)?.placeCall(uri, Bundle()) ?: return false
         return true
     }
 

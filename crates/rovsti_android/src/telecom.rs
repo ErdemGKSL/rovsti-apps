@@ -9,6 +9,13 @@ pub fn place_call(number: &str) -> Result<bool> {
     bridge::call_bool_str("placeCall", number)
 }
 
+/// Calls the voicemail box (`voicemail:` URI through `TelecomManager.placeCall`;
+/// needs `CALL_PHONE`). `false` when the permission is missing and the system
+/// dial pad was opened instead.
+pub fn call_voicemail() -> Result<bool> {
+    bridge::call_bool0("callVoicemail")
+}
+
 /// [`place_call`] on a chosen SIM (story 16.3): `account_key` is the opaque
 /// `PhoneAccountInfo::key`. Kotlin adds `EXTRA_PHONE_ACCOUNT_HANDLE`; it never
 /// changes the system default, and never takes a key for an emergency number.
@@ -138,6 +145,7 @@ mod tests {
         assert!(matches!(phone_accounts(), Err(Error::Unsupported)));
         assert!(matches!(select_account(1, "k"), Err(Error::Unsupported)));
         assert!(matches!(place_call("1"), Err(Error::Unsupported)));
+        assert!(matches!(call_voicemail(), Err(Error::Unsupported)));
         assert!(matches!(add_contact("1"), Err(Error::Unsupported)));
         for page in SystemPage::ALL {
             assert!(matches!(open_system(page), Err(Error::Unsupported)));

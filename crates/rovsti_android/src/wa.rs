@@ -45,6 +45,24 @@ pub fn call_audio_play(frame: &[i16]) -> Result<bool> {
     bridge::call_bool("waPlayFrame", &[Arg::Str(&frame_to_base64(frame)?)])
 }
 
+/// Routes the call audio to the loudspeaker (`true`) or the earpiece (`false`).
+/// `false` when the device offers no such route.
+pub fn call_audio_speaker(on: bool) -> Result<bool> {
+    bridge::call_bool("waSpeaker", &[Arg::Bool(on)])
+}
+
+/// Shows the incoming-call notification (full-screen, Answer and Decline) for
+/// the gateway call `call_id`, titled `title`. `false` when notifications are
+/// blocked. Answer and Decline come back as `wa_call_action` events.
+pub fn show_incoming(call_id: &str, title: &str) -> Result<bool> {
+    bridge::call_bool("waShowIncoming", &[Arg::Str(call_id), Arg::Str(title)])
+}
+
+/// Removes the incoming-call notification of `call_id`. `false` when none was shown.
+pub fn cancel_incoming(call_id: &str) -> Result<bool> {
+    bridge::call_bool("waCancelIncoming", &[Arg::Str(call_id)])
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -55,6 +73,9 @@ mod tests {
     fn desktop_is_unsupported() {
         assert!(matches!(push_token(), Err(Error::Unsupported)));
         assert!(matches!(call_audio_start(), Err(Error::Unsupported)));
+        assert!(matches!(call_audio_speaker(true), Err(Error::Unsupported)));
+        assert!(matches!(show_incoming("c", "Ann"), Err(Error::Unsupported)));
+        assert!(matches!(cancel_incoming("c"), Err(Error::Unsupported)));
         assert!(matches!(call_audio_stop(), Err(Error::Unsupported)));
         assert!(matches!(call_audio_read(), Err(Error::Unsupported)));
         assert!(matches!(

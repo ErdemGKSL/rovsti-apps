@@ -27,11 +27,37 @@ pub mod kind {
     pub const DOCUMENT_RESULT: &str = "document_result";
     pub const RINGTONE_RESULT: &str = "ringtone_result";
     pub const UI_REQUEST: &str = "ui_request";
-    /// The keyguard was dismissed after `window::request_dismiss_keyguard` (no payload).
     /// An FCM data message for WhatsApp (`{"kind":"call"|"message",..}`, AD-WA6). The
     /// event only wakes the process; the apps' gateway stream delivers the content.
     pub const WA_PUSH: &str = "wa_push";
+    /// The user tapped Answer or Decline on a WhatsApp incoming-call notification
+    /// (`{"call_id":..,"action":"answer"|"decline"}`); see [`parse_wa_call_action`].
+    pub const WA_CALL_ACTION: &str = "wa_call_action";
+    /// The keyguard was dismissed after `window::request_dismiss_keyguard` (no payload).
     pub const KEYGUARD_DISMISSED: &str = "keyguard_dismissed";
+}
+
+/// What the user chose on a WhatsApp incoming-call notification.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaCallAction {
+    Answer,
+    Decline,
+}
+
+/// Decodes a `wa_call_action` payload into the gateway call id and the action.
+/// `None` for malformed JSON, a missing or empty id, or an unknown action.
+pub fn parse_wa_call_action(json: &str) -> Option<(String, WaCallAction)> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let id = value.get("call_id")?.as_str()?;
+    if id.is_empty() {
+        return None;
+    }
+    let action = match value.get("action")?.as_str()? {
+        "answer" => WaCallAction::Answer,
+        "decline" => WaCallAction::Decline,
+        _ => return None,
+    };
+    Some((id.to_owned(), action))
 }
 
 /// One undecoded event.
@@ -116,6 +142,33 @@ mod tests {
 
     fn serial() -> std::sync::MutexGuard<'static, ()> {
         SERIAL.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[test]
+    fn wa_call_action_parses() {
+        assert_eq!(
+            parse_wa_call_action(r#"{"call_id":"abc","action":"answer"}"#),
+            Some(("abc".to_owned(), WaCallAction::Answer))
+        );
+        assert_eq!(
+            parse_wa_call_action(r#"{"action":"decline","call_id":"x y"}"#),
+            Some(("x y".to_owned(), WaCallAction::Decline))
+        );
+    }
+
+    #[test]
+    fn wa_call_action_rejects_bad_input() {
+        for bad in [
+            "",
+            "nope",
+            "{}",
+            r#"{"call_id":"","action":"answer"}"#,
+            r#"{"call_id":"a"}"#,
+            r#"{"call_id":"a","action":"hold"}"#,
+            r#"{"call_id":7,"action":"answer"}"#,
+        ] {
+            assert_eq!(parse_wa_call_action(bad), None, "{bad}");
+        }
     }
 
     #[test]

@@ -32,10 +32,12 @@ object WaPush {
 
     /**
      * Call from the host's `FirebaseMessagingService.onMessageReceived` with `remoteMessage.data`.
-     * Rust gets a `wa_push` event; the host shows the call notification itself.
+     * A `kind=call` message shows the incoming-call notification first (the process may have no UI), then
+     * Rust gets a `wa_push` event.
      */
     @JvmStatic
     fun onMessage(data: Map<String, String>) {
+        WaIncomingNotice.of(data)?.let { WaIncoming.show(RovstiBridge.application(), it) }
         RovstiBridge.emit("wa_push", payload(data))
     }
 }

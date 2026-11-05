@@ -4,11 +4,13 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Build
 import android.util.Base64
 import java.util.concurrent.ArrayBlockingQueue
 
@@ -110,7 +112,39 @@ object WaCallAudio {
         track?.release()
         track = null
         mic.clear()
-        context.getSystemService(AudioManager::class.java)?.mode = previousMode
+        context.getSystemService(AudioManager::class.java)?.let {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) it.clearCommunicationDevice()
+            it.mode = previousMode
+        }
+    }
+
+    /** Pure: the communication-device type to look for. */
+    fun wantedType(speaker: Boolean): Int =
+        if (speaker) AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
+
+    /** Pure: the index in [types] of the built-in speaker or earpiece, or -1. */
+    fun pickDevice(types: List<Int>, speaker: Boolean): Int = types.indexOf(wantedType(speaker))
+
+    /**
+     * Loudspeaker or earpiece. API 31+ picks the built-in device from `availableCommunicationDevices`;
+     * older releases use `isSpeakerphoneOn`. False when the device has no such route.
+     */
+    fun setSpeaker(context: Context, speaker: Boolean): Boolean {
+        val audio = context.getSystemService(AudioManager::class.java) ?: return false
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val devices = audio.availableCommunicationDevices
+                val index = pickDevice(devices.map { it.type }, speaker)
+                if (index < 0) return false
+                audio.setCommunicationDevice(devices[index])
+            } else {
+                @Suppress("DEPRECATION")
+                audio.isSpeakerphoneOn = speaker
+                true
+            }
+        } catch (_: RuntimeException) {
+            false
+        }
     }
 
     /** The next microphone frame as base64, or "" when none is ready. */

@@ -1,0 +1,1239 @@
+//! SQLite persistence: instances, hashed connect keys, push tokens and chat
+//! history. One connection behind a mutex; every call runs on the blocking
+//! pool so the async runtime never waits on disk.
+
+use std::collections::HashMap;
+use std::fmt;
+use std::path::Path;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use rovsti_wa_proto::{
+    AppId, ChatSummary, InstanceState, InstanceStatus, KeyHash, KeyId, KeyInfo, MessageBody,
+    Reaction, WaMessage,
+};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
+
+/// Active (not revoked) keys one instance may hold.
+pub const MAX_KEYS_PER_INSTANCE: u32 = 32;
+
+#[derive(Debug, thiserror::Error)]
+pub enum StoreError {
+    #[error("sqlite: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("stored json: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("limit reached")]
+    LimitReached,
+    #[error("not found")]
+    NotFound,
+    #[error("database task failed: {0}")]
+    Task(String),
+    #[error("{0}")]
+    Corrupt(String),
+}
+
+/// Opaque id of a linked WhatsApp account on this gateway.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct InstanceId(String);
+
+impl InstanceId {
+    pub fn from_bytes(bytes: &[u8; 12]) -> Self {
+        let mut s = String::with_capacity(24);
+        for b in bytes {
+            s.push_str(&format!("{b:02x}"));
+        }
+        Self(s)
+    }
+
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for InstanceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// A key to store: only its hash, never the key itself.
+#[derive(Clone, Debug)]
+pub struct NewKey {
+    pub key_id: KeyId,
+    pub hash: KeyHash,
+    pub label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredInstance {
+    pub id: InstanceId,
+    pub state: InstanceState,
+}
+
+/// A key id read back from the database or the wire.
+pub fn parse_key_id(s: &str) -> Option<KeyId> {
+    serde_json::from_value(serde_json::Value::String(s.to_owned())).ok()
+}
+
+/// The 32 raw bytes of a hash (stored as a BLOB).
+fn hash_bytes(hash: &KeyHash) -> Vec<u8> {
+    let hex = hash.to_hex();
+    hex.as_bytes()
+        .chunks(2)
+        .filter_map(|p| u8::from_str_radix(std::str::from_utf8(p).ok()?, 16).ok())
+        .collect()
+}
+
+fn hash_from_bytes(bytes: &[u8]) -> Option<KeyHash> {
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    KeyHash::from_hex(&hex).ok()
+}
+
+fn to_tag<T: serde::Serialize>(value: &T) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(s)) => s,
+        _ => String::new(),
+    }
+}
+
+fn from_tag<T: serde::de::DeserializeOwned>(tag: &str) -> Result<T, StoreError> {
+    Ok(serde_json::from_value(serde_json::Value::String(
+        tag.to_owned(),
+    ))?)
+}
+
+const MIGRATIONS: &[&str] = &[
+    // v1
+    "
+    CREATE TABLE instances (
+        id TEXT PRIMARY KEY,
+        created_ms INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        own_jid TEXT,
+        push_name TEXT
+    );
+    CREATE TABLE keys (
+        key_id TEXT PRIMARY KEY,
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        hash BLOB NOT NULL UNIQUE,
+        label TEXT NOT NULL,
+        created_ms INTEGER NOT NULL,
+        last_used_ms INTEGER,
+        revoked INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX keys_by_instance ON keys(instance_id);
+    CREATE TABLE push_tokens (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        app TEXT NOT NULL,
+        token TEXT NOT NULL,
+        PRIMARY KEY (instance_id, app)
+    );
+    CREATE TABLE chats (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        jid TEXT NOT NULL,
+        name TEXT,
+        is_group INTEGER NOT NULL DEFAULT 0,
+        unread INTEGER NOT NULL DEFAULT 0,
+        last_ms INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (instance_id, jid)
+    );
+    CREATE TABLE messages (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        chat TEXT NOT NULL,
+        id TEXT NOT NULL,
+        sender TEXT,
+        from_me INTEGER NOT NULL,
+        ts_ms INTEGER NOT NULL,
+        body_json TEXT NOT NULL,
+        raw_proto BLOB,
+        PRIMARY KEY (instance_id, chat, id)
+    );
+    CREATE INDEX messages_by_time ON messages(instance_id, chat, ts_ms);
+    CREATE TABLE reactions (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        chat TEXT NOT NULL,
+        id TEXT NOT NULL,
+        sender TEXT NOT NULL,
+        from_me INTEGER NOT NULL DEFAULT 0,
+        emoji TEXT NOT NULL,
+        PRIMARY KEY (instance_id, chat, id, sender)
+    );
+    ",
+];
+
+/// Brings `conn` to the latest schema using `PRAGMA user_version`.
+pub fn migrate(conn: &mut Connection) -> Result<(), StoreError> {
+    let current: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    let latest = MIGRATIONS.len() as u32;
+    if current > latest {
+        return Err(StoreError::Corrupt(format!(
+            "database schema v{current} is newer than this gateway (v{latest})"
+        )));
+    }
+    for (index, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
+        let tx = conn.transaction()?;
+        tx.execute_batch(sql)?;
+        tx.execute_batch(&format!("PRAGMA user_version = {}", index + 1))?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+pub struct Store {
+    conn: Arc<Mutex<Connection>>,
+}
+
+impl fmt::Debug for Store {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("Store")
+    }
+}
+
+fn lock(conn: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
+    // A panic mid-query leaves the connection usable; keep serving.
+    conn.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Store {
+    pub fn open(path: &Path) -> Result<Self, StoreError> {
+        Self::from_connection(Connection::open(path)?)
+    }
+
+    pub fn open_in_memory() -> Result<Self, StoreError> {
+        Self::from_connection(Connection::open_in_memory()?)
+    }
+
+    fn from_connection(mut conn: Connection) -> Result<Self, StoreError> {
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        migrate(&mut conn)?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    async fn run<T, F>(&self, f: F) -> Result<T, StoreError>
+    where
+        T: Send + 'static,
+        F: FnOnce(&mut Connection) -> Result<T, StoreError> + Send + 'static,
+    {
+        let conn = Arc::clone(&self.conn);
+        tokio::task::spawn_blocking(move || f(&mut lock(&conn)))
+            .await
+            .map_err(|e| StoreError::Task(e.to_string()))?
+    }
+
+    /// Creates an instance with its first key. Fails with `LimitReached` when
+    /// `max_instances` exist already; the check and the insert share one
+    /// transaction so concurrent creates cannot overshoot.
+    pub async fn create_instance(
+        &self,
+        id: InstanceId,
+        first_key: NewKey,
+        now_ms: i64,
+        max_instances: u32,
+    ) -> Result<(), StoreError> {
+        self.run(move |conn| {
+            let tx = conn.transaction()?;
+            let count: u32 = tx.query_row("SELECT COUNT(*) FROM instances", [], |r| r.get(0))?;
+            if count >= max_instances {
+                return Err(StoreError::LimitReached);
+            }
+            tx.execute(
+                "INSERT INTO instances (id, created_ms, state) VALUES (?1, ?2, ?3)",
+                params![id.as_str(), now_ms, to_tag(&InstanceState::Linking)],
+            )?;
+            insert_key(&tx, &id, &first_key, now_ms)?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn count_instances(&self) -> Result<u32, StoreError> {
+        self.run(|conn| Ok(conn.query_row("SELECT COUNT(*) FROM instances", [], |r| r.get(0))?))
+            .await
+    }
+
+    pub async fn list_instances(&self) -> Result<Vec<StoredInstance>, StoreError> {
+        self.run(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT id, state FROM instances ORDER BY created_ms, id")?;
+            let rows =
+                stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (id, state) = row?;
+                out.push(StoredInstance {
+                    id: InstanceId::new(id),
+                    state: from_tag(&state)?,
+                });
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    pub async fn delete_instance(&self, id: InstanceId) -> Result<bool, StoreError> {
+        self.run(move |conn| {
+            let n = conn.execute("DELETE FROM instances WHERE id = ?1", [id.as_str()])?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    pub async fn instance_status(
+        &self,
+        id: InstanceId,
+    ) -> Result<Option<InstanceStatus>, StoreError> {
+        self.run(move |conn| {
+            let row = conn
+                .query_row(
+                    "SELECT state, own_jid, push_name FROM instances WHERE id = ?1",
+                    [id.as_str()],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            row.map(|(state, own_jid, push_name)| {
+                Ok(InstanceStatus {
+                    instance_id: id.to_string(),
+                    state: from_tag(&state)?,
+                    own_jid,
+                    push_name,
+                })
+            })
+            .transpose()
+        })
+        .await
+    }
+
+    pub async fn set_state(
+        &self,
+        id: InstanceId,
+        state: InstanceState,
+        own_jid: Option<String>,
+        push_name: Option<String>,
+    ) -> Result<(), StoreError> {
+        self.run(move |conn| {
+            // Keep what we know when a later event does not repeat it.
+            conn.execute(
+                "UPDATE instances SET state = ?2, own_jid = COALESCE(?3, own_jid),
+                 push_name = COALESCE(?4, push_name) WHERE id = ?1",
+                params![id.as_str(), to_tag(&state), own_jid, push_name],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Looks a key up by its hash. A revoked key finds nothing. Bumps
+    /// `last_used_ms` on a hit.
+    pub async fn instance_for_key(
+        &self,
+        hash: KeyHash,
+        now_ms: i64,
+    ) -> Result<Option<(InstanceId, KeyId)>, StoreError> {
+        self.run(move |conn| {
+            let row = conn
+                .query_row(
+                    "SELECT instance_id, key_id, hash FROM keys WHERE hash = ?1 AND revoked = 0",
+                    [hash_bytes(&hash)],
+                    |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, Vec<u8>>(2)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((instance, key_id, stored)) = row else {
+                return Ok(None);
+            };
+            let stored = hash_from_bytes(&stored);
+            if !stored.is_some_and(|s| s.ct_eq(&hash)) {
+                return Ok(None);
+            }
+            let key_id = parse_key_id(&key_id)
+                .ok_or_else(|| StoreError::Corrupt("bad key id in database".into()))?;
+            conn.execute(
+                "UPDATE keys SET last_used_ms = ?2 WHERE key_id = ?1",
+                params![key_id.as_str(), now_ms],
+            )?;
+            Ok(Some((InstanceId::new(instance), key_id)))
+        })
+        .await
+    }
+
+    /// True while the key exists and is not revoked.
+    pub async fn key_active(&self, key_id: KeyId) -> Result<bool, StoreError> {
+        self.run(move |conn| {
+            let n: u32 = conn.query_row(
+                "SELECT COUNT(*) FROM keys WHERE key_id = ?1 AND revoked = 0",
+                [key_id.as_str()],
+                |r| r.get(0),
+            )?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    pub async fn mint_key(
+        &self,
+        instance: InstanceId,
+        key: NewKey,
+        now_ms: i64,
+    ) -> Result<(), StoreError> {
+        self.run(move |conn| {
+            let tx = conn.transaction()?;
+            let exists: u32 = tx.query_row(
+                "SELECT COUNT(*) FROM instances WHERE id = ?1",
+                [instance.as_str()],
+                |r| r.get(0),
+            )?;
+            if exists == 0 {
+                return Err(StoreError::NotFound);
+            }
+            let active: u32 = tx.query_row(
+                "SELECT COUNT(*) FROM keys WHERE instance_id = ?1 AND revoked = 0",
+                [instance.as_str()],
+                |r| r.get(0),
+            )?;
+            if active >= MAX_KEYS_PER_INSTANCE {
+                return Err(StoreError::LimitReached);
+            }
+            insert_key(&tx, &instance, &key, now_ms)?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn list_keys(&self, instance: InstanceId) -> Result<Vec<KeyInfo>, StoreError> {
+        self.run(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT key_id, label, created_ms, last_used_ms FROM keys
+                 WHERE instance_id = ?1 AND revoked = 0 ORDER BY created_ms, key_id",
+            )?;
+            let rows = stmt.query_map([instance.as_str()], |r| {
+                Ok(KeyInfo {
+                    key_id: r.get(0)?,
+                    label: r.get(1)?,
+                    created_ms: r.get(2)?,
+                    last_used_ms: r.get(3)?,
+                })
+            })?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })
+        .await
+    }
+
+    /// Revokes a key of `instance`. False when there is no such live key.
+    pub async fn revoke_key(
+        &self,
+        instance: InstanceId,
+        key_id: String,
+    ) -> Result<bool, StoreError> {
+        self.run(move |conn| {
+            let n = conn.execute(
+                "UPDATE keys SET revoked = 1 WHERE instance_id = ?1 AND key_id = ?2 AND revoked = 0",
+                params![instance.as_str(), key_id],
+            )?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    pub async fn set_push_token(
+        &self,
+        instance: InstanceId,
+        app: AppId,
+        token: String,
+    ) -> Result<(), StoreError> {
+        self.run(move |conn| {
+            conn.execute(
+                "INSERT INTO push_tokens (instance_id, app, token) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(instance_id, app) DO UPDATE SET token = excluded.token",
+                params![instance.as_str(), to_tag(&app), token],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn push_tokens(
+        &self,
+        instance: InstanceId,
+    ) -> Result<Vec<(AppId, String)>, StoreError> {
+        self.run(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT app, token FROM push_tokens WHERE instance_id = ?1 ORDER BY app",
+            )?;
+            let rows = stmt.query_map([instance.as_str()], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (app, token) = row?;
+                out.push((from_tag(&app)?, token));
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    /// Creates the chat or refreshes it. A `None` name keeps the stored one;
+    /// `last_ms` only moves forward; `unread_delta` is added to the counter.
+    pub async fn upsert_chat(
+        &self,
+        instance: InstanceId,
+        jid: String,
+        name: Option<String>,
+        is_group: bool,
+        last_ms: i64,
+        unread_delta: u32,
+    ) -> Result<(), StoreError> {
+        self.run(move |conn| {
+            upsert_chat(
+                conn,
+                &instance,
+                &jid,
+                name.as_deref(),
+                is_group,
+                last_ms,
+                unread_delta,
+            )
+        })
+        .await
+    }
+
+    /// Stores a message and bumps its chat in one transaction. False when the
+    /// message was already there (history sync and live delivery can overlap).
+    pub async fn insert_message(
+        &self,
+        instance: InstanceId,
+        message: WaMessage,
+        raw_proto: Option<Vec<u8>>,
+    ) -> Result<bool, StoreError> {
+        self.run(move |conn| {
+            let tx = conn.transaction()?;
+            let body = serde_json::to_string(&message.body)?;
+            let n = tx.execute(
+                "INSERT OR IGNORE INTO messages
+                 (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    instance.as_str(),
+                    message.chat,
+                    message.id,
+                    message.sender,
+                    message.from_me,
+                    message.timestamp_ms,
+                    body,
+                    raw_proto
+                ],
+            )?;
+            if n > 0 {
+                upsert_chat(
+                    &tx,
+                    &instance,
+                    &message.chat,
+                    None,
+                    message.chat.ends_with("@g.us"),
+                    message.timestamp_ms,
+                    u32::from(!message.from_me),
+                )?;
+            }
+            tx.commit()?;
+            Ok(n > 0)
+        })
+        .await
+    }
+
+    pub async fn set_reaction(
+        &self,
+        instance: InstanceId,
+        chat: String,
+        id: String,
+        reaction: Reaction,
+    ) -> Result<(), StoreError> {
+        self.run(move |conn| {
+            let sender = reaction.sender.unwrap_or_default();
+            if reaction.emoji.is_empty() {
+                conn.execute(
+                    "DELETE FROM reactions WHERE instance_id = ?1 AND chat = ?2 AND id = ?3 AND sender = ?4",
+                    params![instance.as_str(), chat, id, sender],
+                )?;
+            } else {
+                conn.execute(
+                    "INSERT INTO reactions (instance_id, chat, id, sender, from_me, emoji)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(instance_id, chat, id, sender)
+                     DO UPDATE SET emoji = excluded.emoji, from_me = excluded.from_me",
+                    params![instance.as_str(), chat, id, sender, reaction.from_me, reaction.emoji],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// Messages of `chat`, newest first, older than `before_ms` when given.
+    pub async fn messages(
+        &self,
+        instance: InstanceId,
+        chat: String,
+        before_ms: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<WaMessage>, StoreError> {
+        self.run(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, sender, from_me, ts_ms, body_json FROM messages
+                 WHERE instance_id = ?1 AND chat = ?2 AND ts_ms < ?3
+                 ORDER BY ts_ms DESC, id DESC LIMIT ?4",
+            )?;
+            let rows = stmt.query_map(
+                params![
+                    instance.as_str(),
+                    chat,
+                    before_ms.unwrap_or(i64::MAX),
+                    limit
+                ],
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, bool>(2)?,
+                        r.get::<_, i64>(3)?,
+                        r.get::<_, String>(4)?,
+                    ))
+                },
+            )?;
+            let mut reactions = reactions_of(conn, &instance, &chat)?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (id, sender, from_me, timestamp_ms, body) = row?;
+                out.push(WaMessage {
+                    reactions: reactions.remove(&id).unwrap_or_default(),
+                    id,
+                    chat: chat.clone(),
+                    sender,
+                    from_me,
+                    timestamp_ms,
+                    body: serde_json::from_str::<MessageBody>(&body)?,
+                });
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    /// Chats, most recently active first, each with its newest message.
+    pub async fn chats(&self, instance: InstanceId) -> Result<Vec<ChatSummary>, StoreError> {
+        self.run(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT jid, name, is_group, unread FROM chats
+                 WHERE instance_id = ?1 ORDER BY last_ms DESC, jid",
+            )?;
+            let rows = stmt.query_map([instance.as_str()], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, bool>(2)?,
+                    r.get::<_, u32>(3)?,
+                ))
+            })?;
+            let mut out = Vec::new();
+            for row in rows {
+                let (jid, name, is_group, unread) = row?;
+                let last = last_message(conn, &instance, &jid)?;
+                out.push(ChatSummary {
+                    jid,
+                    name,
+                    last,
+                    unread,
+                    is_group,
+                });
+            }
+            Ok(out)
+        })
+        .await
+    }
+}
+
+fn insert_key(
+    tx: &Transaction<'_>,
+    instance: &InstanceId,
+    key: &NewKey,
+    now_ms: i64,
+) -> Result<(), StoreError> {
+    tx.execute(
+        "INSERT INTO keys (key_id, instance_id, hash, label, created_ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            key.key_id.as_str(),
+            instance.as_str(),
+            hash_bytes(&key.hash),
+            key.label,
+            now_ms
+        ],
+    )?;
+    Ok(())
+}
+
+fn upsert_chat(
+    conn: &Connection,
+    instance: &InstanceId,
+    jid: &str,
+    name: Option<&str>,
+    is_group: bool,
+    last_ms: i64,
+    unread_delta: u32,
+) -> Result<(), StoreError> {
+    conn.execute(
+        "INSERT INTO chats (instance_id, jid, name, is_group, unread, last_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(instance_id, jid) DO UPDATE SET
+            name = COALESCE(excluded.name, name),
+            is_group = excluded.is_group,
+            unread = unread + excluded.unread,
+            last_ms = MAX(last_ms, excluded.last_ms)",
+        params![
+            instance.as_str(),
+            jid,
+            name,
+            is_group,
+            unread_delta,
+            last_ms
+        ],
+    )?;
+    Ok(())
+}
+
+fn reactions_of(
+    conn: &Connection,
+    instance: &InstanceId,
+    chat: &str,
+) -> Result<HashMap<String, Vec<Reaction>>, StoreError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, sender, from_me, emoji FROM reactions
+         WHERE instance_id = ?1 AND chat = ?2 ORDER BY id, sender",
+    )?;
+    let rows = stmt.query_map(params![instance.as_str(), chat], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, bool>(2)?,
+            r.get::<_, String>(3)?,
+        ))
+    })?;
+    let mut map: HashMap<String, Vec<Reaction>> = HashMap::new();
+    for row in rows {
+        let (id, sender, from_me, emoji) = row?;
+        map.entry(id).or_default().push(Reaction {
+            sender: (!sender.is_empty()).then_some(sender),
+            from_me,
+            emoji,
+        });
+    }
+    Ok(map)
+}
+
+fn last_message(
+    conn: &Connection,
+    instance: &InstanceId,
+    chat: &str,
+) -> Result<Option<WaMessage>, StoreError> {
+    let row = conn
+        .query_row(
+            "SELECT id, sender, from_me, ts_ms, body_json FROM messages
+             WHERE instance_id = ?1 AND chat = ?2 ORDER BY ts_ms DESC, id DESC LIMIT 1",
+            params![instance.as_str(), chat],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, bool>(2)?,
+                    r.get::<_, i64>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((id, sender, from_me, timestamp_ms, body)) = row else {
+        return Ok(None);
+    };
+    let mut reactions = reactions_of(conn, instance, chat)?;
+    Ok(Some(WaMessage {
+        reactions: reactions.remove(&id).unwrap_or_default(),
+        id,
+        chat: chat.to_owned(),
+        sender,
+        from_me,
+        timestamp_ms,
+        body: serde_json::from_str(&body)?,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rovsti_wa_proto::ConnectKey;
+
+    fn new_key(seed: u8, label: &str) -> (ConnectKey, NewKey) {
+        let key = ConnectKey::from_bytes(&[seed; 32]);
+        let new = NewKey {
+            key_id: KeyId::from_bytes(&[seed; 8]),
+            hash: key.hash(),
+            label: label.to_owned(),
+        };
+        (key, new)
+    }
+
+    fn id(n: u8) -> InstanceId {
+        InstanceId::from_bytes(&[n; 12])
+    }
+
+    fn text(chat: &str, id: &str, ts: i64, from_me: bool) -> WaMessage {
+        WaMessage {
+            id: id.into(),
+            chat: chat.into(),
+            sender: None,
+            from_me,
+            timestamp_ms: ts,
+            body: MessageBody::Text(format!("hello {id}")),
+            reactions: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn migration_sets_user_version_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.db");
+        drop(Store::open(&path).unwrap());
+        // Re-opening runs no migration again and must keep the data.
+        let store = Store::open(&path).unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 10, 4)
+            .await
+            .unwrap();
+        drop(store);
+        let store = Store::open(&path).unwrap();
+        assert_eq!(store.count_instances().await.unwrap(), 1);
+
+        let conn = Connection::open(&path).unwrap();
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, MIGRATIONS.len() as u32);
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        for t in [
+            "chats",
+            "instances",
+            "keys",
+            "messages",
+            "push_tokens",
+            "reactions",
+        ] {
+            assert!(tables.iter().any(|n| n == t), "missing {t}: {tables:?}");
+        }
+    }
+
+    #[test]
+    fn newer_schema_is_refused() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA user_version = 99").unwrap();
+        assert!(matches!(migrate(&mut conn), Err(StoreError::Corrupt(_))));
+    }
+
+    #[tokio::test]
+    async fn database_holds_no_plaintext_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.db");
+        let store = Store::open(&path).unwrap();
+        let (key, new) = new_key(9, "phone");
+        store.create_instance(id(1), new, 1, 4).await.unwrap();
+        let (key2, new2) = new_key(8, "second");
+        store.mint_key(id(1), new2, 2).await.unwrap();
+        // Force everything (WAL included) into the main file.
+        store
+            .run(|c| Ok(c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?))
+            .await
+            .unwrap();
+        drop(store);
+
+        for file in std::fs::read_dir(dir.path()).unwrap() {
+            let bytes = std::fs::read(file.unwrap().path()).unwrap();
+            for secret in [&key, &key2] {
+                let needle = secret.as_str().as_bytes();
+                assert!(
+                    !bytes.windows(needle.len()).any(|w| w == needle),
+                    "plaintext key found on disk"
+                );
+                // Not even the base64 body without the prefix.
+                let body = &needle[4..];
+                assert!(!bytes.windows(body.len()).any(|w| w == body));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn lookup_by_hash_and_last_used() {
+        let store = Store::open_in_memory().unwrap();
+        let (key, new) = new_key(1, "phone");
+        store.create_instance(id(1), new, 100, 4).await.unwrap();
+
+        let hit = store.instance_for_key(key.hash(), 555).await.unwrap();
+        assert_eq!(hit, Some((id(1), KeyId::from_bytes(&[1; 8]))));
+        let keys = store.list_keys(id(1)).await.unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0].label, "phone");
+        assert_eq!(keys[0].created_ms, 100);
+        assert_eq!(keys[0].last_used_ms, Some(555));
+
+        let other = ConnectKey::from_bytes(&[2; 32]);
+        assert_eq!(store.instance_for_key(other.hash(), 1).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn revoke_blocks_lookup_and_listing() {
+        let store = Store::open_in_memory().unwrap();
+        let (key, new) = new_key(1, "a");
+        let (key2, new2) = new_key(2, "b");
+        store.create_instance(id(1), new, 1, 4).await.unwrap();
+        store.mint_key(id(1), new2, 2).await.unwrap();
+        assert_eq!(store.list_keys(id(1)).await.unwrap().len(), 2);
+
+        let kid = KeyId::from_bytes(&[1; 8]);
+        assert!(store.key_active(kid.clone()).await.unwrap());
+        assert!(store.revoke_key(id(1), kid.to_string()).await.unwrap());
+        assert!(!store.key_active(kid.clone()).await.unwrap());
+        // Revoking twice, or through another instance, changes nothing.
+        assert!(!store.revoke_key(id(1), kid.to_string()).await.unwrap());
+        assert!(
+            !store
+                .revoke_key(id(2), "0202020202020202".into())
+                .await
+                .unwrap()
+        );
+
+        assert_eq!(store.instance_for_key(key.hash(), 3).await.unwrap(), None);
+        assert!(
+            store
+                .instance_for_key(key2.hash(), 3)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        let left = store.list_keys(id(1)).await.unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].label, "b");
+    }
+
+    #[tokio::test]
+    async fn instance_cap_is_enforced() {
+        let store = Store::open_in_memory().unwrap();
+        for n in 1..=2u8 {
+            store
+                .create_instance(id(n), new_key(n, "k").1, 1, 2)
+                .await
+                .unwrap();
+        }
+        let err = store
+            .create_instance(id(3), new_key(3, "k").1, 1, 2)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StoreError::LimitReached));
+        assert_eq!(store.count_instances().await.unwrap(), 2);
+        // A refused create leaves no stray key behind.
+        let key3 = ConnectKey::from_bytes(&[3; 32]);
+        assert_eq!(store.instance_for_key(key3.hash(), 1).await.unwrap(), None);
+
+        // Deleting frees a slot.
+        assert!(store.delete_instance(id(1)).await.unwrap());
+        store
+            .create_instance(id(3), new_key(3, "k").1, 1, 2)
+            .await
+            .unwrap();
+        assert!(!store.delete_instance(id(9)).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn mint_key_needs_an_instance_and_has_a_cap() {
+        let store = Store::open_in_memory().unwrap();
+        let err = store
+            .mint_key(id(1), new_key(1, "x").1, 1)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StoreError::NotFound));
+
+        store
+            .create_instance(id(1), new_key(100, "first").1, 1, 4)
+            .await
+            .unwrap();
+        for n in 1..MAX_KEYS_PER_INSTANCE as u8 {
+            store.mint_key(id(1), new_key(n, "k").1, 1).await.unwrap();
+        }
+        let err = store
+            .mint_key(id(1), new_key(99, "k").1, 1)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, StoreError::LimitReached));
+    }
+
+    #[tokio::test]
+    async fn state_is_kept_between_events() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 1, 4)
+            .await
+            .unwrap();
+        let s = store.instance_status(id(1)).await.unwrap().unwrap();
+        assert_eq!(s.state, InstanceState::Linking);
+        assert_eq!(s.own_jid, None);
+
+        store
+            .set_state(
+                id(1),
+                InstanceState::Connected,
+                Some("1@s.whatsapp.net".into()),
+                Some("Ada".into()),
+            )
+            .await
+            .unwrap();
+        store
+            .set_state(id(1), InstanceState::Disconnected, None, None)
+            .await
+            .unwrap();
+        let s = store.instance_status(id(1)).await.unwrap().unwrap();
+        assert_eq!(s.state, InstanceState::Disconnected);
+        assert_eq!(s.own_jid.as_deref(), Some("1@s.whatsapp.net"));
+        assert_eq!(s.push_name.as_deref(), Some("Ada"));
+        assert_eq!(store.instance_status(id(2)).await.unwrap(), None);
+
+        let all = store.list_instances().await.unwrap();
+        assert_eq!(
+            all,
+            vec![StoredInstance {
+                id: id(1),
+                state: InstanceState::Disconnected
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn push_tokens_upsert_per_app() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 1, 4)
+            .await
+            .unwrap();
+        store
+            .set_push_token(id(1), AppId::Phone, "t1".into())
+            .await
+            .unwrap();
+        store
+            .set_push_token(id(1), AppId::Messages, "t2".into())
+            .await
+            .unwrap();
+        store
+            .set_push_token(id(1), AppId::Phone, "t3".into())
+            .await
+            .unwrap();
+        let tokens = store.push_tokens(id(1)).await.unwrap();
+        assert_eq!(
+            tokens,
+            vec![
+                (AppId::Messages, "t2".to_owned()),
+                (AppId::Phone, "t3".to_owned())
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn messages_chats_and_reactions() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 1, 4)
+            .await
+            .unwrap();
+        let chat = "905@s.whatsapp.net";
+        assert!(
+            store
+                .insert_message(id(1), text(chat, "a", 10, false), Some(vec![1, 2]))
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .insert_message(id(1), text(chat, "b", 20, false), None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .insert_message(id(1), text(chat, "c", 30, true), None)
+                .await
+                .unwrap()
+        );
+        // A duplicate neither inserts nor counts as unread again.
+        assert!(
+            !store
+                .insert_message(id(1), text(chat, "b", 20, false), None)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .insert_message(id(1), text("g@g.us", "g1", 5, false), None)
+                .await
+                .unwrap()
+        );
+
+        let page = store.messages(id(1), chat.into(), None, 2).await.unwrap();
+        assert_eq!(
+            page.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["c", "b"]
+        );
+        let older = store
+            .messages(id(1), chat.into(), Some(20), 10)
+            .await
+            .unwrap();
+        assert_eq!(
+            older.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["a"]
+        );
+        // Other instances see nothing.
+        assert!(
+            store
+                .messages(id(2), chat.into(), None, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        store
+            .set_reaction(
+                id(1),
+                chat.into(),
+                "b".into(),
+                Reaction {
+                    sender: Some("x@s.whatsapp.net".into()),
+                    from_me: false,
+                    emoji: "👍".into(),
+                },
+            )
+            .await
+            .unwrap();
+        store
+            .set_reaction(
+                id(1),
+                chat.into(),
+                "b".into(),
+                Reaction {
+                    sender: None,
+                    from_me: true,
+                    emoji: "❤".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let page = store.messages(id(1), chat.into(), None, 10).await.unwrap();
+        let b = page.iter().find(|m| m.id == "b").unwrap();
+        assert_eq!(b.reactions.len(), 2);
+        assert!(
+            b.reactions
+                .iter()
+                .any(|r| r.from_me && r.emoji == "❤" && r.sender.is_none())
+        );
+        // An empty emoji removes the reaction.
+        store
+            .set_reaction(
+                id(1),
+                chat.into(),
+                "b".into(),
+                Reaction {
+                    sender: None,
+                    from_me: true,
+                    emoji: String::new(),
+                },
+            )
+            .await
+            .unwrap();
+        let page = store.messages(id(1), chat.into(), None, 10).await.unwrap();
+        assert_eq!(
+            page.iter().find(|m| m.id == "b").unwrap().reactions.len(),
+            1
+        );
+
+        let chats = store.chats(id(1)).await.unwrap();
+        assert_eq!(chats.len(), 2);
+        assert_eq!(chats[0].jid, chat);
+        assert_eq!(chats[0].unread, 2);
+        assert!(!chats[0].is_group);
+        assert_eq!(chats[0].last.as_ref().unwrap().id, "c");
+        assert!(chats[1].is_group);
+
+        store
+            .upsert_chat(id(1), chat.into(), Some("Ada".into()), false, 1, 0)
+            .await
+            .unwrap();
+        store
+            .upsert_chat(id(1), chat.into(), None, false, 1, 0)
+            .await
+            .unwrap();
+        let chats = store.chats(id(1)).await.unwrap();
+        assert_eq!(chats[0].name.as_deref(), Some("Ada"));
+        assert_eq!(chats[0].unread, 2);
+    }
+
+    #[tokio::test]
+    async fn deleting_an_instance_removes_its_data() {
+        let store = Store::open_in_memory().unwrap();
+        let (key, new) = new_key(1, "a");
+        store.create_instance(id(1), new, 1, 4).await.unwrap();
+        store
+            .insert_message(id(1), text("c@s.whatsapp.net", "m", 1, false), None)
+            .await
+            .unwrap();
+        store
+            .set_push_token(id(1), AppId::Stops, "t".into())
+            .await
+            .unwrap();
+        assert!(store.delete_instance(id(1)).await.unwrap());
+        assert!(store.chats(id(1)).await.unwrap().is_empty());
+        assert!(store.push_tokens(id(1)).await.unwrap().is_empty());
+        assert_eq!(store.instance_for_key(key.hash(), 1).await.unwrap(), None);
+    }
+
+    #[test]
+    fn hash_bytes_round_trip() {
+        let hash = ConnectKey::from_bytes(&[5; 32]).hash();
+        let raw = hash_bytes(&hash);
+        assert_eq!(raw.len(), 32);
+        assert_eq!(hash_from_bytes(&raw), Some(hash));
+        assert_eq!(hash_from_bytes(&raw[..31]), None);
+    }
+
+    #[test]
+    fn instance_id_is_hex() {
+        assert_eq!(id(0xab).as_str(), "abababababababababababab");
+        assert!(parse_key_id("0102030405060708").is_some());
+    }
+}

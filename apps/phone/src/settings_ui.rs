@@ -73,6 +73,7 @@ pub(crate) enum RowId {
     Import,
     ImportError,
     DeleteHistory,
+    ResetSettings,
     Forwarding,
     Accessibility,
     DefaultApps,
@@ -87,7 +88,7 @@ pub(crate) enum RowId {
 }
 
 impl RowId {
-    const COUNT: usize = 27;
+    const COUNT: usize = 28;
 
     const fn index(self) -> usize {
         self as usize
@@ -111,6 +112,7 @@ impl RowId {
             Self::Import => "set-import",
             Self::ImportError => "set-import-error",
             Self::DeleteHistory => "set-delete-history",
+            Self::ResetSettings => "set-reset",
             Self::Forwarding => "set-forwarding",
             Self::Accessibility => "set-access",
             Self::DefaultApps => "set-default-apps",
@@ -221,6 +223,8 @@ pub(crate) struct RowsKey {
     pub replies: usize,
     /// Digits with a speed-dial contact.
     pub speed_dial: usize,
+    /// The settings equal `Settings::default()` (nothing to reset).
+    pub settings_default: bool,
 }
 
 impl PartialEq for RowsKey {
@@ -236,6 +240,7 @@ impl PartialEq for RowsKey {
             && self.call_log_missing == other.call_log_missing
             && self.replies == other.replies
             && self.speed_dial == other.speed_dial
+            && self.settings_default == other.settings_default
     }
 }
 
@@ -467,6 +472,12 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
         "Delete all call history",
         Control::Danger,
     ));
+    let reset = Row::new(RowId::ResetSettings, "Reset settings", Control::Danger);
+    data.push(if key.settings_default {
+        reset.disabled("Already the defaults")
+    } else {
+        reset.note("Calls, sounds and display go back to their defaults")
+    });
     out.push(Section {
         title: "Data",
         rows: data,
@@ -879,8 +890,10 @@ impl PhoneApp {
     /// control springs to the stored values (snapping when `snap`).
     pub(crate) fn sync_settings_rows(&mut self, cx: &mut Context<Self>, snap: bool) {
         let backend = self.backend.read(cx);
+        let settings = backend.settings();
         let key = RowsKey {
-            settings: backend.settings(),
+            settings_default: *settings == Settings::default(),
+            settings,
             sims: backend.sims(),
             facts: backend.facts(),
             on_android: cfg!(target_os = "android"),
@@ -1050,9 +1063,28 @@ impl PhoneApp {
             (RowId::DeleteHistory, _) => {
                 self.open_confirm_delete(crate::history_ui::DeleteScope::All, cx);
             }
+            (RowId::ResetSettings, _) => self.reset_settings(cx),
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Puts every setting back to its default; the pill offers Undo.
+    fn reset_settings(&mut self, cx: &mut Context<Self>) {
+        let old = Settings::clone(&self.backend.read(cx).settings());
+        if old == Settings::default() {
+            return;
+        }
+        self.backend.update(cx, |b, cx| {
+            b.update_settings(cx, |s| *s = Settings::default())
+        });
+        self.sync_settings_rows(cx, false);
+        self.show_pill_action(
+            "Settings reset",
+            "Undo",
+            crate::block_ui::PillAction::RestoreSettings(Box::new(old)),
+            cx,
+        );
     }
 
     fn open_system_page(
@@ -1733,6 +1765,7 @@ mod tests {
             call_log_missing: false,
             replies: 3,
             speed_dial: 2,
+            settings_default: false,
         }
     }
 
@@ -1842,9 +1875,36 @@ mod tests {
             .into_iter()
             .find(|s| s.title == "Data")
             .expect("present");
-        assert_eq!(data.rows.len(), 4);
+        assert_eq!(data.rows.len(), 5);
         assert_eq!(data.rows[2].id, RowId::ImportError);
         assert_eq!(data.rows[3].id, RowId::DeleteHistory);
+        assert_eq!(data.rows[4].id, RowId::ResetSettings);
+    }
+
+    #[test]
+    fn reset_settings_is_a_danger_row_disabled_at_the_defaults() {
+        let reset = |default: bool| {
+            let mut k = key();
+            k.settings_default = default;
+            build_sections(&k)
+                .into_iter()
+                .find(|s| s.title == "Data")
+                .expect("present")
+                .rows
+                .into_iter()
+                .find(|r| r.id == RowId::ResetSettings)
+                .expect("present")
+        };
+        let changed = reset(false);
+        assert_eq!(changed.control, Control::Danger);
+        assert!(changed.enabled);
+        assert_eq!(
+            changed.footnote,
+            Some("Calls, sounds and display go back to their defaults")
+        );
+        let defaults = reset(true);
+        assert!(!defaults.enabled);
+        assert_eq!(defaults.footnote, Some("Already the defaults"));
     }
 
     #[test]
@@ -1854,7 +1914,15 @@ mod tests {
             .find(|s| s.title == "Data")
             .expect("present");
         let ids: Vec<RowId> = data.rows.iter().map(|r| r.id).collect();
-        assert_eq!(ids, [RowId::Export, RowId::Import, RowId::DeleteHistory]);
+        assert_eq!(
+            ids,
+            [
+                RowId::Export,
+                RowId::Import,
+                RowId::DeleteHistory,
+                RowId::ResetSettings
+            ]
+        );
         assert_eq!(data.rows[2].control, Control::Danger);
         assert_eq!(&*data.rows[2].aria, "Delete all call history");
     }
@@ -1921,6 +1989,7 @@ mod tests {
             RowId::Import,
             RowId::ImportError,
             RowId::DeleteHistory,
+            RowId::ResetSettings,
             RowId::Forwarding,
             RowId::Accessibility,
             RowId::DefaultApps,

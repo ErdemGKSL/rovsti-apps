@@ -63,6 +63,8 @@ pub(crate) enum PillAction {
     RestoreCalls(Arc<[CallLogEntry]>, Arc<[WaCallRecord]>),
     /// Undo of a backup import: put the prefs from just before it back.
     RestorePrefs(Box<rovsti_core::settings::ImportPreview>),
+    /// Undo of Reset settings: put the previous settings back.
+    RestoreSettings(Box<rovsti_core::settings::Settings>),
     /// Open the system prompt for call log access.
     GrantCallLog,
 }
@@ -290,6 +292,12 @@ impl PhoneApp {
                     .update(cx, |b, cx| b.apply_import(*preview, cx));
                 self.sync_settings_rows(cx, false);
                 self.show_notice_pill("Import undone", None, false, cx);
+            }
+            PillAction::RestoreSettings(old) => {
+                self.backend
+                    .update(cx, |b, cx| b.update_settings(cx, |s| *s = *old));
+                self.sync_settings_rows(cx, false);
+                self.show_notice_pill("Settings restored", None, false, cx);
             }
             PillAction::GrantCallLog => self.recents_grant(cx),
         }

@@ -77,7 +77,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 
 ### Stops: decisions (AD-ST1 to AD-ST9, AD-SA1 to AD-SA9, AD-SX1 to AD-SX8)
 
-- **AD-ST1 Pure first.** The trip session, destination parsing, saved places, history and
+- **AD-ST1 Pure first.** The trip session, destination parsing, saved stops, history and
   statistics, prefs, the arriving-soon template, GTFS parsing and the map projection are
   `rovsti_geo` modules with unit tests. Kotlin and GPUI only map.
 - **AD-ST2 The trip runs headless.** `TripService` owns the location updates and calls
@@ -147,13 +147,13 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   beyond 14) from a VersaTiles-compatible server that the user sets (default
   `https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}`). `rovsti_geo::tiles` decodes and styles them
   (colorful in the light theme, eclipse in the dark one). `rovsti_tiles` fetches them and keeps the
-  disk cache. The app paints them with `canvas` and `PathBuilder` under the radar layers (saved places,
+  disk cache. The app paints them with `canvas` and `PathBuilder` under the radar layers (saved stops,
   A and B, the circle with the diameter line and its halves, position, breadcrumb, GTFS stops and line) over
   `rovsti_geo::view`. Where a tile is missing, the radar look shows. Tiles around the trip circle
   are prefetched when a trip starts. Text labels are not drawn. The map shows
   "(c) OpenStreetMap contributors".
 - **AD-ST5 Points are local.** A and B each come from the same sources: are `geo:` URIs and maps links (shared, opened or
-  pasted), saved places, recent trips and GTFS stops. No geocoding: a link without coordinates is
+  pasted), saved stops (a stop is a pair, restoring both points), recent trips and GTFS stops. No geocoding: a link without coordinates is
   refused and nothing is fetched to resolve it. The picking state (A, B, pin menu, drag, the
   hint line, labels) is the pure `apps/stops/src/pick.rs`; a point without a name is shown as
   "Point A" / "Point B" and the pair as "A-B 850 m", never as coordinates.
@@ -174,7 +174,8 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   button; otherwise it only feeds the opening view. The idle Trip tab is a tall map with a pick bar; the first
   tap drops A, the second drops B and the circle shows at once, with no sheet and no
   coordinates. A tap within `PICK_RADIUS_PX` of a drawn GTFS stop snaps to that stop (its name,
-  id and coordinate), also when a dragged pin is dropped; otherwise the point is unnamed and
+  id and coordinate); a dragged pin follows the finger exactly and snaps on release only after a quick flick (see
+  `docs/stops-saved-and-snapping.md`, which also defines the stop = gate AB model and saved.json v2); otherwise the point is unnamed and
   shown as "Point A" / "Point B" by its slot (Swap stays right), frozen to that text only when the
   trip starts. With A and B set a third tap on empty map places nothing and says to drag a pin or
   Clear; "Move" in the pin menu arms a pin so the next tap relocates it. Pins drag directly (no
@@ -182,7 +183,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   second finger cancels the drag into a pinch. A map tap never moves the view. Sheet picks
   (saved, recent, stop search, stop sheet, shared links through the Confirm sheet, which
   emphasises the open end) refit the view. The idle view is the pair, else your position at
-  street level, else the last trip or first saved place, else the default city. Your position
+  street level, else the last trip or first saved stop, else the default city. Your position
   comes from the `stops_location` seam in `rovsti_android::location` (last known location plus
   one fresh fix on request; no background tracking, nothing leaves the phone). All state and
   label text is the pure, tested `apps/stops/src/pick.rs`; coordinates survive only in the pin

@@ -176,7 +176,7 @@ list in `docs/phone-acceptance.md`.
       size and Clear in Settings > Map tiles; default arriving-soon text; search every WhatsApp chat
       for the arriving-soon message; the chat list refreshes (done without a device)
 - [x] Delete single History trips, with undo (done without a device)
-- [x] Saved places drawn on the map; a tap on one picks it exactly (done without a device)
-- [x] Move a saved place on the map, with undo (done without a device)
+- [x] Saved stops drawn on the map (see stops-saved-and-snapping.md) (done without a device)
+- [x] Saved stops: pair of points, restore on the map, confirmed delete with undo (done without a device)
 - [ ] Check map picking one-handed on a phone
 - [ ] Check the trip, alarm and Doze on a phone: written without a device

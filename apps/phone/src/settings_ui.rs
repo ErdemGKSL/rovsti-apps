@@ -55,6 +55,17 @@ const SEG_W: f32 = 200.0;
 const SEG_H: f32 = 32.0;
 /// Title of the row (and page) of the call statistics.
 pub(crate) const CALL_STATS_TITLE: &str = "Call statistics";
+/// Title of the row (and page) of the call notes.
+pub(crate) const CALL_NOTES_TITLE: &str = "Call notes";
+
+/// The value of the Call notes row.
+fn notes_count_text(n: usize) -> String {
+    if n == 0 {
+        "None".to_owned()
+    } else {
+        n.to_string()
+    }
+}
 
 /// Every control the page can show. The discriminant indexes the spring table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,10 +100,11 @@ pub(crate) enum RowId {
     SpeedDial,
     ShowFrequent,
     CallStats,
+    CallNotes,
 }
 
 impl RowId {
-    const COUNT: usize = 30;
+    const COUNT: usize = 31;
 
     const fn index(self) -> usize {
         self as usize
@@ -132,6 +144,8 @@ impl RowId {
             Self::ShowFrequent => "set-frequent",
             // Not "set-st-...": that prefix belongs to the statistics page itself.
             Self::CallStats => "set-call-stats",
+            // Not "set-nt-...": that prefix belongs to the Call notes page itself.
+            Self::CallNotes => "set-call-notes",
         }
     }
 }
@@ -232,6 +246,8 @@ pub(crate) struct RowsKey {
     pub replies: usize,
     /// Digits with a speed-dial contact.
     pub speed_dial: usize,
+    /// Call notes saved (the Call notes row shows the count).
+    pub notes: usize,
     /// The settings equal `Settings::default()` (nothing to reset).
     pub settings_default: bool,
 }
@@ -250,6 +266,7 @@ impl PartialEq for RowsKey {
             && self.calls_loaded == other.calls_loaded
             && self.replies == other.replies
             && self.speed_dial == other.speed_dial
+            && self.notes == other.notes
             && self.settings_default == other.settings_default
     }
 }
@@ -490,6 +507,14 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
             }
         },
         Row::new(
+            RowId::CallNotes,
+            CALL_NOTES_TITLE,
+            Control::Link {
+                value: Some(notes_count_text(key.notes).into()),
+                icon: Icon::LucideChevronRight,
+            },
+        ),
+        Row::new(
             RowId::Import,
             "Import",
             Control::Link {
@@ -614,6 +639,7 @@ pub(crate) enum Sub {
     WhatsApp,
     SpeedDial,
     Stats,
+    Notes,
 }
 
 impl Sub {
@@ -625,6 +651,7 @@ impl Sub {
             Self::WhatsApp => "set-wa-",
             Self::SpeedDial => "set-sd-",
             Self::Stats => "set-st-",
+            Self::Notes => "set-nt-",
         }
     }
 
@@ -635,6 +662,7 @@ impl Sub {
             Self::WhatsApp => "WhatsApp",
             Self::SpeedDial => "Speed dial",
             Self::Stats => CALL_STATS_TITLE,
+            Self::Notes => CALL_NOTES_TITLE,
         }
     }
 }
@@ -901,6 +929,7 @@ impl PhoneApp {
             Sub::Blocked => self.blocked_opened(cx),
             Sub::Replies => self.replies_opened(cx),
             Sub::WhatsApp | Sub::SpeedDial | Sub::Stats => {}
+            Sub::Notes => self.notes_opened(cx),
         }
         self.presses.release_all();
         self.update_back(window);
@@ -923,6 +952,7 @@ impl PhoneApp {
             Sub::Blocked => self.blocked_closed(cx),
             Sub::Replies => self.replies_closed(cx),
             Sub::SpeedDial => self.speed_dial_closed(),
+            Sub::Notes => self.notes_closed(cx),
             Sub::WhatsApp | Sub::Stats => {}
         }
     }
@@ -949,6 +979,7 @@ impl PhoneApp {
             calls_loaded: matches!(backend.call_log(), crate::backend::Load::Ready(_)),
             replies: backend.prefs().quick_replies.len(),
             speed_dial: backend.prefs().speed_dial.len(),
+            notes: self.notes.len(),
         };
         let system_tones = key.facts.system_keypad_tones;
         for row in [
@@ -990,7 +1021,12 @@ impl PhoneApp {
         }
         if matches!(
             id,
-            "set-bk-back" | "set-qr-back" | "set-wa-back" | "set-sd-back" | "set-st-back"
+            "set-bk-back"
+                | "set-qr-back"
+                | "set-wa-back"
+                | "set-sd-back"
+                | "set-st-back"
+                | "set-nt-back"
         ) {
             self.settings_close_sub(window, cx);
             return;
@@ -1020,6 +1056,8 @@ impl PhoneApp {
                 self.speed_dial_tap(id, window, cx);
             } else if id.starts_with(Sub::Stats.prefix()) {
                 self.stats_tap(id, window, cx);
+            } else if id.starts_with(Sub::Notes.prefix()) {
+                self.notes_tap(id, window, cx);
             }
             return;
         };
@@ -1102,6 +1140,7 @@ impl PhoneApp {
             (RowId::WhatsApp, _) => self.settings_open_sub(Sub::WhatsApp, window, cx),
             (RowId::SpeedDial, _) => self.settings_open_sub(Sub::SpeedDial, window, cx),
             (RowId::CallStats, _) => self.settings_open_sub(Sub::Stats, window, cx),
+            (RowId::CallNotes, _) => self.settings_open_sub(Sub::Notes, window, cx),
             (RowId::BlockedAccess, _) => self.blocked_grant(cx),
             (RowId::Export, _) => self.backup_export(cx),
             (RowId::ExportCalls, _) => self.backup_export_calls(cx),
@@ -1701,6 +1740,7 @@ impl PhoneApp {
             Sub::WhatsApp => "set-wa-back",
             Sub::SpeedDial => "set-sd-back",
             Sub::Stats => "set-st-back",
+            Sub::Notes => "set-nt-back",
         };
         let back_press = self.presses.value(back_id);
         let back = div()
@@ -1741,6 +1781,7 @@ impl PhoneApp {
             Sub::WhatsApp => self.whatsapp_body(),
             Sub::SpeedDial => self.speed_dial_body(theme, cx),
             Sub::Stats => self.stats_body(theme, cx),
+            Sub::Notes => self.notes_body(theme, cx),
         };
         Some(
             div()
@@ -1814,6 +1855,7 @@ mod tests {
             calls_loaded: true,
             replies: 3,
             speed_dial: 2,
+            notes: 4,
             settings_default: false,
         }
     }
@@ -1924,10 +1966,10 @@ mod tests {
             .into_iter()
             .find(|s| s.title == "Data")
             .expect("present");
-        assert_eq!(data.rows.len(), 7);
-        assert_eq!(data.rows[4].id, RowId::ImportError);
-        assert_eq!(data.rows[5].id, RowId::DeleteHistory);
-        assert_eq!(data.rows[6].id, RowId::ResetSettings);
+        assert_eq!(data.rows.len(), 8);
+        assert_eq!(data.rows[5].id, RowId::ImportError);
+        assert_eq!(data.rows[6].id, RowId::DeleteHistory);
+        assert_eq!(data.rows[7].id, RowId::ResetSettings);
     }
 
     #[test]
@@ -1969,6 +2011,27 @@ mod tests {
     }
 
     #[test]
+    fn the_call_notes_row_shows_the_count() {
+        let mut k = key();
+        let row = |k: &RowsKey| {
+            build_sections(k)
+                .into_iter()
+                .flat_map(|s| s.rows)
+                .find(|r| r.id == RowId::CallNotes)
+                .expect("present")
+        };
+        assert!(matches!(
+            row(&k).control,
+            Control::Link { value: Some(v), .. } if v.as_ref() == "4"
+        ));
+        k.notes = 0;
+        assert!(matches!(
+            row(&k).control,
+            Control::Link { value: Some(v), .. } if v.as_ref() == "None"
+        ));
+    }
+
+    #[test]
     fn reset_settings_is_a_danger_row_disabled_at_the_defaults() {
         let reset = |default: bool| {
             let mut k = key();
@@ -2007,13 +2070,14 @@ mod tests {
                 RowId::Export,
                 RowId::ExportCalls,
                 RowId::CallStats,
+                RowId::CallNotes,
                 RowId::Import,
                 RowId::DeleteHistory,
                 RowId::ResetSettings
             ]
         );
-        assert_eq!(data.rows[4].control, Control::Danger);
-        assert_eq!(&*data.rows[4].aria, "Delete all call history");
+        assert_eq!(data.rows[5].control, Control::Danger);
+        assert_eq!(&*data.rows[5].aria, "Delete all call history");
     }
 
     #[test]
@@ -2092,6 +2156,7 @@ mod tests {
             RowId::SpeedDial,
             RowId::ShowFrequent,
             RowId::CallStats,
+            RowId::CallNotes,
         ];
         assert_eq!(all.len(), RowId::COUNT);
         for (i, a) in all.iter().enumerate() {
@@ -2156,6 +2221,7 @@ mod tests {
             Sub::WhatsApp,
             Sub::SpeedDial,
             Sub::Stats,
+            Sub::Notes,
         ];
         for (i, a) in subs.iter().enumerate() {
             assert!(a.prefix().starts_with("set-") && a.prefix().ends_with('-'));
@@ -2172,11 +2238,14 @@ mod tests {
             RowId::WhatsApp,
             RowId::SpeedDial,
             RowId::CallStats,
+            RowId::CallNotes,
         ];
         for row in rows {
             assert!(subs.iter().all(|s| !row.key().starts_with(s.prefix())));
         }
         assert_eq!(Sub::SpeedDial.prefix(), "set-sd-");
+        assert_eq!(Sub::Notes.prefix(), "set-nt-");
+        assert_eq!(Sub::Notes.title(), "Call notes");
         assert_eq!(Sub::Stats.prefix(), "set-st-");
         assert_eq!(Sub::Stats.title(), "Call statistics");
         assert_eq!(Sub::WhatsApp.prefix(), "set-wa-");

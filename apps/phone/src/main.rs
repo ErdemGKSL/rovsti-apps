@@ -32,6 +32,7 @@ mod incall_note;
 mod incoming;
 mod keypad;
 mod notes;
+mod notes_ui;
 mod notice;
 #[cfg(test)]
 mod perf_harness;
@@ -255,6 +256,7 @@ struct PhoneApp {
     speed_dial: speed_dial_ui::SpeedDialUi,
     /// Call statistics: the merged call list and the page's range.
     stats: stats_ui::StatsUi,
+    notes_ui: notes_ui::NotesUi,
     /// The Recents row menu and S27 (Epic 17).
     row_menu: block_ui::RowMenu,
     /// The Blocked numbers page behind Settings (stories 17.5, 17.6).
@@ -389,6 +391,8 @@ impl PhoneApp {
         let recents_field = recents_view.field.clone();
         let blocked_ui = blocked_ui::BlockedUi::new(cx);
         let blocked_field = blocked_ui.field.clone();
+        let notes_ui = notes_ui::NotesUi::new(cx);
+        let notes_field = notes_ui.field.clone();
         let replies_ed = replies_ui::ReplyEditor::new(cx);
         let reply_fields = replies_ed.fields.clone();
         let whatsapp = cx
@@ -475,6 +479,10 @@ impl PhoneApp {
             // Typing in the add field of the Blocked numbers page clears its error.
             cx.observe_in(&blocked_field, window, |this, _, window, cx| {
                 this.blocked_field_changed(window, cx);
+            }),
+            // Typing in the Call notes search field filters the notes.
+            cx.observe_in(&notes_field, window, |this, _, window, cx| {
+                this.notes_field_changed(window, cx);
             }),
             // Typing in the Contacts search field filters the list.
             cx.observe_in(&search_field, window, |this, _, window, cx| {
@@ -603,6 +611,7 @@ impl PhoneApp {
             pill_action: None,
             speed_dial: speed_dial_ui::SpeedDialUi::default(),
             stats: stats_ui::StatsUi::default(),
+            notes_ui,
             row_menu: block_ui::RowMenu::new(),
             blocked: blocked_ui,
             reply: replies_ui::ReplyUi::default(),

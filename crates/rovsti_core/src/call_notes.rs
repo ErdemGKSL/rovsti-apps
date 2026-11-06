@@ -342,6 +342,34 @@ pub fn share_text(d: &CallDetails, who: Option<&str>, note: Option<&str>) -> Str
     }
 }
 
+/// Shown on the Notes page when there are no notes at all.
+pub const EMPTY_TEXT: &str = "No call notes yet. Add one from a call's details.";
+/// Shown when a search matches no note.
+pub const NO_MATCH_TEXT: &str = "No notes match your search";
+
+/// "Thu 5 Nov 2026, 14:32" in the phone's clock and date style (the same text
+/// as [`CallDetails::when`]).
+pub fn when_line(at_ms: i64, locale: LocaleTime) -> String {
+    when_text(at_ms, locale)
+}
+
+/// Title of a Notes page row: the contact name, else the number as stored.
+pub fn row_title(name: Option<&str>, number: &str) -> String {
+    name.map(str::trim)
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| number.trim())
+        .to_owned()
+}
+
+/// Subtitle of a Notes page row: the date, then the one-line preview.
+pub fn row_subtitle(when: &str, preview: &str) -> String {
+    if preview.is_empty() {
+        when.to_owned()
+    } else {
+        format!("{when} \u{b7} {preview}")
+    }
+}
+
 /// One line of the Notes page.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NoteRow {
@@ -681,6 +709,23 @@ mod tests {
         assert_eq!(notes.rows("plumber", names)[0].index, 1);
         assert!(notes.rows("zzz", names).is_empty());
         assert!(Notes::default().rows("", names).is_empty());
+    }
+
+    #[test]
+    fn row_texts_for_the_notes_page() {
+        assert_eq!(row_title(Some(" Ayşe "), "+90 555"), "Ayşe");
+        assert_eq!(row_title(Some("  "), " +90 555 "), "+90 555");
+        assert_eq!(row_title(None, "+90 555"), "+90 555");
+        assert_eq!(
+            row_subtitle("Thu 5 Nov 2026, 14:32", "call back"),
+            "Thu 5 Nov 2026, 14:32 \u{b7} call back"
+        );
+        assert_eq!(row_subtitle("Thu", ""), "Thu");
+        assert_eq!(
+            when_line(0, LocaleTime::default()),
+            when_text(0, LocaleTime::default())
+        );
+        assert!(EMPTY_TEXT.starts_with("No call notes yet."));
     }
 
     #[test]

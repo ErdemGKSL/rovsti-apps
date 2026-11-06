@@ -112,6 +112,8 @@ pub(crate) struct DetailsSheet {
     pub(crate) at_ms: i64,
     /// The sheet Back returns to: `Number` or `Contact`.
     pub(crate) back_to: SheetKind,
+    /// Opened from the Call notes page: Back closes the sheet.
+    from_notes: bool,
     pub(crate) editing: bool,
     pub(crate) field: Entity<SearchField>,
     /// The call was blocked (it lives in the blocked list).
@@ -141,10 +143,6 @@ impl PhoneApp {
         let Some(vm) = vm.cloned() else {
             return;
         };
-        let locale = match self.backend.read(cx).call_log() {
-            backend::Load::Ready(log) => log.locale,
-            _ => Default::default(),
-        };
         let who = if contact {
             self.contact_sheet.as_ref().map(|s| s.contact.name.clone())
         } else {
@@ -153,6 +151,30 @@ impl PhoneApp {
                 .as_ref()
                 .map(|r| r.title.clone())
                 .filter(|t| t.trim() != vm.number.trim())
+        };
+        let back_to = if contact {
+            SheetKind::Contact
+        } else {
+            SheetKind::Number
+        };
+        self.open_details_for(&vm, who, back_to, false, window, cx);
+    }
+
+    /// Opens the details of one call from a view-model (the entry point of
+    /// the history lines and of the Call notes page). With `from_notes` Back
+    /// closes the sheet instead of showing an earlier one.
+    pub(crate) fn open_details_for(
+        &mut self,
+        vm: &crate::recents::HistoryVm,
+        who: Option<SharedString>,
+        back_to: SheetKind,
+        from_notes: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let locale = match self.backend.read(cx).call_log() {
+            backend::Load::Ready(log) => log.locale,
+            _ => Default::default(),
         };
         let details = call_notes::details(&vm.line, &vm.number, None, locale);
         let field = cx.new(|cx| SearchField::new(cx).with_action(TextInputAction::Done));
@@ -166,11 +188,8 @@ impl PhoneApp {
             number: vm.number.clone(),
             who,
             at_ms: vm.date_ms,
-            back_to: if contact {
-                SheetKind::Contact
-            } else {
-                SheetKind::Number
-            },
+            back_to,
+            from_notes,
             editing: false,
             field,
             blocked: vm.blocked,
@@ -186,10 +205,15 @@ impl PhoneApp {
     /// Back: saves a note being typed, then shows the earlier sheet again.
     pub(crate) fn details_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.details_commit(cx);
-        let Some(back_to) = self.details.as_ref().map(|d| d.back_to) else {
+        let Some((back_to, from_notes)) = self.details.as_ref().map(|d| (d.back_to, d.from_notes))
+        else {
             return;
         };
         window.blur();
+        if from_notes {
+            self.close_sheet(cx);
+            return;
+        }
         self.sheet_kind = back_to;
         self.details = None;
         self.presses.release_all();

@@ -35,6 +35,11 @@ pub(crate) struct NotesStore {
 }
 
 impl NotesStore {
+    /// Notes saved.
+    pub(crate) fn len(&self) -> usize {
+        self.notes.notes.len()
+    }
+
     /// Changes so far; views compare it with the value they last saw.
     pub(crate) fn rev(&self) -> u64 {
         self.rev
@@ -107,6 +112,7 @@ impl PhoneApp {
                 if let Some(stored) = stored {
                     this.notes.loaded(stored);
                     this.sync_recents_notes(cx);
+                    this.notes_page_sync(cx);
                     cx.notify();
                 }
             })
@@ -118,6 +124,7 @@ impl PhoneApp {
     /// Writes the notes off the UI thread. Call it after every change.
     pub(crate) fn save_notes(&mut self, cx: &mut Context<Self>) {
         self.sync_recents_notes(cx);
+        self.notes_page_sync(cx);
         let Some(dir) = self.notes.dir.clone() else {
             return;
         };

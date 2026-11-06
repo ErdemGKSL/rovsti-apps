@@ -1311,6 +1311,11 @@ impl PhoneApp {
     }
 
     /// The entries Recents row `index` stands for.
+    pub(crate) fn recents_row_missed(&self, index: usize) -> bool {
+        self.recents.row(index).is_some_and(|row| row.missed)
+    }
+
+    /// The entries Recents row `index` stands for.
     pub(crate) fn recents_row_refs(
         &self,
         index: usize,
@@ -1988,12 +1993,22 @@ impl PhoneApp {
         let lines = Arc::clone(&self.recents.number_history);
         if let Some(section) = history_section(theme, &lines, Some(edit), self, cx) {
             let del = self.history_delete_button(theme, crate::history_ui::NUMBER_SHEET_DELETE, cx);
+            let csv = sheet_pill(
+                self,
+                crate::person_ui::NUMBER_SHEET_CSV,
+                Icon::LucideDownload,
+                "Export calls",
+                colors.fill,
+                colors.label,
+                cx,
+            );
             children.push(reveal(
                 4,
                 div()
                     .flex()
                     .flex_col()
                     .child(section)
+                    .child(csv)
                     .child(del)
                     .into_any_element(),
             ));
@@ -2007,6 +2022,19 @@ impl PhoneApp {
             ));
         }
         if !row.number.is_empty() {
+            children.push(reveal(
+                5,
+                sheet_pill(
+                    self,
+                    "sheet-na-reply",
+                    Icon::LucideMessageCircle,
+                    "Send a quick reply",
+                    colors.fill,
+                    colors.label,
+                    cx,
+                )
+                .into_any_element(),
+            ));
             children.push(reveal(
                 5,
                 sheet_pill(
@@ -2079,6 +2107,10 @@ impl PhoneApp {
                     self.delete_row_calls(Arc::from([entry]), window, cx);
                 }
             }
+            return;
+        }
+        if id == crate::person_ui::NUMBER_SHEET_CSV {
+            self.export_person_calls(vec![row.number.to_string()], row.title.to_string(), cx);
             return;
         }
         if id == crate::stats_ui::NUMBER_SHARE {

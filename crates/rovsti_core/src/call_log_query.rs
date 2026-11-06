@@ -252,6 +252,28 @@ pub fn extras_for_numbers(extras: &[ExtraCall], numbers: &[&str]) -> Vec<ExtraCa
         .collect()
 }
 
+/// The file name and CSV (with notes) of every call with `numbers`, or `None`
+/// when there is nothing to export.
+pub fn person_export(
+    entries: &[CallLogEntry],
+    extras: &[ExtraCall],
+    numbers: &[&str],
+    who: &str,
+    now_ms: i64,
+    tz_offset_s: i32,
+    notes: &Notes,
+) -> Option<(String, String)> {
+    let mine = entries_for_numbers(entries, numbers);
+    let wa = extras_for_numbers(extras, numbers);
+    if mine.is_empty() && wa.is_empty() {
+        return None;
+    }
+    Some((
+        person_csv_file_name(who, now_ms, tz_offset_s),
+        to_csv_with_notes(&mine, &wa, tz_offset_s, notes),
+    ))
+}
+
 /// What to show when [`apply`] finds nothing.
 pub fn empty_text(query: &Query) -> String {
     let text = query.text.trim();
@@ -755,6 +777,34 @@ mod tests {
         assert!(sel.is_empty());
         // A row without refs cannot be selected.
         assert!(!sel.toggle(&sel_row(vec![], 1)));
+    }
+
+    #[test]
+    fn person_export_filters_and_names_the_file() {
+        let src = vec![
+            entry(1, "0555 111 22 33", CallLogKind::Missed, 1_700_000_000_000),
+            entry(2, "0444", CallLogKind::Incoming, 1_700_000_100_000),
+        ];
+        let (name, csv) = person_export(
+            &src,
+            &[],
+            &["05551112233"],
+            "Anna",
+            1_700_000_000_000,
+            0,
+            &Notes::default(),
+        )
+        .expect("one call matches");
+        assert!(name.to_lowercase().contains("anna") && name.ends_with(".csv"));
+        assert!(csv.contains("0555 111 22 33"));
+        assert!(!csv.contains("0444"));
+    }
+
+    #[test]
+    fn person_export_is_none_without_calls() {
+        let src = vec![entry(1, "0444", CallLogKind::Missed, 0)];
+        assert!(person_export(&src, &[], &["0999"], "Bob", 0, 0, &Notes::default()).is_none());
+        assert!(person_export(&src, &[], &[" "], "Bob", 0, 0, &Notes::default()).is_none());
     }
 
     #[test]

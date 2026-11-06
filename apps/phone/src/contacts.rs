@@ -1322,6 +1322,17 @@ impl PhoneApp {
             self.open_call_details(true, i, window, cx);
             return;
         }
+        if id == crate::person_ui::CONTACT_SHEET_CSV {
+            let numbers: Vec<String> = sheet
+                .contact
+                .numbers
+                .iter()
+                .map(|n| n.raw.to_string())
+                .collect();
+            let name = sheet.contact.name.to_string();
+            self.export_person_calls(numbers, name, cx);
+            return;
+        }
         if id == "sheet-chist-edit" {
             sheet.history_edit = !sheet.history_edit;
             cx.notify();
@@ -2486,12 +2497,22 @@ impl PhoneApp {
         {
             let del =
                 self.history_delete_button(theme, crate::history_ui::CONTACT_SHEET_DELETE, cx);
+            let csv = crate::recents::sheet_pill(
+                self,
+                crate::person_ui::CONTACT_SHEET_CSV,
+                Icon::LucideDownload,
+                "Export calls",
+                colors.fill,
+                colors.label,
+                cx,
+            );
             children.push(reveal(
                 4,
                 div()
                     .flex()
                     .flex_col()
                     .child(section)
+                    .child(csv)
                     .child(del)
                     .into_any_element(),
             ));
@@ -2511,6 +2532,19 @@ impl PhoneApp {
             }
         }
         if !sheet.chooser && !sheet.contact.numbers.is_empty() {
+            children.push(reveal(
+                5,
+                crate::recents::sheet_pill(
+                    self,
+                    "sheet-ca-reply",
+                    Icon::LucideMessageCircle,
+                    "Send a quick reply",
+                    colors.fill,
+                    colors.label,
+                    cx,
+                )
+                .into_any_element(),
+            ));
             children.push(reveal(
                 5,
                 crate::recents::sheet_pill(

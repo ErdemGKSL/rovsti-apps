@@ -104,10 +104,11 @@ pub(crate) const RM_SELECT: &str = "rm-select";
 
 /// Every row-menu item id, in the order the menu lists them (Add only for unnamed numbers).
 #[cfg(test)]
-const MENU_IDS: [&str; 7] = [
+const MENU_IDS: [&str; 8] = [
     "rm-copy",
     "rm-add",
     RM_SELECT,
+    crate::person_ui::RM_REPLY,
     "rm-msg",
     "rm-wa",
     "rm-block",
@@ -131,6 +132,8 @@ pub(crate) struct MenuTarget {
     pub who: SharedString,
     /// The number belongs to a saved contact.
     pub named: bool,
+    /// The row is a missed call (offers a quick reply).
+    pub missed: bool,
     pub blocked: bool,
     /// Why Block is disabled (shown as the row's subtitle).
     pub block_note: Option<&'static str>,
@@ -479,6 +482,7 @@ impl PhoneApp {
             number,
             who,
             named,
+            missed: self.recents_row_missed(index),
             blocked,
             block_note,
             top,
@@ -524,6 +528,10 @@ impl PhoneApp {
                         cx,
                     );
                 }
+            }
+            "rm-reply" if has_number && target.missed => {
+                self.row_menu_close(window, cx);
+                self.open_quick_reply(target.number.clone(), cx);
             }
             "rm-msg" if has_number => {
                 self.row_menu_close(window, cx);
@@ -812,12 +820,25 @@ impl PhoneApp {
             cx,
         )];
         rows.extend(add);
-        rows.extend([
-            self.menu_item(
+        rows.push(self.menu_item(
+            theme,
+            item(RM_SELECT, Icon::LucideCircleCheck, "Select", None, true),
+            cx,
+        ));
+        if target.missed && has_number {
+            rows.push(self.menu_item(
                 theme,
-                item(RM_SELECT, Icon::LucideCircleCheck, "Select", None, true),
+                item(
+                    crate::person_ui::RM_REPLY,
+                    Icon::LucideMessageCircle,
+                    "Send a quick reply",
+                    None,
+                    true,
+                ),
                 cx,
-            ),
+            ));
+        }
+        rows.extend([
             self.menu_item(
                 theme,
                 item(
@@ -1022,6 +1043,7 @@ mod tests {
             number: "0555".into(),
             who: "Ayse".into(),
             named: true,
+            missed: false,
             blocked: false,
             block_note: None,
             top: 100.0,

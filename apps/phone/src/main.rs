@@ -37,6 +37,7 @@ mod notice;
 mod perf_harness;
 #[cfg(any(feature = "perf", test))]
 mod perf_run;
+mod person_ui;
 mod photo_edit;
 mod photo_viewer;
 mod photos;
@@ -122,6 +123,8 @@ enum SheetKind {
     CopyAs,
     /// One call's details and note (`details_ui`), over the Number or Contact sheet.
     CallDetails,
+    /// "Quick reply": canned texts for one number (`person_ui::quick_reply_sheet`).
+    QuickReplyPick,
 }
 
 /// The line under the number field.
@@ -156,6 +159,7 @@ struct PhoneApp {
     t9: keypad::T9Match,
     /// The open "Copy as" / "Share as" chooser.
     copy_as: Option<actions_ui::CopyAs>,
+    quick_reply: Option<person_ui::QuickReply>,
     /// The open in-call note card (`incall_note`).
     incall_note: Option<incall_note::InCallNote>,
     backend: Entity<Backend>,
@@ -541,6 +545,7 @@ impl PhoneApp {
             dial_match: keypad::DialMatch::default(),
             t9: keypad::T9Match::default(),
             copy_as: None,
+            quick_reply: None,
             incall_note: None,
             _subscriptions: subscriptions,
             incall: InCall::new(cx),
@@ -1463,6 +1468,7 @@ impl PhoneApp {
             SheetKind::ConfirmDelete => self.confirm_delete_sheet(theme, window, cx),
             SheetKind::T9Results => self.t9_results_sheet(theme, window, cx),
             SheetKind::CopyAs => self.copy_as_sheet(theme, window, cx),
+            SheetKind::QuickReplyPick => self.quick_reply_sheet(theme, window, cx),
             SheetKind::CallDetails => self.details_sheet(theme, window, cx),
             SheetKind::ImportPreview => {
                 if !self.sheet.is_visible() {

@@ -70,6 +70,8 @@ pub(crate) enum StripAction {
     Block,
     /// Assign the chosen number to this speed-dial digit (chooser only, no tile).
     SpeedDial(u8),
+    /// Quick reply (chooser only: the Number and Contact sheets have a pill, not a tile).
+    Reply,
 }
 
 impl StripAction {
@@ -85,6 +87,7 @@ impl StripAction {
             "copy" => Some(Self::Copy),
             "share" => Some(Self::Share),
             "block" => Some(Self::Block),
+            "reply" => Some(Self::Reply),
             _ => None,
         }
     }
@@ -97,6 +100,7 @@ impl StripAction {
             Self::Copy => "Copy which number?",
             Self::Share => "Share which number?",
             Self::Block => "Block which number?",
+            Self::Reply => "Reply to which number?",
         }
     }
 
@@ -112,6 +116,7 @@ impl StripAction {
     fn caption(self, blocked: bool) -> &'static str {
         match self {
             Self::SpeedDial(_) => "Speed dial",
+            Self::Reply => "Quick reply",
             Self::Message => "Message",
             Self::Copy => "Copy",
             Self::Share => "Share",
@@ -123,6 +128,7 @@ impl StripAction {
     fn icon(self) -> Icon {
         match self {
             Self::SpeedDial(_) => Icon::LucidePhone,
+            Self::Reply => Icon::LucideMessageCircle,
             Self::Message => Icon::LucideMessageCircle,
             Self::Copy => Icon::LucideCopy,
             Self::Share => Icon::LucideShare2,
@@ -376,6 +382,7 @@ impl PhoneApp {
                 }
             }
             StripAction::SpeedDial(digit) => self.speed_dial_set(digit, &number, &who, window, cx),
+            StripAction::Reply => self.open_quick_reply(number, cx),
             StripAction::Block => {
                 self.close_sheet(cx);
                 if self.backend.read(cx).is_blocked(&number) {
@@ -459,6 +466,11 @@ mod tests {
             "Speed dial which number?"
         );
         assert_eq!(StripAction::from_id("sheet-csd-5"), None);
+        assert_eq!(
+            StripAction::from_id("sheet-ca-reply"),
+            Some(StripAction::Reply)
+        );
+        assert_eq!(StripAction::Reply.chooser_title(), "Reply to which number?");
     }
 
     #[test]

@@ -30,6 +30,7 @@ use rovsti_wa_proto::{
 };
 use whatsapp_rust::CallError as WaCallError;
 use whatsapp_rust::voip::{CallEvent, CallHandle};
+use whatsapp_rust::wacore::stanza::call::REJECT_REASON_BUSY;
 use whatsapp_rust::wacore::types::call::{CallAction, IncomingCall};
 
 use crate::AppState;
@@ -67,8 +68,14 @@ pub enum LiveEvent {
 pub trait LiveCall: Send + Sync + 'static {
     fn call_id(&self) -> String;
 
-    /// Ends the call.
+    /// Stops the media engine. Local only: the peer is not told, so use it
+    /// for a call the peer already ended.
     fn hangup(&self) -> BoxFuture<'_, ()>;
+
+    /// Tells the peer the call is over (`<terminate>`, which also cancels a
+    /// call that still rings) and stops the media engine, even if the
+    /// signaling fails.
+    fn terminate(&self) -> BoxFuture<'_, Result<(), DriverError>>;
 
     fn set_muted(&self, muted: bool);
 
@@ -224,6 +231,9 @@ struct CallEntry {
     spk_tx: Sender<Frame>,
     spk_rx: Receiver<Frame>,
     audio_attached: bool,
+    /// The relay is up. An outgoing call gets it from the offer's ack, while
+    /// the callee still rings, so it only counts once the callee accepts.
+    media_up: bool,
     /// Wall clock of the first sighting, for the call list.
     started_ms: i64,
     /// Wall clock of the end, for the call list.
@@ -251,6 +261,7 @@ impl CallEntry {
             spk_tx,
             spk_rx,
             audio_attached: false,
+            media_up: false,
             started_ms: now_ms(),
             ended_ms: None,
             ended_at: None,
@@ -454,34 +465,64 @@ impl CallTable {
             entry.handle.clone()
         };
         // An outgoing call nobody picked up is cancelled on WhatsApp's side.
-        if let Some(handle) = handle {
-            handle.hangup().await;
+        if let Some(handle) = handle
+            && let Err(e) = handle.terminate().await
+        {
+            log::warn!(
+                "{}: cancelling unanswered call {call_id}: {e}",
+                self.instance
+            );
         }
     }
 
     /// Stores the live handle and starts following it. A call that ended
     /// while it was being set up is hung up at once.
     async fn attach_handle(self: &Arc<Self>, call_id: &str, handle: Arc<dyn LiveCall>) {
-        let direction = {
+        let live = {
             let mut calls = self.lock();
             match calls.get_mut(call_id) {
                 Some(entry) if !entry.machine.phase().is_ended() => {
                     entry.handle = Some(Arc::clone(&handle));
-                    Some(entry.machine.direction())
+                    true
                 }
-                _ => None,
+                _ => false,
             }
         };
-        match direction {
-            Some(direction) => {
-                tokio::spawn(Arc::clone(self).follow(call_id.to_owned(), handle, direction));
-            }
-            None => handle.hangup().await,
+        if live {
+            tokio::spawn(Arc::clone(self).follow(call_id.to_owned(), handle));
+        } else {
+            // Ended by the peer, or by `end`, which already told WhatsApp.
+            handle.hangup().await;
+        }
+    }
+
+    /// The relay is up: an answered call becomes active, a ringing outgoing
+    /// one remembers it for the callee's accept.
+    fn media_up(&self, call_id: &str) {
+        let mut calls = self.lock();
+        if let Some(entry) = calls.get_mut(call_id) {
+            entry.media_up = true;
+            self.apply(call_id, entry, CallInput::MediaUp);
+        }
+    }
+
+    /// The callee accepted our call; it is active at once if the relay is up.
+    fn remote_accepted(&self, call_id: &str) {
+        let mut calls = self.lock();
+        let Some(entry) = calls.get_mut(call_id) else {
+            return;
+        };
+        if self
+            .apply(call_id, entry, CallInput::RemoteAccepted)
+            .is_some()
+            && entry.media_up
+        {
+            self.apply(call_id, entry, CallInput::MediaUp);
         }
     }
 
     /// Turns the engine's events into phases until the call is over.
-    async fn follow(self: Arc<Self>, call_id: String, handle: Arc<dyn LiveCall>, d: CallDirection) {
+    async fn follow(self: Arc<Self>, call_id: String, handle: Arc<dyn LiveCall>) {
         let ended = handle.wait_ended();
         tokio::pin!(ended);
         loop {
@@ -489,16 +530,14 @@ impl CallTable {
                 // Events first: a failure just before the end is the reason.
                 biased;
                 event = handle.next_event() => match event {
-                    Some(LiveEvent::MediaUp) => {
-                        if d == CallDirection::Out {
-                            // Media only flows once the callee picked up.
-                            self.transition(&call_id, CallInput::RemoteAccepted);
-                        }
-                        self.transition(&call_id, CallInput::MediaUp);
-                    }
+                    // For an outgoing call the relay comes up while the callee
+                    // still rings; its <accept> (`on_incoming`) answers the call.
+                    Some(LiveEvent::MediaUp) => self.media_up(&call_id),
                     Some(LiveEvent::Failed(reason)) => {
                         self.transition(&call_id, CallInput::Failed(reason));
-                        handle.hangup().await;
+                        if let Err(e) = handle.terminate().await {
+                            log::warn!("{}: ending failed call {call_id}: {e}", self.instance);
+                        }
                         break;
                     }
                     None => {
@@ -550,9 +589,13 @@ impl CallTable {
                     },
                 );
             }
-            CallAction::Accept { call_id, .. } => {
-                self.transition(call_id, CallInput::RemoteAccepted);
-            }
+            CallAction::Accept { call_id, .. } => self.remote_accepted(call_id),
+            // One of the callee's devices cannot take calls; the others ring
+            // on and whatsapp-rust keeps the call (handlers/call.rs).
+            CallAction::Reject {
+                reason: Some(reason),
+                ..
+            } if reason == REJECT_REASON_BUSY => {}
             CallAction::Reject { call_id, .. } | CallAction::Terminate { call_id, .. } => {
                 self.transition(call_id, CallInput::RemoteTerminate);
             }
@@ -648,7 +691,8 @@ impl CallTable {
         };
         match (action, handle, incoming) {
             (EndAction::Reject, _, Some(incoming)) => backend.reject(incoming).await?,
-            (EndAction::Hangup, Some(handle), _) => handle.hangup().await,
+            // `<terminate>`: a local hangup alone leaves the peer ringing.
+            (EndAction::Hangup, Some(handle), _) => handle.terminate().await?,
             (EndAction::Terminate, ..) => {
                 let (id, peer, creator) = signaling;
                 backend.terminate(id, peer, creator).await?;
@@ -682,13 +726,16 @@ impl CallTable {
         let mut entry = CallEntry::new(CallDirection::Out, to.to_owned());
         let handle = backend.place(to.to_owned(), entry.io()).await?;
         let call_id = handle.call_id();
-        entry.creator = call_id.clone();
+        // Visible with its handle, so `end` always has one to terminate.
+        entry.handle = Some(Arc::clone(&handle));
         if !self.insert(&call_id, entry) {
-            handle.hangup().await;
+            if let Err(e) = handle.terminate().await {
+                log::warn!("{}: cancelling surplus call {call_id}: {e}", self.instance);
+            }
             return Err(CallError::Conflict("too many calls"));
         }
         self.spawn_ring_timeout(call_id.clone());
-        self.attach_handle(&call_id, handle).await;
+        tokio::spawn(Arc::clone(self).follow(call_id.clone(), handle));
         Ok(CallStarted { call_id })
     }
 
@@ -856,8 +903,12 @@ async fn audio(
 
 // ------------------------------------------------------------ whatsapp-rust
 
-/// A [`CallHandle`] as a [`LiveCall`].
-struct WaLiveCall(CallHandle);
+/// A [`CallHandle`] as a [`LiveCall`]. `CallHandle::hangup` is local only, so
+/// the client is kept for the `<terminate>` that tells the peer.
+struct WaLiveCall {
+    handle: CallHandle,
+    client: Arc<whatsapp_rust::Client>,
+}
 
 /// The engine event the apps care about, if it is one.
 pub fn live_event(event: &CallEvent) -> Option<LiveEvent> {
@@ -881,19 +932,38 @@ pub fn live_event(event: &CallEvent) -> Option<LiveEvent> {
 
 impl LiveCall for WaLiveCall {
     fn call_id(&self) -> String {
-        self.0.call_id().to_owned()
+        self.handle.call_id().to_owned()
     }
 
     fn hangup(&self) -> BoxFuture<'_, ()> {
-        Box::pin(self.0.hangup())
+        Box::pin(self.handle.hangup())
+    }
+
+    fn terminate(&self) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async move {
+            // The handle knows the device that answered, which `<terminate>`
+            // must address; before an answer it is the peer that rings.
+            let sent = self
+                .client
+                .voip()
+                .terminate(
+                    self.handle.call_id(),
+                    &self.handle.peer_jid(),
+                    self.handle.call_creator(),
+                )
+                .await
+                .map_err(failed);
+            self.handle.hangup().await;
+            sent
+        })
     }
 
     fn set_muted(&self, muted: bool) {
-        self.0.set_muted(muted);
+        self.handle.set_muted(muted);
     }
 
     fn next_event(&self) -> BoxFuture<'_, Option<LiveEvent>> {
-        let events = self.0.events();
+        let events = self.handle.events();
         Box::pin(async move {
             loop {
                 let event = events.recv().await.ok()?;
@@ -905,7 +975,7 @@ impl LiveCall for WaLiveCall {
     }
 
     fn wait_ended(&self) -> BoxFuture<'_, ()> {
-        Box::pin(self.0.wait_ended())
+        Box::pin(self.handle.wait_ended())
     }
 }
 
@@ -924,6 +994,13 @@ pub struct WaCalls {
 impl WaCalls {
     pub fn new(client: Arc<whatsapp_rust::Client>) -> Self {
         Self { client }
+    }
+
+    fn live(&self, handle: CallHandle) -> Arc<dyn LiveCall> {
+        Arc::new(WaLiveCall {
+            handle,
+            client: Arc::clone(&self.client),
+        })
     }
 }
 
@@ -946,7 +1023,7 @@ impl CallBackend for WaCalls {
                 .start()
                 .await
                 .map_err(start_error)?;
-            Ok(Arc::new(WaLiveCall(handle)) as Arc<dyn LiveCall>)
+            Ok(self.live(handle))
         })
     }
 
@@ -965,7 +1042,7 @@ impl CallBackend for WaCalls {
                 .start()
                 .await
                 .map_err(start_error)?;
-            Ok(Arc::new(WaLiveCall(handle)) as Arc<dyn LiveCall>)
+            Ok(self.live(handle))
         })
     }
 
@@ -1003,9 +1080,17 @@ pub mod fake {
 
     use super::*;
 
+    /// What the fake backend and its calls sent to "WhatsApp".
+    type Ops = Arc<Mutex<Vec<String>>>;
+
+    fn record(ops: &Ops, op: String) {
+        ops.lock().unwrap_or_else(|e| e.into_inner()).push(op);
+    }
+
     /// A call that follows whatever the test tells it.
     pub struct FakeLive {
         id: String,
+        ops: Ops,
         muted: AtomicBool,
         hung_up: AtomicBool,
         events_tx: Sender<LiveEvent>,
@@ -1015,9 +1100,15 @@ pub mod fake {
 
     impl FakeLive {
         pub fn new(id: &str) -> Arc<Self> {
+            Self::recording(id, Ops::default())
+        }
+
+        /// A call whose `terminate` is written to `ops`.
+        fn recording(id: &str, ops: Ops) -> Arc<Self> {
             let (events_tx, events_rx) = async_channel::unbounded();
             Arc::new(Self {
                 id: id.to_owned(),
+                ops,
                 muted: AtomicBool::new(false),
                 hung_up: AtomicBool::new(false),
                 events_tx,
@@ -1040,6 +1131,7 @@ pub mod fake {
             self.muted.load(Ordering::Relaxed)
         }
 
+        /// The engine was stopped, by `hangup` or `terminate`.
         pub fn hung_up(&self) -> bool {
             self.hung_up.load(Ordering::Relaxed)
         }
@@ -1054,6 +1146,14 @@ pub mod fake {
             Box::pin(async move {
                 self.hung_up.store(true, Ordering::Relaxed);
                 self.finish();
+            })
+        }
+
+        fn terminate(&self) -> BoxFuture<'_, Result<(), DriverError>> {
+            Box::pin(async move {
+                record(&self.ops, format!("terminate {}", self.id));
+                self.hangup().await;
+                Ok(())
             })
         }
 
@@ -1087,7 +1187,7 @@ pub mod fake {
 
     #[derive(Default)]
     pub struct FakeCalls {
-        ops: Mutex<Vec<String>>,
+        ops: Ops,
         lives: Mutex<Vec<Arc<FakeLive>>>,
         fail_start: Mutex<Option<StartError>>,
         counter: AtomicU64,
@@ -1098,7 +1198,8 @@ pub mod fake {
             Self::default()
         }
 
-        /// `accept`, `place`, `reject` and `terminate` calls so far.
+        /// `accept`, `place`, `reject` and `terminate` calls so far, a live
+        /// call's own `terminate` included (a local `hangup` is not listed).
         pub fn ops(&self) -> Vec<String> {
             self.ops.lock().unwrap_or_else(|e| e.into_inner()).clone()
         }
@@ -1114,7 +1215,7 @@ pub mod fake {
         }
 
         fn record(&self, op: String) {
-            self.ops.lock().unwrap_or_else(|e| e.into_inner()).push(op);
+            record(&self.ops, op);
         }
 
         fn start(
@@ -1132,7 +1233,7 @@ pub mod fake {
             {
                 return Err(error);
             }
-            let live = FakeLive::new(&id);
+            let live = FakeLive::recording(&id, Arc::clone(&self.ops));
             self.lives
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -1467,11 +1568,13 @@ mod tests {
         assert_eq!(rig.calls.ops(), [format!("place {FROM}")]);
 
         let live = rig.calls.lives().pop().unwrap();
+        rig.table.on_incoming(&callee_says(&id, "accept"));
         live.emit(LiveEvent::MediaUp);
         wait_phase(&rig.table, &id, CallPhase::Active).await;
 
         rig.table.end(&rig.calls, &id).await.unwrap();
         assert!(live.hung_up());
+        assert_eq!(rig.calls.ops().last(), Some(&format!("terminate {id}")));
         assert_eq!(
             rig.table.phase(&id),
             Some(CallPhase::Ended(EndReason::Hangup))
@@ -1777,6 +1880,136 @@ mod tests {
         let out2 = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
         rig.table.end(&rig.calls, &out2).await.unwrap();
         assert!(ends(&rig).is_empty());
+    }
+
+    /// What the callee's device `from` sends about our outgoing call `call_id`.
+    fn callee_says(call_id: &str, action: &str) -> IncomingCall {
+        use whatsapp_rust::Jid;
+        use whatsapp_rust::chrono::Utc;
+        let from: Jid = FROM.parse().unwrap();
+        let creator = from.clone();
+        let call_id = call_id.to_owned();
+        let action = match action {
+            "accept" => CallAction::Accept {
+                call_id,
+                call_creator: creator,
+                audio: Vec::new(),
+            },
+            "busy" => CallAction::Reject {
+                call_id,
+                call_creator: creator,
+                reason: Some("busy".into()),
+            },
+            "reject" => CallAction::Reject {
+                call_id,
+                call_creator: creator,
+                reason: None,
+            },
+            other => panic!("no such action {other}"),
+        };
+        IncomingCall::builder()
+            .from(from)
+            .stanza_id("stanza-callee".to_owned())
+            .timestamp(Utc::now())
+            .offline(false)
+            .action(action)
+            .build()
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_ringing_outgoing_call_terminates_it_on_whatsapp() {
+        let rig = rig();
+        let id = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
+        assert_eq!(rig.table.phase(&id), Some(CallPhase::Ringing));
+        rig.table.end(&rig.calls, &id).await.unwrap();
+        assert_eq!(
+            rig.table.phase(&id),
+            Some(CallPhase::Ended(EndReason::Hangup))
+        );
+        // The callee must hear about it: a local teardown alone keeps it ringing.
+        assert_eq!(
+            rig.calls.ops(),
+            [format!("place {FROM}"), format!("terminate {id}")]
+        );
+        assert!(rig.calls.lives().pop().unwrap().hung_up());
+        // Ending again is a conflict, not a second terminate.
+        assert!(matches!(
+            rig.table.end(&rig.calls, &id).await,
+            Err(CallError::Conflict(_))
+        ));
+        assert_eq!(rig.calls.ops().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn ending_an_answered_call_terminates_it_on_whatsapp() {
+        let rig = rig();
+        ring(&rig, "C1");
+        rig.table.accept(&rig.calls, "C1").await.unwrap();
+        let live = rig.calls.lives().pop().unwrap();
+        live.emit(LiveEvent::MediaUp);
+        wait_phase(&rig.table, "C1", CallPhase::Active).await;
+        rig.table.end(&rig.calls, "C1").await.unwrap();
+        assert_eq!(rig.calls.ops(), ["accept C1", "terminate C1"]);
+    }
+
+    #[tokio::test]
+    async fn an_unanswered_outgoing_call_is_terminated_on_whatsapp_at_the_timeout() {
+        let rig = rig_with(Duration::from_millis(40));
+        let id = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
+        wait_phase(&rig.table, &id, CallPhase::Ended(EndReason::Missed)).await;
+        for _ in 0..200 {
+            if rig.calls.ops().len() == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            rig.calls.ops(),
+            [format!("place {FROM}"), format!("terminate {id}")]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_relay_coming_up_does_not_answer_an_outgoing_call() {
+        let rig = rig();
+        let id = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
+        // whatsapp-rust attaches the relay from the offer's ack, so the
+        // relay is allocated while the callee still rings.
+        rig.calls.lives().pop().unwrap().emit(LiveEvent::MediaUp);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(rig.table.phase(&id), Some(CallPhase::Ringing));
+        // The callee's <accept> answers it; media is already up.
+        rig.table.on_incoming(&callee_says(&id, "accept"));
+        assert_eq!(rig.table.phase(&id), Some(CallPhase::Active));
+    }
+
+    #[tokio::test]
+    async fn an_accept_before_the_relay_waits_for_media() {
+        let rig = rig();
+        let id = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
+        rig.table.on_incoming(&callee_says(&id, "accept"));
+        assert_eq!(rig.table.phase(&id), Some(CallPhase::Connecting));
+        rig.calls.lives().pop().unwrap().emit(LiveEvent::MediaUp);
+        wait_phase(&rig.table, &id, CallPhase::Active).await;
+    }
+
+    #[tokio::test]
+    async fn a_busy_device_does_not_end_an_outgoing_call() {
+        let rig = rig();
+        let id = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
+        // One of the callee's devices cannot take calls; the others ring on.
+        rig.table.on_incoming(&callee_says(&id, "busy"));
+        assert_eq!(rig.table.phase(&id), Some(CallPhase::Ringing));
+        // So the caller can still cancel it, and WhatsApp hears about it.
+        rig.table.end(&rig.calls, &id).await.unwrap();
+        assert_eq!(rig.calls.ops().last(), Some(&format!("terminate {id}")));
+
+        let declined = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
+        rig.table.on_incoming(&callee_says(&declined, "reject"));
+        assert_eq!(
+            rig.table.phase(&declined),
+            Some(CallPhase::Ended(EndReason::Rejected))
+        );
     }
 
     #[tokio::test]

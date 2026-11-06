@@ -134,6 +134,14 @@ and starts the microphone; the gateway bridges the frames to whatsapp-rust's voi
 module. Mute is `POST /v1/calls/{id}/mute`, End is `POST /v1/calls/{id}/end`. The
 phone needs the `RECORD_AUDIO` permission. Audio only; video calls are not handled.
 
+End declines a ringing incoming call and otherwise sends WhatsApp a `<terminate>`,
+which also cancels an outgoing call that still rings (whatsapp-rust's
+`CallHandle::hangup` alone only stops the local engine). An unanswered outgoing call
+is terminated the same way after 60 seconds. An outgoing call stays `ringing` until
+the callee accepts: its relay comes up from the offer's ack, before anyone answers. A
+`busy` reject from one of the callee's devices does not end it, since the others ring
+on. Ending a call twice is a 409 `conflict`, an unknown call a 404.
+
 `GET /v1/calls` (bearer key) returns a JSON array of the instance's calls, newest first:
 each item is the `call` event's fields (`call_id`, `peer`, `peer_name`, `direction`,
 `phase`, `is_video`) plus `started_ms` and, once over, `ended_ms` (Unix milliseconds).

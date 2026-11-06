@@ -39,7 +39,7 @@ use rovsti_ui::{
 use rovsti_wa_client::{CallAudio, ClientError};
 use rovsti_wa_proto::{
     CallDirection, CallPhase, CallSummary, CallUpdate, ConnectKey, EndReason, GatewayEvent,
-    GatewayUrl, WaCallHistory, WaCallView, WaScreen, plan_snapshot,
+    GatewayUrl, WaCallHistory, WaCallView, WaScreen, plan_snapshot, tracked_end,
 };
 use rovsti_wa_ui::{StoredLink, WhatsAppSettings};
 
@@ -695,6 +695,15 @@ impl WaCallUi {
     }
 
     fn apply_snapshot(&mut self, summaries: &[CallSummary], cx: &mut Context<Self>) {
+        // The call on screen may have ended while its event was missed.
+        let tracked = self
+            .tracker
+            .view(now_ms())
+            .filter(|v| !v.phase.is_ended())
+            .map(|v| v.call_id);
+        if let Some(end) = tracked_end(tracked.as_deref(), summaries) {
+            self.on_call(end, cx);
+        }
         let plan = plan_snapshot(!self.tracker.is_empty(), summaries, &self.history);
         // A call that was just declined may still ring in the snapshot.
         if let Some(update) = plan.show.filter(|u| !self.once.handled(&u.call_id)) {

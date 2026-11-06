@@ -18,6 +18,7 @@ pub mod dial;
 pub mod gesture;
 pub mod import_plan;
 pub mod inbox;
+pub mod keypad_layout;
 pub mod lru;
 pub mod mms_pdu;
 pub mod msg_backup;

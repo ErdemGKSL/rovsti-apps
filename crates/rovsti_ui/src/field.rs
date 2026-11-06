@@ -338,6 +338,16 @@ pub fn field_box(
             .truncate()
             .text_color(colors.tertiary_label)
             .child(placeholder)
+    } else if typing {
+        // While typing, the end of the text is what the owner is looking at (a long
+        // address, the last characters just typed): cut the start with the ellipsis,
+        // never the end, which the caret follows.
+        div()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_ellipsis_start()
+            .text_color(colors.label)
+            .child(text)
     } else {
         div().truncate().text_color(colors.label).child(text)
     };

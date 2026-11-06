@@ -91,6 +91,14 @@ pub(crate) fn field_box(
             .child(SharedString::from(placeholder))
     } else if multiline {
         div().text_color(colors.label).child(text)
+    } else if typing {
+        // While typing the end of the text is what counts: cut the start, not the end.
+        div()
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_ellipsis_start()
+            .text_color(colors.label)
+            .child(text)
     } else {
         div().truncate().text_color(colors.label).child(text)
     };
@@ -155,8 +163,9 @@ pub(crate) fn confirm_card(
             a: 0.4,
             ..gpui::black()
         })
-        // The scrim swallows touches so nothing underneath reacts.
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        // The scrim swallows every touch so nothing underneath reacts (a stop_propagation on
+        // mouse down is not enough: the rows below also act on the matching mouse up).
+        .occlude()
         .child(
             glass(GlassSpec::control(theme))
                 .w_full()

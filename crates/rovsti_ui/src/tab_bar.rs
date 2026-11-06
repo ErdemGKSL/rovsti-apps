@@ -423,6 +423,9 @@ fn bar_body(
 
     glass(GlassSpec::chrome(theme))
         .relative()
+        // The bar is above the page: a tap on it must not also reach the rows and buttons
+        // that happen to sit under it.
+        .occlude()
         .w(px(bar_w))
         .h(px(bar_h))
         .rounded_full()

@@ -35,6 +35,8 @@ const ROW_IDS: [&str; 9] = [
     "set-sd-1", "set-sd-2", "set-sd-3", "set-sd-4", "set-sd-5", "set-sd-6", "set-sd-7", "set-sd-8",
     "set-sd-9",
 ];
+/// The digit labels, indexed by digit - 1 (static, so a frame formats nothing).
+const DIGITS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 const CHANGE_ID: &str = "set-sd-change";
 const REMOVE_ID: &str = "set-sd-remove";
 
@@ -359,7 +361,7 @@ impl PhoneApp {
                     .text_size(typography::TITLE3.size)
                     .font_weight(typography::TITLE3.weight)
                     .text_color(colors.accent)
-                    .child(row.digit.to_string()),
+                    .child(DIGITS[usize::from(row.digit - 1)]),
             )
             .child(
                 div()

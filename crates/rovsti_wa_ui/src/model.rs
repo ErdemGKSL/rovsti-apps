@@ -91,6 +91,10 @@ pub enum Screen {
     },
 }
 
+// An input is built, moved into `apply` once and dropped; it is never stored
+// in bulk, so the size of the gateway event variant costs nothing worth a box
+// (and a box would change the public variant).
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum Input {
     ChooseLinkNew,

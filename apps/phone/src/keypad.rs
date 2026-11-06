@@ -86,9 +86,34 @@ pub(crate) struct T9Match {
     /// The name format the spans were computed under.
     format: rovsti_core::wire::NameFormat,
     hits: Vec<T9Hit>,
+    /// Bumped whenever `hits` changes, so [`T9Rows`] knows to resolve again.
+    hits_gen: u64,
     /// `None` while a task holds it.
     scratch: Option<T9Scratch>,
     task: Option<gpui::Task<()>>,
+    /// The strip's rows, resolved from `hits` when they (or the exact match,
+    /// the index or the name format) change, never per frame.
+    rows: T9Rows,
+}
+
+/// What [`T9Rows`] was resolved from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RowsKey {
+    hits_gen: u64,
+    index: usize,
+    format: rovsti_core::wire::NameFormat,
+    exact: Option<i64>,
+}
+
+/// The resolved strip: names, numbers and spoken labels built once.
+#[derive(Default)]
+struct T9Rows {
+    key: Option<RowsKey>,
+    shown: Vec<Suggestion>,
+    more: usize,
+    /// "N more" and its spoken label, when `more > 0`.
+    more_text: SharedString,
+    more_aria: SharedString,
 }
 
 /// The digits worth a T9 lookup: at least one, and nothing but digits (`+`,
@@ -132,7 +157,6 @@ struct Suggestion {
     name: SharedString,
     span: Option<Range<usize>>,
     number: SharedString,
-    raw: SharedString,
     label: SharedString,
     monogram: Option<SharedString>,
     hue: Option<usize>,
@@ -711,7 +735,10 @@ impl PhoneApp {
         m.format = format;
         m.task = None;
         let (Load::Ready(index), Some(digits)) = (load, t9_digits(&self.dialed)) else {
-            m.hits.clear();
+            if !m.hits.is_empty() {
+                m.hits.clear();
+                m.hits_gen = m.hits_gen.wrapping_add(1);
+            }
             if let Some(scratch) = &mut m.scratch {
                 scratch.forget();
             }
@@ -733,6 +760,7 @@ impl PhoneApp {
                 this.t9.scratch = Some(scratch);
                 if this.t9.hits != hits {
                     this.t9.hits = hits;
+                    this.t9.hits_gen = this.t9.hits_gen.wrapping_add(1);
                     cx.notify();
                 }
             })
@@ -740,24 +768,34 @@ impl PhoneApp {
         }));
     }
 
-    /// The rows to draw above the field, empty when the strip is hidden, with
-    /// how many more hits there are.
-    fn t9_rows(&self, cx: &Context<Self>) -> (Vec<Suggestion>, usize) {
-        if t9_digits(&self.dialed).is_none() || self.t9.query != self.dialed {
-            return (Vec::new(), 0);
-        }
+    /// Once per render, after [`Self::sync_t9_match`] and
+    /// [`Self::sync_dial_match`]: resolves the hits into strip rows when what
+    /// they depend on changed. An unchanged frame costs one comparison (this
+    /// used to scan the whole book for the exact match and build every row's
+    /// name and labels on every frame the strip showed).
+    pub(crate) fn sync_t9_rows(&mut self, cx: &Context<Self>) {
         let Load::Ready(index) = self.backend.read(cx).contacts() else {
-            return (Vec::new(), 0);
+            if self.t9.rows.key.is_some() {
+                self.t9.rows = T9Rows::default();
+            }
+            return;
         };
+        let key = RowsKey {
+            hits_gen: self.t9.hits_gen,
+            index: Arc::as_ptr(&index) as usize,
+            format: self.t9.format,
+            exact: self.dial_match.found.as_ref().map(|found| found.id),
+        };
+        if self.t9.rows.key == Some(key) {
+            return;
+        }
         let format = self.t9.format;
-        let exact = self
-            .dial_match
-            .found
-            .as_ref()
-            .and_then(|found| index.all().position(|c| c.id == found.id))
+        let exact = key
+            .exact
+            .and_then(|id| index.all().position(|c| c.id == id))
             .and_then(|i| i64::try_from(i).ok());
         let (shown, more) = visible_suggestions(&self.t9.hits, exact);
-        let rows = shown
+        let shown = shown
             .iter()
             .filter_map(|hit| {
                 let contact = index.contact(hit.contact_idx)?;
@@ -769,20 +807,42 @@ impl PhoneApp {
                     hue: rovsti_core::avatar::hue_index(Some(contact.id)),
                     label: format!("Call {name}, {}", number.raw).into(),
                     number: number.raw.clone().into(),
-                    raw: number.raw.clone().into(),
                     span,
                     name: name.into(),
                 })
             })
             .collect();
-        (rows, more)
+        let (more_text, more_aria) = if more > 0 {
+            (
+                format!("{more} more").into(),
+                format!("{more} more contacts").into(),
+            )
+        } else {
+            Default::default()
+        };
+        self.t9.rows = T9Rows {
+            key: Some(key),
+            shown,
+            more,
+            more_text,
+            more_aria,
+        };
+    }
+
+    /// The rows to draw above the field, empty when the strip is hidden, with
+    /// how many more hits there are.
+    fn t9_rows(&self) -> (&[Suggestion], usize) {
+        if t9_digits(&self.dialed).is_none() || self.t9.query != self.dialed {
+            return (&[], 0);
+        }
+        (&self.t9.rows.shown, self.t9.rows.more)
     }
 
     /// A tap on suggestion `slot`: calls its number.
     pub(crate) fn t9_tap(&mut self, slot: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let (rows, _) = self.t9_rows(cx);
+        let (rows, _) = self.t9_rows();
         if let Some(row) = rows.get(slot) {
-            let number = row.raw.clone();
+            let number = row.number.clone();
             self.place_call_from(&number, window, cx);
         }
     }
@@ -795,18 +855,19 @@ impl PhoneApp {
     }
 
     fn t9_strip(&self, theme: Theme, cx: &mut Context<Self>) -> Option<impl IntoElement> {
-        let (rows, more) = self.t9_rows(cx);
+        let (rows, more) = self.t9_rows();
         if rows.is_empty() {
             return None;
         }
         let colors = theme::colors(theme);
         const IDS: [&str; T9_SHOWN] = ["t9-0", "t9-1", "t9-2"];
         let mut strip = div().flex().flex_col().gap(px(T9_GAP)).w(px(320.0));
-        for (slot, row) in rows.into_iter().enumerate() {
+        for (slot, row) in rows.iter().enumerate() {
             let id = IDS[slot];
             let press = self.presses.value(id).clamp(0.0, 1.0);
             let highlights: Vec<_> = row
                 .span
+                .clone()
                 .into_iter()
                 .map(|r| {
                     (
@@ -823,7 +884,7 @@ impl PhoneApp {
                 glass(GlassSpec::control(theme))
                     .id(id)
                     .role(Role::Button)
-                    .aria_label(row.label)
+                    .aria_label(row.label.clone())
                     .relative()
                     .h(px(T9_ROW_H))
                     .px(px(12.0))
@@ -847,14 +908,14 @@ impl PhoneApp {
                             .truncate()
                             .text_size(typography::SUBHEADLINE.size)
                             .text_color(colors.label)
-                            .child(StyledText::new(row.name).with_highlights(highlights)),
+                            .child(StyledText::new(row.name.clone()).with_highlights(highlights)),
                     )
                     .child(
                         div()
                             .flex_none()
                             .text_size(typography::FOOTNOTE.size)
                             .text_color(colors.secondary_label)
-                            .child(row.number),
+                            .child(row.number.clone()),
                     )
                     .on_mouse_down(
                         MouseButton::Left,
@@ -865,12 +926,11 @@ impl PhoneApp {
         }
         if more > 0 {
             let press = self.presses.value("t9-more").clamp(0.0, 1.0);
-            let text = format!("{more} more");
             strip = strip.child(
                 div()
                     .id("t9-more")
                     .role(Role::Button)
-                    .aria_label(format!("{text} contacts"))
+                    .aria_label(self.t9.rows.more_aria.clone())
                     .relative()
                     .h(px(36.0))
                     .flex()
@@ -880,7 +940,7 @@ impl PhoneApp {
                     .font_weight(typography::HEADLINE.weight)
                     .text_color(colors.accent)
                     .opacity(1.0 - 0.5 * press)
-                    .child(text)
+                    .child(self.t9.rows.more_text.clone())
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _, _, cx| this.t9_more(cx)),

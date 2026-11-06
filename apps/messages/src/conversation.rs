@@ -100,6 +100,8 @@ pub enum ConversationEvent {
     Menu,
     /// The Copy pill of a message: the page puts the text on the clipboard.
     Copy(String),
+    /// The Share pill of a message: the page opens the system share sheet.
+    Share(String),
     /// A short message for the page's pill (save results).
     Notice(String),
 }
@@ -2161,6 +2163,7 @@ impl Conversation {
             );
         }
         if let Some(text) = copy_text_of(&message.body, meta) {
+            let shared = text.clone();
             row = row.child(
                 pill("copy", Icon::LucideCopy, "Copy", false).on_click(cx.listener(
                     move |this, _, _, cx| {
@@ -2171,6 +2174,14 @@ impl Conversation {
                     },
                 )),
             );
+            row = row.child(pill("share", Icon::LucideShare2, "Share", false).on_click(
+                cx.listener(move |this, _, _, cx| {
+                    this.strip = None;
+                    this.rows_dirty = true;
+                    cx.emit(ConversationEvent::Share(shared.clone()));
+                    cx.notify();
+                }),
+            ));
         }
         if let MessageBody::Media { kind, mime, .. } = &message.body
             && saveable(*kind)

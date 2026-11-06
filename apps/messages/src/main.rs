@@ -835,6 +835,7 @@ impl MessagesApp {
             ConversationEvent::ToggleMute => this.toggle_open_mute(cx),
             ConversationEvent::Menu => this.open_wa_page_menu(cx),
             ConversationEvent::Copy(text) => this.copy_text(text.clone().into(), false, cx),
+            ConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             ConversationEvent::Notice(text) => {
                 this.show_pill(text.clone());
                 cx.notify();
@@ -883,6 +884,7 @@ impl MessagesApp {
             SmsConversationEvent::Copy { text, sensitive } => {
                 this.copy_text(text.clone().into(), *sensitive, cx);
             }
+            SmsConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             SmsConversationEvent::Menu => this.open_page_menu(cx),
         })
         .detach();
@@ -2547,6 +2549,31 @@ impl MessagesApp {
 
     /// Copies text to the clipboard (`sensitive` hides it from the paste preview)
     /// and says "Copied". A sensitive copy also marks the inbox's code chip.
+    /// Opens the system share sheet with `text`, off the UI thread.
+    fn share_text(&mut self, text: String, cx: &mut Context<Self>) {
+        let task = cx
+            .background_executor()
+            .spawn(async move { rovsti_android::telecom::share_text(&text) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(true) => {}
+                    Err(rovsti_android::Error::Unsupported) => {
+                        this.show_pill("Sharing isn't available here");
+                    }
+                    Ok(false) | Err(_) => {
+                        log::warn!("sharing failed");
+                        this.show_pill("Couldn't share that");
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn copy_text(&mut self, code: SharedString, sensitive: bool, cx: &mut Context<Self>) {
         let text = code.clone();
         let task = cx

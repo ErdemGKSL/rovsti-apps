@@ -60,6 +60,8 @@ pub enum SmsConversationEvent {
         text: String,
         sensitive: bool,
     },
+    /// A share pill under a selected bubble: the page opens the share sheet.
+    Share(String),
     /// The header's more button: the conversation menu.
     Menu,
 }
@@ -543,6 +545,14 @@ impl SmsConversation {
         cx.notify();
     }
 
+    /// A share pill was tapped: the page opens the share sheet and the selection closes.
+    fn share(&mut self, text: String, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.rows_dirty = true;
+        cx.emit(SmsConversationEvent::Share(text));
+        cx.notify();
+    }
+
     fn pick_attachment(&mut self, cx: &mut Context<Self>) {
         self.awaiting_attachment = true;
         self.notice = None;
@@ -787,11 +797,19 @@ impl SmsConversation {
         if self.selected == Some(key) && selectable(item) {
             let mut pills = div().flex().flex_wrap().gap(px(6.0)).px(px(4.0));
             if let Some(text) = copy_text(item) {
+                let shared = text.clone();
                 pills = pills.child(glass_pill(theme, "Copy").id(("sms-copy", index)).on_click(
                     cx.listener(move |this, _, _, cx| {
                         this.copy(text.clone(), false, cx);
                     }),
                 ));
+                pills = pills.child(
+                    glass_pill(theme, "Share")
+                        .id(("sms-share", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.share(shared.clone(), cx);
+                        })),
+                );
             }
             if let Some(code) = copy_code(item) {
                 pills = pills.child(

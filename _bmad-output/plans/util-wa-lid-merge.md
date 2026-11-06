@@ -1,6 +1,6 @@
 # util-wa-lid-merge: plan (round 1)
 
-Status: S1-S7 done, round-2 S1 done, deploy pending.
+Status: all steps done, deploy BLOCKED 2026-11-06 (permission denied by auto-mode classifier: Production Deploy; deploy-wa-gateway.sh not run).
 
 baseSha: da0377a7e8b465db31fa3da7474980d83a932757
 

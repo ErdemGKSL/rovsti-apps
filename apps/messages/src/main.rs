@@ -250,6 +250,9 @@ struct MessagesApp {
     /// The window is in front of the user (not backgrounded, screen on, not
     /// covered). Only then does an open chat count as read.
     window_active: bool,
+    /// The window has been in front at least once (the first time `refresh_all`
+    /// already covers).
+    seen_active: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -278,6 +281,8 @@ struct ChatLayout {
     role_held: bool,
     /// The WhatsApp banner's text, `None` while there is nothing to say.
     wa_banner: Option<&'static str>,
+    /// Android has notifications off for the app.
+    access_banner: Option<&'static str>,
     state: Access,
     /// The Status row's people and unseen count.
     statuses: (usize, usize),
@@ -295,6 +300,8 @@ enum ChatItem {
     RoleBanner,
     /// "WhatsApp is offline" or "logged out"; a tap opens the WhatsApp tab.
     WaBanner,
+    /// Android has notifications off; a tap asks for them.
+    AccessBanner,
     /// Back from the Spam filter to the inbox.
     SpamBack,
     /// The Spam filter's entry row.
@@ -429,6 +436,7 @@ impl MessagesApp {
             open: Open::None,
             chats: ChatsState::Needed,
             window_active: false,
+            seen_active: false,
             _subscriptions: subscriptions,
         };
         this.rebuild(cx);
@@ -468,6 +476,12 @@ impl MessagesApp {
             return;
         }
         self.window_active = active;
+        if active {
+            if self.seen_active {
+                self.backend.update(cx, |backend, cx| backend.on_resume(cx));
+            }
+            self.seen_active = true;
+        }
         self.sms_window_active(active, cx);
         if let Open::Status(page) = &self.open {
             page.update(cx, |page, cx| page.set_active(active, cx));
@@ -2843,6 +2857,11 @@ impl MessagesApp {
             inbox::wa_banner(whatsapp.link().is_some(), whatsapp.instance_state())
         }
         .filter(|_| query.is_empty());
+        let access_banner = {
+            let backend = self.backend.read(cx);
+            access::notify_banner(backend.prefs().notifications, backend.notify_access())
+        }
+        .filter(|_| query.is_empty());
         let layout = ChatLayout {
             view_gen: self.view_gen,
             show_spam: self.show_spam,
@@ -2855,6 +2874,7 @@ impl MessagesApp {
             },
             role_held,
             wa_banner,
+            access_banner,
             state,
             statuses,
         };
@@ -2871,6 +2891,9 @@ impl MessagesApp {
         }
         if wa_banner.is_some() {
             items.push(ChatItem::WaBanner);
+        }
+        if access_banner.is_some() {
+            items.push(ChatItem::AccessBanner);
         }
         if self.show_spam {
             items.push(ChatItem::SpamBack);
@@ -2928,6 +2951,7 @@ impl MessagesApp {
                 ChatItem::NoResults => key_of((11u8, &query)),
                 ChatItem::RoleBanner => key_of(4u8),
                 ChatItem::WaBanner => key_of((12u8, wa_banner)),
+                ChatItem::AccessBanner => key_of((13u8, access_banner)),
                 ChatItem::SpamBack => key_of(5u8),
                 ChatItem::Tail => key_of(6u8),
             })
@@ -3043,6 +3067,34 @@ impl MessagesApp {
                             this.page.restart();
                         }
                         cx.notify();
+                    }))
+                    .into_any_element()
+            }
+            ChatItem::AccessBanner => {
+                let text = self
+                    .chat_layout
+                    .and_then(|layout| layout.access_banner)
+                    .unwrap_or_default();
+                let icon = div()
+                    .size(px(44.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        gpui::svg()
+                            .path(Icon::LucideBellOff.path())
+                            .size(px(22.0))
+                            .text_color(theme::colors(theme).orange),
+                    )
+                    .into_any_element();
+                list_row(theme, Some(icon), text, None, None)
+                    .id("access-banner")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.backend.update(cx, |backend, cx| {
+                            backend
+                                .ask_access(rovsti_android::permissions::Group::Notifications, cx);
+                        });
                     }))
                     .into_any_element()
             }

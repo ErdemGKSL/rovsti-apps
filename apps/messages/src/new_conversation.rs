@@ -257,6 +257,21 @@ impl Render for NewConversation {
             .into_any_element();
         let header = header_bar(theme, back, "New message".into(), None, None);
 
+        let contacts_off = self.backend.read(cx).contacts_denied().then(|| {
+            div()
+                .id("new-contacts-access")
+                .flex_none()
+                .px(px(16.0))
+                .pb(px(8.0))
+                .text_size(typography::SUBHEADLINE.size)
+                .text_color(colors.orange)
+                .child(crate::access::CONTACTS_OFF)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.backend.update(cx, |backend, cx| {
+                        backend.ask_access(rovsti_android::permissions::Group::Contacts, cx);
+                    });
+                }))
+        });
         let body = if self.rows.is_empty() {
             div()
                 .flex_1()
@@ -297,6 +312,7 @@ impl Render for NewConversation {
                 window,
                 cx,
             )))
+            .children(contacts_off)
             .child(body)
     }
 }

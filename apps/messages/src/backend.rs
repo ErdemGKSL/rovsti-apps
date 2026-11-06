@@ -165,6 +165,10 @@ pub struct Backend {
     threads_state: Access,
     sims: SmsSimsPayload,
     contacts: Arc<ContactIndex>,
+    /// Android's notification permission (`None` = unknown, or desktop).
+    notify_access: Option<permissions::Access>,
+    /// The last contacts pull was refused by Android.
+    contacts_denied: bool,
     locale: LocaleTime,
     /// `None` until the first answer (the banner stays hidden meanwhile).
     sms_role: Option<bool>,
@@ -202,6 +206,8 @@ impl Backend {
                 threads_state: Access::Loading,
                 sims: SmsSimsPayload::default(),
                 contacts: Arc::new(ContactIndex::default()),
+                notify_access: None,
+                contacts_denied: false,
                 locale: LocaleTime::default(),
                 sms_role: None,
                 prefs: MessagesPrefs::default(),
@@ -301,6 +307,14 @@ impl Backend {
         &self.sims
     }
 
+    pub fn notify_access(&self) -> Option<permissions::Access> {
+        self.notify_access
+    }
+
+    pub fn contacts_denied(&self) -> bool {
+        self.contacts_denied
+    }
+
     pub fn contacts(&self) -> &Arc<ContactIndex> {
         &self.contacts
     }
@@ -389,6 +403,97 @@ impl Backend {
         self.pull_locale(cx);
         self.pull_role(cx);
         self.pull_blocked(cx);
+        self.pull_access(cx);
+    }
+
+    /// The window came back to the front: the user may have changed things in
+    /// the system settings.
+    pub fn on_resume(&mut self, cx: &mut Context<Self>) {
+        let pulls = crate::access::resume_pulls(self.threads_state, self.contacts_denied);
+        if pulls.role {
+            self.pull_role(cx);
+        }
+        if pulls.access {
+            self.pull_access(cx);
+        }
+        if pulls.threads {
+            self.pull_threads(cx);
+        }
+        if pulls.contacts {
+            self.pull_contacts(cx);
+        }
+    }
+
+    /// Reads Android's notification permission.
+    pub fn pull_access(&mut self, cx: &mut Context<Self>) {
+        let task = cx
+            .background_executor()
+            .spawn(async { permissions::state(permissions::Group::Notifications) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let next = match result {
+                    Ok(access) => Some(access),
+                    Err(Error::Unsupported) => None,
+                    Err(error) => {
+                        log::warn!("reading the notification permission failed: {error}");
+                        this.notify_access
+                    }
+                };
+                if next != this.notify_access {
+                    this.notify_access = next;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Asks for a permission: the system dialog, or App info when Android
+    /// will not show it any more.
+    pub fn ask_access(&mut self, group: permissions::Group, cx: &mut Context<Self>) {
+        let task = cx.background_executor().spawn(async move {
+            let open = || permissions::open_app_details().map(|_| ());
+            if matches!(group, permissions::Group::Notifications) {
+                match crate::access::ask_for(permissions::state(group)?) {
+                    None => Ok(()),
+                    Some(crate::access::Ask::Request) => {
+                        if permissions::request(group)? {
+                            Ok(())
+                        } else {
+                            open()
+                        }
+                    }
+                    Some(crate::access::Ask::OpenAppInfo) => open(),
+                }
+            } else {
+                // Messages declares only READ_CONTACTS, but the group also
+                // checks WRITE_CONTACTS, so its state cannot be trusted.
+                if permissions::request(group)? {
+                    Ok(())
+                } else {
+                    open()
+                }
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |_, cx| match result {
+                Ok(()) => {}
+                Err(Error::Unsupported) => {
+                    cx.emit(BackendEvent::Notice("That needs an Android phone.".into()));
+                }
+                Err(error) => {
+                    log::warn!("asking for a permission failed: {error}");
+                    cx.emit(BackendEvent::Notice(
+                        "Couldn't open the permission settings".into(),
+                    ));
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub fn pull_threads(&mut self, cx: &mut Context<Self>) {
@@ -470,9 +575,9 @@ impl Backend {
         let task = cx.background_executor().spawn(async {
             // Indexing is part of the background work.
             match decode::<ContactsPayload>(providers::contacts()) {
-                Pull::Ready(p) => Some(ContactIndex::new(p.contacts)),
-                Pull::Unsupported => Some(ContactIndex::new(Preview::contacts())),
-                Pull::Denied => Some(ContactIndex::default()),
+                Pull::Ready(p) => Some((ContactIndex::new(p.contacts), false)),
+                Pull::Unsupported => Some((ContactIndex::new(Preview::contacts()), false)),
+                Pull::Denied => Some((ContactIndex::default(), true)),
                 Pull::Failed(error) => {
                     log::warn!("pulling the contacts failed: {error}");
                     None
@@ -485,7 +590,8 @@ impl Backend {
                 if this.pulls.contacts != generation {
                     return;
                 }
-                if let Some(index) = index {
+                if let Some((index, denied)) = index {
+                    this.contacts_denied = denied;
                     this.contacts = Arc::new(index);
                     cx.notify();
                 }

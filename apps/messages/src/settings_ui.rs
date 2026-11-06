@@ -695,12 +695,35 @@ impl SettingsView {
                 .update(cx, |backend, cx| backend.request_sms_role(cx));
         }))
         .into_any_element();
-        section(theme, None, [row]).into_any_element()
+        let mut rows = vec![row];
+        if self.backend.read(cx).contacts_denied() {
+            rows.push(
+                list_row(
+                    theme,
+                    None,
+                    "Contacts",
+                    Some(crate::access::CONTACTS_OFF.into()),
+                    Some("Off".into()),
+                )
+                .id("set-contacts")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.backend.update(cx, |backend, cx| {
+                        backend.ask_access(rovsti_android::permissions::Group::Contacts, cx);
+                    });
+                }))
+                .into_any_element(),
+            );
+        }
+        section(theme, None, rows).into_any_element()
     }
 
     fn notifications(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let (prefs, threads, sms_names) = {
+        let (prefs, threads, sms_names, banner) = {
             let backend = self.backend.read(cx);
+            let banner = crate::access::notify_banner(
+                backend.prefs().notifications,
+                backend.notify_access(),
+            );
             let names: HashMap<i64, String> = backend
                 .threads()
                 .iter()
@@ -714,7 +737,12 @@ impl SettingsView {
                     (!names.is_empty()).then(|| (t.thread_id, names.join(", ")))
                 })
                 .collect();
-            (backend.prefs().clone(), backend.threads().to_vec(), names)
+            (
+                backend.prefs().clone(),
+                backend.threads().to_vec(),
+                names,
+                banner,
+            )
         };
         let name_of = |thread: &ThreadId| match thread {
             ThreadId::Sms(id) => sms_names.get(id).cloned(),
@@ -748,6 +776,20 @@ impl SettingsView {
             }))
             .into_any_element(),
         ];
+        if let Some(text) = banner {
+            rows.insert(
+                1,
+                list_row(theme, None, "Allow notifications", Some(text.into()), None)
+                    .id("set-allow-notify")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.backend.update(cx, |backend, cx| {
+                            backend
+                                .ask_access(rovsti_android::permissions::Group::Notifications, cx);
+                        });
+                    }))
+                    .into_any_element(),
+            );
+        }
         for (index, tag) in prefs.muted.iter().enumerate() {
             let owned = tag.clone();
             rows.push(

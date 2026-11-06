@@ -11,7 +11,7 @@ APK: build with `gpuiforge build android` in `apps/messages`. Put `google-servic
 | # | Step | Expected | Pass / Fail | Notes |
 |---|---|---|---|---|
 | **A. Role grant on HyperOS** | | | | |
-| 1 | Install and open Rovsti Messages. Allow SMS, Contacts, Phone and Notifications when asked. | The permissions are granted. On HyperOS "Allow restricted settings" may be needed first (Settings, Apps, Rovsti Messages, three dots). | | |
+| 1 | Install and open Rovsti Messages. Tap Make default (it grants SMS, Contacts, Phone and Notifications). If any is still off, tap the inbox banner, the Allow notifications and Contacts rows in Settings, or the Contacts line in New message. | The permissions are granted. On HyperOS "Allow restricted settings" may be needed first (Settings, Apps, Rovsti Messages, three dots). | | |
 | 2 | Tap the default-app prompt (Settings, Apps, Default apps, SMS app) and choose Rovsti Messages. | The system dialog offers Rovsti Messages (it appears only if all four role components resolve) and the role is granted. | | |
 | 3 | Reopen the app. | No "make default" banner; sending is enabled. | | |
 | **B. SMS received with the app not running (`SMS_DELIVER`, cold)** | | | | |

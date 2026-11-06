@@ -79,6 +79,8 @@ const T9_SHOWN: usize = 3;
 /// Height of one suggestion row and the gap between rows.
 const T9_ROW_H: f32 = 48.0;
 const T9_GAP: f32 = 6.0;
+/// Height of a row in the Matches sheet.
+const T9_RESULT_H: f32 = 58.0;
 
 /// The T9 suggestions for the digits in the field, computed like
 /// [`DialMatch`]: off the UI thread whenever the field or the contact index
@@ -101,6 +103,24 @@ pub(crate) struct T9Match {
     /// The strip's rows, resolved from `hits` when they (or the exact match,
     /// the index or the name format) change, never per frame.
     rows: T9Rows,
+    /// Every hit, for the Matches sheet; resolved when it opens (and when the
+    /// hits change under it), never per frame.
+    all: T9All,
+}
+
+/// Every hit resolved for the Matches sheet.
+#[derive(Default)]
+struct T9All {
+    key: Option<AllKey>,
+    rows: Arc<[Suggestion]>,
+}
+
+/// What [`T9All`] was resolved from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AllKey {
+    hits_gen: u64,
+    index: usize,
+    format: rovsti_core::wire::NameFormat,
 }
 
 /// What [`T9Rows`] was resolved from.
@@ -126,7 +146,6 @@ struct T9Rows {
 /// The digits worth a T9 lookup: at least one, and nothing but digits (`+`,
 /// `*` and `#` are not T9).
 /// Title of the T9 results list.
-#[allow(dead_code)] // wired up by a later step
 pub(crate) fn results_title(digits: &str, count: usize) -> String {
     if count == 1 {
         format!("1 match for {digits}")
@@ -142,7 +161,6 @@ pub(crate) fn contacts_hint_shown(denied: bool, digits_typed: bool, dismissed: b
 }
 
 /// Parses a T9 result row id: `sheet-t9-{i}` is (i, false), `sheet-t9c-{i}` is (i, true).
-#[allow(dead_code)] // wired up by a later step
 pub(crate) fn t9_result_index(id: &str) -> Option<(usize, bool)> {
     if let Some(i) = id.strip_prefix("sheet-t9c-") {
         i.parse().ok().map(|i| (i, true))
@@ -167,6 +185,26 @@ pub(crate) fn visible_suggestions(hits: &[T9Hit], exact: Option<i64>) -> (Vec<T9
         .filter(|hit| exact != Some(i64::from(hit.contact_idx)));
     let shown: Vec<T9Hit> = rest.by_ref().take(T9_SHOWN).copied().collect();
     (shown, rest.count())
+}
+
+/// One hit resolved into a row: name, matched span, number and labels.
+fn suggestion_of(
+    index: &rovsti_core::search::ContactIndex,
+    hit: &T9Hit,
+    format: rovsti_core::wire::NameFormat,
+) -> Option<Suggestion> {
+    let contact = index.contact(hit.contact_idx)?;
+    let number = contact.numbers.get(usize::from(hit.number_idx))?;
+    let name = names::display(contact, format).into_owned();
+    let span = hit.name_span.and_then(|s| byte_range(&name, s));
+    Some(Suggestion {
+        monogram: rovsti_core::avatar::monogram(&name).map(|c| c.to_string().into()),
+        hue: rovsti_core::avatar::hue_index(Some(contact.id)),
+        label: format!("Call {name}, {}", number.raw).into(),
+        number: number.raw.clone().into(),
+        span,
+        name: name.into(),
+    })
 }
 
 /// Byte range of the characters `span` of `name`, clamped to the name.
@@ -859,7 +897,14 @@ impl PhoneApp {
     /// they depend on changed. An unchanged frame costs one comparison (this
     /// used to scan the whole book for the exact match and build every row's
     /// name and labels on every frame the strip showed).
-    pub(crate) fn sync_t9_rows(&mut self, cx: &Context<Self>) {
+    pub(crate) fn sync_t9_rows(&mut self, cx: &mut Context<Self>) {
+        if self.sheet_kind == crate::SheetKind::T9Results && self.sheet.is_open() {
+            if t9_digits(&self.dialed).is_none() {
+                self.close_sheet(cx);
+            } else {
+                self.t9_all_rows(cx);
+            }
+        }
         let Load::Ready(index) = self.backend.read(cx).contacts() else {
             if self.t9.rows.key.is_some() {
                 self.t9.rows = T9Rows::default();
@@ -883,20 +928,7 @@ impl PhoneApp {
         let (shown, more) = visible_suggestions(&self.t9.hits, exact);
         let shown = shown
             .iter()
-            .filter_map(|hit| {
-                let contact = index.contact(hit.contact_idx)?;
-                let number = contact.numbers.get(usize::from(hit.number_idx))?;
-                let name = names::display(contact, format).into_owned();
-                let span = hit.name_span.and_then(|s| byte_range(&name, s));
-                Some(Suggestion {
-                    monogram: rovsti_core::avatar::monogram(&name).map(|c| c.to_string().into()),
-                    hue: rovsti_core::avatar::hue_index(Some(contact.id)),
-                    label: format!("Call {name}, {}", number.raw).into(),
-                    number: number.raw.clone().into(),
-                    span,
-                    name: name.into(),
-                })
-            })
+            .filter_map(|hit| suggestion_of(&index, hit, format))
             .collect();
         let (more_text, more_aria) = if more > 0 {
             (
@@ -933,11 +965,217 @@ impl PhoneApp {
         }
     }
 
-    /// A tap on "N more": Contacts with the search prefilled.
+    /// Resolves every hit (at most [`t9::MAX_HITS`]) for the Matches sheet
+    /// when the hits, the index or the name format changed since last time.
+    fn t9_all_rows(&mut self, cx: &Context<Self>) {
+        let Load::Ready(index) = self.backend.read(cx).contacts() else {
+            self.t9.all = T9All::default();
+            return;
+        };
+        let key = AllKey {
+            hits_gen: self.t9.hits_gen,
+            index: Arc::as_ptr(&index) as usize,
+            format: self.t9.format,
+        };
+        if self.t9.all.key == Some(key) {
+            return;
+        }
+        let rows: Arc<[Suggestion]> = self
+            .t9
+            .hits
+            .iter()
+            .take(rovsti_core::t9::MAX_HITS)
+            .filter_map(|hit| suggestion_of(&index, hit, key.format))
+            .collect();
+        self.t9.all = T9All {
+            key: Some(key),
+            rows,
+        };
+    }
+
+    /// A tap on "N more": the Matches sheet with every hit.
     pub(crate) fn t9_more(&mut self, cx: &mut Context<Self>) {
-        let query = self.dialed.clone();
-        self.contacts.field.update(cx, |f, cx| f.set(&query, cx));
-        self.select_tab(crate::CONTACTS_TAB, cx);
+        if !self.can_open_sheet() {
+            return;
+        }
+        self.t9_all_rows(cx);
+        self.sheet_kind = crate::SheetKind::T9Results;
+        self.sheet.open();
+        cx.notify();
+    }
+
+    /// A tap (finger-up; the mouse button on desktop) on a Matches sheet id.
+    fn t9_result_act(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.presses.down(id);
+        if let Some((index, call)) = t9_result_index(id) {
+            self.t9_result_tap(index, call, window, cx);
+        }
+    }
+
+    /// A tap on row `index` of the Matches sheet: its number fills the field
+    /// (`call` false) or is called (`call` true); the sheet closes either way.
+    pub(crate) fn t9_result_tap(
+        &mut self,
+        index: usize,
+        call: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(number) = self.t9.all.rows.get(index).map(|row| row.number.clone()) else {
+            return;
+        };
+        self.close_sheet(cx);
+        if call {
+            self.place_call_from(&number, window, cx);
+            return;
+        }
+        self.dialed = dial::normalise_paste(&number)
+            .chars()
+            .take(dial::MAX_LEN)
+            .collect();
+        self.status = None;
+        self.digit_pop.snap(1.1);
+        self.digit_pop.set_target(1.0);
+        self.delete_shown.set_target(1.0);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        cx.notify();
+    }
+
+    /// The Matches sheet body: a header and every hit in a scrolling column.
+    pub(crate) fn t9_results_sheet(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.sheet.is_visible() {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        let answer = call_colors(theme).answer;
+        let rows = &self.t9.all.rows;
+        let mut list = div()
+            .id("sheet-t9-list")
+            .flex()
+            .flex_col()
+            .max_h(px(T9_RESULT_H * 6.5))
+            .overflow_y_scroll();
+        for (i, row) in rows.iter().enumerate() {
+            let row_id: SharedString = format!("sheet-t9-{i}").into();
+            let call_id: SharedString = format!("sheet-t9c-{i}").into();
+            let press = self.presses.value(&row_id).clamp(0.0, 1.0);
+            let call_press = self.presses.value(&call_id).clamp(0.0, 1.0);
+            let highlights: Vec<_> = row
+                .span
+                .clone()
+                .into_iter()
+                .map(|r| {
+                    (
+                        r,
+                        HighlightStyle {
+                            font_weight: Some(FontWeight::BOLD),
+                            color: Some(colors.accent),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
+            let circle = div()
+                .id(call_id.clone())
+                .role(Role::Button)
+                .aria_label(row.label.clone())
+                .relative()
+                .flex_none()
+                .size(px(36.0 * press_scale(call_press, scale::PRESS)))
+                .rounded_full()
+                .bg(mix(answer, gpui::white(), 0.18 * call_press))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    svg()
+                        .path(Icon::LucidePhone.path())
+                        .size(px(18.0))
+                        .text_color(gpui::white()),
+                )
+                .on_mouse_down(MouseButton::Left, {
+                    let id = call_id.clone();
+                    cx.listener(move |this, _, window, cx| this.t9_result_act(&id, window, cx))
+                })
+                .child(touch_surface(Self::touch_listener(
+                    cx,
+                    Some(call_id.clone()),
+                )));
+            list = list.child(
+                div()
+                    .id(row_id.clone())
+                    .role(Role::Button)
+                    .aria_label(format!("Use {}", row.number))
+                    .relative()
+                    .h(px(T9_RESULT_H))
+                    .px(px(18.0))
+                    .opacity(1.0 - 0.3 * press)
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .child(person_avatar(
+                        theme,
+                        row.hue,
+                        row.monogram.as_ref(),
+                        36.0,
+                        None,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(typography::BODY.size)
+                                    .text_color(colors.label)
+                                    .child(
+                                        StyledText::new(row.name.clone())
+                                            .with_highlights(highlights),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(typography::FOOTNOTE.size)
+                                    .text_color(colors.secondary_label)
+                                    .child(row.number.clone()),
+                            ),
+                    )
+                    .on_mouse_down(MouseButton::Left, {
+                        let id = row_id.clone();
+                        cx.listener(move |this, _, window, cx| this.t9_result_act(&id, window, cx))
+                    })
+                    .child(touch_surface(Self::touch_listener(
+                        cx,
+                        Some(row_id.clone()),
+                    )))
+                    .child(circle),
+            );
+        }
+        let body = div()
+            .flex()
+            .flex_col()
+            .pb(px(18.0))
+            .child(
+                div()
+                    .px(px(18.0))
+                    .pb(px(8.0))
+                    .text_size(typography::TITLE3.size)
+                    .font_weight(typography::TITLE3.weight)
+                    .text_color(colors.label)
+                    .child(results_title(&self.dialed, rows.len())),
+            )
+            .child(list)
+            .into_any_element();
+        self.modal_sheet(theme, window, "Matches", body, cx)
     }
 
     fn t9_strip(&self, theme: Theme, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -1507,6 +1745,31 @@ impl PhoneApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suggestion_of_resolves_hits_and_rejects_stale_ones() {
+        let index = rovsti_core::search::ContactIndex::new(crate::sample::long_contacts(5));
+        let hit = T9Hit {
+            contact_idx: 0,
+            number_idx: 0,
+            name_span: None,
+            rank: 3,
+        };
+        let format = rovsti_core::wire::NameFormat::default();
+        let row = suggestion_of(&index, &hit, format).expect("first contact resolves");
+        assert!(row.label.starts_with("Call "));
+        assert!(row.label.ends_with(&*row.number));
+        let stale = T9Hit {
+            contact_idx: 999,
+            ..hit
+        };
+        assert!(suggestion_of(&index, &stale, format).is_none());
+        let no_number = T9Hit {
+            number_idx: 999,
+            ..hit
+        };
+        assert!(suggestion_of(&index, &no_number, format).is_none());
+    }
 
     #[test]
     fn results_title_pluralises() {

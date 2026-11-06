@@ -110,6 +110,8 @@ enum SheetKind {
     ResetReplies,
     /// "Delete calls with {who}?" / "Delete all call history?" (`history_ui`).
     ConfirmDelete,
+    /// Every T9 match behind the keypad strip's "N more" (`keypad::t9_results_sheet`).
+    T9Results,
 }
 
 /// The line under the number field.
@@ -1326,6 +1328,7 @@ impl PhoneApp {
             SheetKind::AddCall | SheetKind::SimChooser | SheetKind::Reply => None,
             SheetKind::ResetReplies => self.replies_reset_sheet(theme, window, cx),
             SheetKind::ConfirmDelete => self.confirm_delete_sheet(theme, window, cx),
+            SheetKind::T9Results => self.t9_results_sheet(theme, window, cx),
             SheetKind::ImportPreview => {
                 if !self.sheet.is_visible() {
                     return None;

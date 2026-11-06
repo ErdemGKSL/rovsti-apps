@@ -175,6 +175,7 @@ struct MessagesApp {
     back_enabled: bool,
     /// The gateway's chats as inbox threads (SMS comes from the backend).
     /// Change it through [`Self::wa_threads_mut`], which marks the inbox stale.
+    drafts: drafts::Drafts,
     wa_threads: Vec<InboxThread>,
     /// Archive, pin, mute and preview details of each chat, by JID. Change it
     /// through [`Self::wa_info_mut`].
@@ -346,6 +347,7 @@ impl MessagesApp {
             digests: Digests::default(),
             remote_scheduled: Vec::new(),
             back_enabled: false,
+            drafts: drafts::Drafts::default(),
             wa_threads: Vec::new(),
             wa_info: HashMap::new(),
             avatars,
@@ -627,7 +629,7 @@ impl MessagesApp {
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             return;
         };
-        self.leave_page();
+        self.leave_page(cx);
         let (feed, backend, avatars) = (
             self.statuses.clone(),
             self.backend.clone(),
@@ -730,7 +732,7 @@ impl MessagesApp {
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             return;
         };
-        self.leave_page();
+        self.leave_page(cx);
         let is_group = self
             .wa_threads
             .iter()
@@ -797,6 +799,9 @@ impl MessagesApp {
         if meta.marked_unread {
             self.chat_action(&jid, ChatActionKind::MarkRead { read: true }, cx);
         }
+        if let Some(text) = self.drafts.take(&ThreadId::WhatsApp(jid.clone())) {
+            conversation.update(cx, |c, cx| c.set_draft(&text, cx));
+        }
         self.open = Open::WhatsApp(jid, conversation);
         self.rebuild(cx);
         self.page.restart();
@@ -810,7 +815,7 @@ impl MessagesApp {
         recipients: Vec<String>,
         cx: &mut Context<Self>,
     ) {
-        self.leave_page();
+        self.leave_page(cx);
         let backend = self.backend.clone();
         let conversation =
             cx.new(|cx| SmsConversation::new(backend, thread_id, title, recipients, cx));
@@ -830,6 +835,11 @@ impl MessagesApp {
         .detach();
         if thread_id >= 0 {
             self.dismiss_notification(&ThreadId::Sms(thread_id), cx);
+        }
+        if thread_id >= 0
+            && let Some(text) = self.drafts.take(&ThreadId::Sms(thread_id))
+        {
+            conversation.update(cx, |c, cx| c.set_draft(&text, cx));
         }
         self.open = Open::Sms(conversation);
         self.update_switch(cx);
@@ -855,7 +865,7 @@ impl MessagesApp {
     }
 
     fn open_new(&mut self, cx: &mut Context<Self>) {
-        self.leave_page();
+        self.leave_page(cx);
         let backend = self.backend.clone();
         let entry = cx.new(|cx| NewConversation::new(backend, cx));
         cx.subscribe(&entry, |this, _, event, cx| match event {
@@ -890,13 +900,21 @@ impl MessagesApp {
 
     /// A page is about to replace the open one (a notification, the channel
     /// switch): layers that belonged to the old page go with it.
-    fn leave_page(&mut self) {
+    fn leave_page(&mut self, cx: &App) {
+        if let Some(thread) = self.open_thread_id(cx) {
+            let text = match &self.open {
+                Open::WhatsApp(_, conversation) => conversation.read(cx).draft(cx),
+                Open::Sms(conversation) => conversation.read(cx).draft(cx),
+                _ => String::new(),
+            };
+            self.drafts.put(thread, &text);
+        }
         self.schedule.close();
         self.row_menu = None;
     }
 
     fn close_page(&mut self, cx: &mut Context<Self>) {
-        self.leave_page();
+        self.leave_page(cx);
         self.open = Open::None;
         self.page.restart();
         cx.notify();
@@ -1217,6 +1235,7 @@ impl MessagesApp {
         if self.open_thread_id(cx).as_ref() == Some(&thread) {
             self.close_page(cx);
         }
+        self.drafts.forget(&thread);
         self.dismiss_notification(&thread, cx);
         self.show_pill("Conversation deleted");
         cx.notify();

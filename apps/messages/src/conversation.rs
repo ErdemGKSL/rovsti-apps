@@ -367,6 +367,19 @@ impl Conversation {
         }
     }
 
+    /// Unsent composer text worth keeping (nothing while editing a message).
+    pub fn draft(&self, cx: &gpui::App) -> String {
+        if self.editing.is_some() {
+            return String::new();
+        }
+        self.composer.read(cx).text().to_owned()
+    }
+
+    /// Puts kept text back into the composer.
+    pub fn set_draft(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.composer.update(cx, |field, cx| field.set(text, cx));
+    }
+
     /// The text was scheduled: the composer is done with it.
     pub fn clear_draft(&mut self, cx: &mut Context<Self>) {
         self.composer.update(cx, |field, cx| field.clear(cx));

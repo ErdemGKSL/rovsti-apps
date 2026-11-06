@@ -6,10 +6,8 @@ use std::collections::HashMap;
 use rovsti_core::ThreadId;
 
 #[derive(Default)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct Drafts(HashMap<ThreadId, String>);
 
-#[cfg_attr(not(test), allow(dead_code))]
 impl Drafts {
     /// Keeps `text` for `thread`. Blank text removes the draft; a thread not
     /// yet created (`Sms` with a negative id) keeps none.

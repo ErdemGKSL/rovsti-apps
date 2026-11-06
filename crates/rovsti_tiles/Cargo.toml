@@ -1,0 +1,23 @@
+[package]
+name = "rovsti_tiles"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Map tile fetching over rustls (graviola) and the per-server disk cache for Rovsti Stops."
+
+[dependencies]
+rovsti_geo.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Pure-Rust crypto only: `ring` and `aws-lc-rs` need a C toolchain (the NDK).
+rustls-graviola = "0.4"
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "gzip"] }
+
+[dev-dependencies]
+flate2.workspace = true
+
+[lints]
+workspace = true

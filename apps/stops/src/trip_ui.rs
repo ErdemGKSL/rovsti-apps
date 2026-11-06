@@ -9,13 +9,12 @@ use std::time::Duration;
 
 use gpui::{
     AnyElement, Context, Hsla, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, div, px, svg,
+    StatefulInteractiveElement, Styled, div, px,
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
 use rovsti_geo::{ActiveTrip, Diameter, FixOut, Side, TripState, tiles::tiles_for_circle};
 use rovsti_ui::{
-    Icon,
-    components::{backdrop, empty_state, flat_glass, glass_pill, list_row, section},
+    components::{backdrop, flat_glass, glass_pill, list_row, section},
     theme,
     tokens::{Theme, radius, typography},
 };
@@ -198,26 +197,20 @@ pub struct AlarmView {
 
 // ---- views -----------------------------------------------------------------------
 
-fn text_block(theme: Theme, text: impl Into<SharedString>) -> AnyElement {
-    div()
-        .px(px(16.0))
-        .pb(px(12.0))
-        .text_size(typography::FOOTNOTE.size)
-        .text_color(theme::colors(theme).secondary_label)
-        .child(text.into())
-        .into_any_element()
-}
-
 impl StopsApp {
     pub(crate) fn trip_tab(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let mut page = div().flex().flex_col().gap(px(24.0));
         if self.trip.is_some() {
             page = page.child(self.live_card(theme, cx));
+            if let Some(map) = self.map_card(theme, cx) {
+                page = page.child(map);
+            }
         } else {
+            // Idle: the map is the picker, the pick bar sits right under it.
+            if let Some(map) = self.map_card(theme, cx) {
+                page = page.child(map);
+            }
             page = page.child(self.setup_cards(theme, cx));
-        }
-        if let Some(map) = self.map_card(theme, cx) {
-            page = page.child(map);
         }
         if let Some(hint) = backend::full_screen_notice(&self.preflight) {
             let row = list_row(
@@ -259,68 +252,107 @@ impl StopsApp {
         page.into_any_element()
     }
 
-    /// A and B rows and Start: what shows while no trip runs.
+    /// Under the map while no trip runs: the pick bar, the other ways to pick,
+    /// the A and B rows and the notice toggle.
     fn setup_cards(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
-        let mut rows: Vec<AnyElement> = Vec::new();
-        for slot in [Slot::A, Slot::B] {
-            let dest = self.pick.ends.get(slot);
-            let title = match dest {
-                Some(_) => pick::point_label(slot, dest),
-                None => format!("Choose {}", slot.label()),
-            };
-            let active = slot == self.pick.sheet_slot();
-            rows.push(
-                list_row(
-                    theme,
-                    None,
-                    format!("{}  {title}", slot.label()),
-                    None,
-                    Some(if active { "Next" } else { "" }.into()),
-                )
-                .id(("end-row", slot as usize))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.pick.set_sheet_slot(slot);
-                    this.open_picker(cx);
-                }))
-                .into_any_element(),
+        let ready = self.pick.can_start();
+        let any_end = !self.pick.ends.is_empty();
+        let hint = self.pick.hint();
+        let busy = self.busy;
+        let label = if busy { "Starting..." } else { "Start" };
+        let pair = self.pick.ends.a.clone().zip(self.pick.ends.b.clone());
+        let start = glass_pill(theme, label)
+            .id("start")
+            .flex_1()
+            .h(px(52.0))
+            .text_color(if ready {
+                colors.accent
+            } else {
+                colors.tertiary_label
+            });
+        let start = match pair {
+            Some((a, b)) if ready => start.on_click(cx.listener(move |this, _, _, cx| {
+                this.request_start(a.clone(), b.clone(), cx);
+            })),
+            _ => start,
+        };
+        let mut buttons = div().flex().items_center().gap(px(8.0));
+        if any_end {
+            buttons = buttons.child(
+                glass_pill(theme, "Clear")
+                    .id("clear-ends")
+                    .h(px(52.0))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.pick.clear();
+                        this.map.follow = true;
+                        cx.notify();
+                    })),
             );
         }
-        rows.push(
-            list_row(
-                theme,
-                Some(
-                    svg()
-                        .path(Icon::LucideArrowLeftRight.path())
-                        .size(px(18.0))
-                        .text_color(colors.accent)
-                        .into_any_element(),
-                ),
-                "Swap A and B",
-                None,
-                None,
+        buttons = buttons
+            .child(
+                glass_pill(theme, "Swap")
+                    .id("swap-ends")
+                    .h(px(52.0))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.pick.swap();
+                        cx.notify();
+                    })),
             )
-            .id("swap-ends")
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.pick.swap();
-                cx.notify();
-            }))
-            .into_any_element(),
-        );
-        let mut page = div().flex().flex_col().gap(px(24.0));
-        if self.pick.ends.is_empty() {
-            page = page.child(empty_state(
-                theme,
-                "Where are you going?",
-                "Pick two points, A and B. Crossing the line between them inside their circle wakes you.",
-            ));
-        }
-        page = page.child(section(theme, Some("Line".into()), rows));
-        let ready = self.pick.can_start();
-        page = page.child(text_block(theme, self.pick.hint().text()));
+            .child(start);
+        let mut bar = div()
+            .px(px(16.0))
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(
+                div()
+                    .text_size(typography::HEADLINE.size)
+                    .font_weight(typography::HEADLINE.weight)
+                    .text_color(match hint {
+                        pick::Hint::Invalid(_) => colors.red,
+                        _ => colors.label,
+                    })
+                    .child(hint.text()),
+            )
+            .child(buttons);
         if let Some(Ok(d)) = self.pick.ends.diameter() {
-            page = page.child(text_block(theme, trigger_text(&d)));
+            bar = bar.child(
+                div()
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.secondary_label)
+                    .child(trigger_text(&d)),
+            );
         }
+
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for slot in [Slot::A, Slot::B] {
+            let name = pick::point_label(slot, self.pick.ends.get(slot));
+            rows.push(
+                list_row(theme, None, format!("{}  {name}", slot.label()), None, None)
+                    .id(("end-row", slot as usize))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.pick.set_sheet_slot(slot);
+                        this.open_picker(cx);
+                    }))
+                    .into_any_element(),
+            );
+        }
+        let sources = list_row(
+            theme,
+            None,
+            "Saved places, recent trips, links",
+            None,
+            Some("Open".into()),
+        )
+        .id("pick-sources")
+        .on_click(cx.listener(|this, _, _, cx| this.open_picker(cx)))
+        .into_any_element();
+
+        let mut page = div().flex().flex_col().gap(px(16.0)).child(bar);
+        page = page.child(section(theme, None, [sources]));
+        page = page.child(section(theme, None, rows));
         if self.notice_available(cx) {
             let chat = self
                 .prefs
@@ -347,25 +379,7 @@ impl StopsApp {
                 .into_any_element()],
             ));
         }
-        let label = if self.busy { "Starting..." } else { "Start" };
-        let pair = self.pick.ends.a.clone().zip(self.pick.ends.b.clone());
-        let start = glass_pill(theme, label)
-            .id("start")
-            .w(px(220.0))
-            .h(px(52.0))
-            .text_color(if ready {
-                colors.accent
-            } else {
-                colors.tertiary_label
-            });
-        let start = match pair {
-            Some((a, b)) if ready => start.on_click(cx.listener(move |this, _, _, cx| {
-                this.request_start(a.clone(), b.clone(), cx);
-            })),
-            _ => start,
-        };
-        page.child(div().flex().justify_center().child(start))
-            .into_any_element()
+        page.into_any_element()
     }
 
     /// The running trip: where, how far, how long, and Stop.

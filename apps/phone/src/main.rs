@@ -679,7 +679,8 @@ impl PhoneApp {
     }
 
     /// System Back, in the order of EXPERIENCE.md: sheet, in-call keypad,
-    /// In-Call screen. On the tabs the OS decides (Activity moves to back).
+    /// In-Call screen. On the other tabs it goes to the Keypad; on the Keypad
+    /// the OS decides (Activity moves to back).
     fn on_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.reply_is_open() {
             // Back puts the reply sheet away and returns to the ringing card.
@@ -694,12 +695,24 @@ impl PhoneApp {
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
         } else if self.settings.sub_open() {
-            self.settings_close_sub(window, cx);
+            // The WhatsApp page steps back inside itself first.
+            let stepped = self.settings.sub == Some(settings_ui::Sub::WhatsApp)
+                && self
+                    .whatsapp
+                    .update(cx, |whatsapp, cx| whatsapp.go_back(cx));
+            if !stepped {
+                self.settings_close_sub(window, cx);
+            }
         } else if self.settings.is_open() {
             self.settings_close(window, cx);
         } else if self.contacts.typing {
             // First Back puts the keyboard away; the next one is the OS's.
             window.blur();
+        } else if self.incall.wants_back(self.incall.call_only) {
+            self.incall_back(cx);
+        } else if self.tabs.selected() != KEYPAD_TAB {
+            // From any other tab Back goes home, to the Keypad; there the OS decides.
+            self.select_tab(KEYPAD_TAB, cx);
         } else {
             self.incall_back(cx);
         }
@@ -716,7 +729,8 @@ impl PhoneApp {
             || self.sheet.is_open()
             || self.settings.is_open()
             || self.contacts.typing
-            || self.incall.wants_back(call_only);
+            || self.incall.wants_back(call_only)
+            || self.tabs.selected() != KEYPAD_TAB;
         if want != self.back_enabled {
             self.back_enabled = want;
             window.set_back_enabled(want);

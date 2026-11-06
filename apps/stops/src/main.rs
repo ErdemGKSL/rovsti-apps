@@ -352,13 +352,37 @@ impl StopsApp {
     }
 
     /// System Back: the alarm snoozes, a sheet closes.
+    /// Whether System Back has a layer to close: the alarm, a sheet, a Settings page, an opened
+    /// saved place, or any tab but the first (Trip). When it has not, Back leaves the app.
+    pub(crate) fn can_go_back(&self) -> bool {
+        self.alarm.is_some()
+            || self.sheet.is_open()
+            || (self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main)
+            || self.expanded.is_some()
+            || self.tabs.selected() != 0
+    }
+
+    /// System Back: one step out of the top-most layer.
     fn on_back(&mut self, cx: &mut Context<Self>) {
         if self.alarm.is_some() {
             self.alarm_action(AlarmAction::Snooze, cx);
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
         } else if self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main {
-            self.open_settings(SettingsPage::Main, cx);
+            // The WhatsApp page steps back inside itself first.
+            let stepped = self.settings_page == SettingsPage::WhatsApp
+                && self
+                    .whatsapp
+                    .update(cx, |whatsapp, cx| whatsapp.go_back(cx));
+            if !stepped {
+                self.open_settings(SettingsPage::Main, cx);
+            }
+        } else if self.expanded.is_some() {
+            self.expanded = None;
+            cx.notify();
+        } else if self.tabs.select(0) {
+            self.page.restart();
+            cx.notify();
         }
     }
 

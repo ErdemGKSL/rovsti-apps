@@ -441,6 +441,50 @@ impl ContactsApp {
         cx.notify();
     }
 
+    /// Whether System Back has a layer to close: the confirm card, the photo sheet, the editor,
+    /// a card or group page, the WhatsApp page, or any tab but the first. When it has not,
+    /// Back leaves the app.
+    fn can_go_back(&self, cx: &App) -> bool {
+        self.confirm.is_some()
+            || self.photo_sheet.is_open()
+            || self.editor.is_some()
+            || self.group_edit.is_some()
+            || self.open.is_some()
+            || self.group_page.is_some()
+            || self.whatsapp_open
+            || self.whatsapp.read(cx).can_go_back()
+            || self.tabs.selected() != CONTACTS_TAB
+    }
+
+    /// System Back: one step out of the top-most layer.
+    fn go_back(&mut self, cx: &mut Context<Self>) {
+        if self.confirm.is_some() {
+            self.answer(false, cx);
+        } else if self.photo_sheet.is_open() {
+            self.close_photo_sheet(cx);
+        } else if self.editor.is_some() {
+            self.close_editor(cx);
+        } else if self.group_edit.is_some() {
+            self.cancel_group_edit(cx);
+        } else if self.open.is_some() {
+            self.close_contact(cx);
+        } else if self.group_page.is_some() {
+            self.close_group(cx);
+        } else if self.whatsapp_open {
+            // The WhatsApp settings step back inside themselves first.
+            if !self
+                .whatsapp
+                .update(cx, |whatsapp, cx| whatsapp.go_back(cx))
+            {
+                self.set_whatsapp_open(false, cx);
+            }
+        } else if self.tabs.select(CONTACTS_TAB) {
+            self.notice = None;
+            self.page.restart();
+            cx.notify();
+        }
+    }
+
     /// Runs an Android action off the UI thread and reports a failure in the
     /// notice line. `what` completes "Can't …".
     fn act(
@@ -1008,6 +1052,11 @@ impl Render for ContactsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = current_theme(window);
         let tab = self.tabs.selected();
+        let want_back = self.can_go_back(cx);
+        if want_back != self.back_enabled {
+            self.back_enabled = want_back;
+            window.set_back_enabled(want_back);
+        }
         self.request_photos(tab, cx);
         let fading = self.photos.fading();
         let mut motion = std::mem::take(&mut self.motion);
@@ -1136,10 +1185,10 @@ fn main() {
                 },
                 |window, cx| {
                     let app = cx.new(|cx| ContactsApp::new(window, cx));
-                    // System Back closes the photo sheet.
+                    // System Back steps out of the top-most layer, then to the first tab.
                     let weak = app.downgrade();
                     window.on_system_back(cx, move |_, cx| {
-                        weak.update(cx, |this, cx| this.close_photo_sheet(cx)).ok();
+                        weak.update(cx, |this, cx| this.go_back(cx)).ok();
                     });
                     app
                 },

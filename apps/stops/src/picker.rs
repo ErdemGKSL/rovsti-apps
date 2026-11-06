@@ -319,7 +319,7 @@ impl StopsApp {
     ) -> Option<AnyElement> {
         self.sheet.set_reduced(window.prefers_reduced_motion());
         self.sheet.set_viewport(window.viewport_size());
-        let want_back = self.sheet.is_open() || self.alarm.is_some();
+        let want_back = self.can_go_back();
         if want_back != self.back_enabled {
             self.back_enabled = want_back;
             window.set_back_enabled(want_back);

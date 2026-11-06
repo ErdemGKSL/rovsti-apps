@@ -185,6 +185,23 @@ impl WhatsAppSettings {
         cx.notify();
     }
 
+    /// Whether the system Back key has something to do inside this screen (a step back, or
+    /// cancelling a link in progress). The app puts its own Back handling after this one.
+    pub fn can_go_back(&self) -> bool {
+        self.model.back_input().is_some()
+    }
+
+    /// Takes one step back inside the settings; `false` when there is none to take.
+    pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
+        match self.model.back_input() {
+            Some(input) => {
+                self.dispatch(input, cx);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The saved link, once this app is connected to an instance.
     pub fn link(&self) -> Option<&StoredLink> {
         self.model.link.as_ref()

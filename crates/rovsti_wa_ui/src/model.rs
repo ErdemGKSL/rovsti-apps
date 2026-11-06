@@ -241,6 +241,26 @@ impl LinkModel {
         }
     }
 
+    /// What the system Back key does on the current screen: a step back inside the
+    /// settings, or cancelling a link in progress (the on-screen Cancel). `None` on the
+    /// screens that are the top of the settings (the two options, the connected page), so
+    /// Back leaves them like it leaves any other page.
+    pub fn back_input(&self) -> Option<Input> {
+        match self.screen {
+            Screen::EnterUrl
+            | Screen::LinkNew { .. }
+            | Screen::PasteKey
+            | Screen::ShareKey { .. }
+            | Screen::Keys { .. }
+            | Screen::ConfirmDelete
+            | Screen::Failed { .. } => Some(Input::Back),
+            Screen::ShowQr { .. } | Screen::ShowCode { .. } => Some(Input::Cancel),
+            Screen::Choose | Screen::Connecting | Screen::Connected { .. } | Screen::LoggedOut => {
+                None
+            }
+        }
+    }
+
     /// The instance is connected and its events are flowing.
     pub fn is_connected(&self) -> bool {
         self.link.is_some()
@@ -1188,5 +1208,35 @@ mod tests {
             Some(link)
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn system_back_steps_back_inside_the_settings_and_leaves_the_top_alone() {
+        let mut m = LinkModel::new(AppId::Messages, None);
+        assert_eq!(m.back_input(), None, "the two options are the top");
+        for screen in [
+            Screen::EnterUrl,
+            Screen::LinkNew {
+                method: LinkMethodChoice::Qr,
+            },
+            Screen::PasteKey,
+            Screen::ConfirmDelete,
+        ] {
+            m.screen = screen;
+            assert_eq!(m.back_input(), Some(Input::Back), "{:?}", m.screen);
+        }
+        m.screen = Screen::ShowQr {
+            payload: "p".into(),
+        };
+        assert_eq!(m.back_input(), Some(Input::Cancel), "a link in progress");
+        m.screen = Screen::Connecting;
+        assert_eq!(m.back_input(), None);
+        m.screen = Screen::LoggedOut;
+        assert_eq!(m.back_input(), None);
+        // The step Back takes is the on-screen one.
+        m.screen = Screen::EnterUrl;
+        let input = m.back_input().expect("a step back");
+        m.apply(input);
+        assert_eq!(m.screen, Screen::Choose);
     }
 }

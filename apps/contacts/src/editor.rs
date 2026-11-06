@@ -473,11 +473,6 @@ impl ContactsApp {
         self.photo_sheet
             .set_reduced(window.prefers_reduced_motion());
         self.photo_sheet.set_viewport(window.viewport_size());
-        let want_back = self.photo_sheet.is_open();
-        if want_back != self.back_enabled {
-            self.back_enabled = want_back;
-            window.set_back_enabled(want_back);
-        }
         let colors = theme::colors(theme);
         let mut body = div().flex().flex_col().pb(px(12.0)).child(
             div()

@@ -59,6 +59,8 @@ use settings_ui::{SettingsEvent, SettingsView};
 use sms_conversation::{SmsConversation, SmsConversationEvent};
 
 const TABS: [&str; 3] = ["Chats", "WhatsApp", "Settings"];
+const CHATS_TAB: usize = 0;
+const WHATSAPP_TAB: usize = 1;
 const TAB_ICONS: [Icon; 3] = [
     Icon::LucideMessageSquare,
     Icon::LucideMessageCircle,
@@ -448,6 +450,34 @@ impl MessagesApp {
         self.open = Open::None;
         self.page.restart();
         cx.notify();
+    }
+
+    /// Whether System Back has a layer to close: the "Send later" sheet, an open chat or the new
+    /// message page, a step inside the WhatsApp settings, or any tab but the first (Chats). When
+    /// it has not, Back leaves the app.
+    fn can_go_back(&self, cx: &App) -> bool {
+        self.schedule.is_open()
+            || !matches!(self.open, Open::None)
+            || (self.tabs.selected() == WHATSAPP_TAB && self.whatsapp.read(cx).can_go_back())
+            || self.tabs.selected() != CHATS_TAB
+    }
+
+    /// System Back: one step out of the top-most layer.
+    fn go_back(&mut self, cx: &mut Context<Self>) {
+        if self.schedule.is_open() {
+            self.close_schedule(cx);
+        } else if !matches!(self.open, Open::None) {
+            self.close_page(cx);
+        } else if self.tabs.selected() == WHATSAPP_TAB
+            && self
+                .whatsapp
+                .update(cx, |whatsapp, cx| whatsapp.go_back(cx))
+        {
+            // The WhatsApp settings stepped back inside themselves.
+        } else if self.tabs.select(CHATS_TAB) {
+            self.page.restart();
+            cx.notify();
+        }
     }
 
     // ---- notifications (while attached) --------------------------------------
@@ -944,7 +974,7 @@ impl MessagesApp {
         self.schedule.sheet.set_reduced(reduced);
         self.schedule.sheet.set_viewport(window.viewport_size());
         self.pill.set_reduced(reduced);
-        let want_back = self.schedule.is_open();
+        let want_back = self.can_go_back(cx);
         if want_back != self.back_enabled {
             self.back_enabled = want_back;
             window.set_back_enabled(want_back);
@@ -1269,10 +1299,10 @@ fn main() {
                 },
                 |window, cx| {
                     let app = cx.new(|cx| MessagesApp::new(backend, cx));
-                    // System Back closes the "Send later" sheet.
+                    // System Back steps out of the top-most layer, then to the first tab.
                     let weak = app.downgrade();
                     window.on_system_back(cx, move |_, cx| {
-                        weak.update(cx, |this, cx| this.close_schedule(cx)).ok();
+                        weak.update(cx, |this, cx| this.go_back(cx)).ok();
                     });
                     app
                 },

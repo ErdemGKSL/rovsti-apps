@@ -82,7 +82,7 @@ impl ContactsApp {
     }
 
     /// The owner answered the card.
-    fn answer(&mut self, yes: bool, cx: &mut Context<Self>) {
+    pub(crate) fn answer(&mut self, yes: bool, cx: &mut Context<Self>) {
         let Some(confirm) = self.confirm.take() else {
             return;
         };

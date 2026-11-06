@@ -63,6 +63,25 @@ fn error_input(error: ClientError) -> Input {
     }
 }
 
+/// Runs a blocking gateway job and turns a panic inside it into an error.
+///
+/// A panicking future leaves its `Task` without output, and awaiting it then
+/// panics with "Task polled after completion" on the UI thread, which takes
+/// the app down. With `panic = "unwind"` the panic is caught here instead:
+/// the job owns everything it touches, so nothing half-updated is observed
+/// afterwards. The panic hook has already logged the message and location.
+fn guarded<T>(job: impl FnOnce() -> Result<T, ClientError>) -> Result<T, ClientError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).unwrap_or_else(|payload| {
+        let message = payload
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_owned())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_owned());
+        log::error!("a gateway call panicked: {message}");
+        Err(ClientError::Http(format!("internal error: {message}")))
+    })
+}
+
 fn parse_link(link: &StoredLink) -> Result<(GatewayUrl, ConnectKey), ClientError> {
     Ok((
         GatewayUrl::parse(&link.gateway_url)?,
@@ -339,7 +358,7 @@ impl WhatsAppSettings {
         job: impl FnOnce() -> Result<T, ClientError> + Send + 'static,
         done: impl FnOnce(T) -> Input + 'static,
     ) {
-        let task = cx.background_executor().spawn(async move { job() });
+        let task = cx.background_executor().spawn(async move { guarded(job) });
         cx.spawn(async move |this, cx| {
             let input = match task.await {
                 Ok(value) => done(value),
@@ -357,7 +376,7 @@ impl WhatsAppSettings {
         cx: &mut Context<Self>,
         job: impl FnOnce() -> Result<(), ClientError> + Send + 'static,
     ) {
-        let task = cx.background_executor().spawn(async move { job() });
+        let task = cx.background_executor().spawn(async move { guarded(job) });
         cx.spawn(async move |this, cx| {
             if let Err(error) = task.await {
                 this.update(cx, |this, cx| this.dispatch(error_input(error), cx))
@@ -975,5 +994,20 @@ impl Render for WhatsAppSettings {
             Screen::ConfirmDelete => Self::confirm_delete(theme, cx),
             Screen::Failed { message, .. } => Self::failed(theme, &message, cx),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_panicking_job_becomes_an_error() {
+        let result: Result<(), ClientError> = guarded(|| panic!("boom"));
+        assert_eq!(
+            result,
+            Err(ClientError::Http("internal error: boom".into()))
+        );
+        assert_eq!(guarded(|| Ok(7)), Ok(7));
     }
 }

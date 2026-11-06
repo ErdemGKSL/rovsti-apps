@@ -90,12 +90,43 @@ const MUTE_WEEK_MS: i64 = 7 * 24 * HOUR_MS;
 /// The long-press menu of a WhatsApp row.
 #[derive(Clone, Debug)]
 struct RowMenu {
-    jid: String,
+    /// The row's WhatsApp chat, when it has one.
+    jid: Option<String>,
     title: SharedString,
     meta: ChatMeta,
     unread: u32,
     /// The mute lengths show instead of the main actions.
     mute_choices: bool,
+    /// The row's SMS thread, when it has one.
+    sms: Option<SmsRowMenu>,
+    /// "Delete conversation" asked: the confirmation shows instead.
+    delete_confirm: bool,
+}
+
+/// The SMS part of a row menu.
+#[derive(Clone, Debug)]
+struct SmsRowMenu {
+    thread_id: i64,
+    sender: Option<String>,
+    unread: bool,
+    muted: bool,
+    in_spam: bool,
+}
+
+/// The SMS actions a row menu lists now. Not spam and Block have no handler
+/// yet, so they stay out rather than show as dead buttons.
+fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
+    use sms_actions::SmsAction;
+    sms_actions::actions(&sms_actions::SmsActionContext {
+        unread: sms.unread,
+        muted: sms.muted,
+        in_spam: sms.in_spam,
+        single_sender: sms.sender.is_some(),
+        ..sms_actions::SmsActionContext::default()
+    })
+    .into_iter()
+    .filter(|a| !matches!(a, SmsAction::NotSpam | SmsAction::Block))
+    .collect()
 }
 
 /// The page pushed over the tabs.
@@ -270,6 +301,7 @@ impl MessagesApp {
                     this.show_pill(text.clone());
                     cx.notify();
                 }
+                BackendEvent::ThreadDeleted(id) => this.on_thread_deleted(*id, cx),
                 BackendEvent::SmsChanged | BackendEvent::Status(_) | BackendEvent::Document(_) => {}
             }),
             cx.subscribe(&settings, |this, _, event, cx| match event {
@@ -510,7 +542,11 @@ impl MessagesApp {
                 GatewayEvent::ChatMeta { jid, meta } => {
                     let info = self.wa_info_mut().entry(jid.clone()).or_default();
                     info.meta = meta;
-                    if self.row_menu.as_ref().is_some_and(|m| m.jid == jid) {
+                    if self
+                        .row_menu
+                        .as_ref()
+                        .is_some_and(|m| m.jid.as_deref() == Some(jid.as_str()))
+                    {
                         self.row_menu = None;
                     }
                 }
@@ -523,7 +559,11 @@ impl MessagesApp {
                         self.open = Open::None;
                         self.page.restart();
                     }
-                    if self.row_menu.as_ref().is_some_and(|m| m.jid == jid) {
+                    if self
+                        .row_menu
+                        .as_ref()
+                        .is_some_and(|m| m.jid.as_deref() == Some(jid.as_str()))
+                    {
                         self.row_menu = None;
                     }
                 }
@@ -843,25 +883,112 @@ impl MessagesApp {
     // ---- WhatsApp chat actions -------------------------------------------------
 
     /// Long press on a WhatsApp row: its menu.
-    fn open_row_menu(&mut self, jid: String, title: SharedString, cx: &mut Context<Self>) {
-        let id = ThreadId::WhatsApp(jid.clone());
-        let unread = self
-            .wa_threads
-            .iter()
-            .find(|t| t.id == id)
-            .map_or(0, |t| t.unread);
-        let meta = self
-            .wa_info
-            .get(&jid)
-            .map(|info| info.meta.clone())
-            .unwrap_or_default();
+    fn open_row_menu(
+        &mut self,
+        jid: Option<String>,
+        sms: Option<(i64, Option<String>)>,
+        title: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        let (unread, meta) = jid.as_ref().map_or_else(
+            || (0, ChatMeta::default()),
+            |jid| {
+                let id = ThreadId::WhatsApp(jid.clone());
+                let unread = self
+                    .wa_threads
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map_or(0, |t| t.unread);
+                let meta = self
+                    .wa_info
+                    .get(jid)
+                    .map(|info| info.meta.clone())
+                    .unwrap_or_default();
+                (unread, meta)
+            },
+        );
+        let sms = sms.map(|(thread_id, sender)| {
+            let backend = self.backend.read(cx);
+            SmsRowMenu {
+                thread_id,
+                sender,
+                unread: backend
+                    .threads()
+                    .iter()
+                    .any(|t| t.thread_id == thread_id && t.unread > 0),
+                muted: backend
+                    .prefs()
+                    .is_muted(&notifications::thread_tag(&ThreadId::Sms(thread_id))),
+                in_spam: self.show_spam,
+            }
+        });
         self.row_menu = Some(RowMenu {
             jid,
             title,
             meta,
             unread,
             mute_choices: false,
+            sms,
+            delete_confirm: false,
         });
+        cx.notify();
+    }
+
+    /// One SMS item of the row menu.
+    fn sms_row_action(&mut self, action: sms_actions::SmsAction, cx: &mut Context<Self>) {
+        use sms_actions::SmsAction;
+        let Some(sms) = self.row_menu.as_ref().and_then(|m| m.sms.clone()) else {
+            return;
+        };
+        let id = sms.thread_id;
+        match action {
+            SmsAction::Delete => {
+                if let Some(menu) = &mut self.row_menu {
+                    menu.delete_confirm = true;
+                }
+            }
+            SmsAction::MarkRead => {
+                self.row_menu = None;
+                self.backend
+                    .update(cx, |backend, cx| backend.mark_read(id, cx));
+            }
+            SmsAction::Mute | SmsAction::Unmute => {
+                self.row_menu = None;
+                let mute = action == SmsAction::Mute;
+                let tag = notifications::thread_tag(&ThreadId::Sms(id));
+                self.backend.update(cx, |backend, cx| {
+                    backend.update_prefs(cx, |p| p.set_muted(&tag, mute))
+                });
+                self.show_pill(if mute { "Muted" } else { "Unmuted" });
+            }
+            // Not offered by the row menu yet.
+            SmsAction::NotSpam | SmsAction::Block | SmsAction::Call | SmsAction::AddContact => {
+                self.row_menu = None;
+            }
+        }
+        cx.notify();
+    }
+
+    /// The confirmed delete: the backend does it and answers with an event.
+    fn confirm_delete_thread(&mut self, cx: &mut Context<Self>) {
+        let Some(menu) = self.row_menu.take() else {
+            return;
+        };
+        if let Some(sms) = menu.sms {
+            self.backend
+                .update(cx, |backend, cx| backend.delete_thread(sms.thread_id, cx));
+        }
+        cx.notify();
+    }
+
+    /// A conversation is gone: its page, notification and menu go with it.
+    fn on_thread_deleted(&mut self, thread_id: i64, cx: &mut Context<Self>) {
+        let thread = ThreadId::Sms(thread_id);
+        if self.open_thread_id(cx).as_ref() == Some(&thread) {
+            self.close_page(cx);
+        }
+        self.dismiss_notification(&thread, cx);
+        self.show_pill("Conversation deleted");
         cx.notify();
     }
 
@@ -914,7 +1041,7 @@ impl MessagesApp {
         let menu = self.row_menu.as_ref()?;
         let colors = theme::colors(theme);
         let now = now_ms();
-        let jid = menu.jid.clone();
+        let jid = menu.jid.clone().unwrap_or_default();
         let action = |id: &'static str, icon: Icon, label: String, kind: ChatActionKind| {
             let jid = jid.clone();
             menu_item(theme, id, icon, label.into(), colors.label).on_click(
@@ -922,7 +1049,45 @@ impl MessagesApp {
             )
         };
         let mut items: Vec<AnyElement> = Vec::new();
-        if menu.mute_choices {
+        if menu.delete_confirm {
+            let prompt = sms_actions::delete_prompt(&menu.title);
+            items.push(
+                div()
+                    .px(px(16.0))
+                    .py(px(8.0))
+                    .text_size(typography::BODY.size)
+                    .text_color(colors.label)
+                    .child(prompt)
+                    .into_any_element(),
+            );
+            items.push(
+                menu_item(
+                    theme,
+                    "menu-delete-confirm",
+                    Icon::LucideTrash2,
+                    "Delete".into(),
+                    colors.red,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.confirm_delete_thread(cx)))
+                .into_any_element(),
+            );
+            items.push(
+                menu_item(
+                    theme,
+                    "menu-delete-cancel",
+                    Icon::LucideX,
+                    "Cancel".into(),
+                    colors.label,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(menu) = &mut this.row_menu {
+                        menu.delete_confirm = false;
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+            );
+        } else if menu.mute_choices {
             items.push(
                 action(
                     "menu-mute-8h",
@@ -955,6 +1120,64 @@ impl MessagesApp {
                 .into_any_element(),
             );
         } else {
+            if menu.jid.is_some() {
+                self.wa_menu_items(menu, theme, &mut items, cx);
+            }
+            if let Some(sms) = &menu.sms {
+                for sms_action in row_sms_actions(sms) {
+                    let danger = sms_actions::is_danger(sms_action);
+                    let icon = match sms_action {
+                        sms_actions::SmsAction::MarkRead => Icon::LucideMailOpen,
+                        sms_actions::SmsAction::Mute => Icon::LucideBellOff,
+                        sms_actions::SmsAction::Unmute => Icon::LucideBell,
+                        _ => Icon::LucideTrash2,
+                    };
+                    items.push(
+                        menu_item(
+                            theme,
+                            format!("menu-sms-{sms_action:?}"),
+                            icon,
+                            sms_actions::label(sms_action).into(),
+                            if danger { colors.red } else { colors.label },
+                        )
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.sms_row_action(sms_action, cx)),
+                        )
+                        .into_any_element(),
+                    );
+                }
+            }
+        }
+        Some(menu_card(
+            theme,
+            "row-menu",
+            menu.title.clone(),
+            items,
+            cx.listener(|this, _, _, cx| {
+                this.row_menu = None;
+                cx.notify();
+            }),
+        ))
+    }
+
+    /// The WhatsApp items of the row menu (pin, archive, mute, read).
+    fn wa_menu_items(
+        &self,
+        menu: &RowMenu,
+        theme: Theme,
+        items: &mut Vec<AnyElement>,
+        cx: &mut Context<Self>,
+    ) {
+        let colors = theme::colors(theme);
+        let now = now_ms();
+        let jid = menu.jid.clone().unwrap_or_default();
+        let action = |id: &'static str, icon: Icon, label: String, kind: ChatActionKind| {
+            let jid = jid.clone();
+            menu_item(theme, id, icon, label.into(), colors.label).on_click(
+                cx.listener(move |this, _, _, cx| this.chat_action(&jid, kind.clone(), cx)),
+            )
+        };
+        {
             let meta = &menu.meta;
             items.push(
                 action(
@@ -1027,16 +1250,6 @@ impl MessagesApp {
                 .into_any_element(),
             );
         }
-        Some(menu_card(
-            theme,
-            "row-menu",
-            menu.title.clone(),
-            items,
-            cx.listener(|this, _, _, cx| {
-                this.row_menu = None;
-                cx.notify();
-            }),
-        ))
     }
 
     /// Whether System Back has a layer to close: the "Send later" sheet, an open chat or the new
@@ -1058,7 +1271,9 @@ impl MessagesApp {
             self.close_schedule(cx);
         } else if let Some(menu) = &mut self.row_menu {
             // The mute lengths step back to the menu, the menu closes.
-            if menu.mute_choices {
+            if menu.delete_confirm {
+                menu.delete_confirm = false;
+            } else if menu.mute_choices {
                 menu.mute_choices = false;
             } else {
                 self.row_menu = None;
@@ -1741,10 +1956,20 @@ impl MessagesApp {
         let code = row.otp.clone();
         let copied = code.is_some() && self.copied == code;
         let photo = self.row_photo(row, cx);
-        let menu = row.wa_chat.clone().map(|jid| {
+        let has_menu = row.wa_chat.is_some() || row.sms_thread.is_some();
+        let menu = has_menu.then(|| {
             let title = row.title.clone();
+            let jid = row.wa_chat.clone();
+            let sms = row
+                .sms_thread
+                .map(|id| (id, row.sms_sender.as_ref().map(|s| s.to_string())));
             Box::new(cx.listener(move |this, _, _, cx| {
-                this.open_row_menu(jid.to_string(), title.clone(), cx);
+                this.open_row_menu(
+                    jid.as_ref().map(|j| j.to_string()),
+                    sms.clone(),
+                    title.clone(),
+                    cx,
+                );
             })) as Box<dyn Fn(&gpui::LongPressEvent, &mut Window, &mut App)>
         });
         let open_title = title.clone();
@@ -2323,4 +2548,32 @@ fn main() {
             .expect("failed to open the Rovsti Messages window");
             cx.activate(true);
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sms_actions::SmsAction::*;
+
+    fn menu(unread: bool, muted: bool, in_spam: bool) -> SmsRowMenu {
+        SmsRowMenu {
+            thread_id: 1,
+            sender: Some("+905321234567".into()),
+            unread,
+            muted,
+            in_spam,
+        }
+    }
+
+    #[test]
+    fn row_menu_lists_only_actions_with_a_handler() {
+        assert_eq!(
+            row_sms_actions(&menu(true, false, false)),
+            vec![MarkRead, Mute, Delete]
+        );
+        assert_eq!(
+            row_sms_actions(&menu(false, true, true)),
+            vec![Unmute, Delete]
+        );
+    }
 }

@@ -89,6 +89,8 @@ pub enum BackendEvent {
     Handoff(Handoff),
     /// Something the user should be told in a pill.
     Notice(String),
+    /// A conversation was deleted (the thread id): pages and notifications of it go.
+    ThreadDeleted(i64),
 }
 
 impl EventEmitter<BackendEvent> for Backend {}
@@ -701,6 +703,59 @@ impl Backend {
             }
         })
         .detach();
+    }
+
+    /// Deletes an SMS conversation. Refuses without the SMS role (the preview
+    /// has none to need). On success the list is pulled again, the thread's
+    /// mute tag and SIM choice are dropped and `ThreadDeleted` is emitted;
+    /// otherwise a `Notice` says why.
+    pub fn delete_thread(&mut self, thread_id: i64, cx: &mut Context<Self>) {
+        if let Some(preview) = &mut self.preview {
+            preview.delete_thread(thread_id);
+            self.threads.retain(|t| t.thread_id != thread_id);
+            self.forget_thread_prefs(thread_id, cx);
+            cx.emit(BackendEvent::ThreadDeleted(thread_id));
+            cx.notify();
+            return;
+        }
+        if !self.sms_role_held() {
+            cx.emit(BackendEvent::Notice(crate::sms_actions::NEEDS_ROLE.into()));
+            return;
+        }
+        let task = cx
+            .background_executor()
+            .spawn(async move { sms::delete_thread(thread_id) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| match result {
+                Ok(true) => {
+                    this.threads.retain(|t| t.thread_id != thread_id);
+                    this.forget_thread_prefs(thread_id, cx);
+                    this.pull_threads(cx);
+                    cx.emit(BackendEvent::ThreadDeleted(thread_id));
+                    cx.notify();
+                }
+                Ok(false) | Err(_) => {
+                    if let Err(error) = result {
+                        log::warn!("deleting thread {thread_id} failed: {error}");
+                    }
+                    cx.emit(BackendEvent::Notice(
+                        "Couldn't delete that conversation".into(),
+                    ));
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Drops what the preferences kept for a thread that is gone.
+    fn forget_thread_prefs(&mut self, thread_id: i64, cx: &mut Context<Self>) {
+        let tag = crate::notifications::thread_tag(&rovsti_core::ThreadId::Sms(thread_id));
+        self.update_prefs(cx, |prefs| {
+            prefs.set_muted(&tag, false);
+            prefs.sim_choices.remove(&thread_id);
+        });
     }
 
     pub fn remember_sim(&mut self, thread_id: i64, sub_id: i32, cx: &mut Context<Self>) {

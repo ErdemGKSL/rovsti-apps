@@ -257,6 +257,12 @@ impl Preview {
         }
     }
 
+    /// Removes a thread and its messages.
+    pub fn delete_thread(&mut self, thread_id: i64) {
+        self.rows.retain(|r| r.thread_id != thread_id);
+        self.addresses.retain(|(id, _)| *id != thread_id);
+    }
+
     pub fn mark_read(&mut self, thread_id: i64) {
         for row in self.rows.iter_mut().filter(|r| r.thread_id == thread_id) {
             row.read = true;
@@ -341,6 +347,15 @@ mod tests {
         assert_eq!(ayse.unread, 2);
         assert_eq!(ayse.snippet, "I can bring the cake");
         assert_eq!(threads[0].thread_id, 1);
+    }
+
+    #[test]
+    fn deleting_a_thread_removes_it_and_its_messages() {
+        let mut preview = Preview::new(NOW);
+        preview.delete_thread(1);
+        assert!(preview.threads().threads.iter().all(|t| t.thread_id != 1));
+        assert!(preview.messages(1, None, 50).sms.is_empty());
+        assert_eq!(preview.threads().threads.len(), 4);
     }
 
     #[test]

@@ -40,7 +40,6 @@ pub struct Data {
     pub saved: SavedPlaces,
     pub history: History,
     pub trip: Option<ActiveTrip>,
-    #[allow(dead_code, reason = "wired to the UI in a later step")]
     pub draft: Ends,
     pub gtfs: Option<Arc<Feed>>,
 }
@@ -80,7 +79,6 @@ pub fn save_places(dir: &Path, saved: &SavedPlaces) {
 }
 
 /// Writes the A and B being picked.
-#[allow(dead_code, reason = "wired to the UI in a later step")]
 pub fn save_draft(dir: &Path, ends: &Ends) {
     log_save(storage::save_json(dir, store::DRAFT_FILE, ends));
 }

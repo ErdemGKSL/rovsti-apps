@@ -187,6 +187,12 @@ impl Picking {
         self.moving = None;
     }
 
+    /// The ends differ from what was last written as the draft, and no pin is
+    /// mid-drag (a drag changes the ends every frame; write once it settles).
+    pub fn draft_due(&self, written: &Ends) -> bool {
+        self.dragging().is_none() && self.ends != *written
+    }
+
     /// Forgets both points and every gesture in progress.
     pub fn clear(&mut self) {
         *self = Self::default();
@@ -697,5 +703,21 @@ mod tests {
         p.restore(before.clone());
         assert_eq!(p.ends, before);
         assert_eq!(p.menu(), None);
+    }
+
+    #[test]
+    fn draft_is_due_only_when_changed_and_not_dragging() {
+        let mut p = two();
+        let written = p.ends.clone();
+        assert!(!p.draft_due(&written));
+        assert!(p.draft_due(&Ends::default()));
+        p.remove(Slot::B);
+        assert!(p.draft_due(&written));
+        let mut d = two();
+        assert!(d.drag_start(Slot::A));
+        d.drag_to(Slot::A, Coord::new(1.0, 2.0));
+        assert!(!d.draft_due(&Ends::default()));
+        d.drag_cancel();
+        assert!(d.draft_due(&Ends::default()));
     }
 }

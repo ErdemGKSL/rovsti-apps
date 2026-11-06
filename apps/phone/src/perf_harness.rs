@@ -161,6 +161,11 @@ pub struct Rig {
 
 impl Rig {
     pub fn new() -> Self {
+        Self::with_size(402.0, 874.0)
+    }
+
+    /// A rig whose window is `w` x `h` dp.
+    pub fn with_size(w: f32, h: f32) -> Self {
         FrameClock::set_fixed_step(Some(FRAME));
         let mut cx = HeadlessAppContext::with_platform(
             Arc::new(CosmicTextSystem::new("Noto Sans")),
@@ -171,7 +176,7 @@ impl Rig {
         let dirty = Rc::new(Cell::new(true));
         let flag = Rc::clone(&dirty);
         let window = cx
-            .open_window(size(px(402.0), px(874.0)), move |window, cx| {
+            .open_window(size(px(w), px(h)), move |window, cx| {
                 let backend = Backend::start(cx);
                 let app = cx.new(|cx| PhoneApp::new(backend.clone(), rx, window, cx));
                 let backend_flag = Rc::clone(&flag);
@@ -757,6 +762,106 @@ mod tests {
                 "tab {tab} drew {} frames while idle",
                 run.frames.len()
             );
+        }
+    }
+
+    fn rect(b: gpui::Bounds<gpui::Pixels>) -> rovsti_core::keypad_layout::Rect {
+        rovsti_core::keypad_layout::Rect {
+            x: f32::from(b.origin.x),
+            y: f32::from(b.origin.y),
+            w: f32::from(b.size.width),
+            h: f32::from(b.size.height),
+        }
+    }
+
+    /// The drawn keys, call button and number field land on the rects the pure
+    /// layout computed, at every size, empty or with a very long number.
+    #[test]
+    fn keypad_draws_inside_its_layout_rects() {
+        use crate::fx::{A_CALL, A_FIELD, A_KEY};
+        use rovsti_core::keypad_layout::Rect;
+        const LONG: &str = "+90555123456789012345678901234567890";
+        for (w, h) in [
+            (360.0, 640.0),
+            (412.0, 915.0),
+            (320.0, 480.0),
+            (915.0, 412.0),
+            (800.0, 360.0),
+        ] {
+            let mut keys_seen: Vec<Vec<Rect>> = Vec::new();
+            for dialed in ["", LONG] {
+                let mut rig = Rig::with_size(w, h);
+                rig.settle();
+                if rig.with_app(|app, _, _| app.tabs.selected()) != crate::KEYPAD_TAB {
+                    rig.apply(Action::Tab(crate::KEYPAD_TAB));
+                }
+                rig.with_app(|app, _, cx| {
+                    app.dialed = dialed.into();
+                    cx.notify();
+                });
+                rig.dirty.set(true);
+                rig.settle();
+                let (layout, keys, call, field) = rig.with_app(|app, _, _| {
+                    let keys: Vec<_> = (0..12).map(|s| app.marks.get(A_KEY + s)).collect();
+                    (
+                        app.kp_layout,
+                        keys,
+                        app.marks.get(A_CALL),
+                        app.marks.get(A_FIELD),
+                    )
+                });
+                let ctx = format!("{w}x{h} dialed {dialed:?}");
+                let keys: Vec<Rect> = keys
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, b)| rect(b.unwrap_or_else(|| panic!("{ctx}: key {i} not drawn"))))
+                    .collect();
+                let call = rect(call.unwrap_or_else(|| panic!("{ctx}: call not drawn")));
+                let field = rect(field.unwrap_or_else(|| panic!("{ctx}: field not drawn")));
+                // One pixel of slack: Rect::inside already allows half a pixel.
+                let grow = |r: Rect| Rect {
+                    x: r.x - 0.5,
+                    y: r.y - 0.5,
+                    w: r.w + 1.0,
+                    h: r.h + 1.0,
+                };
+                let viewport = Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w,
+                    h,
+                };
+                for (i, k) in keys.iter().enumerate() {
+                    assert!(
+                        k.inside(&grow(layout.grid)),
+                        "{ctx}: key {i} {k:?} outside grid {:?}",
+                        layout.grid
+                    );
+                }
+                assert!(
+                    call.inside(&grow(layout.call_row)),
+                    "{ctx}: call {call:?} outside {:?}",
+                    layout.call_row
+                );
+                assert!(
+                    field.inside(&grow(layout.number)),
+                    "{ctx}: field {field:?} outside {:?}",
+                    layout.number
+                );
+                for r in keys.iter().chain([&call, &field]) {
+                    assert!(
+                        r.inside(&grow(viewport)),
+                        "{ctx}: {r:?} outside the viewport"
+                    );
+                    assert!(
+                        r.bottom() <= layout.tab_bar.y + 1.0,
+                        "{ctx}: {r:?} reaches the tab bar at {}",
+                        layout.tab_bar.y
+                    );
+                }
+                keys_seen.push(keys);
+            }
+            assert_eq!(keys_seen[0], keys_seen[1], "{w}x{h}: typing moved the keys");
         }
     }
 }

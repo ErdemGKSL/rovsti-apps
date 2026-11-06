@@ -22,6 +22,12 @@ impl Drafts {
         }
     }
 
+    /// The draft, kept.
+    #[allow(dead_code)]
+    pub fn get(&self, thread: &ThreadId) -> Option<&str> {
+        self.0.get(thread).map(String::as_str)
+    }
+
     /// The draft, removed.
     pub fn take(&mut self, thread: &ThreadId) -> Option<String> {
         self.0.remove(thread)
@@ -48,6 +54,17 @@ mod tests {
         assert_eq!(d.take(&wa()).as_deref(), Some("hello"));
         assert_eq!(d.take(&wa()), None, "take empties");
         assert_eq!(d.take(&ThreadId::Sms(3)).as_deref(), Some("sms"));
+    }
+
+    #[test]
+    fn get_peeks_without_removing() {
+        let mut d = Drafts::default();
+        assert_eq!(d.get(&wa()), None);
+        d.put(wa(), "hello");
+        assert_eq!(d.get(&wa()), Some("hello"));
+        assert_eq!(d.get(&wa()), Some("hello"));
+        assert_eq!(d.take(&wa()).as_deref(), Some("hello"));
+        assert_eq!(d.get(&wa()), None);
     }
 
     #[test]

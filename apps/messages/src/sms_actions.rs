@@ -9,8 +9,10 @@ pub enum SmsAction {
     Unmute,
     NotSpam,
     Block,
+    Unblock,
     Call,
     AddContact,
+    OpenContact,
     Delete,
 }
 
@@ -29,15 +31,16 @@ pub struct SmsActionContext {
 }
 
 /// The actions to list, in order, the destructive ones last.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn actions(ctx: &SmsActionContext) -> Vec<SmsAction> {
     let mut out = Vec::new();
     if ctx.on_page {
         if ctx.single_sender {
             out.push(SmsAction::Call);
-            if !ctx.known_contact {
-                out.push(SmsAction::AddContact);
-            }
+            out.push(if ctx.known_contact {
+                SmsAction::OpenContact
+            } else {
+                SmsAction::AddContact
+            });
         }
     } else {
         if ctx.unread {
@@ -52,14 +55,17 @@ pub fn actions(ctx: &SmsActionContext) -> Vec<SmsAction> {
             out.push(SmsAction::NotSpam);
         }
     }
-    if ctx.single_sender && !ctx.blocked {
-        out.push(SmsAction::Block);
+    if ctx.single_sender {
+        out.push(if ctx.blocked {
+            SmsAction::Unblock
+        } else {
+            SmsAction::Block
+        });
     }
     out.push(SmsAction::Delete);
     out
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn label(action: SmsAction) -> &'static str {
     match action {
         SmsAction::MarkRead => "Mark as read",
@@ -67,20 +73,20 @@ pub fn label(action: SmsAction) -> &'static str {
         SmsAction::Unmute => "Unmute",
         SmsAction::NotSpam => "Not spam",
         SmsAction::Block => "Block",
+        SmsAction::Unblock => "Unblock",
         SmsAction::Call => "Call",
         SmsAction::AddContact => "Add to contacts",
+        SmsAction::OpenContact => "Open contact",
         SmsAction::Delete => "Delete conversation",
     }
 }
 
 /// Shown in red.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn is_danger(action: SmsAction) -> bool {
     matches!(action, SmsAction::Block | SmsAction::Delete)
 }
 
 /// The confirmation text before a conversation is deleted.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn delete_prompt(title: &str) -> String {
     let title = title.trim();
     let who = if title.is_empty() {
@@ -105,8 +111,11 @@ pub fn sender_of(addresses: &[String]) -> Option<&str> {
 }
 
 /// Shown when deleting needs the default-SMS-app role.
-#[cfg_attr(not(test), allow(dead_code))]
 pub const NEEDS_ROLE: &str = "Make Rovsti Messages your default SMS app to delete messages";
+
+/// The pill action label offered next to [`NEEDS_ROLE`].
+#[allow(dead_code)]
+pub const MAKE_DEFAULT: &str = "Make default";
 
 /// What the pill says after Not spam.
 pub fn not_spam_text(sender: &str) -> String {
@@ -166,7 +175,17 @@ mod tests {
             in_spam: true,
             ..row()
         };
-        assert_eq!(actions(&c), vec![Mute, NotSpam, Delete]);
+        assert_eq!(actions(&c), vec![Mute, NotSpam, Unblock, Delete]);
+    }
+
+    #[test]
+    fn a_blocked_row_offers_unblock_never_both() {
+        let c = SmsActionContext {
+            blocked: true,
+            ..row()
+        };
+        assert_eq!(actions(&c), vec![Mute, Unblock, Delete]);
+        assert!(!actions(&c).contains(&Block));
     }
 
     #[test]
@@ -189,16 +208,17 @@ mod tests {
             ..row()
         };
         assert_eq!(actions(&page), vec![Call, AddContact, Block, Delete]);
+        assert!(!actions(&page).contains(&OpenContact));
         let known = SmsActionContext {
             known_contact: true,
             ..page
         };
-        assert_eq!(actions(&known), vec![Call, Block, Delete]);
+        assert_eq!(actions(&known), vec![Call, OpenContact, Block, Delete]);
         let blocked = SmsActionContext {
             blocked: true,
             ..page
         };
-        assert_eq!(actions(&blocked), vec![Call, AddContact, Delete]);
+        assert_eq!(actions(&blocked), vec![Call, AddContact, Unblock, Delete]);
         let group = SmsActionContext {
             single_sender: false,
             ..page
@@ -209,13 +229,27 @@ mod tests {
     #[test]
     fn labels_are_unique_and_danger_is_marked() {
         let all = [
-            MarkRead, Mute, Unmute, NotSpam, Block, Call, AddContact, Delete,
+            MarkRead,
+            Mute,
+            Unmute,
+            NotSpam,
+            Block,
+            Unblock,
+            Call,
+            AddContact,
+            OpenContact,
+            Delete,
         ];
         let labels: std::collections::HashSet<_> = all.iter().map(|a| label(*a)).collect();
         assert_eq!(labels.len(), all.len());
         assert!(labels.iter().all(|l| !l.is_empty()));
         assert!(is_danger(Block) && is_danger(Delete));
-        assert!(!is_danger(Mute) && !is_danger(Call));
+        assert!(!is_danger(Mute) && !is_danger(Call) && !is_danger(Unblock));
+        assert_eq!(
+            (label(Unblock), label(OpenContact)),
+            ("Unblock", "Open contact")
+        );
+        assert_eq!(MAKE_DEFAULT, "Make default");
     }
 
     #[test]

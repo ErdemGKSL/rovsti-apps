@@ -2874,6 +2874,50 @@ fn media_label(kind: MediaKind) -> &'static str {
     }
 }
 
+/// Whether a media message can be saved to the phone.
+#[allow(dead_code)]
+fn saveable(kind: MediaKind) -> bool {
+    !matches!(kind, MediaKind::Sticker)
+}
+
+/// The file name a saved media message gets.
+#[allow(dead_code)]
+fn save_name(kind: MediaKind, media: Option<&MediaMeta>, mime: &str, message_id: &str) -> String {
+    if let Some(name) = media
+        .and_then(|m| m.file_name.as_deref())
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+    {
+        return name.replace(['/', '\\'], "_");
+    }
+    let word = match kind {
+        MediaKind::Image => "photo",
+        MediaKind::Video => "video",
+        MediaKind::Audio => "audio",
+        MediaKind::Document => "document",
+        MediaKind::Sticker => "sticker",
+    };
+    let base = mime
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let ext = match base.as_str() {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/png" => "png",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "video/mp4" => "mp4",
+        "audio/ogg" => "ogg",
+        "audio/mpeg" => "mp3",
+        "application/pdf" => "pdf",
+        _ => "bin",
+    };
+    let id: String = message_id.chars().take(8).collect();
+    format!("WhatsApp {word} {id}.{ext}")
+}
+
 /// The text a bubble shows for a body.
 fn body_text(body: &MessageBody) -> String {
     match body {
@@ -3196,6 +3240,56 @@ mod tests {
             Plan::Media {
                 caption: Some("look".into())
             }
+        );
+    }
+
+    #[test]
+    fn only_real_media_is_saveable() {
+        assert!(saveable(MediaKind::Image));
+        assert!(saveable(MediaKind::Video));
+        assert!(saveable(MediaKind::Audio));
+        assert!(saveable(MediaKind::Document));
+        assert!(!saveable(MediaKind::Sticker));
+    }
+
+    #[test]
+    fn save_names_keep_or_invent_a_safe_file_name() {
+        let doc = MediaMeta {
+            file_name: Some(" rapor.pdf ".into()),
+            ..MediaMeta::default()
+        };
+        assert_eq!(
+            save_name(
+                MediaKind::Document,
+                Some(&doc),
+                "application/pdf",
+                "ABCDEF123456"
+            ),
+            "rapor.pdf"
+        );
+        let evil = MediaMeta {
+            file_name: Some("a\\b/c.txt".into()),
+            ..MediaMeta::default()
+        };
+        assert_eq!(
+            save_name(MediaKind::Document, Some(&evil), "text/plain", "x"),
+            "a_b_c.txt"
+        );
+        let blank = MediaMeta {
+            file_name: Some("  ".into()),
+            ..MediaMeta::default()
+        };
+        assert_eq!(
+            save_name(MediaKind::Image, Some(&blank), "image/jpeg", "ABCDEF123456"),
+            "WhatsApp photo ABCDEF12.jpg"
+        );
+        assert_eq!(
+            save_name(MediaKind::Audio, None, "audio/ogg; codecs=opus", "ab"),
+            "WhatsApp audio ab.ogg"
+        );
+        assert_eq!(
+            save_name(MediaKind::Video, None, "application/x-weird", "ab"),
+            "WhatsApp video ab.bin"
         );
     }
 

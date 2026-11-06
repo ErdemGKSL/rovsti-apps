@@ -128,6 +128,8 @@ fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
         on_page: sms.on_page,
         ..sms_actions::SmsActionContext::default()
     });
+    // Not wired to the UI yet.
+    actions.retain(|a| *a != sms_actions::SmsAction::OpenContact);
     // A new conversation has no provider thread to delete yet.
     if sms.thread_id < 0 {
         actions.retain(|a| *a != sms_actions::SmsAction::Delete);
@@ -1099,6 +1101,9 @@ impl MessagesApp {
                 if let Some(sender) = sms.sender {
                     self.block_sender(sender, title, cx);
                 }
+            }
+            SmsAction::Unblock | SmsAction::OpenContact => {
+                self.row_menu = None;
             }
             SmsAction::Call | SmsAction::AddContact => {
                 self.row_menu = None;

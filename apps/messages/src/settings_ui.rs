@@ -128,8 +128,20 @@ pub fn rule_text(rule: &SpamRule) -> String {
 }
 
 /// A muted notification tag as a person reads it.
-pub fn tag_label(tag: &str, threads: &[SmsThreadRow]) -> String {
-    match parse_tag(tag) {
+pub fn tag_label(
+    tag: &str,
+    threads: &[SmsThreadRow],
+    name_of: impl Fn(&ThreadId) -> Option<String>,
+) -> String {
+    let parsed = parse_tag(tag);
+    if let Some(name) = parsed
+        .as_ref()
+        .and_then(&name_of)
+        .filter(|n| !n.trim().is_empty())
+    {
+        return name;
+    }
+    match parsed {
         Some(ThreadId::Sms(id)) => threads
             .iter()
             .find(|t| t.thread_id == id)
@@ -652,7 +664,7 @@ impl SettingsView {
                 list_row(
                     theme,
                     None,
-                    format!("Muted: {}", tag_label(tag, &threads)),
+                    format!("Muted: {}", tag_label(tag, &threads, |_| None)),
                     Some("Tap to unmute".into()),
                     None,
                 )
@@ -1141,18 +1153,30 @@ mod tests {
 
     #[test]
     fn muted_tags_get_names() {
+        let none = |_: &ThreadId| None;
         let threads = [SmsThreadRow {
             thread_id: 7,
             addresses: vec!["+905321234567".into()],
             ..SmsThreadRow::default()
         }];
-        assert_eq!(tag_label("sms:7", &threads), "+905321234567");
-        assert_eq!(tag_label("sms:8", &threads), "SMS conversation 8");
+        assert_eq!(tag_label("sms:7", &threads, none), "+905321234567");
+        assert_eq!(tag_label("sms:8", &threads, none), "SMS conversation 8");
         assert_eq!(
-            tag_label("wa:9053@s.whatsapp.net", &threads),
+            tag_label("wa:9053@s.whatsapp.net", &threads, none),
             "WhatsApp 9053"
         );
-        assert_eq!(tag_label("???", &threads), "???");
+        assert_eq!(tag_label("???", &threads, none), "???");
+        let named = |t: &ThreadId| match t {
+            ThreadId::Sms(7) => Some("Ayşe".to_owned()),
+            ThreadId::WhatsApp(_) => Some("  ".to_owned()),
+            _ => None,
+        };
+        assert_eq!(tag_label("sms:7", &threads, named), "Ayşe");
+        assert_eq!(tag_label("sms:8", &threads, named), "SMS conversation 8");
+        assert_eq!(
+            tag_label("wa:9053@s.whatsapp.net", &threads, named),
+            "WhatsApp 9053"
+        );
     }
 
     #[test]

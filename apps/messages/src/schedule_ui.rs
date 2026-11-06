@@ -250,6 +250,29 @@ pub fn strip_items(
     items
 }
 
+/// The rows the strip shows: the first few, or all when expanded.
+#[allow(dead_code)]
+pub fn visible_items(items: &[StripItem], expanded: bool) -> &[StripItem] {
+    if expanded {
+        items
+    } else {
+        &items[..items.len().min(STRIP_ROWS)]
+    }
+}
+
+/// The expander's label for `hidden` more rows.
+#[allow(dead_code)]
+pub fn more_label(hidden: usize) -> String {
+    format!("Show {hidden} more")
+}
+
+/// The text to put in the composer after cancelling a scheduled message: its
+/// body, but never over what the user is typing.
+#[allow(dead_code)]
+pub fn text_after_cancel(composer: &str, body: &str) -> Option<String> {
+    composer.trim().is_empty().then(|| body.to_owned())
+}
+
 /// Puts `item` into the gateway list, replacing the same id.
 pub fn upsert_remote(list: &mut Vec<ScheduledText>, item: ScheduledText) {
     match list.iter_mut().find(|t| t.id == item.id) {
@@ -498,6 +521,32 @@ pub fn strip<V: 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn strip_item(n: i64) -> StripItem {
+        StripItem {
+            key: StripKey::Local(n as u64),
+            at_ms: n,
+            body: format!("m{n}"),
+            failed: false,
+        }
+    }
+
+    #[test]
+    fn the_strip_collapses_to_a_few_rows() {
+        let items: Vec<_> = (0..5).map(strip_item).collect();
+        assert_eq!(visible_items(&items, false).len(), STRIP_ROWS);
+        assert_eq!(visible_items(&items, true).len(), 5);
+        assert_eq!(visible_items(&items[..2], false).len(), 2);
+        assert!(visible_items(&[], false).is_empty());
+        assert_eq!(more_label(items.len() - STRIP_ROWS), "Show 2 more");
+    }
+
+    #[test]
+    fn cancel_never_overwrites_the_composer() {
+        assert_eq!(text_after_cancel("", "hi").as_deref(), Some("hi"));
+        assert_eq!(text_after_cancel("  \n", "hi").as_deref(), Some("hi"));
+        assert_eq!(text_after_cancel("typing", "hi"), None);
+    }
 
     /// 2026-11-05 12:00:00 UTC.
     const NOW: i64 = 1_793_880_000_000;

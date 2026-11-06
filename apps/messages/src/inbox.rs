@@ -613,6 +613,15 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
     }
 }
 
+/// The snippet an inbox row shows: the unsent draft's first line when there is one.
+#[allow(dead_code)]
+pub fn snippet_with_draft(snippet: &str, draft: Option<&str>) -> String {
+    match draft.map(|d| d.trim()).filter(|d| !d.is_empty()) {
+        Some(draft) => format!("Draft: {}", draft.lines().next().unwrap_or("").trim()),
+        None => snippet.to_owned(),
+    }
+}
+
 /// Indices of the rows that match `query`: by folded title or snippet, or, for
 /// a query with three or more digits, by the digits of the SMS sender. A blank
 /// query keeps every row. Order is kept.
@@ -1523,6 +1532,17 @@ mod tests {
         );
         assert_eq!(view.rows.len(), 1);
         assert!(view.archived.is_empty());
+    }
+
+    #[test]
+    fn drafts_replace_the_snippet() {
+        assert_eq!(snippet_with_draft("old", None), "old");
+        assert_eq!(snippet_with_draft("old", Some("  \n ")), "old");
+        assert_eq!(snippet_with_draft("old", Some("hi")), "Draft: hi");
+        assert_eq!(
+            snippet_with_draft("old", Some("\n first line \nsecond")),
+            "Draft: first line"
+        );
     }
 
     #[test]

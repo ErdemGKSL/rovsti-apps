@@ -55,6 +55,8 @@ pub(crate) enum PillAction {
     CancelSpeedDialPick,
     /// Undo of a speed-dial Remove: put the entry back on its digit.
     RestoreSpeedDial(u8, rovsti_core::settings::SpeedDialEntry),
+    /// Undo of a speed-dial assign that replaced nothing: free the digit again.
+    ClearSpeedDial(u8),
     /// Undo of a quick-reply Clear: put the old text back in its slot.
     RestoreReply(usize, SharedString),
     /// Undo of a Recents Delete: re-insert the call-log rows and WhatsApp records.
@@ -271,6 +273,10 @@ impl PhoneApp {
             }
             PillAction::RestoreSpeedDial(digit, entry) => {
                 self.speed_dial_write(digit, Some(entry), cx);
+                cx.notify();
+            }
+            PillAction::ClearSpeedDial(digit) => {
+                self.speed_dial_write(digit, None, cx);
                 cx.notify();
             }
             PillAction::RestoreReply(slot, text) => self.replies_restore(slot, &text, window, cx),

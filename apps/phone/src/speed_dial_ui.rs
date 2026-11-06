@@ -269,6 +269,67 @@ impl PhoneApp {
         }
     }
 
+    /// Assigns `number_raw` of `name` to `digit` from the Contact sheet. The pill
+    /// undoes it: back to the replaced entry, or to a free digit.
+    pub(crate) fn speed_dial_set(
+        &mut self,
+        digit: u8,
+        number_raw: &str,
+        name: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let previous = self
+            .backend
+            .read(cx)
+            .prefs()
+            .speed_dial
+            .get(&digit)
+            .cloned();
+        let entry = SpeedDialEntry {
+            lookup_key: String::new(),
+            number_raw: number_raw.to_owned(),
+            name: name.to_owned(),
+        };
+        if self.speed_dial_write(digit, Some(entry), cx) {
+            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+            let text = speed_dial::assigned_text(digit, name, previous.as_ref());
+            let action = match previous {
+                Some(prev) => PillAction::RestoreSpeedDial(digit, prev),
+                None => PillAction::ClearSpeedDial(digit),
+            };
+            self.show_pill_action(text, "Undo", action, cx);
+        } else {
+            self.show_notice_pill("Couldn't set speed dial", None, false, cx);
+        }
+    }
+
+    /// Clears the digit a Contact sheet's numbers hold, with an Undo pill.
+    pub(crate) fn speed_dial_clear(
+        &mut self,
+        digit: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let old = self
+            .backend
+            .read(cx)
+            .prefs()
+            .speed_dial
+            .get(&digit)
+            .cloned();
+        self.speed_dial_write(digit, None, cx);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        if let Some(old) = old {
+            self.show_pill_action(
+                format!("Removed speed dial {digit}"),
+                "Undo",
+                PillAction::RestoreSpeedDial(digit, old),
+                cx,
+            );
+        }
+    }
+
     /// Assigns (`Some`) or clears (`None`) a digit. Whether it went through.
     pub(crate) fn speed_dial_write(
         &mut self,

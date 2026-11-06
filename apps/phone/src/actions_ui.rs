@@ -45,6 +45,8 @@ pub(crate) enum StripAction {
     Copy,
     Share,
     Block,
+    /// Assign the chosen number to this speed-dial digit (chooser only, no tile).
+    SpeedDial(u8),
 }
 
 impl StripAction {
@@ -67,6 +69,7 @@ impl StripAction {
     /// The Contact sheet's chooser header when this action waits for a number.
     pub(crate) fn chooser_title(self) -> &'static str {
         match self {
+            Self::SpeedDial(_) => "Speed dial which number?",
             Self::Message => "Message which number?",
             Self::Copy => "Copy which number?",
             Self::Share => "Share which number?",
@@ -76,6 +79,7 @@ impl StripAction {
 
     fn caption(self, blocked: bool) -> &'static str {
         match self {
+            Self::SpeedDial(_) => "Speed dial",
             Self::Message => "Message",
             Self::Copy => "Copy",
             Self::Share => "Share",
@@ -86,6 +90,7 @@ impl StripAction {
 
     fn icon(self) -> Icon {
         match self {
+            Self::SpeedDial(_) => Icon::LucidePhone,
             Self::Message => Icon::LucideMessageCircle,
             Self::Copy => Icon::LucideCopy,
             Self::Share => Icon::LucideShare2,
@@ -203,6 +208,7 @@ impl PhoneApp {
                     );
                 }
             }
+            StripAction::SpeedDial(digit) => self.speed_dial_set(digit, &number, &who, window, cx),
             StripAction::Block => {
                 self.close_sheet(cx);
                 if self.backend.read(cx).is_blocked(&number) {
@@ -241,6 +247,15 @@ mod tests {
         }
         assert_eq!(StripAction::from_id("sheet-cstar"), None);
         assert_eq!(StripAction::from_id("sheet-ncall"), None);
+    }
+
+    #[test]
+    fn speed_dial_chooser_names_the_verb() {
+        assert_eq!(
+            StripAction::SpeedDial(5).chooser_title(),
+            "Speed dial which number?"
+        );
+        assert_eq!(StripAction::from_id("sheet-csd-5"), None);
     }
 
     #[test]

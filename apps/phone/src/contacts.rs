@@ -17,10 +17,12 @@ use gpui::{
 use rovsti_core::{
     contacts_view::{self, CallTarget, ContactVm, NameStyle, NumberVm},
     search::ContactIndex,
+    speed_dial,
     wire::WireContact,
 };
 use rovsti_ui::{
     Icon,
+    components::flat_glass,
     glass::{GlassSpec, glass},
     moments::Tween,
     motion::press_scale,
@@ -423,6 +425,8 @@ pub(crate) struct ContactSheet {
     chooser: bool,
     /// A quick action waiting for the owner to pick a number (chooser mode).
     pending: Option<StripAction>,
+    /// The speed-dial digit row is showing.
+    sd_open: bool,
     /// The calls with the contact's numbers, built when the sheet opened.
     history: Arc<[crate::recents::HistoryVm]>,
     note: Option<SharedString>,
@@ -1151,6 +1155,7 @@ impl PhoneApp {
             starred,
             chooser,
             pending: None,
+            sd_open: false,
             history,
             note: None,
             note_task: None,
@@ -1301,6 +1306,45 @@ impl PhoneApp {
                 self.close_sheet(cx);
                 self.place_whatsapp(&raw, cx);
             }
+            return;
+        }
+        if id == SD_ID || id == SD_REMOVE_ID {
+            let raws: Vec<&str> = sheet
+                .contact
+                .numbers
+                .iter()
+                .map(|n| n.raw.as_str())
+                .collect();
+            let prefs_map = self.backend.read(cx).prefs().speed_dial.clone();
+            let held = speed_dial::digit_for(&prefs_map, &raws);
+            if id == SD_REMOVE_ID {
+                sheet.sd_open = false;
+                if let Some(digit) = held {
+                    self.speed_dial_clear(digit, window, cx);
+                }
+            } else {
+                sheet.sd_open = !sheet.sd_open;
+            }
+            cx.notify();
+            return;
+        }
+        if let Some(digit) = sd_digit(id) {
+            match contacts_view::call_target(&sheet.contact.numbers) {
+                CallTarget::Direct(i) => {
+                    let raw = sheet.contact.numbers[i].raw.clone();
+                    let name = sheet.contact.name.clone();
+                    sheet.sd_open = false;
+                    self.speed_dial_set(digit, &raw, &name, window, cx);
+                }
+                CallTarget::Choose => {
+                    sheet.pending = Some(StripAction::SpeedDial(digit));
+                    sheet.chooser = true;
+                    sheet.sd_open = false;
+                    sheet.note = None;
+                }
+                CallTarget::Nothing => {}
+            }
+            cx.notify();
             return;
         }
         if let Some(action) = StripAction::from_id(id) {
@@ -2303,6 +2347,9 @@ impl PhoneApp {
             ));
         }
         children.push(reveal(3, numbers.into_any_element()));
+        if !sheet.chooser {
+            children.push(reveal(3, speed_dial_row(self, theme, cx)));
+        }
         if !sheet.chooser
             && let Some(section) = crate::recents::history_section(theme, &sheet.history)
         {
@@ -2420,6 +2467,170 @@ fn fav_move_pills(
             can_down,
             cx,
         ))
+        .into_any_element()
+}
+
+/// Contact sheet speed-dial controls (all keep the `sheet-c` router prefix).
+const SD_ID: &str = "sheet-csd";
+const SD_REMOVE_ID: &str = "sheet-csd-x";
+const SD_KEY_IDS: [&str; 8] = [
+    "sheet-csd-2",
+    "sheet-csd-3",
+    "sheet-csd-4",
+    "sheet-csd-5",
+    "sheet-csd-6",
+    "sheet-csd-7",
+    "sheet-csd-8",
+    "sheet-csd-9",
+];
+
+/// The digit a speed-dial key id (`sheet-csd-N`) stands for; 2..=9 only.
+fn sd_digit(id: &str) -> Option<u8> {
+    let d: u8 = id.strip_prefix("sheet-csd-")?.parse().ok()?;
+    ((2..=9).contains(&d) && id.len() == "sheet-csd-".len() + 1).then_some(d)
+}
+
+/// "Add to speed dial" or "Speed dial {d}" with Remove, and the digit keys
+/// under it while `sd_open`.
+fn speed_dial_row(app: &PhoneApp, theme: Theme, cx: &mut Context<PhoneApp>) -> AnyElement {
+    let colors = theme::colors(theme);
+    let Some(sheet) = &app.contact_sheet else {
+        return div().into_any_element();
+    };
+    let map = app.backend.read(cx).prefs().speed_dial.clone();
+    let raws: Vec<&str> = sheet
+        .contact
+        .numbers
+        .iter()
+        .map(|n| n.raw.as_str())
+        .collect();
+    let held = speed_dial::digit_for(&map, &raws);
+    let usable = !raws.is_empty();
+    let label: SharedString = match held {
+        Some(d) => format!("Speed dial {d}").into(),
+        None => "Add to speed dial".into(),
+    };
+    let press = app.presses.value(SD_ID).clamp(0.0, 1.0);
+    let text_button =
+        |id: &'static str, text: &'static str, ink: gpui::Hsla, cx: &mut Context<PhoneApp>| {
+            div()
+                .id(id)
+                .role(Role::Button)
+                .aria_label(text)
+                .relative()
+                .h(px(44.0))
+                .px(px(14.0))
+                .flex()
+                .items_center()
+                .text_size(typography::SUBHEADLINE.size)
+                .text_color(ink)
+                .child(text)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.presses.down(id);
+                        this.contact_sheet_act(id, window, cx);
+                    }),
+                )
+                .child(touch_surface(PhoneApp::touch_listener(cx, Some(id.into()))))
+        };
+    let head = div()
+        .flex()
+        .items_center()
+        .h(px(44.0))
+        .child(
+            div()
+                .id(SD_ID)
+                .role(Role::Button)
+                .aria_label(label.clone())
+                .relative()
+                .flex_1()
+                .h(px(44.0))
+                .px(px(14.0))
+                .flex()
+                .items_center()
+                .text_size(typography::SUBHEADLINE.size)
+                .text_color(colors.accent)
+                .when(!usable, |d| d.opacity(0.4))
+                .bg(gpui::Hsla {
+                    a: 0.2 * press,
+                    ..colors.fill
+                })
+                .child(label)
+                .when(usable, |d| {
+                    d.on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            this.presses.down(SD_ID);
+                            this.contact_sheet_act(SD_ID, window, cx);
+                        }),
+                    )
+                    .child(touch_surface(PhoneApp::touch_listener(
+                        cx,
+                        Some(SD_ID.into()),
+                    )))
+                }),
+        )
+        .children(
+            held.is_some()
+                .then(|| text_button(SD_REMOVE_ID, "Remove", call_colors(theme).danger, cx)),
+        );
+    let keys = sheet.sd_open.then(|| {
+        let name = sheet.contact.name.clone();
+        div()
+            .flex()
+            .justify_center()
+            .gap(px(6.0))
+            .pb(px(6.0))
+            .children(SD_KEY_IDS.into_iter().map(|id| {
+                let digit = sd_digit(id).unwrap_or(2);
+                let taken = map.contains_key(&digit);
+                let k = press_scale(app.presses.value(id).clamp(0.0, 1.0), scale::PRESS);
+                div()
+                    .size(px(36.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        flat_glass(theme, None)
+                            .id(id)
+                            .role(Role::Button)
+                            .aria_label(SharedString::from(format!("{digit}, {name}")))
+                            .relative()
+                            .size(px(36.0 * k))
+                            .rounded(px(12.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_size(typography::HEADLINE.size)
+                            .text_color(colors.label)
+                            .child(digit.to_string())
+                            .children(taken.then(|| {
+                                div()
+                                    .absolute()
+                                    .top(px(4.0))
+                                    .right(px(4.0))
+                                    .size(px(5.0))
+                                    .rounded_full()
+                                    .bg(colors.accent)
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, window, cx| {
+                                    this.presses.down(id);
+                                    this.contact_sheet_act(id, window, cx);
+                                }),
+                            )
+                            .child(touch_surface(PhoneApp::touch_listener(cx, Some(id.into())))),
+                    )
+            }))
+    });
+    div()
+        .flex()
+        .flex_col()
+        .child(head)
+        .children(keys)
         .into_any_element()
 }
 
@@ -2871,6 +3082,33 @@ fn favorite_tile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sd_digit_accepts_two_to_nine_only() {
+        for d in 2..=9u8 {
+            assert_eq!(sd_digit(&format!("sheet-csd-{d}")), Some(d));
+        }
+        for id in [
+            "sheet-csd-0",
+            "sheet-csd-1",
+            "sheet-csd-10",
+            "sheet-csd-x",
+            "sheet-csd",
+            "sheet-csd-+5",
+            "sheet-cn-5",
+        ] {
+            assert_eq!(sd_digit(id), None, "{id}");
+        }
+    }
+
+    #[test]
+    fn sd_ids_keep_the_router_prefix_and_match_their_digit() {
+        assert!(SD_ID.starts_with("sheet-c") && SD_REMOVE_ID.starts_with("sheet-c"));
+        for (i, id) in SD_KEY_IDS.iter().enumerate() {
+            assert!(id.starts_with("sheet-c"));
+            assert_eq!(sd_digit(id), Some(i as u8 + 2));
+        }
+    }
 
     #[test]
     fn reorder_target_rejects_same_slot_and_out_of_range() {

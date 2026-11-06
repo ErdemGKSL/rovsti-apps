@@ -338,7 +338,28 @@ impl LogEdits {
         let mut all: Vec<CallLogEntry> = log
             .into_iter()
             .filter(|e| !self.deleted.contains(&e.id))
-            .chain(self.restored.iter().cloned())
+            .chain(
+                self.restored
+                    .iter()
+                    .filter(|e| e.kind != CallLogKind::Blocked)
+                    .cloned(),
+            )
+            .collect();
+        all.sort_by_key(|e| std::cmp::Reverse(e.date_ms));
+        all
+    }
+
+    /// The blocked-calls page: deleted ids dropped, restored Blocked rows merged in.
+    fn apply_blocked(&self, calls: Vec<CallLogEntry>) -> Vec<CallLogEntry> {
+        let mut all: Vec<CallLogEntry> = calls
+            .into_iter()
+            .filter(|e| !self.deleted.contains(&e.id))
+            .chain(
+                self.restored
+                    .iter()
+                    .filter(|e| e.kind == CallLogKind::Blocked)
+                    .cloned(),
+            )
             .collect();
         all.sort_by_key(|e| std::cmp::Reverse(e.date_ms));
         all
@@ -382,7 +403,9 @@ static EDITS: std::sync::Mutex<LogEdits> = std::sync::Mutex::new(LogEdits::new()
 /// Desktop stand-in for deleting call-log rows; how many existed.
 #[cfg(not(target_os = "android"))]
 pub fn delete_calls(ids: &[i64], now_ms: i64) -> u32 {
-    let visible = preview_call_log(now_ms);
+    // Ids from the main log and from the blocked-calls page are both deletable.
+    let mut visible = preview_call_log(now_ms);
+    visible.extend(blocked_calls(now_ms));
     EDITS
         .lock()
         .map_or(0, |mut edits| edits.delete(ids, &visible))
@@ -461,6 +484,14 @@ pub fn unblock_row(raw: &str) {
 
 /// Blocked calls for the desktop page, newest first.
 pub fn blocked_calls(now_ms: i64) -> Vec<CallLogEntry> {
+    let base = blocked_calls_seed(now_ms);
+    match EDITS.lock() {
+        Ok(edits) => edits.apply_blocked(base),
+        Err(_) => base,
+    }
+}
+
+fn blocked_calls_seed(now_ms: i64) -> Vec<CallLogEntry> {
     let call = |id: i64, raw: &str, ago: i64, reason: BlockReason| CallLogEntry {
         id: 5000 + id,
         number_raw: raw.to_owned(),
@@ -646,5 +677,29 @@ mod tests {
         assert!(edits.apply(log.clone()).is_empty());
         edits.restore(vec![log[1].clone()]);
         assert_eq!(edits.apply(log).len(), 1);
+    }
+
+    #[test]
+    fn deleting_a_blocked_call_removes_it_and_restore_brings_it_back() {
+        let now = 1_000_000_000;
+        let blocked = blocked_calls_seed(now);
+        let first = blocked[0].clone();
+        let mut edits = LogEdits::new();
+        assert_eq!(edits.delete(&[first.id], &blocked), 1);
+        let after = edits.apply_blocked(blocked.clone());
+        assert_eq!(after.len(), blocked.len() - 1);
+        assert!(after.iter().all(|e| e.id != first.id));
+        assert!(
+            edits
+                .apply(call_log(now))
+                .iter()
+                .all(|e| e.kind != CallLogKind::Blocked),
+            "blocked rows never leak into the main log"
+        );
+
+        assert_eq!(edits.restore(vec![first.clone()]), 1);
+        let back = edits.apply_blocked(blocked.clone());
+        assert_eq!(back.len(), blocked.len());
+        assert_eq!(back[0].date_ms, first.date_ms);
     }
 }

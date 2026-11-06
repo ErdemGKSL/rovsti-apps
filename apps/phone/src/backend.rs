@@ -1164,7 +1164,13 @@ impl Backend {
         cx.spawn(async move |this, cx| {
             let outcome = cx.background_executor().spawn(async move { write() }).await;
             if matches!(outcome, WriteOutcome::Done(_)) {
-                this.update(cx, |this, cx| this.refresh_call_log(cx)).ok();
+                this.update(cx, |this, cx| {
+                    this.refresh_call_log(cx);
+                    if this.blocked_calls_wanted {
+                        this.refresh_blocked_calls(cx);
+                    }
+                })
+                .ok();
             }
             outcome
         })

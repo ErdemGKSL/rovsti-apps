@@ -527,6 +527,19 @@ impl PhoneApp {
             backend::Load::Ready(log) => entries_by_id(&log.source, &ids),
             _ => Vec::new(),
         };
+        self.delete_call_entries(entries, wa_ids, window, cx);
+    }
+
+    /// Like `delete_call_ids`, but the caller supplies the rows to delete (and to
+    /// restore on Undo), e.g. from a page that is not the main call log.
+    pub(crate) fn delete_call_entries(
+        &mut self,
+        entries: Vec<CallLogEntry>,
+        wa_ids: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ids: Vec<i64> = entries.iter().map(|e| e.id).collect();
         let total = entries.len() + wa_ids.len();
         if total == 0 {
             return;

@@ -1226,12 +1226,26 @@ impl ContactsApp {
                 )
                 .into_any_element()
             } else {
-                empty_state(
-                    theme,
-                    "No Results",
-                    format!("No contact matches “{}”.", contacts_view::clip_query(query)),
-                )
-                .into_any_element()
+                let draft = matches!(self.book, Book::Ready(_))
+                    .then(|| rovsti_core::contact_edit::draft_from_query(query))
+                    .flatten();
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .child(empty_state(
+                        theme,
+                        "No Results",
+                        format!("No contact matches “{}”.", contacts_view::clip_query(query)),
+                    ))
+                    .children(draft.map(|draft| {
+                        glass_pill(theme, "Create Contact")
+                            .id("create-from-search")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_new_editor_with(draft.clone(), cx)
+                            }))
+                    }))
+                    .into_any_element()
             })
         } else {
             None

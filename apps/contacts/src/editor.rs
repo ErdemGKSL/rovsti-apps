@@ -180,10 +180,12 @@ impl Editor {
 
 impl ContactsApp {
     pub(crate) fn open_new_editor(&mut self, cx: &mut Context<Self>) {
-        let draft = ContactDraft {
-            account: default_account(&self.accounts, &self.save_to),
-            ..ContactDraft::blank()
-        };
+        self.open_new_editor_with(ContactDraft::blank(), cx);
+    }
+
+    /// New Contact prefilled with `draft`, saved to the default account.
+    pub(crate) fn open_new_editor_with(&mut self, mut draft: ContactDraft, cx: &mut Context<Self>) {
+        draft.account = default_account(&self.accounts, &self.save_to);
         self.start_editor(&draft, cx);
     }
 

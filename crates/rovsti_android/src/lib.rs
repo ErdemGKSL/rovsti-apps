@@ -24,6 +24,7 @@ pub mod notify;
 pub mod perf;
 pub mod permissions;
 pub mod providers;
+pub mod reminders;
 pub mod roles;
 pub mod settings;
 pub mod sms;

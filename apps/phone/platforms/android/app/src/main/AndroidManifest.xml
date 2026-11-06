@@ -112,6 +112,9 @@
             </intent-filter>
         </receiver>
 
+        <!-- Call-back reminder alarms (inexact, no boot receiver; re-armed at launch). -->
+        <receiver android:name="dev.rovsti.bridge.CallReminderReceiver" android:exported="false" />
+
         <!-- Images handed to the share sheet (cache/share only, read-only). -->
         <provider
             android:name="dev.rovsti.bridge.RovstiShareProvider"

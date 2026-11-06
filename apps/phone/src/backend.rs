@@ -26,7 +26,7 @@ use gpui::{App, AppContext as _, Context, Entity, Task};
 use rovsti_android::{
     Error, calls, contacts_edit, documents,
     events::{self, RawEvent, kind},
-    media, permissions, providers, roles, telecom, xiaomi,
+    media, permissions, providers, reminders, roles, telecom, xiaomi,
 };
 use rovsti_core::{
     blocklist::BlockSet,
@@ -436,6 +436,16 @@ impl Backend {
             if let Some(snapshot) = first_snapshot {
                 backend.calls.apply(snapshot);
             }
+            // Alarms are lost on reboot or update; bring them back at launch.
+            cx.background_executor()
+                .spawn(async {
+                    if let Err(error) = reminders::rearm_all()
+                        && !matches!(error, Error::Unsupported)
+                    {
+                        log::debug!("re-arming reminders: {error}");
+                    }
+                })
+                .detach();
             let drain = cx.spawn(async move |this, cx| {
                 while let Some(event) = events_rx.next().await {
                     if this
@@ -1316,6 +1326,34 @@ pub fn add_contact(number: &str) -> Outcome {
 /// Opens the system SMS app on `number` (an empty body).
 pub fn send_sms_to(number: &str) -> Outcome {
     Outcome::from(telecom::send_sms_to(number), "message")
+}
+
+/// Opens the system SMS app on `number` with `body` filled in.
+pub fn compose_sms(number: &str, body: &str) -> Outcome {
+    Outcome::from(telecom::compose_sms(number, body), "composing a message")
+}
+
+/// Arms the call-back alarm for `r` (inexact; re-armed at launch).
+pub fn arm_reminder(r: &rovsti_core::reminder::Reminder) -> Outcome {
+    let json = rovsti_core::reminder::arm_json(r);
+    Outcome::from(reminders::arm(&json), "arming a reminder")
+}
+
+/// Cancels the alarm of reminder `id`.
+pub fn disarm_reminder(id: i64) -> Outcome {
+    Outcome::from(reminders::disarm(id), "disarming a reminder")
+}
+
+/// The reminders the system still holds (empty on desktop).
+pub fn armed_reminders() -> Vec<rovsti_core::reminder::Reminder> {
+    match reminders::armed() {
+        Ok(json) => rovsti_core::reminder::parse_list(&json),
+        Err(Error::Unsupported) => Vec::new(),
+        Err(error) => {
+            log::warn!("reading armed reminders failed: {error}");
+            Vec::new()
+        }
+    }
 }
 
 /// Puts `text` on the system clipboard.

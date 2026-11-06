@@ -388,6 +388,14 @@ object RovstiBridge {
 
     @JvmStatic fun pullFiredSms(): String = ScheduledSms.pullFired(app)
 
+    @JvmStatic fun armCallReminder(json: String): Boolean = CallReminders.arm(app, json)
+
+    @JvmStatic fun disarmCallReminder(id: String): Boolean = id.toLongOrNull()?.let { CallReminders.disarm(app, it) } ?: false
+
+    @JvmStatic fun armedCallReminders(): String = CallReminders.armedJson(app)
+
+    @JvmStatic fun rearmCallReminders(): Boolean = CallReminders.rearmAll(app)
+
     @JvmStatic fun showMessageNotification(specJson: String): Boolean = MessageNotifications.show(app, specJson)
 
     @JvmStatic fun cancelMessageNotification(tag: String): Boolean = MessageNotifications.cancel(app, tag)
@@ -722,6 +730,11 @@ object RovstiBridge {
     /** Story 14.4: the SMS composer for [number] (`smsto:`). */
     @JvmStatic
     fun sendSmsTo(number: String): Boolean = start(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", number, null)))
+
+    /** The SMS composer with `body` prefilled. The user still presses send, so there is no `SEND_SMS`. */
+    @JvmStatic
+    fun composeSms(number: String, body: String): Boolean =
+        start(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", number, null)).putExtra("sms_body", body))
 
     /** The e-mail composer for [address] (`mailto:`). */
     @JvmStatic

@@ -164,6 +164,17 @@ pub fn notification_body(r: &Reminder) -> String {
     }
 }
 
+/// The JSON the Android alarm side stores: the reminder plus the finished
+/// notification `title` and `body`, so Kotlin does not format anything.
+pub fn arm_json(r: &Reminder) -> String {
+    let mut value = serde_json::to_value(r).unwrap_or_default();
+    if let Some(map) = value.as_object_mut() {
+        map.insert("title".into(), notification_title(r).into());
+        map.insert("body".into(), notification_body(r).into());
+    }
+    value.to_string()
+}
+
 /// The stored list; bad JSON gives an empty list.
 pub fn parse_list(json: &str) -> Vec<Reminder> {
     serde_json::from_str(json).unwrap_or_default()
@@ -196,6 +207,19 @@ mod tests {
             created_ms: 0,
             missed: true,
         }
+    }
+
+    #[test]
+    fn arm_json_carries_reminder_and_texts() {
+        let r = rem(5_000);
+        let v: serde_json::Value = serde_json::from_str(&arm_json(&r)).expect("json");
+        assert_eq!(v["id"], 1);
+        assert_eq!(v["number"], "+442079460958");
+        assert_eq!(v["at_ms"], 5_000);
+        assert_eq!(v["title"], notification_title(&r));
+        assert_eq!(v["body"], "You missed a call");
+        // The stored form still parses as a Reminder.
+        assert_eq!(parse_list(&format!("[{}]", arm_json(&r))), vec![r]);
     }
 
     #[test]

@@ -102,6 +102,20 @@ SMS still goes out, possibly a few minutes late, and the UI says so. The payload
 SharedPreferences and sent by `SmsSend` from the receiver, so no native library is needed;
 `BootReceiver` re-arms after a reboot.
 
+**Call reminders (Phone).** "Call back later" uses `rovsti_android::reminders` (`arm`, `disarm`,
+`armed`, `rearm_all`) and `CallReminders.kt`. One alarm per reminder, always the inexact
+`setAndAllowWhileIdle` (no exact-alarm permission, so it can be a few minutes late). The payload is
+`reminder::arm_json` (the reminder plus the finished `title` and `body`) and is kept in
+SharedPreferences. There is no boot receiver: the app calls `rearm_all` at launch, which re-sets
+every stored alarm (due ones fire at once). `CallReminderReceiver` (not exported) posts a
+notification on the `reminders` channel ("Call reminders", default importance), then forgets the
+item and emits `reminder_fired {id}`. The tap and the "Call back" action are `ACTION_DIAL tel:`
+addressed to the app's own package, so nothing is dialled without a further tap. No new permission.
+
+**Composing an SMS with text.** `telecom::compose_sms(number, body)` calls
+`RovstiBridge.composeSms`: `ACTION_SENDTO smsto:<number>` with the `sms_body` extra. The user
+presses send in their SMS app, so `SEND_SMS` is not needed.
+
 **FCM flavor.** Same as Phone: put `google-services.json` in `apps/messages/platforms/android/app/`.
 Only then does `app/build.gradle.kts` apply the Google services plugin, add `firebase-messaging`, the
 source directory `src/firebase/kotlin` and the manifest `src/firebase/AndroidManifest.xml`.

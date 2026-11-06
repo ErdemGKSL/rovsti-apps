@@ -1,6 +1,9 @@
 //! Calls through Android's Telecom stack.
 
-use crate::{Result, bridge};
+use crate::{
+    Result,
+    bridge::{self, Arg},
+};
 
 /// Places a call with `TelecomManager.placeCall` (needs `CALL_PHONE`; as the
 /// default dialer Rovsti Phone also gets the in-call UI). Returns `false` if
@@ -99,6 +102,13 @@ pub fn send_sms_to(number: &str) -> Result<bool> {
     bridge::call_bool_str("sendSmsTo", number)
 }
 
+/// Opens the SMS composer for `number` with `body` filled in (`smsto:` plus
+/// `sms_body`; the user still presses send, so no `SEND_SMS` is needed).
+/// `false` when no app answered.
+pub fn compose_sms(number: &str, body: &str) -> Result<bool> {
+    bridge::call_bool("composeSms", &[Arg::Str(number), Arg::Str(body)])
+}
+
 /// Opens the e-mail composer for `address` (`mailto:`). `false` when no app answered.
 pub fn send_email_to(address: &str) -> Result<bool> {
     bridge::call_bool_str("sendEmailTo", address)
@@ -162,6 +172,7 @@ mod tests {
             assert!(matches!(open_system(page), Err(Error::Unsupported)));
         }
         assert!(matches!(send_sms_to("1"), Err(Error::Unsupported)));
+        assert!(matches!(compose_sms("1", "hi"), Err(Error::Unsupported)));
         assert!(matches!(send_email_to("a@b.c"), Err(Error::Unsupported)));
         assert!(matches!(copy_text("x"), Err(Error::Unsupported)));
         assert!(matches!(share_text("x"), Err(Error::Unsupported)));

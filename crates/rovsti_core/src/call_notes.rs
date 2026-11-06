@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::call_log::{CallType, DateOrder, civil_from_days, clock_text, format_duration};
 use crate::phone_number::PhoneNumber;
 use crate::recents::{HistoryLine, LocaleTime, history_text};
+use crate::search::fold;
 
 /// One note on one call.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,6 +135,26 @@ impl Notes {
             })
             .min()
             .map(|(_, i)| i)
+    }
+
+    /// Whether a note of `number` written for a call that spanned
+    /// `first_ms..=last_ms` (plus `MATCH_WINDOW_MS` each side) contains
+    /// `folded_text` once folded with `search::fold`. False for empty text and
+    /// for a private or unparsable number.
+    pub fn mentions(&self, number: &str, first_ms: i64, last_ms: i64, folded_text: &str) -> bool {
+        if folded_text.is_empty() {
+            return false;
+        }
+        let Some(wanted) = parse_number(number) else {
+            return false;
+        };
+        let lo = first_ms.saturating_sub(MATCH_WINDOW_MS);
+        let hi = last_ms.saturating_add(MATCH_WINDOW_MS);
+        self.notes.iter().any(|n| {
+            (lo..=hi).contains(&n.at_ms)
+                && fold(&n.text).contains(folded_text)
+                && parse_number(&n.number).is_some_and(|p| p.matches(&wanted))
+        })
     }
 
     /// Adds, replaces or (for empty text) deletes the note of a call.

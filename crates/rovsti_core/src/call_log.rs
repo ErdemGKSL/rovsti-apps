@@ -39,7 +39,7 @@ impl CallType {
 }
 
 /// Identifies one stored call behind a Recents row, for deleting or restoring it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EntryRef {
     /// A row of the phone's call log (`CallLog.Calls._ID`).
     Log(i64),

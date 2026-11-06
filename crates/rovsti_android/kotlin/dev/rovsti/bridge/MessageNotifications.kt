@@ -99,7 +99,7 @@ object MessageNotifications {
             style.addMessage(line, now - (spec.lines.size - 1 - i) * 1000L, them)
         }
         val builder = Notification.Builder(context, CHANNEL)
-            .setSmallIcon(context.applicationInfo.icon)
+            .setSmallIcon(NotificationIcon.small(context))
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setStyle(style)
             .setAutoCancel(true)

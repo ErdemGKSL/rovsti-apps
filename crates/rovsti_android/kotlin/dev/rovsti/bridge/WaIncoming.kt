@@ -94,7 +94,7 @@ object WaIncoming {
             val decline = pending(context, notice.callId, DECLINE, 2)
             val caller = Person.Builder().setName(notice.title).setImportant(true).build()
             val builder = Notification.Builder(context, CHANNEL)
-                .setSmallIcon(context.applicationInfo.icon)
+                .setSmallIcon(NotificationIcon.small(context))
                 .setCategory(Notification.CATEGORY_CALL)
                 .setOngoing(true)
                 // A cold process never learns that the caller hung up: do not leave an ongoing notice behind.
@@ -134,7 +134,7 @@ object WaIncoming {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
             val notification = Notification.Builder(context, MISSED_CHANNEL)
-                .setSmallIcon(context.applicationInfo.icon)
+                .setSmallIcon(NotificationIcon.small(context))
                 .setCategory(Notification.CATEGORY_MISSED_CALL)
                 .setContentTitle(notice.title)
                 .setContentText("Missed WhatsApp call")

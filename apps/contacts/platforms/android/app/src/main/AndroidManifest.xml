@@ -23,6 +23,8 @@
     <application
         android:name=".RovstiContactsApp"
         android:label="Rovsti Contacts"
+        android:icon="@drawable/gpui_app_icon"
+        android:roundIcon="@drawable/gpui_app_icon"
         android:theme="@style/GpuiTheme"
         android:allowBackup="false"
         android:supportsRtl="true">

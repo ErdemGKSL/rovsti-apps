@@ -14,7 +14,7 @@ use rovsti_core::{
 use crate::{ContactsApp, backend, confirm::Confirm};
 
 impl ContactsApp {
-    /// Reads every contact with a number and offers it as `contacts.vcf`.
+    /// Reads every contact and offers it as `contacts.vcf`.
     pub(crate) fn export_contacts(&mut self, cx: &mut Context<Self>) {
         if self.transfer_busy {
             self.say_busy(cx);

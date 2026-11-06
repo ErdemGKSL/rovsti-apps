@@ -57,7 +57,7 @@ fn import_summary(add: usize, duplicates: usize, unreadable: usize) -> String {
     }
     if unreadable > 0 {
         parts.push(format!(
-            "{} without a name or a phone number",
+            "{} without a name, or with a broken number or email",
             contacts_words(unreadable)
         ));
     }
@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(
             import_summary(2, 1, 3),
             "Left out: 1 contact already in your address book, \
-             3 contacts without a name or a phone number."
+             3 contacts without a name, or with a broken number or email."
         );
     }
 }

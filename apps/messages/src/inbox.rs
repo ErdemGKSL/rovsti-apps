@@ -142,6 +142,17 @@ impl InboxView {
         self.spam.iter().any(|r| r.threads.contains(thread))
     }
 
+    /// True when the row holding `thread` is SMS only: no WhatsApp chat, no
+    /// WhatsApp thread (so it may be moved into Spam).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn sms_only(&self, thread: &ThreadId) -> bool {
+        self.all_rows()
+            .find(|r| r.threads.contains(thread))
+            .is_some_and(|r| {
+                r.wa_chat.is_none() && r.threads.iter().all(|t| matches!(t, ThreadId::Sms(_)))
+            })
+    }
+
     /// Every row, wherever it is shown.
     pub fn all_rows(&self) -> impl Iterator<Item = &RowView> {
         self.rows.iter().chain(&self.spam).chain(&self.archived)
@@ -1602,6 +1613,47 @@ mod tests {
             &BlockSet::default(),
         );
         assert!(view.spam.is_empty());
+    }
+
+    #[test]
+    fn sms_only_is_false_for_merged_rows() {
+        let view = build_with(
+            &[
+                sms(1, &["+905321234567"], "hi", MIN, 0),
+                sms(2, &["+905559876543"], "hello", 2 * MIN, 0),
+            ],
+            &[wa("905321234567@s.whatsapp.net", "Ayse", 5 * MIN, 0)],
+            vec![],
+            &rules(),
+            &BlockSet::default(),
+        );
+        assert!(!view.sms_only(&ThreadId::Sms(1)), "merged with WhatsApp");
+        assert!(view.sms_only(&ThreadId::Sms(2)));
+        assert!(!view.sms_only(&ThreadId::Sms(99)), "unknown thread");
+        assert!(!view.sms_only(&ThreadId::WhatsApp("905321234567@s.whatsapp.net".into())));
+    }
+
+    #[test]
+    fn sender_rule_moves_a_row_to_spam() {
+        let rules = SpamRules {
+            rules: vec![spam::SpamRule::Sender {
+                pattern: "TRENDYOL".into(),
+            }],
+            ..SpamRules::default()
+        };
+        let view = build_with(
+            &[
+                sms(1, &["TRENDYOL"], "Kampanya", MIN, 1),
+                sms(2, &["GARANTI"], "Merhaba", 2 * MIN, 0),
+            ],
+            &[],
+            vec![],
+            &rules,
+            &BlockSet::default(),
+        );
+        assert!(view.in_spam(&ThreadId::Sms(1)));
+        assert!(!view.in_spam(&ThreadId::Sms(2)));
+        assert_eq!(view.spam.len(), 1);
     }
 
     #[test]

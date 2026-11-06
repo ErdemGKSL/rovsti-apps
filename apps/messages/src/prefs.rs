@@ -11,7 +11,7 @@ use std::{
     path::Path,
 };
 
-use rovsti_core::spam::{SpamRule, SpamRules};
+use rovsti_core::spam::{RuleError, SpamRule, SpamRules};
 use rovsti_ui::storage;
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +26,16 @@ pub fn default_spam_rules() -> SpamRules {
         rules: vec![SpamRule::UnknownWithLink],
         ..SpamRules::default()
     }
+}
+
+/// What [`MessagesPrefs::mark_spam`] changed, so Undo can restore it exactly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct SpamMark {
+    /// A new sender rule was added (not already there).
+    pub rule_added: bool,
+    /// The sender was on the allow list and has been taken off.
+    pub was_allowed: bool,
 }
 
 fn yes() -> bool {
@@ -129,6 +139,50 @@ impl MessagesPrefs {
         let before = self.spam.allow.len();
         self.spam.allow.retain(|a| !a.eq_ignore_ascii_case(sender));
         self.spam.allow.len() != before
+    }
+
+    /// Moves a sender into Spam: a sender rule, and off the allow list (which
+    /// beats rules). An existing rule is fine; on any other error nothing changes.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn mark_spam(&mut self, sender: &str) -> Result<SpamMark, RuleError> {
+        let sender = sender.trim();
+        let was_allowed = self.unallow_sender(sender);
+        let rule = SpamRule::Sender {
+            pattern: sender.to_owned(),
+        };
+        match self.spam.add_rule(rule) {
+            Ok(()) => Ok(SpamMark {
+                rule_added: true,
+                was_allowed,
+            }),
+            Err(RuleError::Duplicate) => Ok(SpamMark {
+                rule_added: false,
+                was_allowed,
+            }),
+            Err(e) => {
+                if was_allowed {
+                    self.allow_sender(sender);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Undoes [`MessagesPrefs::mark_spam`].
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn unmark_spam(&mut self, sender: &str, mark: SpamMark) {
+        let sender = sender.trim();
+        if mark.rule_added {
+            let found = self.spam.rules.iter().position(|r| {
+                matches!(r, SpamRule::Sender { pattern } if pattern.trim().eq_ignore_ascii_case(sender))
+            });
+            if let Some(index) = found {
+                self.spam.remove_rule(index);
+            }
+        }
+        if mark.was_allowed {
+            self.allow_sender(sender);
+        }
     }
 
     pub fn remove_allowed(&mut self, index: usize) -> bool {
@@ -268,5 +322,77 @@ mod tests {
         assert!(prefs.allow_sender("Bank"));
         assert!(prefs.unallow_sender(" BANK "));
         assert!(prefs.spam.allow.is_empty());
+    }
+
+    fn has_sender_rule(prefs: &MessagesPrefs, sender: &str) -> bool {
+        prefs.spam.rules.iter().any(
+            |r| matches!(r, SpamRule::Sender { pattern } if pattern.eq_ignore_ascii_case(sender)),
+        )
+    }
+
+    #[test]
+    fn mark_spam_adds_a_sender_rule_and_unallows() {
+        let mut prefs = MessagesPrefs::default();
+        assert!(prefs.allow_sender("TRENDYOL"));
+        let mark = prefs.mark_spam(" TRENDYOL ").expect("ok");
+        assert_eq!(
+            mark,
+            SpamMark {
+                rule_added: true,
+                was_allowed: true
+            }
+        );
+        assert!(has_sender_rule(&prefs, "TRENDYOL"));
+        assert!(prefs.spam.allow.is_empty());
+    }
+
+    #[test]
+    fn unmark_spam_restores_exactly() {
+        let mut prefs = MessagesPrefs::default();
+        let original = prefs.clone();
+        let mark = prefs.mark_spam("GARANTI").expect("ok");
+        prefs.unmark_spam("garanti", mark);
+        assert_eq!(prefs, original);
+
+        prefs.allow_sender("GARANTI");
+        let original = prefs.clone();
+        let mark = prefs.mark_spam("GARANTI").expect("ok");
+        assert!(mark.was_allowed && mark.rule_added);
+        prefs.unmark_spam("GARANTI", mark);
+        assert_eq!(prefs, original);
+    }
+
+    #[test]
+    fn mark_spam_on_a_full_list_changes_nothing() {
+        let mut prefs = MessagesPrefs::default();
+        let mut n = 0;
+        while prefs.spam.rules.len() < rovsti_core::spam::MAX_RULES {
+            prefs
+                .spam
+                .add_rule(SpamRule::Keyword {
+                    text: format!("k{n}"),
+                })
+                .expect("room");
+            n += 1;
+        }
+        prefs.allow_sender("TRENDYOL");
+        let before = prefs.clone();
+        assert_eq!(prefs.mark_spam("TRENDYOL"), Err(RuleError::TooMany));
+        assert_eq!(prefs, before);
+        assert_eq!(prefs.mark_spam("  "), Err(RuleError::Empty));
+        assert_eq!(prefs, before);
+    }
+
+    #[test]
+    fn mark_spam_twice_is_a_duplicate_not_an_error() {
+        let mut prefs = MessagesPrefs::default();
+        prefs.mark_spam("TRENDYOL").expect("first");
+        let rules = prefs.spam.rules.len();
+        let mark = prefs.mark_spam("trendyol").expect("duplicate is fine");
+        assert!(!mark.rule_added);
+        assert_eq!(prefs.spam.rules.len(), rules);
+        // Undoing the second mark must not remove the first rule.
+        prefs.unmark_spam("trendyol", mark);
+        assert!(has_sender_rule(&prefs, "TRENDYOL"));
     }
 }

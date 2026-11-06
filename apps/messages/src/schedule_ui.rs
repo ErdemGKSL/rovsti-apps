@@ -373,6 +373,91 @@ pub fn strip_items(
     items
 }
 
+/// Where an overview entry goes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub enum EntryTarget {
+    Sms(String),
+    WhatsApp(String),
+}
+
+/// One waiting (or failed) scheduled message in the overview.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct ScheduledEntry {
+    pub key: StripKey,
+    pub target: EntryTarget,
+    pub at_ms: i64,
+    pub body: String,
+    pub failed: bool,
+}
+
+/// Everything scheduled, both queues together: failed first, then soonest.
+/// Sent gateway items are history and left out.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn overview(local: &[ScheduledSms], remote: &[ScheduledText]) -> Vec<ScheduledEntry> {
+    let mut entries: Vec<ScheduledEntry> = local
+        .iter()
+        .map(|i| ScheduledEntry {
+            key: StripKey::Local(i.id),
+            target: match &i.target {
+                ScheduleTarget::Sms { to, .. } => EntryTarget::Sms(to.clone()),
+                ScheduleTarget::WhatsApp { chat } => EntryTarget::WhatsApp(chat.clone()),
+            },
+            at_ms: i.at_ms,
+            body: i.body.clone(),
+            failed: false,
+        })
+        .chain(
+            remote
+                .iter()
+                .filter(|t| !matches!(t.state, ScheduledState::Sent { .. }))
+                .map(|t| ScheduledEntry {
+                    key: StripKey::Gateway(t.id.clone()),
+                    target: EntryTarget::WhatsApp(t.chat.clone()),
+                    at_ms: t.send_at_ms,
+                    body: t.text.clone(),
+                    failed: matches!(t.state, ScheduledState::Failed { .. }),
+                }),
+        )
+        .collect();
+    entries.sort_by_key(|e| (!e.failed, e.at_ms));
+    entries
+}
+
+/// The overview row's subtitle.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn overview_subtitle(entries: &[ScheduledEntry]) -> String {
+    let failed = entries.iter().filter(|e| e.failed).count();
+    let waiting = entries.len() - failed;
+    match (waiting, failed) {
+        (0, 0) => String::new(),
+        (w, 0) => format!("{w} waiting"),
+        (0, f) => format!("{f} couldn't be sent"),
+        (w, f) => format!("{w} waiting, {f} couldn't be sent"),
+    }
+}
+
+/// True when `after` is failed and `before` was not (unknown counts as not failed).
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn newly_failed(before: Option<&ScheduledText>, after: &ScheduledText) -> bool {
+    matches!(after.state, ScheduledState::Failed { .. })
+        && !before.is_some_and(|b| matches!(b.state, ScheduledState::Failed { .. }))
+}
+
+/// The pill when a gateway-scheduled WhatsApp message failed.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn remote_failed_text(title: &str) -> String {
+    format!(
+        "Scheduled WhatsApp message to {} couldn't be sent",
+        title.trim()
+    )
+}
+
+/// Shown when Send later is chosen with an empty composer.
+#[cfg_attr(not(test), allow(dead_code))]
+pub const TYPE_FIRST: &str = "Type the message first, then choose Send later";
+
 /// The rows the strip shows: the first few, or all when expanded.
 pub fn visible_items(items: &[StripItem], expanded: bool) -> &[StripItem] {
     if expanded {
@@ -1072,5 +1157,97 @@ mod tests {
         assert!(!early.is_schedulable(now, 0));
         assert!(early.step_day(1).is_schedulable(now, 0));
         assert!(CustomPick::initial(now, 0).is_schedulable(now, 0));
+    }
+
+    #[test]
+    fn overview_lists_both_queues_failed_first() {
+        let local = [
+            sms_item(1, NOW + 3000, "+905321234567"),
+            sms_item(2, NOW + 1000, "+14155550100"),
+        ];
+        let list = vec![
+            remote("a", "a@s.whatsapp.net", NOW + 2000, ScheduledState::Pending),
+            remote(
+                "b",
+                "b@s.whatsapp.net",
+                NOW + 9000,
+                ScheduledState::Failed { reason: "x".into() },
+            ),
+        ];
+        let entries = overview(&local, &list);
+        let keys: Vec<_> = entries.iter().map(|e| e.key.clone()).collect();
+        assert_eq!(
+            keys,
+            vec![
+                StripKey::Gateway("b".into()),
+                StripKey::Local(2),
+                StripKey::Gateway("a".into()),
+                StripKey::Local(1),
+            ]
+        );
+        assert!(entries[0].failed && !entries[1].failed);
+        assert_eq!(entries[1].target, EntryTarget::Sms("+14155550100".into()));
+        assert_eq!(
+            entries[2].target,
+            EntryTarget::WhatsApp("a@s.whatsapp.net".into())
+        );
+    }
+
+    #[test]
+    fn overview_skips_sent_gateway_items() {
+        let list = vec![remote(
+            "c",
+            "c@s.whatsapp.net",
+            NOW,
+            ScheduledState::Sent {
+                message_id: "M".into(),
+            },
+        )];
+        assert!(overview(&[], &list).is_empty());
+    }
+
+    #[test]
+    fn overview_subtitles_count() {
+        let entry = |failed| ScheduledEntry {
+            key: StripKey::Local(1),
+            target: EntryTarget::Sms("1".into()),
+            at_ms: 0,
+            body: String::new(),
+            failed,
+        };
+        assert_eq!(overview_subtitle(&[entry(false)]), "1 waiting");
+        assert_eq!(
+            overview_subtitle(&[entry(false), entry(false), entry(false)]),
+            "3 waiting"
+        );
+        assert_eq!(
+            overview_subtitle(&[entry(false), entry(false), entry(true)]),
+            "2 waiting, 1 couldn't be sent"
+        );
+        assert_eq!(overview_subtitle(&[entry(true)]), "1 couldn't be sent");
+    }
+
+    #[test]
+    fn newly_failed_only_on_the_transition() {
+        let pending = remote("a", "c", 1, ScheduledState::Pending);
+        let failed = remote("a", "c", 1, ScheduledState::Failed { reason: "x".into() });
+        let sent = remote(
+            "a",
+            "c",
+            1,
+            ScheduledState::Sent {
+                message_id: "M".into(),
+            },
+        );
+        assert!(newly_failed(Some(&pending), &failed));
+        assert!(newly_failed(None, &failed));
+        assert!(!newly_failed(Some(&failed), &failed));
+        assert!(!newly_failed(Some(&pending), &sent));
+        assert!(!newly_failed(None, &pending));
+        assert_eq!(
+            remote_failed_text(" Ayse "),
+            "Scheduled WhatsApp message to Ayse couldn't be sent"
+        );
+        assert!(TYPE_FIRST.starts_with("Type the message first"));
     }
 }

@@ -1,9 +1,13 @@
 //! Unsent composer text per conversation, kept for the session so Back and
 //! return does not lose it. Pure.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rovsti_core::ThreadId;
+
+/// The file the drafts are kept in (a map of thread tag to text).
+#[cfg_attr(not(test), allow(dead_code))]
+pub const DRAFTS_FILE: &str = "drafts.json";
 
 #[derive(Default)]
 pub struct Drafts {
@@ -45,6 +49,43 @@ impl Drafts {
             self.rev += 1;
         }
         taken
+    }
+
+    /// The drafts as the file keeps them, keyed by conversation tag.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn to_map(&self) -> BTreeMap<String, String> {
+        self.map
+            .iter()
+            .map(|(thread, text)| (crate::notifications::thread_tag(thread), text.clone()))
+            .collect()
+    }
+
+    /// Reads [`Drafts::to_map`] back; bad tags, new-thread ids and blank texts are skipped.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn from_map(map: &BTreeMap<String, String>) -> Drafts {
+        let mut drafts = Drafts::default();
+        for (tag, text) in map {
+            if let Some(thread) = crate::notifications::parse_tag(tag) {
+                drafts.put(thread, text);
+            }
+        }
+        drafts.rev = 0;
+        drafts
+    }
+
+    /// Adds drafts from `loaded` for threads without one now; this session's text wins.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn merge_loaded(&mut self, loaded: Drafts) {
+        let mut added = false;
+        for (thread, text) in loaded.map {
+            if let std::collections::hash_map::Entry::Vacant(slot) = self.map.entry(thread) {
+                slot.insert(text);
+                added = true;
+            }
+        }
+        if added {
+            self.rev += 1;
+        }
     }
 
     pub fn forget(&mut self, thread: &ThreadId) {
@@ -114,5 +155,58 @@ mod tests {
         let mut d = Drafts::default();
         d.put(ThreadId::Sms(-1), "new");
         assert_eq!(d.take(&ThreadId::Sms(-1)), None);
+    }
+
+    #[test]
+    fn drafts_round_trip_through_the_file_map() {
+        let mut d = Drafts::default();
+        d.put(wa(), "hello");
+        d.put(ThreadId::Sms(3), "sms");
+        let map = d.to_map();
+        assert_eq!(map.get("sms:3").map(String::as_str), Some("sms"));
+        assert_eq!(
+            map.get("wa:1@s.whatsapp.net").map(String::as_str),
+            Some("hello")
+        );
+        assert_eq!(DRAFTS_FILE, "drafts.json");
+        let back = Drafts::from_map(&map);
+        assert_eq!(back.rev(), 0);
+        assert_eq!(back.get(&wa()), Some("hello"));
+        assert_eq!(back.get(&ThreadId::Sms(3)), Some("sms"));
+    }
+
+    #[test]
+    fn bad_tags_are_skipped() {
+        let map: BTreeMap<String, String> = [
+            ("junk", "x"),
+            ("sms:abc", "x"),
+            ("sms:-1", "x"),
+            ("wa:", "x"),
+            ("sms:4", "  "),
+            ("sms:5", "ok"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+        let d = Drafts::from_map(&map);
+        assert_eq!(d.to_map().len(), 1);
+        assert_eq!(d.get(&ThreadId::Sms(5)), Some("ok"));
+    }
+
+    #[test]
+    fn session_drafts_win_over_loaded_ones() {
+        let mut d = Drafts::default();
+        d.put(wa(), "new");
+        let rev = d.rev();
+        let mut loaded = Drafts::default();
+        loaded.put(wa(), "old");
+        d.merge_loaded(loaded);
+        assert_eq!(d.get(&wa()), Some("new"));
+        assert_eq!(d.rev(), rev, "nothing added");
+        let mut loaded = Drafts::default();
+        loaded.put(ThreadId::Sms(2), "from file");
+        d.merge_loaded(loaded);
+        assert_eq!(d.get(&ThreadId::Sms(2)), Some("from file"));
+        assert_eq!(d.rev(), rev + 1);
     }
 }

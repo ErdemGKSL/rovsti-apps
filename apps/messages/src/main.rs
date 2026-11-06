@@ -144,6 +144,9 @@ fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
         in_spam: sms.in_spam,
         single_sender: sms.sender.is_some(),
         known_contact: sms.contact_id.is_some(),
+        // Until the menu carries them (move to Spam): numbers only, no Move to Spam.
+        sender_is_number: true,
+        can_be_spam: false,
         blocked: sms.blocked,
         on_page: sms.on_page,
     });
@@ -1282,6 +1285,8 @@ impl MessagesApp {
                     self.telecom_action(action, sender, cx);
                 }
             }
+            // Not offered yet (the menus pass `can_be_spam: false`).
+            SmsAction::MoveToSpam => {}
         }
         cx.notify();
     }

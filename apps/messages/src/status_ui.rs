@@ -167,6 +167,15 @@ impl StatusFeed {
 
 /// What to call an author: the address-book name, WhatsApp's name for them,
 /// the push name their update carried, then the number.
+/// The chat to open from someone's status: only another person's phone JID
+/// (own updates and LIDs have no chat to open).
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn message_target(author: &str, from_me: bool) -> Option<String> {
+    let author = author.trim();
+    (!from_me && author.ends_with("@s.whatsapp.net") && author != "@s.whatsapp.net")
+        .then(|| author.to_owned())
+}
+
 fn author_title(author: &StatusAuthor, backend: &Backend, avatars: &WaAvatars) -> String {
     let contact = backend
         .contacts()
@@ -1145,5 +1154,15 @@ mod tests {
         let teal = argb(0xFF1E_6E4F);
         let expected: Hsla = rgba(0x1E6E_4FFF).into();
         assert_eq!(teal, expected);
+    }
+
+    #[test]
+    fn only_other_peoples_phone_jids_can_be_messaged() {
+        let jid = "905321234567@s.whatsapp.net";
+        assert_eq!(message_target(jid, false), Some(jid.to_owned()));
+        assert_eq!(message_target(jid, true), None);
+        assert_eq!(message_target("123456@lid", false), None);
+        assert_eq!(message_target("status@broadcast", false), None);
+        assert_eq!(message_target("", false), None);
     }
 }

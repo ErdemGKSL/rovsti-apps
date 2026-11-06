@@ -8,6 +8,7 @@ pub enum SmsAction {
     Mute,
     Unmute,
     NotSpam,
+    MoveToSpam,
     Block,
     Unblock,
     Call,
@@ -25,6 +26,10 @@ pub struct SmsActionContext {
     /// One-to-one: the thread has exactly one other address.
     pub single_sender: bool,
     pub known_contact: bool,
+    /// The sender is a phone number (not an alphanumeric id like `TRENDYOL`).
+    pub sender_is_number: bool,
+    /// The row is SMS only, so it may be moved into Spam.
+    pub can_be_spam: bool,
     pub blocked: bool,
     /// The menu is the conversation page's, not an inbox row's.
     pub on_page: bool,
@@ -33,17 +38,22 @@ pub struct SmsActionContext {
 /// The actions to list, in order, the destructive ones last.
 pub fn actions(ctx: &SmsActionContext) -> Vec<SmsAction> {
     let mut out = Vec::new();
+    let numeric = ctx.single_sender && ctx.sender_is_number;
+    let can_spam = ctx.single_sender && ctx.can_be_spam && !ctx.in_spam && !ctx.known_contact;
     if ctx.on_page {
         if ctx.in_spam && ctx.single_sender {
             out.push(SmsAction::NotSpam);
         }
-        if ctx.single_sender {
+        if numeric {
             out.push(SmsAction::Call);
             out.push(if ctx.known_contact {
                 SmsAction::OpenContact
             } else {
                 SmsAction::AddContact
             });
+        }
+        if can_spam {
+            out.push(SmsAction::MoveToSpam);
         }
     } else {
         if ctx.unread {
@@ -54,11 +64,14 @@ pub fn actions(ctx: &SmsActionContext) -> Vec<SmsAction> {
         } else {
             SmsAction::Mute
         });
+        if can_spam {
+            out.push(SmsAction::MoveToSpam);
+        }
         if ctx.in_spam && ctx.single_sender {
             out.push(SmsAction::NotSpam);
         }
     }
-    if ctx.single_sender {
+    if numeric {
         out.push(if ctx.blocked {
             SmsAction::Unblock
         } else {
@@ -75,6 +88,7 @@ pub fn label(action: SmsAction) -> &'static str {
         SmsAction::Mute => "Mute",
         SmsAction::Unmute => "Unmute",
         SmsAction::NotSpam => "Not spam",
+        SmsAction::MoveToSpam => "Move to Spam",
         SmsAction::Block => "Block",
         SmsAction::Unblock => "Unblock",
         SmsAction::Call => "Call",
@@ -124,6 +138,24 @@ pub fn not_spam_text(sender: &str) -> String {
     format!("{} is no longer spam", sender.trim())
 }
 
+/// What the pill says after Move to Spam; a blank title reads "this sender".
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn moved_to_spam_text(title: &str) -> String {
+    let title = title.trim();
+    format!(
+        "Moved {} to Spam",
+        if title.is_empty() {
+            "this sender"
+        } else {
+            title
+        }
+    )
+}
+
+/// Shown when the spam rule list is full.
+#[cfg_attr(not(test), allow(dead_code))]
+pub const TOO_MANY_RULES: &str = "Too many spam rules. Remove one in Settings first.";
+
 /// What the pill says after Block; a blank title reads "this number".
 pub fn blocked_text(title: &str) -> String {
     let title = title.trim();
@@ -154,19 +186,24 @@ mod tests {
     fn row() -> SmsActionContext {
         SmsActionContext {
             single_sender: true,
+            sender_is_number: true,
+            can_be_spam: true,
             ..SmsActionContext::default()
         }
     }
 
     #[test]
     fn row_actions_follow_the_state() {
-        assert_eq!(actions(&row()), vec![Mute, Block, Delete]);
+        assert_eq!(actions(&row()), vec![Mute, MoveToSpam, Block, Delete]);
         let c = SmsActionContext {
             unread: true,
             muted: true,
             ..row()
         };
-        assert_eq!(actions(&c), vec![MarkRead, Unmute, Block, Delete]);
+        assert_eq!(
+            actions(&c),
+            vec![MarkRead, Unmute, MoveToSpam, Block, Delete]
+        );
         let c = SmsActionContext {
             in_spam: true,
             ..row()
@@ -186,7 +223,7 @@ mod tests {
             blocked: true,
             ..row()
         };
-        assert_eq!(actions(&c), vec![Mute, Unblock, Delete]);
+        assert_eq!(actions(&c), vec![Mute, MoveToSpam, Unblock, Delete]);
         assert!(!actions(&c).contains(&Block));
     }
 
@@ -209,7 +246,10 @@ mod tests {
             muted: true,
             ..row()
         };
-        assert_eq!(actions(&page), vec![Call, AddContact, Block, Delete]);
+        assert_eq!(
+            actions(&page),
+            vec![Call, AddContact, MoveToSpam, Block, Delete]
+        );
         assert!(!actions(&page).contains(&OpenContact));
         let known = SmsActionContext {
             known_contact: true,
@@ -220,7 +260,10 @@ mod tests {
             blocked: true,
             ..page
         };
-        assert_eq!(actions(&blocked), vec![Call, AddContact, Unblock, Delete]);
+        assert_eq!(
+            actions(&blocked),
+            vec![Call, AddContact, MoveToSpam, Unblock, Delete]
+        );
         let group = SmsActionContext {
             single_sender: false,
             ..page
@@ -258,6 +301,7 @@ mod tests {
             Mute,
             Unmute,
             NotSpam,
+            MoveToSpam,
             Block,
             Unblock,
             Call,
@@ -269,7 +313,9 @@ mod tests {
         assert_eq!(labels.len(), all.len());
         assert!(labels.iter().all(|l| !l.is_empty()));
         assert!(is_danger(Block) && is_danger(Delete));
-        assert!(!is_danger(Mute) && !is_danger(Call) && !is_danger(Unblock));
+        assert!(
+            !is_danger(MoveToSpam) && !is_danger(Mute) && !is_danger(Call) && !is_danger(Unblock)
+        );
         assert_eq!(
             (label(Unblock), label(OpenContact)),
             ("Unblock", "Open contact")
@@ -307,5 +353,57 @@ mod tests {
         assert_eq!(refusal_note(refusal), "Emergency numbers can't be blocked");
         let refusal = rovsti_core::blocklist::can_block("*#06#", &emergency).expect_err("refused");
         assert_eq!(refusal_note(refusal), "Unknown number, cannot block");
+    }
+
+    #[test]
+    fn alphanumeric_sender_offers_move_to_spam_not_block_or_call() {
+        let c = SmsActionContext {
+            sender_is_number: false,
+            ..row()
+        };
+        assert_eq!(actions(&c), vec![Mute, MoveToSpam, Delete]);
+        let page = SmsActionContext { on_page: true, ..c };
+        assert_eq!(actions(&page), vec![MoveToSpam, Delete]);
+        assert_eq!(label(MoveToSpam), "Move to Spam");
+    }
+
+    #[test]
+    fn move_to_spam_hidden_for_contacts_spam_and_mixed_rows() {
+        let hidden = |c: SmsActionContext| !actions(&c).contains(&MoveToSpam);
+        assert!(hidden(SmsActionContext {
+            known_contact: true,
+            ..row()
+        }));
+        assert!(hidden(SmsActionContext {
+            in_spam: true,
+            ..row()
+        }));
+        assert!(hidden(SmsActionContext {
+            can_be_spam: false,
+            ..row()
+        }));
+        assert!(hidden(SmsActionContext {
+            single_sender: false,
+            ..row()
+        }));
+    }
+
+    #[test]
+    fn page_offers_move_to_spam() {
+        let page = SmsActionContext {
+            on_page: true,
+            ..row()
+        };
+        assert_eq!(
+            actions(&page),
+            vec![Call, AddContact, MoveToSpam, Block, Delete]
+        );
+    }
+
+    #[test]
+    fn move_to_spam_texts() {
+        assert_eq!(moved_to_spam_text(" Trendyol "), "Moved Trendyol to Spam");
+        assert_eq!(moved_to_spam_text(" "), "Moved this sender to Spam");
+        assert!(TOO_MANY_RULES.contains("Settings"));
     }
 }

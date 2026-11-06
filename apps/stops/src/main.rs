@@ -14,8 +14,8 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use futures::{StreamExt as _, channel::mpsc};
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, Context, Entity, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Styled, Task, Window, WindowBounds, WindowOptions, div,
-    prelude::*, px, size,
+    ParentElement, Render, SharedString, Styled, Subscription, Task, Window, WindowBounds,
+    WindowOptions, div, prelude::*, px, size,
 };
 use rovsti_android::{
     events::{self, RawEvent, kind},
@@ -101,6 +101,8 @@ pub(crate) struct StopsApp {
     /// A start waiting for the user to answer a permission prompt.
     pub(crate) pending_start: Option<(Destination, Destination)>,
     pub(crate) preflight: Preflight,
+    /// Re-reads permissions when the user comes back from system settings.
+    _activation: Subscription,
     pub(crate) alarm: Option<AlarmView>,
     /// Brings the alarm back after a snooze.
     pub(crate) rering: Option<Task<()>>,
@@ -151,13 +153,12 @@ impl StopsApp {
 
         // Coming back from a permission page or the lock screen: the service
         // may have changed the trip, and the grants may have changed.
-        cx.observe_window_activation(window, |this, window, cx| {
+        let activation = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.refresh_preflight(cx);
                 this.refresh_trip(cx);
             }
-        })
-        .detach();
+        });
 
         // Kotlin events: the service's status, the alarm, permissions, files.
         let (mut events_rx, sink) = events::install_sink_owned();
@@ -252,6 +253,7 @@ impl StopsApp {
             busy: false,
             pending_start: None,
             preflight: Preflight::default(),
+            _activation: activation,
             alarm: None,
             rering: None,
             sheet: Sheet::new(),

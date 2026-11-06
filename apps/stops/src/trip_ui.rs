@@ -209,20 +209,20 @@ impl StopsApp {
         if let Some(map) = self.map_card(theme, cx) {
             page = page.child(map);
         }
-        if self.preflight.full_screen_missing() {
+        if let Some(hint) = backend::full_screen_notice(&self.preflight) {
             let row = list_row(
                 theme,
                 None,
                 "Let the alarm wake the screen",
-                Some("Allow full-screen alerts so it shows over the lock screen.".into()),
+                Some(hint.into()),
                 Some("Open".into()),
             )
             .id("full-screen-row")
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_click(cx.listener(|_, _, _, cx| {
                 cx.background_executor()
                     .spawn(async { backend::open_full_screen_settings() })
                     .detach();
-                this.preflight.full_screen = None;
+                // The window-activation refresh re-reads the grant on return.
                 cx.notify();
             }));
             page = page.child(section(theme, None, [row.into_any_element()]));

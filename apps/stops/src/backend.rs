@@ -189,6 +189,13 @@ impl Preflight {
     }
 }
 
+/// The hint under the full-screen row: only when the grant is known to be
+/// missing. Unknown (`None`) and granted show nothing.
+pub fn full_screen_notice(pre: &Preflight) -> Option<&'static str> {
+    pre.full_screen_missing()
+        .then_some("Allow full-screen alerts so it shows over the lock screen.")
+}
+
 /// Opens the system page where full-screen alarms are allowed.
 pub fn open_full_screen_settings() {
     if let Err(error) = permissions::open_full_screen_intent_settings() {
@@ -435,6 +442,17 @@ mod tests {
         assert_eq!(pre(p, d).next_step(), Some(Step::LocationInSettings));
         assert_eq!(pre(g, d).next_step(), Some(Step::RequestNotifications));
         assert_eq!(pre(g, p).next_step(), Some(Step::NotificationsInSettings));
+    }
+
+    #[test]
+    fn full_screen_notice_only_when_known_missing() {
+        let with = |full_screen| Preflight {
+            full_screen,
+            ..Preflight::default()
+        };
+        assert!(full_screen_notice(&with(Some(false))).is_some());
+        assert_eq!(full_screen_notice(&with(Some(true))), None);
+        assert_eq!(full_screen_notice(&with(None)), None);
     }
 
     #[test]

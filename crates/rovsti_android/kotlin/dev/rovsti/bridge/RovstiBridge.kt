@@ -545,7 +545,8 @@ object RovstiBridge {
 
     @JvmStatic
     fun canUseFullScreenIntent(): Boolean =
-        app.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() == true
+        Build.VERSION.SDK_INT < 34 ||
+            app.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() == true
 
     @JvmStatic
     fun openFullScreenIntentSettings(): Boolean = start(

@@ -225,7 +225,24 @@ impl RowVm {
         }
     }
 
-    fn build(v: RowView, sims: &SimInfo) -> Self {
+    /// The subtitle of a row: an unnamed row from abroad gains its country
+    /// (`Incoming \u{b7} Germany`); contacts, home numbers and private numbers keep it.
+    fn subtitle_with_country(
+        subtitle: String,
+        named: bool,
+        number: &str,
+        home_cc: Option<&str>,
+    ) -> String {
+        if named {
+            return subtitle;
+        }
+        let Some(country) = rovsti_core::calling_code::country_line(number, home_cc) else {
+            return subtitle;
+        };
+        crate::details_ui::header_caption(Some(&subtitle), Some(&country)).unwrap_or(subtitle)
+    }
+
+    fn build(v: RowView, sims: &SimInfo, home_cc: Option<&str>) -> Self {
         let account = v
             .account_key
             .as_deref()
@@ -244,7 +261,7 @@ impl RowVm {
             aria,
             title: v.title.into(),
             count: v.count.map(Into::into),
-            subtitle: v.subtitle.into(),
+            subtitle: Self::subtitle_with_country(v.subtitle, v.named, &v.number, home_cc).into(),
             time: v.time.into(),
             direction: v.direction,
             missed: v.missed,
@@ -863,7 +880,7 @@ impl PhoneApp {
                 } else {
                     CallerPhoto::default()
                 };
-                let mut row = RowVm::build(v, &sims);
+                let mut row = RowVm::build(v, &sims, log.home_cc.as_deref());
                 row.photo = photo;
                 row.refs = merged_row.refs.as_slice().into();
                 row
@@ -3601,5 +3618,42 @@ mod tests {
         assert_ne!(BS_YES, BS_NO);
         assert!(!select_tools_enabled(0));
         assert!(select_tools_enabled(1) && select_tools_enabled(5));
+    }
+
+    fn row_view(title: &str, subtitle: &str, named: bool, number: &str) -> RowView {
+        RowView {
+            title: title.into(),
+            count: None,
+            subtitle: subtitle.into(),
+            time: String::new(),
+            aria: String::new(),
+            direction: rovsti_core::recents::Direction::Incoming,
+            missed: false,
+            callable: !number.is_empty(),
+            number: number.into(),
+            hue: None,
+            monogram: None,
+            named,
+            account_key: None,
+            whatsapp: false,
+        }
+    }
+
+    fn subtitle_of(v: RowView, home: Option<&str>) -> String {
+        RowVm::build(v, &SimInfo::default(), home)
+            .subtitle
+            .to_string()
+    }
+
+    #[test]
+    fn country_caption_only_for_unnamed_foreign_rows() {
+        let named = row_view("Ada", "+49 30 1234567", true, "+49301234567");
+        assert_eq!(subtitle_of(named, Some("90")), "+49 30 1234567");
+        let home = row_view("+90 532 111 22 33", "Incoming", false, "+905321112233");
+        assert_eq!(subtitle_of(home, Some("90")), "Incoming");
+        let foreign = row_view("+49 30 1234567", "Incoming", false, "+49301234567");
+        assert_eq!(subtitle_of(foreign, Some("90")), "Incoming \u{b7} Germany");
+        let private = row_view("Private number", "Incoming", false, "");
+        assert_eq!(subtitle_of(private, Some("90")), "Incoming");
     }
 }

@@ -428,6 +428,22 @@ impl CallView {
         self
     }
 
+    /// An unknown caller's country under the number (`Germany`, or `WhatsApp \u{b7} Germany`).
+    /// A named telecom caller keeps its number line; home numbers and private ones are unchanged.
+    #[must_use]
+    pub(crate) fn with_country(mut self, number: &str, home_cc: Option<&str>) -> Self {
+        let label = match self.secondary.as_deref() {
+            None => None,
+            Some(WA_CAPTION) => Some(WA_CAPTION),
+            Some(_) => return self,
+        };
+        let country = rovsti_core::calling_code::country_line(number, home_cc);
+        if let Some(caption) = crate::details_ui::header_caption(label, country.as_deref()) {
+            self.secondary = Some(caption.into());
+        }
+        self
+    }
+
     pub(crate) fn phase(&self) -> Phase {
         match self.state {
             CallState::Active => Phase::Active,
@@ -1007,8 +1023,15 @@ impl PhoneApp {
             let backend = self.backend.read(cx);
             let model = backend.calls();
             let scene = CallScene::of(model.snapshot());
+            let home_cc = match backend.call_log() {
+                backend::Load::Ready(log) => log.home_cc.clone(),
+                _ => None,
+            };
             (
-                CallView::from_model(model),
+                CallView::from_model(model).map(|v| {
+                    let number = v.number.to_string();
+                    v.with_country(&number, home_cc.as_deref())
+                }),
                 model.keyguard_locked(),
                 model.is_call_only_mode(),
                 WaitingView::from_scene(&scene),
@@ -1042,6 +1065,17 @@ impl PhoneApp {
                 let mut wa = CallView::from_wa(screen);
                 if let Some(caller) = &wa_caller {
                     wa = wa.with_wa_caller(caller);
+                    if caller.contact_id.is_none()
+                        && let Some(number) = wa_view
+                            .as_ref()
+                            .and_then(|v| crate::wa_call::dial_number(&v.peer))
+                    {
+                        let home_cc = match self.backend.read(cx).call_log() {
+                            backend::Load::Ready(log) => log.home_cc.clone(),
+                            _ => None,
+                        };
+                        wa = wa.with_country(&number, home_cc.as_deref());
+                    }
                 }
                 let key = zone::wa_key(screen);
                 // A name or look that resolved late rebuilds the zone's party too.
@@ -3069,5 +3103,25 @@ mod tests {
         assert!(first_time(&mut seen, "a"));
         assert!(!first_time(&mut seen, "a"));
         assert!(first_time(&mut seen, "b"));
+    }
+
+    #[test]
+    fn unknown_callers_gain_a_country_caption() {
+        let model = model_with(WireCallState::Ringing, None, true);
+        let base = CallView::from_model(&model).expect("foreground call");
+        let foreign = base.clone().with_country("+49 30 1234567", Some("90"));
+        assert_eq!(foreign.secondary.as_deref(), Some("Germany"));
+        let home = base.clone().with_country("+90 532 111 22 33", Some("90"));
+        assert_eq!(home.secondary, None);
+        let private = base.clone().with_country("", Some("90"));
+        assert_eq!(private.secondary, None);
+        let named = CallView::from_model(&model_with(WireCallState::Ringing, Some("Ada"), true))
+            .expect("foreground call")
+            .with_country("+49 30 1234567", Some("90"));
+        assert_ne!(named.secondary.as_deref(), Some("Germany"));
+        let mut wa = base;
+        wa.secondary = Some(WA_CAPTION.into());
+        let wa = wa.with_country("+49301234567", Some("90"));
+        assert_eq!(wa.secondary.as_deref(), Some("WhatsApp \u{b7} Germany"));
     }
 }

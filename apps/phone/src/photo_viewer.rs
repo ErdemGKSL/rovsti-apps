@@ -65,20 +65,9 @@ pub(crate) fn image_rect(view: ZoomView, natural: Size, viewport: Size) -> (f32,
 
 /// A file name for the gallery: the person's name, safe for a file system.
 pub(crate) fn photo_file_name(title: &str) -> String {
-    let stem: String = title
-        .trim()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect();
-    let stem = stem
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    if stem.is_empty() {
-        "photo.png".to_owned()
-    } else {
-        format!("{stem}-photo.png")
+    match rovsti_core::number_format::file_slug_opt(title) {
+        Some(stem) => format!("{stem}-photo.png"),
+        None => "photo.png".to_owned(),
     }
 }
 

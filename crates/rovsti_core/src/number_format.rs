@@ -211,6 +211,107 @@ pub fn available(raw: &str, home_cc: Option<&str>) -> Vec<(NumberForm, String)> 
     out
 }
 
+/// The most bytes a contact QR payload may hold; bigger cards scan badly.
+pub const QR_MAX_BYTES: usize = 1200;
+
+/// A vCard ready to be drawn as a QR code.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContactQr {
+    pub payload: String,
+    /// Numbers in the card.
+    pub kept: usize,
+    /// Numbers left out to make the card fit (duplicates are not counted).
+    pub dropped: usize,
+}
+
+/// Even a card with a single number is over [`QR_MAX_BYTES`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("This contact is too big for a QR code.")]
+pub struct QrTooBig;
+
+fn label_kind(label: Option<&str>) -> FieldKind {
+    match label.map(|l| l.trim().to_lowercase()).as_deref() {
+        Some("mobile" | "cell") => FieldKind::Mobile,
+        Some("home") => FieldKind::Home,
+        Some("work") => FieldKind::Work,
+        _ => FieldKind::Other,
+    }
+}
+
+/// One vCard for `name` with `numbers` (raw text and optional label), as E.164
+/// when known. Duplicates are dropped; numbers go from the end until it fits.
+pub fn contact_qr(
+    name: &str,
+    numbers: &[(&str, Option<&str>)],
+    home_cc: Option<&str>,
+) -> Result<ContactQr, QrTooBig> {
+    let mut fields: Vec<DraftField> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for (raw, label) in numbers {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        let value = render(raw, NumberForm::E164, home_cc, None).unwrap_or_else(|| raw.to_owned());
+        if seen.insert(value.clone()) {
+            fields.push(DraftField::new(value, label_kind(*label)));
+        }
+    }
+    let total = fields.len();
+    let build = |fields: &[DraftField]| {
+        vcard::write(&[ContactDraft {
+            given: name.trim().to_owned(),
+            numbers: fields.to_vec(),
+            ..ContactDraft::default()
+        }])
+    };
+    loop {
+        let payload = build(&fields);
+        if payload.len() <= QR_MAX_BYTES {
+            let kept = fields.len();
+            return Ok(ContactQr {
+                payload,
+                kept,
+                dropped: total - kept,
+            });
+        }
+        if fields.len() <= 1 {
+            return Err(QrTooBig);
+        }
+        fields.pop();
+    }
+}
+
+/// A file-system safe slug of `name`, or `None` when nothing is left.
+pub fn file_slug_opt(name: &str) -> Option<String> {
+    let mapped: String = name
+        .trim()
+        .chars()
+        .map(|c| match c {
+            'ı' => 'i',
+            'İ' => 'I',
+            c if c.is_alphanumeric() => c,
+            _ => '-',
+        })
+        .collect();
+    let slug = mapped
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    (!slug.is_empty()).then_some(slug)
+}
+
+/// Like [`file_slug_opt`], with `contact` when the name has nothing usable.
+pub fn file_slug(name: &str) -> String {
+    file_slug_opt(name).unwrap_or_else(|| "contact".to_owned())
+}
+
+/// The gallery name of a contact's QR image.
+pub fn qr_file_name(name: &str) -> String {
+    format!("rovsti-{}-qr.png", file_slug(name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,5 +482,70 @@ mod tests {
     fn labels() {
         assert_eq!(NumberForm::E164.label(), "International (E.164)");
         assert_eq!(NumberForm::ALL.len(), 5);
+    }
+
+    #[test]
+    fn qr_round_trips_and_dedups() {
+        let qr = contact_qr(
+            "Ada Lovelace",
+            &[
+                ("0555 111 22 33", Some("Mobile")),
+                ("+905551112233", None),
+                ("0212 111 22 33", Some("work")),
+            ],
+            Some("90"),
+        )
+        .expect("fits");
+        assert_eq!((qr.kept, qr.dropped), (2, 0));
+        let parsed = vcard::parse(&qr.payload);
+        let c = &parsed.contacts[0];
+        assert_eq!(c.display_name(), "Ada Lovelace");
+        let values: Vec<_> = c.numbers.iter().map(|n| n.value.as_str()).collect();
+        assert_eq!(values, ["+905551112233", "+902121112233"]);
+    }
+
+    #[test]
+    fn qr_escapes_name() {
+        let name = "Çelik, Ömer; Jr";
+        let qr = contact_qr(name, &[("+905551112233", None)], None).expect("fits");
+        assert!(qr.payload.contains("\\,") && qr.payload.contains("\\;"));
+        assert_eq!(vcard::parse(&qr.payload).contacts[0].display_name(), name);
+    }
+
+    #[test]
+    fn qr_trims_from_the_end() {
+        let name = "a".repeat(420);
+        let numbers: Vec<String> = (0..12).map(|i| format!("+9055511{i:05}")).collect();
+        let refs: Vec<(&str, Option<&str>)> = numbers.iter().map(|n| (n.as_str(), None)).collect();
+        let qr = contact_qr(&name, &refs, None).expect("fits");
+        assert!(qr.payload.len() <= QR_MAX_BYTES);
+        assert_eq!(qr.kept + qr.dropped, 12);
+        assert!(qr.dropped > 0 && qr.kept > 0);
+        let parsed = vcard::parse(&qr.payload);
+        assert_eq!(parsed.contacts[0].numbers.len(), qr.kept);
+        assert_eq!(parsed.contacts[0].numbers[0].value, numbers[0]);
+        // One more number would not have fit.
+        let more = contact_qr(&name, &refs[..qr.kept + 1], None).expect("fits");
+        assert_eq!(more.kept, qr.kept);
+    }
+
+    #[test]
+    fn qr_too_big() {
+        let name = "x".repeat(QR_MAX_BYTES);
+        assert_eq!(
+            contact_qr(&name, &[("+905551112233", None)], None),
+            Err(QrTooBig)
+        );
+    }
+
+    #[test]
+    fn slugs() {
+        assert_eq!(file_slug("Çağrı Işık"), "Çağri-Işik");
+        assert_eq!(file_slug("Ömer ı İ"), "Ömer-i-I");
+        assert_eq!(file_slug("😀 Ada 🎉"), "Ada");
+        assert_eq!(file_slug(""), "contact");
+        assert_eq!(file_slug_opt("***"), None);
+        assert_eq!(qr_file_name("Ada Lovelace"), "rovsti-Ada-Lovelace-qr.png");
+        assert_eq!(qr_file_name("😀"), "rovsti-contact-qr.png");
     }
 }

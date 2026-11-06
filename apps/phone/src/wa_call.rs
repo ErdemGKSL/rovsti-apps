@@ -710,7 +710,6 @@ impl WaCallUi {
         count
     }
 
-    #[allow(dead_code)] // as above
     fn history_changed(&mut self, cx: &mut Context<Self>) {
         self.history_rev += 1;
         self.save_history(cx);

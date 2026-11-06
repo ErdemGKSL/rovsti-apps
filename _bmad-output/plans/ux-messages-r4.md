@@ -231,4 +231,17 @@ and remove the attribute in that step.
 
 ## Status
 
-Planned (round 4). Not started.
+Done without a device (cargo only), one commit per step:
+
+- Step 1 pure logic and tests (`access.rs`, card actions, `wa_muted`/`wa_bell`/`in_spam`, `failed_notice`/`late_note`, `own_reaction`).
+- N1 done: notifications banner and Allow, Contacts row/line, refresh on return from App info (step 2).
+- N2 done: location and contact cards act (step 3).
+- N3 done: one WhatsApp mute, Settings > Muted lists gateway mutes (step 4).
+- N4 done: Not spam from inside a Spam conversation (step 5).
+- N5 done: failed scheduled SMS "Open" restores the text (step 6).
+- N8 done: late-alarm note in Send later (step 6).
+- N6 done: failed reaction rolls back, failed edit keeps the text (step 7).
+- N7 done: Retry on the chats pill (step 7).
+- Step 8 docs: `docs/messages-acceptance.md` rows 73 to 84 and the roadmap line.
+
+Device checks for all of the above are rows 73 to 84 of `docs/messages-acceptance.md`.

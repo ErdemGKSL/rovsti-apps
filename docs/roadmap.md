@@ -83,6 +83,9 @@ list in `docs/phone-acceptance.md`.
       pictures, open links, Undo for archive and mute, WhatsApp offline banner, tap to
       retry a load, restore asks for the role first, Reset settings with Undo
       (done without a device)
+- [x] Fourth UX pass: permission asks and refresh on return, location and contact card
+      actions, one WhatsApp mute, Not spam from the conversation, resend failed scheduled
+      SMS, recovery after failed WhatsApp actions (done without a device)
 
 ## WhatsApp gateway (`services/wa_gateway`)
 

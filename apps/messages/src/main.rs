@@ -114,7 +114,10 @@ struct SmsRowMenu {
     in_spam: bool,
     /// The menu is the open conversation page's, not an inbox row's.
     on_page: bool,
-    known_contact: bool,
+    /// Android contact id of the sender, when the number is in the address book.
+    contact_id: Option<i64>,
+    /// The sender is on the system blocklist.
+    blocked: bool,
 }
 
 /// The SMS actions a row menu lists.
@@ -124,12 +127,10 @@ fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
         muted: sms.muted,
         in_spam: sms.in_spam,
         single_sender: sms.sender.is_some(),
-        known_contact: sms.known_contact,
+        known_contact: sms.contact_id.is_some(),
+        blocked: sms.blocked,
         on_page: sms.on_page,
-        ..sms_actions::SmsActionContext::default()
     });
-    // Not wired to the UI yet.
-    actions.retain(|a| *a != sms_actions::SmsAction::OpenContact);
     // A new conversation has no provider thread to delete yet.
     if sms.thread_id < 0 {
         actions.retain(|a| *a != sms_actions::SmsAction::Delete);
@@ -144,8 +145,12 @@ enum PillAction {
     Unallow(String),
     /// Unblocks a number.
     Unblock(String),
+    /// Blocks a number again after an Unblock.
+    Reblock(String),
     /// Restores something deleted in Settings.
     Settings(SettingsUndo),
+    /// Asks for the default SMS app role.
+    RequestSmsRole,
 }
 
 /// The page pushed over the tabs.
@@ -1040,6 +1045,12 @@ impl MessagesApp {
         );
         let sms = sms.map(|(thread_id, sender)| {
             let backend = self.backend.read(cx);
+            let blocked = sender
+                .as_deref()
+                .is_some_and(|s| backend.blocked().is_blocked(s));
+            let contact_id = sender
+                .as_deref()
+                .and_then(|s| backend.contacts().match_number(s).map(|c| c.id));
             SmsRowMenu {
                 thread_id,
                 sender,
@@ -1052,7 +1063,8 @@ impl MessagesApp {
                     .is_muted(&notifications::thread_tag(&ThreadId::Sms(thread_id))),
                 in_spam: self.show_spam,
                 on_page: false,
-                known_contact: false,
+                contact_id,
+                blocked,
             }
         });
         self.row_menu = Some(RowMenu {
@@ -1076,7 +1088,16 @@ impl MessagesApp {
         let id = sms.thread_id;
         match action {
             SmsAction::Delete => {
-                if let Some(menu) = &mut self.row_menu {
+                let backend = self.backend.read(cx);
+                if !backend.sms_role_held() && !backend.is_preview() {
+                    self.row_menu = None;
+                    self.show_pill_action(
+                        sms_actions::NEEDS_ROLE,
+                        sms_actions::MAKE_DEFAULT,
+                        PillAction::RequestSmsRole,
+                        cx,
+                    );
+                } else if let Some(menu) = &mut self.row_menu {
                     menu.delete_confirm = true;
                 }
             }
@@ -1106,8 +1127,34 @@ impl MessagesApp {
                     self.block_sender(sender, title, cx);
                 }
             }
-            SmsAction::Unblock | SmsAction::OpenContact => {
+            SmsAction::Unblock => {
                 self.row_menu = None;
+                if let Some(sender) = sms.sender {
+                    self.unblock_sender(sender, cx);
+                }
+            }
+            SmsAction::OpenContact => {
+                self.row_menu = None;
+                if let Some(contact_id) = sms.contact_id {
+                    let task = cx
+                        .background_executor()
+                        .spawn(async move { rovsti_android::telecom::edit_contact(contact_id) });
+                    cx.spawn(async move |this, cx| {
+                        let result = task.await;
+                        this.update(cx, |this, cx| {
+                            match result {
+                                Ok(true) => {}
+                                Err(rovsti_android::Error::Unsupported) => {
+                                    this.show_pill("Contacts need an Android phone.");
+                                }
+                                Ok(false) | Err(_) => this.show_pill("Couldn't open that contact."),
+                            }
+                            cx.notify();
+                        })
+                        .ok();
+                    })
+                    .detach();
+                }
             }
             SmsAction::Call | SmsAction::AddContact => {
                 self.row_menu = None;
@@ -1132,12 +1179,15 @@ impl MessagesApp {
             (id, c.title(), c.recipients().to_vec())
         };
         let sender = sms_actions::sender_of(&recipients).map(str::to_owned);
-        let (known_contact, muted) = {
+        let (contact_id, blocked, muted) = {
             let backend = self.backend.read(cx);
             (
                 sender
                     .as_deref()
-                    .is_some_and(|s| backend.contacts().match_number(s).is_some()),
+                    .and_then(|s| backend.contacts().match_number(s).map(|c| c.id)),
+                sender
+                    .as_deref()
+                    .is_some_and(|s| backend.blocked().is_blocked(s)),
                 backend
                     .prefs()
                     .is_muted(&notifications::thread_tag(&ThreadId::Sms(thread_id))),
@@ -1156,7 +1206,8 @@ impl MessagesApp {
                 muted,
                 in_spam: false,
                 on_page: true,
-                known_contact,
+                contact_id,
+                blocked,
             }),
             delete_confirm: false,
         });
@@ -1287,6 +1338,10 @@ impl MessagesApp {
                 self.show_pill("Back in Spam");
             }
             PillAction::Settings(undo) => self.undo_settings(undo, cx),
+            PillAction::Reblock(raw) => self.reblock(raw, cx),
+            PillAction::RequestSmsRole => self
+                .backend
+                .update(cx, |backend, cx| backend.request_sms_role(cx)),
             PillAction::Unblock(raw) => {
                 let task = cx
                     .background_executor()
@@ -1310,6 +1365,57 @@ impl MessagesApp {
             }
         }
         cx.notify();
+    }
+
+    /// Unblock from a menu: asks Android off the UI thread, re-pulls the
+    /// blocklist; the pill offers Undo.
+    fn unblock_sender(&mut self, raw: String, cx: &mut Context<Self>) {
+        let number = raw.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { rovsti_android::blocklist::unblock(&number) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(true) => {
+                        this.backend
+                            .update(cx, |backend, cx| backend.pull_blocked(cx));
+                        this.show_pill_action("Unblocked", "Undo", PillAction::Reblock(raw), cx);
+                    }
+                    Err(rovsti_android::Error::Unsupported) => {
+                        this.show_pill("Unblocking needs an Android phone.");
+                    }
+                    Ok(false) | Err(_) => this.show_pill("Couldn't unblock that number"),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Blocks a number again (Undo of an unblock or of a Settings delete).
+    fn reblock(&mut self, raw: String, cx: &mut Context<Self>) {
+        let task = cx
+            .background_executor()
+            .spawn(async move { rovsti_android::blocklist::block(&raw) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(true) => {
+                        this.backend
+                            .update(cx, |backend, cx| backend.pull_blocked(cx));
+                        this.show_pill("Blocked again");
+                    }
+                    _ => this.show_pill("Couldn't block that number"),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Puts back what a Settings delete removed.
@@ -1337,27 +1443,7 @@ impl MessagesApp {
                 });
                 self.show_pill("Muted again");
             }
-            SettingsUndo::Block(raw) => {
-                let task = cx
-                    .background_executor()
-                    .spawn(async move { rovsti_android::blocklist::block(&raw) });
-                cx.spawn(async move |this, cx| {
-                    let result = task.await;
-                    this.update(cx, |this, cx| {
-                        match result {
-                            Ok(true) => {
-                                this.backend
-                                    .update(cx, |backend, cx| backend.pull_blocked(cx));
-                                this.show_pill("Blocked again");
-                            }
-                            _ => this.show_pill("Couldn't block that number"),
-                        }
-                        cx.notify();
-                    })
-                    .ok();
-                })
-                .detach();
-            }
+            SettingsUndo::Block(raw) => self.reblock(raw, cx),
         }
         cx.notify();
     }
@@ -1572,6 +1658,8 @@ impl MessagesApp {
                         sms_actions::SmsAction::Call => Icon::LucidePhone,
                         sms_actions::SmsAction::AddContact => Icon::LucideUserPlus,
                         sms_actions::SmsAction::Block => Icon::LucideBan,
+                        sms_actions::SmsAction::Unblock => Icon::LucideCircleCheck,
+                        sms_actions::SmsAction::OpenContact => Icon::LucideUser,
                         _ => Icon::LucideTrash2,
                     };
                     items.push(
@@ -3115,7 +3203,8 @@ mod tests {
             muted,
             in_spam,
             on_page: false,
-            known_contact: false,
+            contact_id: None,
+            blocked: false,
         }
     }
 
@@ -3132,17 +3221,37 @@ mod tests {
     }
 
     #[test]
+    fn blocked_sender_offers_unblock_on_row_and_page() {
+        let blocked = |on_page| SmsRowMenu {
+            on_page,
+            blocked: true,
+            ..menu(false, false, false)
+        };
+        assert_eq!(
+            row_sms_actions(&blocked(false)),
+            vec![Mute, Unblock, Delete]
+        );
+        assert_eq!(
+            row_sms_actions(&blocked(true)),
+            vec![Call, AddContact, Unblock, Delete]
+        );
+    }
+
+    #[test]
     fn page_menu_hides_add_contact_for_a_known_number() {
-        let page = |known_contact| SmsRowMenu {
+        let page = |known_contact: bool| SmsRowMenu {
             on_page: true,
-            known_contact,
+            contact_id: known_contact.then_some(7),
             ..menu(false, false, false)
         };
         assert_eq!(
             row_sms_actions(&page(false)),
             vec![Call, AddContact, Block, Delete]
         );
-        assert_eq!(row_sms_actions(&page(true)), vec![Call, Block, Delete]);
+        assert_eq!(
+            row_sms_actions(&page(true)),
+            vec![Call, OpenContact, Block, Delete]
+        );
         let draft = SmsRowMenu {
             thread_id: -1,
             ..page(false)

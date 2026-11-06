@@ -114,7 +114,6 @@ pub fn sender_of(addresses: &[String]) -> Option<&str> {
 pub const NEEDS_ROLE: &str = "Make Rovsti Messages your default SMS app to delete messages";
 
 /// The pill action label offered next to [`NEEDS_ROLE`].
-#[allow(dead_code)]
 pub const MAKE_DEFAULT: &str = "Make default";
 
 /// What the pill says after Not spam.

@@ -286,6 +286,7 @@ pub fn extra_calls(history: &WaCallHistory) -> Vec<ExtraCall> {
                 started_ms: record.started_ms,
                 duration_s: record.duration_s,
                 missed: record.missed,
+                outgoing: record.direction == CallDirection::Out,
                 label,
                 call_id: record.call_id.clone(),
             })

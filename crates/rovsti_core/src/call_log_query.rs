@@ -372,6 +372,7 @@ mod tests {
             started_ms: 3_000,
             duration_s: 61,
             missed: false,
+            outgoing: false,
             label: Some("Zoe".into()),
             call_id: "w1".into(),
         };

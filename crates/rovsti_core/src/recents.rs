@@ -245,6 +245,8 @@ pub struct ExtraCall {
     pub started_ms: i64,
     pub duration_s: u64,
     pub missed: bool,
+    /// We placed the call (an unanswered outgoing call is not `missed`).
+    pub outgoing: bool,
     /// The peer's name when known; `None` shows the number as the title.
     pub label: Option<String>,
     /// The id of the stored call (for forgetting it).
@@ -590,6 +592,7 @@ mod tests {
             started_ms: NOW - ago,
             duration_s: 30,
             missed,
+            outgoing: false,
             label: None,
             call_id: format!("wa-{ago}"),
         }
@@ -914,6 +917,7 @@ mod tests {
             started_ms: NOW - ago,
             duration_s: 10,
             missed,
+            outgoing: false,
             label: label.map(str::to_owned),
             call_id: format!("wa-{ago}-{number}"),
         }

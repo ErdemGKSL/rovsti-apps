@@ -99,6 +99,21 @@ pub(crate) fn refusal_note(refusal: BlockRefusal) -> &'static str {
     }
 }
 
+/// The row-menu item that enters Recents select mode.
+pub(crate) const RM_SELECT: &str = "rm-select";
+
+/// Every row-menu item id, in the order the menu lists them (Add only for unnamed numbers).
+#[cfg(test)]
+const MENU_IDS: [&str; 7] = [
+    "rm-copy",
+    "rm-add",
+    RM_SELECT,
+    "rm-msg",
+    "rm-wa",
+    "rm-block",
+    "rm-delete",
+];
+
 /// One row of the menu.
 struct Item {
     id: &'static str,
@@ -533,6 +548,10 @@ impl PhoneApp {
                     self.start_block(target.number, target.who, Some(target.index), window, cx);
                 }
             }
+            RM_SELECT => {
+                self.row_menu_close(window, cx);
+                self.recents_enter_select(target.index, window, cx);
+            }
             "rm-delete" if target.count > 0 => {
                 self.row_menu_close(window, cx);
                 self.delete_row_calls(target.refs, window, cx);
@@ -796,6 +815,11 @@ impl PhoneApp {
         rows.extend([
             self.menu_item(
                 theme,
+                item(RM_SELECT, Icon::LucideCircleCheck, "Select", None, true),
+                cx,
+            ),
+            self.menu_item(
+                theme,
                 item(
                     "rm-msg",
                     Icon::LucideMessageCircle,
@@ -960,6 +984,16 @@ mod tests {
         assert!((fx.alpha - 0.5).abs() < 1e-4);
         s.t = FADE_SECS;
         assert!(s.done());
+    }
+
+    #[test]
+    fn menu_ids_are_unique_and_include_select() {
+        let mut ids = MENU_IDS.to_vec();
+        assert!(ids.iter().all(|id| id.starts_with("rm-")));
+        assert!(ids.contains(&"rm-select"));
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), MENU_IDS.len());
     }
 
     #[test]

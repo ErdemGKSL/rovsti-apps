@@ -37,6 +37,12 @@ pub(crate) enum DeleteScope {
     },
     /// The whole call log (opened from Settings > Data).
     All,
+    /// The rows chosen in Recents select mode: their entries, row and call counts.
+    Selected {
+        refs: Arc<[EntryRef]>,
+        rows: usize,
+        calls: u32,
+    },
 }
 
 pub(crate) const NUMBER_SHEET_DELETE: &str = "sheet-nhist-del";
@@ -68,6 +74,9 @@ pub(crate) fn confirm_text(scope: &DeleteScope, count: usize) -> (String, String
                 body.push_str(" This can't be undone.");
             }
             ("Delete all call history?".to_owned(), body)
+        }
+        DeleteScope::Selected { rows, calls, .. } => {
+            rovsti_core::call_log_query::delete_selected_text(*rows, *calls)
         }
     }
 }
@@ -137,6 +146,10 @@ impl PhoneApp {
                 }
             }
             Some(DeleteScope::All) => self.delete_all_history(window, cx),
+            Some(DeleteScope::Selected { refs, .. }) => {
+                self.recents_leave_select(cx);
+                self.delete_row_calls(refs, window, cx);
+            }
             None => {}
         }
     }
@@ -201,8 +214,10 @@ impl PhoneApp {
         let scope = self.confirm_delete.as_ref()?;
         let (ids, wa) = self.scope_ids(scope, cx);
         let mut count = ids.len() + wa.len();
-        if matches!(scope, DeleteScope::All) {
-            count = self.all_calls_count(cx);
+        match scope {
+            DeleteScope::All => count = self.all_calls_count(cx),
+            DeleteScope::Selected { calls, .. } => count = *calls as usize,
+            DeleteScope::Numbers { .. } => {}
         }
         let (title, text) = confirm_text(scope, count);
         let colors = theme::colors(theme);
@@ -374,6 +389,23 @@ mod tests {
         assert_eq!(t, "Delete all call history?");
         assert!(b.starts_with("This removes every entry"));
         assert!(b.ends_with("Missed-call count goes to 0."));
+    }
+
+    #[test]
+    fn confirm_text_selected() {
+        let scope = |rows, calls| DeleteScope::Selected {
+            refs: Arc::from(Vec::new()),
+            rows,
+            calls,
+        };
+        assert_eq!(
+            confirm_text(&scope(3, 7), 7),
+            (
+                "Delete 3 rows?".to_owned(),
+                "7 calls will be removed from this phone's call log.".to_owned()
+            )
+        );
+        assert_eq!(confirm_text(&scope(1, 1), 1).0, "Delete this row?");
     }
 
     #[test]

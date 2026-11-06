@@ -53,6 +53,13 @@ use crate::{
 const FIELD_H: f32 = 44.0;
 /// Height of the filter chip capsule.
 const CHIP_H: f32 = 36.0;
+/// Select mode's pills and the floating bar.
+pub(crate) const SEL_ALL: &str = "rc-sel-all";
+pub(crate) const SEL_DONE: &str = "rc-sel-done";
+pub(crate) const SEL_DEL: &str = "rc-sel-del";
+const SELECT_BAR_H: f32 = 56.0;
+/// Gap between the select bar and the tab bar.
+const SELECT_BAR_GAP: f32 = 6.0;
 /// Fixed row height (UX-DR5): scroll offsets are `index * ROW_H`.
 pub const ROW_H: f32 = 58.0;
 /// Width of the info target at the right edge of a row.
@@ -281,6 +288,8 @@ pub(crate) struct RecentsView {
     inserted: usize,
     fresh: usize,
     fresh_in: Entrance,
+    /// Select mode: the rows chosen so far (`None` = normal mode).
+    pub(crate) select: Option<call_log_query::Selection>,
 }
 
 impl RecentsView {
@@ -326,6 +335,7 @@ impl RecentsView {
             inserted: 0,
             fresh: 0,
             fresh_in: Entrance::default(),
+            select: None,
         }
     }
 
@@ -512,6 +522,10 @@ impl PhoneApp {
             }
             Load::PermissionDenied => self.recents_failed(State::Denied),
             Load::Unavailable => self.recents_failed(State::Unavailable),
+        }
+        let merged = Arc::clone(&self.recents.merged);
+        if let Some(select) = self.recents.select.as_mut() {
+            select.retain_present(&merged);
         }
         self.sync_missed_label(cx);
         self.arm_view_timer(cx);
@@ -770,6 +784,9 @@ impl PhoneApp {
         self.recents.marked = false;
         self.recents.touch = None;
         self.call_note = None;
+        if self.tabs.selected() != RECENTS_TAB {
+            self.recents.select = None;
+        }
         if self.tabs.selected() == RECENTS_TAB {
             // Relative times ("3:14 pm", "Yesterday") age while the app sits.
             if let (Some(log), Some(built)) = (self.recents.log.clone(), self.recents.built_at)
@@ -852,6 +869,14 @@ impl PhoneApp {
         {
             return None;
         }
+        let selecting = self.recents.select.is_some();
+        // The select bar floats over the bottom of the list.
+        if selecting
+            && f32::from(position.y)
+                > f32::from(window.viewport_size().height) - self.select_bar_inset()
+        {
+            return None;
+        }
         let bounds = self.recents.bounds.get();
         row_at(
             f32::from(position.x - bounds.origin.x),
@@ -861,9 +886,11 @@ impl PhoneApp {
             self.recents.visible.len(),
         )
         .filter(|(index, zone)| {
-            self.recents
-                .row(*index)
-                .is_some_and(|row| row.callable || *zone == Zone::Info && !row.number.is_empty())
+            // Select mode takes every row, callable or not.
+            selecting
+                || self.recents.row(*index).is_some_and(|row| {
+                    row.callable || *zone == Zone::Info && !row.number.is_empty()
+                })
         })
     }
 
@@ -889,7 +916,7 @@ impl PhoneApp {
                     self.recents.last_pressed = Some((index, zone));
                     self.presses.touch_down(press_id(index, zone));
                     self.recents.suppress_click = false;
-                    if zone == Zone::Row {
+                    if zone == Zone::Row && self.recents.select.is_none() {
                         // Holding a row opens its quick-action menu (copy, message, block).
                         self.recents.long_task =
                             Some(cx.spawn_in(window, async move |this, cx| {
@@ -953,12 +980,236 @@ impl PhoneApp {
                 // mouse press that follows a tap on lift only performs it.
                 self.recents.last_pressed = Some((index, zone));
                 self.presses.down(press_id(index, zone));
+                if self.recents.select.is_some() {
+                    self.recents_toggle_select(index, window, cx);
+                    return;
+                }
                 match zone {
                     Zone::Row => self.recents_call(index, window, cx),
                     Zone::Info => self.recents_info(index, window, cx),
                 }
             }
         }
+    }
+
+    // ---- Select mode ----------------------------------------------------
+
+    /// Enters select mode with the row at list position `index` chosen.
+    pub(crate) fn recents_enter_select(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.blur();
+        self.recents.select = Some(call_log_query::Selection::default());
+        self.recents_toggle_select(index, window, cx);
+    }
+
+    /// Flips the row at list position `index` (a light haptic).
+    fn recents_toggle_select(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(&at) = self.recents.visible.get(index) else {
+            return;
+        };
+        let Some(row) = self.recents.merged.get(at) else {
+            return;
+        };
+        if let Some(select) = self.recents.select.as_mut() {
+            select.toggle(row);
+            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+            cx.notify();
+        }
+    }
+
+    /// Leaves select mode and forgets the choice.
+    pub(crate) fn recents_leave_select(&mut self, cx: &mut Context<Self>) {
+        if self.recents.select.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Whether every row now listed is chosen.
+    fn recents_all_selected(&self) -> bool {
+        let r = &self.recents;
+        r.select.as_ref().is_some_and(|sel| {
+            !r.visible.is_empty()
+                && r.visible
+                    .iter()
+                    .all(|&i| r.merged.get(i).is_some_and(|row| sel.contains(row)))
+        })
+    }
+
+    /// Select all / Deselect all, Done and Delete of the select bar.
+    pub(crate) fn recents_select_act(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match id {
+            SEL_ALL => {
+                let all = self.recents_all_selected();
+                let (merged, visible) = (
+                    Arc::clone(&self.recents.merged),
+                    self.recents.visible.clone(),
+                );
+                if let Some(sel) = self.recents.select.as_mut() {
+                    if all {
+                        sel.clear();
+                    } else {
+                        sel.select_all(&merged, &visible);
+                    }
+                    rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                }
+            }
+            SEL_DONE => {
+                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                self.recents.select = None;
+            }
+            SEL_DEL => {
+                let merged = Arc::clone(&self.recents.merged);
+                let scope = self.recents.select.as_ref().and_then(|sel| {
+                    (!sel.is_empty()).then(|| crate::history_ui::DeleteScope::Selected {
+                        refs: sel.refs(&merged).into(),
+                        rows: sel.len(),
+                        calls: sel.call_count(&merged),
+                    })
+                });
+                if let Some(scope) = scope {
+                    self.open_confirm_delete(scope, cx);
+                }
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// Height from the window bottom up to the select bar's top edge.
+    fn select_bar_inset(&self) -> f32 {
+        f32::from(rovsti_ui::tab_bar::content_bottom_inset_with(
+            self.safe_bottom,
+        )) + SELECT_BAR_GAP
+            + SELECT_BAR_H
+    }
+
+    /// The floating glass bar over the tab bar: the count and a Delete pill.
+    pub(crate) fn select_bar(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let select = self.recents.select.as_ref()?;
+        if self.tabs.selected() != RECENTS_TAB {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        let n = select.len();
+        let press = self.presses.value(SEL_DEL).clamp(0.0, 1.0);
+        let danger = call_colors(theme).danger;
+        let mut del = div()
+            .id(SEL_DEL)
+            .role(Role::Button)
+            .aria_label("Delete")
+            .aria_disabled(n == 0)
+            .relative()
+            .flex_none()
+            .h(px(36.0 * press_scale(press, scale::PRESS)))
+            .px(px(18.0))
+            .rounded_full()
+            .bg(if n == 0 { colors.fill } else { danger })
+            .flex()
+            .items_center()
+            .text_size(typography::HEADLINE.size)
+            .font_weight(typography::HEADLINE.weight)
+            .text_color(if n == 0 {
+                colors.tertiary_label
+            } else {
+                gpui::white()
+            })
+            .child("Delete");
+        if n > 0 {
+            del = del
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.presses.down(SEL_DEL);
+                        this.recents_select_act(SEL_DEL, window, cx);
+                    }),
+                )
+                .child(touch_surface(Self::touch_listener(
+                    cx,
+                    Some(SEL_DEL.into()),
+                )));
+        }
+        Some(
+            div()
+                .id("rc-sel-bar")
+                .absolute()
+                .left(metrics::ROW_INSET)
+                .right(metrics::ROW_INSET)
+                .bottom(
+                    rovsti_ui::tab_bar::content_bottom_inset_with(self.safe_bottom)
+                        + px(SELECT_BAR_GAP),
+                )
+                .h(px(SELECT_BAR_H))
+                .occlude()
+                .child(
+                    glass(GlassSpec::control(theme))
+                        .size_full()
+                        .rounded_full()
+                        .shadow(shadow::glass(theme.is_dark()))
+                        .flex()
+                        .items_center()
+                        .gap(px(10.0))
+                        .pl(px(18.0))
+                        .pr(px(10.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(typography::HEADLINE.size)
+                                .font_weight(typography::HEADLINE.weight)
+                                .text_color(colors.label)
+                                .child(call_log_query::select_title(n)),
+                        )
+                        .child(del),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// Select mode's header row: Select all / Deselect all on the left, Done on the right.
+    fn recents_select_header(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let all = self.recents_all_selected();
+        let pill = |id: &'static str, label: &'static str, cx: &mut Context<Self>| {
+            let press = self.presses.value(id).clamp(0.0, 1.0);
+            glass_pill(theme, label)
+                .id(id)
+                .role(Role::Button)
+                .aria_label(label)
+                .relative()
+                .flex_none()
+                .h(px(FIELD_H * press_scale(press, scale::PRESS)))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.presses.down(id);
+                        this.recents_select_act(id, window, cx);
+                    }),
+                )
+                .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
+        };
+        div()
+            .flex_none()
+            .h(px(FIELD_H))
+            .mx(metrics::ROW_INSET)
+            .mb(px(8.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(pill(
+                SEL_ALL,
+                if all { "Deselect all" } else { "Select all" },
+                cx,
+            ))
+            .child(pill(SEL_DONE, "Done", cx))
     }
 
     /// Desktop preview: tap the first Recents row.
@@ -1170,7 +1421,11 @@ impl PhoneApp {
                     .w_full()
                     .flex()
                     .flex_col()
-                    .child(self.recents_field(theme, cx))
+                    .child(if r.select.is_some() {
+                        self.recents_select_header(theme, cx).into_any_element()
+                    } else {
+                        self.recents_field(theme, cx).into_any_element()
+                    })
                     .child(self.recents_chips(theme, cx))
                     .child(results)
                     .into_any_element()
@@ -1536,6 +1791,12 @@ impl PhoneApp {
                     } else {
                         self.caller_photo(&vm.photo, cx)
                     };
+                    let chosen = r.select.as_ref().map(|sel| {
+                        r.visible
+                            .get(i)
+                            .and_then(|&at| r.merged.get(at))
+                            .is_some_and(|row| sel.contains(row))
+                    });
                     let row = recents_row(
                         theme,
                         i,
@@ -1543,7 +1804,7 @@ impl PhoneApp {
                         (row_press, info_press),
                         (r.sims.visible(), r.note_hit(i)),
                         fx,
-                        photo,
+                        (photo, chosen),
                     );
                     if live {
                         live_row(row, i, r.inserted, r.fresh, progress)
@@ -2402,7 +2663,8 @@ fn recents_row(
     (row_press, info_press): (f32, f32),
     (sim_slot, note): (bool, Option<&SharedString>),
     fx: Option<crate::block_ui::RowFx>,
-    photo: Option<(Arc<RenderImage>, f32)>,
+    // The photo; `Some(chosen)` in select mode puts the selection circle in the avatar slot.
+    (photo, select): (Option<(Arc<RenderImage>, f32)>, Option<bool>),
 ) -> AnyElement {
     let colors = theme::colors(theme);
     let danger = call_colors(theme).danger;
@@ -2419,6 +2681,7 @@ fn recents_row(
         .id(index)
         .role(Role::Button)
         .aria_label(vm.aria.clone())
+        .when_some(select, |row, chosen| row.aria_selected(chosen))
         .relative()
         .h(px(ROW_H))
         .w_full()
@@ -2452,6 +2715,9 @@ fn recents_row(
                 .pl(metrics::ROW_INSET)
                 .pr(px(4.0))
                 .child(match fx {
+                    _ if select.is_some() => {
+                        select_circle(theme, select == Some(true)).into_any_element()
+                    }
                     // S27: the avatar greys and a ring with a slash settles over it.
                     Some(fx) if fx.ring > 0.0 => div()
                         .relative()
@@ -2584,6 +2850,35 @@ fn recents_row(
                 .bg(colors.separator),
         )
         .into_any_element()
+}
+
+/// The 22 px selection circle in the avatar slot (centred in its 40 px box):
+/// filled accent with a check when chosen, a hairline ring otherwise.
+fn select_circle(theme: Theme, chosen: bool) -> gpui::Div {
+    let colors = theme::colors(theme);
+    let ring = div()
+        .size(px(22.0))
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center();
+    let ring = if chosen {
+        ring.bg(colors.accent).child(
+            svg()
+                .path(Icon::LucideCheck.path())
+                .size(px(14.0))
+                .text_color(gpui::white()),
+        )
+    } else {
+        ring.border_1().border_color(colors.tertiary_label)
+    };
+    div()
+        .flex_none()
+        .size(px(AVATAR))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(ring)
 }
 
 /// Icon, title, body and an optional pill `(id, label, press)`, centred in the

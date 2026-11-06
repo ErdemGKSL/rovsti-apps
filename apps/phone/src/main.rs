@@ -841,6 +841,9 @@ impl PhoneApp {
             }
         } else if self.settings.is_open() {
             self.settings_close(window, cx);
+        } else if self.tabs.selected() == RECENTS_TAB && self.recents.select.is_some() {
+            // Back leaves select mode before anything else on Recents.
+            self.recents_leave_select(cx);
         } else if self.contacts.typing || self.recents.typing {
             // First Back puts the keyboard away; the next one is the OS's.
             window.blur();
@@ -888,6 +891,7 @@ impl PhoneApp {
                 || self.settings.is_open()
                 || self.contacts.typing
                 || self.recents.typing
+                || self.recents.select.is_some()
                 || self.tabs.selected() != KEYPAD_TAB);
         let want = self.incoming.wants_back()
             || self.viewer.is_some()
@@ -1576,6 +1580,7 @@ impl Render for PhoneApp {
                 .child(self.page(theme, window, cx))
                 .children(self.return_pill(theme, cx))
                 .children(self.notice_slot(theme, cx))
+                .children(self.select_bar(theme, cx))
                 .children((away < 0.995 && self.settings.progress() < 0.995).then(|| {
                     // Under the keyboard the bar slides off the bottom; it is
                     // hidden, not dismissed. The bar is a cached view: frames in

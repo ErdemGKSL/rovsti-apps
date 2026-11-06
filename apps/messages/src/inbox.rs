@@ -605,6 +605,66 @@ pub fn fold_message(threads: &mut Vec<InboxThread>, message: &WaMessage, viewing
     }
 }
 
+/// A `chat_merged` event: the chat `from` (a LID) now lives under `into`. The
+/// `from` thread goes; its unread count adds to `into`'s and the newer last
+/// message wins. The chat meta (pin, mute, archive) moves when `into` has
+/// none of its own. `into` is created from `from` when it was not listed.
+pub fn apply_merge(
+    threads: &mut Vec<InboxThread>,
+    info: &mut HashMap<String, WaChatInfo>,
+    from: &str,
+    into: &str,
+) {
+    if from == into {
+        return;
+    }
+    let from_id = ThreadId::WhatsApp(from.to_owned());
+    let into_id = ThreadId::WhatsApp(into.to_owned());
+    if let Some(at) = threads.iter().position(|t| t.id == from_id) {
+        let mut gone = threads.remove(at);
+        match threads.iter_mut().find(|t| t.id == into_id) {
+            Some(kept) => {
+                kept.unread = kept.unread.saturating_add(gone.unread);
+                if gone.last.timestamp_ms > kept.last.timestamp_ms {
+                    gone.last.thread = into_id;
+                    kept.last = gone.last;
+                }
+                if kept.title.is_none() {
+                    kept.title = gone.title;
+                }
+            }
+            None => {
+                gone.id = into_id.clone();
+                gone.last.thread = into_id;
+                threads.push(gone);
+            }
+        }
+    }
+    let Some(gone) = info.remove(from) else {
+        return;
+    };
+    match info.get_mut(into) {
+        Some(kept) => {
+            if kept.meta == ChatMeta::default() {
+                kept.meta = gone.meta;
+            } else if kept.meta.push_name.is_none() {
+                kept.meta.push_name = gone.meta.push_name;
+            }
+            let older = match (&kept.last, &gone.last) {
+                (Some(a), Some(b)) => b.timestamp_ms > a.timestamp_ms,
+                (None, Some(_)) => true,
+                _ => false,
+            };
+            if older {
+                kept.last = gone.last;
+            }
+        }
+        None => {
+            info.insert(into.to_owned(), gone);
+        }
+    }
+}
+
 pub fn badges(row: &InboxRow) -> Vec<Badge> {
     row.channels.iter().copied().map(Badge::of).collect()
 }
@@ -1199,6 +1259,74 @@ mod tests {
             title: Some(name.into()),
             is_group: false,
         }
+    }
+
+    #[test]
+    fn apply_merge_folds_the_lid_chat_into_the_pn_chat() {
+        let lid = "1@lid";
+        let pn = "905321111111@s.whatsapp.net";
+        let mut threads = vec![wa(lid, "x", 10, 2), wa(pn, "Annem", 500, 3)];
+        let mut infos = HashMap::new();
+        infos.insert(
+            lid.to_owned(),
+            info(
+                ChatMeta {
+                    pinned: true,
+                    ..ChatMeta::default()
+                },
+                Some(last(true, None, "newer", MessageMeta::default())),
+                false,
+            ),
+        );
+        apply_merge(&mut threads, &mut infos, lid, pn);
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, ThreadId::WhatsApp(pn.into()));
+        assert_eq!(threads[0].unread, 5);
+        assert_eq!(threads[0].last.timestamp_ms, NOW - 10, "newer last kept");
+        assert_eq!(threads[0].last.thread, threads[0].id);
+        assert_eq!(threads[0].title.as_deref(), Some("Annem"));
+        assert!(!infos.contains_key(lid));
+        assert!(infos[pn].meta.pinned, "meta moved");
+        assert!(infos[pn].last.is_some());
+
+        // Again: nothing left to merge.
+        let before = threads.clone();
+        apply_merge(&mut threads, &mut infos, lid, pn);
+        assert_eq!(threads, before);
+    }
+
+    #[test]
+    fn apply_merge_keeps_the_target_meta_and_renames_a_lone_thread() {
+        let lid = "1@lid";
+        let pn = "2@s.whatsapp.net";
+        let mut threads = vec![wa(lid, "x", 10, 1)];
+        let mut infos = HashMap::new();
+        infos.insert(
+            lid.to_owned(),
+            info(
+                ChatMeta {
+                    pinned: true,
+                    ..ChatMeta::default()
+                },
+                None,
+                false,
+            ),
+        );
+        infos.insert(
+            pn.to_owned(),
+            info(
+                ChatMeta {
+                    archived: true,
+                    ..ChatMeta::default()
+                },
+                None,
+                false,
+            ),
+        );
+        apply_merge(&mut threads, &mut infos, lid, pn);
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, ThreadId::WhatsApp(pn.into()));
+        assert!(infos[pn].meta.archived && !infos[pn].meta.pinned);
     }
 
     fn build_with(

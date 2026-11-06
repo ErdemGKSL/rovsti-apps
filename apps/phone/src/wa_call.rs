@@ -527,7 +527,9 @@ impl WaCallUi {
             }
             let linked = settings.read(cx).link().is_some();
             let connected = settings.read(cx).is_connected();
-            let resync = events.iter().any(|e| matches!(e, GatewayEvent::Resync));
+            let resync = events
+                .iter()
+                .any(|e| matches!(e, GatewayEvent::Resync | GatewayEvent::ChatMerged { .. }));
             this.on_events(events, linked, cx);
             if connected && (!this.was_connected || resync) {
                 this.sync_calls(cx);

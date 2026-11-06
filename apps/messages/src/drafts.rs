@@ -84,6 +84,19 @@ impl Drafts {
         }
     }
 
+    /// Moves the draft of `from` to `into` (a merged chat). When both have
+    /// one, the non-empty `into` draft stays.
+    pub fn rekey(&mut self, from: &ThreadId, into: &ThreadId) {
+        if from == into {
+            return;
+        }
+        let Some(text) = self.map.remove(from) else {
+            return;
+        };
+        self.map.entry(into.clone()).or_insert(text);
+        self.rev += 1;
+    }
+
     pub fn forget(&mut self, thread: &ThreadId) {
         self.take(thread);
     }
@@ -105,6 +118,27 @@ mod tests {
         assert_eq!(d.take(&wa()).as_deref(), Some("hello"));
         assert_eq!(d.take(&wa()), None, "take empties");
         assert_eq!(d.take(&ThreadId::Sms(3)).as_deref(), Some("sms"));
+    }
+
+    #[test]
+    fn rekey_moves_and_keeps_the_target_draft() {
+        let lid = ThreadId::WhatsApp("1@lid".into());
+        let mut d = Drafts::default();
+        d.put(lid.clone(), "old");
+        let rev = d.rev();
+        d.rekey(&lid, &wa());
+        assert_eq!(d.get(&wa()), Some("old"));
+        assert_eq!(d.get(&lid), None);
+        assert!(d.rev() > rev);
+
+        d.put(lid.clone(), "other");
+        d.rekey(&lid, &wa());
+        assert_eq!(d.get(&wa()), Some("old"), "into wins");
+        assert_eq!(d.get(&lid), None);
+
+        let rev = d.rev();
+        d.rekey(&lid, &wa());
+        assert_eq!(d.rev(), rev, "nothing to move");
     }
 
     #[test]

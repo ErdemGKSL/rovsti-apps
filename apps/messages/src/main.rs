@@ -838,6 +838,36 @@ impl MessagesApp {
                         self.row_menu = None;
                     }
                 }
+                GatewayEvent::ChatMerged { from, into } => {
+                    self.wa_rev += 1;
+                    inbox::apply_merge(&mut self.wa_threads, &mut self.wa_info, &from, &into);
+                    let (from_id, into_id) = (
+                        ThreadId::WhatsApp(from.clone()),
+                        ThreadId::WhatsApp(into.clone()),
+                    );
+                    self.drafts.rekey(&from_id, &into_id);
+                    let (from_tag, into_tag) = (
+                        notifications::thread_tag(&from_id),
+                        notifications::thread_tag(&into_id),
+                    );
+                    self.backend.update(cx, |backend, cx| {
+                        backend.update_prefs(cx, |prefs| {
+                            prefs.rekey_thread(&from_tag, &into_tag);
+                        });
+                    });
+                    if let Open::WhatsApp(open, _) = &mut self.open
+                        && *open == from
+                    {
+                        *open = into.clone();
+                    }
+                    if let Some(menu) = &mut self.row_menu
+                        && menu.jid.as_deref() == Some(from.as_str())
+                    {
+                        menu.jid = Some(into.clone());
+                    }
+                    self.chats = ChatsState::Needed;
+                    self.reload_statuses(cx);
+                }
                 GatewayEvent::Scheduled(item) => {
                     let before = self.remote_scheduled.iter().find(|t| t.id == item.id);
                     let announce = schedule_ui::newly_failed(before, &item)

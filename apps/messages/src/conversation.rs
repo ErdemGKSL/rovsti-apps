@@ -1123,6 +1123,19 @@ impl Conversation {
             self.load(None, cx);
             return;
         }
+        // The chat moved to its phone-number id: follow it and reload.
+        if let GatewayEvent::ChatMerged { from, into } = event {
+            if *from == self.chat {
+                self.timeline.apply_event(event);
+                self.timeline.set_chat(into.clone());
+                self.chat = into.clone();
+                self.rows_dirty = true;
+                self.loading = false;
+                self.load(None, cx);
+                cx.notify();
+            }
+            return;
+        }
         match event {
             GatewayEvent::Typing { chat, state, .. } if *chat == self.chat => {
                 if *state == TypingState::Paused {

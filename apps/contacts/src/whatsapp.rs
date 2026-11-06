@@ -282,7 +282,10 @@ impl ContactsApp {
         let now = now_ms();
         let mut resync = false;
         for event in &events {
-            resync |= matches!(event, GatewayEvent::Resync);
+            resync |= matches!(
+                event,
+                GatewayEvent::Resync | GatewayEvent::ChatMerged { .. }
+            );
             self.wa.book.apply(event, now);
             self.avatars
                 .update(cx, |avatars, cx| avatars.on_event(event, cx));

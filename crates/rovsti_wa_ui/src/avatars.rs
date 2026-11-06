@@ -374,7 +374,7 @@ impl WaAvatars {
                     cx.notify();
                 }
             }
-            GatewayEvent::Resync => {
+            GatewayEvent::Resync | GatewayEvent::ChatMerged { .. } => {
                 self.book.forget_misses();
                 cx.notify();
             }

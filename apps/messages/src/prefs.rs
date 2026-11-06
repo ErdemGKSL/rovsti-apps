@@ -116,6 +116,20 @@ impl MessagesPrefs {
 
     /// Adds a sender to the allow list (never spam). `false` when it was empty
     /// or already there.
+    /// Moves the per-thread state of tag `from_tag` to `into_tag` (a merged
+    /// chat). Returns `true` when anything changed.
+    pub fn rekey_thread(&mut self, from_tag: &str, into_tag: &str) -> bool {
+        if from_tag == into_tag {
+            return false;
+        }
+        let mut changed = false;
+        if self.muted.remove(from_tag) {
+            self.muted.insert(into_tag.to_owned());
+            changed = true;
+        }
+        changed
+    }
+
     pub fn allow_sender(&mut self, sender: &str) -> bool {
         let sender = sender.trim();
         if sender.is_empty()
@@ -305,6 +319,22 @@ mod tests {
         prefs.set_muted("wa:a", true);
         prefs.set_muted("wa:a", false);
         assert!(!prefs.is_muted("wa:a"));
+    }
+
+    #[test]
+    fn rekey_thread_moves_the_mute() {
+        let mut prefs = MessagesPrefs::default();
+        prefs.set_muted("wa:1@lid", true);
+        assert!(prefs.rekey_thread("wa:1@lid", "wa:2@s.whatsapp.net"));
+        assert!(!prefs.is_muted("wa:1@lid"));
+        assert!(prefs.is_muted("wa:2@s.whatsapp.net"));
+        assert!(!prefs.rekey_thread("wa:1@lid", "wa:2@s.whatsapp.net"));
+        assert!(!prefs.rekey_thread("wa:2@s.whatsapp.net", "wa:2@s.whatsapp.net"));
+    }
+
+    #[test]
+    fn allow_list_edits() {
+        let mut prefs = MessagesPrefs::default();
         assert!(!prefs.allow_sender("  "));
         assert!(prefs.allow_sender("Bank"));
         assert!(!prefs.allow_sender("BANK"), "case-insensitive duplicate");

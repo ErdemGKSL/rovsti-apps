@@ -124,6 +124,13 @@ pub enum GatewayEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         author: Option<String>,
     },
+    /// A chat stored under a LID was merged into the phone-number chat of the
+    /// same person: move local state (drafts, pins, mutes) from `from` to
+    /// `into`, and refetch chats. Older clients skip it.
+    ChatMerged {
+        from: String,
+        into: String,
+    },
     /// The client missed events; refetch chats.
     Resync,
     /// The key used for this socket was revoked.
@@ -322,6 +329,13 @@ mod tests {
             (
                 GatewayEvent::StatusChanged { author: None },
                 r#"{"type":"status_changed"}"#,
+            ),
+            (
+                GatewayEvent::ChatMerged {
+                    from: "1@lid".into(),
+                    into: "2@s.whatsapp.net".into(),
+                },
+                r#"{"type":"chat_merged","from":"1@lid","into":"2@s.whatsapp.net"}"#,
             ),
             (GatewayEvent::Resync, r#"{"type":"resync"}"#),
             (GatewayEvent::KeyRevoked, r#"{"type":"key_revoked"}"#),

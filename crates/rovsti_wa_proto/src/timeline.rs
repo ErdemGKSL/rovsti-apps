@@ -153,6 +153,14 @@ impl Timeline {
                 self.metas.clear();
                 changed
             }
+            // The chat now lives under `into`: drop what it held, the caller
+            // refetches.
+            GatewayEvent::ChatMerged { from, .. } if *from == self.chat => {
+                let changed = !self.items.is_empty();
+                self.items.retain(|i| i.state.local_id().is_some());
+                self.metas.clear();
+                changed
+            }
             GatewayEvent::Receipt { chat, ids, kind } if *chat == self.chat => {
                 let to = match kind {
                     ReceiptKind::Delivered => ItemState::Delivered,
@@ -338,6 +346,11 @@ impl Timeline {
 
     pub fn items(&self) -> &[Item] {
         &self.items
+    }
+
+    /// Points the timeline at another chat (after a merge); items stay.
+    pub fn set_chat(&mut self, chat: impl Into<String>) {
+        self.chat = chat.into();
     }
 
     /// The chat JID this timeline shows.
@@ -584,6 +597,26 @@ mod tests {
         assert!(t.apply_event(&GatewayEvent::ChatCleared { jid: CHAT.into() }));
         assert_eq!(t.items().len(), 1);
         assert!(matches!(t.items()[0].state, ItemState::Pending { .. }));
+    }
+
+    #[test]
+    fn chat_merged_clears_the_from_chat_only() {
+        let mut t = Timeline::new(CHAT);
+        t.apply_event(&GatewayEvent::Message(msg("a", 10, false)));
+        let other = GatewayEvent::ChatMerged {
+            from: "9@lid".into(),
+            into: "2@s.whatsapp.net".into(),
+        };
+        assert!(!t.apply_event(&other));
+        assert_eq!(t.items().len(), 1);
+        t.push_pending(1, "later".into(), 40);
+        assert!(t.apply_event(&GatewayEvent::ChatMerged {
+            from: CHAT.into(),
+            into: "2@s.whatsapp.net".into(),
+        }));
+        assert_eq!(t.items().len(), 1, "pending sends stay");
+        t.set_chat("2@s.whatsapp.net");
+        assert_eq!(t.chat(), "2@s.whatsapp.net");
     }
 
     fn msg(id: &str, ts: i64, from_me: bool) -> WaMessage {

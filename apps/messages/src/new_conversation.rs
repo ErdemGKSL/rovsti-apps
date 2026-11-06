@@ -40,6 +40,14 @@ pub struct Recipient {
     pub detail: Option<String>,
 }
 
+/// The JID of the first number a WhatsApp lookup found registered.
+pub fn registered_jid(users: &[rovsti_wa_proto::WaUser]) -> Option<String> {
+    users
+        .iter()
+        .find(|user| user.on_whatsapp)
+        .map(|user| user.jid.clone())
+}
+
 /// What the entry tells the page that hosts it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NewConversationEvent {
@@ -298,6 +306,25 @@ mod tests {
     use rovsti_core::wire::{WireContact, WireNumber};
 
     use super::*;
+
+    #[test]
+    fn registered_jid_skips_unregistered() {
+        let user = |jid: &str, on_whatsapp| rovsti_wa_proto::WaUser {
+            jid: jid.into(),
+            on_whatsapp,
+            business: false,
+            verified_name: None,
+        };
+        assert_eq!(registered_jid(&[]), None);
+        assert_eq!(registered_jid(&[user("1@s.whatsapp.net", false)]), None);
+        assert_eq!(
+            registered_jid(&[
+                user("1@s.whatsapp.net", false),
+                user("2@s.whatsapp.net", true)
+            ]),
+            Some("2@s.whatsapp.net".to_owned())
+        );
+    }
 
     fn contact(id: i64, name: &str, numbers: &[(&str, bool)]) -> WireContact {
         WireContact {

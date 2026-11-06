@@ -193,6 +193,8 @@ struct MessagesApp {
     show_archived: bool,
     /// The long-press menu of a WhatsApp row.
     row_menu: Option<RowMenu>,
+    /// New message: the recipient being asked "SMS or WhatsApp".
+    channel_pick: Option<Recipient>,
     /// Bumped on every change of `wa_threads`.
     wa_rev: u64,
     /// Bumped on every backend notification (threads, contacts, rules, clock).
@@ -370,6 +372,7 @@ impl MessagesApp {
             contacts_seen: 0,
             show_archived: false,
             row_menu: None,
+            channel_pick: None,
             wa_rev: 0,
             backend_epoch: 0,
             inbox_key: None,
@@ -897,6 +900,62 @@ impl MessagesApp {
     /// A recipient picked in the new-message entry: their SMS thread when there
     /// is one, else a draft that the first send turns into a thread.
     fn open_recipient(&mut self, recipient: &Recipient, cx: &mut Context<Self>) {
+        if self.whatsapp.read(cx).gateway().is_some() {
+            self.channel_pick = Some(recipient.clone());
+            cx.notify();
+            return;
+        }
+        self.open_recipient_sms(recipient, cx);
+    }
+
+    /// The chosen WhatsApp channel for a recipient: an existing chat, else a
+    /// background lookup of the bare number.
+    fn open_recipient_whatsapp(&mut self, recipient: &Recipient, cx: &mut Context<Self>) {
+        let Some(gateway) = self.whatsapp.read(cx).gateway() else {
+            self.open_recipient_sms(recipient, cx);
+            return;
+        };
+        let users: Vec<String> = self
+            .wa_threads
+            .iter()
+            .filter_map(|t| match &t.id {
+                ThreadId::WhatsApp(jid) if !jid.ends_with("@g.us") => {
+                    Some(jid_user(jid).to_owned())
+                }
+                _ => None,
+            })
+            .collect();
+        let users: Vec<&str> = users.iter().map(String::as_str).collect();
+        let title = recipient.title.clone();
+        match rovsti_wa_proto::wa_target(&[recipient.number.as_str()], &users) {
+            rovsti_wa_proto::WaTarget::Chat(jid) => self.open_chat(jid, title, cx),
+            rovsti_wa_proto::WaTarget::Number(jid) => {
+                let task = cx
+                    .background_executor()
+                    .spawn(async move { gateway.lookup_users(&[jid]) });
+                cx.spawn(async move |this, cx| {
+                    let result = task.await;
+                    this.update(cx, |this, cx| match result {
+                        Ok(users) => match new_conversation::registered_jid(&users) {
+                            Some(jid) => this.open_chat(jid, title, cx),
+                            None => this.show_pill(format!("{title} is not on WhatsApp")),
+                        },
+                        Err(_) => this.show_pill("Can't check WhatsApp right now."),
+                    })
+                    .ok();
+                    this.update(cx, |_, cx| cx.notify()).ok();
+                })
+                .detach();
+            }
+            rovsti_wa_proto::WaTarget::NeedsCountryCode | rovsti_wa_proto::WaTarget::None => {
+                self.show_pill("Add the country code to message on WhatsApp");
+                cx.notify();
+            }
+        }
+    }
+
+    /// The SMS channel for a recipient.
+    fn open_recipient_sms(&mut self, recipient: &Recipient, cx: &mut Context<Self>) {
         let found = inbox::thread_for_number(self.backend.read(cx).threads(), &recipient.number)
             .map(|t| (t.thread_id, t.addresses.clone()));
         match found {
@@ -1301,6 +1360,51 @@ impl MessagesApp {
         cx.notify();
     }
 
+    /// New message with WhatsApp linked: SMS or WhatsApp for the picked recipient.
+    fn channel_pick_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let recipient = self.channel_pick.clone()?;
+        let colors = theme::colors(theme);
+        let sms = recipient.clone();
+        let wa = recipient.clone();
+        let items = vec![
+            menu_item(
+                theme,
+                "channel-sms",
+                Icon::LucideMessageSquare,
+                "SMS".into(),
+                colors.label,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.channel_pick = None;
+                this.open_recipient_sms(&sms, cx);
+            }))
+            .into_any_element(),
+            menu_item(
+                theme,
+                "channel-whatsapp",
+                Icon::LucideMessageCircle,
+                "WhatsApp".into(),
+                colors.label,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.channel_pick = None;
+                this.open_recipient_whatsapp(&wa, cx);
+                cx.notify();
+            }))
+            .into_any_element(),
+        ];
+        Some(menu_card(
+            theme,
+            "channel-pick",
+            recipient.title.into(),
+            items,
+            cx.listener(|this, _, _, cx| {
+                this.channel_pick = None;
+                cx.notify();
+            }),
+        ))
+    }
+
     /// The row menu over the inbox: a dimmed screen and a glass card of actions.
     fn row_menu_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.row_menu.as_ref()?;
@@ -1526,6 +1630,7 @@ impl MessagesApp {
     fn can_go_back(&self, cx: &App) -> bool {
         self.schedule.is_open()
             || self.row_menu.is_some()
+            || self.channel_pick.is_some()
             || self.search_open
             || self.show_archived
             || self.show_spam
@@ -1538,6 +1643,9 @@ impl MessagesApp {
     fn go_back(&mut self, cx: &mut Context<Self>) {
         if self.schedule.is_open() {
             self.close_schedule(cx);
+        } else if self.channel_pick.is_some() {
+            self.channel_pick = None;
+            cx.notify();
         } else if let Some(menu) = &mut self.row_menu {
             // The mute lengths step back to the menu, the menu closes.
             if menu.delete_confirm {
@@ -2162,6 +2270,7 @@ impl MessagesApp {
         if matches!(self.open, Open::None | Open::Sms(_)) {
             out.extend(self.row_menu_overlay(theme, cx));
         }
+        out.extend(self.channel_pick_overlay(theme, cx));
         out
     }
 

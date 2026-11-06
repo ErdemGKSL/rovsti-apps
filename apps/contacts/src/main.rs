@@ -52,7 +52,7 @@ use rovsti_ui::{
     tokens::{Theme, metrics, shadow, typography},
 };
 
-use rovsti_wa_ui::{AppId, WhatsAppSettings};
+use rovsti_wa_ui::{AppId, WaAvatars, WhatsAppSettings};
 
 use crate::{
     backend::Book,
@@ -117,11 +117,18 @@ struct Row {
     monogram: SharedString,
     /// The star and the WhatsApp mark at the row's end.
     trailing: Option<SharedString>,
+    /// The JID of the contact's WhatsApp chat, for its picture.
+    wa_jid: Option<String>,
 }
 
 impl Row {
-    /// Sets the WhatsApp mark (computed per pull and per chats refresh).
-    fn set_whatsapp(&mut self, on: bool) {
+    /// Sets the WhatsApp mark and chat (computed per pull and per chats
+    /// refresh, never per frame).
+    fn set_whatsapp(&mut self, jid: Option<&str>) {
+        if self.wa_jid.as_deref() != jid {
+            self.wa_jid = jid.map(str::to_owned);
+        }
+        let on = jid.is_some();
         self.trailing = match (on, self.vm.starred) {
             (true, true) => Some("WhatsApp ★".into()),
             (true, false) => Some("WhatsApp".into()),
@@ -139,6 +146,7 @@ impl From<ContactVm> for Row {
             subtitle: vm.subtitle.clone().map(Into::into),
             monogram: vm.monogram.map(String::from).unwrap_or_default().into(),
             trailing: vm.starred.then(|| "★".into()),
+            wa_jid: None,
             vm,
         }
     }
@@ -200,6 +208,8 @@ struct ContactsApp {
     whatsapp_open: bool,
     /// WhatsApp per contact: chats, presence, lookups.
     wa: whatsapp::WaPanel,
+    /// WhatsApp profile pictures and profiles, for contacts without a photo.
+    avatars: Entity<WaAvatars>,
 }
 
 impl ContactsApp {
@@ -277,6 +287,9 @@ impl ContactsApp {
         // (presence, resync) and a fresh connection feed the card and the list.
         cx.observe(&whatsapp, |this, _, cx| this.on_whatsapp_changed(cx))
             .detach();
+        // A picture or a profile arrived: the rows on screen draw it.
+        let avatars = cx.new(|cx| WaAvatars::new(&whatsapp, cx));
+        cx.observe(&avatars, |_, _, cx| cx.notify()).detach();
         let mut app = Self {
             tabs: TabBar::new(
                 TABS.into_iter()
@@ -321,6 +334,7 @@ impl ContactsApp {
             whatsapp,
             whatsapp_open: false,
             wa: whatsapp::WaPanel::default(),
+            avatars,
         };
         refill(&app.contacts_list, 0, Some(app.search_focus(cx)), true);
         app.pull_wa_offset(cx);
@@ -432,7 +446,7 @@ impl ContactsApp {
                     .into_iter()
                     .map(|vm| {
                         let mut row = Row::from(vm);
-                        row.set_whatsapp(self.wa.marked.contains(&row.vm.id));
+                        row.set_whatsapp(self.wa.marked.get(&row.vm.id).map(String::as_str));
                         row
                     })
                     .collect()
@@ -794,7 +808,9 @@ impl ContactsApp {
     ) -> AnyElement {
         let id = row.vm.id;
         let tint = hue_pair(theme, row.vm.hue).0;
-        let photo = row.vm.photo_uri.as_ref().and_then(|_| self.photos.get(id));
+        let picture =
+            self.avatar_picture(id, row.vm.photo_uri.is_some(), row.wa_jid.as_deref(), cx);
+        let photo = picture.as_ref().map(|(image, opacity)| (image, *opacity));
         list_row(
             theme,
             Some(photo_avatar(theme, row.monogram.clone(), 40.0, tint, photo).into_any_element()),
@@ -843,6 +859,24 @@ impl ContactsApp {
         };
         if let Some((id, uri)) = wanted {
             self.want_photos([(id, uri.as_str())], cx);
+        }
+        // A contact on WhatsApp without a readable photo of its own shows its
+        // WhatsApp picture (asked for only while its row is drawn).
+        let rows = match set {
+            RowSet::Contacts => &self.rows,
+            RowSet::Favorites => &self.favorites,
+            RowSet::Group => &self.group_rows,
+        };
+        if let Some(row) = rows.get(i)
+            && let Some(jid) = row.wa_jid.as_deref()
+            && self
+                .photos
+                .wa_stands_in(row.vm.id, row.vm.photo_uri.is_some())
+        {
+            self.avatars.update(cx, |avatars, cx| {
+                let picture_id = avatars.profile(jid).and_then(|p| p.picture_id.clone());
+                avatars.want(jid, picture_id.as_deref(), cx);
+            });
         }
         let Some(row) = self.row_set(set).get(i) else {
             return div().into_any_element();
@@ -1202,7 +1236,8 @@ impl Render for ContactsApp {
             window.set_back_enabled(want_back);
         }
         self.request_photos(cx);
-        let fading = self.photos.fading();
+        self.request_wa_card(cx);
+        let fading = self.photos.fading() || self.avatars.read(cx).fading();
         let mut motion = std::mem::take(&mut self.motion);
         motion.frame_timed(window, |dt, real| {
             self.tabs.tick(dt)

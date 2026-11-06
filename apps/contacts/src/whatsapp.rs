@@ -8,14 +8,16 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use gpui::{Context, SharedString};
 use rovsti_core::{PhoneNumber, recents::LocaleTime, wire::WireContact};
+use rovsti_wa_client::{Gateway, Picture};
 use rovsti_wa_proto::{
-    ChatSummary, GatewayEvent, PresenceBook, WaTarget, WaUser, chat_users, presence_label,
-    timeline::user_jid, wa_target,
+    ChatSummary, GatewayEvent, PresenceBook, WaProfile, WaTarget, WaUser, chat_users,
+    presence_label, timeline::user_jid, wa_target,
 };
 
 use crate::ContactsApp;
@@ -38,8 +40,9 @@ pub(crate) struct WaPanel {
     pub chat_users: Vec<String>,
     pub book: PresenceBook,
     pub lookups: HashMap<i64, LookupState>,
-    /// Contacts whose list row carries the WhatsApp mark.
-    pub marked: HashSet<i64>,
+    /// Contacts whose list row carries the WhatsApp mark, with the JID of
+    /// their chat (the list asks for its picture).
+    pub marked: HashMap<i64, String>,
     /// JIDs presence was already subscribed for.
     subscribed: HashSet<String>,
     connected: bool,
@@ -156,29 +159,86 @@ pub(crate) fn status_line(
 }
 
 /// The contacts that get the WhatsApp mark in the list: some number of theirs
-/// matches a known 1:1 chat. Parses each chat and number once.
+/// matches a known 1:1 chat. Each maps to that chat's JID. Parses each chat
+/// and number once.
 pub(crate) fn marked_contacts<'a>(
     contacts: impl IntoIterator<Item = &'a WireContact>,
     chat_users: &[String],
-) -> HashSet<i64> {
-    let chats: Vec<PhoneNumber> = chat_users
+) -> HashMap<i64, String> {
+    let chats: Vec<(&str, PhoneNumber)> = chat_users
         .iter()
-        .filter_map(|user| PhoneNumber::parse(&format!("+{user}")).ok())
+        .filter_map(|user| {
+            PhoneNumber::parse(&format!("+{user}"))
+                .ok()
+                .map(|n| (user.as_str(), n))
+        })
         .collect();
     if chats.is_empty() {
-        return HashSet::new();
+        return HashMap::new();
     }
     contacts
         .into_iter()
-        .filter(|c| {
+        .filter_map(|c| {
             c.numbers
                 .iter()
                 .filter_map(|n| PhoneNumber::parse(&n.raw).ok())
                 .filter(PhoneNumber::is_international)
-                .any(|n| chats.iter().any(|chat| n.matches(chat)))
+                .find_map(|n| chats.iter().find(|(_, chat)| n.matches(chat)))
+                .map(|(user, _)| (c.id, format!("{user}@s.whatsapp.net")))
         })
-        .map(|c| c.id)
         .collect()
+}
+
+/// What the card says about the person from their WhatsApp profile, as
+/// `(label, value)`: the name they set (when it differs from the contact's),
+/// the business name, and their About text.
+pub(crate) fn profile_lines(
+    profile: &WaProfile,
+    contact_name: &str,
+) -> Vec<(&'static str, String)> {
+    let text = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    let mut lines = Vec::new();
+    if let Some(push) = text(&profile.push_name)
+        && !push.eq_ignore_ascii_case(contact_name.trim())
+    {
+        lines.push(("WhatsApp name", push));
+    }
+    if profile.business {
+        let name = text(&profile.verified_name).unwrap_or_else(|| "Business account".to_owned());
+        lines.push(("Business", name));
+    }
+    if let Some(about) = text(&profile.about) {
+        lines.push(("About", about));
+    }
+    lines
+}
+
+/// The file the large WhatsApp picture of contact `id` is written to.
+pub(crate) fn wa_photo_path(dir: &Path, id: i64) -> PathBuf {
+    dir.join(format!("wa-photo-{id}.jpg"))
+}
+
+/// Fetches the large WhatsApp picture of `jid` and writes it under `dir`.
+/// Blocking: run it on the background executor. Returns the file's path.
+fn fetch_wa_photo(gateway: &Gateway, jid: &str, dir: &Path, id: i64) -> Result<String, String> {
+    let bytes = match gateway.picture(jid, true, None) {
+        Ok(Picture::Image { bytes, .. }) => bytes,
+        Ok(Picture::None | Picture::Unchanged) => {
+            return Err("they have no WhatsApp photo you can see".to_owned());
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let path = wa_photo_path(dir, id);
+    std::fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+    path.into_os_string()
+        .into_string()
+        .map_err(|_| "the data folder has an unusual name".to_owned())
 }
 
 pub(crate) fn now_ms() -> i64 {
@@ -217,6 +277,8 @@ impl ContactsApp {
         for event in &events {
             resync |= matches!(event, GatewayEvent::Resync);
             self.wa.book.apply(event, now);
+            self.avatars
+                .update(cx, |avatars, cx| avatars.on_event(event, cx));
         }
         let just_connected = connected && !self.wa.connected;
         self.wa.connected = connected;
@@ -265,7 +327,7 @@ impl ContactsApp {
     pub(crate) fn refresh_marks(&mut self) {
         self.wa.marked = match self.index() {
             Some(index) => marked_contacts(index.all(), &self.wa.chat_users),
-            None => HashSet::new(),
+            None => HashMap::new(),
         };
         self.apply_marks();
     }
@@ -278,8 +340,65 @@ impl ContactsApp {
             .chain(self.favorites.iter_mut())
             .chain(self.group_rows.iter_mut())
         {
-            row.set_whatsapp(self.wa.marked.contains(&row.vm.id));
+            row.set_whatsapp(self.wa.marked.get(&row.vm.id).map(String::as_str));
         }
+    }
+
+    /// The WhatsApp JID of the open card, when one is known (a chat, or a
+    /// number the lookup found registered).
+    pub(crate) fn card_jid(&self) -> Option<String> {
+        let card = self.open.as_ref()?;
+        let numbers: Vec<String> = card.numbers.iter().map(|n| n.raw.clone()).collect();
+        self.wa.jid(card.id, &numbers)
+    }
+
+    /// For the open card: ask for the WhatsApp picture (shown when the
+    /// contact has no photo of its own) and the WhatsApp profile.
+    pub(crate) fn request_wa_card(&mut self, cx: &mut Context<Self>) {
+        if self.editor.is_some() {
+            return;
+        }
+        let Some(jid) = self.card_jid() else { return };
+        let Some(id) = self.open.as_ref().map(|card| card.id) else {
+            return;
+        };
+        // The section offers the picture even over a photo of the contact's own.
+        self.want_wa_picture(id, false, &jid, cx);
+        self.avatars
+            .update(cx, |avatars, cx| avatars.want_profile(&jid, cx));
+    }
+
+    /// Saves the WhatsApp picture of `jid` as the photo of contact `id`: the
+    /// large picture is fetched, written to the data folder and handed to
+    /// the same path a picked photo takes (Android deletes the file after).
+    pub(crate) fn use_wa_photo(&mut self, id: i64, jid: String, cx: &mut Context<Self>) {
+        let Some(gateway) = self.whatsapp.read(cx).gateway() else {
+            self.notice = Some("Connect WhatsApp to use the photo.".into());
+            cx.notify();
+            return;
+        };
+        let Some(dir) = self.prefs_dir.clone() else {
+            self.notice = Some("Can't change the photo right now.".into());
+            cx.notify();
+            return;
+        };
+        self.notice = Some("Getting the WhatsApp photo…".into());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let saved = cx
+                .background_executor()
+                .spawn(async move { fetch_wa_photo(&gateway, &jid, &dir, id) })
+                .await;
+            this.update(cx, |this, cx| match saved {
+                Ok(path) => this.apply_photo(id, path, cx),
+                Err(words) => {
+                    this.notice = Some(format!("Can't use the WhatsApp photo: {words}.").into());
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// For the open card: look the contact up when needed and subscribe
@@ -548,9 +667,59 @@ mod tests {
             contact(4, &[]),
         ];
         let marked = marked_contacts(&contacts, &["905321234567".to_owned()]);
-        assert!(marked.contains(&1));
-        assert!(!marked.contains(&3));
-        assert!(!marked.contains(&4));
+        assert_eq!(
+            marked.get(&1).map(String::as_str),
+            Some("905321234567@s.whatsapp.net")
+        );
+        assert!(!marked.contains_key(&3));
+        assert!(!marked.contains_key(&4));
         assert!(marked_contacts(&contacts, &[]).is_empty());
+    }
+
+    #[test]
+    fn profile_lines_skip_what_says_nothing_new() {
+        let profile = WaProfile {
+            jid: "1@s.whatsapp.net".into(),
+            push_name: Some(" ayse ".into()),
+            about: Some("Hey there".into()),
+            ..WaProfile::default()
+        };
+        assert_eq!(
+            profile_lines(&profile, "Ayşe Yılmaz"),
+            vec![
+                ("WhatsApp name", "ayse".to_owned()),
+                ("About", "Hey there".to_owned())
+            ]
+        );
+        // The same name as the contact is not repeated.
+        assert_eq!(
+            profile_lines(&profile, "AYSE"),
+            vec![("About", "Hey there".to_owned())]
+        );
+        let business = WaProfile {
+            business: true,
+            verified_name: Some("Ayşe Bakery".into()),
+            about: Some("  ".into()),
+            ..WaProfile::default()
+        };
+        assert_eq!(
+            profile_lines(&business, "Ayşe"),
+            vec![("Business", "Ayşe Bakery".to_owned())]
+        );
+        let unnamed = WaProfile {
+            business: true,
+            ..WaProfile::default()
+        };
+        assert_eq!(
+            profile_lines(&unnamed, "Ayşe"),
+            vec![("Business", "Business account".to_owned())]
+        );
+    }
+
+    #[test]
+    fn the_photo_file_is_named_per_contact() {
+        let dir = Path::new("data");
+        assert_ne!(wa_photo_path(dir, 1), wa_photo_path(dir, 2));
+        assert!(wa_photo_path(dir, 7).starts_with(dir));
     }
 }

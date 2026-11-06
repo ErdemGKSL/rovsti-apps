@@ -1,7 +1,9 @@
 //! The contact card: the page one contact opens to.
 
+use std::{iter, sync::Arc};
+
 use gpui::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
+    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, RenderImage, SharedString,
     StatefulInteractiveElement, Styled, div, px, svg,
 };
 use rovsti_core::contact_card::ContactCard;
@@ -132,6 +134,21 @@ impl ContactsApp {
             .status(card.id, &numbers, crate::whatsapp::now_ms())?;
         let jid = self.wa.jid(card.id, &numbers);
         let enabled = jid.is_some();
+        let profile_rows: Vec<AnyElement> = jid
+            .as_deref()
+            .and_then(|jid| self.avatars.read(cx).profile(jid))
+            .map(|profile| crate::whatsapp::profile_lines(profile, &card.name))
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(i, (label, value))| {
+                Self::info_row(theme, ("wa-profile", i), label.into(), value.into())
+            })
+            .collect();
+        let photo_row = jid
+            .as_deref()
+            .and_then(|jid| Some((jid.to_owned(), self.avatars.read(cx).picture(jid)?)))
+            .map(|(jid, picture)| self.wa_photo_row(card, jid, picture, theme, cx));
         let (chat_jid, call_jid) = (jid.clone(), jid);
         let (chat_name, call_name) = (card.name.clone(), card.name.clone());
         let buttons = div()
@@ -161,13 +178,69 @@ impl ContactsApp {
             section(
                 theme,
                 Some("WhatsApp".into()),
-                [
-                    Self::info_row(theme, ("wa-status", 0), "Status".into(), status.into()),
-                    buttons,
-                ],
+                iter::once(Self::info_row(
+                    theme,
+                    ("wa-status", 0),
+                    "Status".into(),
+                    status.into(),
+                ))
+                .chain(profile_rows)
+                .chain(photo_row)
+                .chain(iter::once(buttons)),
             )
             .into_any_element(),
         )
+    }
+
+    /// The WhatsApp picture with "Use as Contact Photo": saved at once when
+    /// the contact has no photo, after a question when it would replace one.
+    fn wa_photo_row(
+        &self,
+        card: &ContactCard,
+        jid: String,
+        picture: (Arc<RenderImage>, f32),
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        let id = card.id;
+        let tint = hue_pair(theme, card.hue).0;
+        let monogram: SharedString = card.monogram.map(String::from).unwrap_or_default().into();
+        let replaces = self.photo_uri_of(id).is_some();
+        let name = SharedString::from(card.name.clone());
+        div()
+            .id("wa-photo")
+            .flex()
+            .items_center()
+            .gap(px(12.0))
+            .min_h(metrics::ROW_HEIGHT_SUBTITLE)
+            .px(metrics::ROW_INSET)
+            .py(px(6.0))
+            .border_b(metrics::SEPARATOR)
+            .border_color(colors.separator)
+            .child(photo_avatar(
+                theme,
+                monogram,
+                40.0,
+                tint,
+                Some((&picture.0, picture.1)),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(typography::BODY.size)
+                    .text_color(colors.accent)
+                    .child("Use as Contact Photo"),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if replaces {
+                    this.ask_use_wa_photo(id, jid.clone(), name.clone(), cx);
+                } else {
+                    this.use_wa_photo(id, jid.clone(), cx);
+                }
+            }))
+            .into_any_element()
     }
 
     pub(crate) fn detail(
@@ -181,7 +254,10 @@ impl ContactsApp {
         let primary = card.primary().map(|n| n.raw.clone());
         let tint = hue_pair(theme, card.hue).0;
         let monogram: SharedString = card.monogram.map(String::from).unwrap_or_default().into();
-        let photo = self.photo_uri_of(id).and_then(|_| self.photos.get(id));
+        let wa_jid = self.card_jid();
+        let picture =
+            self.avatar_picture(id, self.photo_uri_of(id).is_some(), wa_jid.as_deref(), cx);
+        let photo = picture.as_ref().map(|(image, opacity)| (image, *opacity));
         // The card's extra facts, once the full contact has been read.
         let full = self.open_draft.as_ref().filter(|d| d.id == Some(id));
 

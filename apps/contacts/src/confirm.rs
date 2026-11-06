@@ -1,4 +1,5 @@
-//! The confirmation card: "Delete this contact?", "Delete this group?" and
+//! The confirmation card: "Delete this contact?", "Delete this group?",
+//! "Replace the photo?" (with the WhatsApp one) and
 //! "Add these contacts?" after a vCard was read.
 
 use gpui::{AnyElement, Context, IntoElement, SharedString, StatefulInteractiveElement};
@@ -19,6 +20,12 @@ pub(crate) enum Confirm {
     DeleteGroup {
         id: i64,
         title: SharedString,
+    },
+    /// The WhatsApp picture of `jid` would replace the contact's photo.
+    UseWaPhoto {
+        id: i64,
+        jid: String,
+        name: SharedString,
     },
     /// A vCard file was read: these cards would be added.
     Import {
@@ -81,6 +88,17 @@ impl ContactsApp {
         cx.notify();
     }
 
+    pub(crate) fn ask_use_wa_photo(
+        &mut self,
+        id: i64,
+        jid: String,
+        name: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        self.confirm = Some(Confirm::UseWaPhoto { id, jid, name });
+        cx.notify();
+    }
+
     /// The owner answered the card.
     pub(crate) fn answer(&mut self, yes: bool, cx: &mut Context<Self>) {
         let Some(confirm) = self.confirm.take() else {
@@ -93,6 +111,7 @@ impl ContactsApp {
         match confirm {
             Confirm::DeleteContact { id, .. } => self.delete_contact(id, cx),
             Confirm::DeleteGroup { id, .. } => self.delete_group(id, cx),
+            Confirm::UseWaPhoto { id, jid, .. } => self.use_wa_photo(id, jid, cx),
             Confirm::Import { cards, .. } => self.add_imported(cards, cx),
         }
     }
@@ -169,6 +188,12 @@ impl ContactsApp {
                 format!("Delete “{title}”?"),
                 "The group goes away. The contacts in it stay in your address book.",
                 vec![cancel, yes("Delete", true, cx)],
+            ),
+            Confirm::UseWaPhoto { name, .. } => confirm_card(
+                theme,
+                "Replace the photo?",
+                format!("{name}'s photo is replaced with their WhatsApp photo."),
+                vec![cancel, yes("Replace", false, cx)],
             ),
             Confirm::Import {
                 cards,

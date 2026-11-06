@@ -41,6 +41,6 @@ pub use meta::{
 pub use presence::{PresenceBook, presence_label};
 pub use push::{Wake, parse_wake};
 pub use timeline::{
-    Item, ItemState, Timeline, TypingThrottle, day_breaks, reaction_chips, user_jid,
+    Item, ItemState, Timeline, TypingThrottle, day_breaks, reaction_chips, read_requests, user_jid,
 };
 pub use url::{GatewayUrl, UrlError};

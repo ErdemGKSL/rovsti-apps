@@ -20,6 +20,7 @@ mod prefs;
 mod schedule_ui;
 mod settings_ui;
 mod sms_conversation;
+mod ticks;
 
 use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
 
@@ -157,6 +158,9 @@ struct MessagesApp {
     open: Open,
     /// The chat list is being fetched, or was fetched for this link.
     chats: ChatsState,
+    /// The window is in front of the user (not backgrounded, screen on, not
+    /// covered). Only then does an open chat count as read.
+    window_active: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -295,6 +299,7 @@ impl MessagesApp {
             copied: None,
             open: Open::None,
             chats: ChatsState::Needed,
+            window_active: false,
             _subscriptions: subscriptions,
         };
         this.rebuild(cx);
@@ -314,6 +319,42 @@ impl MessagesApp {
         self.wa_threads.is_empty()
             && self.backend.read(cx).is_preview()
             && self.whatsapp.read(cx).link().is_none()
+    }
+
+    /// Follows the window coming to the front and leaving it, so read
+    /// receipts only go out while the user can see the chat.
+    fn watch_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.window_active = window.is_window_active();
+        let active = self.window_active;
+        self.backend
+            .update(cx, |backend, cx| backend.set_ui_active(active, cx));
+        let subscription = cx.observe_window_activation(window, |this, window, cx| {
+            this.on_window_active(window.is_window_active(), cx);
+        });
+        self._subscriptions.push(subscription);
+    }
+
+    fn on_window_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if self.window_active == active {
+            return;
+        }
+        self.window_active = active;
+        self.sms_window_active(active, cx);
+        if let Open::WhatsApp(jid, conversation) = &self.open {
+            let (jid, conversation) = (jid.clone(), conversation.clone());
+            conversation.update(cx, |c, cx| c.set_active(active, cx));
+            if active {
+                // Back in front of the open chat: what arrived meanwhile is
+                // read now.
+                let id = ThreadId::WhatsApp(jid);
+                self.dismiss_notification(&id, cx);
+                for thread in self.wa_threads_mut().iter_mut().filter(|t| t.id == id) {
+                    thread.unread = 0;
+                }
+                self.rebuild(cx);
+                cx.notify();
+            }
+        }
     }
 
     /// The WhatsApp threads, for a change: the inbox merges again next rebuild.
@@ -409,8 +450,9 @@ impl MessagesApp {
             }
             match event {
                 GatewayEvent::Message(message) => {
-                    let viewing =
-                        matches!(&self.open, Open::WhatsApp(jid, _) if *jid == message.chat);
+                    // An open chat in a window the user can't see is not read.
+                    let viewing = self.window_active
+                        && matches!(&self.open, Open::WhatsApp(jid, _) if *jid == message.chat);
                     inbox::fold_message(self.wa_threads_mut(), &message, viewing);
                     inbox::note_last(self.wa_info_mut(), &message);
                     self.notify_whatsapp(&message, cx);
@@ -422,6 +464,11 @@ impl MessagesApp {
                     meta,
                 } => {
                     if inbox::note_meta(&mut self.wa_info, &chat, &id, body.as_ref(), &meta) {
+                        self.wa_rev += 1;
+                    }
+                }
+                GatewayEvent::Receipt { chat, ids, kind } => {
+                    if inbox::note_receipt(&mut self.wa_info, &chat, &ids, kind) {
                         self.wa_rev += 1;
                     }
                 }
@@ -527,7 +574,12 @@ impl MessagesApp {
                         this.rebuild(cx);
                     }
                     Err(ClientError::Unauthorized) => {}
-                    Err(error) => log::warn!("loading WhatsApp chats failed: {error}"),
+                    Err(error) => {
+                        log::warn!("loading WhatsApp chats failed: {error}");
+                        // The next gateway event (or reconnect) tries again.
+                        this.chats = ChatsState::Needed;
+                        this.show_pill("Couldn't load WhatsApp chats");
+                    }
                 }
                 cx.notify();
             })
@@ -602,6 +654,7 @@ impl MessagesApp {
                     avatars,
                     photos,
                     peer,
+                    active: self.window_active,
                 },
                 cx,
             )
@@ -922,6 +975,7 @@ impl MessagesApp {
         self.schedule.is_open()
             || self.row_menu.is_some()
             || self.show_archived
+            || self.show_spam
             || !matches!(self.open, Open::None)
             || (self.tabs.selected() == WHATSAPP_TAB && self.whatsapp.read(cx).can_go_back())
             || self.tabs.selected() != CHATS_TAB
@@ -945,8 +999,10 @@ impl MessagesApp {
             // The conversation closed one of its own layers (menu, reply, edit).
         } else if !matches!(self.open, Open::None) {
             self.close_page(cx);
-        } else if self.show_archived && self.tabs.selected() == CHATS_TAB {
+        } else if (self.show_archived || self.show_spam) && self.tabs.selected() == CHATS_TAB {
+            // The Spam filter and the archived chats step back to the inbox.
             self.show_archived = false;
+            self.show_spam = false;
             self.chat_list.scroll_to_top();
             cx.notify();
         } else if self.tabs.selected() == WHATSAPP_TAB
@@ -971,6 +1027,27 @@ impl MessagesApp {
                 Some(conversation.read(cx).thread()).filter(|t| *t != ThreadId::Sms(-1))
             }
             Open::New(_) | Open::None => None,
+        }
+    }
+
+    /// The conversation someone is looking at: the open one while the window
+    /// is in front. In the background nothing is being read, so it notifies.
+    fn viewed_thread_id(&self, cx: &App) -> Option<ThreadId> {
+        self.window_active
+            .then(|| self.open_thread_id(cx))
+            .flatten()
+    }
+
+    /// The SMS side of the window coming to the front or leaving it: Kotlin is
+    /// told (see [`Backend::set_ui_active`]), and an open SMS thread that got
+    /// messages meanwhile is read now.
+    fn sms_window_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        self.backend
+            .update(cx, |backend, cx| backend.set_ui_active(active, cx));
+        if let (true, Some(ThreadId::Sms(id))) = (active, self.open_thread_id(cx)) {
+            self.dismiss_notification(&ThreadId::Sms(id), cx);
+            self.backend
+                .update(cx, |backend, cx| backend.mark_read(id, cx));
         }
     }
 
@@ -1023,7 +1100,11 @@ impl MessagesApp {
     /// A live WhatsApp message: notify unless it is mine or its chat is open.
     fn notify_whatsapp(&mut self, message: &WaMessage, cx: &mut Context<Self>) {
         let incoming = to_rovsti(message);
-        let open = self.open_thread_id(cx);
+        // The open chat stays quiet only while the user is looking at it.
+        let open = self
+            .window_active
+            .then(|| self.open_thread_id(cx))
+            .flatten();
         if !notifications::should_notify(open.as_ref(), &incoming) {
             return;
         }
@@ -1076,8 +1157,13 @@ impl MessagesApp {
             timestamp_ms: received.date_ms,
             read: false,
         };
-        let open = self.open_thread_id(cx);
+        let open = self.viewed_thread_id(cx);
         if !notifications::should_notify(open.as_ref(), &message) {
+            // Kotlin posted its notification before telling the app; the
+            // conversation is on screen, so it goes again.
+            if open.as_ref() == Some(&thread) {
+                self.dismiss_notification(&thread, cx);
+            }
             return;
         }
         let (name, is_spam, is_group) = {
@@ -1293,6 +1379,10 @@ impl MessagesApp {
     }
 
     pub(crate) fn schedule_custom(&mut self, cx: &mut Context<Self>) {
+        // The sheet stays tappable while it slides away: one tap schedules once.
+        if !self.schedule.is_open() {
+            return;
+        }
         let typed = self.schedule.custom_text(cx);
         let offset = self.backend.read(cx).locale().tz_offset_s;
         match schedule_ui::parse_custom(&typed, now_ms(), offset) {
@@ -1307,6 +1397,10 @@ impl MessagesApp {
     /// Schedules the sheet's text for `at_ms`: SMS into the local queue and an
     /// alarm, WhatsApp to the gateway.
     pub(crate) fn schedule_at(&mut self, at_ms: i64, cx: &mut Context<Self>) {
+        // The sheet stays tappable while it slides away: one tap schedules once.
+        if !self.schedule.is_open() {
+            return;
+        }
         let Some(draft) = self.schedule.draft().cloned() else {
             return;
         };
@@ -2077,6 +2171,7 @@ fn main() {
                 },
                 |window, cx| {
                     let app = cx.new(|cx| MessagesApp::new(backend, cx));
+                    app.update(cx, |app, cx| app.watch_window(window, cx));
                     // System Back steps out of the top-most layer, then to the first tab.
                     let weak = app.downgrade();
                     window.on_system_back(cx, move |_, cx| {

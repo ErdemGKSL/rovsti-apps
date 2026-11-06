@@ -6,8 +6,8 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use rovsti_wa_proto::{
     ChatAction, ChatState, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo, LinkRequest,
-    MarkRead, MediaKind, Reaction, RevokeMessage, SendReaction, SendText, Sent, WaMessage,
-    WaProfile, WaUser,
+    MarkRead, MediaKind, MessageMeta, Reaction, RevokeMessage, SendReaction, SendText, Sent,
+    WaMessage, WaProfile, WaUser, event::ReceiptKind,
 };
 
 use crate::hub::Hub;
@@ -17,6 +17,47 @@ use crate::store::{
     ChatChange, FetchedProfile, InstanceId, MessageChange, MessageExtras, ProfileChange, Store,
 };
 use crate::wa::calls::{CallBackend, CallTable};
+
+/// What the apps hear when the ticks of my messages `moved` in `chat`: one
+/// `Receipt` for those now delivered and one for those now read or played,
+/// then a `MessageMeta` per played message, which is how an app learns a voice
+/// note was heard (a `Receipt` only says delivered or read).
+pub fn tick_events(chat: &str, moved: Vec<(String, MessageMeta)>) -> Vec<GatewayEvent> {
+    let mut delivered = Vec::new();
+    let mut read = Vec::new();
+    let mut played = Vec::new();
+    for (id, meta) in moved {
+        match meta.status {
+            Some(DeliveryStatus::Delivered) => delivered.push(id),
+            Some(DeliveryStatus::Read) => read.push(id),
+            Some(DeliveryStatus::Played) => {
+                read.push(id.clone());
+                played.push((id, meta));
+            }
+            Some(DeliveryStatus::Sent) | None => {}
+        }
+    }
+    let receipts = [
+        (ReceiptKind::Delivered, delivered),
+        (ReceiptKind::Read, read),
+    ]
+    .into_iter()
+    .filter(|(_, ids)| !ids.is_empty())
+    .map(|(kind, ids)| GatewayEvent::Receipt {
+        chat: chat.to_owned(),
+        ids,
+        kind,
+    });
+    let metas = played
+        .into_iter()
+        .map(|(id, meta)| GatewayEvent::MessageMeta {
+            chat: chat.to_owned(),
+            id,
+            body: None,
+            meta: Box::new(meta),
+        });
+    receipts.chain(metas).collect()
+}
 
 /// A file to send as a media message.
 #[derive(Clone)]
@@ -323,15 +364,68 @@ impl EventSink {
         }
     }
 
-    /// Stores the ticks of my messages (the `Receipt` event tells the apps).
+    /// Stores the ticks a one-to-one receipt puts on my messages and tells
+    /// the apps about the ones that moved.
     pub async fn set_status(&self, chat: &str, ids: Vec<String>, status: DeliveryStatus) {
-        if let Err(e) = self
+        match self
             .store
             .set_status(self.instance.clone(), chat.to_owned(), ids, status)
             .await
         {
-            log::warn!("{}: saving receipts failed: {e}", self.instance);
+            Ok(moved) => self.publish_ticks(chat, moved),
+            Err(e) => log::warn!("{}: saving receipts failed: {e}", self.instance),
         }
+    }
+
+    /// Stores one group member's receipt for my messages and tells the apps
+    /// about the messages whose group-wide ticks moved (see
+    /// [`crate::store::group_status`]).
+    pub async fn group_receipt(
+        &self,
+        chat: &str,
+        participant: String,
+        ids: Vec<String>,
+        status: DeliveryStatus,
+        members: Option<usize>,
+    ) {
+        match self
+            .store
+            .record_group_receipt(
+                self.instance.clone(),
+                chat.to_owned(),
+                participant,
+                ids,
+                status,
+                members,
+            )
+            .await
+        {
+            Ok(moved) => self.publish_ticks(chat, moved),
+            Err(e) => log::warn!("{}: saving receipts failed: {e}", self.instance),
+        }
+    }
+
+    /// A `Receipt` event per new tick state, and for played voice notes also
+    /// the new meta (a `Receipt` only knows delivered and read).
+    fn publish_ticks(&self, chat: &str, moved: Vec<(String, MessageMeta)>) {
+        for event in tick_events(chat, moved) {
+            self.publish(event);
+        }
+    }
+
+    /// The ids among `ids` that are not my own messages (unknown ids too).
+    pub async fn not_mine(&self, chat: &str, ids: Vec<String>) -> Vec<String> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            if !self
+                .find_message(chat, &id)
+                .await
+                .is_some_and(|m| m.from_me)
+            {
+                out.push(id);
+            }
+        }
+        out
     }
 
     /// Deletes a message on this account's devices and tells the apps.
@@ -1313,7 +1407,45 @@ mod fake {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::{MessageMeta, Quoted};
+    use rovsti_wa_proto::Quoted;
+
+    #[test]
+    fn moved_ticks_become_receipts_and_played_meta() {
+        let at = |status| MessageMeta {
+            status: Some(status),
+            ..Default::default()
+        };
+        let events = tick_events(
+            "c",
+            vec![
+                ("d".into(), at(DeliveryStatus::Delivered)),
+                ("r".into(), at(DeliveryStatus::Read)),
+                ("p".into(), at(DeliveryStatus::Played)),
+            ],
+        );
+        assert_eq!(
+            events,
+            [
+                GatewayEvent::Receipt {
+                    chat: "c".into(),
+                    ids: vec!["d".into()],
+                    kind: ReceiptKind::Delivered,
+                },
+                GatewayEvent::Receipt {
+                    chat: "c".into(),
+                    ids: vec!["r".into(), "p".into()],
+                    kind: ReceiptKind::Read,
+                },
+                GatewayEvent::MessageMeta {
+                    chat: "c".into(),
+                    id: "p".into(),
+                    body: None,
+                    meta: Box::new(at(DeliveryStatus::Played)),
+                },
+            ]
+        );
+        assert!(tick_events("c", Vec::new()).is_empty());
+    }
 
     #[test]
     fn only_meta_worth_a_second_event_is_announced() {

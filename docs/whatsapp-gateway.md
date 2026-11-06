@@ -265,8 +265,20 @@ Live, new event types carry the same data; older clients skip them:
   about text, saved name or picture changed. A new `picture_id` means a cached
   picture is stale.
 
-Receipts are stored as `status`; the `receipt` event is unchanged. A read on another
-of my devices clears the chat's unread counter. History syncs bring each message's
+Receipts are stored as `status`; the `receipt` event is unchanged, but it is only
+sent when a message's ticks actually move. In a one-to-one chat the other side's
+receipt moves them. In a group each member's receipt is kept (table `receipts`), and
+the message shows delivered once every other member has it, read once every other
+member read it, played once every other member played it. The member count is
+today's (whatsapp-rust's cached group info), not the one at send time, so a member
+who joined later holds the ticks back; when the group cannot be read, ticks stop at
+delivered. A played receipt also sends `message_meta` with `status: played` (a
+`receipt` only knows delivered and read). Receipts from my own devices never move
+ticks. A read on another of my devices (`read-self`) clears the chat's unread
+counter and sends `receipt {kind: read}` for the other side's messages only, never
+mine. `POST /v1/read` in a group sends one receipt per author: the request's
+`sender`, else each stored message's author, as a LID in LID-addressed groups.
+History syncs bring each message's
 ticks, star and reactions, each chat's archive, pin and mute state, and push names.
 Chats WhatsApp keys by LID are stored under the phone-number JID when WhatsApp
 tells it, so they match address-book contacts.

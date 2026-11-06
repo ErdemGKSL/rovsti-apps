@@ -21,7 +21,8 @@ use whatsapp_rust::RevokeType;
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::upload::UploadOptions;
-use whatsapp_rust::wacore::types::events::ConnectFailureReason;
+use whatsapp_rust::wacore::client::context::GroupInfo as WaGroupInfo;
+use whatsapp_rust::wacore::types::events::{ConnectFailureReason, Receipt};
 use whatsapp_rust::wacore::types::presence::{ChatPresence, ChatPresenceMedia, ReceiptType};
 use whatsapp_rust::wacore_binary::JidExt as _;
 use whatsapp_rust::waproto::buffa::Message as _;
@@ -81,16 +82,9 @@ fn millis(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
 }
 
-/// The delivery state a receipt reports, if it is one the apps show.
-pub fn receipt_kind(kind: &ReceiptType) -> Option<ReceiptKind> {
-    match kind {
-        ReceiptType::Delivered => Some(ReceiptKind::Delivered),
-        ReceiptType::Read | ReceiptType::ReadSelf | ReceiptType::Played => Some(ReceiptKind::Read),
-        _ => None,
-    }
-}
-
-/// The ticks a receipt from the other side puts on my messages.
+/// The ticks a receipt from the other side puts on my messages. `ReadSelf`
+/// (I read their message on another of my devices) and `PlayedSelf` are
+/// about their messages, never ticks on mine.
 pub fn receipt_status(kind: &ReceiptType) -> Option<DeliveryStatus> {
     match kind {
         ReceiptType::Delivered => Some(DeliveryStatus::Delivered),
@@ -98,6 +92,47 @@ pub fn receipt_status(kind: &ReceiptType) -> Option<DeliveryStatus> {
         ReceiptType::Played => Some(DeliveryStatus::Played),
         _ => None,
     }
+}
+
+/// Whether `jid` is one of my own accounts (`own`: my phone-number and LID
+/// JIDs), whatever the device.
+fn is_own(jid: &Jid, own: &[&Jid]) -> bool {
+    own.iter().any(|me| me.user == jid.user)
+}
+
+/// The other members of a group: everyone but me.
+fn members_besides_me(participants: &[Jid], own: &[&Jid]) -> usize {
+    participants.iter().filter(|p| !is_own(p, own)).count()
+}
+
+/// One name per group member for counting receipts, whether WhatsApp named
+/// them by phone number or by LID: the phone number when it is known (from
+/// the receipt, else from the group's LID map), else the LID.
+fn participant_key(sender: &Jid, alt: Option<&Jid>, group: Option<&WaGroupInfo>) -> String {
+    let jid = convert::prefer_pn(sender, alt);
+    if jid.is_lid()
+        && let Some(pn) = group.and_then(|g| g.phone_jid_for_lid_user(&jid.user))
+    {
+        return pn.to_non_ad().to_string();
+    }
+    jid.to_string()
+}
+
+/// Read receipt requests for `ids` in group `chat` when the app did not name
+/// the author: one per author of the stored messages (`None` for unknown
+/// ones, which WhatsApp then has to match by id alone).
+fn split_by_author(
+    ids: &[String],
+    authors: &[Option<String>],
+) -> Vec<(Option<String>, Vec<String>)> {
+    let mut out: Vec<(Option<String>, Vec<String>)> = Vec::new();
+    for (id, author) in ids.iter().zip(authors) {
+        match out.iter_mut().find(|(a, _)| a == author) {
+            Some((_, group)) => group.push(id.clone()),
+            None => out.push((author.clone(), vec![id.clone()])),
+        }
+    }
+    out
 }
 
 /// The reply meta stored with a message I send quoting `quoted`.
@@ -364,11 +399,13 @@ impl WaRuntime {
                     let sink = sink.clone();
                     let instance = instance.clone();
                     let was_connected = Arc::clone(&was_connected);
-                    move |event, _client| {
+                    move |event, client| {
                         let sink = sink.clone();
                         let instance = instance.clone();
                         let was_connected = Arc::clone(&was_connected);
-                        async move { handle_event(&sink, &instance, &was_connected, &event).await }
+                        async move {
+                            handle_event(&sink, &client, &instance, &was_connected, &event).await;
+                        }
                     }
                 },
             );
@@ -625,40 +662,81 @@ impl WaRuntime {
     }
 }
 
+/// A delivered, read or played receipt. One-to-one: the ticks of my messages
+/// move. Group: the receipt is one member's, and the ticks move once every
+/// other member got that far. `ReadSelf`: I read their messages on another
+/// of my devices, which clears the unread count and marks their messages
+/// read in the apps, never mine. Receipts from my own devices are ignored.
+async fn on_receipt(sink: &EventSink, client: &Client, receipt: &Receipt) {
+    if receipt.message_ids.is_empty() {
+        return;
+    }
+    let source = &receipt.source;
+    let chat_jid = if source.chat.is_lid() {
+        convert::prefer_pn(&source.chat, source.sender_alt.as_ref())
+    } else {
+        source.chat.to_non_ad()
+    };
+    let chat = chat_jid.to_string();
+    let ids: Vec<String> = receipt
+        .message_ids
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    if receipt.r#type == ReceiptType::ReadSelf {
+        sink.mark_chat_read(&chat).await;
+        let ids = sink.not_mine(&chat, ids).await;
+        if !ids.is_empty() {
+            sink.publish(GatewayEvent::Receipt {
+                chat,
+                ids,
+                kind: ReceiptKind::Read,
+            });
+        }
+        return;
+    }
+    let Some(status) = receipt_status(&receipt.r#type) else {
+        return;
+    };
+    let device = client.persistence_manager().get_device_snapshot();
+    let own: Vec<&Jid> = device.pn.iter().chain(device.lid.iter()).collect();
+    let from_me = is_own(&source.sender, &own)
+        || source
+            .sender_alt
+            .as_ref()
+            .is_some_and(|alt| is_own(alt, &own));
+    // My other devices ack what I send; that says nothing about the
+    // recipient (a chat with myself excepted).
+    if from_me && !is_own(&chat_jid, &own) {
+        return;
+    }
+    if chat_jid.is_group() {
+        let group = client.groups().query_info(&source.chat).await;
+        if let Err(e) = &group {
+            log::debug!("group of a receipt unknown, ticks stay grey: {e}");
+        }
+        let group = group.ok();
+        let members = group
+            .as_deref()
+            .map(|g| members_besides_me(&g.participants, &own));
+        let participant =
+            participant_key(&source.sender, source.sender_alt.as_ref(), group.as_deref());
+        sink.group_receipt(&chat, participant, ids, status, members)
+            .await;
+    } else {
+        sink.set_status(&chat, ids, status).await;
+    }
+}
+
 async fn handle_event(
     sink: &EventSink,
+    client: &Client,
     instance: &InstanceId,
     was_connected: &AtomicBool,
     event: &Event,
 ) {
     match event {
-        Event::Receipt(receipt) => {
-            let Some(kind) = receipt_kind(&receipt.r#type) else {
-                return;
-            };
-            if receipt.message_ids.is_empty() {
-                return;
-            }
-            let chat = if receipt.source.chat.is_lid() {
-                convert::prefer_pn(&receipt.source.chat, receipt.source.sender_alt.as_ref())
-            } else {
-                receipt.source.chat.to_non_ad()
-            }
-            .to_string();
-            let ids: Vec<String> = receipt
-                .message_ids
-                .iter()
-                .map(ToString::to_string)
-                .collect();
-            if let Some(status) = receipt_status(&receipt.r#type) {
-                sink.set_status(&chat, ids.clone(), status).await;
-            }
-            if matches!(receipt.r#type, ReceiptType::ReadSelf) {
-                // Read on another of my devices.
-                sink.mark_chat_read(&chat).await;
-            }
-            sink.publish(GatewayEvent::Receipt { chat, ids, kind });
-        }
+        Event::Receipt(receipt) => on_receipt(sink, client, receipt).await,
         Event::Presence(update) => sink.publish(GatewayEvent::Presence {
             jid: update.from.to_non_ad().to_string(),
             available: !update.unavailable,
@@ -779,12 +857,50 @@ impl WaDriver for WaRuntime {
                 .map(convert::parse_jid)
                 .transpose()?;
             let (client, sink) = self.client_of(&instance)?;
-            let ids: Vec<&str> = req.ids.iter().map(String::as_str).collect();
-            client
-                .mark_as_read(&chat, sender.as_ref(), &ids)
-                .await
-                .map_err(failed)?;
-            sink.mark_chat_read(&chat.to_non_ad().to_string()).await;
+            let chat_key = chat.to_non_ad().to_string();
+            if !chat.is_group() {
+                let ids: Vec<&str> = req.ids.iter().map(String::as_str).collect();
+                client
+                    .mark_as_read(&chat, None, &ids)
+                    .await
+                    .map_err(failed)?;
+                sink.mark_chat_read(&chat_key).await;
+                return Ok(());
+            }
+            // A group receipt names the author of the messages it covers.
+            // Older apps leave it out: take it from the stored messages.
+            let batches = match sender {
+                Some(sender) => vec![(Some(sender), req.ids)],
+                None => {
+                    let mut authors = Vec::with_capacity(req.ids.len());
+                    for id in &req.ids {
+                        let stored = sink.find_message(&chat_key, id).await;
+                        authors.push(stored.and_then(|m| m.sender));
+                    }
+                    split_by_author(&req.ids, &authors)
+                        .into_iter()
+                        .map(|(author, ids)| {
+                            let author = author.as_deref().map(convert::parse_jid).transpose()?;
+                            Ok((author, ids))
+                        })
+                        .collect::<Result<Vec<_>, DriverError>>()?
+                }
+            };
+            // The gateway keeps authors by phone number; a LID group wants
+            // their LID.
+            let group = client.groups().query_info(&chat).await.ok();
+            for (author, ids) in batches {
+                let author = match (author, group.as_deref()) {
+                    (Some(a), Some(g)) => Some(g.phone_device_jid_into_lid(a)),
+                    (author, _) => author,
+                };
+                let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+                client
+                    .mark_as_read(&chat, author.as_ref(), &ids)
+                    .await
+                    .map_err(failed)?;
+            }
+            sink.mark_chat_read(&chat_key).await;
             Ok(())
         })
     }
@@ -1056,6 +1172,14 @@ impl WaDriver for WaRuntime {
                 .map(convert::parse_jid)
                 .transpose()?;
             let (client, _) = self.client_of(&instance)?;
+            // As for read receipts: a LID group wants the author's LID.
+            let sender = match sender {
+                Some(sender) if chat.is_group() => match client.groups().query_info(&chat).await {
+                    Ok(group) => Some(group.phone_device_jid_into_lid(sender)),
+                    Err(_) => Some(sender),
+                },
+                sender => sender,
+            };
             let ids: Vec<&str> = req.ids.iter().map(String::as_str).collect();
             client
                 .mark_as_played(&chat, sender.as_ref(), &ids)
@@ -1186,15 +1310,71 @@ mod tests {
     }
 
     #[test]
-    fn receipts_map_to_delivered_or_read() {
+    fn only_the_other_sides_receipts_tick_my_messages() {
+        use DeliveryStatus::*;
+        assert_eq!(receipt_status(&ReceiptType::Delivered), Some(Delivered));
+        assert_eq!(receipt_status(&ReceiptType::Read), Some(Read));
+        assert_eq!(receipt_status(&ReceiptType::Played), Some(Played));
+        // Read or played by me on another device: no ticks on my messages.
+        assert_eq!(receipt_status(&ReceiptType::ReadSelf), None);
+        assert_eq!(receipt_status(&ReceiptType::PlayedSelf), None);
+        assert_eq!(receipt_status(&ReceiptType::Sender), None);
+        assert_eq!(receipt_status(&ReceiptType::Retry), None);
+    }
+
+    fn jid(s: &str) -> Jid {
+        convert::parse_jid(s).unwrap()
+    }
+
+    #[test]
+    fn my_devices_are_not_group_members() {
+        let pn = jid("90500@s.whatsapp.net");
+        let lid = jid("777@lid");
+        let own = [&pn, &lid];
+        assert!(is_own(&jid("90500:3@s.whatsapp.net"), &own));
+        assert!(is_own(&jid("777:2@lid"), &own));
+        assert!(!is_own(&jid("4915@s.whatsapp.net"), &own));
+        let members = [jid("777@lid"), jid("1@lid"), jid("2@lid")];
+        assert_eq!(members_besides_me(&members, &own), 2);
+        assert_eq!(members_besides_me(&members, &[]), 3);
+    }
+
+    #[test]
+    fn a_member_counts_once_by_number_or_lid() {
+        use whatsapp_rust::wacore::types::message::AddressingMode;
+        let lid = jid("111:4@lid");
+        let pn = jid("4915@s.whatsapp.net");
         assert_eq!(
-            receipt_kind(&ReceiptType::Delivered),
-            Some(ReceiptKind::Delivered)
+            participant_key(&lid, Some(&pn), None),
+            "4915@s.whatsapp.net"
         );
-        assert_eq!(receipt_kind(&ReceiptType::Read), Some(ReceiptKind::Read));
-        assert_eq!(receipt_kind(&ReceiptType::Played), Some(ReceiptKind::Read));
-        assert_eq!(receipt_kind(&ReceiptType::Retry), None);
-        assert_eq!(receipt_kind(&ReceiptType::Sender), None);
+        assert_eq!(participant_key(&lid, None, None), "111@lid");
+        let mut group = WaGroupInfo::new(Vec::new(), AddressingMode::Lid);
+        group.add_participants([(&jid("111@lid"), Some(&pn))]);
+        assert_eq!(
+            participant_key(&lid, None, Some(&group)),
+            "4915@s.whatsapp.net"
+        );
+        assert_eq!(
+            participant_key(&jid("4915:1@s.whatsapp.net"), None, Some(&group)),
+            "4915@s.whatsapp.net"
+        );
+    }
+
+    #[test]
+    fn group_reads_split_by_author() {
+        let ids: Vec<String> = ["a", "b", "c", "d"].map(String::from).into();
+        let ada = Some("1@s.whatsapp.net".to_owned());
+        let bob = Some("2@s.whatsapp.net".to_owned());
+        let split = split_by_author(&ids, &[ada.clone(), bob.clone(), ada.clone(), None]);
+        assert_eq!(
+            split,
+            [
+                (ada, vec!["a".to_owned(), "c".to_owned()]),
+                (bob, vec!["b".to_owned()]),
+                (None, vec!["d".to_owned()]),
+            ]
+        );
     }
 
     #[test]

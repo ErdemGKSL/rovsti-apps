@@ -26,12 +26,13 @@ use rovsti_ui::{
     tokens::{Theme, typography},
 };
 use rovsti_wa_proto::{
-    ChatActionKind, ChatMeta, MUTED_FOREVER, MessageBody, MessageMeta, RichChat, WaMessage,
-    jid_user, meta::body_preview, to_rovsti,
+    ChatActionKind, ChatMeta, DeliveryStatus, MUTED_FOREVER, MessageBody, MessageMeta, RichChat,
+    WaMessage, event::ReceiptKind, jid_user, meta::body_preview, to_rovsti,
 };
 use rovsti_wa_ui::{display_name, photo_avatar};
 
 use crate::conversation::civil_from_days;
+use crate::ticks::{Tick, read_color, ticks};
 
 /// Which channel a badge names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -83,6 +84,8 @@ pub struct RowView {
     pub muted: bool,
     /// Marked unread by hand: the dot without a count.
     pub marked_unread: bool,
+    /// The ticks of the newest message when it is a WhatsApp message of mine.
+    pub tick: Option<Tick>,
 }
 
 /// The pictures an avatar may show, best first: the address book's photo,
@@ -229,6 +232,44 @@ pub fn note_meta(
         changed = true;
     }
     changed
+}
+
+/// A `receipt` event: the ticks of the chat's newest message, when it is
+/// mine, move forward (never back). Returns `true` on change.
+pub fn note_receipt(
+    infos: &mut HashMap<String, WaChatInfo>,
+    chat: &str,
+    ids: &[String],
+    kind: ReceiptKind,
+) -> bool {
+    let Some(last) = infos
+        .get_mut(chat)
+        .and_then(|info| info.last.as_mut())
+        .filter(|last| last.from_me && ids.contains(&last.id))
+    else {
+        return false;
+    };
+    let status = match kind {
+        ReceiptKind::Delivered => DeliveryStatus::Delivered,
+        ReceiptKind::Read => DeliveryStatus::Read,
+    };
+    let merged = status.merge(last.meta.status);
+    if last.meta.status == Some(merged) {
+        return false;
+    }
+    last.meta.status = Some(merged);
+    true
+}
+
+/// The ticks the preview of `info`'s newest message shows: mine only, and
+/// none on a deleted one.
+pub fn preview_tick(info: &WaChatInfo) -> Option<Tick> {
+    let last = info
+        .last
+        .as_ref()
+        .filter(|l| l.from_me && !l.meta.revoked)?;
+    let voice = last.meta.media.as_ref().is_some_and(|m| m.voice_note);
+    Some(Tick::of_status(last.meta.status, voice))
 }
 
 /// What a chat action does to the chat before the gateway confirms it (its
@@ -512,6 +553,10 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
         _ => None,
     }
     .unwrap_or_else(|| row.last.body.clone());
+    let tick = match (&newest.id, info) {
+        (ThreadId::WhatsApp(_), Some(info)) => preview_tick(info),
+        _ => None,
+    };
     let meta = info.map(|i| &i.meta);
     let photo_uri = match &row.key {
         PersonKey::Contact(_) => contact_photo(row, sms, inputs.contacts),
@@ -538,6 +583,7 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
         pinned: meta.is_some_and(|m| m.pinned),
         muted: meta.is_some_and(|m| m.is_muted(inputs.now_ms)),
         marked_unread: meta.is_some_and(|m| m.marked_unread),
+        tick,
     }
 }
 
@@ -759,6 +805,9 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
                         .items_center()
                         .gap(px(6.0))
                         .children(badges)
+                        .children(view.tick.map(|tick| {
+                            ticks(tick, 15.0, colors.tertiary_label, read_color(false))
+                        }))
                         .child(
                             div()
                                 .flex_1()
@@ -1498,6 +1547,42 @@ mod tests {
         // The same message again keeps its meta.
         note_last(&mut infos, &wa_message(jid, "a", false, 10));
         assert!(infos[jid].last.as_ref().expect("a preview").meta.revoked);
+    }
+
+    #[test]
+    fn receipts_move_the_preview_ticks_forward_only() {
+        let jid = "905321234567@s.whatsapp.net";
+        let mut infos = HashMap::new();
+        note_last(&mut infos, &wa_message(jid, "mine", true, 10));
+        let tick = |infos: &HashMap<String, WaChatInfo>| preview_tick(&infos[jid]);
+        // A message of mine without a stored status was at least sent.
+        assert_eq!(tick(&infos), Some(Tick::Sent));
+        let ids = ["mine".to_owned()];
+        assert!(note_receipt(&mut infos, jid, &ids, ReceiptKind::Delivered));
+        assert_eq!(tick(&infos), Some(Tick::Delivered));
+        assert!(note_receipt(&mut infos, jid, &ids, ReceiptKind::Read));
+        assert_eq!(tick(&infos), Some(Tick::Read));
+        // A late delivered receipt does not take the blue ticks away.
+        assert!(!note_receipt(&mut infos, jid, &ids, ReceiptKind::Delivered));
+        assert_eq!(tick(&infos), Some(Tick::Read));
+        // Receipts for other messages and other chats change nothing.
+        assert!(!note_receipt(
+            &mut infos,
+            jid,
+            &["x".into()],
+            ReceiptKind::Read
+        ));
+        assert!(!note_receipt(&mut infos, "y", &ids, ReceiptKind::Read));
+
+        // Their newest message has no ticks, even when read.
+        note_last(&mut infos, &wa_message(jid, "theirs", false, 20));
+        assert!(!note_receipt(
+            &mut infos,
+            jid,
+            &["theirs".into()],
+            ReceiptKind::Read
+        ));
+        assert_eq!(tick(&infos), None);
     }
 
     #[test]

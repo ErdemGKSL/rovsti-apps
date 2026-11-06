@@ -16,7 +16,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 mod rich;
 pub use rich::{
     ChatChange, ChatSettings, FetchedProfile, MAX_THUMBNAIL_BYTES, MessageChange, MessageExtras,
-    ProfileChange, apply_change, merge_edit,
+    ProfileChange, ReceiptCounts, apply_change, group_status, merge_edit,
 };
 
 /// Active (not revoked) keys one instance may hold.
@@ -231,6 +231,18 @@ const MIGRATIONS: &[&str] = &[
         verified_name TEXT,
         fetched_ms INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (instance_id, jid)
+    );
+    ",
+    // v4: how far each group member got with my group messages
+    // (1 delivered, 2 read, 3 played), for group-wide ticks.
+    "
+    CREATE TABLE receipts (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        chat TEXT NOT NULL,
+        id TEXT NOT NULL,
+        participant TEXT NOT NULL,
+        status INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, chat, id, participant)
     );
     ",
 ];
@@ -1280,6 +1292,7 @@ mod tests {
             "scheduled",
             "chat_settings",
             "profiles",
+            "receipts",
         ] {
             assert!(tables.iter().any(|n| n == t), "missing {t}: {tables:?}");
         }
@@ -1989,6 +2002,62 @@ mod tests {
             .unwrap();
         assert_eq!(page[0].meta.status, Some(DeliveryStatus::Delivered));
         assert_eq!(page[1].meta.status, None);
+    }
+
+    #[tokio::test]
+    async fn group_receipts_need_every_member() {
+        use rovsti_wa_proto::DeliveryStatus;
+        let store = store_with_instance().await;
+        let group = "g@g.us";
+        let mine = text(group, "m", 1, true);
+        store.insert_message(id(1), mine, None).await.unwrap();
+        let theirs = text(group, "t", 2, false);
+        store.insert_message(id(1), theirs, None).await.unwrap();
+        let receipt = |who: &str, status| {
+            store.record_group_receipt(
+                id(1),
+                group.into(),
+                who.into(),
+                vec!["m".into(), "t".into(), "unknown".into()],
+                status,
+                Some(2),
+            )
+        };
+        let status_of = |page: &[rovsti_wa_proto::RichMessage], msg: &str| {
+            page.iter()
+                .find(|r| r.message.id == msg)
+                .and_then(|r| r.meta.status)
+        };
+
+        // One of two members read it: not even delivered to all yet.
+        assert!(receipt("a", DeliveryStatus::Read).await.unwrap().is_empty());
+        // A repeated, older receipt does not count twice or go back.
+        assert!(
+            receipt("a", DeliveryStatus::Delivered)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let moved = receipt("b", DeliveryStatus::Delivered).await.unwrap();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].0, "m");
+        assert_eq!(moved[0].1.status, Some(DeliveryStatus::Delivered));
+        let moved = receipt("b", DeliveryStatus::Read).await.unwrap();
+        assert_eq!(moved[0].1.status, Some(DeliveryStatus::Read));
+
+        let page = store
+            .messages_rich(id(1), group.into(), None, 10)
+            .await
+            .unwrap();
+        // The ticks survive a reload; their message never gets any.
+        assert_eq!(status_of(&page, "m"), Some(DeliveryStatus::Read));
+        assert_eq!(status_of(&page, "t"), None);
+
+        // Clearing the chat forgets the receipts with the messages.
+        store.delete_chat(id(1), group.into(), true).await.unwrap();
+        let again = text(group, "m", 1, true);
+        store.insert_message(id(1), again, None).await.unwrap();
+        assert!(receipt("b", DeliveryStatus::Read).await.unwrap().is_empty());
     }
 
     #[tokio::test]

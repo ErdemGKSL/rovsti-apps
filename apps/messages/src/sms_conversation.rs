@@ -1052,6 +1052,22 @@ pub fn attachment_label(path: &str) -> String {
     }
 }
 
+/// The text of a message to copy; `None` when it has none (a picture alone).
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn copy_text(item: &SmsItem) -> Option<String> {
+    let text = item.body.trim();
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// The one-time code of an incoming message, to copy.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn copy_code(item: &SmsItem) -> Option<String> {
+    if item.outgoing {
+        return None;
+    }
+    rovsti_core::otp::detect(&item.body).map(|o| o.code)
+}
+
 #[cfg(test)]
 mod tests {
     use rovsti_core::sms::{MmsPart, SmsSim};
@@ -1086,6 +1102,21 @@ mod tests {
             state,
             sub_id: None,
         }
+    }
+
+    #[test]
+    fn copy_helpers() {
+        let mut m = item(false, DeliveryState::None, T);
+        m.body = "  Your code is 123456 \n".into();
+        assert_eq!(copy_text(&m).as_deref(), Some("Your code is 123456"));
+        assert_eq!(copy_code(&m).as_deref(), Some("123456"));
+        m.outgoing = true;
+        assert_eq!(copy_code(&m), None, "outgoing has no code to copy");
+        m.body = "  ".into();
+        assert_eq!(copy_text(&m), None);
+        m.outgoing = false;
+        m.body = "see you soon".into();
+        assert_eq!(copy_code(&m), None);
     }
 
     #[test]

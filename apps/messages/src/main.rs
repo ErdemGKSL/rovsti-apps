@@ -8,6 +8,7 @@
 mod backend;
 mod backup_ui;
 mod conversation;
+mod drafts;
 // Only the Android JNI entry calls `handle`; desktop builds exercise it from the tests.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod headless;
@@ -19,6 +20,7 @@ mod photos;
 mod prefs;
 mod schedule_ui;
 mod settings_ui;
+mod sms_actions;
 mod sms_conversation;
 mod status_ui;
 mod ticks;
@@ -412,6 +414,7 @@ impl MessagesApp {
                         wa: &self.wa_info,
                         rules: backend.spam_rules(),
                         blocked: backend.blocked(),
+                        muted: &backend.prefs().muted,
                         locale,
                         now_ms: now,
                     },

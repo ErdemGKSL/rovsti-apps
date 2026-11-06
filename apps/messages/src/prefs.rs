@@ -108,6 +108,16 @@ impl MessagesPrefs {
         true
     }
 
+    /// Takes a sender off the allow list (case-insensitive), for Undo. `false`
+    /// when it was not there.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn unallow_sender(&mut self, sender: &str) -> bool {
+        let sender = sender.trim();
+        let before = self.spam.allow.len();
+        self.spam.allow.retain(|a| !a.eq_ignore_ascii_case(sender));
+        self.spam.allow.len() != before
+    }
+
     pub fn remove_allowed(&mut self, index: usize) -> bool {
         if index < self.spam.allow.len() {
             self.spam.allow.remove(index);
@@ -200,5 +210,14 @@ mod tests {
         assert!(!prefs.allow_sender("BANK"), "case-insensitive duplicate");
         assert!(prefs.remove_allowed(0));
         assert!(!prefs.remove_allowed(0));
+    }
+
+    #[test]
+    fn unallow_sender_undoes_allow() {
+        let mut prefs = MessagesPrefs::default();
+        assert!(!prefs.unallow_sender("Bank"));
+        assert!(prefs.allow_sender("Bank"));
+        assert!(prefs.unallow_sender(" BANK "));
+        assert!(prefs.spam.allow.is_empty());
     }
 }

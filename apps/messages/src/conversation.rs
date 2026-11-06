@@ -45,6 +45,24 @@ use rovsti_wa_proto::{
     reaction_chips, read_requests,
 };
 
+/// The text "Copy" puts on the clipboard: the text or a media caption. Nothing
+/// for a deleted message, media without a caption, or a location/contact card.
+#[cfg_attr(not(test), allow(dead_code))]
+fn copy_text_of(body: &MessageBody, meta: Option<&MessageMeta>) -> Option<String> {
+    if let Some(meta) = meta
+        && (meta.revoked || meta.location.is_some() || meta.contact.is_some())
+    {
+        return None;
+    }
+    let text = match body {
+        MessageBody::Text(text) => text,
+        MessageBody::Media { caption, .. } => caption.as_ref()?,
+        MessageBody::Unsupported => return None,
+    };
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
 /// Messages per history request.
 const PAGE: u32 = 50;
 
@@ -2864,6 +2882,34 @@ mod tests {
             },
             state,
         }
+    }
+
+    #[test]
+    fn copy_text_of_text_and_captions_only() {
+        let text = MessageBody::Text(" hi ".into());
+        assert_eq!(copy_text_of(&text, None).as_deref(), Some("hi"));
+        let media = |caption: Option<&str>| MessageBody::Media {
+            kind: MediaKind::Image,
+            caption: caption.map(str::to_owned),
+            mime: "image/jpeg".into(),
+            size: 1,
+        };
+        assert_eq!(
+            copy_text_of(&media(Some("beach")), None).as_deref(),
+            Some("beach")
+        );
+        assert_eq!(copy_text_of(&media(None), None), None);
+        assert_eq!(copy_text_of(&MessageBody::Unsupported, None), None);
+        let revoked = MessageMeta {
+            revoked: true,
+            ..MessageMeta::default()
+        };
+        assert_eq!(copy_text_of(&text, Some(&revoked)), None);
+        let card = MessageMeta {
+            location: Some(Location::default()),
+            ..MessageMeta::default()
+        };
+        assert_eq!(copy_text_of(&text, Some(&card)), None);
     }
 
     // 2026-11-05 14:05:00 UTC

@@ -1,0 +1,213 @@
+//! What the conversation menus of an SMS thread offer. Pure: the menus in
+//! `main.rs` only map [`SmsAction`]s to rows.
+
+/// One thing a user can do with an SMS conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmsAction {
+    MarkRead,
+    Mute,
+    Unmute,
+    NotSpam,
+    Block,
+    Call,
+    AddContact,
+    Delete,
+}
+
+/// What decides which actions apply.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SmsActionContext {
+    pub unread: bool,
+    pub muted: bool,
+    pub in_spam: bool,
+    /// One-to-one: the thread has exactly one other address.
+    pub single_sender: bool,
+    pub known_contact: bool,
+    pub blocked: bool,
+    /// The menu is the conversation page's, not an inbox row's.
+    pub on_page: bool,
+}
+
+/// The actions to list, in order, the destructive ones last.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn actions(ctx: &SmsActionContext) -> Vec<SmsAction> {
+    let mut out = Vec::new();
+    if ctx.on_page {
+        if ctx.single_sender {
+            out.push(SmsAction::Call);
+            if !ctx.known_contact {
+                out.push(SmsAction::AddContact);
+            }
+        }
+    } else {
+        if ctx.unread {
+            out.push(SmsAction::MarkRead);
+        }
+        out.push(if ctx.muted {
+            SmsAction::Unmute
+        } else {
+            SmsAction::Mute
+        });
+        if ctx.in_spam && ctx.single_sender {
+            out.push(SmsAction::NotSpam);
+        }
+    }
+    if ctx.single_sender && !ctx.blocked {
+        out.push(SmsAction::Block);
+    }
+    out.push(SmsAction::Delete);
+    out
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn label(action: SmsAction) -> &'static str {
+    match action {
+        SmsAction::MarkRead => "Mark as read",
+        SmsAction::Mute => "Mute",
+        SmsAction::Unmute => "Unmute",
+        SmsAction::NotSpam => "Not spam",
+        SmsAction::Block => "Block",
+        SmsAction::Call => "Call",
+        SmsAction::AddContact => "Add to contacts",
+        SmsAction::Delete => "Delete conversation",
+    }
+}
+
+/// Shown in red.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn is_danger(action: SmsAction) -> bool {
+    matches!(action, SmsAction::Block | SmsAction::Delete)
+}
+
+/// The confirmation text before a conversation is deleted.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn delete_prompt(title: &str) -> String {
+    let title = title.trim();
+    let who = if title.is_empty() {
+        "this number"
+    } else {
+        title
+    };
+    format!("Delete the conversation with {who}? Its messages are removed from this phone.")
+}
+
+/// The one address of a one-to-one thread; `None` for no address or a group.
+pub fn sender_of(addresses: &[String]) -> Option<&str> {
+    let mut found: Option<&str> = None;
+    for address in addresses.iter().map(|a| a.trim()).filter(|a| !a.is_empty()) {
+        match found {
+            None => found = Some(address),
+            Some(first) if first == address => {}
+            Some(_) => return None,
+        }
+    }
+    found
+}
+
+/// Shown when deleting needs the default-SMS-app role.
+#[cfg_attr(not(test), allow(dead_code))]
+pub const NEEDS_ROLE: &str = "Make Rovsti Messages your default SMS app to delete messages";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use SmsAction::*;
+
+    fn row() -> SmsActionContext {
+        SmsActionContext {
+            single_sender: true,
+            ..SmsActionContext::default()
+        }
+    }
+
+    #[test]
+    fn row_actions_follow_the_state() {
+        assert_eq!(actions(&row()), vec![Mute, Block, Delete]);
+        let c = SmsActionContext {
+            unread: true,
+            muted: true,
+            ..row()
+        };
+        assert_eq!(actions(&c), vec![MarkRead, Unmute, Block, Delete]);
+        let c = SmsActionContext {
+            in_spam: true,
+            ..row()
+        };
+        assert_eq!(actions(&c), vec![Mute, NotSpam, Block, Delete]);
+        let c = SmsActionContext {
+            blocked: true,
+            in_spam: true,
+            ..row()
+        };
+        assert_eq!(actions(&c), vec![Mute, NotSpam, Delete]);
+    }
+
+    #[test]
+    fn a_group_row_has_no_sender_actions() {
+        let c = SmsActionContext {
+            single_sender: false,
+            in_spam: true,
+            unread: true,
+            ..SmsActionContext::default()
+        };
+        assert_eq!(actions(&c), vec![MarkRead, Mute, Delete]);
+    }
+
+    #[test]
+    fn page_actions_depend_on_the_contact() {
+        let page = SmsActionContext {
+            on_page: true,
+            unread: true,
+            muted: true,
+            ..row()
+        };
+        assert_eq!(actions(&page), vec![Call, AddContact, Block, Delete]);
+        let known = SmsActionContext {
+            known_contact: true,
+            ..page
+        };
+        assert_eq!(actions(&known), vec![Call, Block, Delete]);
+        let blocked = SmsActionContext {
+            blocked: true,
+            ..page
+        };
+        assert_eq!(actions(&blocked), vec![Call, AddContact, Delete]);
+        let group = SmsActionContext {
+            single_sender: false,
+            ..page
+        };
+        assert_eq!(actions(&group), vec![Delete]);
+    }
+
+    #[test]
+    fn labels_are_unique_and_danger_is_marked() {
+        let all = [
+            MarkRead, Mute, Unmute, NotSpam, Block, Call, AddContact, Delete,
+        ];
+        let labels: std::collections::HashSet<_> = all.iter().map(|a| label(*a)).collect();
+        assert_eq!(labels.len(), all.len());
+        assert!(labels.iter().all(|l| !l.is_empty()));
+        assert!(is_danger(Block) && is_danger(Delete));
+        assert!(!is_danger(Mute) && !is_danger(Call));
+    }
+
+    #[test]
+    fn the_delete_prompt_names_the_conversation() {
+        assert_eq!(
+            delete_prompt("Ayşe"),
+            "Delete the conversation with Ayşe? Its messages are removed from this phone."
+        );
+        assert!(delete_prompt("  ").contains("this number"));
+        assert!(!NEEDS_ROLE.is_empty());
+    }
+
+    #[test]
+    fn sender_of_needs_exactly_one_address() {
+        let v = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(sender_of(&v(&[])), None);
+        assert_eq!(sender_of(&v(&["+90555"])), Some("+90555"));
+        assert_eq!(sender_of(&v(&[" ", " +90555 "])), Some("+90555"));
+        assert_eq!(sender_of(&v(&["+90555", "+90556"])), None);
+        assert_eq!(sender_of(&v(&["+90555", "+90555"])), Some("+90555"));
+    }
+}

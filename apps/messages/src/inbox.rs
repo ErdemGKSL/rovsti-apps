@@ -5,7 +5,10 @@
 //! filtering) and draws one row. The mapping is pure and tested here, the
 //! drawing is a thin GPUI shell.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 use gpui::{
     AnyElement, App, ClickEvent, InteractiveElement, IntoElement, LongPressEvent, ParentElement,
@@ -17,7 +20,7 @@ use rovsti_core::{
     inbox::{InboxRow, InboxThread, PersonKey, merge},
     otp,
     recents::LocaleTime,
-    search::ContactIndex,
+    search::{self, ContactIndex},
     sms::SmsThreadRow,
     spam::{self, SpamRules},
 };
@@ -32,6 +35,8 @@ use rovsti_wa_proto::{
 use rovsti_wa_ui::{display_name, photo_avatar};
 
 use crate::conversation::civil_from_days;
+use crate::notifications::thread_tag;
+use crate::sms_actions;
 use crate::ticks::{Tick, read_color, ticks};
 
 /// Which channel a badge names.
@@ -86,6 +91,10 @@ pub struct RowView {
     pub marked_unread: bool,
     /// The ticks of the newest message when it is a WhatsApp message of mine.
     pub tick: Option<Tick>,
+    /// The person's newest SMS thread.
+    pub sms_thread: Option<i64>,
+    /// Its one address, when it is a one-to-one thread.
+    pub sms_sender: Option<SharedString>,
 }
 
 /// The pictures an avatar may show, best first: the address book's photo,
@@ -366,6 +375,8 @@ pub struct Inputs<'a> {
     pub wa: &'a HashMap<String, WaChatInfo>,
     pub rules: &'a SpamRules,
     pub blocked: &'a BlockSet,
+    /// Muted notification tags (`sms:<id>`, `wa:<jid>`).
+    pub muted: &'a BTreeSet<String>,
     pub locale: LocaleTime,
     pub now_ms: i64,
 }
@@ -561,6 +572,16 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
         _ => None,
     };
     let meta = info.map(|i| &i.meta);
+    let sms_thread = row.threads.iter().find_map(|t| match t.id {
+        ThreadId::Sms(id) => Some(id),
+        ThreadId::WhatsApp(_) => None,
+    });
+    let sms_sender = sms_thread
+        .and_then(|id| sms.0.get(&id))
+        .and_then(|source| sms_actions::sender_of(&source.addresses))
+        .map(|s| SharedString::from(s.to_owned()));
+    let sms_muted =
+        sms_thread.is_some_and(|id| inputs.muted.contains(&thread_tag(&ThreadId::Sms(id))));
     let photo_uri = match &row.key {
         PersonKey::Contact(_) => contact_photo(row, sms, inputs.contacts),
         _ => None,
@@ -584,10 +605,38 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
         },
         wa_chat: wa_chat.map(|jid| SharedString::from(jid.to_owned())),
         pinned: meta.is_some_and(|m| m.pinned),
-        muted: meta.is_some_and(|m| m.is_muted(inputs.now_ms)),
+        muted: sms_muted || meta.is_some_and(|m| m.is_muted(inputs.now_ms)),
         marked_unread: meta.is_some_and(|m| m.marked_unread),
         tick,
+        sms_thread,
+        sms_sender,
     }
+}
+
+/// Indices of the rows that match `query`: by folded title or snippet, or, for
+/// a query with three or more digits, by the digits of the SMS sender. A blank
+/// query keeps every row. Order is kept.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn filter_rows(rows: &[RowView], query: &str) -> Vec<usize> {
+    let query = query.trim();
+    if query.is_empty() {
+        return (0..rows.len()).collect();
+    }
+    let folded = search::fold(query);
+    let digits: String = query.chars().filter(char::is_ascii_digit).collect();
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| {
+            search::fold(&row.title).contains(&folded)
+                || search::fold(&row.snippet).contains(&folded)
+                || (digits.len() >= 3
+                    && row.sms_sender.as_ref().is_some_and(|sender| {
+                        let have: String = sender.chars().filter(char::is_ascii_digit).collect();
+                        have.contains(&digits)
+                    }))
+        })
+        .map(|(i, _)| i)
+        .collect()
 }
 
 /// The photo of the contact a row belongs to, found through its number.
@@ -966,6 +1015,7 @@ mod tests {
                 wa: infos,
                 rules,
                 blocked,
+                muted: &BTreeSet::new(),
                 locale: LocaleTime::default(),
                 now_ms: NOW,
             },
@@ -977,6 +1027,98 @@ mod tests {
             rules: vec![spam::SpamRule::UnknownWithLink],
             ..SpamRules::default()
         }
+    }
+
+    fn build_muted(sms: &[SmsThreadRow], muted: &BTreeSet<String>) -> InboxView {
+        let index = ContactIndex::new(vec![]);
+        build(
+            sms,
+            &[],
+            &Inputs {
+                contacts: &index,
+                wa: &HashMap::new(),
+                rules: &rules(),
+                blocked: &BlockSet::default(),
+                muted,
+                locale: LocaleTime::default(),
+                now_ms: NOW,
+            },
+        )
+    }
+
+    #[test]
+    fn sms_rows_carry_thread_and_sender() {
+        let view = build_with(
+            &[
+                sms(1, &["+905321234567"], "hi", 5 * MIN, 0),
+                sms(2, &["+905321111111", "+905322222222"], "group", 4 * MIN, 0),
+            ],
+            &[wa("905559999999@s.whatsapp.net", "Wa", 3 * MIN, 0)],
+            vec![],
+            &rules(),
+            &BlockSet::default(),
+        );
+        let one = view
+            .rows
+            .iter()
+            .find(|r| r.sms_thread == Some(1))
+            .expect("row");
+        assert_eq!(one.sms_sender.as_deref(), Some("+905321234567"));
+        let group = view
+            .rows
+            .iter()
+            .find(|r| r.sms_thread == Some(2))
+            .expect("row");
+        assert_eq!(group.sms_sender, None);
+        let wa_row = view.rows.iter().find(|r| r.wa_chat.is_some()).expect("row");
+        assert_eq!((wa_row.sms_thread, wa_row.sms_sender.clone()), (None, None));
+    }
+
+    #[test]
+    fn muted_sms_thread_shows_the_bell() {
+        let rows = [sms(1, &["+905321234567"], "hi", 5 * MIN, 0)];
+        assert!(!build_muted(&rows, &BTreeSet::new()).rows[0].muted);
+        let muted: BTreeSet<String> = ["sms:1".to_owned()].into();
+        assert!(build_muted(&rows, &muted).rows[0].muted);
+        let other: BTreeSet<String> = ["sms:2".to_owned()].into();
+        assert!(!build_muted(&rows, &other).rows[0].muted);
+    }
+
+    fn row_for(title: &str, snippet: &str, sender: Option<&str>) -> RowView {
+        let mut view = build_with(
+            &[sms(1, &["+905321234567"], snippet, MIN, 0)],
+            &[],
+            vec![],
+            &rules(),
+            &BlockSet::default(),
+        );
+        let mut row = view.rows.remove(0);
+        row.title = title.to_owned().into();
+        row.sms_sender = sender.map(|s| SharedString::from(s.to_owned()));
+        row
+    }
+
+    #[test]
+    fn filter_rows_matches_title_snippet_digits_and_turkish_fold() {
+        let rows = vec![
+            row_for("Ayşe Yılmaz", "see you", Some("+905321234567")),
+            row_for("Bank", "Your balance", Some("+908501112233")),
+            row_for("Group", "no sender", None),
+        ];
+        assert_eq!(filter_rows(&rows, "ayse"), vec![0]);
+        assert_eq!(filter_rows(&rows, "BALANCE"), vec![1]);
+        assert_eq!(filter_rows(&rows, "0532 123"), vec![0]);
+        assert_eq!(filter_rows(&rows, "9999"), Vec::<usize>::new());
+        assert_eq!(filter_rows(&rows, "85011"), vec![1]);
+        // Two digits are too few for a number match.
+        assert_eq!(filter_rows(&rows, "53"), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn blank_query_keeps_all() {
+        let rows = vec![row_for("A", "x", None), row_for("B", "y", None)];
+        assert_eq!(filter_rows(&rows, ""), vec![0, 1]);
+        assert_eq!(filter_rows(&rows, "   "), vec![0, 1]);
     }
 
     #[test]

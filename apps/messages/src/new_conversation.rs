@@ -50,7 +50,7 @@ pub enum NewConversationEvent {
 impl EventEmitter<NewConversationEvent> for NewConversation {}
 
 /// The options for `query`: the typed number first when it reads as one, then
-/// the matching contacts with a number (their default, else their first).
+/// the matching contacts, one option per number (the default first).
 pub fn options(query: &str, contacts: &ContactIndex) -> Vec<Recipient> {
     let query = query.trim();
     let mut found = Vec::new();
@@ -62,27 +62,39 @@ pub fn options(query: &str, contacts: &ContactIndex) -> Vec<Recipient> {
             detail: None,
         });
     }
-    for contact in contacts.search(query) {
-        let number = contact
+    'contacts: for contact in contacts.search(query) {
+        let usable = |n: &&rovsti_core::wire::WireNumber| !n.raw.trim().is_empty();
+        // The default number first, then the provider's order.
+        let ordered = contact
             .numbers
             .iter()
-            .find(|n| n.default && !n.raw.trim().is_empty())
-            .or_else(|| contact.numbers.iter().find(|n| !n.raw.trim().is_empty()));
-        let Some(number) = number else {
-            continue;
-        };
-        let title = if contact.display_name.trim().is_empty() {
-            number.raw.clone()
-        } else {
-            contact.display_name.clone()
-        };
-        found.push(Recipient {
-            title,
-            number: number.raw.clone(),
-            detail: Some(number.raw.clone()),
-        });
-        if found.len() >= LIMIT {
-            break;
+            .filter(usable)
+            .filter(|n| n.default)
+            .chain(contact.numbers.iter().filter(usable).filter(|n| !n.default));
+        let mut seen: Vec<String> = Vec::new();
+        for number in ordered {
+            let digits: String = number.raw.chars().filter(char::is_ascii_digit).collect();
+            if seen.contains(&digits) {
+                continue;
+            }
+            seen.push(digits);
+            let title = if contact.display_name.trim().is_empty() {
+                number.raw.clone()
+            } else {
+                contact.display_name.clone()
+            };
+            let detail = match number.label.as_deref().map(str::trim) {
+                Some(label) if !label.is_empty() => format!("{label} \u{b7} {}", number.raw),
+                _ => number.raw.clone(),
+            };
+            found.push(Recipient {
+                title,
+                number: number.raw.clone(),
+                detail: Some(detail),
+            });
+            if found.len() >= LIMIT {
+                break 'contacts;
+            }
         }
     }
     found
@@ -318,7 +330,8 @@ mod tests {
     #[test]
     fn an_empty_query_lists_contacts_with_numbers() {
         let found = options("", &index());
-        assert_eq!(found.len(), 2);
+        // Ayşe has one number, Mert two.
+        assert_eq!(found.len(), 3);
         assert_eq!(found[0].title, "Ayşe Yılmaz");
         assert_eq!(found[0].detail.as_deref(), Some("+905321234567"));
     }
@@ -326,9 +339,33 @@ mod tests {
     #[test]
     fn a_name_searches_and_uses_the_default_number() {
         let found = options("mert", &index());
-        assert_eq!(found.len(), 1);
+        assert_eq!(found.len(), 2);
         assert_eq!(found[0].number, "+905559876543");
+        assert_eq!(found[1].number, "+905550000000");
         assert!(options("zzz", &index()).is_empty());
+    }
+
+    #[test]
+    fn two_numbers_give_two_labelled_options_and_duplicates_one() {
+        let mut c = contact(
+            5,
+            "Can",
+            &[("+905550000001", false), ("+905550000002", true)],
+        );
+        c.numbers[0].label = Some("Work".into());
+        c.numbers.push(WireNumber {
+            raw: "+90 555 000 0001".into(),
+            label: None,
+            default: false,
+        });
+        let found = options("can", &ContactIndex::new(vec![c]));
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].number, "+905550000002");
+        assert_eq!(found[0].detail.as_deref(), Some("+905550000002"));
+        assert_eq!(
+            found[1].detail.as_deref(),
+            Some("Work \u{b7} +905550000001")
+        );
     }
 
     #[test]

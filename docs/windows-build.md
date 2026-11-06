@@ -22,12 +22,10 @@ first release build (2026-11-03).
   gpuiforge opens Gradle's own `.gradle/<version>/checksums/checksums.lock`, which Gradle
   holds. Move Gradle's project cache with `--project-cache-dir <dir outside the repo>`.
   (Found with Process Monitor: filter Result is SHARING VIOLATION.)
-- **Git symlinks.** `core.symlinks=false` checks a symlink out as a small text file.
-  `apps/phone/.../kotlin/dev/rovsti/bridge` is such a link, so Phone's Kotlin fails with
-  `Unresolved reference 'bridge'` until the folder is a real copy of
-  `crates/rovsti_android/kotlin/dev/rovsti/bridge`. gpuiforge's source snapshot also
-  refuses junctions. Contacts avoids the problem by adding `crates/rovsti_android/kotlin`
-  as a Gradle source directory.
+- **Git symlinks.** `core.symlinks=false` checks a symlink out as a small text file, and
+  gpuiforge's source snapshot refuses symlinks and junctions. No host uses one now: all four
+  add `crates/rovsti_android/kotlin` as a Gradle source directory in `app/build.gradle.kts`.
+  (Phone used to link `kotlin/dev/rovsti/bridge`, which needed a temporary copy to build.)
 - `gpuiforge.json` keeps an absolute keystore path (`/home/erdem/...` for Phone). For a
   throwaway build, create a keystore with `keytool`, and pass the signing environment to
   Gradle directly (`GPUIFORGE_SIGNING_ENABLED=1`, `GPUIFORGE_SIGNING_KEYSTORE`,

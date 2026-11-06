@@ -28,8 +28,8 @@ Install: `adb install -r <apk>`, or `gpuiforge run android --device <serial>`.
 
 - Namespace is `dev.rovsti.phone`; phone Kotlin is in `app/src/main/kotlin/dev/rovsti/phone`.
   `gpuiforge.json` sets `activity` to `dev.rovsti.phone.MainActivity`.
-- `app/src/main/kotlin/dev/rovsti/bridge` is a symlink to
-  `crates/rovsti_android/kotlin/dev/rovsti/bridge` (shared Kotlin).
+- The shared Kotlin (`crates/rovsti_android/kotlin`) is a Gradle source directory added in
+  `app/build.gradle.kts`, not a symlink, so Windows checkouts build too.
 - Permissions live in both `gpuiforge.json` and `app/src/main/AndroidManifest.xml`; keep them equal.
 - The eject bakes absolute paths into `app/build.gradle.kts`. After moving the repo run
   `scripts/fix-eject-paths.sh`.

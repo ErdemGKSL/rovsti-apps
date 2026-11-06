@@ -90,6 +90,12 @@ android {
 // apps/phone, found from the Gradle project (platforms/android) so the repo can move.
 val phoneAppDir = rootProject.projectDir.resolve("../..").canonicalFile
 
+// The shared Kotlin bridge lives in crates/rovsti_android. It is added as a source directory
+// instead of a symlink, which Windows checkouts do not create (core.symlinks=false).
+android.sourceSets["main"].kotlin.directories.add(
+    phoneAppDir.resolve("../../crates/rovsti_android/kotlin").canonicalPath,
+)
+
 for (profile in listOf("debug", "release")) {
     val variant = profile.replaceFirstChar { it.uppercase() }
     val rustProfile = gpuiRustProfile.getOrElse(if (profile == "debug") "dev" else "release")

@@ -143,6 +143,8 @@ struct RowsKey {
     index: usize,
     format: rovsti_core::wire::NameFormat,
     exact: Option<i64>,
+    /// Rows the layout has room for.
+    cap: usize,
 }
 
 /// The resolved strip: names, numbers and spoken labels built once.
@@ -189,13 +191,17 @@ fn t9_digits(dialed: &str) -> Option<&str> {
 }
 
 /// What the strip shows: the hits without the contact the status line already
-/// names, at most [`T9_SHOWN`], and how many more there are. `exact` is that
+/// names, at most `cap` (and [`T9_SHOWN`]), and how many more there are. `exact` is that
 /// contact's position in the contacts payload (a [`T9Hit::contact_idx`]).
-pub(crate) fn visible_suggestions(hits: &[T9Hit], exact: Option<i64>) -> (Vec<T9Hit>, usize) {
+pub(crate) fn visible_suggestions(
+    hits: &[T9Hit],
+    exact: Option<i64>,
+    cap: usize,
+) -> (Vec<T9Hit>, usize) {
     let mut rest = hits
         .iter()
         .filter(|hit| exact != Some(i64::from(hit.contact_idx)));
-    let shown: Vec<T9Hit> = rest.by_ref().take(T9_SHOWN).copied().collect();
+    let shown: Vec<T9Hit> = rest.by_ref().take(cap.min(T9_SHOWN)).copied().collect();
     (shown, rest.count())
 }
 
@@ -951,6 +957,7 @@ impl PhoneApp {
             index: Arc::as_ptr(&index) as usize,
             format: self.t9.format,
             exact: self.dial_match.found.as_ref().map(|found| found.id),
+            cap: self.kp_layout.match_rows,
         };
         if self.t9.rows.key == Some(key) {
             return;
@@ -960,7 +967,7 @@ impl PhoneApp {
             .exact
             .and_then(|id| index.all().position(|c| c.id == id))
             .and_then(|i| i64::try_from(i).ok());
-        let (shown, more) = visible_suggestions(&self.t9.hits, exact);
+        let (shown, more) = visible_suggestions(&self.t9.hits, exact, key.cap);
         let shown = shown
             .iter()
             .filter_map(|hit| suggestion_of(&index, hit, format))
@@ -1213,14 +1220,24 @@ impl PhoneApp {
         self.modal_sheet(theme, window, "Matches", body, cx)
     }
 
-    fn t9_strip(&self, theme: Theme, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    fn t9_strip(
+        &self,
+        theme: Theme,
+        layout: &rovsti_core::keypad_layout::KeypadLayout,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement> {
         let (rows, more) = self.t9_rows();
         if rows.is_empty() {
             return None;
         }
         let colors = theme::colors(theme);
         const IDS: [&str; T9_SHOWN] = ["t9-0", "t9-1", "t9-2"];
-        let mut strip = div().flex().flex_col().gap(px(T9_GAP)).w(px(320.0));
+        let mut strip = div()
+            .flex()
+            .flex_col()
+            .gap(px(T9_GAP))
+            .w(px(layout.matches.w.min(360.0)));
+        let last = rows.len().saturating_sub(1);
         for (slot, row) in rows.iter().enumerate() {
             let id = IDS[slot];
             let press = self.presses.value(id).clamp(0.0, 1.0);
@@ -1239,6 +1256,37 @@ impl PhoneApp {
                     )
                 })
                 .collect();
+            let pill = (layout.more_inline && more > 0 && slot == last).then(|| {
+                let press = self.presses.value("t9-more").clamp(0.0, 1.0);
+                glass(GlassSpec::control(theme))
+                    .id("t9-more")
+                    .role(Role::Button)
+                    .aria_label(self.t9.rows.more_aria.clone())
+                    .relative()
+                    .flex_none()
+                    .h(px(30.0))
+                    .px(px(10.0))
+                    .rounded(radius::CARD)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(typography::FOOTNOTE.size)
+                    .font_weight(typography::HEADLINE.weight)
+                    .text_color(colors.accent)
+                    .opacity(1.0 - 0.5 * press)
+                    .child(SharedString::from(format!("+{more}")))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.t9_more(cx);
+                        }),
+                    )
+                    .child(touch_surface(Self::touch_listener(
+                        cx,
+                        Some("t9-more".into()),
+                    )))
+            });
             strip = strip.child(
                 glass(GlassSpec::control(theme))
                     .id(id)
@@ -1276,6 +1324,7 @@ impl PhoneApp {
                             .text_color(colors.secondary_label)
                             .child(row.number.clone()),
                     )
+                    .children(pill)
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| this.t9_tap(slot, window, cx)),
@@ -1283,7 +1332,7 @@ impl PhoneApp {
                     .child(touch_surface(Self::touch_listener(cx, Some(id.into())))),
             );
         }
-        if more > 0 {
+        if more > 0 && !layout.more_inline {
             let press = self.presses.value("t9-more").clamp(0.0, 1.0);
             strip = strip.child(
                 div()
@@ -1765,7 +1814,8 @@ impl PhoneApp {
         let matches = section(layout.matches)
             .flex()
             .justify_center()
-            .children(self.t9_strip(theme, cx));
+            .items_end()
+            .children(self.t9_strip(theme, layout, cx));
         let actions = section(layout.actions)
             .flex()
             .justify_center()
@@ -2064,15 +2114,26 @@ mod tests {
     #[test]
     fn suggestions_cap_at_three_and_count_the_rest() {
         let hits: Vec<_> = (0..7).map(hit).collect();
-        let (shown, more) = visible_suggestions(&hits, None);
+        let (shown, more) = visible_suggestions(&hits, None, 3);
         assert_eq!(idxs(&shown), [0, 1, 2]);
         assert_eq!(more, 4);
     }
 
     #[test]
+    fn suggestions_with_a_cap_of_one_count_the_hidden_hits() {
+        let hits: Vec<_> = (0..5).map(hit).collect();
+        let (shown, more) = visible_suggestions(&hits, Some(0), 1);
+        assert_eq!(idxs(&shown), [1]);
+        assert_eq!(more, 3);
+        // A cap above the strip's maximum is clamped.
+        let (shown, more) = visible_suggestions(&hits, None, 9);
+        assert_eq!((shown.len(), more), (3, 2));
+    }
+
+    #[test]
     fn suggestions_drop_the_exact_contact_before_capping() {
         let hits: Vec<_> = (0..5).map(hit).collect();
-        let (shown, more) = visible_suggestions(&hits, Some(1));
+        let (shown, more) = visible_suggestions(&hits, Some(1), 3);
         assert_eq!(idxs(&shown), [0, 2, 3]);
         assert_eq!(more, 1);
     }
@@ -2080,14 +2141,14 @@ mod tests {
     #[test]
     fn suggestions_with_few_hits_have_no_remainder() {
         let hits = [hit(4), hit(9)];
-        assert_eq!(visible_suggestions(&hits, None).1, 0);
-        let (shown, more) = visible_suggestions(&hits, Some(4));
+        assert_eq!(visible_suggestions(&hits, None, 3).1, 0);
+        let (shown, more) = visible_suggestions(&hits, Some(4), 3);
         assert_eq!((idxs(&shown), more), (vec![9], 0));
-        let (shown, more) = visible_suggestions(&[], Some(4));
+        let (shown, more) = visible_suggestions(&[], Some(4), 3);
         assert!(shown.is_empty());
         assert_eq!(more, 0);
         // An exact match that is not among the hits changes nothing.
-        let (shown, _) = visible_suggestions(&hits, Some(77));
+        let (shown, _) = visible_suggestions(&hits, Some(77), 3);
         assert_eq!(shown.len(), 2);
     }
 

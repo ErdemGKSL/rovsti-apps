@@ -5,7 +5,7 @@
 //! the current [`Screen`]. Apps embed the entity, read [`WhatsAppSettings::gateway`]
 //! once connected and drain [`WhatsAppSettings::take_events`].
 
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use futures::StreamExt;
 use gpui::{
@@ -40,10 +40,20 @@ const ACTION_DELETE: &str = "Delete instance…";
 const QR_FILE: &str = "rovsti-whatsapp-link.png";
 /// Events kept for the app between two calls of `take_events`.
 const EVENT_BACKLOG: usize = 1024;
+/// The platform sometimes refuses the first request for the app's data folder
+/// ("Android system service rejected the request"); asking again works.
+const STORAGE_ATTEMPTS: u32 = 4;
+const STORAGE_RETRY: Duration = Duration::from_millis(400);
 
 pub struct WhatsAppSettings {
     model: LinkModel,
+    /// The app's folder under `storage::data_dir` (asked again on a retry).
+    data_dir_name: &'static str,
     data_dir: Option<PathBuf>,
+    /// A link made while the data folder was unreachable: written as soon as it is.
+    unsaved_link: Option<StoredLink>,
+    /// The owner unlinked before the data folder was reachable: the saved link must go, not load.
+    skip_saved_link: bool,
     gateway: Option<(StoredLink, Gateway)>,
     stream: Option<(StoredLink, EventStream)>,
     events: Vec<GatewayEvent>,
@@ -102,27 +112,13 @@ impl WhatsAppSettings {
         let phone_field = field(TextInputPurpose::Phone, TextInputAction::Done, cx);
         let key_field = field(TextInputPurpose::Text, TextInputAction::Done, cx);
 
-        let dir = storage::data_dir(data_dir_name, cx);
-        let pump = cx.spawn(async move |this, cx| {
-            let dir = dir.await;
-            this.update(cx, |this, cx| match dir {
-                Ok(dir) => {
-                    let link = storage::load_json::<StoredLink>(&dir, LINK_FILE);
-                    this.data_dir = Some(dir);
-                    this.model = LinkModel::new(this.model.app(), link);
-                    let effects = this.model.start();
-                    this.run(effects, cx);
-                    cx.notify();
-                }
-                Err(error) => {
-                    this.dispatch(Input::Error(error), cx);
-                }
-            })
-            .ok();
-        });
+        let pump = Self::open_storage(data_dir_name, cx);
         Self {
             model: LinkModel::new(app, None),
+            data_dir_name,
             data_dir: None,
+            unsaved_link: None,
+            skip_saved_link: false,
             gateway: None,
             stream: None,
             events: Vec::new(),
@@ -133,6 +129,60 @@ impl WhatsAppSettings {
             key_field,
             _pump: Some(pump),
         }
+    }
+
+    /// Asks for the app's data folder, again a few times when the platform refuses, then
+    /// hands it to [`Self::storage_ready`]. Only the last failure is shown.
+    fn open_storage(name: &'static str, cx: &mut Context<Self>) -> gpui::Task<()> {
+        cx.spawn(async move |this, cx| {
+            let mut attempt = 1;
+            let found = loop {
+                let Ok(request) = this.update(cx, |_, cx| storage::data_dir(name, cx)) else {
+                    return;
+                };
+                match request.await {
+                    Ok(dir) => break Ok(dir),
+                    Err(error) if attempt < STORAGE_ATTEMPTS => {
+                        log::warn!(
+                            "data folder request failed ({attempt}/{STORAGE_ATTEMPTS}): {error}"
+                        );
+                        attempt += 1;
+                        cx.background_executor().timer(STORAGE_RETRY).await;
+                    }
+                    Err(error) => break Err(error),
+                }
+            };
+            this.update(cx, |this, cx| match found {
+                Ok(dir) => this.storage_ready(dir, cx),
+                Err(error) => this.dispatch(Input::Error(error), cx),
+            })
+            .ok();
+        })
+    }
+
+    /// The data folder is reachable: load the saved link (a linked app checks its key), or
+    /// write the one made in the meantime.
+    fn storage_ready(&mut self, dir: PathBuf, cx: &mut Context<Self>) {
+        if std::mem::take(&mut self.skip_saved_link)
+            && let Err(error) = std::fs::remove_file(dir.join(LINK_FILE))
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!("removing the WhatsApp link failed: {:?}", error.kind());
+        }
+        self.data_dir = Some(dir.clone());
+        if let Some(link) = self.unsaved_link.take().or_else(|| self.model.link.clone()) {
+            // Linked in this session while the folder was out of reach: keep that link.
+            if let Err(error) = storage::save_json(&dir, LINK_FILE, &link) {
+                log::warn!("saving the WhatsApp link failed: {:?}", error.kind());
+            }
+            cx.notify();
+            return;
+        }
+        let saved = storage::load_json::<StoredLink>(&dir, LINK_FILE);
+        self.model = LinkModel::new(self.model.app(), saved);
+        let effects = self.model.start();
+        self.run(effects, cx);
+        cx.notify();
     }
 
     /// The saved link, once this app is connected to an instance.
@@ -220,6 +270,14 @@ impl WhatsAppSettings {
     // ---- state ------------------------------------------------------------------
 
     fn dispatch(&mut self, input: Input, cx: &mut Context<Self>) {
+        // "Try again" after the data folder could not be reached asks for the folder again;
+        // the model alone would only go back to the two options, with the saved link unread.
+        if matches!(input, Input::Retry) && self.data_dir.is_none() {
+            self.model.screen = Screen::Connecting;
+            self._pump = Some(Self::open_storage(self.data_dir_name, cx));
+            cx.notify();
+            return;
+        }
         let effects = self.model.apply(input);
         self.sync();
         self.run(effects, cx);
@@ -324,17 +382,25 @@ impl WhatsAppSettings {
                         })
                         .detach();
                 }
-                Effect::Save(link) => {
-                    if let Some(dir) = &self.data_dir
-                        && let Err(error) = storage::save_json(dir, LINK_FILE, &link)
-                    {
-                        log::warn!("saving the WhatsApp link failed: {:?}", error.kind());
+                Effect::Save(link) => match &self.data_dir {
+                    Some(dir) => {
+                        if let Err(error) = storage::save_json(dir, LINK_FILE, &link) {
+                            log::warn!("saving the WhatsApp link failed: {:?}", error.kind());
+                        }
                     }
-                }
+                    None => {
+                        log::warn!("the data folder is not reachable yet: keeping the link");
+                        self.unsaved_link = Some(link);
+                    }
+                },
                 Effect::Forget => {
                     self.stream = None;
                     self.push_for = None;
                     self.events.clear();
+                    if self.data_dir.is_none() {
+                        self.unsaved_link = None;
+                        self.skip_saved_link = true;
+                    }
                     if let Some(dir) = &self.data_dir
                         && let Err(error) = std::fs::remove_file(dir.join(LINK_FILE))
                         && error.kind() != std::io::ErrorKind::NotFound
@@ -999,6 +1065,8 @@ impl Render for WhatsAppSettings {
 
 #[cfg(test)]
 mod tests {
+    use gpui::TestAppContext;
+
     use super::*;
 
     #[test]
@@ -1009,5 +1077,59 @@ mod tests {
             Err(ClientError::Http("internal error: boom".into()))
         );
         assert_eq!(guarded(|| Ok(7)), Ok(7));
+    }
+
+    fn link() -> StoredLink {
+        StoredLink {
+            gateway_url: "https://rovsti.erdemdev.tr".into(),
+            instance_id: "inst-1".into(),
+            key: "rwk_test".into(),
+        }
+    }
+
+    /// A link made before the data folder could be asked for is written once it is, not lost.
+    #[gpui::test]
+    fn a_link_made_before_the_folder_is_ready_is_saved_afterwards(cx: &mut TestAppContext) {
+        let name = "wa-ui-test-unsaved-link";
+        let view = cx.new(|cx| WhatsAppSettings::new(AppId::Messages, name, cx));
+        view.update(cx, |view, cx| {
+            assert!(
+                view.data_dir.is_none(),
+                "the folder is still being asked for"
+            );
+            view.run(vec![Effect::Save(link())], cx);
+            assert!(view.unsaved_link.is_some());
+        });
+        cx.run_until_parked();
+        let dir = view
+            .read_with(cx, |view, _| view.data_dir.clone())
+            .expect("folder found");
+        assert_eq!(
+            storage::load_json::<StoredLink>(&dir, LINK_FILE),
+            Some(link())
+        );
+        view.read_with(cx, |view, _| assert!(view.unsaved_link.is_none()));
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// Unlinking before the folder is reachable must not bring the old link back.
+    #[gpui::test]
+    fn unlinking_before_the_folder_is_ready_removes_the_saved_link(cx: &mut TestAppContext) {
+        let name = "wa-ui-test-forget";
+        // First run: a link is saved.
+        let first = cx.new(|cx| WhatsAppSettings::new(AppId::Messages, name, cx));
+        first.update(cx, |view, cx| view.run(vec![Effect::Save(link())], cx));
+        cx.run_until_parked();
+        let dir = first
+            .read_with(cx, |view, _| view.data_dir.clone())
+            .expect("folder found");
+        assert!(storage::load_json::<StoredLink>(&dir, LINK_FILE).is_some());
+        // Second run: the owner unlinks while the folder is still being asked for.
+        let second = cx.new(|cx| WhatsAppSettings::new(AppId::Messages, name, cx));
+        second.update(cx, |view, cx| view.run(vec![Effect::Forget], cx));
+        cx.run_until_parked();
+        assert_eq!(storage::load_json::<StoredLink>(&dir, LINK_FILE), None);
+        second.read_with(cx, |view, _| assert!(view.link().is_none()));
+        std::fs::remove_dir_all(dir).ok();
     }
 }

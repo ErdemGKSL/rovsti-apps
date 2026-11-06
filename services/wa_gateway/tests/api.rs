@@ -861,6 +861,43 @@ async fn call_audio_echoes_frames_and_drops_wrong_sizes() {
 }
 
 #[tokio::test]
+async fn ending_a_ringing_outgoing_call_cancels_it_on_whatsapp() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let g = gateway.clone();
+    let call_id = blocking(move || g.place_call(PEER)).await.unwrap().call_id;
+    assert_eq!(next_call_phase(&mut events).await, CallPhase::Ringing);
+
+    let (g, id) = (gateway.clone(), call_id.clone());
+    blocking(move || g.end_call(&id)).await.unwrap();
+    assert_eq!(
+        next_call_phase(&mut events).await,
+        CallPhase::Ended(EndReason::Hangup)
+    );
+    // The callee's phone stops ringing only if WhatsApp is told.
+    assert_eq!(
+        server.driver.calls().ops(),
+        [format!("place {PEER}"), format!("terminate {call_id}")]
+    );
+
+    // Ending it again, or a call nobody knows, is refused and sends nothing.
+    let (g, id) = (gateway.clone(), call_id.clone());
+    match blocking(move || g.end_call(&id)).await {
+        Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::Conflict),
+        other => panic!("expected a conflict, got {other:?}"),
+    }
+    let g = gateway.clone();
+    match blocking(move || g.end_call("NOPE")).await {
+        Err(ClientError::Api(e)) => assert_eq!(e.code, ErrorCode::NotFound),
+        other => panic!("expected not found, got {other:?}"),
+    }
+    assert_eq!(server.driver.calls().ops().len(), 2);
+}
+
+#[tokio::test]
 async fn an_incoming_call_rings_and_is_answered_over_the_api() {
     let server = start(4).await;
     let (gateway, created) = create(&server).await;

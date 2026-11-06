@@ -65,6 +65,17 @@ pub fn plan_snapshot(
     SnapshotPlan { show, ended }
 }
 
+/// The ended update for the call on screen (`tracked`), when the snapshot
+/// says it is over. The tracker then ends it as if the live `ended` event had
+/// arrived, so a missed event cannot leave a call ringing on screen.
+pub fn tracked_end(tracked: Option<&str>, summaries: &[CallSummary]) -> Option<CallUpdate> {
+    let tracked = tracked?;
+    summaries
+        .iter()
+        .find(|s| s.update.call_id == tracked && s.update.phase.is_ended())
+        .map(|s| s.update.clone())
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WaCallHistory {
     records: VecDeque<WaCallRecord>,
@@ -315,6 +326,23 @@ mod tests {
         let plan = plan_snapshot(true, &list, &WaCallHistory::new());
         assert_eq!(plan.show, None);
         assert_eq!(plan.ended.len(), 1);
+    }
+
+    #[test]
+    fn a_tracked_call_the_snapshot_ended_is_ended() {
+        use CallDirection::In;
+        let list = [
+            at("other", In, CallPhase::Ended(EndReason::Missed), 2),
+            at("on_screen", In, CallPhase::Ended(EndReason::Missed), 1),
+            at("live", In, CallPhase::Ringing, 3),
+        ];
+        let end = tracked_end(Some("on_screen"), &list).unwrap();
+        assert_eq!(end.call_id, "on_screen");
+        assert_eq!(end.phase, CallPhase::Ended(EndReason::Missed));
+        // Still live, unknown to the snapshot, or nothing on screen: no change.
+        assert_eq!(tracked_end(Some("live"), &list), None);
+        assert_eq!(tracked_end(Some("absent"), &list), None);
+        assert_eq!(tracked_end(None, &list), None);
     }
 
     #[test]

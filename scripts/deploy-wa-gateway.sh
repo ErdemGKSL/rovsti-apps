@@ -7,12 +7,14 @@
 # Docker), installs /usr/local/bin/wa_gateway plus the hardened unit from
 # services/wa_gateway/deploy, and checks /healthz.
 #
-# Usage: scripts/deploy-wa-gateway.sh [deploy|status|logs|rollback] [--dry-run]
+# Usage: scripts/deploy-wa-gateway.sh [deploy|status|logs|rollback] [--dry-run] [--if-changed]
 #   deploy    build and (re)install the service (default)
 #   status    service state, listener, health answer, config
 #   logs      the last 100 journal lines (LINES=300 for more)
 #   rollback  put the previous binary back
 #   --dry-run check tools, key and connection, build the bundle, change nothing
+#   --if-changed  deploy only when the bundle differs from the last deployed one (a SHA-256 of
+#             its files is kept on the server), so it is safe to run after every change
 #
 # Settings (environment; the defaults are this project's server):
 #   DEPLOY_HOST=ssh.erdemdev.tr   DEPLOY_USER=erdem
@@ -55,10 +57,12 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 COMMAND=deploy
 DRY_RUN=0
+IF_CHANGED=0
 for arg in "$@"; do
   case "$arg" in
     deploy|status|logs|rollback) COMMAND="$arg" ;;
     --dry-run) DRY_RUN=1 ;;
+    --if-changed) IF_CHANGED=1 ;;
     -h|--help) sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument '$arg' (try --help)" ;;
   esac
@@ -172,7 +176,9 @@ make_bundle() {  # make_bundle <dir>: writes <dir>/bundle.tgz
     fi
   fi
   tar -czf "$dir/bundle.tgz" -C "$pkg" .
-  say "bundle: $(du -h "$dir/bundle.tgz" | cut -f1)"
+  # A digest of the files (names and contents, not the archive, whose bytes vary by run).
+  BUNDLE_HASH="$(cd "$pkg" && find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1)"
+  say "bundle: $(du -h "$dir/bundle.tgz" | cut -f1), digest ${BUNDLE_HASH:0:12}"
 }
 
 # ---- commands -------------------------------------------------------------------------------
@@ -182,6 +188,15 @@ cmd_deploy() {
   tmp="$(mktemp -d)"
   trap "rm -rf '$tmp'" EXIT
   make_bundle "$tmp"
+
+  if [ "$IF_CHANGED" = 1 ]; then
+    local deployed
+    deployed="$(ssh_run "cat \"\$HOME/$REMOTE_WORK/deployed.sha256\" 2>/dev/null || true")"
+    if [ "${deployed//[[:space:]]/}" = "$BUNDLE_HASH" ]; then
+      say "the gateway on $TARGET is already this version (digest ${BUNDLE_HASH:0:12}): nothing to deploy"
+      return
+    fi
+  fi
 
   if [ "$DRY_RUN" = 1 ]; then
     say "dry run: would build on $TARGET, install /usr/local/bin/wa_gateway, listen on $GATEWAY_BIND"
@@ -226,6 +241,7 @@ cmd_deploy() {
 
   say "installing"
   remote install
+  ssh_run "echo $BUNDLE_HASH > \"\$HOME/$REMOTE_WORK/deployed.sha256\""
   cat <<EOF
 
 The gateway is running on $DEPLOY_HOST at http://$GATEWAY_BIND (loopback only).

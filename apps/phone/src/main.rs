@@ -850,6 +850,7 @@ impl PhoneApp {
                 || self.sheet.is_open()
                 || self.settings.is_open()
                 || self.contacts.typing
+                || self.recents.typing
                 || self.tabs.selected() != KEYPAD_TAB);
         let want = self.incoming.wants_back()
             || self.viewer.is_some()

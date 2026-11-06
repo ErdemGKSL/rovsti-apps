@@ -779,7 +779,17 @@ impl PhoneApp {
                 .focus_handle()
                 .is_focused(window);
         self.contacts.typing = focused;
-        self.tabs_away.set_target(f32::from(u8::from(focused)));
+        // The Recents search field raises the keyboard the same way.
+        let recents_focused = self.tabs.selected() == crate::RECENTS_TAB
+            && self
+                .recents
+                .field
+                .read(cx)
+                .focus_handle()
+                .is_focused(window);
+        self.recents.typing = recents_focused;
+        self.tabs_away
+            .set_target(f32::from(u8::from(focused || recents_focused)));
     }
 
     /// The search field's text or focus changed.

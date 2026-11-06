@@ -17,12 +17,13 @@ use rovsti_core::{
 };
 use rovsti_ui::{
     Icon,
+    components::large_title,
     glass::{GlassGrid, GlassInteraction, GlassSpec, glass, glass_interactive, paint_glass_grid},
     motion::press_scale,
     motion_tokens::scale,
     spring::Spring,
     theme::{self, call_colors},
-    tokens::{Theme, mix, radius, shadow, typography},
+    tokens::{Theme, metrics, mix, radius, shadow, typography},
     touch::touch_surface,
 };
 
@@ -597,8 +598,6 @@ impl PhoneApp {
         });
     }
 
-    /// The number field's font size now: 36 stepping down with length, and
-    /// never wider than the screen.
     /// The pure layout's input for this frame.
     pub(crate) fn keypad_input(&self, window: &Window) -> rovsti_core::keypad_layout::KeypadInput {
         let size = window.viewport_size();
@@ -1799,7 +1798,13 @@ impl PhoneApp {
             .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
     }
 
-    pub(crate) fn keypad(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn keypad(
+        &self,
+        theme: Theme,
+        setup: AnyElement,
+        gear: AnyElement,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let answer = call_colors(theme).answer;
         let layout = &self.kp_layout;
         let key = layout.key;
@@ -1925,9 +1930,53 @@ impl PhoneApp {
                     }),
             );
 
+        // The header sits in its layout rect: portrait keeps the large title
+        // (button row at 54..98 in the box); landscape is one row.
+        let header = div().absolute().left_0().w_full().h(px(HEADER_H));
+        let header = if layout.header_compact {
+            let colors = theme::colors(theme);
+            header
+                .top(px(layout.header.y + 2.0 - 54.0))
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top(px(54.0))
+                        .w_full()
+                        .h(px(44.0))
+                        .pl(metrics::ROW_INSET)
+                        .pr(px(108.0))
+                        .flex()
+                        .items_center()
+                        .whitespace_nowrap()
+                        .truncate()
+                        .text_size(typography::HEADLINE.size)
+                        .font_weight(typography::HEADLINE.weight)
+                        .text_color(colors.label)
+                        .child(crate::TABS[crate::KEYPAD_TAB]),
+                )
+                .child(setup)
+                .child(gear)
+        } else {
+            header
+                .top(px(layout.header.bottom() - HEADER_H))
+                .child(
+                    div()
+                        .relative()
+                        .left(px(self.title_shift()))
+                        .pr(px(56.0))
+                        .child(large_title(theme, crate::TABS[crate::KEYPAD_TAB], None)),
+                )
+                .child(setup)
+                .child(gear)
+        };
+
         div()
+            .absolute()
+            .top_0()
+            .left_0()
             .size_full()
-            .relative()
+            .child(header)
             .child(number)
             .child(matches)
             .child(actions)

@@ -1296,11 +1296,6 @@ impl PhoneApp {
                 )
                 .into_any_element();
         }
-        let title = div()
-            .relative()
-            .left(px(self.title_shift()))
-            .pr(px(56.0))
-            .child(large_title(theme, TABS[tab], None));
         div()
             .id("page")
             .size_full()
@@ -1310,10 +1305,8 @@ impl PhoneApp {
                     .relative()
                     .top(px(self.page_lift()))
                     .left(px(self.page_slide()))
-                    .child(title)
-                    .child(setup)
-                    .child(gear)
-                    .child(self.keypad(theme, cx)),
+                    .size_full()
+                    .child(self.keypad(theme, setup, gear, cx)),
             )
             .into_any_element()
     }

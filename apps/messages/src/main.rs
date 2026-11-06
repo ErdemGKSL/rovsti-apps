@@ -30,8 +30,8 @@ use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClipboardItem, Context, Entity, Hsla,
     InteractiveElement, IntoElement, ListAlignment, ParentElement, Render, RenderImage,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds,
-    WindowOptions, div, list, px, size,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, TextInputAction,
+    TextInputPurpose, Window, WindowBounds, WindowOptions, div, list, px, size,
 };
 use rovsti_core::{
     Message, MessageDirection, PhoneNumber, ThreadId, blocklist,
@@ -45,6 +45,7 @@ use rovsti_ui::{
     Icon, IconAssets,
     components::{avatar, empty_state, glass_icon_button, glass_pill, large_title, list_row},
     current_theme,
+    field::{TextField, field_box},
     glass::{GlassSpec, glass},
     notice_pill::{NoticePill, PillEvent},
     tab_bar::{Tab, TabBar, content_bottom_inset},
@@ -209,6 +210,9 @@ struct MessagesApp {
     chat_layout: Option<ChatLayout>,
     /// The Spam filter's rows are showing instead of the inbox.
     show_spam: bool,
+    /// The Chats search row is showing.
+    search_open: bool,
+    search_field: Entity<TextField>,
     /// The OTP code that was just copied.
     copied: Option<SharedString>,
     open: Open,
@@ -237,6 +241,9 @@ struct ChatLayout {
     view_gen: u64,
     show_spam: bool,
     show_archived: bool,
+    /// Whether a non-blank query filters the list, and its field's edit count.
+    searching: bool,
+    search_edits: u64,
     role_held: bool,
     state: Access,
     /// The Status row's people and unseen count.
@@ -247,6 +254,10 @@ struct ChatLayout {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ChatItem {
     Title,
+    /// The search field and its Cancel pill.
+    Search,
+    /// Nothing matches the query.
+    NoResults,
     /// "Read-only: not your default SMS app".
     RoleBanner,
     /// Back from the Spam filter to the inbox.
@@ -282,9 +293,12 @@ impl MessagesApp {
         let avatars = cx.new(|cx| WaAvatars::new(&whatsapp, cx));
         let photos = cx.new(|_| ContactPhotos::new());
         let statuses = cx.new(|_| StatusFeed::default());
+        let search_field =
+            cx.new(|cx| TextField::with_input(TextInputPurpose::Text, TextInputAction::Search, cx));
         // The backend owns the one event sink: it hands WhatsApp pushes over
         // here, and SMS, contact and role changes rebuild the inbox.
         let subscriptions = vec![
+            cx.observe(&search_field, |_, _, cx| cx.notify()),
             cx.observe(&whatsapp, |this, whatsapp, cx| {
                 let events = whatsapp.update(cx, |settings, _| settings.take_events());
                 let connected = whatsapp.read(cx).is_connected();
@@ -365,6 +379,8 @@ impl MessagesApp {
             chat_items: Vec::new(),
             chat_layout: None,
             show_spam: false,
+            search_open: false,
+            search_field,
             copied: None,
             open: Open::None,
             chats: ChatsState::Needed,
@@ -1510,6 +1526,7 @@ impl MessagesApp {
     fn can_go_back(&self, cx: &App) -> bool {
         self.schedule.is_open()
             || self.row_menu.is_some()
+            || self.search_open
             || self.show_archived
             || self.show_spam
             || !matches!(self.open, Open::None)
@@ -1545,6 +1562,8 @@ impl MessagesApp {
             // The Status viewer closed; the page stays.
         } else if !matches!(self.open, Open::None) {
             self.close_page(cx);
+        } else if self.search_open && self.tabs.selected() == CHATS_TAB {
+            self.close_search(cx);
         } else if (self.show_archived || self.show_spam) && self.tabs.selected() == CHATS_TAB {
             // The Spam filter and the archived chats step back to the inbox.
             self.show_archived = false;
@@ -2297,6 +2316,22 @@ impl MessagesApp {
             .into_any_element()
     }
 
+    /// The trimmed search query, empty when the search is closed.
+    fn search_query(&self, cx: &App) -> String {
+        if self.search_open {
+            self.search_field.read(cx).text().trim().to_owned()
+        } else {
+            String::new()
+        }
+    }
+
+    fn close_search(&mut self, cx: &mut Context<Self>) {
+        self.search_open = false;
+        self.search_field.update(cx, |field, cx| field.clear(cx));
+        self.chat_list.scroll_to_top();
+        cx.notify();
+    }
+
     /// The rows the Chats list shows now: the Spam filter's, the archived
     /// chats or the inbox's.
     fn shown_rows(&self) -> &[RowView] {
@@ -2322,10 +2357,17 @@ impl MessagesApp {
             let shown = list.authors.len() + usize::from(!list.mine.is_empty());
             (shown, list.unviewed())
         };
+        let query = self.search_query(cx);
         let layout = ChatLayout {
             view_gen: self.view_gen,
             show_spam: self.show_spam,
             show_archived: self.show_archived,
+            searching: !query.is_empty(),
+            search_edits: if self.search_open {
+                self.search_field.read(cx).edits
+            } else {
+                0
+            },
             role_held,
             state,
             statuses,
@@ -2335,6 +2377,9 @@ impl MessagesApp {
         }
         self.chat_layout = Some(layout);
         let mut items = vec![ChatItem::Title];
+        if self.search_open {
+            items.push(ChatItem::Search);
+        }
         if !role_held {
             items.push(ChatItem::RoleBanner);
         }
@@ -2342,7 +2387,7 @@ impl MessagesApp {
             items.push(ChatItem::SpamBack);
         } else if self.show_archived {
             items.push(ChatItem::ArchivedBack);
-        } else {
+        } else if query.is_empty() {
             if statuses.0 > 0 {
                 items.push(ChatItem::Status);
             }
@@ -2354,7 +2399,17 @@ impl MessagesApp {
             }
         }
         let rows = self.shown_rows();
-        items.extend((0..rows.len()).map(ChatItem::Row));
+        let mut no_match_empty = false;
+        if !query.is_empty() {
+            let matches = inbox::filter_rows(rows, &query);
+            no_match_empty = matches.is_empty();
+            items.extend(matches.into_iter().map(ChatItem::Row));
+        } else {
+            items.extend((0..rows.len()).map(ChatItem::Row));
+        }
+        if no_match_empty {
+            items.push(ChatItem::NoResults);
+        }
         if !self.show_spam
             && !self.show_archived
             && self.view.rows.is_empty()
@@ -2380,6 +2435,8 @@ impl MessagesApp {
                 ChatItem::Status => key_of((9u8, statuses)),
                 ChatItem::Empty => key_of((3u8, state)),
                 ChatItem::Title => key_of(0u8),
+                ChatItem::Search => key_of(10u8),
+                ChatItem::NoResults => key_of((11u8, &query)),
                 ChatItem::RoleBanner => key_of(4u8),
                 ChatItem::SpamBack => key_of(5u8),
                 ChatItem::Tail => key_of(6u8),
@@ -2422,7 +2479,53 @@ impl MessagesApp {
                     .id("new-message")
                     .on_click(cx.listener(|this, _, _, cx| this.open_new(cx)))
                     .into_any_element();
-                large_title(theme, TABS[CHATS_TAB], Some(compose)).into_any_element()
+                let search = glass_icon_button(theme, Icon::LucideSearch, 0.0, false)
+                    .id("search-chats")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.search_open = true;
+                        let focus = this.search_field.read(cx).focus_handle();
+                        window.focus(&focus, cx);
+                        cx.notify();
+                    }))
+                    .into_any_element();
+                let actions = div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(search)
+                    .child(compose)
+                    .into_any_element();
+                large_title(theme, TABS[CHATS_TAB], Some(actions)).into_any_element()
+            }
+            ChatItem::Search => div()
+                .w_full()
+                .px(px(12.0))
+                .pb(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(div().flex_1().min_w_0().child(field_box(
+                    theme,
+                    "chat-search",
+                    &self.search_field,
+                    "Search chats",
+                    window,
+                    cx,
+                )))
+                .child(
+                    glass_pill(theme, "Cancel")
+                        .id("search-cancel")
+                        .on_click(cx.listener(|this, _, _, cx| this.close_search(cx))),
+                )
+                .into_any_element(),
+            ChatItem::NoResults => {
+                let query = self.search_query(cx);
+                empty_state(
+                    theme,
+                    "No Results",
+                    format!("No conversation matches \"{query}\"."),
+                )
+                .into_any_element()
             }
             ChatItem::RoleBanner => self.role_banner(theme, cx),
             ChatItem::SpamBack => list_row(

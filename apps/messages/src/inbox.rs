@@ -616,7 +616,6 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
 /// Indices of the rows that match `query`: by folded title or snippet, or, for
 /// a query with three or more digits, by the digits of the SMS sender. A blank
 /// query keeps every row. Order is kept.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn filter_rows(rows: &[RowView], query: &str) -> Vec<usize> {
     let query = query.trim();
     if query.is_empty() {

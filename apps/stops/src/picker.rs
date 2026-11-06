@@ -361,7 +361,16 @@ impl StopsApp {
             return;
         };
         let name = self.field.read(cx).text().to_owned();
-        let result = self.saved.save(&name, dest.coord, dest.gtfs_stop.clone());
+        if self.save_named(&name, &dest, cx) {
+            self.sheet.close();
+        }
+        cx.notify();
+    }
+
+    /// Saves `dest` as `name` and shows the pill. True when the place is now
+    /// in Saved (new or already there); false when the name was refused.
+    fn save_named(&mut self, name: &str, dest: &Destination, cx: &mut Context<Self>) -> bool {
+        let result = self.saved.save(name, dest.coord, dest.gtfs_stop.clone());
         let text = pick::save_result_text(&result, &self.saved);
         let id = match result {
             Ok(id) => {
@@ -371,15 +380,14 @@ impl StopsApp {
             Err(rovsti_geo::PlaceError::Duplicate(id)) => Some(id),
             Err(_) => None,
         };
-        if let Some(id) = id {
-            if let Some(place) = self.saved.get(id) {
-                let (coord, label) = (place.coord, place.name.clone());
-                self.pick.relabel_near(coord, &label);
-            }
-            self.sheet.close();
+        if let Some(id) = id
+            && let Some(place) = self.saved.get(id)
+        {
+            let (coord, label) = (place.coord, place.name.clone());
+            self.pick.relabel_near(coord, &label);
         }
         self.show_pill(text, None, cx);
-        cx.notify();
+        id.is_some()
     }
 
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
@@ -411,7 +419,12 @@ impl StopsApp {
         cx: &mut Context<Self>,
     ) {
         if save {
-            self.save_point(&dest, cx);
+            let name = self.field.read(cx).text().to_owned();
+            if !self.save_named(&name, &dest, cx) {
+                // The sheet stays open so the name can be fixed.
+                cx.notify();
+                return;
+            }
         }
         self.map.pattern = dest.pattern;
         self.map.follow = true;
@@ -427,20 +440,6 @@ impl StopsApp {
         self.map.follow = true;
         self.sheet.close();
         cx.notify();
-    }
-
-    /// Keeps a point in Saved; a duplicate is fine.
-    fn save_point(&mut self, dest: &Destination, cx: &mut Context<Self>) {
-        match self.saved.add(&dest.label, dest.coord) {
-            Ok(id) => {
-                if let Some(place) = self.saved.get_mut(id) {
-                    place.gtfs_stop.clone_from(&dest.gtfs_stop);
-                }
-                self.save_places(cx);
-            }
-            Err(rovsti_geo::PlaceError::Duplicate(_)) => {}
-            Err(error) => self.show_pill(error.message(), None, cx),
-        }
     }
 
     fn rename_place(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -480,7 +479,10 @@ impl StopsApp {
                 self.pick.sheet_slot().picker_title(),
                 self.pick_body(theme, window, cx),
             ),
-            SheetMode::Confirm(dest) => ("Use this point", self.confirm_body(theme, &dest, cx)),
+            SheetMode::Confirm(dest) => (
+                "Use this point",
+                self.confirm_body(theme, &dest, window, cx),
+            ),
             SheetMode::Rename(id) => ("Rename place", self.rename_body(theme, id, window, cx)),
             SheetMode::SavePoint { dest, .. } => {
                 ("Save place", self.save_point_body(theme, &dest, window, cx))
@@ -847,7 +849,7 @@ impl StopsApp {
                 list_row(theme, None, "Save this stop", None, None)
                     .id("stop-save")
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.save_stop(&save_dest, cx);
+                        this.open_save_point(save_dest.clone(), None, cx);
                     }))
                     .into_any_element(),
             ],
@@ -863,31 +865,15 @@ impl StopsApp {
         .into_any_element()
     }
 
-    /// Keeps a transit stop in Saved, remembering which stop of the feed it is.
-    fn save_stop(&mut self, dest: &Destination, cx: &mut Context<Self>) {
-        match self.saved.add(&dest.label, dest.coord) {
-            Ok(id) => {
-                if let Some(place) = self.saved.get_mut(id) {
-                    place.gtfs_stop.clone_from(&dest.gtfs_stop);
-                }
-                self.save_places(cx);
-                self.show_pill("Saved.", None, cx);
-            }
-            Err(rovsti_geo::PlaceError::Duplicate(_)) => {
-                self.show_pill("You already saved a place here.", None, cx);
-            }
-            Err(error) => self.show_pill(error.message(), None, cx),
-        }
-        cx.notify();
-    }
-
     fn confirm_body(
         &mut self,
         theme: Theme,
         dest: &Destination,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = theme::colors(theme);
+        let prefill = dest.clone();
         let save_row = list_row(
             theme,
             None,
@@ -896,8 +882,12 @@ impl StopsApp {
             Some(if self.save_place { "On" } else { "Off" }.into()),
         )
         .id("save-toggle")
-        .on_click(cx.listener(|this, _, _, cx| {
+        .on_click(cx.listener(move |this, _, _, cx| {
             this.save_place = !this.save_place;
+            if this.save_place {
+                let name = pick::save_prefill(&prefill);
+                this.field.update(cx, |f, cx| f.set(&name, cx));
+            }
             cx.notify();
         }));
         let as_a = dest.clone();
@@ -918,6 +908,16 @@ impl StopsApp {
             .child(Self::sheet_title(theme, dest.title()))
             .child(Self::footnote(theme, pick::details_text(dest)))
             .child(section(theme, None, [save_row.into_any_element()]))
+            .children(self.save_place.then(|| {
+                div().px(px(16.0)).child(field_box(
+                    theme,
+                    "confirm-save-field",
+                    &self.field,
+                    "Name",
+                    window,
+                    cx,
+                ))
+            }))
             .child(
                 div()
                     .flex()

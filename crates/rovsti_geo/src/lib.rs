@@ -16,6 +16,7 @@ pub mod notice;
 pub mod places;
 pub mod poll;
 pub mod prefs;
+pub mod saved_stops;
 mod session;
 pub mod tiles;
 mod trip;
@@ -33,6 +34,7 @@ pub use history::{History, Outcome, Stats, TripRecord};
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};
 pub use places::{Place, PlaceError, SavedPlaces};
 pub use prefs::{NOTICE_MINUTES, NoticePrefs, NoticeWhen, SNOOZE_CHOICES, StopsPrefs};
+pub use saved_stops::{LoadedStops, SavedStop, SavedStopError, SavedStops};
 pub use session::{
     ActiveTrip, FixIn, FixOut, FixOutcome, FixPos, NoticeDelivery, NoticeState, Track,
 };

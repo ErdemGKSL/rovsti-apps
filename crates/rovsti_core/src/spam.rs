@@ -229,6 +229,44 @@ pub fn links(body: &str) -> Vec<String> {
     out
 }
 
+/// One "Open link" pill: its label and the URL it opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenLink {
+    pub label: String,
+    pub url: String,
+}
+
+/// Up to `max` pills for the links of `body`: "Open link" for a single link,
+/// the host (at most 24 characters) when there are several.
+pub fn open_links(body: &str, max: usize) -> Vec<OpenLink> {
+    let found = links(body);
+    let several = found.len() > 1;
+    found
+        .into_iter()
+        .take(max)
+        .map(|url| {
+            let label = if several {
+                host_label(&url)
+            } else {
+                "Open link".to_owned()
+            };
+            OpenLink { label, url }
+        })
+        .collect()
+}
+
+/// The URL without scheme and path, cut to 24 characters with an ellipsis.
+fn host_label(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    if host.chars().count() > 24 {
+        let cut: String = host.chars().take(23).collect();
+        format!("{cut}\u{2026}")
+    } else {
+        host.to_owned()
+    }
+}
+
 /// The openable URL for one whitespace-free token, if it looks like a link.
 fn link_token(raw: &str) -> Option<String> {
     const TLDS: [&str; 30] = [
@@ -310,6 +348,25 @@ pub fn classify(
 mod tests {
     use super::*;
     use crate::wire::BlockedNumber;
+
+    #[test]
+    fn open_links_single_and_several() {
+        let one = open_links("see https://a.com/x now", 3);
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].label, "Open link");
+        assert_eq!(one[0].url, "https://a.com/x");
+        let many = open_links("a.com b.org https://c.net/p?q=1 www.d.io e.com", 3);
+        let labels: Vec<_> = many.iter().map(|l| l.label.as_str()).collect();
+        assert_eq!(labels, ["a.com", "b.org", "c.net"]);
+        assert!(open_links("no links here", 3).is_empty());
+    }
+
+    #[test]
+    fn open_links_truncates_long_hosts() {
+        let l = open_links("https://averyveryverylonghostname-example.com/x b.com", 3);
+        assert_eq!(l[0].label.chars().count(), 24);
+        assert!(l[0].label.ends_with('\u{2026}'));
+    }
 
     fn rules(list: Vec<SpamRule>) -> SpamRules {
         SpamRules {

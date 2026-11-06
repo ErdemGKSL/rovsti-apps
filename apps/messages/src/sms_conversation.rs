@@ -601,6 +601,14 @@ impl SmsConversation {
         cx.notify();
     }
 
+    /// An open-link pill was tapped: the browser gets the URL and the selection closes.
+    fn open_link(&mut self, url: &str, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.rows_dirty = true;
+        cx.open_url(url);
+        cx.notify();
+    }
+
     /// Hands one picture or file of a message to the "Save as" sheet.
     fn save_part(&mut self, part: SavePart, cx: &mut Context<Self>) {
         self.selected = None;
@@ -937,6 +945,18 @@ impl SmsConversation {
                         .id(("sms-save", index * 100 + n))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.save_part(part.clone(), cx);
+                        })),
+                );
+            }
+            for (n, link) in rovsti_core::spam::open_links(&item.body, 3)
+                .into_iter()
+                .enumerate()
+            {
+                pills = pills.child(
+                    glass_pill(theme, link.label)
+                        .id(("sms-link", index * 10 + n))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_link(&link.url, cx);
                         })),
                 );
             }

@@ -2194,10 +2194,10 @@ impl Conversation {
         let message = &item.message;
         let revoked = meta.is_some_and(|m| m.revoked);
         let id = message.id.clone();
-        let pill = |key: &str, icon: Icon, label: &'static str, danger: bool| {
+        let pill = |key: &str, icon: Icon, label: &str, danger: bool| {
             let colors = theme::colors(theme);
             let color = if danger { colors.red } else { colors.label };
-            glass_pill(theme, label)
+            glass_pill(theme, label.to_owned())
                 .id(SharedString::from(format!("act-{key}-{id}")))
                 .flex()
                 .items_center()
@@ -2276,6 +2276,27 @@ impl Conversation {
                     cx.notify();
                 }),
             ));
+        }
+        if !revoked && let Some(text) = copy_text_of(&message.body, meta) {
+            for (n, link) in rovsti_core::spam::open_links(&text, 3)
+                .into_iter()
+                .enumerate()
+            {
+                row = row.child(
+                    pill(
+                        &format!("link{n}"),
+                        Icon::LucideExternalLink,
+                        &link.label,
+                        false,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.open_url(&link.url);
+                        cx.notify();
+                    })),
+                );
+            }
         }
         if let MessageBody::Media { kind, mime, .. } = &message.body
             && saveable(*kind)

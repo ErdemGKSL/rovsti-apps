@@ -42,6 +42,40 @@ Ready-made files live in [`services/wa_gateway/deploy/`](../services/wa_gateway/
 - `Caddyfile.example`: TLS and WebSocket proxying, with a note on `trust_proxy`.
 - `config.example.toml`: every key with its default. A unit test parses it with the real
   loader, so it cannot drift from `config.rs`.
+- `remote-install.sh`: the half of the script below that runs on the server.
+
+### One command to the Raspberry Pi (no Docker)
+
+`scripts/deploy-wa-gateway.sh` builds the gateway on the server and runs it as the
+`wa-gateway` systemd service. It connects as `erdem` to `ssh.erdemdev.tr` through
+`cloudflared access ssh`, sends a 300 KB bundle (the gateway and the three workspace crates
+it needs, not the apps), builds it there with cargo (it installs rustup for that user the
+first time), installs `/usr/local/bin/wa_gateway` and the unit from this folder, writes
+`/etc/wa-gateway/config.toml`, and waits for `GET /healthz`. The gateway listens on
+`127.0.0.1:7218`; a Cloudflare tunnel public hostname (`https://rovsti.erdemdev.tr`) points
+at `http://localhost:7218`.
+
+```
+scripts/deploy-wa-gateway.sh            # build and (re)install
+scripts/deploy-wa-gateway.sh status     # service, listener, health, config
+scripts/deploy-wa-gateway.sh logs       # journal (LINES=300 for more)
+scripts/deploy-wa-gateway.sh rollback   # previous binary
+scripts/deploy-wa-gateway.sh --dry-run  # connection and bundle check only
+```
+
+- The SSH key is `~/.ssh/erdem_rpi_deploy.pem` (`DEPLOY_KEY`); on Windows only your own
+  account may be able to read it (`icacls key /inheritance:r /grant:r "%USERNAME%:(R)"`).
+  The script uses the Windows OpenSSH client, which accepts that ACL.
+- The existing `/etc/wa-gateway/config.toml` is kept on later deploys (`FORCE_CONFIG=1`
+  rewrites it). `trust_proxy = true` is right behind the tunnel: the gateway reads the last
+  `X-Forwarded-For` entry, which Cloudflare appends, and the port is loopback-only.
+- FCM push: the service-account key is uploaded to `/etc/wa-gateway/service-account.json`
+  (root only, mode 0600) and handed to the service with `LoadCredential=` in a drop-in
+  (`/etc/systemd/system/wa-gateway.service.d/10-rovsti.conf`), so the unprivileged service
+  user never owns the file. The project id goes into `config.toml`.
+- The workspace's release profile is tuned for Android size (fat LTO). The server build
+  overrides it (no LTO, `opt-level` 2) so a Raspberry Pi finishes in a reasonable time.
+- Data lives in `/var/lib/wa-gateway`. Back it up: it holds the linked accounts' keys.
 
 ## Configuration
 

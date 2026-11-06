@@ -491,7 +491,7 @@ impl ContactsApp {
         name: String,
         cx: &mut Context<Self>,
     ) {
-        self.notice = None;
+        self.clear_notice();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -514,7 +514,9 @@ impl ContactsApp {
                 }
             };
             this.update(cx, |this, cx| {
-                this.notice = notice;
+                if let Some(n) = notice {
+                    this.notice = Some(n);
+                }
                 cx.notify();
             })
             .ok();

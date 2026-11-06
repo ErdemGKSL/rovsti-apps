@@ -80,7 +80,7 @@ impl ContactsApp {
             }
         })
         .detach();
-        self.notice = None;
+        self.clear_notice();
         self.picker = Some(Picker {
             for_,
             chosen: initial.iter().copied().collect(),

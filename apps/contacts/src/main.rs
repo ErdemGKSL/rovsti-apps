@@ -102,6 +102,32 @@ enum NoticeAction {
     UndoDelete,
 }
 
+/// Whether a notice button survives a clear: only the Undo of a waiting delete.
+fn keeps_undo(action: Option<NoticeAction>, pending: bool) -> bool {
+    action == Some(NoticeAction::UndoDelete) && pending
+}
+
+#[cfg(test)]
+mod notice_tests {
+    use super::*;
+
+    #[test]
+    fn undo_is_kept_while_pending() {
+        assert!(keeps_undo(Some(NoticeAction::UndoDelete), true));
+    }
+
+    #[test]
+    fn undo_is_dropped_without_pending() {
+        assert!(!keeps_undo(Some(NoticeAction::UndoDelete), false));
+    }
+
+    #[test]
+    fn no_action_is_dropped() {
+        assert!(!keeps_undo(None, true));
+        assert!(!keeps_undo(None, false));
+    }
+}
+
 /// A deleted contact, hidden but not yet removed from Android.
 struct PendingDelete {
     id: i64,
@@ -583,7 +609,7 @@ impl ContactsApp {
             .map(|c| ContactCard::new(c, format));
         self.open_draft = None;
         self.close_field_sheet_now();
-        self.notice = None;
+        self.clear_notice();
         // The lists keep their own scroll; the card starts at its top.
         self.scroll.set_offset(gpui::point(px(0.0), px(0.0)));
         self.page.restart();
@@ -611,7 +637,7 @@ impl ContactsApp {
 
     fn set_whatsapp_open(&mut self, open: bool, cx: &mut Context<Self>) {
         self.whatsapp_open = open;
-        self.notice = None;
+        self.clear_notice();
         self.page.restart();
         cx.notify();
     }
@@ -684,7 +710,7 @@ impl ContactsApp {
                 self.set_whatsapp_open(false, cx);
             }
         } else if self.tabs.select(CONTACTS_TAB) {
-            self.notice = None;
+            self.clear_notice();
             self.page.restart();
             cx.notify();
         } else {
@@ -701,7 +727,7 @@ impl ContactsApp {
         action: impl FnOnce() -> rovsti_android::Result<bool> + Send + 'static,
         cx: &mut Context<Self>,
     ) {
-        self.notice = None;
+        self.clear_notice();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -715,7 +741,9 @@ impl ContactsApp {
                 }
             };
             this.update(cx, |this, cx| {
-                this.notice = notice;
+                if let Some(n) = notice {
+                    this.notice = Some(n);
+                }
                 cx.notify();
             })
             .ok();
@@ -1453,6 +1481,16 @@ impl ContactsApp {
         }
     }
 
+    /// Navigation and a new action clear the notice, except the Undo of a
+    /// delete that is still waiting.
+    pub(crate) fn clear_notice(&mut self) {
+        if keeps_undo(self.notice_action, self.pending_delete.is_some()) {
+            return;
+        }
+        self.notice = None;
+        self.notice_action = None;
+    }
+
     /// Starts the timer that takes the notice away, once per new text. A
     /// notice ending in "…" says work is under way and stays until replaced.
     fn keep_notice_timer(&mut self, cx: &mut Context<Self>) {
@@ -1662,7 +1700,7 @@ impl Render for ContactsApp {
                                 this.open_draft = None;
                                 this.group_page = None;
                                 this.group_edit = None;
-                                this.notice = None;
+                                this.clear_notice();
                                 this.page.restart();
                             }
                             cx.notify();

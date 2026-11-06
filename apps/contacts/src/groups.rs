@@ -120,7 +120,7 @@ impl ContactsApp {
             .map(|g| self.rows_of_group(g))
             .unwrap_or_default();
         self.group_edit = None;
-        self.notice = None;
+        self.clear_notice();
         self.refill_groups(true, cx);
         self.page.restart();
         cx.notify();
@@ -153,7 +153,7 @@ impl ContactsApp {
             saving: false,
             account,
         });
-        self.notice = None;
+        self.clear_notice();
         // The title box sits in the header: keep it drawn while it has focus.
         self.refill_groups(false, cx);
         cx.notify();

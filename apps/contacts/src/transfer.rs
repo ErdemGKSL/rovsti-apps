@@ -53,7 +53,7 @@ impl ContactsApp {
             return;
         }
         self.transfer_busy = true;
-        self.notice = None;
+        self.clear_notice();
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
@@ -229,7 +229,7 @@ impl ContactsApp {
                 })
                 .await;
             this.update(cx, |this, cx| {
-                this.notice = None;
+                this.clear_notice();
                 this.transfer_busy = false;
                 this.confirm = Some(Confirm::Import {
                     cards: plan.add,

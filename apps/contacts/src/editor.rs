@@ -229,7 +229,7 @@ impl ContactsApp {
 
     fn start_editor(&mut self, draft: &ContactDraft, cx: &mut Context<Self>) {
         self.editor = Some(Editor::new(draft, cx));
-        self.notice = None;
+        self.clear_notice();
         self.page.restart();
         cx.notify();
     }
@@ -443,7 +443,7 @@ impl ContactsApp {
             return;
         }
         self.transfer_busy = true;
-        self.notice = None;
+        self.clear_notice();
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx

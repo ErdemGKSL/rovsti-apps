@@ -153,6 +153,9 @@ impl ContactsApp {
             return;
         };
         drop(task);
+        // The button is gone with the delete; the text expires on its timer.
+        self.notice_action = None;
+        cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -172,6 +175,9 @@ impl ContactsApp {
     /// The owner tapped Undo: the contact comes back and its card opens.
     pub(crate) fn undo_delete(&mut self, cx: &mut Context<Self>) {
         let Some(pending) = self.pending_delete.take() else {
+            self.notice = None;
+            self.notice_action = None;
+            cx.notify();
             return;
         };
         self.notice = None;

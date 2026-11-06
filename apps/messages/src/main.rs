@@ -34,19 +34,19 @@ use gpui::{
     WindowOptions, div, list, px, size,
 };
 use rovsti_core::{
-    Message, MessageDirection, PhoneNumber, ThreadId,
+    Message, MessageDirection, PhoneNumber, ThreadId, blocklist,
     inbox::InboxThread,
     notify::NotificationSpec,
     schedule::{self, ScheduleTarget, ScheduledSms},
     spam,
-    wire::Handoff,
+    wire::{EmergencyList, Handoff},
 };
 use rovsti_ui::{
     Icon, IconAssets,
     components::{avatar, empty_state, glass_icon_button, glass_pill, large_title, list_row},
     current_theme,
     glass::{GlassSpec, glass},
-    notice_pill::NoticePill,
+    notice_pill::{NoticePill, PillEvent},
     tab_bar::{Tab, TabBar, content_bottom_inset},
     theme,
     tokens::{Theme, metrics, shadow, typography},
@@ -113,10 +113,8 @@ struct SmsRowMenu {
     in_spam: bool,
 }
 
-/// The SMS actions a row menu lists now. Not spam and Block have no handler
-/// yet, so they stay out rather than show as dead buttons.
+/// The SMS actions a row menu lists.
 fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
-    use sms_actions::SmsAction;
     sms_actions::actions(&sms_actions::SmsActionContext {
         unread: sms.unread,
         muted: sms.muted,
@@ -124,9 +122,15 @@ fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
         single_sender: sms.sender.is_some(),
         ..sms_actions::SmsActionContext::default()
     })
-    .into_iter()
-    .filter(|a| !matches!(a, SmsAction::NotSpam | SmsAction::Block))
-    .collect()
+}
+
+/// What the pill's trailing "Undo" does.
+#[derive(Clone, Debug)]
+enum PillAction {
+    /// Puts a sender back in Spam.
+    Unallow(String),
+    /// Unblocks a number.
+    Unblock(String),
 }
 
 /// The page pushed over the tabs.
@@ -151,6 +155,8 @@ struct MessagesApp {
     schedule: ScheduleSheet,
     /// Confirmations and failures, over the page.
     pill: NoticePill,
+    /// What the pill's trailing button does, with the pill's token.
+    pill_action: Option<(u64, PillAction)>,
     /// What each notified conversation says, for the digest.
     digests: Digests,
     /// The gateway's scheduled texts (pending and recently finished).
@@ -326,6 +332,7 @@ impl MessagesApp {
             backend,
             schedule,
             pill: NoticePill::new(),
+            pill_action: None,
             digests: Digests::default(),
             remote_scheduled: Vec::new(),
             back_enabled: false,
@@ -961,9 +968,133 @@ impl MessagesApp {
                 });
                 self.show_pill(if mute { "Muted" } else { "Unmuted" });
             }
-            // Not offered by the row menu yet.
-            SmsAction::NotSpam | SmsAction::Block | SmsAction::Call | SmsAction::AddContact => {
+            SmsAction::NotSpam => {
                 self.row_menu = None;
+                if let Some(sender) = sms.sender {
+                    self.not_spam(sender, cx);
+                }
+            }
+            SmsAction::Block => {
+                let title = self.row_menu.take().map(|m| m.title).unwrap_or_default();
+                if let Some(sender) = sms.sender {
+                    self.block_sender(sender, title, cx);
+                }
+            }
+            // Not offered by the row menu.
+            SmsAction::Call | SmsAction::AddContact => {
+                self.row_menu = None;
+            }
+        }
+        cx.notify();
+    }
+
+    /// Not spam: the sender joins the allow list, so its row moves to the inbox.
+    fn not_spam(&mut self, sender: String, cx: &mut Context<Self>) {
+        let mut added = false;
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| added = p.allow_sender(&sender));
+        });
+        if added {
+            self.show_pill_action(
+                sms_actions::not_spam_text(&sender),
+                "Undo",
+                PillAction::Unallow(sender),
+                cx,
+            );
+        } else {
+            self.show_pill("Already allowed");
+        }
+    }
+
+    /// Block: refuses emergency numbers, asks Android off the UI thread, then
+    /// re-pulls the blocklist. The pill offers Undo.
+    fn block_sender(&mut self, raw: String, title: SharedString, cx: &mut Context<Self>) {
+        if let Err(refusal) = blocklist::can_block(&raw, &EmergencyList::default()) {
+            self.show_pill(sms_actions::refusal_note(refusal));
+            return;
+        }
+        let number = raw.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { rovsti_android::blocklist::block(&number) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(true) => {
+                        this.backend
+                            .update(cx, |backend, cx| backend.pull_blocked(cx));
+                        this.show_pill_action(
+                            sms_actions::blocked_text(&title),
+                            "Undo",
+                            PillAction::Unblock(raw),
+                            cx,
+                        );
+                    }
+                    Err(rovsti_android::Error::Unsupported) => {
+                        this.show_pill("Blocking needs an Android phone.");
+                    }
+                    Ok(false) | Err(_) => this.show_pill("Android refused that change."),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Shows the pill with a trailing button and remembers what it does.
+    fn show_pill_action(
+        &mut self,
+        text: impl Into<SharedString>,
+        label: &'static str,
+        action: PillAction,
+        cx: &mut Context<Self>,
+    ) {
+        let token = self.pill.show(text, Some(label.into()), true, false);
+        self.pill_action = Some((token, action));
+        cx.notify();
+    }
+
+    /// The trailing button was tapped. A pill replaced meanwhile owns another
+    /// token, so a stale tap does nothing.
+    fn pill_fired(&mut self, cx: &mut Context<Self>) {
+        let Some((token, action)) = self.pill_action.take() else {
+            return;
+        };
+        if token != self.pill.token() {
+            return;
+        }
+        self.pill.dismiss();
+        match action {
+            PillAction::Unallow(sender) => {
+                self.backend.update(cx, |backend, cx| {
+                    backend.update_prefs(cx, |p| {
+                        p.unallow_sender(&sender);
+                    })
+                });
+                self.show_pill("Back in Spam");
+            }
+            PillAction::Unblock(raw) => {
+                let task = cx
+                    .background_executor()
+                    .spawn(async move { rovsti_android::blocklist::unblock(&raw) });
+                cx.spawn(async move |this, cx| {
+                    let result = task.await;
+                    this.update(cx, |this, cx| {
+                        match result {
+                            Ok(true) => {
+                                this.backend
+                                    .update(cx, |backend, cx| backend.pull_blocked(cx));
+                                this.show_pill("Unblocked");
+                            }
+                            _ => this.show_pill("Couldn't unblock that number"),
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
             }
         }
         cx.notify();
@@ -1876,7 +2007,9 @@ impl MessagesApp {
             let entity = cx.entity();
             move |pointer, position, _, cx| {
                 entity.update(cx, |this, cx| {
-                    this.pill.pointer(pointer, position);
+                    if this.pill.pointer(pointer, position) == PillEvent::Action {
+                        this.pill_fired(cx);
+                    }
                     cx.notify();
                 });
             }
@@ -2566,14 +2699,14 @@ mod tests {
     }
 
     #[test]
-    fn row_menu_lists_only_actions_with_a_handler() {
+    fn row_menu_offers_not_spam_and_block() {
         assert_eq!(
             row_sms_actions(&menu(true, false, false)),
-            vec![MarkRead, Mute, Delete]
+            vec![MarkRead, Mute, Block, Delete]
         );
         assert_eq!(
             row_sms_actions(&menu(false, true, true)),
-            vec![Unmute, Delete]
+            vec![Unmute, NotSpam, Block, Delete]
         );
     }
 }

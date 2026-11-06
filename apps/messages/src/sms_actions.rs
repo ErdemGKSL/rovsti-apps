@@ -108,6 +108,33 @@ pub fn sender_of(addresses: &[String]) -> Option<&str> {
 #[cfg_attr(not(test), allow(dead_code))]
 pub const NEEDS_ROLE: &str = "Make Rovsti Messages your default SMS app to delete messages";
 
+/// What the pill says after Not spam.
+pub fn not_spam_text(sender: &str) -> String {
+    format!("{} is no longer spam", sender.trim())
+}
+
+/// What the pill says after Block; a blank title reads "this number".
+pub fn blocked_text(title: &str) -> String {
+    let title = title.trim();
+    format!(
+        "Blocked {}",
+        if title.is_empty() {
+            "this number"
+        } else {
+            title
+        }
+    )
+}
+
+/// Why Block was refused before Android was asked.
+pub fn refusal_note(refusal: rovsti_core::blocklist::BlockRefusal) -> &'static str {
+    use rovsti_core::blocklist::BlockRefusal;
+    match refusal {
+        BlockRefusal::Emergency => "Emergency numbers can't be blocked",
+        BlockRefusal::NoNumber | BlockRefusal::NotANumber => "Unknown number, cannot block",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,5 +236,17 @@ mod tests {
         assert_eq!(sender_of(&v(&[" ", " +90555 "])), Some("+90555"));
         assert_eq!(sender_of(&v(&["+90555", "+90556"])), None);
         assert_eq!(sender_of(&v(&["+90555", "+90555"])), Some("+90555"));
+    }
+
+    #[test]
+    fn pill_texts_and_refusals() {
+        assert_eq!(not_spam_text(" Bank "), "Bank is no longer spam");
+        assert_eq!(blocked_text("Ayse"), "Blocked Ayse");
+        assert_eq!(blocked_text("  "), "Blocked this number");
+        let emergency = rovsti_core::wire::EmergencyList::default();
+        let refusal = rovsti_core::blocklist::can_block("112", &emergency).expect_err("refused");
+        assert_eq!(refusal_note(refusal), "Emergency numbers can't be blocked");
+        let refusal = rovsti_core::blocklist::can_block("*#06#", &emergency).expect_err("refused");
+        assert_eq!(refusal_note(refusal), "Unknown number, cannot block");
     }
 }

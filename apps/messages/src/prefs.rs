@@ -110,7 +110,6 @@ impl MessagesPrefs {
 
     /// Takes a sender off the allow list (case-insensitive), for Undo. `false`
     /// when it was not there.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn unallow_sender(&mut self, sender: &str) -> bool {
         let sender = sender.trim();
         let before = self.spam.allow.len();

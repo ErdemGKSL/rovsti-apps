@@ -22,6 +22,21 @@ incoming calls, live WhatsApp sockets and arrival alarms.
 Every link falls back to the app's system details page when a component is missing,
 because Xiaomi moves these screens between releases.
 
+## Stops alarm on Xiaomi
+
+For the arrival alarm to ring on time and over the lock screen, grant all of these:
+
+- Autostart, so the boot receiver and the exact alarms (snooze, watchdog, ring guard) can start the app.
+- Battery saver set to "No restrictions", so `TripService` keeps location updates with the screen off.
+- Other permissions: "Show on lock screen" and "Display pop-up windows while running in background",
+  so `AlarmActivity` can open over the lock screen.
+- Full-screen notifications (Android 14+): the Stops UI shows a row when `canUseFullScreenIntent()` is false.
+
+The alarm channel `trip_alarm_v2` is `IMPORTANCE_HIGH` with `USAGE_ALARM`, which is what lets MIUI and
+HyperOS silent mode and Do Not Disturb keep alarms audible. MIUI may clamp `setStreamVolume` on
+`STREAM_ALARM`; the call is wrapped in a `SecurityException` guard and the alarm then rings at the
+level the system allows. The sound fallback chain and the vibration run regardless.
+
 ## Known quirks to verify on device
 
 - Some MIUI builds hide the default-app role dialog. When `roles::request` returns

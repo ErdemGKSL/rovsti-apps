@@ -71,9 +71,9 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | Phone | `ROLE_DIALER` | `InCallService` (in-call UI + ringing via full-screen intent), `ACTION_DIAL` activity filter, call log and contacts providers; `RECORD_AUDIO` for WhatsApp calls |
 | Messages | `ROLE_SMS` | `SMS_DELIVER` receiver, `WAP_PUSH_DELIVER` (MMS) receiver, `RESPOND_VIA_MESSAGE` service, `SENDTO`/`SEND` activity filters, inline-reply, scheduled-SMS and boot receivers; one headless JNI call into Rust for cold decisions (AD-MSG4); WhatsApp wakes through optional FCM push and fetches its text through that same call (AD-MSG5); no foreground service |
 | Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS`); `INTERNET` for the gateway (WhatsApp only); Photo Picker for contact photos (no permission); handoff to Phone and Messages (`dev.rovsti.permission.HANDOFF`, signature); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
-| Stops | none | foreground service of type `location` (`TripService`) feeding fixes to `rovsti_geo::ActiveTrip` through the headless call, `AlarmActivity` (native Views over the lock screen, full-screen intent), `USE_EXACT_ALARM` for snooze and the watchdog (`setAlarmClock`, `setExactAndAllowWhileIdle` as fallback), boot receiver that ends a stale trip; `INTERNET` for the gateway (the arriving-soon message only); `geo:` and maps-link `VIEW` filters and `SEND text/plain` |
+| Stops | none | foreground service of type `location` (`TripService`) feeding fixes to `rovsti_geo::ActiveTrip` through the headless call, `AlarmActivity` (native Views over the lock screen, full-screen intent), `TripAlarm`/`AlarmSound` (alarm-usage audio focus, `STREAM_ALARM` volume raise and restore, `CATEGORY_ALARM` channel), `USE_EXACT_ALARM` for snooze and the watchdog (`setAlarmClock`, `setExactAndAllowWhileIdle` as fallback), boot receiver that ends a stale trip; `INTERNET` for the gateway (the arriving-soon message only); `geo:` and maps-link `VIEW` filters and `SEND text/plain` |
 
-### Stops: decisions (AD-ST1 to AD-ST8, AD-SX1 to AD-SX8)
+### Stops: decisions (AD-ST1 to AD-ST8, AD-SA1 to AD-SA6, AD-SX1 to AD-SX8)
 
 - **AD-ST1 Pure first.** The trip session, destination parsing, saved places, history and
   statistics, prefs, the arriving-soon template, GTFS parsing and the map projection are
@@ -83,11 +83,48 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   `trip.json`, runs `ActiveTrip::on_fix`, saves, maybe sends the WhatsApp notice, and answers
   `FixOut`. The UI, when attached, gets the same answer as a `trip_status` event, so a trip survives
   the activity being killed. Every change of `trip.json` holds `store::lock()`.
-- **AD-ST3 The alarm needs no GPUI.** `TripAlarm` posts a full-screen-intent notification to the
-  native `AlarmActivity`, plays the default alarm sound and vibrates with alarm usage (each can be
-  switched off in Settings, never both), holds a wake lock for at most 10 minutes. Snooze re-rings
-  through `AlarmManager.setAlarmClock`; a watchdog alarm asks for a fix when none arrived. GPUI draws
-  its own alarm screen only while the app is open.
+- **AD-ST3 The alarm needs no GPUI.** `TripAlarm` posts a `CATEGORY_ALARM` full-screen-intent
+  notification to the native `AlarmActivity` (over the lock screen), plays sound through
+  `AlarmSound` and vibrates with alarm usage (each can be switched off in Settings, never both).
+  Snooze re-rings through `AlarmManager.setAlarmClock`; a watchdog alarm asks for a fix when none
+  arrived. GPUI draws its own alarm screen only while the app is open. AD-SA1 to AD-SA6 fix the
+  details: polling curve, retry window, policy, fallback chain, timeout and routing.
+- **AD-SA1 One explicit polling curve** (`rovsti_geo::poll`). Interval =
+  `slack / (2 * MAX_SPEED_MPS)` clamped to `[MIN_POLL = 3 s, MAX_POLL = 300 s]`, with
+  `slack = line_m - acc - max(DEAD_BAND_M, acc)`. The closer to the A-B diameter, the shorter;
+  never longer than 300 s. The `/2` keeps two fixes at worst-case speed from jumping the band
+  unseen. Unknown distance (no usable fix yet) gives 300 s; unknown or unusable accuracy counts as
+  `MAX_ACCURACY_M` (pessimistic); a garbage fix reuses the last usable distance; a trip that is not
+  tracking polls at `IDLE_POLL` (60 s). Tests: monotonic, exact 300 s cap, 3 s floor, safety bound.
+- **AD-SA2 Retry window.** `retry_after(interval) = interval + clamp(interval / 4, 5 s, 30 s)`.
+  Rust sends it as `FixOut.retry_ms`; `TripService` arms the watchdog with it (a mirrored formula
+  covers the start spec), so a missing fix triggers a retry, never silence. On a `null` location
+  the service tries the other provider once, then reports `searching`. Every changed interval
+  re-registers the location request (both the `LocationRequest` and the legacy path).
+- **AD-SA3 Alarm policy is Rust data.** `rovsti_geo::alarm::AlarmPlan` (volume percent, ramp,
+  ring timeout, sound order, vibration pattern) goes to Kotlin inside the start spec (`"alarm"`) and
+  is saved with the trip prefs. Kotlin has identical defaults so the alarm rings even if Rust never
+  answered; a cargo contract test (`apps/stops/src/kotlin_contract.rs`) keeps both in sync. The
+  volume target (`volume_target`, at least 80 % of max, never lowering a louder level) and the ramp
+  (`ramp_volume`, full loudness within 5 s) are pure functions mirrored in Kotlin.
+- **AD-SA4 Never silent.** Sound sources in order: `user_alarm`, `default_alarm`,
+  `default_ringtone`, `default_notification`, `tone` (a `ToneGenerator` on `STREAM_ALARM`; no
+  bundled raw sound because `rovsti_android` ships no resources). A null URI, an exception or a
+  `MediaPlayer` `OnErrorListener` callback advances to the next source. Vibration with alarm usage
+  runs independently of the sound.
+- **AD-SA5 Ring timeout and guard.** After the ring timeout (10 min) the alarm stops and re-rings
+  after the user's snooze length (`trip_alarm` action `timeout`, event `timed_out`). Timeouts do
+  not consume `MAX_SNOOZES` and are capped at `MAX_TIMEOUT_RERINGS` (6); past the cap the
+  notification stays and the sound stops. A guard alarm armed at ring start (`setAlarmClock` at
+  now + timeout + default snooze, same PendingIntent) re-rings after process death. Stopping
+  releases player, tone generator, audio focus, vibration, wake lock and restores the user's alarm
+  volume, idempotently; `TripAlarm.recover` restores a stale saved volume after a crash.
+- **AD-SA6 Routing like the stock clock.** Every audio, focus and vibration call uses one
+  `ALARM_ATTRS` (`USAGE_ALARM`, `CONTENT_TYPE_SONIFICATION`) with
+  `AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE`, so music pauses and Android plays the alarm on the speaker
+  as well as a wired or Bluetooth headset. No preferred device, no communication device, no
+  `STREAM_MUSIC`. The channel `trip_alarm_v2` is `IMPORTANCE_HIGH` with alarm sound attributes, so
+  the Do Not Disturb alarm exception applies.
 - **AD-ST4 Map: vector tiles under a vector radar.** No region is bundled with the app (it bloats
   the APK and goes stale). Stops downloads Shortbread 1.0 vector tiles (MVT, zoom 0-14, overzoomed
   beyond 14) from a VersaTiles-compatible server that the user sets (default

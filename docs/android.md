@@ -143,13 +143,28 @@ Rust (`trip_alarm`, `snooze_min`). The Settings tab also offers the battery exem
 (`xiaomi::request_ignore_battery_optimizations`), the Xiaomi autostart page when `xiaomi::detect()`
 finds MIUI or HyperOS, and the exact-alarm status.
 
+**Alarm channel, audio and full screen.** `TripAlarm` posts on the channel `trip_alarm_v2`
+(`IMPORTANCE_HIGH`, alarm sound with `USAGE_ALARM` attributes, `setBypassDnd(true)`; the old
+`trip_alarm` channel is deleted), with `CATEGORY_ALARM`, so Do Not Disturb treats it as an alarm. On
+Android 14+ `NotificationManager.canUseFullScreenIntent()` is checked at ring time; when denied the
+heads-up notification and sound still run and Kotlin emits `{"state":"error","error":"full_screen"}`
+on `trip_status`. The Stops UI row "Let the alarm wake the screen" reads
+`rovsti_android::permissions::can_use_full_screen_intent` (desktop `Unsupported`), opens
+`open_full_screen_intent_settings` and refreshes when the window is activated again.
+`AlarmActivity` uses `setShowWhenLocked` and `setTurnScreenOn`. `AlarmSound` requests
+`AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE` with alarm attributes (abandoned on stop), raises
+`STREAM_ALARM` to at least 80 % of max (or keeps a louder user level) with a ramp of about 4 s and
+restores the saved level afterwards, then walks the sound fallback chain (AD-SA4). The ring stops
+after 10 minutes and re-rings after the snooze length (AD-SA5). The policy comes from
+`rovsti_geo::alarm::AlarmPlan`.
+
 **Doze.** Snooze uses `setAlarmClock`, which Doze lets through; the watchdog is an exact alarm. If
 `canScheduleExactAlarms()` is false they fall back to `setExactAndAllowWhileIdle`, which may be late.
 HyperOS can still delay location for a foreground service; the battery and autostart rows are the
 mitigation. None of this has run on a phone: the open item is in [roadmap.md](roadmap.md#rovsti-stops).
 
 **Trigger and `FixOut`.** The service is trigger-agnostic: it reads `state`, `ring`, `next_fix_ms`,
-`high_accuracy`, `title` and `text`. `distance_m` is now the distance to the line A-B. New fields,
+`high_accuracy`, `retry_ms` (watchdog window), `title` and `text`. `distance_m` is now the distance to the line A-B. New fields,
 all optional so older answers still parse: `side` (`"left"`, `"right"` or absent when on the line),
 `inside` (bool, in the circle) and `circle_m` (metres to the circle, 0 inside). A `trip.json` of the
 old single-destination shape is moved to `trip.legacy.json` and the service is answered

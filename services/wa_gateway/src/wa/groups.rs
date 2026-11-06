@@ -21,8 +21,14 @@ pub fn group_info(
         subject: subject.to_owned(),
         participants: participants
             .into_iter()
-            .map(|(jid, admin)| Participant { jid, admin })
+            .map(|(jid, admin)| Participant {
+                jid,
+                admin,
+                name: None,
+            })
             .collect(),
+        description: None,
+        announce: false,
     }
 }
 
@@ -72,11 +78,13 @@ mod tests {
             vec![
                 Participant {
                     jid: "905@s.whatsapp.net".into(),
-                    admin: true
+                    admin: true,
+                    name: None,
                 },
                 Participant {
                     jid: "906@s.whatsapp.net".into(),
-                    admin: false
+                    admin: false,
+                    name: None,
                 },
             ]
         );

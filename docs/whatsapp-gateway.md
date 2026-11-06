@@ -225,6 +225,111 @@ in request order. `business` and `verified_name` are optional in the reply.
 `rovsti_wa_client::Gateway::lookup_users(&[String])` wraps it. Apps look up one
 contact's numbers when its card opens, never the whole address book.
 
+## Message and chat meta
+
+`GET /v1/chats` and `GET /v1/chats/{jid}/messages` send the old fields plus a `meta`
+object (left out when empty), so older clients keep reading them as `ChatSummary` /
+`WaMessage`. The types are in `rovsti_wa_proto::meta`; the client reads them with
+`chats_with_meta()` (`RichChat`) and `messages_with_meta(...)` (`RichMessage`).
+
+A message's `meta` (`MessageMeta`) can hold:
+
+| Field | Meaning |
+| --- | --- |
+| `quoted` | `{id, sender, preview}` of the message this one replies to |
+| `forwarded`, `mentions` | forwarded flag; JIDs mentioned with `@` |
+| `edited_ms` | last edit (the body already holds the new text) |
+| `revoked` | deleted for everyone; the body is `unsupported`, nothing else is kept |
+| `status` | ticks of my messages: `sent`, `delivered`, `read`, `played` (only forward) |
+| `sender_name` | the author's push name when it arrived (groups) |
+| `media` | `file_name`, `seconds`, `width`, `height`, `pages`, `voice_note`, `animated`, `view_once`, `thumbnail` |
+| `location` | `{latitude, longitude, name, address, live}` (the body stays `unsupported`) |
+| `contact` | a shared contact card `{display_name, vcard}` (body `unsupported`) |
+| `starred` | starred on any device |
+
+A chat's `meta` (`ChatMeta`) holds `picture_id`, the other person's `push_name`,
+`archived`, `pinned`, `muted_until_ms` (`-1` is "until unmuted") and `marked_unread`;
+`last_meta` is the meta of the newest message.
+
+Live, new event types carry the same data; older clients skip them:
+
+- `message_meta {chat, id, body?, meta}`: a message's meta is new or changed (reply
+  context of a new message, an edit with the new `body`, a delete for everyone, a
+  star). A new message gets one only when there is more to say than "sent" (and, in
+  one-to-one chats, the push name).
+- `message_deleted {chat, id}`: deleted on my devices only.
+- `chat_meta {jid, meta}`: archive, pin, mute or unread mark changed here or on
+  another device (WhatsApp app-state sync).
+- `chat_deleted {jid}`, `chat_cleared {jid}`: done on another device.
+- `profile {jid, push_name, contact_name, about, picture_id, ...}`: a push name,
+  about text, saved name or picture changed. A new `picture_id` means a cached
+  picture is stale.
+
+Receipts are stored as `status`; the `receipt` event is unchanged. A read on another
+of my devices clears the chat's unread counter. History syncs bring each message's
+ticks, star and reactions, each chat's archive, pin and mute state, and push names.
+Chats WhatsApp keys by LID are stored under the phone-number JID when WhatsApp
+tells it, so they match address-book contacts.
+
+`rovsti_wa_proto::Timeline::apply_rich_page` and `Timeline::meta(id)` keep the meta
+next to the timeline and apply `message_meta`, `message_deleted` and `chat_cleared`.
+
+## Acting on messages and chats
+
+All need the bearer key and answer 204. Unknown messages are 404, malformed JIDs 400.
+
+| Request | Body | Notes |
+| --- | --- | --- |
+| `POST /v1/messages/edit` | `{chat, message_id, text}` | my own text or photo/video/document caption, within 15 minutes |
+| `POST /v1/messages/revoke` | `{chat, message_id, sender?}` | delete for everyone; `sender` set: a group admin deletes someone else's message |
+| `POST /v1/messages/delete` | `{chat, message_id}` | delete on my devices only |
+| `POST /v1/messages/star` | `{chat, message_id, starred}` | |
+| `POST /v1/played` | same as `/v1/read` | played receipts for voice and video notes |
+| `POST /v1/chats/action` | `{chat, action}` | `action` is `{"type":"archive","archived":true}`, `{"type":"pin","pinned":true}`, `{"type":"mute","until_ms":null}` (null: forever; else a future unix ms), `{"type":"unmute"}` or `{"type":"mark_read","read":false}` |
+
+Each one is sent to WhatsApp first, then stored and announced (`message_meta`,
+`message_deleted` or `chat_meta`). Client: `edit_message`, `revoke_message`,
+`delete_for_me`, `star_message`, `mark_played`, `chat_action`.
+
+`POST /v1/messages/media` also takes `quoted_id` (reply), `file_name` (documents;
+no path separators, at most 255 bytes), `seconds` and `voice_note=true` in its query.
+Client: `send_media_with(chat, kind, mime, caption, &MediaOptions, bytes)`.
+
+`GET /v1/messages/{id}/thumbnail` answers the small preview image that came inside
+a photo, video, document, sticker or location (`meta.media.thumbnail`), up to 64 KiB,
+or 404. Client: `thumbnail(id)`.
+
+## Profiles and profile pictures
+
+`POST /v1/contacts/profiles` with `{"jids": [...], "refresh": false}` (1 to 50 user
+JIDs `number@s.whatsapp.net`, LIDs or group JIDs) answers one `WaProfile` per distinct
+JID in request order: `push_name`, `contact_name` (the name saved in WhatsApp's own
+contact sync), `about`, `picture_id`, `business`, `verified_name`, `fetched_ms`.
+Push names are learned from every incoming message and from history syncs; about,
+picture id and business data are asked from WhatsApp at most once a day per JID
+(`refresh: true` forces it). When WhatsApp cannot be asked the stored data is
+returned. Client: `profiles(&jids)`, `refresh_profiles(&jids)`;
+`WaProfile::display_name()` picks saved name, then business name, then push name.
+
+`GET /v1/pictures/{jid}` (add `?full=true` for the large picture) answers the profile
+picture bytes (JPEG) with `ETag: "<picture id>"` and `Cache-Control: private,
+no-cache`. Send `If-None-Match: "<id>"` to get a 304 when the picture is unchanged; a
+person or group without a (visible) picture is a 404. The gateway keeps the
+downloaded pictures in `instances/<id>/pictures` (64 MiB per instance, least recently
+used first out), checks the picture id against WhatsApp at most once a day, and
+drops it at once when WhatsApp reports a change (`profile` event). Client:
+`picture(jid, full, known_id)` returns `Picture::Image {id, bytes}`,
+`Picture::Unchanged` or `Picture::None`. Pictures are fetched only from WhatsApp's
+own HTTPS hosts.
+
+Profile and picture queries that reach WhatsApp share a per-instance bucket of 120
+tokens (two come back every second), separate from the lookup bucket; over it the
+answer is 429 `rate_limited`. Stored answers never cost a token.
+
+`GET /v1/groups` and `GET /v1/groups/{jid}` now also carry the group `description`,
+`announce` (only admins may send) and each participant's `name` (push name or saved
+name) when the gateway knows it. Client: `groups()`, `group(jid)`.
+
 ## Scheduled texts
 
 The gateway can send a text later, so the phone may be off at that time.

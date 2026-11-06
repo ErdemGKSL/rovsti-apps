@@ -12,11 +12,11 @@ use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use rovsti_wa_proto::api::routes as r;
 use rovsti_wa_proto::{
-    ChatState, ChatSummary, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope,
-    GatewayEvent, GroupInfo, InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest,
-    LookupUsers, MAX_LOOKUP, MarkRead, MediaKind, MessageBody, MintKey, PushRegistration,
+    ChatState, CreateInstance, CreatedInstance, ErrorCode, EventEnvelope, GatewayEvent, GroupInfo,
+    InstanceState, InstanceStatus, IssuedKey, KeyId, KeyInfo, LinkRequest, LookupUsers, MAX_LOOKUP,
+    MarkRead, MediaKind, MessageBody, MintKey, PushRegistration, RichChat, RichMessage,
     ScheduleText, ScheduledState, ScheduledText, SendReaction, SendText, Sent, SetPresence,
-    SubscribePresence, WaMessage, WaUser,
+    SubscribePresence, WaUser,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -32,7 +32,8 @@ use crate::{AppState, store::StoreError};
 
 const MAX_LABEL_CHARS: usize = 64;
 const MAX_PUSH_TOKEN_BYTES: usize = 4096;
-const MAX_TEXT_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_TEXT_BYTES: usize = 64 * 1024;
+const MAX_FILE_NAME_BYTES: usize = 255;
 /// Pending scheduled texts one instance may hold.
 const MAX_PENDING_SCHEDULED: u32 = 200;
 /// A scheduled text must be due between these offsets from now.
@@ -76,6 +77,7 @@ pub fn router(state: AppState) -> Router {
         .route(r::GROUPS, get(groups))
         .route(r::GROUP, get(group))
         .merge(crate::wa::calls::routes())
+        .merge(crate::rich_routes::routes())
         .with_state(state)
 }
 
@@ -411,8 +413,10 @@ async fn event_socket(mut socket: WebSocket, state: AppState, auth: Authed, afte
     let _ = socket.send(Message::Close(None)).await;
 }
 
-async fn chats(State(state): State<AppState>, auth: Authed) -> ApiResult<Json<Vec<ChatSummary>>> {
-    Ok(Json(state.store().chats(auth.instance).await?))
+/// The chats with their meta: old clients read the `ChatSummary` fields and
+/// skip the rest.
+async fn chats(State(state): State<AppState>, auth: Authed) -> ApiResult<Json<Vec<RichChat>>> {
+    Ok(Json(state.store().chats_rich(auth.instance).await?))
 }
 
 #[derive(Debug, Deserialize)]
@@ -426,12 +430,12 @@ async fn chat_messages(
     auth: Authed,
     Path(jid): Path<String>,
     Query(page): Query<PageQuery>,
-) -> ApiResult<Json<Vec<WaMessage>>> {
+) -> ApiResult<Json<Vec<RichMessage>>> {
     let limit = page.limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE);
     Ok(Json(
         state
             .store()
-            .messages(auth.instance, jid, page.before, limit)
+            .messages_rich(auth.instance, jid, page.before, limit)
             .await?,
     ))
 }
@@ -526,17 +530,14 @@ async fn cancel_scheduled(
 }
 
 /// Rejects a malformed JID before it reaches the driver.
-fn check_jid(jid: &str) -> ApiResult<()> {
+pub(crate) fn check_jid(jid: &str) -> ApiResult<()> {
     crate::wa::convert::parse_jid(jid)
         .map(drop)
         .map_err(HttpError::from)
 }
 
-async fn mark_read(
-    State(state): State<AppState>,
-    auth: Authed,
-    Json(req): Json<MarkRead>,
-) -> ApiResult<StatusCode> {
+/// Validates a read (or played) receipt request.
+pub(crate) fn check_read(req: &MarkRead) -> ApiResult<()> {
     check_jid(&req.chat)?;
     if let Some(sender) = req.sender.as_deref().filter(|s| !s.trim().is_empty()) {
         check_jid(sender)?;
@@ -546,6 +547,15 @@ async fn mark_read(
             "ids must hold 1 to {MAX_READ_IDS} message ids"
         )));
     }
+    Ok(())
+}
+
+async fn mark_read(
+    State(state): State<AppState>,
+    auth: Authed,
+    Json(req): Json<MarkRead>,
+) -> ApiResult<StatusCode> {
+    check_read(&req)?;
     state.driver().mark_read(&auth.instance, req).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -591,6 +601,28 @@ struct SendMediaQuery {
     kind: MediaKind,
     mime: String,
     caption: Option<String>,
+    #[serde(default)]
+    quoted_id: Option<String>,
+    #[serde(default)]
+    file_name: Option<String>,
+    #[serde(default)]
+    seconds: Option<u32>,
+    #[serde(default)]
+    voice_note: bool,
+}
+
+/// A document file name: printable, no path, at most 255 bytes.
+fn check_file_name(name: &str) -> ApiResult<()> {
+    let ok = !name.trim().is_empty()
+        && name.len() <= MAX_FILE_NAME_BYTES
+        && !name
+            .chars()
+            .any(|c| c.is_control() || c == '/' || c == '\\');
+    if ok {
+        Ok(())
+    } else {
+        Err(HttpError::bad_request("file_name is not a valid file name"))
+    }
 }
 
 /// A MIME type the gateway is willing to store and echo in a header.
@@ -626,17 +658,25 @@ async fn send_media(
     {
         return Err(HttpError::bad_request("caption is too long"));
     }
+    let file_name = query.file_name.filter(|n| !n.is_empty());
+    if let Some(name) = &file_name {
+        check_file_name(name)?;
+    }
     let req = SendMedia {
         chat: query.chat,
         kind: query.kind,
         mime: query.mime,
         caption,
         data: body.into(),
+        quoted_id: query.quoted_id.filter(|id| !id.is_empty()),
+        file_name,
+        seconds: query.seconds,
+        voice_note: query.voice_note,
     };
     Ok(Json(state.driver().send_media(&auth.instance, req).await?))
 }
 
-fn media_response(mime: &str, bytes: Vec<u8>) -> Response {
+pub(crate) fn media_response(mime: &str, bytes: Vec<u8>) -> Response {
     let content_type = HeaderValue::from_str(mime)
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
     (
@@ -774,8 +814,32 @@ async fn lookup_users(
     Ok(Json(ordered))
 }
 
+/// Fills participant names from the push names the gateway has seen.
+async fn name_participants(
+    state: &AppState,
+    instance: &InstanceId,
+    groups: &mut [GroupInfo],
+) -> ApiResult<()> {
+    let jids: Vec<String> = groups
+        .iter()
+        .flat_map(|g| g.participants.iter().map(|p| p.jid.clone()))
+        .collect();
+    let profiles = state.store().profiles(instance.clone(), jids).await?;
+    for participant in groups.iter_mut().flat_map(|g| g.participants.iter_mut()) {
+        if participant.name.is_none() {
+            participant.name = profiles
+                .iter()
+                .find(|p| p.jid == participant.jid)
+                .and_then(|p| p.display_name().map(str::to_owned));
+        }
+    }
+    Ok(())
+}
+
 async fn groups(State(state): State<AppState>, auth: Authed) -> ApiResult<Json<Vec<GroupInfo>>> {
-    Ok(Json(state.driver().groups(&auth.instance).await?))
+    let mut groups = state.driver().groups(&auth.instance).await?;
+    name_participants(&state, &auth.instance, &mut groups).await?;
+    Ok(Json(groups))
 }
 
 async fn group(
@@ -784,7 +848,10 @@ async fn group(
     Path(jid): Path<String>,
 ) -> ApiResult<Json<GroupInfo>> {
     check_jid(&jid)?;
-    Ok(Json(state.driver().group(&auth.instance, jid).await?))
+    let mut group = [state.driver().group(&auth.instance, jid).await?];
+    name_participants(&state, &auth.instance, &mut group).await?;
+    let [group] = group;
+    Ok(Json(group))
 }
 
 #[cfg(test)]

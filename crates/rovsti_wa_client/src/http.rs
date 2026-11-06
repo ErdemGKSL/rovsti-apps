@@ -8,10 +8,12 @@ use std::time::Duration;
 
 use rovsti_wa_proto::api::routes;
 use rovsti_wa_proto::{
-    CallStarted, CallSummary, ChatState, ChatSummary, ConnectKey, CreateInstance, CreatedInstance,
-    GatewayUrl, GroupInfo, InstanceStatus, IssuedKey, KeyInfo, LinkRequest, LookupUsers, MarkRead,
-    MediaKind, MintKey, PlaceCall, PushRegistration, ScheduleText, ScheduledText, SendReaction,
-    SendText, Sent, SetMuted, SetPresence, SubscribePresence, WaMessage, WaUser,
+    CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, ConnectKey, CreateInstance,
+    CreatedInstance, DeleteForMe, EditMessage, GatewayUrl, GroupInfo, InstanceStatus, IssuedKey,
+    KeyInfo, LinkRequest, LookupUsers, MarkRead, MediaKind, MediaOptions, MintKey, PlaceCall,
+    ProfilesRequest, PushRegistration, RevokeMessage, RichChat, RichMessage, ScheduleText,
+    ScheduledText, SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage,
+    SubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -106,6 +108,59 @@ pub(crate) fn send_media_path(
         path.push_str(&format!("&caption={}", enc(caption)));
     }
     path
+}
+
+/// [`send_media_path`] plus reply, file name, duration and voice-note flag.
+pub(crate) fn send_media_path_with(
+    chat: &str,
+    kind: MediaKind,
+    mime: &str,
+    caption: Option<&str>,
+    options: &MediaOptions,
+) -> String {
+    let mut path = send_media_path(chat, kind, mime, caption);
+    if let Some(id) = options.quoted_id.as_deref().filter(|v| !v.is_empty()) {
+        path.push_str(&format!("&quoted_id={}", enc(id)));
+    }
+    if let Some(name) = options.file_name.as_deref().filter(|v| !v.is_empty()) {
+        path.push_str(&format!("&file_name={}", enc(name)));
+    }
+    if let Some(seconds) = options.seconds {
+        path.push_str(&format!("&seconds={seconds}"));
+    }
+    if options.voice_note {
+        path.push_str("&voice_note=true");
+    }
+    path
+}
+
+pub(crate) fn picture_path(jid: &str, full: bool) -> String {
+    let path = routes::fill(routes::PICTURE, "jid", jid);
+    if full {
+        format!("{path}?full=true")
+    } else {
+        path
+    }
+}
+
+/// The picture id an `ETag` header names (`"123"`, `W/"123"` or `123`).
+pub(crate) fn etag_id(value: &str) -> Option<String> {
+    let value = value.trim();
+    let value = value.strip_prefix("W/").unwrap_or(value);
+    let id = value.trim_matches('"');
+    (!id.is_empty()).then(|| id.to_owned())
+}
+
+/// A profile picture as [`Gateway::picture`] found it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Picture {
+    /// The picture and its id. Cache the bytes under the id: the id changes
+    /// whenever the picture does.
+    Image { id: String, bytes: Vec<u8> },
+    /// The picture is still the one whose id the caller passed.
+    Unchanged,
+    /// The person or group has no picture, or hides it from this account.
+    None,
 }
 
 enum Payload {
@@ -344,6 +399,12 @@ impl Gateway {
         self.get(routes::GROUPS)
     }
 
+    /// One group with its members (named by push name where the gateway
+    /// knows it) and description.
+    pub fn group(&self, jid: &str) -> Result<GroupInfo, ClientError> {
+        self.get(&routes::fill(routes::GROUP, "jid", jid))
+    }
+
     /// Which of the user `jids` (`number@s.whatsapp.net`, at most
     /// `MAX_LOOKUP`) are on WhatsApp. The gateway caches answers and limits
     /// how many numbers an instance may look up.
@@ -380,6 +441,160 @@ impl Gateway {
     pub fn set_muted(&self, call_id: &str, muted: bool) -> Result<(), ClientError> {
         let path = routes::fill(routes::CALL_MUTE, "call_id", call_id);
         self.post_unit(&path, &SetMuted { muted })
+    }
+
+    /// Chats with their meta: picture id, push name, archive, pin and mute
+    /// state, and the meta of the newest message.
+    pub fn chats_with_meta(&self) -> Result<Vec<RichChat>, ClientError> {
+        self.get(routes::CHATS)
+    }
+
+    /// Like [`Self::messages`], with each message's meta (reply, ticks,
+    /// edit, delete, media details, sender push name).
+    pub fn messages_with_meta(
+        &self,
+        chat: &str,
+        before_ms: Option<i64>,
+        limit: u32,
+    ) -> Result<Vec<RichMessage>, ClientError> {
+        self.get(&messages_path(chat, before_ms, limit))
+    }
+
+    /// Like [`Self::send_media`], as a reply or with a document name,
+    /// duration or voice-note flag.
+    pub fn send_media_with(
+        &self,
+        chat: &str,
+        kind: MediaKind,
+        mime: &str,
+        caption: Option<&str>,
+        options: &MediaOptions,
+        bytes: Vec<u8>,
+    ) -> Result<Sent, ClientError> {
+        let path = send_media_path_with(chat, kind, mime, caption, options);
+        decode(self.exec(Method::POST, &path, true, Payload::Bytes(bytes))?)
+    }
+
+    /// The small preview image that came with a photo, video, document,
+    /// sticker or location (`meta.media.thumbnail` says whether there is
+    /// one). JPEG, PNG or WebP bytes.
+    pub fn thumbnail(&self, message_id: &str) -> Result<Vec<u8>, ClientError> {
+        let path = routes::fill(routes::MESSAGE_THUMBNAIL, "message_id", message_id);
+        let mut resp = self.exec(Method::GET, &path, true, Payload::None)?;
+        resp.body_mut()
+            .with_config()
+            .limit(JSON_LIMIT)
+            .read_to_vec()
+            .map_err(ClientError::from)
+    }
+
+    /// Edits the text or caption of a message I sent (WhatsApp allows 15
+    /// minutes). A `message_meta` event follows.
+    pub fn edit_message(&self, req: &EditMessage) -> Result<(), ClientError> {
+        self.post_unit(routes::EDIT, req)
+    }
+
+    /// Deletes a message for everyone. A `message_meta` event with
+    /// `meta.revoked` follows.
+    pub fn revoke_message(&self, req: &RevokeMessage) -> Result<(), ClientError> {
+        self.post_unit(routes::REVOKE, req)
+    }
+
+    /// Deletes a message on this account's devices. A `message_deleted`
+    /// event follows.
+    pub fn delete_for_me(&self, req: &DeleteForMe) -> Result<(), ClientError> {
+        self.post_unit(routes::DELETE_FOR_ME, req)
+    }
+
+    pub fn star_message(&self, req: &StarMessage) -> Result<(), ClientError> {
+        self.post_unit(routes::STAR, req)
+    }
+
+    /// Played receipts for voice and video notes (blue microphone).
+    pub fn mark_played(&self, req: &MarkRead) -> Result<(), ClientError> {
+        self.post_unit(routes::MARK_PLAYED, req)
+    }
+
+    /// Archives, pins, mutes or marks a chat on every device. A `chat_meta`
+    /// event follows.
+    pub fn chat_action(&self, req: &ChatAction) -> Result<(), ClientError> {
+        self.post_unit(routes::CHAT_ACTION, req)
+    }
+
+    /// Push name, saved name, about text, picture id and business details of
+    /// up to `MAX_PROFILES` user or group JIDs, in request order. The gateway
+    /// answers from its store and asks WhatsApp at most once a day per JID.
+    pub fn profiles(&self, jids: &[String]) -> Result<Vec<WaProfile>, ClientError> {
+        self.post(
+            routes::PROFILES,
+            &ProfilesRequest {
+                jids: jids.to_vec(),
+                refresh: false,
+            },
+        )
+    }
+
+    /// Like [`Self::profiles`], asking WhatsApp even for fresh entries.
+    pub fn refresh_profiles(&self, jids: &[String]) -> Result<Vec<WaProfile>, ClientError> {
+        self.post(
+            routes::PROFILES,
+            &ProfilesRequest {
+                jids: jids.to_vec(),
+                refresh: true,
+            },
+        )
+    }
+
+    /// The profile picture of a user or group: the small preview (about
+    /// 96 px) or, with `full`, the large one. Pass the id of the picture you
+    /// hold as `known_id` to get [`Picture::Unchanged`] instead of the bytes.
+    pub fn picture(
+        &self,
+        jid: &str,
+        full: bool,
+        known_id: Option<&str>,
+    ) -> Result<Picture, ClientError> {
+        let key = self.key.as_ref().ok_or(ClientError::Unauthorized)?;
+        let mut req = request(
+            Method::GET,
+            &self.url,
+            &picture_path(jid, full),
+            Some(key),
+            (),
+        )?;
+        if let Some(id) = known_id.filter(|id| !id.is_empty()) {
+            let tag = HeaderValue::from_str(&rovsti_wa_proto::meta::picture_etag(id))
+                .map_err(|e| ClientError::Http(e.to_string()))?;
+            req.headers_mut().insert(header::IF_NONE_MATCH, tag);
+        }
+        let mut resp = self.agent.run(req)?;
+        let status = resp.status().as_u16();
+        match status {
+            304 => return Ok(Picture::Unchanged),
+            404 => return Ok(Picture::None),
+            200..=299 => {}
+            _ => {
+                let body = resp
+                    .body_mut()
+                    .with_config()
+                    .limit(ERROR_BODY_LIMIT)
+                    .read_to_vec()
+                    .unwrap_or_default();
+                return Err(from_status(status, &body));
+            }
+        }
+        let id = resp
+            .headers()
+            .get(header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .and_then(etag_id)
+            .ok_or_else(|| ClientError::Decode("picture without an ETag".to_owned()))?;
+        let bytes = resp
+            .body_mut()
+            .with_config()
+            .limit(JSON_LIMIT)
+            .read_to_vec()?;
+        Ok(Picture::Image { id, bytes })
     }
 
     fn call_action(&self, template: &str, call_id: &str) -> Result<(), ClientError> {
@@ -518,6 +733,51 @@ mod tests {
                 message_id: "M".into()
             }
         );
+    }
+
+    #[test]
+    fn media_options_and_picture_paths() {
+        let options = MediaOptions {
+            quoted_id: Some("Q 1".into()),
+            file_name: Some("rapor 1.pdf".into()),
+            seconds: Some(9),
+            voice_note: true,
+        };
+        let path = send_media_path_with("c", MediaKind::Document, "a/b", None, &options);
+        assert!(
+            path.ends_with("&quoted_id=Q%201&file_name=rapor%201.pdf&seconds=9&voice_note=true"),
+            "{path}"
+        );
+        let plain =
+            send_media_path_with("c", MediaKind::Image, "a/b", None, &MediaOptions::default());
+        assert_eq!(plain, send_media_path("c", MediaKind::Image, "a/b", None));
+        assert_eq!(
+            picture_path("9053@s.whatsapp.net", false),
+            "/v1/pictures/9053%40s.whatsapp.net"
+        );
+        assert_eq!(
+            picture_path("1-2@g.us", true),
+            "/v1/pictures/1-2%40g.us?full=true"
+        );
+        assert_eq!(etag_id("\"123\"").as_deref(), Some("123"));
+        assert_eq!(etag_id("W/\"123\"").as_deref(), Some("123"));
+        assert_eq!(etag_id(" 77 ").as_deref(), Some("77"));
+        assert_eq!(etag_id("\"\""), None);
+    }
+
+    #[test]
+    fn rich_lists_decode_old_and_new_gateways() {
+        let old = r#"[{"id":"m","chat":"c","sender":null,"from_me":true,"timestamp_ms":1,
+            "body":{"text":"hi"},"reactions":[]}]"#;
+        let list: Vec<RichMessage> = decode(Response::new(Body::builder().data(old))).unwrap();
+        assert!(list[0].meta.is_empty());
+        let new = r#"[{"id":"m","chat":"c","sender":null,"from_me":true,"timestamp_ms":1,
+            "body":{"text":"hi"},"reactions":[],"meta":{"status":"read","edited_ms":4}}]"#;
+        let list: Vec<RichMessage> = decode(Response::new(Body::builder().data(new))).unwrap();
+        assert_eq!(list[0].meta.edited_ms, Some(4));
+        // The plain method reads the same reply.
+        let plain: Vec<WaMessage> = decode(Response::new(Body::builder().data(new))).unwrap();
+        assert_eq!(plain[0].id, "m");
     }
 
     #[test]

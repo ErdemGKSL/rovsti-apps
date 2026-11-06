@@ -1,7 +1,8 @@
 //! Events the gateway pushes over `GET /v1/events`.
 
-use crate::api::{InstanceStatus, Reaction, ScheduledText, TypingState, WaMessage};
+use crate::api::{InstanceStatus, MessageBody, Reaction, ScheduledText, TypingState, WaMessage};
 use crate::call::{CallDirection, CallPhase};
+use crate::meta::{ChatMeta, MessageMeta, WaProfile};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EventEnvelope {
@@ -84,6 +85,38 @@ pub enum GatewayEvent {
     Call(CallUpdate),
     /// A scheduled text was added, sent or failed. Older clients skip it.
     Scheduled(ScheduledText),
+    /// The meta of a message is new or changed: a reply, ticks, an edit
+    /// (`body` holds the new body), a delete for everyone (`meta.revoked`,
+    /// `body` is `unsupported`), a star. Follows the `message` event of a new
+    /// message whose meta is not empty. Older clients skip it.
+    MessageMeta {
+        chat: String,
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<MessageBody>,
+        meta: Box<MessageMeta>,
+    },
+    /// A message was deleted on my devices only: drop it.
+    MessageDeleted {
+        chat: String,
+        id: String,
+    },
+    /// Archive, pin, mute, unread mark or picture of a chat changed.
+    ChatMeta {
+        jid: String,
+        meta: ChatMeta,
+    },
+    /// A chat was deleted on another device: drop it and its messages.
+    ChatDeleted {
+        jid: String,
+    },
+    /// A chat was cleared on another device: drop its messages, keep it.
+    ChatCleared {
+        jid: String,
+    },
+    /// A person's or group's push name, about text or picture changed. A new
+    /// `picture_id` means cached picture bytes are stale.
+    Profile(WaProfile),
     /// The client missed events; refetch chats.
     Resync,
     /// The key used for this socket was revoked.
@@ -215,6 +248,63 @@ mod tests {
                     state: crate::api::ScheduledState::Pending,
                 }),
                 r#"{"type":"scheduled","id":"s","chat":"c","text":"t","send_at_ms":9,"created_ms":1,"state":{"status":"pending"}}"#,
+            ),
+            (
+                GatewayEvent::MessageMeta {
+                    chat: "c".into(),
+                    id: "m".into(),
+                    body: None,
+                    meta: Box::new(MessageMeta {
+                        revoked: true,
+                        ..Default::default()
+                    }),
+                },
+                r#"{"type":"message_meta","chat":"c","id":"m","meta":{"revoked":true}}"#,
+            ),
+            (
+                GatewayEvent::MessageMeta {
+                    chat: "c".into(),
+                    id: "m".into(),
+                    body: Some(MessageBody::Text("new".into())),
+                    meta: Box::new(MessageMeta {
+                        edited_ms: Some(3),
+                        ..Default::default()
+                    }),
+                },
+                r#"{"type":"message_meta","chat":"c","id":"m","body":{"text":"new"},"meta":{"edited_ms":3}}"#,
+            ),
+            (
+                GatewayEvent::MessageDeleted {
+                    chat: "c".into(),
+                    id: "m".into(),
+                },
+                r#"{"type":"message_deleted","chat":"c","id":"m"}"#,
+            ),
+            (
+                GatewayEvent::ChatMeta {
+                    jid: "j".into(),
+                    meta: ChatMeta {
+                        archived: true,
+                        ..Default::default()
+                    },
+                },
+                r#"{"type":"chat_meta","jid":"j","meta":{"archived":true}}"#,
+            ),
+            (
+                GatewayEvent::ChatDeleted { jid: "j".into() },
+                r#"{"type":"chat_deleted","jid":"j"}"#,
+            ),
+            (
+                GatewayEvent::ChatCleared { jid: "j".into() },
+                r#"{"type":"chat_cleared","jid":"j"}"#,
+            ),
+            (
+                GatewayEvent::Profile(WaProfile {
+                    jid: "j".into(),
+                    picture_id: Some("7".into()),
+                    ..Default::default()
+                }),
+                r#"{"type":"profile","jid":"j","push_name":null,"contact_name":null,"about":null,"picture_id":"7","business":false,"verified_name":null,"fetched_ms":0}"#,
             ),
             (GatewayEvent::Resync, r#"{"type":"resync"}"#),
             (GatewayEvent::KeyRevoked, r#"{"type":"key_revoked"}"#),

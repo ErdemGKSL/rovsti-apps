@@ -158,6 +158,14 @@ impl Config {
     pub fn media_dir(&self, instance: &str) -> PathBuf {
         self.data_dir.join("instances").join(instance).join("media")
     }
+
+    /// Where the profile pictures an instance downloaded are cached.
+    pub fn pictures_dir(&self, instance: &str) -> PathBuf {
+        self.data_dir
+            .join("instances")
+            .join(instance)
+            .join("pictures")
+    }
 }
 
 /// What the command line asked for.

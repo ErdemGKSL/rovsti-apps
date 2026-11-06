@@ -13,6 +13,12 @@ use rovsti_wa_proto::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+mod rich;
+pub use rich::{
+    ChatChange, ChatSettings, FetchedProfile, MAX_THUMBNAIL_BYTES, MessageChange, MessageExtras,
+    ProfileChange, apply_change, merge_edit,
+};
+
 /// Active (not revoked) keys one instance may hold.
 pub const MAX_KEYS_PER_INSTANCE: u32 = 32;
 
@@ -88,12 +94,16 @@ pub struct HistoryChat {
     pub unread: u32,
     pub last_ms: i64,
     pub messages: Vec<HistoryMessage>,
+    /// Archive, pin, mute and unread mark at sync time.
+    pub settings: ChatSettings,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HistoryMessage {
     pub message: WaMessage,
-    pub raw_proto: Option<Vec<u8>>,
+    pub extras: MessageExtras,
+    /// Reactions the sync carries with the message.
+    pub reactions: Vec<Reaction>,
 }
 
 /// The 32 raw bytes of a hash (stored as a BLOB).
@@ -193,6 +203,35 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE INDEX scheduled_due ON scheduled(state_json, send_at_ms);
     CREATE INDEX scheduled_by_instance ON scheduled(instance_id, send_at_ms);
+    ",
+    // v3
+    "
+    ALTER TABLE messages ADD COLUMN meta_json TEXT;
+    ALTER TABLE messages ADD COLUMN secret BLOB;
+    ALTER TABLE messages ADD COLUMN thumb BLOB;
+    CREATE INDEX messages_by_id ON messages(instance_id, id);
+    CREATE TABLE chat_settings (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        jid TEXT NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0,
+        pinned INTEGER NOT NULL DEFAULT 0,
+        muted_until_ms INTEGER,
+        marked_unread INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (instance_id, jid)
+    );
+    CREATE TABLE profiles (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        jid TEXT NOT NULL,
+        push_name TEXT,
+        contact_name TEXT,
+        about TEXT,
+        picture_id TEXT,
+        picture_checked_ms INTEGER NOT NULL DEFAULT 0,
+        business INTEGER NOT NULL DEFAULT 0,
+        verified_name TEXT,
+        fetched_ms INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (instance_id, jid)
+    );
     ",
 ];
 
@@ -711,39 +750,11 @@ impl Store {
         message: WaMessage,
         raw_proto: Option<Vec<u8>>,
     ) -> Result<bool, StoreError> {
-        self.run(move |conn| {
-            let tx = conn.transaction()?;
-            let body = serde_json::to_string(&message.body)?;
-            let n = tx.execute(
-                "INSERT OR IGNORE INTO messages
-                 (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    instance.as_str(),
-                    message.chat,
-                    message.id,
-                    message.sender,
-                    message.from_me,
-                    message.timestamp_ms,
-                    body,
-                    raw_proto
-                ],
-            )?;
-            if n > 0 {
-                upsert_chat(
-                    &tx,
-                    &instance,
-                    &message.chat,
-                    None,
-                    message.chat.ends_with("@g.us"),
-                    message.timestamp_ms,
-                    u32::from(!message.from_me),
-                )?;
-            }
-            tx.commit()?;
-            Ok(n > 0)
-        })
-        .await
+        let extras = MessageExtras {
+            raw_proto,
+            ..Default::default()
+        };
+        self.insert_message_full(instance, message, extras).await
     }
 
     pub async fn set_reaction(
@@ -917,23 +928,26 @@ impl Store {
                         chat.last_ms
                     ],
                 )?;
+                rich::write_settings(&tx, &instance, &chat.jid, &chat.settings)?;
                 for row in &chat.messages {
-                    let m = &row.message;
-                    tx.execute(
-                        "INSERT OR IGNORE INTO messages
-                         (instance_id, chat, id, sender, from_me, ts_ms, body_json, raw_proto)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                        params![
-                            instance.as_str(),
-                            chat.jid,
-                            m.id,
-                            m.sender,
-                            m.from_me,
-                            m.timestamp_ms,
-                            serde_json::to_string(&m.body)?,
-                            row.raw_proto
-                        ],
-                    )?;
+                    let fresh = rich::insert_row(&tx, &instance, &chat.jid, &row.message, &row.extras)?;
+                    if !fresh {
+                        continue;
+                    }
+                    for reaction in row.reactions.iter().filter(|r| !r.emoji.is_empty()) {
+                        tx.execute(
+                            "INSERT OR IGNORE INTO reactions (instance_id, chat, id, sender, from_me, emoji)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            params![
+                                instance.as_str(),
+                                chat.jid,
+                                row.message.id,
+                                reaction_key(reaction.sender.clone(), reaction.from_me),
+                                reaction.from_me,
+                                reaction.emoji
+                            ],
+                        )?;
+                    }
                 }
                 written += 1;
             }
@@ -1154,9 +1168,18 @@ fn last_message(
     instance: &InstanceId,
     chat: &str,
 ) -> Result<Option<WaMessage>, StoreError> {
+    Ok(last_message_row(conn, instance, chat)?.map(|(message, _)| message))
+}
+
+/// The newest message of `chat` and its raw `meta_json`.
+fn last_message_row(
+    conn: &Connection,
+    instance: &InstanceId,
+    chat: &str,
+) -> Result<Option<(WaMessage, Option<String>)>, StoreError> {
     let row = conn
         .query_row(
-            "SELECT id, sender, from_me, ts_ms, body_json FROM messages
+            "SELECT id, sender, from_me, ts_ms, body_json, meta_json FROM messages
              WHERE instance_id = ?1 AND chat = ?2 ORDER BY ts_ms DESC, id DESC LIMIT 1",
             params![instance.as_str(), chat],
             |r| {
@@ -1166,23 +1189,27 @@ fn last_message(
                     r.get::<_, bool>(2)?,
                     r.get::<_, i64>(3)?,
                     r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, sender, from_me, timestamp_ms, body)) = row else {
+    let Some((id, sender, from_me, timestamp_ms, body, meta)) = row else {
         return Ok(None);
     };
     let mut reactions = reactions_of(conn, instance, chat)?;
-    Ok(Some(WaMessage {
-        reactions: reactions.remove(&id).unwrap_or_default(),
-        id,
-        chat: chat.to_owned(),
-        sender,
-        from_me,
-        timestamp_ms,
-        body: serde_json::from_str(&body)?,
-    }))
+    Ok(Some((
+        WaMessage {
+            reactions: reactions.remove(&id).unwrap_or_default(),
+            id,
+            chat: chat.to_owned(),
+            sender,
+            from_me,
+            timestamp_ms,
+            body: serde_json::from_str(&body)?,
+        },
+        meta,
+    )))
 }
 
 #[cfg(test)]
@@ -1251,13 +1278,15 @@ mod tests {
             "push_tokens",
             "reactions",
             "scheduled",
+            "chat_settings",
+            "profiles",
         ] {
             assert!(tables.iter().any(|n| n == t), "missing {t}: {tables:?}");
         }
     }
 
     #[tokio::test]
-    async fn v1_database_upgrades_to_v2_and_keeps_its_data() {
+    async fn v1_database_upgrades_to_the_latest_and_keeps_its_data() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("gateway.db");
         {
@@ -1295,7 +1324,7 @@ mod tests {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, MIGRATIONS.len() as u32);
     }
 
     fn sched(id: &str, at: i64) -> ScheduledText {
@@ -1853,6 +1882,298 @@ mod tests {
         assert!(store.chats(id(1)).await.unwrap().is_empty());
         assert!(store.push_tokens(id(1)).await.unwrap().is_empty());
         assert_eq!(store.instance_for_key(key.hash(), 1).await.unwrap(), None);
+    }
+
+    async fn store_with_instance() -> Store {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 1, 4)
+            .await
+            .unwrap();
+        store
+    }
+
+    #[tokio::test]
+    async fn meta_thumbnails_and_push_names_are_stored() {
+        use rovsti_wa_proto::{DeliveryStatus, MessageMeta, Quoted};
+        let store = store_with_instance().await;
+        let chat = "g@g.us";
+        let mut m = text(chat, "m1", 10, false);
+        m.sender = Some("4915@s.whatsapp.net".into());
+        let meta = MessageMeta {
+            quoted: Some(Quoted {
+                id: "q".into(),
+                sender: None,
+                preview: Some("hi".into()),
+            }),
+            sender_name: Some(" Ada ".into()),
+            ..Default::default()
+        };
+        let extras = MessageExtras {
+            meta: meta.clone(),
+            raw_proto: None,
+            secret: Some(vec![7; 32]),
+            thumbnail: Some(vec![0xFF, 0xD8, 1]),
+        };
+        assert!(
+            store
+                .insert_message_full(id(1), m.clone(), extras.clone())
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .insert_message_full(id(1), m.clone(), extras)
+                .await
+                .unwrap()
+        );
+
+        let page = store
+            .messages_rich(id(1), chat.into(), None, 10)
+            .await
+            .unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].message, m);
+        assert_eq!(page[0].meta, meta);
+        // The plain list is the same messages.
+        assert_eq!(
+            store.messages(id(1), chat.into(), None, 10).await.unwrap(),
+            vec![m]
+        );
+        assert_eq!(
+            store.thumbnail(id(1), "m1".into()).await.unwrap(),
+            Some(vec![0xFF, 0xD8, 1])
+        );
+        assert_eq!(
+            store
+                .message_secret(id(1), chat.into(), "m1".into())
+                .await
+                .unwrap(),
+            Some(vec![7; 32])
+        );
+        // The author's push name was remembered, trimmed.
+        let profiles = store
+            .profiles(
+                id(1),
+                vec!["4915@s.whatsapp.net".into(), "x@s.whatsapp.net".into()],
+            )
+            .await
+            .unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].push_name.as_deref(), Some("Ada"));
+
+        let chats = store.chats_rich(id(1)).await.unwrap();
+        assert_eq!(chats.len(), 1);
+        assert_eq!(
+            chats[0].last_meta.as_ref().unwrap().sender_name.as_deref(),
+            Some(" Ada ")
+        );
+        // Push names are not a group's name.
+        assert_eq!(chats[0].meta.push_name, None);
+
+        // Receipts move my messages only.
+        let mine = text(chat, "m2", 20, true);
+        store.insert_message(id(1), mine, None).await.unwrap();
+        store
+            .set_status(
+                id(1),
+                chat.into(),
+                vec!["m2".into(), "m1".into()],
+                DeliveryStatus::Delivered,
+            )
+            .await
+            .unwrap();
+        let page = store
+            .messages_rich(id(1), chat.into(), None, 10)
+            .await
+            .unwrap();
+        assert_eq!(page[0].meta.status, Some(DeliveryStatus::Delivered));
+        assert_eq!(page[1].meta.status, None);
+    }
+
+    #[tokio::test]
+    async fn edits_revokes_and_deletes() {
+        let store = store_with_instance().await;
+        let chat = "c@s.whatsapp.net";
+        store
+            .insert_message(id(1), text(chat, "m", 1, true), Some(vec![1, 2]))
+            .await
+            .unwrap();
+        store
+            .set_reaction(
+                id(1),
+                chat.into(),
+                "m".into(),
+                Reaction {
+                    sender: None,
+                    from_me: false,
+                    emoji: "x".into(),
+                },
+            )
+            .await
+            .unwrap();
+        let edit = MessageChange::Edit {
+            body: MessageBody::Text("new".into()),
+            edited_ms: 5,
+        };
+        let (body, meta) = store
+            .change_message(id(1), chat.into(), "m".into(), edit.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(body, Some(MessageBody::Text("new".into())));
+        assert_eq!(meta.edited_ms, Some(5));
+        assert_eq!(
+            store
+                .change_message(id(1), chat.into(), "m".into(), edit)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .change_message(id(1), chat.into(), "nope".into(), MessageChange::Revoke)
+                .await
+                .unwrap(),
+            None
+        );
+        let (body, meta) = store
+            .change_message(id(1), chat.into(), "m".into(), MessageChange::Revoke)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(body, Some(MessageBody::Unsupported));
+        assert!(meta.revoked);
+        let stored = store
+            .message(id(1), chat.into(), "m".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stored.reactions.is_empty(), "reactions go with the message");
+        let (_, raw) = store
+            .media_source(id(1), "m".into())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(raw, None, "the media of a deleted message is not kept");
+
+        assert!(
+            store
+                .delete_message(id(1), chat.into(), "m".into())
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .delete_message(id(1), chat.into(), "m".into())
+                .await
+                .unwrap()
+        );
+
+        store
+            .insert_message(id(1), text(chat, "n", 2, false), None)
+            .await
+            .unwrap();
+        assert!(store.delete_chat(id(1), chat.into(), true).await.unwrap());
+        let chats = store.chats(id(1)).await.unwrap();
+        assert_eq!(chats.len(), 1, "a cleared chat stays");
+        assert_eq!((chats[0].unread, chats[0].last.clone()), (0, None));
+        assert!(store.delete_chat(id(1), chat.into(), false).await.unwrap());
+        assert!(store.chats(id(1)).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn chat_settings_and_profiles() {
+        use rovsti_wa_proto::MUTED_FOREVER;
+        let store = store_with_instance().await;
+        let chat = "c@s.whatsapp.net";
+        store
+            .insert_message(id(1), text(chat, "m", 1, false), None)
+            .await
+            .unwrap();
+        let meta = store
+            .change_chat(id(1), chat.into(), ChatChange::Pinned(true))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(meta.pinned);
+        assert_eq!(
+            store
+                .change_chat(id(1), chat.into(), ChatChange::Pinned(true))
+                .await
+                .unwrap(),
+            None
+        );
+        store
+            .change_chat(id(1), chat.into(), ChatChange::Muted(Some(MUTED_FOREVER)))
+            .await
+            .unwrap();
+        store
+            .change_chat(id(1), chat.into(), ChatChange::MarkedUnread(false))
+            .await
+            .unwrap();
+        let rich = store.chats_rich(id(1)).await.unwrap();
+        assert_eq!(rich[0].chat.unread, 0, "marking read clears the counter");
+        assert!(rich[0].meta.pinned && rich[0].meta.is_muted(0));
+
+        // Profiles: a picture change is visible, a refetch of the same is not.
+        let changed = store
+            .change_profile(
+                id(1),
+                chat.into(),
+                ProfileChange::Picture(Some("p1".into())),
+                5,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(changed.picture_id.as_deref(), Some("p1"));
+        assert_eq!(
+            store.picture_state(id(1), chat.into()).await.unwrap(),
+            (Some("p1".into()), 5)
+        );
+        let fetched = FetchedProfile {
+            jid: chat.into(),
+            about: Some("hey".into()),
+            picture_id: Some("p1".into()),
+            business: false,
+            verified_name: None,
+        };
+        let after = store
+            .change_profile(
+                id(1),
+                chat.into(),
+                ProfileChange::Fetched(fetched.clone()),
+                9,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((after.about.as_deref(), after.fetched_ms), (Some("hey"), 9));
+        assert_eq!(
+            store
+                .change_profile(id(1), chat.into(), ProfileChange::Fetched(fetched), 10)
+                .await
+                .unwrap(),
+            None
+        );
+        store
+            .change_profile(id(1), chat.into(), ProfileChange::Stale, 11)
+            .await
+            .unwrap();
+        assert_eq!(store.picture_state(id(1), chat.into()).await.unwrap().1, 0);
+        store
+            .set_push_names(
+                id(1),
+                vec![(chat.into(), "Bob".into()), (chat.into(), " ".into())],
+            )
+            .await
+            .unwrap();
+        let rich = store.chats_rich(id(1)).await.unwrap();
+        assert_eq!(rich[0].meta.picture_id.as_deref(), Some("p1"));
+        assert_eq!(rich[0].meta.push_name.as_deref(), Some("Bob"));
+        // The plain chat list did not change shape.
+        assert_eq!(store.chats(id(1)).await.unwrap()[0], rich[0].chat);
     }
 
     #[test]

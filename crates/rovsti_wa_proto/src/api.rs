@@ -34,6 +34,15 @@ pub mod routes {
     pub const CALL_END: &str = "/v1/calls/{call_id}/end";
     pub const CALL_MUTE: &str = "/v1/calls/{call_id}/mute";
     pub const CALL_AUDIO: &str = "/v1/calls/{call_id}/audio";
+    pub const MESSAGE_THUMBNAIL: &str = "/v1/messages/{message_id}/thumbnail";
+    pub const EDIT: &str = "/v1/messages/edit";
+    pub const REVOKE: &str = "/v1/messages/revoke";
+    pub const DELETE_FOR_ME: &str = "/v1/messages/delete";
+    pub const STAR: &str = "/v1/messages/star";
+    pub const MARK_PLAYED: &str = "/v1/played";
+    pub const CHAT_ACTION: &str = "/v1/chats/action";
+    pub const PROFILES: &str = "/v1/contacts/profiles";
+    pub const PICTURE: &str = "/v1/pictures/{jid}";
 
     /// Replaces `{name}` in `template` with `value`, percent-encoding every
     /// byte that is not unreserved (so a JID's `@` is safe in a path).
@@ -287,6 +296,10 @@ pub struct ChatSummary {
 pub struct Participant {
     pub jid: String,
     pub admin: bool,
+    /// Their WhatsApp push name, when the gateway has seen it. Older
+    /// gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -294,6 +307,12 @@ pub struct GroupInfo {
     pub jid: String,
     pub subject: String,
     pub participants: Vec<Participant>,
+    /// The group description. Older gateways omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Only admins may send (announcement group).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub announce: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

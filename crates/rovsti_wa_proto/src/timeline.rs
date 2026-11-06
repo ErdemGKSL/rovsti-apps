@@ -1,10 +1,13 @@
 //! Pure conversation model: merges history pages, live events and optimistic
 //! sends into one ascending list the UI can render. No I/O, no clock.
 
+use std::collections::HashMap;
+
 use rovsti_core::PhoneNumber;
 
 use crate::api::{LinkError, MediaKind, MessageBody, Reaction, Sent, WaMessage};
 use crate::event::{GatewayEvent, ReceiptKind};
+use crate::meta::{DeliveryStatus, MessageMeta, RichMessage};
 
 /// Delivery state of one timeline item. The order of `Sent < Delivered < Read`
 /// is the order receipts may move it in.
@@ -46,6 +49,8 @@ pub struct Timeline {
     chat: String,
     items: Vec<Item>,
     has_older: bool,
+    /// Non-empty [`MessageMeta`] by message id.
+    metas: HashMap<String, MessageMeta>,
 }
 
 impl Timeline {
@@ -54,7 +59,46 @@ impl Timeline {
             chat: chat.into(),
             items: Vec::new(),
             has_older: false,
+            metas: HashMap::new(),
         }
+    }
+
+    /// Like [`Self::apply_page`] for a page with meta
+    /// (`Gateway::messages_with_meta`): also keeps each message's meta and
+    /// starts my messages at the ticks the gateway stored.
+    pub fn apply_rich_page(&mut self, page: Vec<RichMessage>, limit: u32) {
+        self.has_older = page.len() == limit as usize;
+        for RichMessage { message, meta } in page {
+            if message.chat != self.chat {
+                continue;
+            }
+            let id = message.id.clone();
+            self.upsert(message);
+            self.set_meta(&id, meta);
+        }
+    }
+
+    /// The meta of a message, when it has any.
+    pub fn meta(&self, id: &str) -> Option<&MessageMeta> {
+        self.metas.get(id)
+    }
+
+    /// Stores `meta` for `id` and moves its ticks forward. Returns `true` on
+    /// change.
+    fn set_meta(&mut self, id: &str, meta: MessageMeta) -> bool {
+        let mut changed = false;
+        if let Some(status) = meta.status
+            && let Some(item) = self.items.iter_mut().find(|i| i.message.id == id)
+        {
+            changed |= upgrade(&mut item.state, state_of(status));
+        }
+        if meta.is_empty() {
+            changed |= self.metas.remove(id).is_some();
+        } else if self.metas.get(id) != Some(&meta) {
+            self.metas.insert(id.to_owned(), meta);
+            changed = true;
+        }
+        changed
     }
 
     /// A `GET /v1/chats/{jid}/messages` page (newest first). Dedups by id, keeps
@@ -79,6 +123,36 @@ impl Timeline {
                 reactions,
                 read,
             } if *chat == self.chat => self.update(id, reactions, *read),
+            GatewayEvent::MessageMeta {
+                chat,
+                id,
+                body,
+                meta,
+            } if *chat == self.chat => {
+                let mut changed = false;
+                if let Some(body) = body
+                    && let Some(item) = self.items.iter_mut().find(|i| i.message.id == *id)
+                    && item.message.body != *body
+                {
+                    item.message.body = body.clone();
+                    changed = true;
+                }
+                changed | self.set_meta(id, (**meta).clone())
+            }
+            GatewayEvent::MessageDeleted { chat, id } if *chat == self.chat => {
+                self.metas.remove(id);
+                let before = self.items.len();
+                self.items.retain(|i| i.message.id != *id);
+                self.items.len() != before
+            }
+            GatewayEvent::ChatCleared { jid } | GatewayEvent::ChatDeleted { jid }
+                if *jid == self.chat =>
+            {
+                let changed = !self.items.is_empty();
+                self.items.retain(|i| i.state.local_id().is_some());
+                self.metas.clear();
+                changed
+            }
             GatewayEvent::Receipt { chat, ids, kind } if *chat == self.chat => {
                 let to = match kind {
                     ReceiptKind::Delivered => ItemState::Delivered,
@@ -295,6 +369,15 @@ impl Timeline {
     }
 }
 
+/// The item state that shows `status`.
+fn state_of(status: DeliveryStatus) -> ItemState {
+    match status {
+        DeliveryStatus::Sent => ItemState::Sent,
+        DeliveryStatus::Delivered => ItemState::Delivered,
+        DeliveryStatus::Read | DeliveryStatus::Played => ItemState::Read,
+    }
+}
+
 /// Moves `state` to `to` only when that is strictly further along.
 fn upgrade(state: &mut ItemState, to: ItemState) -> bool {
     match (state.rank(), to.rank()) {
@@ -390,6 +473,60 @@ mod tests {
     use super::*;
 
     const CHAT: &str = "1@s.whatsapp.net";
+
+    #[test]
+    fn rich_pages_and_meta_events() {
+        let mut t = Timeline::new(CHAT);
+        let page = vec![
+            RichMessage {
+                message: msg("b", 20, true),
+                meta: MessageMeta {
+                    status: Some(DeliveryStatus::Read),
+                    ..Default::default()
+                },
+            },
+            RichMessage::from(msg("a", 10, false)),
+        ];
+        t.apply_rich_page(page, 2);
+        assert!(t.has_older());
+        assert_eq!(t.items()[1].state, ItemState::Read);
+        assert!(t.meta("a").is_none());
+        assert_eq!(t.meta("b").unwrap().status, Some(DeliveryStatus::Read));
+
+        // An edit replaces the body and keeps the meta.
+        let edit = GatewayEvent::MessageMeta {
+            chat: CHAT.into(),
+            id: "a".into(),
+            body: Some(MessageBody::Text("fixed".into())),
+            meta: Box::new(MessageMeta {
+                edited_ms: Some(30),
+                ..Default::default()
+            }),
+        };
+        assert!(t.apply_event(&edit));
+        assert!(!t.apply_event(&edit));
+        assert_eq!(t.items()[0].message.body, MessageBody::Text("fixed".into()));
+        assert_eq!(t.meta("a").unwrap().edited_ms, Some(30));
+
+        // Other chats are ignored; a delete for me drops the item.
+        let other = GatewayEvent::MessageDeleted {
+            chat: "x".into(),
+            id: "a".into(),
+        };
+        assert!(!t.apply_event(&other));
+        assert!(t.apply_event(&GatewayEvent::MessageDeleted {
+            chat: CHAT.into(),
+            id: "a".into(),
+        }));
+        assert_eq!(t.items().len(), 1);
+        assert!(t.meta("a").is_none());
+
+        // Clearing the chat keeps only pending sends.
+        t.push_pending(1, "later".into(), 40);
+        assert!(t.apply_event(&GatewayEvent::ChatCleared { jid: CHAT.into() }));
+        assert_eq!(t.items().len(), 1);
+        assert!(matches!(t.items()[0].state, ItemState::Pending { .. }));
+    }
 
     fn msg(id: &str, ts: i64, from_me: bool) -> WaMessage {
         WaMessage {

@@ -10,24 +10,28 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
+use rovsti_wa_proto::meta::body_preview;
 use rovsti_wa_proto::{
-    ChatState, GatewayEvent, GroupInfo, InstanceState, InstanceStatus, LinkRequest, MarkRead,
-    MessageBody, Reaction, SendReaction, SendText, Sent, TypingState, WaMessage, WaUser,
+    ChatAction, ChatActionKind, ChatState, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo,
+    InstanceState, InstanceStatus, LinkRequest, MarkRead, MessageBody, MessageMeta, Quoted,
+    Reaction, RevokeMessage, SendReaction, SendText, Sent, TypingState, WaMessage, WaUser,
     event::ReceiptKind,
 };
+use whatsapp_rust::RevokeType;
 use whatsapp_rust::pair_code::PairCodeOptions;
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::upload::UploadOptions;
 use whatsapp_rust::wacore::types::events::ConnectFailureReason;
 use whatsapp_rust::wacore::types::presence::{ChatPresence, ChatPresenceMedia, ReceiptType};
+use whatsapp_rust::wacore_binary::JidExt as _;
 use whatsapp_rust::waproto::buffa::Message as _;
 
 use super::calls::{CallBackend, WaCalls};
-use super::convert::{self, Converted};
-use super::{groups, history, media, reaction};
-use crate::driver::{DriverError, EventSink, SendMedia, WaDriver};
+use super::convert;
+use super::{app_state, groups, history, media, picture, reaction};
+use crate::driver::{DriverError, EventSink, MessageRef, PictureFetch, SendMedia, WaDriver};
 use crate::now_ms;
-use crate::store::InstanceId;
+use crate::store::{FetchedProfile, InstanceId, MessageExtras};
 
 /// How long a bot gets to flush and stop before it is abandoned.
 const STOP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -84,6 +88,41 @@ pub fn receipt_kind(kind: &ReceiptType) -> Option<ReceiptKind> {
         ReceiptType::Read | ReceiptType::ReadSelf | ReceiptType::Played => Some(ReceiptKind::Read),
         _ => None,
     }
+}
+
+/// The ticks a receipt from the other side puts on my messages.
+pub fn receipt_status(kind: &ReceiptType) -> Option<DeliveryStatus> {
+    match kind {
+        ReceiptType::Delivered => Some(DeliveryStatus::Delivered),
+        ReceiptType::Read => Some(DeliveryStatus::Read),
+        ReceiptType::Played => Some(DeliveryStatus::Played),
+        _ => None,
+    }
+}
+
+/// The reply meta stored with a message I send quoting `quoted`.
+fn quoted_meta(quoted_id: &str, quoted: Option<&WaMessage>, own_jid: Option<&str>) -> Quoted {
+    Quoted {
+        id: quoted_id.to_owned(),
+        sender: quoted.and_then(|m| {
+            if m.from_me {
+                own_jid.map(str::to_owned)
+            } else {
+                m.sender.clone().or_else(|| Some(m.chat.clone()))
+            }
+        }),
+        preview: quoted.and_then(|m| body_preview(&m.body, 120)),
+    }
+}
+
+/// The parsed author of a stored message (`None`: mine, or a one-to-one chat).
+fn author_jid(target: &MessageRef) -> Result<Option<Jid>, DriverError> {
+    target
+        .sender
+        .as_deref()
+        .filter(|_| !target.from_me && convert::is_group(&target.chat))
+        .map(convert::parse_jid)
+        .transpose()
 }
 
 /// A typing indicator as the apps know it.
@@ -279,18 +318,17 @@ impl WaRuntime {
             .on_message({
                 let sink = sink.clone();
                 move |ctx| {
-                    let (converted, raw) = convert::message(&ctx);
+                    // An encrypted edit needs the stored secret of the edited
+                    // message; the rest converts without any lookup.
+                    let pending = app_state::encrypted_edit(&ctx);
+                    let converted = convert::message(&ctx);
                     let sink = sink.clone();
                     async move {
-                        match converted {
-                            Converted::Message(message) => sink.emit_message(message, raw).await,
-                            Converted::Reaction {
-                                chat,
-                                target_id,
-                                reaction,
-                            } => sink.emit_reaction(chat, target_id, reaction).await,
-                            Converted::Ignore => {}
-                        }
+                        let converted = match pending {
+                            Some(edit) => edit.resolve(&sink).await,
+                            None => converted,
+                        };
+                        app_state::apply_converted(&sink, converted).await;
                     }
                 }
             })
@@ -308,6 +346,19 @@ impl WaRuntime {
                     EventKind::IncomingCall,
                     EventKind::MissedCall,
                     EventKind::CallEndedElsewhere,
+                    EventKind::PictureUpdate,
+                    EventKind::UserAboutUpdate,
+                    EventKind::ContactUpdated,
+                    EventKind::ContactUpdate,
+                    EventKind::PushNameUpdate,
+                    EventKind::PinUpdate,
+                    EventKind::MuteUpdate,
+                    EventKind::ArchiveUpdate,
+                    EventKind::StarUpdate,
+                    EventKind::MarkChatAsReadUpdate,
+                    EventKind::DeleteChatUpdate,
+                    EventKind::ClearChatUpdate,
+                    EventKind::DeleteMessageForMeUpdate,
                 ],
                 {
                     let sink = sink.clone();
@@ -362,18 +413,48 @@ impl WaRuntime {
             .await
             .map_err(failed)?
             .into();
-        let message = media::build_message(req.kind, &uploaded, &req.mime, req.caption.as_deref());
-        let raw = message.encode_to_vec();
-        let result = client.send_message(to, message).await.map_err(failed)?;
-
-        let timestamp_ms = now_ms();
-        let sender = client
+        let details = media::Details {
+            file_name: req.file_name.as_deref(),
+            seconds: req.seconds,
+            voice_note: req.voice_note,
+        };
+        let mut message = media::build_message_with(
+            req.kind,
+            &uploaded,
+            &req.mime,
+            req.caption.as_deref(),
+            &details,
+        );
+        let own = client
             .persistence_manager()
             .get_device_snapshot()
             .pn
             .as_ref()
+            .map(|jid| jid.to_non_ad());
+        let own_jid = own.as_ref().map(ToString::to_string);
+        let mut quoted = None;
+        if let Some(quoted_id) = req.quoted_id.as_deref() {
+            let stored = sink.find_message(&chat, quoted_id).await;
+            message.set_context_info(quote_context(
+                &chat,
+                quoted_id,
+                stored.as_ref(),
+                own_jid.as_deref(),
+            ));
+            quoted = Some(quoted_meta(quoted_id, stored.as_ref(), own_jid.as_deref()));
+        }
+        let raw = message.encode_to_vec();
+        let mut extras = convert::extras(&message);
+        let result = client.send_message(to, message).await.map_err(failed)?;
+
+        let timestamp_ms = now_ms();
+        let sender = own
+            .as_ref()
             .and_then(|jid| convert::group_sender(&chat, jid));
-        sink.emit_message(
+        extras.raw_proto = Some(raw);
+        extras.meta.status = Some(DeliveryStatus::Sent);
+        extras.meta.quoted = quoted;
+        sink.emit_full(
             WaMessage {
                 id: result.message_id.clone(),
                 chat,
@@ -388,7 +469,7 @@ impl WaRuntime {
                 },
                 reactions: Vec::new(),
             },
-            Some(raw),
+            extras,
         )
         .await;
         Ok(Sent {
@@ -454,7 +535,7 @@ impl WaRuntime {
         };
         let mut infos = Vec::with_capacity(metadata.len());
         for group in &metadata {
-            let info = groups::group_info(
+            let mut info = groups::group_info(
                 &group.id,
                 &group.subject,
                 group.participants.iter().map(|p| {
@@ -464,6 +545,13 @@ impl WaRuntime {
                     )
                 }),
             );
+            info.description = group
+                .description
+                .as_deref()
+                .map(str::trim)
+                .filter(|d| !d.is_empty())
+                .map(str::to_owned);
+            info.announce = group.is_announcement;
             sink.rename_chat(&info.jid, &info.subject).await;
             infos.push(info);
         }
@@ -486,11 +574,16 @@ impl WaRuntime {
             .as_ref()
             .map(|jid| jid.to_non_ad());
 
+        let mut meta = MessageMeta {
+            status: Some(DeliveryStatus::Sent),
+            ..Default::default()
+        };
         let result = match req.quoted_id.as_deref().filter(|id| !id.is_empty()) {
             None => client.send_text(to, req.text.clone()).await,
             Some(quoted_id) => {
                 let quoted = sink.find_message(&chat, quoted_id).await;
                 let own_jid = own.as_ref().map(ToString::to_string);
+                meta.quoted = Some(quoted_meta(quoted_id, quoted.as_ref(), own_jid.as_deref()));
                 let context = quote_context(&chat, quoted_id, quoted.as_ref(), own_jid.as_deref());
                 let message = wa::Message {
                     extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
@@ -509,7 +602,7 @@ impl WaRuntime {
         let sender = own
             .as_ref()
             .and_then(|jid| convert::group_sender(&chat, jid));
-        sink.emit_message(
+        sink.emit_full(
             WaMessage {
                 id: result.message_id.clone(),
                 chat,
@@ -519,7 +612,10 @@ impl WaRuntime {
                 body: MessageBody::Text(req.text),
                 reactions: Vec::new(),
             },
-            None,
+            MessageExtras {
+                meta,
+                ..Default::default()
+            },
         )
         .await;
         Ok(Sent {
@@ -543,15 +639,25 @@ async fn handle_event(
             if receipt.message_ids.is_empty() {
                 return;
             }
-            sink.publish(GatewayEvent::Receipt {
-                chat: receipt.source.chat.to_non_ad().to_string(),
-                ids: receipt
-                    .message_ids
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect(),
-                kind,
-            });
+            let chat = if receipt.source.chat.is_lid() {
+                convert::prefer_pn(&receipt.source.chat, receipt.source.sender_alt.as_ref())
+            } else {
+                receipt.source.chat.to_non_ad()
+            }
+            .to_string();
+            let ids: Vec<String> = receipt
+                .message_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            if let Some(status) = receipt_status(&receipt.r#type) {
+                sink.set_status(&chat, ids.clone(), status).await;
+            }
+            if matches!(receipt.r#type, ReceiptType::ReadSelf) {
+                // Read on another of my devices.
+                sink.mark_chat_read(&chat).await;
+            }
+            sink.publish(GatewayEvent::Receipt { chat, ids, kind });
         }
         Event::Presence(update) => sink.publish(GatewayEvent::Presence {
             jid: update.from.to_non_ad().to_string(),
@@ -573,9 +679,13 @@ async fn handle_event(
         Event::HistorySync(lazy) => {
             let progress = lazy.progress();
             let lazy = (**lazy).clone();
-            let chats = tokio::task::spawn_blocking(move || history::drain(&lazy)).await;
-            match chats {
-                Ok(Ok(chats)) => sink.import_history(chats, progress).await,
+            let now = now_ms();
+            let drained = tokio::task::spawn_blocking(move || history::drain(&lazy, now)).await;
+            match drained {
+                Ok(Ok(drained)) => {
+                    sink.set_push_names(drained.push_names).await;
+                    sink.import_history(drained.chats, progress).await;
+                }
                 Ok(Err(e)) => log::warn!("{instance}: history sync unreadable: {e}"),
                 Err(e) => log::warn!("{instance}: history sync task failed: {e}"),
             }
@@ -613,7 +723,7 @@ async fn handle_event(
                     .await;
             }
         }
-        _ => {}
+        other => app_state::handle(sink, other).await,
     }
 }
 
@@ -796,6 +906,251 @@ impl WaDriver for WaRuntime {
     fn call_backend(&self, instance: &InstanceId) -> Result<Arc<dyn CallBackend>, DriverError> {
         let (client, _) = self.client_of(instance)?;
         Ok(Arc::new(WaCalls::new(client)))
+    }
+
+    fn edit_message(
+        &self,
+        instance: &InstanceId,
+        req: EditMessage,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let to = convert::parse_jid(&req.chat)?;
+            let (client, sink) = self.client_of(&instance)?;
+            let stored = sink.find_message(&req.chat, &req.message_id).await;
+            let content = match stored.map(|m| m.body) {
+                // A caption edit resends the media message with the new caption.
+                Some(MessageBody::Media { kind, .. }) => app_state::caption_edit(kind, &req.text)
+                    .ok_or_else(|| {
+                    DriverError::BadRequest("this message cannot be edited".to_owned())
+                })?,
+                _ => wa::Message {
+                    conversation: Some(req.text.clone()),
+                    ..Default::default()
+                },
+            };
+            client
+                .edit_message(to, req.message_id, content)
+                .await
+                .map(drop)
+                .map_err(failed)
+        })
+    }
+
+    fn revoke_message(
+        &self,
+        instance: &InstanceId,
+        req: RevokeMessage,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let to = convert::parse_jid(&req.chat)?;
+            let revoke_type = match req.sender.as_deref() {
+                Some(sender) => RevokeType::Admin {
+                    original_sender: convert::parse_jid(sender)?,
+                },
+                None => RevokeType::Sender,
+            };
+            let (client, _) = self.client_of(&instance)?;
+            client
+                .revoke_message(to, req.message_id, revoke_type)
+                .await
+                .map_err(failed)
+        })
+    }
+
+    fn delete_for_me(
+        &self,
+        instance: &InstanceId,
+        target: MessageRef,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let chat = convert::parse_jid(&target.chat)?;
+            let author = author_jid(&target)?;
+            let (client, _) = self.client_of(&instance)?;
+            client
+                .chat_actions()
+                .delete_message_for_me(
+                    &chat,
+                    author.as_ref(),
+                    &target.id,
+                    target.from_me,
+                    true,
+                    Some(target.timestamp_ms / 1000),
+                )
+                .await
+                .map_err(failed)
+        })
+    }
+
+    fn star_message(
+        &self,
+        instance: &InstanceId,
+        target: MessageRef,
+        starred: bool,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let chat = convert::parse_jid(&target.chat)?;
+            let author = author_jid(&target)?;
+            let (client, _) = self.client_of(&instance)?;
+            let actions = client.chat_actions();
+            if starred {
+                actions
+                    .star_message(&chat, author.as_ref(), &target.id, target.from_me)
+                    .await
+            } else {
+                actions
+                    .unstar_message(&chat, author.as_ref(), &target.id, target.from_me)
+                    .await
+            }
+            .map_err(failed)
+        })
+    }
+
+    fn chat_action(
+        &self,
+        instance: &InstanceId,
+        req: ChatAction,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let chat = convert::parse_jid(&req.chat)?;
+            let (client, _) = self.client_of(&instance)?;
+            let actions = client.chat_actions();
+            match req.action {
+                ChatActionKind::Archive { archived: true } => {
+                    actions.archive_chat(&chat, None).await
+                }
+                ChatActionKind::Archive { archived: false } => {
+                    actions.unarchive_chat(&chat, None).await
+                }
+                ChatActionKind::Pin { pinned: true } => actions.pin_chat(&chat).await,
+                ChatActionKind::Pin { pinned: false } => actions.unpin_chat(&chat).await,
+                ChatActionKind::Mute { until_ms: None } => actions.mute_chat(&chat).await,
+                ChatActionKind::Mute {
+                    until_ms: Some(until),
+                } => actions.mute_chat_until(&chat, until).await,
+                ChatActionKind::Unmute => actions.unmute_chat(&chat).await,
+                ChatActionKind::MarkRead { read } => {
+                    actions.mark_chat_as_read(&chat, read, None).await
+                }
+            }
+            .map_err(failed)
+        })
+    }
+
+    fn mark_played(
+        &self,
+        instance: &InstanceId,
+        req: MarkRead,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let chat = convert::parse_jid(&req.chat)?;
+            let sender = req
+                .sender
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .map(convert::parse_jid)
+                .transpose()?;
+            let (client, _) = self.client_of(&instance)?;
+            let ids: Vec<&str> = req.ids.iter().map(String::as_str).collect();
+            client
+                .mark_as_played(&chat, sender.as_ref(), &ids)
+                .await
+                .map_err(failed)
+        })
+    }
+
+    fn profiles(
+        &self,
+        instance: &InstanceId,
+        jids: Vec<String>,
+    ) -> BoxFuture<'_, Result<Vec<FetchedProfile>, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let parsed = jids
+                .iter()
+                .map(|jid| convert::parse_jid(jid))
+                .collect::<Result<Vec<_>, _>>()?;
+            let (client, _) = self.client_of(&instance)?;
+            let (groups, users): (Vec<&Jid>, Vec<&Jid>) = parsed.iter().partition(|j| j.is_group());
+            let users: Vec<Jid> = users.into_iter().cloned().collect();
+            let mut out = Vec::with_capacity(parsed.len());
+            if !users.is_empty() {
+                let infos = client
+                    .contacts()
+                    .get_user_info(&users)
+                    .await
+                    .map_err(failed)?;
+                for jid in &users {
+                    let key = jid.to_non_ad();
+                    let info = infos
+                        .iter()
+                        .find(|(k, _)| k.to_non_ad() == key)
+                        .map(|(_, v)| v);
+                    out.push(FetchedProfile {
+                        jid: key.to_string(),
+                        about: info
+                            .and_then(|i| i.status.clone())
+                            .filter(|s| !s.is_empty()),
+                        picture_id: info
+                            .and_then(|i| i.picture_id.clone())
+                            .filter(|p| !p.is_empty()),
+                        business: info.is_some_and(|i| i.is_business),
+                        verified_name: info
+                            .and_then(|i| i.verified_name.as_ref())
+                            .and_then(|v| v.name.clone()),
+                    });
+                }
+            }
+            for group in groups {
+                let picture = client
+                    .contacts()
+                    .get_profile_picture(group, true)
+                    .await
+                    .map_err(failed)?;
+                out.push(FetchedProfile {
+                    jid: group.to_non_ad().to_string(),
+                    picture_id: picture.map(|p| p.id).filter(|id| !id.is_empty()),
+                    ..Default::default()
+                });
+            }
+            Ok(out)
+        })
+    }
+
+    fn fetch_picture(
+        &self,
+        instance: &InstanceId,
+        jid: String,
+        preview: bool,
+        known_id: Option<String>,
+    ) -> BoxFuture<'_, Result<PictureFetch, DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let jid = convert::parse_jid(&jid)?;
+            let (client, _) = self.client_of(&instance)?;
+            let Some(found) = client
+                .contacts()
+                .get_profile_picture(&jid, preview)
+                .await
+                .map_err(failed)?
+                .filter(|p| !p.id.is_empty() && !p.url.is_empty())
+            else {
+                return Ok(PictureFetch::None);
+            };
+            if known_id.as_deref() == Some(found.id.as_str()) {
+                return Ok(PictureFetch::Unchanged);
+            }
+            let bytes = picture::fetch(found.url).await?;
+            Ok(PictureFetch::New {
+                id: found.id,
+                bytes,
+            })
+        })
     }
 
     fn group(

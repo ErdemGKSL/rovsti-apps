@@ -677,6 +677,7 @@ impl Render for StopsApp {
                 | self.sheet.tick(dt)
                 | self.sheet.tick_real(real)
                 | self.pill.tick(dt)
+                | self.map.tick_settle(dt)
         });
         self.motion = motion;
         let tab = self.tabs.selected();

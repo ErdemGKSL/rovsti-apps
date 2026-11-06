@@ -20,10 +20,10 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, BorderStyle, Bounds, Context, Corners, Edges, HitboxBehavior, Hsla,
-    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Path, PathBuilder, Pixels, Point, StatefulInteractiveElement, Styled, Task,
-    TouchEvent, TouchPhase, Window, canvas, div, point, px, quad,
+    AnyElement, App, BorderStyle, Bounds, Context, Corners, Edges, HapticFeedback, HitboxBehavior,
+    Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement, Path, PathBuilder, Pixels, Point, StatefulInteractiveElement,
+    Styled, Task, TouchEvent, TouchPhase, Window, canvas, div, point, px, quad,
 };
 use rovsti_android::location;
 use rovsti_geo::{
@@ -36,6 +36,8 @@ use rovsti_geo::{
 };
 use rovsti_ui::{
     components::flat_glass,
+    haptics, motion_tokens,
+    spring::Spring,
     theme,
     tokens::{Theme, radius, typography},
     touch::TAP_SLOP,
@@ -1442,6 +1444,8 @@ pub struct MapState {
     scene_serial: u64,
     /// The tessellated paths of the scene, shared with the paint closure.
     paint: Rc<RefCell<PaintCache>>,
+    /// A pin easing into the stop it snapped to.
+    pub settle: Option<PinSettle>,
 }
 
 /// What a scene is built from: equal inputs give an equal scene.
@@ -1497,11 +1501,73 @@ impl Default for MapState {
             scene: None,
             scene_serial: 0,
             paint: Rc::default(),
+            settle: None,
         }
     }
 }
 
+/// A dropped pin gliding from where the finger let go to the stop it snapped to.
+#[derive(Clone, Debug)]
+pub struct PinSettle {
+    pub slot: Slot,
+    pub from: Coord,
+    pub spring: Spring,
+}
+
+impl PinSettle {
+    pub fn new(slot: Slot, from: Coord) -> Self {
+        Self {
+            slot,
+            from,
+            spring: settle_spring(),
+        }
+    }
+
+    /// Where the pin is drawn while it settles onto `to`.
+    pub fn coord(&self, to: Coord) -> Coord {
+        lerp_coord(self.from, to, self.spring.value)
+    }
+}
+
+fn settle_spring() -> Spring {
+    let mut spring = Spring::new(0.0, motion_tokens::release()).with_epsilon(0.002);
+    spring.set_target(1.0);
+    spring
+}
+
+/// Linear blend of two points: `a` at 0, `b` at 1 (not clamped, so a springy
+/// overshoot passes the target a little).
+pub fn lerp_coord(a: Coord, b: Coord, t: f32) -> Coord {
+    let t = f64::from(t);
+    Coord::new(a.lat + (b.lat - a.lat) * t, a.lon + (b.lon - a.lon) * t)
+}
+
+/// The settle for a pin dropped at `released` and resolved to `dest`: only a
+/// snap (the destination is a GTFS stop) glides, and never under reduced motion.
+pub fn settle_for_drop(
+    slot: Slot,
+    released: Coord,
+    dest: &Destination,
+    reduced_motion: bool,
+) -> Option<PinSettle> {
+    (dest.gtfs_stop.is_some() && !reduced_motion && released != dest.coord)
+        .then(|| PinSettle::new(slot, released))
+}
+
 impl MapState {
+    /// Advances the settle; returns whether it is still moving.
+    pub fn tick_settle(&mut self, dt: Duration) -> bool {
+        let Some(settle) = &mut self.settle else {
+            return false;
+        };
+        if settle.spring.tick(dt) {
+            true
+        } else {
+            self.settle = None;
+            false
+        }
+    }
+
     /// The next device fix, within [`LOCATE_WAIT_MS`] of `now_ms`, should
     /// recentre the view (the my-location button).
     pub fn ask_locate(&mut self, now_ms: i64) {
@@ -1603,7 +1669,7 @@ fn input_surface(
     bounds_out: Rc<Cell<Bounds<Pixels>>>,
     menu_rect: Option<(f32, f32, f32, f32)>,
     blocked: bool,
-    on_input: impl Fn(MapInput, &mut App) + 'static,
+    on_input: impl Fn(MapInput, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let on_input = Rc::new(on_input);
     canvas(
@@ -1644,6 +1710,7 @@ fn input_surface(
                         phase: event.phase.into(),
                         at: (f32::from(event.position.x), f32::from(event.position.y)),
                     },
+                    window,
                     cx,
                 );
             });
@@ -1662,13 +1729,14 @@ fn input_surface(
                             phase: Phase::Start,
                             at: (f32::from(event.position.x), f32::from(event.position.y)),
                         },
+                        window,
                         cx,
                     );
                 }
             });
             let moved = Rc::clone(&pressed);
             let move_input = Rc::clone(&mouse);
-            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                 if phase.bubble() && moved.get() && event.pressed_button == Some(MouseButton::Left)
                 {
                     move_input(
@@ -1676,17 +1744,19 @@ fn input_surface(
                             phase: Phase::Move,
                             at: (f32::from(event.position.x), f32::from(event.position.y)),
                         },
+                        window,
                         cx,
                     );
                 }
             });
-            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
                 if phase.bubble() && event.button == MouseButton::Left && pressed.replace(false) {
                     mouse(
                         MapInput::Mouse {
                             phase: Phase::End,
                             at: (f32::from(event.position.x), f32::from(event.position.y)),
                         },
+                        window,
                         cx,
                     );
                 }
@@ -1781,7 +1851,13 @@ impl StopsApp {
                 .ends
                 .get(slot)
                 .filter(|_| self.trip.is_none())
-                .map(|d| (d.coord, d.gtfs_stop.is_some()))
+                .map(|d| {
+                    let coord = match &self.map.settle {
+                        Some(s) if s.slot == slot => s.coord(d.coord),
+                        _ => d.coord,
+                    };
+                    (coord, d.gtfs_stop.is_some())
+                })
         });
         let saved_coords: Vec<Coord> = self.saved.stops.iter().map(SavedStop::center).collect();
         let key = SceneKey {
@@ -1849,8 +1925,8 @@ impl StopsApp {
             self.map.bounds.clone(),
             menu_rect,
             blocked,
-            move |event, cx| {
-                input.update(cx, |this, cx| this.map_input(event, cx));
+            move |event, window, cx| {
+                input.update(cx, |this, cx| this.map_input(event, window, cx));
             },
         );
         let pinch = entity;
@@ -2064,7 +2140,7 @@ impl StopsApp {
         cx.notify();
     }
 
-    fn map_input(&mut self, event: MapInput, cx: &mut Context<Self>) {
+    fn map_input(&mut self, event: MapInput, window: &Window, cx: &mut Context<Self>) {
         let now = now_ms().max(0) as u64;
         let (gesture, touch_ended) = match event {
             MapInput::Touch { id, phase, at } => (
@@ -2076,7 +2152,7 @@ impl StopsApp {
             }
         };
         if let Some(gesture) = gesture {
-            self.apply_gesture(gesture);
+            self.apply_gesture(gesture, window);
             cx.notify();
         }
         let pin_end = matches!(
@@ -2100,7 +2176,7 @@ impl StopsApp {
         }
     }
 
-    fn apply_gesture(&mut self, gesture: Gesture) {
+    fn apply_gesture(&mut self, gesture: Gesture, window: &Window) {
         match gesture {
             Gesture::Pan { dx, dy } => {
                 self.map.take_over();
@@ -2120,6 +2196,7 @@ impl StopsApp {
             Gesture::PinDrag { slot, at } => {
                 // The auto view would chase the pin under the finger.
                 self.map.take_over();
+                self.map.settle = None;
                 if self.pick.dragging() != Some(slot) && !self.pick.drag_start(slot) {
                     return;
                 }
@@ -2143,6 +2220,7 @@ impl StopsApp {
                     started_on_candidate: false,
                 };
                 let origin = self.pick.drag_origin(slot).cloned();
+                let released = self.map.viewport.unproject(at);
                 let dest = drop_destination(
                     self.gtfs.as_deref(),
                     &self.map.viewport,
@@ -2151,6 +2229,12 @@ impl StopsApp {
                     &input,
                     origin.as_ref(),
                 );
+                let settle =
+                    settle_for_drop(slot, released, &dest, window.prefers_reduced_motion());
+                if dest.gtfs_stop.is_some() {
+                    haptics::perform(window, HapticFeedback::Selection);
+                }
+                self.map.settle = settle;
                 self.pick.drag_end(slot, dest);
             }
             Gesture::PinCancel { .. } => self.pick.drag_cancel(),
@@ -2925,6 +3009,34 @@ mod tests {
 
     fn drop_feed() -> Feed {
         Feed::new(vec![named_stop("S1", "Moda", 0.0)], vec![], vec![], 0)
+    }
+
+    #[test]
+    fn the_settle_lerp_runs_from_release_to_stop() {
+        let (from, to) = (Coord::new(10.0, 20.0), Coord::new(11.0, 22.0));
+        assert_eq!(lerp_coord(from, to, 0.0), from);
+        assert_eq!(lerp_coord(from, to, 1.0), to);
+        let mid = lerp_coord(from, to, 0.5);
+        assert!((mid.lat - 10.5).abs() < 1e-9 && (mid.lon - 21.0).abs() < 1e-9);
+        let settle = PinSettle::new(Slot::A, from);
+        assert_eq!(settle.coord(to), from, "starts where the finger let go");
+    }
+
+    #[test]
+    fn only_a_snap_drop_starts_a_settle() {
+        let released = Coord::new(1.0, 1.0);
+        let free = Destination::dropped(released);
+        assert!(settle_for_drop(Slot::A, released, &free, false).is_none());
+        let stop = Destination {
+            label: "Moda".into(),
+            coord: Coord::new(1.001, 1.001),
+            gtfs_stop: Some("S2".into()),
+            pattern: None,
+        };
+        let settle = settle_for_drop(Slot::B, released, &stop, false).expect("snap settles");
+        assert_eq!(settle.slot, Slot::B);
+        assert_eq!(settle.from, released);
+        assert!(settle_for_drop(Slot::B, released, &stop, true).is_none());
     }
 
     #[test]

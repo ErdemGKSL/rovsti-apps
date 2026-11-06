@@ -259,8 +259,8 @@ development_status:
 
   epic-21: backlog
   21-1-call-details-page-with-s35-details-arrival: backlog
-  21-2-delete-call-history-entries-undo-and-spike-s12: backlog
-  21-3-delete-all-call-history-and-s36-hold-to-delete: backlog
+  21-2-delete-call-history-entries-undo-and-spike-s12: review
+  21-3-delete-all-call-history-and-s36-hold-to-delete: review
   21-4-call-quality-indicators-live-and-history: backlog
   epic-21-retrospective: optional
 

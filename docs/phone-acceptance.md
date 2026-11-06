@@ -160,6 +160,27 @@ no default, an unsaved number in Recents, and a few calls (one missed) with the 
 | X18 | Settings, Speed dial: remove an assigned digit. | The pill "Removed speed dial {d}" shows with Undo; Undo restores the same contact. | | |
 | X19 | Settings, Quick replies: tap Clear on a filled reply. | The pill "Reply cleared" shows with Undo; Undo restores the text. Clearing an empty field shows no pill. | | |
 
+## Delete call history and Contact sheet speed dial (UX pass, round 2)
+
+Needs a few calls with the same person (one a WhatsApp call, WhatsApp connected) and a contact
+that is not on a speed dial digit. The delete rows need the call log write permission (spike S12,
+`docs/spikes/s12-calllog.md`).
+
+| # | Step | Expected | Pass / Fail | Notes |
+|---|---|---|---|---|
+| D1 | Recents: hold a grouped row such as "Ayşe (3)", tap "Delete 3 calls". | The row disappears and the pill "Deleted 3 calls" shows with Undo. A single call reads "Delete from Recents". | | |
+| D2 | Tap Undo on the pill. | The row comes back with the same calls, times and durations; the missed badge matches again. | | |
+| D3 | Open the "i" sheet of a person with calls (Number or Contact sheet), tap "Delete call history". | A confirm sheet "Delete calls with {name}?" shows the count. Cancel changes nothing. | | |
+| D4 | Confirm with Delete. | Every call with that person is gone from Recents and from the sheet; the pill "Deleted {n} calls" shows with Undo, and Undo restores them. | | |
+| D5 | Settings, Data, "Delete all call history", then Delete. | Recents shows its empty state, the missed badge is 0, the pill reads "Call history deleted" (no Undo). | | |
+| D6 | Delete a WhatsApp call row (D1 path), wait for or force a gateway sync, reopen Recents. | The deleted WhatsApp call does not come back. After D2's Undo it is back. | | |
+| D7 | Take the call log permission away in system settings, repeat D1. | The pill offers "Allow call log access"; if the system refuses writes the pill reads "Not allowed on this phone" and nothing is removed or lost. | | |
+| D8 | Contacts: open a contact with a number that has no speed dial. | Under the numbers a row "Add to speed dial". | | |
+| D9 | Tap it, then pick 5. | The row reads "Speed dial 5" with Remove, the pill reads "Speed dial 5: {name}" with Undo, and Settings, Speed dial lists the person on 5. | | |
+| D10 | Pick a digit another person holds. | The pill reads "Speed dial {d}: {name} (was {other})"; Undo gives the digit back to the other person. | | |
+| D11 | On a contact with two numbers and no default, pick a digit. | The sheet asks "Speed dial which number?" and assigns the chosen one. | | |
+| D12 | Tap Remove. | The pill "Removed speed dial {d}" shows with Undo; Undo restores it. Holding the digit on the empty Keypad calls the person while assigned. | | |
+
 ## WhatsApp calls
 
 Needs the gateway running (`docs/whatsapp-gateway.md`), WhatsApp linked or connected under

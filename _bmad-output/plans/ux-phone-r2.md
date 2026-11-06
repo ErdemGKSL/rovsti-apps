@@ -208,3 +208,17 @@ Speed dial shows the person on 5, holding 5 on the empty Keypad calls them; Remo
 ## Next round (candidates)
 - Re-audit after S1 to S8. Expected to be empty apart from R5 items that need a device or are
   gated by design.
+
+## Status
+
+S1 to S7 are committed on main after base `93c27bc`:
+
+- 6a188b7 Rovsti phone: Pure logic: entry refs, delete sets, restore JSON, speed-dial lookup, WhatsApp tombstones (+tests)
+- 8e596ce Rovsti phone: Android seam: shared Kotlin CallLogWrite and rovsti_android::providers mirrors
+- d54900a Rovsti phone: Backend and WhatsApp history: delete, restore, delete all (no UI yet)
+- 1870cb2 Rovsti phone: Recents row menu Delete with Undo
+- 529fa4c Rovsti phone: Delete call history from Number and Contact sheets via confirm sheet
+- 1945934 Rovsti phone: Settings > Data: Delete all call history
+- 15bbb7f Rovsti phone: Speed dial on the Contact sheet
+
+S8 (docs: phone-acceptance D1 to D12, roadmap tick, `docs/spikes/s12-calllog.md`, sprint-status 21-2 and 21-3 to review) is in the working tree, not committed. The S12 device check is PENDING; the re-audit after S8 found nothing else reachable without a device.

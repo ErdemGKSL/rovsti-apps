@@ -44,7 +44,10 @@ list in `docs/phone-acceptance.md`.
       row with a Show Frequent setting (done without a device)
 - [x] Keypad Add to contacts and Message, Recents menu Add to contacts, WhatsApp call-back from
       Recents, Undo pills for speed dial Remove and quick reply Clear (done without a device)
-- [ ] Delete call history (CallLogWrite, spike S12)
+- [x] Delete call history (CallLogWrite, spike S12): Recents row Delete with Undo, "Delete call
+      history" in the sheets, Settings > Data "Delete all call history", Speed dial row on the
+      Contact sheet (done without a device; the S12 device check is pending,
+      `docs/spikes/s12-calllog.md`)
 
 ## Rovsti Messages
 

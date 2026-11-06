@@ -340,6 +340,13 @@ impl PhoneApp {
                     self.set_status(text);
                 }
             }
+            "kp-name" => {
+                let id = self.dial_match.found.as_ref().map(|f| f.id);
+                let row = id.and_then(|id| self.contacts.all.iter().find(|r| r.id == id).cloned());
+                if let Some(row) = row {
+                    self.open_contact_sheet(row, false, window, cx);
+                }
+            }
             "kp-add" => {
                 let outcome = backend::add_contact(&self.dialed);
                 if outcome != backend::Outcome::Done {
@@ -1267,24 +1274,47 @@ impl PhoneApp {
             // The status line is 36 px tall whether or not it speaks, so a
             // name appearing never moves the keys.
             None => match &self.dial_match.found {
-                Some(found) => area
-                    .aria_label(found.label.clone())
-                    .child(person_avatar(
-                        theme,
-                        found.hue,
-                        found.monogram.as_ref(),
-                        22.0,
-                        None,
-                    ))
-                    .child(
+                Some(found) => {
+                    let press = self.presses.value("kp-name").clamp(0.0, 1.0);
+                    area.child(
                         div()
-                            .max_w(px(260.0))
-                            .truncate()
-                            .text_size(typography::SUBHEADLINE.size)
-                            .font_weight(typography::HEADLINE.weight)
-                            .text_color(colors.label)
-                            .child(found.name.clone()),
-                    ),
+                            .id("kp-name")
+                            .role(Role::Button)
+                            .aria_label(SharedString::from(format!("{}, open contact", found.name)))
+                            .relative()
+                            .h(px(36.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .opacity(1.0 - 0.5 * press)
+                            .child(person_avatar(
+                                theme,
+                                found.hue,
+                                found.monogram.as_ref(),
+                                22.0,
+                                None,
+                            ))
+                            .child(
+                                div()
+                                    .max_w(px(260.0))
+                                    .truncate()
+                                    .text_size(typography::SUBHEADLINE.size)
+                                    .font_weight(typography::HEADLINE.weight)
+                                    .text_color(colors.label)
+                                    .child(found.name.clone()),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, window, cx| {
+                                    this.mouse_down("kp-name", window, cx)
+                                }),
+                            )
+                            .child(touch_surface(Self::touch_listener(
+                                cx,
+                                Some("kp-name".into()),
+                            ))),
+                    )
+                }
                 None if self.add_offered() => {
                     let wa = self.whatsapp_chip_shown(cx);
                     area.child(self.status_button(theme, "kp-add", "Add to contacts", cx))

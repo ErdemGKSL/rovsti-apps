@@ -781,9 +781,9 @@ impl PhoneApp {
                     .text_color(colors.accent)
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, _, _, cx| {
+                        cx.listener(|this, _, window, cx| {
                             this.presses.down("cs-grant");
-                            this.state_pill("cs-grant", cx);
+                            this.state_pill("cs-grant", window, cx);
                         }),
                     )
                     .child(touch_surface(Self::touch_listener(

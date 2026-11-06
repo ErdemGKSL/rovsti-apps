@@ -206,7 +206,7 @@ pub(crate) struct ContactsView {
     bounds: Rc<Cell<Bounds<Pixels>>>,
     pub(crate) state: State,
     index: Option<Arc<ContactIndex>>,
-    all: Arc<[ContactRow]>,
+    pub(crate) all: Arc<[ContactRow]>,
     pub(crate) rows: Arc<[ContactRow]>,
     /// The query `rows` was built for.
     query: String,
@@ -214,6 +214,8 @@ pub(crate) struct ContactsView {
     seen_edits: u64,
     /// The field's text as of the last edit.
     field_text: SharedString,
+    /// The search text as a dialable number, when it is one.
+    query_number: Option<SharedString>,
     touch: Option<Point<Pixels>>,
     tap: TapGuard,
     last_pressed: Option<usize>,
@@ -250,6 +252,7 @@ impl ContactsView {
             field: cx.new(SearchField::new),
             seen_edits: 0,
             field_text: SharedString::default(),
+            query_number: None,
             touch: None,
             tap: TapGuard::default(),
             last_pressed: None,
@@ -721,6 +724,7 @@ impl PhoneApp {
             return;
         }
         self.contacts.query.clone_from(&text);
+        self.contacts.query_number = contacts_view::query_number(&text).map(SharedString::from);
         self.contacts.search_task = None;
         let Some(index) = self.contacts.index.clone() else {
             return;
@@ -1458,7 +1462,7 @@ impl PhoneApp {
     }
 
     /// The pill on a Contacts or Favorites state screen.
-    pub(crate) fn contacts_pill(&mut self, id: &str, cx: &mut Context<Self>) {
+    pub(crate) fn contacts_pill(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         match id {
             "cs-grant" | "fv-grant" => {
                 let access = self.backend.read(cx).permissions().contacts;
@@ -1478,11 +1482,34 @@ impl PhoneApp {
                     self.show_notice_pill(text, None, false, cx);
                 }
             }
+            "cs-nm-call" | "cs-nm-msg" | "cs-nm-add" => {
+                if let Some(number) = self.contacts.query_number.clone() {
+                    self.number_pill(id, &number, window, cx);
+                }
+            }
             "fv-go" => self.select_tab(CONTACTS_TAB, cx),
             "cs-retry" | "fv-retry" => self.backend.update(cx, |b, cx| b.retry_contacts(cx)),
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Call / Message / Add to contacts for a number typed into the search.
+    fn number_pill(&mut self, id: &str, number: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (outcome, fallback) = match id {
+            "cs-nm-call" => {
+                self.place_call_from(number, window, cx);
+                return;
+            }
+            "cs-nm-msg" => (backend::send_sms_to(number), "Couldn't open Messages"),
+            _ => (
+                backend::add_contact(number),
+                "Couldn't open the Contacts app",
+            ),
+        };
+        if outcome != backend::Outcome::Done {
+            self.show_notice_pill(outcome.why_not(fallback), None, false, cx);
+        }
     }
 
     // ---- Rendering: Contacts ---------------------------------------------
@@ -1754,7 +1781,7 @@ impl PhoneApp {
         let c = &self.contacts;
         if c.rows.is_empty() {
             let echo = contacts_view::clip_query(&c.query);
-            return no_matches(theme, &echo);
+            return self.no_matches(theme, &echo, cx);
         }
         let list = uniform_list(
             "contacts",
@@ -2817,36 +2844,68 @@ fn number_row(
         .into_any_element()
 }
 
-/// "No matches" for a query nothing matched.
-fn no_matches(theme: Theme, echo: &str) -> AnyElement {
-    let colors = theme::colors(theme);
-    div()
-        .flex_1()
-        .w_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap(px(8.0))
-        .px(px(32.0))
-        .pt(px(56.0))
-        .child(
-            div()
-                .text_size(typography::TITLE3.size)
-                .font_weight(typography::TITLE3.weight)
-                .text_color(colors.label)
-                .child("No matches"),
-        )
-        .child(
-            div()
-                .max_w(px(300.0))
-                .text_size(typography::SUBHEADLINE.size)
-                .text_color(colors.secondary_label)
-                .text_center()
-                .child(SharedString::from(format!(
-                    "No contact matches \"{echo}\"."
-                ))),
-        )
-        .into_any_element()
+/// Pill ids of the unsaved-number actions.
+const NUMBER_PILLS: [(&str, &str); 3] = [
+    ("cs-nm-call", "Call"),
+    ("cs-nm-msg", "Message"),
+    ("cs-nm-add", "Add to contacts"),
+];
+
+impl PhoneApp {
+    /// "No matches" for a query nothing matched; a typed number also offers
+    /// Call, Message and Add to contacts.
+    fn no_matches(&self, theme: Theme, echo: &str, cx: &mut Context<Self>) -> AnyElement {
+        let colors = theme::colors(theme);
+        let number = self.contacts.query_number.clone();
+        let (title, body) = match &number {
+            Some(_) => ("No matches".to_owned(), format!("No contact has {echo}.")),
+            None => (
+                "No matches".to_owned(),
+                format!("No contact matches \"{echo}\"."),
+            ),
+        };
+        div()
+            .flex_1()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(32.0))
+            .pt(px(56.0))
+            .child(
+                div()
+                    .text_size(typography::TITLE3.size)
+                    .font_weight(typography::TITLE3.weight)
+                    .text_color(colors.label)
+                    .child(SharedString::from(title)),
+            )
+            .child(
+                div()
+                    .max_w(px(300.0))
+                    .text_size(typography::SUBHEADLINE.size)
+                    .text_color(colors.secondary_label)
+                    .text_center()
+                    .child(SharedString::from(body)),
+            )
+            .children(
+                number
+                    .is_some()
+                    .then_some(NUMBER_PILLS)
+                    .into_iter()
+                    .flatten()
+                    .map(|(id, label)| {
+                        crate::recents::state_pill_button(
+                            theme,
+                            id,
+                            label,
+                            self.presses.value(id),
+                            cx,
+                        )
+                    }),
+            )
+            .into_any_element()
+    }
 }
 
 /// A round avatar: the hue pair as a diagonal gradient with the monogram, and
@@ -3104,6 +3163,11 @@ fn favorite_tile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn number_pill_ids_belong_to_contacts() {
+        assert!(NUMBER_PILLS.iter().all(|(id, _)| id.starts_with("cs-")));
+    }
 
     #[test]
     fn sd_digit_accepts_two_to_nine_only() {

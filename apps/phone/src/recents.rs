@@ -964,14 +964,14 @@ impl PhoneApp {
     }
 
     /// A pill on a state screen (Recents, Contacts, Favorites) was pressed.
-    pub(crate) fn state_pill(&mut self, id: &str, cx: &mut Context<Self>) {
+    pub(crate) fn state_pill(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         match id {
             "rc-grant" => self.recents_grant(cx),
             "rc-retry" => self.backend.update(cx, |b, cx| b.retry_call_log(cx)),
             "set-bk-retry" | "set-bk-grant" => {
                 self.blocked_tap_state(id, cx);
             }
-            other => self.contacts_pill(other, cx),
+            other => self.contacts_pill(other, window, cx),
         }
     }
 
@@ -2081,28 +2081,40 @@ pub(crate) fn state_view(
                 .text_center()
                 .child(body),
         )
-        .children(pill.map(|(id, label, press)| {
-            let press = press.clamp(0.0, 1.0);
-            div()
-                .id(id)
-                .role(Role::Button)
-                .aria_label(label)
-                .relative()
-                .mt(px(12.0))
-                .child(
-                    glass_pill(theme, label)
-                        .text_color(colors.accent)
-                        .opacity(1.0 - 0.25 * press),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, _, cx| {
-                        this.presses.down(id);
-                        this.state_pill(id, cx);
-                    }),
-                )
-                .child(touch_surface(PhoneApp::touch_listener(cx, Some(id.into()))))
-        }))
+        .children(pill.map(|(id, label, press)| state_pill_button(theme, id, label, press, cx)))
+        .into_any_element()
+}
+
+/// One glass pill on a state screen; acts on finger-up through
+/// [`PhoneApp::state_pill`].
+pub(crate) fn state_pill_button(
+    theme: Theme,
+    id: &'static str,
+    label: &'static str,
+    press: f32,
+    cx: &mut Context<PhoneApp>,
+) -> AnyElement {
+    let colors = theme::colors(theme);
+    let press = press.clamp(0.0, 1.0);
+    div()
+        .id(id)
+        .role(Role::Button)
+        .aria_label(label)
+        .relative()
+        .mt(px(12.0))
+        .child(
+            glass_pill(theme, label)
+                .text_color(colors.accent)
+                .opacity(1.0 - 0.25 * press),
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, window, cx| {
+                this.presses.down(id);
+                this.state_pill(id, window, cx);
+            }),
+        )
+        .child(touch_surface(PhoneApp::touch_listener(cx, Some(id.into()))))
         .into_any_element()
 }
 

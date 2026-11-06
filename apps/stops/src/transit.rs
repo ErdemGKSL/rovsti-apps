@@ -335,7 +335,7 @@ impl StopsApp {
         } else if self.gtfs.is_none() && !busy {
             block = block.child(note(
                 theme,
-                "With a feed, you can wake up 1, 2 or 3 stops before yours, and see stops on the map.",
+                "With a feed, stops and their lines show on the map and in search, and any stop can be A or B.",
                 false,
             ));
         }

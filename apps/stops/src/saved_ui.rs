@@ -71,7 +71,7 @@ impl StopsApp {
             return Page::Flow(
                 empty_state(
                     theme,
-                    "No Saved Stops",
+                    "No Saved Places",
                     "Tap a pin on the map and choose Save, or save a stop or a shared place. Saved places appear here for one-tap use as A or B.",
                 )
                 .into_any_element(),

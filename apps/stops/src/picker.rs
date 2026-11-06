@@ -872,6 +872,23 @@ impl StopsApp {
         };
         let b_dest = a_dest.clone();
         let save_dest = here;
+        let already = self.saved.near(coord).map(|p| (p.id, p.name.clone()));
+        let save_row = match already {
+            Some((id, name)) => list_row(
+                theme,
+                None,
+                format!("Saved as {name}"),
+                None,
+                Some("Rename".into()),
+            )
+            .id("stop-rename")
+            .on_click(cx.listener(move |this, _, _, cx| this.open_rename(id, cx))),
+            None => list_row(theme, None, "Save this stop", None, None)
+                .id("stop-save")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_save_point(save_dest.clone(), None, cx);
+                })),
+        };
         body = body.child(section(
             theme,
             Some("This stop".into()),
@@ -888,12 +905,7 @@ impl StopsApp {
                         this.use_as(Slot::B, b_dest.clone(), false, cx);
                     }))
                     .into_any_element(),
-                list_row(theme, None, "Save this stop", None, None)
-                    .id("stop-save")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_save_point(save_dest.clone(), None, cx);
-                    }))
-                    .into_any_element(),
+                save_row.into_any_element(),
             ],
         ));
         body.child(
@@ -916,22 +928,35 @@ impl StopsApp {
     ) -> AnyElement {
         let colors = theme::colors(theme);
         let prefill = dest.clone();
-        let save_row = list_row(
-            theme,
-            None,
-            "Save this place",
-            None,
-            Some(if self.save_place { "On" } else { "Off" }.into()),
-        )
-        .id("save-toggle")
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.save_place = !this.save_place;
-            if this.save_place {
-                let name = pick::save_prefill(&prefill);
-                this.field.update(cx, |f, cx| f.set(&name, cx));
-            }
-            cx.notify();
-        }));
+        let already = self.saved.near(dest.coord).map(|p| (p.id, p.name.clone()));
+        let is_saved = already.is_some();
+        let save_row = match already {
+            Some((id, name)) => list_row(
+                theme,
+                None,
+                format!("Saved as {name}"),
+                None,
+                Some("Rename".into()),
+            )
+            .id("save-rename")
+            .on_click(cx.listener(move |this, _, _, cx| this.open_rename(id, cx))),
+            None => list_row(
+                theme,
+                None,
+                "Save this place",
+                None,
+                Some(if self.save_place { "On" } else { "Off" }.into()),
+            )
+            .id("save-toggle")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.save_place = !this.save_place;
+                if this.save_place {
+                    let name = pick::save_prefill(&prefill);
+                    this.field.update(cx, |f, cx| f.set(&name, cx));
+                }
+                cx.notify();
+            })),
+        };
         let as_a = dest.clone();
         let as_b = dest.clone();
         let default = self.pick.confirm_slot();
@@ -950,7 +975,7 @@ impl StopsApp {
             .child(Self::sheet_title(theme, dest.title()))
             .child(Self::footnote(theme, pick::details_text(dest)))
             .child(section(theme, None, [save_row.into_any_element()]))
-            .children(self.save_place.then(|| {
+            .children((self.save_place && !is_saved).then(|| {
                 div().px(px(16.0)).child(field_box(
                     theme,
                     "confirm-save-field",
@@ -978,7 +1003,7 @@ impl StopsApp {
                             .id("confirm-use-a")
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                let save = this.save_place;
+                                let save = this.save_place && !is_saved;
                                 this.use_as(Slot::A, as_a.clone(), save, cx);
                             })),
                     )
@@ -987,7 +1012,7 @@ impl StopsApp {
                             .id("confirm-use-b")
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                let save = this.save_place;
+                                let save = this.save_place && !is_saved;
                                 this.use_as(Slot::B, as_b.clone(), save, cx);
                             })),
                     ),

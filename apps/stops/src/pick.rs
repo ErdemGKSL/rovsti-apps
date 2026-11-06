@@ -15,7 +15,6 @@ use crate::{
 };
 
 /// The empty-search line of the place picker.
-#[allow(dead_code)] // wired up by a later step of the UX pass
 pub fn no_match_text(query: &str, has_feed: bool) -> String {
     let q = query.trim();
     if has_feed {

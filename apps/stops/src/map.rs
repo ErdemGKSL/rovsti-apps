@@ -195,7 +195,6 @@ pub fn pick_saved(
 
 /// A fingerprint of the saved places (id and position), to tell when the
 /// drawn markers need rebuilding.
-#[allow(dead_code)] // wired up by a later step of the UX pass
 pub fn saved_key(saved: &SavedPlaces) -> u64 {
     let mut hasher = DefaultHasher::new();
     for place in &saved.places {

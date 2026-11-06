@@ -282,7 +282,6 @@ pub fn preview_tick(info: &WaChatInfo) -> Option<Tick> {
     Some(Tick::of_status(last.meta.status, voice))
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 /// The action that takes `action` back, given the chat's meta `before` it
 /// was applied. `None` for mark-read (nothing to undo from a pill).
 pub fn undo_of(action: &ChatActionKind, before: &ChatMeta) -> Option<ChatActionKind> {
@@ -299,7 +298,6 @@ pub fn undo_of(action: &ChatActionKind, before: &ChatMeta) -> Option<ChatActionK
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 /// What to tell the user after `action`; `None` when the row itself shows the
 /// change (pin, mark read).
 pub fn action_notice(action: &ChatActionKind) -> Option<&'static str> {

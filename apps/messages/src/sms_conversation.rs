@@ -749,10 +749,16 @@ impl SmsConversation {
         });
         let error = self.error.clone().map(|error| {
             div()
+                .id("sms-load-error")
                 .py(px(8.0))
                 .text_size(typography::FOOTNOTE.size)
                 .text_color(colors.red)
                 .child(error)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.error = None;
+                    this.load(None, cx);
+                    cx.notify();
+                }))
         });
         let empty = (self.entries.is_empty() && !self.loading && self.error.is_none()).then(|| {
             div()

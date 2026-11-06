@@ -312,7 +312,6 @@ pub fn action_notice(action: &ChatActionKind) -> Option<&'static str> {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 /// The inbox banner for the WhatsApp connection; `None` when there is nothing
 /// to say (not linked, connected, or still linking).
 pub fn wa_banner(linked: bool, state: Option<InstanceState>) -> Option<&'static str> {

@@ -275,6 +275,8 @@ struct ChatLayout {
     searching: bool,
     search_edits: u64,
     role_held: bool,
+    /// The WhatsApp banner's text, `None` while there is nothing to say.
+    wa_banner: Option<&'static str>,
     state: Access,
     /// The Status row's people and unseen count.
     statuses: (usize, usize),
@@ -290,6 +292,8 @@ enum ChatItem {
     NoResults,
     /// "Read-only: not your default SMS app".
     RoleBanner,
+    /// "WhatsApp is offline" or "logged out"; a tap opens the WhatsApp tab.
+    WaBanner,
     /// Back from the Spam filter to the inbox.
     SpamBack,
     /// The Spam filter's entry row.
@@ -759,7 +763,11 @@ impl MessagesApp {
                         *this.wa_info_mut() = infos;
                         this.rebuild(cx);
                     }
-                    Err(ClientError::Unauthorized) => {}
+                    Err(ClientError::Unauthorized) => {
+                        // The WhatsApp banner explains it.
+                        log::warn!("loading WhatsApp chats: unauthorized");
+                        this.chats = ChatsState::Needed;
+                    }
                     Err(error) => {
                         log::warn!("loading WhatsApp chats failed: {error}");
                         // The next gateway event (or reconnect) tries again.
@@ -2824,6 +2832,11 @@ impl MessagesApp {
             (shown, list.unviewed())
         };
         let query = self.search_query(cx);
+        let wa_banner = {
+            let whatsapp = self.whatsapp.read(cx);
+            inbox::wa_banner(whatsapp.link().is_some(), whatsapp.instance_state())
+        }
+        .filter(|_| query.is_empty());
         let layout = ChatLayout {
             view_gen: self.view_gen,
             show_spam: self.show_spam,
@@ -2835,6 +2848,7 @@ impl MessagesApp {
                 0
             },
             role_held,
+            wa_banner,
             state,
             statuses,
         };
@@ -2848,6 +2862,9 @@ impl MessagesApp {
         }
         if !role_held {
             items.push(ChatItem::RoleBanner);
+        }
+        if wa_banner.is_some() {
+            items.push(ChatItem::WaBanner);
         }
         if self.show_spam {
             items.push(ChatItem::SpamBack);
@@ -2904,6 +2921,7 @@ impl MessagesApp {
                 ChatItem::Search => key_of(10u8),
                 ChatItem::NoResults => key_of((11u8, &query)),
                 ChatItem::RoleBanner => key_of(4u8),
+                ChatItem::WaBanner => key_of((12u8, wa_banner)),
                 ChatItem::SpamBack => key_of(5u8),
                 ChatItem::Tail => key_of(6u8),
             })
@@ -2994,6 +3012,34 @@ impl MessagesApp {
                 .into_any_element()
             }
             ChatItem::RoleBanner => self.role_banner(theme, cx),
+            ChatItem::WaBanner => {
+                let text = self
+                    .chat_layout
+                    .and_then(|layout| layout.wa_banner)
+                    .unwrap_or_default();
+                let icon = div()
+                    .size(px(44.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        gpui::svg()
+                            .path(Icon::LucideWifiOff.path())
+                            .size(px(22.0))
+                            .text_color(theme::colors(theme).orange),
+                    )
+                    .into_any_element();
+                list_row(theme, Some(icon), text, None, None)
+                    .id("wa-banner")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if this.tabs.select(1) {
+                            this.page.restart();
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            }
             ChatItem::SpamBack => list_row(
                 theme,
                 None,

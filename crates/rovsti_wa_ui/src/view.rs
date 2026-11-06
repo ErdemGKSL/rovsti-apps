@@ -252,6 +252,12 @@ impl WhatsAppSettings {
         self.gateway.as_ref().map(|(_, gateway)| gateway.clone())
     }
 
+    /// The gateway's last reported state of the instance, `None` until the
+    /// first status arrived.
+    pub fn instance_state(&self) -> Option<rovsti_wa_proto::InstanceState> {
+        self.model.status.as_ref().map(|s| s.state)
+    }
+
     /// The instance is linked to WhatsApp and the gateway says it is connected.
     pub fn is_connected(&self) -> bool {
         self.model.is_connected()

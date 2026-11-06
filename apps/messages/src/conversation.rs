@@ -199,6 +199,9 @@ pub struct Conversation {
     active: bool,
     /// The last failed load, shown above the messages.
     error: Option<SharedString>,
+    /// A failed page load; a tap on it loads again. Kept apart from `error` so
+    /// a failed reaction is not "retried" as a load.
+    load_error: Option<SharedString>,
     /// The virtualised, bottom-aligned timeline: item 0 is the "Load earlier"
     /// slot, then one item per [`Entry`].
     list: KeyedList,
@@ -271,6 +274,9 @@ pub struct Conversation {
     _subscriptions: Vec<gpui::Subscription>,
 }
 
+/// What a failed page load says; a tap on it tries again.
+const LOAD_ERROR: &str = "Couldn't load messages. Tap to try again.";
+
 impl Conversation {
     pub fn new(setup: Setup, cx: &mut Context<Self>) -> Self {
         let Setup {
@@ -338,6 +344,7 @@ impl Conversation {
             marked: HashSet::new(),
             active,
             error: None,
+            load_error: None,
             list: KeyedList::new(ListAlignment::Bottom, 1),
             entries: Vec::new(),
             rows_dirty: true,
@@ -1015,7 +1022,7 @@ impl Conversation {
                 this.loading = false;
                 match result {
                     Ok(page) => {
-                        this.error = None;
+                        this.load_error = None;
                         this.timeline.apply_rich_page(page, PAGE);
                         this.sync_rows();
                         if before_ms.is_none() {
@@ -1025,7 +1032,7 @@ impl Conversation {
                     }
                     Err(error) => {
                         log::warn!("loading WhatsApp messages failed: {error}");
-                        this.error = Some(format!("Couldn't load messages: {error}").into());
+                        this.load_error = Some(LOAD_ERROR.into());
                     }
                 }
                 cx.notify();
@@ -1645,7 +1652,24 @@ impl Conversation {
                 .text_color(colors.red)
                 .child(error)
         });
-        let empty = (self.entries.is_empty() && !self.loading && self.error.is_none()).then(|| {
+        let load_failed = self.load_error.clone().map(|error| {
+            div()
+                .id("conv-load-error")
+                .py(px(8.0))
+                .text_size(typography::FOOTNOTE.size)
+                .text_color(colors.red)
+                .child(error)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.load_error = None;
+                    this.load(None, cx);
+                    cx.notify();
+                }))
+        });
+        let empty = (self.entries.is_empty()
+            && !self.loading
+            && self.error.is_none()
+            && self.load_error.is_none())
+        .then(|| {
             div()
                 .py(px(48.0))
                 .flex()
@@ -1660,6 +1684,7 @@ impl Conversation {
             .gap(px(4.0))
             .children(older)
             .children(status)
+            .children(load_failed)
             .children(empty)
             .into_any_element()
     }
@@ -3203,6 +3228,11 @@ fn body_text(body: &MessageBody) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn load_error_invites_a_retry() {
+        assert!(super::LOAD_ERROR.ends_with("Tap to try again."));
+    }
+
     use rovsti_wa_proto::{DeliveryStatus, WaMessage};
 
     use super::*;

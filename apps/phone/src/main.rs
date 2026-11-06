@@ -113,6 +113,8 @@ enum SheetKind {
     ConfirmDelete,
     /// Every T9 match behind the keypad strip's "N more" (`keypad::t9_results_sheet`).
     T9Results,
+    /// "Copy as" / "Share as": the number in each format (`actions_ui::copy_as_sheet`).
+    CopyAs,
 }
 
 /// The line under the number field.
@@ -145,6 +147,8 @@ struct PhoneApp {
     /// Whose number is typed (story 10.1); shown in the status line.
     dial_match: keypad::DialMatch,
     t9: keypad::T9Match,
+    /// The open "Copy as" / "Share as" chooser.
+    copy_as: Option<actions_ui::CopyAs>,
     backend: Entity<Backend>,
     xiaomi: Option<XiaomiOs>,
     _subscriptions: Vec<Subscription>,
@@ -516,6 +520,7 @@ impl PhoneApp {
             t9_hint_dismissed: false,
             dial_match: keypad::DialMatch::default(),
             t9: keypad::T9Match::default(),
+            copy_as: None,
             _subscriptions: subscriptions,
             incall: InCall::new(cx),
             incoming: Incoming::new(cx, marks.clone()),
@@ -1010,6 +1015,15 @@ impl PhoneApp {
                             window,
                             cx,
                         );
+                    } else if let Some(share) = actions_ui::StripAction::from_id(&id)
+                        .and_then(actions_ui::StripAction::formats_hold)
+                    {
+                        self.arm_hold(
+                            sim_ui::HOLD_MS,
+                            keypad::HoldAction::CopyAs { share },
+                            window,
+                            cx,
+                        );
                     } else if &*id == "call" && self.sim_long_press_ready(cx) {
                         self.arm_hold(sim_ui::HOLD_MS, keypad::HoldAction::SimChooser, window, cx);
                     } else if &*id == "set-title" {
@@ -1391,6 +1405,7 @@ impl PhoneApp {
             SheetKind::ResetReplies => self.replies_reset_sheet(theme, window, cx),
             SheetKind::ConfirmDelete => self.confirm_delete_sheet(theme, window, cx),
             SheetKind::T9Results => self.t9_results_sheet(theme, window, cx),
+            SheetKind::CopyAs => self.copy_as_sheet(theme, window, cx),
             SheetKind::ImportPreview => {
                 if !self.sheet.is_visible() {
                     return None;

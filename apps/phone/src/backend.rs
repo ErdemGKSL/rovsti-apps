@@ -179,6 +179,9 @@ pub struct CallLog {
     pub rows: Vec<RecentsRow>,
     /// Clock style of the phone, for the row time labels.
     pub locale: LocaleTime,
+    /// Country code the numbers in `source` mostly share, for "Copy as" and
+    /// "Share as". Computed once per snapshot.
+    pub home_cc: Option<String>,
 }
 
 /// What Setup needs to know about the phone (FR-5, FR-6).
@@ -1309,6 +1312,11 @@ pub fn send_sms_to(number: &str) -> Outcome {
     Outcome::from(telecom::send_sms_to(number), "message")
 }
 
+/// Puts `text` on the system clipboard.
+pub fn copy_text(text: &str) -> Outcome {
+    Outcome::from(telecom::copy_text(text), "copying")
+}
+
 /// Opens the system share sheet with `text`.
 pub fn share_text(text: &str) -> Outcome {
     Outcome::from(telecom::share_text(text), "sharing")
@@ -1540,11 +1548,14 @@ fn build_call_log_with(
             .collect()
     };
     let rows = call_log::group(&entries);
+    let home_cc =
+        rovsti_core::number_format::infer_home_cc(source.iter().map(|e| e.number_raw.as_str()));
     CallLog {
         source,
         entries,
         rows,
         locale,
+        home_cc,
     }
 }
 

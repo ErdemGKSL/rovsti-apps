@@ -8,6 +8,7 @@ use gpui::{
     ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::*,
     px, svg,
 };
+use rovsti_core::number_format::{self, NumberForm};
 use rovsti_ui::{
     Icon,
     components::flat_glass,
@@ -19,6 +20,28 @@ use rovsti_ui::{
 };
 
 use crate::{PhoneApp, backend, block_ui::shown_number};
+
+/// The open "Copy as" / "Share as" chooser: every format of one number.
+pub(crate) struct CopyAs {
+    /// Share instead of copy.
+    pub share: bool,
+    pub forms: Vec<(NumberForm, String)>,
+}
+
+/// Row id of the chooser's `index`-th format.
+pub(crate) fn format_id(index: usize) -> String {
+    format!("sheet-fmt-{index}")
+}
+
+/// The index a chooser row id stands for.
+pub(crate) fn format_index(id: &str) -> Option<usize> {
+    id.strip_prefix("sheet-fmt-")?.parse().ok()
+}
+
+/// The pill after copying one format.
+pub(crate) fn copied_text(form: NumberForm) -> String {
+    format!("Copied {}", form.label())
+}
 
 const TILE: f32 = 64.0;
 const GAP: f32 = 12.0;
@@ -74,6 +97,15 @@ impl StripAction {
             Self::Copy => "Copy which number?",
             Self::Share => "Share which number?",
             Self::Block => "Block which number?",
+        }
+    }
+
+    /// `Some(share)` for the two tiles a long press turns into the format chooser.
+    pub(crate) fn formats_hold(self) -> Option<bool> {
+        match self {
+            Self::Copy => Some(false),
+            Self::Share => Some(true),
+            _ => None,
         }
     }
 
@@ -172,6 +204,141 @@ pub(crate) fn action_strip(
 }
 
 impl PhoneApp {
+    /// Long press on Copy or Share: lists the number in every format.
+    pub(crate) fn open_copy_as(
+        &mut self,
+        share: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let raw = match self.sheet_kind {
+            crate::SheetKind::Number => self.recents.number.as_ref().map(|r| r.number.to_string()),
+            crate::SheetKind::Contact => self.contact_sheet.as_ref().and_then(|s| {
+                match rovsti_core::contacts_view::call_target(&s.contact.numbers) {
+                    rovsti_core::contacts_view::CallTarget::Direct(i) => {
+                        Some(s.contact.numbers[i].raw.to_string())
+                    }
+                    _ => None,
+                }
+            }),
+            _ => None,
+        };
+        let Some(raw) = raw.filter(|r| !r.is_empty()) else {
+            return;
+        };
+        let home_cc = match self.backend.read(cx).call_log() {
+            backend::Load::Ready(log) => log.home_cc.clone(),
+            _ => None,
+        };
+        let forms = number_format::available(&raw, home_cc.as_deref());
+        if forms.len() < 2 {
+            return; // one format only: the plain tap already does it
+        }
+        rovsti_ui::haptics::perform(window, gpui::HapticFeedback::LongPress);
+        self.copy_as = Some(CopyAs { share, forms });
+        self.sheet_kind = crate::SheetKind::CopyAs;
+        self.presses.release_all();
+        cx.notify();
+    }
+
+    /// A tap on a chooser row.
+    pub(crate) fn copy_as_act(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(chooser) = &self.copy_as else {
+            return;
+        };
+        let Some((form, text)) = format_index(id).and_then(|i| chooser.forms.get(i)).cloned()
+        else {
+            return;
+        };
+        let share = chooser.share;
+        self.close_sheet(cx);
+        if share {
+            let outcome = backend::share_text(&text);
+            if outcome != backend::Outcome::Done {
+                self.show_notice_pill(
+                    outcome.why_not("Couldn't open the share sheet"),
+                    None,
+                    false,
+                    cx,
+                );
+            }
+        } else {
+            if backend::copy_text(&text) != backend::Outcome::Done {
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+            }
+            self.show_notice_pill(copied_text(form), None, false, cx);
+        }
+    }
+
+    /// The chooser sheet.
+    pub(crate) fn copy_as_sheet(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.sheet.is_visible() {
+            return None;
+        }
+        let chooser = self.copy_as.as_ref()?;
+        let colors = theme::colors(theme);
+        let rows = chooser.forms.iter().enumerate().map(|(i, (form, text))| {
+            let id: SharedString = format_id(i).into();
+            let press = self.presses.value(&id).clamp(0.0, 1.0);
+            let act = id.clone();
+            div()
+                .id(id.clone())
+                .role(Role::Button)
+                .aria_label(SharedString::from(format!("{}, {}", form.label(), text)))
+                .relative()
+                .w_full()
+                .min_h(px(58.0))
+                .px(px(20.0))
+                .py(px(8.0))
+                .flex()
+                .flex_col()
+                .justify_center()
+                .bg(gpui::Hsla {
+                    a: 0.9 * press,
+                    ..colors.fill
+                })
+                .child(
+                    div()
+                        .text_size(typography::FOOTNOTE.size)
+                        .text_color(colors.secondary_label)
+                        .child(form.label()),
+                )
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(typography::BODY.size)
+                        .text_color(colors.label)
+                        .child(preview_line(text)),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, _, cx| {
+                        this.presses.down(act.clone());
+                        this.copy_as_act(&act, cx);
+                    }),
+                )
+                .child(touch_surface(PhoneApp::touch_listener(cx, Some(id))))
+        });
+        let body = div()
+            .flex()
+            .flex_col()
+            .pb(px(16.0))
+            .children(rows)
+            .into_any_element();
+        self.modal_sheet(
+            theme,
+            window,
+            if chooser.share { "Share as" } else { "Copy as" },
+            body,
+            cx,
+        )
+    }
+
     /// Runs a strip action on `number` (as stored); `who` names it in pills.
     pub(crate) fn run_strip_action(
         &mut self,
@@ -222,9 +389,45 @@ impl PhoneApp {
     }
 }
 
+/// One line of a format for the chooser (a vCard spans several lines).
+fn preview_line(text: &str) -> String {
+    text.lines().collect::<Vec<_>>().join("  ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_ids_round_trip() {
+        for i in [0, 1, 4, 12] {
+            assert_eq!(format_index(&format_id(i)), Some(i));
+        }
+        assert_eq!(format_index("sheet-fmt-"), None);
+        assert_eq!(format_index("sheet-fmt-x"), None);
+        assert_eq!(format_index("sheet-ca-copy"), None);
+    }
+
+    #[test]
+    fn only_copy_and_share_open_the_chooser() {
+        assert_eq!(StripAction::Copy.formats_hold(), Some(false));
+        assert_eq!(StripAction::Share.formats_hold(), Some(true));
+        assert_eq!(StripAction::Message.formats_hold(), None);
+        assert_eq!(StripAction::Block.formats_hold(), None);
+    }
+
+    #[test]
+    fn copied_pill_names_the_format() {
+        assert_eq!(
+            copied_text(NumberForm::E164),
+            "Copied International (E.164)"
+        );
+    }
+
+    #[test]
+    fn preview_joins_lines() {
+        assert_eq!(preview_line("a\nb"), "a  b");
+    }
 
     #[test]
     fn chooser_titles_name_the_verb() {

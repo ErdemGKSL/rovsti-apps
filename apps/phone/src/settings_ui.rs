@@ -70,6 +70,7 @@ pub(crate) enum RowId {
     Theme,
     SimDefault,
     Export,
+    ExportCalls,
     Import,
     ImportError,
     DeleteHistory,
@@ -88,7 +89,7 @@ pub(crate) enum RowId {
 }
 
 impl RowId {
-    const COUNT: usize = 28;
+    const COUNT: usize = 29;
 
     const fn index(self) -> usize {
         self as usize
@@ -109,6 +110,7 @@ impl RowId {
             Self::Theme => "set-theme",
             Self::SimDefault => "set-sim",
             Self::Export => "set-export",
+            Self::ExportCalls => "set-export-calls",
             Self::Import => "set-import",
             Self::ImportError => "set-import-error",
             Self::DeleteHistory => "set-delete-history",
@@ -220,6 +222,8 @@ pub(crate) struct RowsKey {
     pub can_block: bool,
     /// The call log permission is missing (the Blocked calls view needs it).
     pub call_log_missing: bool,
+    /// The call log snapshot is loaded (the CSV export needs it).
+    pub calls_loaded: bool,
     pub replies: usize,
     /// Digits with a speed-dial contact.
     pub speed_dial: usize,
@@ -238,6 +242,7 @@ impl PartialEq for RowsKey {
             && self.blocked == other.blocked
             && self.can_block == other.can_block
             && self.call_log_missing == other.call_log_missing
+            && self.calls_loaded == other.calls_loaded
             && self.replies == other.replies
             && self.speed_dial == other.speed_dial
             && self.settings_default == other.settings_default
@@ -451,6 +456,20 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
                 icon: Icon::LucideUpload,
             },
         ),
+        {
+            let row = Row::new(
+                RowId::ExportCalls,
+                crate::backup_ui::EXPORT_CALLS_TITLE,
+                Control::Link {
+                    value: None,
+                    icon: Icon::LucideUpload,
+                },
+            );
+            match crate::backup_ui::export_calls_note(key.calls_loaded) {
+                Some(note) => row.disabled(note),
+                None => row,
+            }
+        },
         Row::new(
             RowId::Import,
             "Import",
@@ -905,6 +924,7 @@ impl PhoneApp {
             },
             can_block: backend.can_block_here(),
             call_log_missing: !backend.permissions().phone.is_granted(),
+            calls_loaded: matches!(backend.call_log(), crate::backend::Load::Ready(_)),
             replies: backend.prefs().quick_replies.len(),
             speed_dial: backend.prefs().speed_dial.len(),
         };
@@ -1059,6 +1079,7 @@ impl PhoneApp {
             (RowId::SpeedDial, _) => self.settings_open_sub(Sub::SpeedDial, window, cx),
             (RowId::BlockedAccess, _) => self.blocked_grant(cx),
             (RowId::Export, _) => self.backup_export(cx),
+            (RowId::ExportCalls, _) => self.backup_export_calls(cx),
             (RowId::Import, _) => self.backup_import(cx),
             (RowId::DeleteHistory, _) => {
                 self.open_confirm_delete(crate::history_ui::DeleteScope::All, cx);
@@ -1763,6 +1784,7 @@ mod tests {
             blocked: Some(2),
             can_block: true,
             call_log_missing: false,
+            calls_loaded: true,
             replies: 3,
             speed_dial: 2,
             settings_default: false,
@@ -1875,10 +1897,29 @@ mod tests {
             .into_iter()
             .find(|s| s.title == "Data")
             .expect("present");
-        assert_eq!(data.rows.len(), 5);
-        assert_eq!(data.rows[2].id, RowId::ImportError);
-        assert_eq!(data.rows[3].id, RowId::DeleteHistory);
-        assert_eq!(data.rows[4].id, RowId::ResetSettings);
+        assert_eq!(data.rows.len(), 6);
+        assert_eq!(data.rows[3].id, RowId::ImportError);
+        assert_eq!(data.rows[4].id, RowId::DeleteHistory);
+        assert_eq!(data.rows[5].id, RowId::ResetSettings);
+    }
+
+    #[test]
+    fn the_calls_export_row_waits_for_the_call_log() {
+        let mut k = key();
+        let row = |k: &RowsKey| {
+            build_sections(k)
+                .into_iter()
+                .flat_map(|s| s.rows)
+                .find(|r| r.id == RowId::ExportCalls)
+                .expect("present")
+        };
+        let ready = row(&k);
+        assert!(ready.enabled);
+        assert_eq!(ready.title, "Export call history (CSV)");
+        k.calls_loaded = false;
+        let waiting = row(&k);
+        assert!(!waiting.enabled);
+        assert_eq!(waiting.footnote, Some("Call history isn't loaded yet"));
     }
 
     #[test]
@@ -1918,13 +1959,14 @@ mod tests {
             ids,
             [
                 RowId::Export,
+                RowId::ExportCalls,
                 RowId::Import,
                 RowId::DeleteHistory,
                 RowId::ResetSettings
             ]
         );
-        assert_eq!(data.rows[2].control, Control::Danger);
-        assert_eq!(&*data.rows[2].aria, "Delete all call history");
+        assert_eq!(data.rows[3].control, Control::Danger);
+        assert_eq!(&*data.rows[3].aria, "Delete all call history");
     }
 
     #[test]
@@ -1986,6 +2028,7 @@ mod tests {
             RowId::Theme,
             RowId::SimDefault,
             RowId::Export,
+            RowId::ExportCalls,
             RowId::Import,
             RowId::ImportError,
             RowId::DeleteHistory,

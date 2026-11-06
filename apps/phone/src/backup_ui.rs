@@ -27,6 +27,25 @@ pub(crate) fn replace_line(p: &ImportPreview) -> String {
     )
 }
 
+/// Title of the call history export row in Settings > Data.
+pub(crate) const EXPORT_CALLS_TITLE: &str = "Export call history (CSV)";
+
+/// The note that disables the export row, `None` once the call log is loaded.
+pub(crate) fn export_calls_note(loaded: bool) -> Option<&'static str> {
+    (!loaded).then_some("Call history isn't loaded yet")
+}
+
+/// Pill text for the answer of the call history export.
+pub(crate) fn export_calls_pill(ok: bool, failed: bool) -> Option<&'static str> {
+    if ok {
+        Some("Call history exported")
+    } else if failed {
+        Some("Couldn't export")
+    } else {
+        Some("Export cancelled")
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct BackupUi {
     /// The parsed file the open sheet would import.
@@ -42,6 +61,39 @@ impl PhoneApp {
         if outcome.failed() {
             self.show_notice_pill("Couldn't open the file picker", None, false, cx);
         }
+    }
+
+    /// Builds the call history CSV off the UI thread and opens "save as".
+    pub(crate) fn backup_export_calls(&mut self, cx: &mut Context<Self>) {
+        let (source, tz) = match self.backend.read(cx).call_log() {
+            crate::backend::Load::Ready(log) => (log.source.clone(), log.locale.tz_offset_s),
+            _ => {
+                self.show_notice_pill("Call history isn't loaded yet", None, false, cx);
+                return;
+            }
+        };
+        let extras = self.wa_call.read(cx).recents_extras();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as i64);
+        cx.spawn(async move |this, cx| {
+            let (name, csv) = cx
+                .background_executor()
+                .spawn(async move {
+                    (
+                        rovsti_core::call_log_query::csv_file_name(now_ms, tz),
+                        rovsti_core::call_log_query::to_csv(&source, &extras, tz),
+                    )
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                if crate::backend::export_calls(&name, &csv).failed() {
+                    this.show_notice_pill("Couldn't export", None, false, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub(crate) fn backup_import(&mut self, cx: &mut Context<Self>) {
@@ -74,6 +126,11 @@ impl PhoneApp {
                     self.show_notice_pill(format!("Saved to {name}"), None, false, cx);
                 } else if result.error.is_some() {
                     self.show_notice_pill("Couldn't save the file", None, false, cx);
+                }
+            }
+            DocumentOp::ExportCalls => {
+                if let Some(text) = export_calls_pill(result.ok, result.error.is_some()) {
+                    self.show_notice_pill(text, None, false, cx);
                 }
             }
             DocumentOp::ImportBackup => {
@@ -232,6 +289,22 @@ impl PhoneApp {
 mod tests {
     use super::*;
     use rovsti_core::settings::PrefsV2;
+
+    #[test]
+    fn export_row_text_and_states() {
+        assert_eq!(EXPORT_CALLS_TITLE, "Export call history (CSV)");
+        assert_eq!(export_calls_note(true), None);
+        assert_eq!(
+            export_calls_note(false),
+            Some("Call history isn't loaded yet")
+        );
+        assert_eq!(
+            export_calls_pill(true, false),
+            Some("Call history exported")
+        );
+        assert_eq!(export_calls_pill(false, true), Some("Couldn't export"));
+        assert_eq!(export_calls_pill(false, false), Some("Export cancelled"));
+    }
 
     #[test]
     fn the_line_names_the_four_sections() {

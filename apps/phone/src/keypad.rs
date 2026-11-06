@@ -372,6 +372,10 @@ pub(crate) enum HoldAction {
     RouteList,
     /// A dimmed In-Call control (its [`Slot`](crate::zone::Slot) index) was held: say why.
     Reason(u8),
+    /// Copy (`share` false) or Share was held on a number sheet: the format chooser.
+    CopyAs {
+        share: bool,
+    },
 }
 
 impl PhoneApp {
@@ -523,6 +527,7 @@ impl PhoneApp {
             HoldAction::SettingsDiagnostics => self.settings_diagnostics(window, cx),
             HoldAction::RouteList => self.route_long_press(window, cx),
             HoldAction::Reason(slot) => self.show_reason(usize::from(slot), window, cx),
+            HoldAction::CopyAs { share } => self.open_copy_as(share, window, cx),
         }
         cx.notify();
     }

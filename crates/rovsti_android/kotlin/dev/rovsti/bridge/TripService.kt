@@ -175,7 +175,7 @@ class TripService : Service() {
     private lateinit var locations: LocationManager
     private lateinit var alarms: AlarmManager
     @Volatile private var spec: TripSpec? = null
-    private var foreground = false
+    @Volatile private var foreground = false
     private var requested: Pair<Long, String>? = null
     private val listener = LocationListener { location -> worker.execute { onFix(location) } }
 
@@ -481,7 +481,11 @@ class TripService : Service() {
             if (live != null && current != null) {
                 live.armWatchdog(tripWatchdogMs(current.nextFixMs))
                 try {
-                    live.worker.execute { live.askForFix(current) }
+                    live.worker.execute {
+                    // A provider that vanished left no registration behind: restore it before asking.
+                    live.requestUpdates(current.nextFixMs, current.highAccuracy)
+                    live.askForFix(current)
+                }
                     return
                 } catch (_: RejectedExecutionException) {
                     // The service is shutting down: fall through and start it again.

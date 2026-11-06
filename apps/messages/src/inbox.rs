@@ -613,8 +613,23 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
     }
 }
 
+/// Shows the unsent draft of each row's first thread that has one in place
+/// of its snippet.
+pub fn apply_drafts<'a>(view: &mut InboxView, draft_of: impl Fn(&ThreadId) -> Option<&'a str>) {
+    for row in view
+        .rows
+        .iter_mut()
+        .chain(view.spam.iter_mut())
+        .chain(view.archived.iter_mut())
+    {
+        let draft = row.threads.iter().find_map(&draft_of);
+        if draft.is_some() {
+            row.snippet = snippet_with_draft(&row.snippet, draft).into();
+        }
+    }
+}
+
 /// The snippet an inbox row shows: the unsent draft's first line when there is one.
-#[allow(dead_code)]
 pub fn snippet_with_draft(snippet: &str, draft: Option<&str>) -> String {
     match draft.map(|d| d.trim()).filter(|d| !d.is_empty()) {
         Some(draft) => format!("Draft: {}", draft.lines().next().unwrap_or("").trim()),
@@ -1104,6 +1119,23 @@ mod tests {
         row.title = title.to_owned().into();
         row.sms_sender = sender.map(|s| SharedString::from(s.to_owned()));
         row
+    }
+
+    #[test]
+    fn drafts_replace_snippets_of_rows_that_have_one() {
+        let mut view = InboxView {
+            rows: vec![row_for("A", "old", None), {
+                let mut r = row_for("B", "keep", None);
+                r.threads = vec![ThreadId::Sms(99)];
+                r
+            }],
+            ..InboxView::default()
+        };
+        let first = view.rows[0].threads[0].clone();
+        let text = "line one\nline two".to_owned();
+        apply_drafts(&mut view, |t| (*t == first).then_some(text.as_str()));
+        assert_eq!(view.rows[0].snippet, "Draft: line one");
+        assert_eq!(view.rows[1].snippet, "keep");
     }
 
     #[test]

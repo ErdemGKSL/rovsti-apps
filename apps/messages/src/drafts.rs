@@ -6,7 +6,10 @@ use std::collections::HashMap;
 use rovsti_core::ThreadId;
 
 #[derive(Default)]
-pub struct Drafts(HashMap<ThreadId, String>);
+pub struct Drafts {
+    map: HashMap<ThreadId, String>,
+    rev: u64,
+}
 
 impl Drafts {
     /// Keeps `text` for `thread`. Blank text removes the draft; a thread not
@@ -15,26 +18,37 @@ impl Drafts {
         if matches!(thread, ThreadId::Sms(id) if id < 0) {
             return;
         }
-        if text.trim().is_empty() {
-            self.0.remove(&thread);
+        let changed = if text.trim().is_empty() {
+            self.map.remove(&thread).is_some()
         } else {
-            self.0.insert(thread, text.to_owned());
+            self.map.insert(thread, text.to_owned()).as_deref() != Some(text)
+        };
+        if changed {
+            self.rev += 1;
         }
     }
 
+    /// Bumped whenever a draft is added, changed or removed.
+    pub fn rev(&self) -> u64 {
+        self.rev
+    }
+
     /// The draft, kept.
-    #[allow(dead_code)]
     pub fn get(&self, thread: &ThreadId) -> Option<&str> {
-        self.0.get(thread).map(String::as_str)
+        self.map.get(thread).map(String::as_str)
     }
 
     /// The draft, removed.
     pub fn take(&mut self, thread: &ThreadId) -> Option<String> {
-        self.0.remove(thread)
+        let taken = self.map.remove(thread);
+        if taken.is_some() {
+            self.rev += 1;
+        }
+        taken
     }
 
     pub fn forget(&mut self, thread: &ThreadId) {
-        self.0.remove(thread);
+        self.take(thread);
     }
 }
 
@@ -54,6 +68,23 @@ mod tests {
         assert_eq!(d.take(&wa()).as_deref(), Some("hello"));
         assert_eq!(d.take(&wa()), None, "take empties");
         assert_eq!(d.take(&ThreadId::Sms(3)).as_deref(), Some("sms"));
+    }
+
+    #[test]
+    fn rev_moves_only_on_real_changes() {
+        let mut d = Drafts::default();
+        d.put(wa(), "  ");
+        assert_eq!(d.rev(), 0);
+        d.put(wa(), "hi");
+        assert_eq!(d.rev(), 1);
+        d.put(wa(), "hi");
+        assert_eq!(d.rev(), 1);
+        d.put(wa(), "hi!");
+        assert_eq!(d.rev(), 2);
+        d.forget(&wa());
+        assert_eq!(d.rev(), 3);
+        d.forget(&wa());
+        assert_eq!(d.rev(), 3);
     }
 
     #[test]

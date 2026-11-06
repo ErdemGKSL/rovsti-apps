@@ -256,6 +256,8 @@ struct InboxKey {
     day: i64,
     /// The desktop preview chat stands in for an unlinked WhatsApp.
     wa_preview: bool,
+    /// Unsent drafts, which show in the rows.
+    drafts: u64,
 }
 
 /// What decides the Chats list's items besides the rows themselves.
@@ -500,9 +502,10 @@ impl MessagesApp {
             wa: self.wa_rev,
             day: (now.div_euclid(1000) + i64::from(locale.tz_offset_s)).div_euclid(86_400),
             wa_preview: self.wa_preview(cx),
+            drafts: self.drafts.rev(),
         };
         if self.inbox_key != Some(key) {
-            let view = {
+            let mut view = {
                 let wa = self.wa_for_view(cx);
                 let backend = self.backend.read(cx);
                 inbox::build(
@@ -519,6 +522,16 @@ impl MessagesApp {
                     },
                 )
             };
+            inbox::apply_drafts(&mut view, |t| self.drafts.get(t));
+            let titles: HashMap<String, String> = view
+                .rows
+                .iter()
+                .chain(&view.spam)
+                .chain(&view.archived)
+                .filter_map(|r| Some((r.wa_chat.as_ref()?.to_string(), r.title.to_string())))
+                .collect();
+            self.settings
+                .update(cx, |settings, cx| settings.set_wa_titles(titles, cx));
             if view != self.view {
                 self.view = view;
                 self.view_gen += 1;
@@ -1027,6 +1040,7 @@ impl MessagesApp {
     fn close_page(&mut self, cx: &mut Context<Self>) {
         self.leave_page(cx);
         self.open = Open::None;
+        self.rebuild(cx);
         self.page.restart();
         cx.notify();
     }

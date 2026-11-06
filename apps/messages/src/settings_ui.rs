@@ -9,6 +9,7 @@
 //! [`crate::backup_ui`].
 
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
 };
@@ -181,10 +182,20 @@ pub struct SettingsView {
     /// The archive the picker copied into the app's cache.
     picked: Option<String>,
     restore: Option<Restore>,
+    /// WhatsApp chat titles by JID, for the names in Muted.
+    wa_titles: HashMap<String, String>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
 impl SettingsView {
+    /// The inbox's chat titles by JID, so Muted can name WhatsApp chats.
+    pub fn set_wa_titles(&mut self, titles: HashMap<String, String>, cx: &mut Context<Self>) {
+        if self.wa_titles != titles {
+            self.wa_titles = titles;
+            cx.notify();
+        }
+    }
+
     pub fn new(backend: Entity<Backend>, cx: &mut Context<Self>) -> Self {
         let field = |purpose, action, cx: &mut Context<Self>| {
             cx.new(|cx| TextField::with_input(purpose, action, cx))
@@ -226,6 +237,7 @@ impl SettingsView {
             export_path: None,
             picked: None,
             restore: None,
+            wa_titles: HashMap::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -626,9 +638,26 @@ impl SettingsView {
     }
 
     fn notifications(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let (prefs, threads) = {
+        let (prefs, threads, sms_names) = {
             let backend = self.backend.read(cx);
-            (backend.prefs().clone(), backend.threads().to_vec())
+            let names: HashMap<i64, String> = backend
+                .threads()
+                .iter()
+                .filter_map(|t| {
+                    let names: Vec<&str> = t
+                        .addresses
+                        .iter()
+                        .filter_map(|a| backend.contacts().match_number(a))
+                        .map(|c| c.display_name.as_str())
+                        .collect();
+                    (!names.is_empty()).then(|| (t.thread_id, names.join(", ")))
+                })
+                .collect();
+            (backend.prefs().clone(), backend.threads().to_vec(), names)
+        };
+        let name_of = |thread: &ThreadId| match thread {
+            ThreadId::Sms(id) => sms_names.get(id).cloned(),
+            ThreadId::WhatsApp(jid) => self.wa_titles.get(jid).cloned(),
         };
         let mut rows = vec![
             Self::switch_row(
@@ -664,7 +693,7 @@ impl SettingsView {
                 list_row(
                     theme,
                     None,
-                    format!("Muted: {}", tag_label(tag, &threads, |_| None)),
+                    format!("Muted: {}", tag_label(tag, &threads, name_of)),
                     Some("Tap to unmute".into()),
                     None,
                 )

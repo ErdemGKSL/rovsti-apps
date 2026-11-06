@@ -1507,8 +1507,11 @@ impl StopsApp {
         }
         let viewport = self.map.viewport;
         let centre = self.map.bounds.get().center();
+        // Pins are only grabbable while the pair can be edited.
+        let editable = self.trip.is_none() && self.alarm.is_none();
         let handles: Vec<(Slot, (f32, f32))> = [Slot::A, Slot::B]
             .into_iter()
+            .filter(|_| editable)
             .filter_map(|slot| {
                 let (x, y) = viewport.project(self.pick.ends.get(slot)?.coord);
                 Some((slot, (f32::from(centre.x) + x, f32::from(centre.y) + y)))
@@ -1803,6 +1806,8 @@ impl StopsApp {
             }
             Gesture::PinTap { slot } => self.pick.open_menu(slot),
             Gesture::PinDrag { slot, at } => {
+                // The auto view would chase the pin under the finger.
+                self.map.take_over();
                 if self.pick.dragging() != Some(slot) && !self.pick.drag_start(slot) {
                     return;
                 }
@@ -1810,6 +1815,7 @@ impl StopsApp {
                 self.pick.drag_to(slot, coord);
             }
             Gesture::PinDrop { slot, at } => {
+                self.map.take_over();
                 let at = self.map.to_view(at);
                 let dest = snap_destination(
                     self.gtfs.as_deref(),
@@ -1830,6 +1836,9 @@ impl StopsApp {
         if self.trip.is_some() || self.sheet.is_open() || self.alarm.is_some() {
             return;
         }
+        // Keep the view where the user tapped: the idle fit would otherwise
+        // recentre on the new pin and move it from under the finger.
+        self.map.take_over();
         let dest = snap_destination(
             self.gtfs.as_deref(),
             &self.map.viewport,

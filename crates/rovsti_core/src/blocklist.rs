@@ -268,6 +268,136 @@ pub fn bulk_text(b: &BulkParse) -> String {
     out
 }
 
+/// First line of the blocked-numbers file `to_csv` writes.
+pub const CSV_HEADER: &str = "number,name";
+
+/// Most numbers one file import will block.
+pub const IMPORT_MAX: usize = 2000;
+
+/// The list as a CSV file: header, then one CRLF row per number in list
+/// order (the raw number and the contact name, both guarded and quoted).
+pub fn to_csv(rows: &[BlockedNumber], name_of: impl Fn(&str) -> Option<String>) -> String {
+    use crate::call_log_query::cell;
+    let mut out = String::from(CSV_HEADER);
+    out.push_str("\r\n");
+    for row in rows {
+        let raw = if row.number_raw.trim().is_empty() {
+            row.normalized.as_str()
+        } else {
+            row.number_raw.as_str()
+        };
+        let raw = raw.trim();
+        let name = name_of(raw).unwrap_or_default();
+        out.push_str(&cell(raw));
+        out.push(',');
+        out.push_str(&cell(name.trim()));
+        out.push_str("\r\n");
+    }
+    out
+}
+
+/// `rovsti-blocked-numbers-YYYY-MM-DD.csv` for the local date of `now_ms`.
+pub fn csv_file_name(now_ms: i64, tz_offset_s: i32) -> String {
+    format!(
+        "rovsti-blocked-numbers-{}.csv",
+        crate::call_log_query::local_date(now_ms, tz_offset_s).0
+    )
+}
+
+/// What reading a blocked-numbers file would do.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FileImport {
+    pub bulk: BulkParse,
+    /// Lines that held no usable number.
+    pub skipped_lines: usize,
+    /// More than [`IMPORT_MAX`] new numbers: the rest was ignored.
+    pub truncated: bool,
+}
+
+/// The first CSV field of `line`, unquoted, without the injection guard `'`.
+fn first_field(line: &str) -> String {
+    let line = line.trim_start();
+    let field = if let Some(rest) = line.strip_prefix('"') {
+        let mut out = String::new();
+        let mut chars = rest.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '"' {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    out.push('"');
+                } else {
+                    break;
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    } else {
+        line.split(',').next().unwrap_or("").to_owned()
+    };
+    let field = field.trim();
+    field.strip_prefix('\'').unwrap_or(field).trim().to_owned()
+}
+
+/// Reads a blocked-numbers file (what [`to_csv`] writes, or any list with one
+/// number per line). Blank lines, `#` comments and a `number` header are
+/// skipped; the first CSV field of each other line is the number.
+pub fn parse_file(text: &str, emergency: &EmergencyList, already: &BlockSet) -> FileImport {
+    let mut out = FileImport::default();
+    let mut parsed: Vec<PhoneNumber> = Vec::new();
+    let mut first = true;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let is_first = std::mem::replace(&mut first, false);
+        if is_first && line.to_lowercase().starts_with("number") {
+            continue;
+        }
+        let field = first_field(line);
+        match parse_input(&field, emergency) {
+            Ok(number) => {
+                let Ok(p) = PhoneNumber::parse(&number) else {
+                    out.skipped_lines += 1;
+                    continue;
+                };
+                if already.is_blocked(&number) || parsed.iter().any(|q| q.matches(&p)) {
+                    out.bulk.already_blocked += 1;
+                } else if out.bulk.to_block.len() >= IMPORT_MAX {
+                    out.truncated = true;
+                    break;
+                } else {
+                    parsed.push(p);
+                    out.bulk.to_block.push(number);
+                }
+            }
+            Err(BlockInputError::Emergency) => out.bulk.skipped_emergency += 1,
+            Err(BlockInputError::Invalid) => out.skipped_lines += 1,
+        }
+    }
+    out
+}
+
+/// The pill after a file import: "Blocked 12 numbers, 3 already blocked, 1
+/// line skipped", or "No new numbers to block".
+pub fn import_text(f: &FileImport) -> String {
+    if f.bulk.to_block.is_empty() {
+        return "No new numbers to block".to_owned();
+    }
+    let mut out = bulk_text(&f.bulk);
+    if f.skipped_lines > 0 {
+        let noun = if f.skipped_lines == 1 {
+            "line"
+        } else {
+            "lines"
+        };
+        out.push_str(&format!(", {} {noun} skipped", f.skipped_lines));
+    }
+    out
+}
+
 /// Title and message of the "Unblock all" confirmation.
 pub fn unblock_all_text(n: usize) -> (String, String) {
     let message = if n == 1 {
@@ -545,5 +675,119 @@ mod tests {
         let none = parse_many("nothing here", &emergency, &already);
         assert_eq!(none, BulkParse::default());
         assert_eq!(bulk_text(&none), "Blocked 0 numbers");
+    }
+
+    // ---- file export / import -------------------------------------------
+
+    #[test]
+    fn csv_header_only_for_no_rows() {
+        assert_eq!(to_csv(&[], |_| None), "number,name\r\n");
+    }
+
+    #[test]
+    fn csv_rows_quote_and_guard() {
+        let rows = [
+            row(1, "+90 555 111 22 33", ""),
+            row(2, "", "0850 000 00 00"),
+            row(3, "=1+1", ""),
+        ];
+        let csv = to_csv(&rows, |n| {
+            n.starts_with("+90").then(|| "Smith, Anna".to_owned())
+        });
+        assert_eq!(
+            csv,
+            "number,name\r\n+90 555 111 22 33,\"Smith, Anna\"\r\n0850 000 00 00,\r\n'=1+1,\r\n"
+        );
+    }
+
+    #[test]
+    fn csv_file_name_uses_local_date() {
+        // 2026-11-06 23:30 UTC, +3h -> 2026-11-07.
+        let ms = 1_794_007_800_000;
+        assert_eq!(
+            csv_file_name(ms, 0),
+            "rovsti-blocked-numbers-2026-11-06.csv"
+        );
+        assert_eq!(
+            csv_file_name(ms, 3 * 3600),
+            "rovsti-blocked-numbers-2026-11-07.csv"
+        );
+    }
+
+    #[test]
+    fn parse_file_skips_header_comments_and_blanks() {
+        let text = "number,name\r\n# my list\r\n\r\n0532 444 55 66,Spam\n   \n+49 30 1234567\n";
+        let f = parse_file(text, &EmergencyList::default(), &BlockSet::default());
+        assert_eq!(f.bulk.to_block, ["05324445566", "+49301234567"]);
+        assert_eq!(f.skipped_lines, 0);
+        assert!(!f.truncated);
+    }
+
+    #[test]
+    fn parse_file_reads_quotes_and_guard() {
+        let text = "\"0532 444 55 66\",\"Smith, Anna\"\n'+90 555 777 88 99,x\n\"\"\"0\"\"\"\n";
+        let f = parse_file(text, &EmergencyList::default(), &BlockSet::default());
+        assert_eq!(f.bulk.to_block, ["05324445566", "+905557778899"]);
+        assert_eq!(f.skipped_lines, 1);
+    }
+
+    #[test]
+    fn parse_file_sorts_emergency_repeats_and_junk() {
+        let text = "112\n0532 444 55 66\n0532-444-55-66\n+90 555 111 22 33\nACME-BANK\nhello\n";
+        let f = parse_file(text, &EmergencyList::default(), &set());
+        assert_eq!(f.bulk.to_block, ["05324445566"]);
+        assert_eq!(f.bulk.skipped_emergency, 1);
+        assert_eq!(f.bulk.already_blocked, 2);
+        assert_eq!(f.skipped_lines, 2);
+        assert_eq!(
+            import_text(&f),
+            "Blocked 1 number, 2 already blocked, 2 lines skipped"
+        );
+    }
+
+    #[test]
+    fn parse_file_caps_at_import_max() {
+        let text: String = (0..=IMPORT_MAX).map(|i| format!("+4930{i:07}\n")).collect();
+        let f = parse_file(&text, &EmergencyList::default(), &BlockSet::default());
+        assert_eq!(f.bulk.to_block.len(), IMPORT_MAX);
+        assert!(f.truncated);
+        let exact: String = (0..IMPORT_MAX).map(|i| format!("+4930{i:07}\n")).collect();
+        let f = parse_file(&exact, &EmergencyList::default(), &BlockSet::default());
+        assert_eq!(f.bulk.to_block.len(), IMPORT_MAX);
+        assert!(!f.truncated);
+    }
+
+    #[test]
+    fn csv_round_trip() {
+        let rows = [
+            row(1, "+90 555 111 22 33", ""),
+            row(2, "0850 000 00 00", ""),
+            row(3, "+49 30 1234567", ""),
+        ];
+        let csv = to_csv(&rows, |n| Some(format!("Name, {n}")));
+        let f = parse_file(&csv, &EmergencyList::default(), &BlockSet::default());
+        assert_eq!(
+            f.bulk.to_block,
+            ["+905551112233", "08500000000", "+49301234567"]
+        );
+        assert_eq!(f.skipped_lines, 0);
+    }
+
+    #[test]
+    fn import_text_variants() {
+        let mut f = FileImport::default();
+        assert_eq!(import_text(&f), "No new numbers to block");
+        f.skipped_lines = 3;
+        assert_eq!(import_text(&f), "No new numbers to block");
+        f.bulk.to_block = vec!["1".into(); 12];
+        f.bulk.already_blocked = 3;
+        f.skipped_lines = 1;
+        assert_eq!(
+            import_text(&f),
+            "Blocked 12 numbers, 3 already blocked, 1 line skipped"
+        );
+        f.bulk.already_blocked = 0;
+        f.skipped_lines = 0;
+        assert_eq!(import_text(&f), "Blocked 12 numbers");
     }
 }

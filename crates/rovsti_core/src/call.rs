@@ -396,6 +396,18 @@ pub fn status_text(state: CallState, now_ms: i64, connect_time_ms: i64) -> Statu
     StatusText { headline, reason }
 }
 
+/// The one-line text after a call ends: "Call with Anna Smith, 4:32", or
+/// "Call ended, 4:32" when there is no name.
+pub fn after_call_text(who: &str, talk_s: u64) -> String {
+    let time = crate::call_log::format_duration(talk_s);
+    let who = who.trim();
+    if who.is_empty() {
+        format!("Call ended, {time}")
+    } else {
+        format!("Call with {who}, {time}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -852,5 +864,15 @@ mod tests {
         );
         assert!(m.endpoints().get("b").is_some_and(|r| r.ghost));
         assert_eq!(m.take_endpoint_diff().removed, ["b"]);
+    }
+
+    #[test]
+    fn after_call_text_with_and_without_who() {
+        assert_eq!(
+            after_call_text("Anna Smith", 272),
+            "Call with Anna Smith, 4:32"
+        );
+        assert_eq!(after_call_text("  ", 272), "Call ended, 4:32");
+        assert_eq!(after_call_text("", 0), "Call ended, 0:00");
     }
 }

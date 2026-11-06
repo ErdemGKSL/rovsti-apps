@@ -460,6 +460,32 @@ impl Notes {
             .collect::<Vec<_>>()
             .join("\n\n")
     }
+
+    /// Every note as CSV, newest first: `date,time,name,number,note`, CRLF
+    /// rows, local time, cells guarded and quoted.
+    pub fn to_csv(&self, name_of: impl Fn(&str) -> Option<String>, tz_offset_s: i32) -> String {
+        use crate::call_log_query::{cell, local_date};
+        let mut out = String::from("date,time,name,number,note\r\n");
+        for (_, note) in self.newest_first() {
+            let (date, time) = local_date(note.at_ms, tz_offset_s);
+            let name = name_of(&note.number).unwrap_or_default();
+            out.push_str(&format!(
+                "{date},{time},{},{},{}\r\n",
+                cell(name.trim()),
+                cell(note.number.trim()),
+                cell(&note.text)
+            ));
+        }
+        out
+    }
+}
+
+/// `rovsti-call-notes-YYYY-MM-DD.csv` for the local date of `now_ms`.
+pub fn notes_csv_file_name(now_ms: i64, tz_offset_s: i32) -> String {
+    format!(
+        "rovsti-call-notes-{}.csv",
+        crate::call_log_query::local_date(now_ms, tz_offset_s).0
+    )
 }
 
 #[cfg(test)]
@@ -788,5 +814,41 @@ Anna Smith, Thu 5 Nov 2026, 14:32\nBring the invoice\nand the key\n\n\
         assert!(!n.has_note("", at, at));
         assert!(!n.has_note("private", at, at));
         assert!(!Notes::default().has_note("+905551234567", at, at));
+    }
+
+    fn csv_notes() -> Notes {
+        let mut n = Notes::default();
+        n.set("+905551112233", 1_794_007_800_000, "old, \"quoted\"", 0);
+        n.set("0850 000 00 00", 1_794_009_600_000, "=SUM(A1)\nsecond", 0);
+        n
+    }
+
+    #[test]
+    fn notes_csv_empty_is_header_only() {
+        assert_eq!(
+            Notes::default().to_csv(|_| None, 0),
+            "date,time,name,number,note\r\n"
+        );
+    }
+
+    #[test]
+    fn notes_csv_newest_first_and_escaped() {
+        let csv = csv_notes().to_csv(|n| n.starts_with("+90").then(|| "Anna, S".to_owned()), 0);
+        assert_eq!(
+            csv,
+            "date,time,name,number,note\r\n\
+             2026-11-07,00:00,,0850 000 00 00,\"'=SUM(A1)\nsecond\"\r\n\
+             2026-11-06,23:30,\"Anna, S\",+905551112233,\"old, \"\"quoted\"\"\"\r\n"
+        );
+    }
+
+    #[test]
+    fn notes_csv_uses_timezone_and_file_name() {
+        let csv = csv_notes().to_csv(|_| None, 3 * 3600);
+        assert!(csv.contains("2026-11-07,02:30,"));
+        assert_eq!(
+            notes_csv_file_name(1_794_007_800_000, 0),
+            "rovsti-call-notes-2026-11-06.csv"
+        );
     }
 }

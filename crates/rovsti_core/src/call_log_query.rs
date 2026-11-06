@@ -412,7 +412,7 @@ fn direction(kind: CallLogKind) -> &'static str {
     }
 }
 
-fn local_date(ms: i64, tz_offset_s: i32) -> (String, String) {
+pub(crate) fn local_date(ms: i64, tz_offset_s: i32) -> (String, String) {
     let secs = ms.div_euclid(1000) + i64::from(tz_offset_s);
     let (y, m, d) = civil_from_days(secs.div_euclid(86_400));
     let sod = secs.rem_euclid(86_400);

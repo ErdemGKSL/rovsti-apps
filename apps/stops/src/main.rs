@@ -19,10 +19,11 @@ use gpui::{
 };
 use rovsti_android::{
     events::{self, RawEvent, kind},
+    location::{self, LocationFix, parse_location_fix},
     trip::{AlarmAction, parse_trip_alarm},
 };
 use rovsti_core::wire::{DocumentOp, DocumentResult};
-use rovsti_geo::{ActiveTrip, Feed, History, Place, SavedPlaces, StopsPrefs};
+use rovsti_geo::{ActiveTrip, Coord, Feed, History, Place, SavedPlaces, StopsPrefs};
 use rovsti_ui::{
     Icon, IconAssets,
     components::large_title,
@@ -273,7 +274,37 @@ impl StopsApp {
             confirm_clear: false,
         };
         app.refresh_preflight_later(cx);
+        app.load_last_location(cx);
         app
+    }
+
+    /// Centres the idle map on the newest device fix when it is fresh. Silent when
+    /// there is none, no permission, or on desktop.
+    fn load_last_location(&self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let fix = cx
+                .background_executor()
+                .spawn(async { location::last_location() })
+                .await;
+            if let Ok(Some(fix)) = fix {
+                this.update(cx, |this, cx| this.apply_fix(fix, true, cx))
+                    .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// Puts a device fix on the map. No trip means the idle map follows it; a
+    /// running trip keeps its own view.
+    fn apply_fix(&mut self, fix: LocationFix, require_fresh: bool, cx: &mut Context<Self>) {
+        if self.trip.is_some()
+            || (require_fresh && !map::fresh_enough(fix.time_ms, store::now_ms()))
+        {
+            return;
+        }
+        self.map
+            .set_device_fix(Coord::new(fix.lat, fix.lon), fix.accuracy_m);
+        cx.notify();
     }
 
     /// `ROVSTI_STOPS_SIMULATE=1` on desktop: a synthetic fix every second,
@@ -333,6 +364,10 @@ impl StopsApp {
             kind::TRIP_ALARM => match parse_trip_alarm(&event.json) {
                 Some(alarm) => self.on_alarm_event(alarm, cx),
                 None => log::warn!("unreadable trip_alarm event"),
+            },
+            kind::STOPS_LOCATION => match parse_location_fix(&event.json) {
+                Some(fix) => self.apply_fix(fix, false, cx),
+                None => log::warn!("unreadable stops_location event"),
             },
             kind::PERMISSIONS_CHANGED => {
                 self.refresh_preflight(cx);

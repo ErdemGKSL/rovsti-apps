@@ -11,6 +11,8 @@ const TRIP_ALARM: &str =
     include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/TripAlarm.kt");
 const BRIDGE: &str =
     include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/RovstiBridge.kt");
+const STOPS_LOCATION: &str =
+    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/StopsLocation.kt");
 const TRIP_SERVICE_RECOVER: &str = "TripAlarm.recover(this)";
 const MANIFEST: &str = include_str!("../platforms/android/app/src/main/AndroidManifest.xml");
 
@@ -189,4 +191,26 @@ fn background_location_is_declared_and_mapped() {
     assert!(MANIFEST.contains("android.permission.ACCESS_BACKGROUND_LOCATION"));
     let key = format!("\"{}\"", Group::BackgroundLocation.key());
     assert!(BRIDGE.contains(&key), "RovstiBridge.kt lacks {key}");
+}
+
+#[test]
+fn idle_location_seam_is_in_kotlin() {
+    for token in [
+        "getLastKnownLocation",
+        "getCurrentLocation",
+        "requestSingleUpdate",
+        "\"stops_location\"",
+        "SecurityException",
+    ] {
+        assert!(
+            STOPS_LOCATION.contains(token),
+            "StopsLocation.kt lacks {token}"
+        );
+    }
+    assert!(BRIDGE.contains("fun lastLocation(): String"));
+    assert!(BRIDGE.contains("fun locateOnce(): Boolean"));
+    assert_eq!(
+        rovsti_android::events::kind::STOPS_LOCATION,
+        "stops_location"
+    );
 }

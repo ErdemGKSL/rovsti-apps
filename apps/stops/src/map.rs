@@ -1151,6 +1151,15 @@ pub struct MapState {
     tap_timer: Option<Task<()>>,
 }
 
+/// How old a device fix may be and still centre the idle map.
+pub const FIX_MAX_AGE_MS: i64 = 10 * 60 * 1000;
+
+/// Whether a fix taken at `time_ms` is recent enough at `now_ms` (a fix from the
+/// future, within clock skew, counts as fresh).
+pub fn fresh_enough(time_ms: i64, now_ms: i64) -> bool {
+    time_ms > 0 && now_ms.saturating_sub(time_ms) <= FIX_MAX_AGE_MS
+}
+
 impl Default for MapState {
     fn default() -> Self {
         Self {
@@ -1167,6 +1176,13 @@ impl Default for MapState {
 }
 
 impl MapState {
+    /// Records a device fix and recentres the view on it at street level. The
+    /// trail is left alone.
+    pub fn set_device_fix(&mut self, at: Coord, accuracy_m: f64) {
+        self.position = Some((at, accuracy_m));
+        self.viewport = Viewport::new(at, STREET_MPP);
+    }
+
     fn size(&self) -> (f32, f32) {
         let b = self.bounds.get();
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));

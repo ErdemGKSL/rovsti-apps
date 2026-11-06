@@ -55,6 +55,9 @@ pub mod kind {
     /// Rovsti Stops: the alarm rang, snoozed or was dismissed; see
     /// [`crate::trip::parse_trip_alarm`].
     pub const TRIP_ALARM: &str = "trip_alarm";
+    /// Rovsti Stops: one fresh device fix asked for with `location::request_location`
+    /// (`{lat, lon, accuracy_m, time_ms}`); see [`crate::location::parse_location_fix`].
+    pub const STOPS_LOCATION: &str = "stops_location";
 }
 
 /// What the user chose on a WhatsApp incoming-call notification.

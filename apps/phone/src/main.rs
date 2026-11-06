@@ -42,6 +42,7 @@ mod person_ui;
 mod photo_edit;
 mod photo_viewer;
 mod photos;
+mod prune_ui;
 mod recents;
 mod remind_ui;
 mod replies_ui;
@@ -133,6 +134,8 @@ enum SheetKind {
     QuickReplyPick,
     /// "Remind me": the call-back time chooser (`remind_ui::remind_pick_sheet`).
     RemindPick,
+    /// Settings > Data > "Delete older calls": the age chooser (`prune_ui::prune_sheet`).
+    PruneAge,
     /// "Which number?": several numbers on the clipboard (`keypad::paste_choose_sheet`).
     PasteChoose,
 }
@@ -1498,6 +1501,7 @@ impl PhoneApp {
             SheetKind::CopyAs => self.copy_as_sheet(theme, window, cx),
             SheetKind::QuickReplyPick => self.quick_reply_sheet(theme, window, cx),
             SheetKind::RemindPick => self.remind_pick_sheet(theme, window, cx),
+            SheetKind::PruneAge => self.prune_sheet(theme, window, cx),
             SheetKind::PasteChoose => self.paste_choose_sheet(theme, window, cx),
             SheetKind::CallDetails => self.details_sheet(theme, window, cx),
             SheetKind::ImportPreview => {

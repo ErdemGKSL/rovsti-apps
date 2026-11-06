@@ -12,6 +12,7 @@ use gpui::{
 };
 use rovsti_core::{
     call_log::{EntryRef, blocked_ids_for_numbers, ids_for_numbers},
+    call_log_query::{PruneAge, ids_older_than, prune_text},
     recents::extra_ids_for_numbers,
     wire::CallLogEntry,
 };
@@ -43,6 +44,8 @@ pub(crate) enum DeleteScope {
         rows: usize,
         calls: u32,
     },
+    /// Calls that started before `cutoff_ms` (Settings > Data > Delete older calls).
+    Older { age: PruneAge, cutoff_ms: i64 },
 }
 
 pub(crate) const NUMBER_SHEET_DELETE: &str = "sheet-nhist-del";
@@ -52,6 +55,14 @@ const NO: &str = "sheet-del-no";
 
 /// Above this many entries Delete all keeps no snapshot, so it has no Undo.
 pub(crate) const UNDO_CAP: usize = 5000;
+
+/// Whether `count` entries are few enough to keep an Undo snapshot.
+pub(crate) fn within_undo_cap(count: usize) -> bool {
+    count <= UNDO_CAP
+}
+
+/// The warning appended to a confirm body when there will be no Undo.
+const NO_UNDO: &str = " This can't be undone.";
 
 /// Title and body of the confirm sheet; `count` is how many calls go.
 pub(crate) fn confirm_text(scope: &DeleteScope, count: usize) -> (String, String) {
@@ -70,13 +81,20 @@ pub(crate) fn confirm_text(scope: &DeleteScope, count: usize) -> (String, String
             let mut body =
                 "This removes every entry from this phone's call log. Missed-call count goes to 0."
                     .to_owned();
-            if count > UNDO_CAP {
-                body.push_str(" This can't be undone.");
+            if !within_undo_cap(count) {
+                body.push_str(NO_UNDO);
             }
             ("Delete all call history?".to_owned(), body)
         }
         DeleteScope::Selected { rows, calls, .. } => {
             rovsti_core::call_log_query::delete_selected_text(*rows, *calls)
+        }
+        DeleteScope::Older { age, .. } => {
+            let (title, mut body) = prune_text(*age, count);
+            if !within_undo_cap(count) {
+                body.push_str(NO_UNDO);
+            }
+            (title, body)
         }
     }
 }
@@ -84,6 +102,14 @@ pub(crate) fn confirm_text(scope: &DeleteScope, count: usize) -> (String, String
 impl PhoneApp {
     /// Call-log ids and WhatsApp call ids `scope` covers right now.
     fn scope_ids(&self, scope: &DeleteScope, cx: &gpui::App) -> (Vec<i64>, Vec<String>) {
+        if let DeleteScope::Older { cutoff_ms, .. } = scope {
+            let log = match self.backend.read(cx).call_log() {
+                backend::Load::Ready(log) => Some(log),
+                _ => None,
+            };
+            let source: &[CallLogEntry] = log.as_ref().map_or(&[], |l| &l.source);
+            return ids_older_than(source, &self.wa_call.read(cx).recents_extras(), *cutoff_ms);
+        }
         let DeleteScope::Numbers {
             numbers, blocked, ..
         } = scope
@@ -145,6 +171,10 @@ impl PhoneApp {
                     self.delete_call_ids(ids, wa_ids, window, cx);
                 }
             }
+            Some(scope @ DeleteScope::Older { .. }) => {
+                let (ids, wa_ids) = self.scope_ids(&scope, cx);
+                self.delete_call_ids(ids, wa_ids, window, cx);
+            }
             Some(DeleteScope::All) => self.delete_all_history(window, cx),
             Some(DeleteScope::Selected { refs, .. }) => {
                 self.recents_leave_select(cx);
@@ -162,7 +192,7 @@ impl PhoneApp {
             _ => Vec::new(),
         };
         let records = self.wa_call.read(cx).all_records();
-        let undoable = entries.len() + records.len() <= UNDO_CAP;
+        let undoable = within_undo_cap(entries.len() + records.len());
         let task = self.backend.update(cx, |b, cx| b.delete_all_calls(cx));
         cx.spawn(async move |this, cx| {
             let outcome = task.await;
@@ -217,7 +247,7 @@ impl PhoneApp {
         match scope {
             DeleteScope::All => count = self.all_calls_count(cx),
             DeleteScope::Selected { calls, .. } => count = *calls as usize,
-            DeleteScope::Numbers { .. } => {}
+            DeleteScope::Numbers { .. } | DeleteScope::Older { .. } => {}
         }
         let (title, text) = confirm_text(scope, count);
         let colors = theme::colors(theme);
@@ -406,6 +436,26 @@ mod tests {
             )
         );
         assert_eq!(confirm_text(&scope(1, 1), 1).0, "Delete this row?");
+    }
+
+    #[test]
+    fn confirm_text_older() {
+        let scope = DeleteScope::Older {
+            age: PruneAge::Days90,
+            cutoff_ms: 0,
+        };
+        assert_eq!(
+            confirm_text(&scope, 12),
+            (
+                "Delete calls older than 90 days?".to_owned(),
+                "12 calls will be removed from this phone's call log.".to_owned()
+            )
+        );
+        let (_, at_cap) = confirm_text(&scope, UNDO_CAP);
+        assert!(!at_cap.contains("can't be undone"));
+        let (_, over) = confirm_text(&scope, UNDO_CAP + 1);
+        assert!(over.ends_with("This can't be undone."));
+        assert!(within_undo_cap(UNDO_CAP) && !within_undo_cap(UNDO_CAP + 1));
     }
 
     #[test]

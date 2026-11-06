@@ -86,6 +86,7 @@ pub(crate) enum RowId {
     ExportCalls,
     Import,
     ImportError,
+    DeleteOlder,
     DeleteHistory,
     ResetSettings,
     Forwarding,
@@ -104,7 +105,7 @@ pub(crate) enum RowId {
 }
 
 impl RowId {
-    const COUNT: usize = 31;
+    const COUNT: usize = 32;
 
     const fn index(self) -> usize {
         self as usize
@@ -128,6 +129,7 @@ impl RowId {
             Self::ExportCalls => "set-export-calls",
             Self::Import => "set-import",
             Self::ImportError => "set-import-error",
+            Self::DeleteOlder => "set-delete-older",
             Self::DeleteHistory => "set-delete-history",
             Self::ResetSettings => "set-reset",
             Self::Forwarding => "set-forwarding",
@@ -530,6 +532,11 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
             Control::Error(message.into()),
         ));
     }
+    data.push(Row::new(
+        RowId::DeleteOlder,
+        "Delete older calls",
+        Control::Danger,
+    ));
     data.push(Row::new(
         RowId::DeleteHistory,
         "Delete all call history",
@@ -1145,6 +1152,7 @@ impl PhoneApp {
             (RowId::Export, _) => self.backup_export(cx),
             (RowId::ExportCalls, _) => self.backup_export_calls(cx),
             (RowId::Import, _) => self.backup_import(cx),
+            (RowId::DeleteOlder, _) => self.open_prune_pick(cx),
             (RowId::DeleteHistory, _) => {
                 self.open_confirm_delete(crate::history_ui::DeleteScope::All, cx);
             }
@@ -1966,10 +1974,11 @@ mod tests {
             .into_iter()
             .find(|s| s.title == "Data")
             .expect("present");
-        assert_eq!(data.rows.len(), 8);
+        assert_eq!(data.rows.len(), 9);
         assert_eq!(data.rows[5].id, RowId::ImportError);
-        assert_eq!(data.rows[6].id, RowId::DeleteHistory);
-        assert_eq!(data.rows[7].id, RowId::ResetSettings);
+        assert_eq!(data.rows[6].id, RowId::DeleteOlder);
+        assert_eq!(data.rows[7].id, RowId::DeleteHistory);
+        assert_eq!(data.rows[8].id, RowId::ResetSettings);
     }
 
     #[test]
@@ -2072,12 +2081,15 @@ mod tests {
                 RowId::CallStats,
                 RowId::CallNotes,
                 RowId::Import,
+                RowId::DeleteOlder,
                 RowId::DeleteHistory,
                 RowId::ResetSettings
             ]
         );
         assert_eq!(data.rows[5].control, Control::Danger);
-        assert_eq!(&*data.rows[5].aria, "Delete all call history");
+        assert_eq!(&*data.rows[5].aria, "Delete older calls");
+        assert_eq!(data.rows[6].control, Control::Danger);
+        assert_eq!(&*data.rows[6].aria, "Delete all call history");
     }
 
     #[test]
@@ -2142,6 +2154,7 @@ mod tests {
             RowId::ExportCalls,
             RowId::Import,
             RowId::ImportError,
+            RowId::DeleteOlder,
             RowId::DeleteHistory,
             RowId::ResetSettings,
             RowId::Forwarding,

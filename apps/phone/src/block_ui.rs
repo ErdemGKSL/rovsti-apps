@@ -664,6 +664,8 @@ impl PhoneApp {
         if total == 0 {
             return;
         }
+        // Past the cap no snapshot is kept, so the pill has no Undo.
+        let undoable = crate::history_ui::within_undo_cap(total);
         rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
         let records = self
             .wa_call
@@ -677,6 +679,9 @@ impl PhoneApp {
             };
             this.update(cx, |this, cx| {
                 match outcome {
+                    backend::WriteOutcome::Done(_) if !undoable => {
+                        this.show_notice_pill(deleted_text(total), None, false, cx);
+                    }
                     backend::WriteOutcome::Done(_) => this.show_pill_action(
                         deleted_text(total),
                         "Undo",

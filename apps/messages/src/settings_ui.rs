@@ -34,7 +34,7 @@ use rovsti_ui::{
     theme,
     tokens::{Theme, typography},
 };
-use rovsti_wa_proto::jid_user;
+use rovsti_wa_proto::{is_pn_jid, jid_user};
 
 use crate::{
     backend::{Backend, BackendEvent, now_ms},
@@ -157,7 +157,8 @@ pub fn tag_label(
             .map(|t| t.addresses.join(", "))
             .filter(|label| !label.is_empty())
             .unwrap_or_else(|| format!("SMS conversation {id}")),
-        Some(ThreadId::WhatsApp(jid)) => format!("WhatsApp {}", jid_user(&jid)),
+        Some(ThreadId::WhatsApp(jid)) if is_pn_jid(&jid) => format!("WhatsApp {}", jid_user(&jid)),
+        Some(ThreadId::WhatsApp(_)) => "WhatsApp user".to_owned(),
         None => tag.to_owned(),
     }
 }
@@ -833,7 +834,13 @@ impl SettingsView {
                 .get(jid)
                 .filter(|n| !n.trim().is_empty())
                 .cloned()
-                .unwrap_or_else(|| format!("WhatsApp {}", jid_user(jid)));
+                .unwrap_or_else(|| {
+                    if is_pn_jid(jid) {
+                        format!("WhatsApp {}", jid_user(jid))
+                    } else {
+                        "WhatsApp user".to_owned()
+                    }
+                });
             rows.push(
                 list_row(
                     theme,

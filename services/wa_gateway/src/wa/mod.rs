@@ -5,6 +5,7 @@ pub mod calls;
 pub mod convert;
 pub mod groups;
 pub mod history;
+pub mod lid;
 pub mod media;
 pub mod picture;
 pub mod reaction;

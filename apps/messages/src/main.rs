@@ -117,6 +117,8 @@ struct RowMenu {
     page_number: Option<String>,
     /// Android contact id of `page_number`, when it is in the address book.
     contact_id: Option<i64>,
+    /// A conversation page's menu: "Send later" comes first.
+    send_later: bool,
 }
 
 /// The phone number behind a 1:1 WhatsApp chat JID. Groups, channels and hidden-number (LID)
@@ -1313,6 +1315,7 @@ impl MessagesApp {
             delete_confirm: false,
             page_number: None,
             contact_id: None,
+            send_later: false,
         });
         cx.notify();
     }
@@ -1454,6 +1457,28 @@ impl MessagesApp {
         if let Some(menu) = &mut self.row_menu {
             menu.page_number = number;
             menu.contact_id = contact_id;
+            menu.send_later = true;
+        }
+        cx.notify();
+    }
+
+    /// "Send later" of a page menu: closes the menu and asks the open page to schedule its
+    /// composer text; a blank composer gets the "type first" pill.
+    fn menu_send_later(&mut self, cx: &mut Context<Self>) {
+        self.row_menu = None;
+        let (scheduled, draft) = match &self.open {
+            Open::WhatsApp(_, conversation) => (
+                conversation.update(cx, |c, cx| c.request_schedule(cx)),
+                conversation.read(cx).draft(cx),
+            ),
+            Open::Sms(conversation) => (
+                conversation.update(cx, |c, cx| c.request_schedule(cx)),
+                conversation.read(cx).draft(cx),
+            ),
+            _ => (true, String::new()),
+        };
+        if schedule_ui::explain_type_first(scheduled, &draft) {
+            self.show_pill(schedule_ui::TYPE_FIRST);
         }
         cx.notify();
     }
@@ -1556,6 +1581,7 @@ impl MessagesApp {
             delete_confirm: false,
             page_number: None,
             contact_id: None,
+            send_later: true,
         });
         cx.notify();
     }
@@ -2084,6 +2110,19 @@ impl MessagesApp {
                 .into_any_element(),
             );
         } else {
+            if menu.send_later {
+                items.push(
+                    menu_item(
+                        theme,
+                        "menu-send-later",
+                        Icon::LucideAlarmClock,
+                        "Send later".into(),
+                        colors.label,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.menu_send_later(cx)))
+                    .into_any_element(),
+                );
+            }
             if menu.jid.is_some() {
                 self.wa_menu_items(menu, theme, &mut items, cx);
             }

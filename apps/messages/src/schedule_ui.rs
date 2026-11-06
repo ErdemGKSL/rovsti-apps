@@ -458,6 +458,12 @@ pub fn remote_failed_text(title: &str) -> String {
 #[cfg_attr(not(test), allow(dead_code))]
 pub const TYPE_FIRST: &str = "Type the message first, then choose Send later";
 
+/// Whether a refused "Send later" should explain itself: only when the composer is blank
+/// (otherwise another notice, such as "Make default to reply", already speaks).
+pub fn explain_type_first(scheduled: bool, draft: &str) -> bool {
+    !scheduled && draft.trim().is_empty()
+}
+
 /// The rows the strip shows: the first few, or all when expanded.
 pub fn visible_items(items: &[StripItem], expanded: bool) -> &[StripItem] {
     if expanded {
@@ -1249,5 +1255,8 @@ mod tests {
             "Scheduled WhatsApp message to Ayse couldn't be sent"
         );
         assert!(TYPE_FIRST.starts_with("Type the message first"));
+        assert!(explain_type_first(false, "  \n"));
+        assert!(!explain_type_first(false, "hi"));
+        assert!(!explain_type_first(true, ""));
     }
 }

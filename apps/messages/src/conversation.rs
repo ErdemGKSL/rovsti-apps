@@ -758,10 +758,22 @@ impl Conversation {
     }
 
     /// Long-press (or right-click) on Send. Only a typed text can wait.
-    fn request_schedule(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn request_schedule(&mut self, cx: &mut Context<Self>) -> bool {
         let text = self.composer.read(cx).text().trim().to_owned();
-        if !text.is_empty() {
-            cx.emit(ConversationEvent::Schedule(text));
+        if text.is_empty() {
+            return false;
+        }
+        cx.emit(ConversationEvent::Schedule(text));
+        true
+    }
+
+    /// Long-press on Send: schedules, or says why nothing happened.
+    fn long_press_schedule(&mut self, cx: &mut Context<Self>) {
+        let scheduled = self.request_schedule(cx);
+        if crate::schedule_ui::explain_type_first(scheduled, &self.draft(cx)) {
+            cx.emit(ConversationEvent::Notice(
+                crate::schedule_ui::TYPE_FIRST.to_owned(),
+            ));
         }
     }
 
@@ -2664,10 +2676,10 @@ impl Render for Conversation {
         let send = glass_icon_button(theme, Icon::LucideArrowUp, 0.0, false)
             .id("conv-send")
             .on_click(cx.listener(|this, _, _, cx| this.send(cx)))
-            .on_long_press(cx.listener(|this, _, _, cx| this.request_schedule(cx)))
+            .on_long_press(cx.listener(|this, _, _, cx| this.long_press_schedule(cx)))
             .on_mouse_down(
                 gpui::MouseButton::Right,
-                cx.listener(|this, _, _, cx| this.request_schedule(cx)),
+                cx.listener(|this, _, _, cx| this.long_press_schedule(cx)),
             )
             .into_any_element();
         let attach = glass_icon_button(theme, Icon::LucidePlus, 0.0, false)

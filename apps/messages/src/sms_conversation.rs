@@ -290,10 +290,10 @@ impl SmsConversation {
     }
 
     /// Long-press (or right-click) on Send. Only a typed text can wait.
-    fn request_schedule(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn request_schedule(&mut self, cx: &mut Context<Self>) -> bool {
         let body = self.composer.read(cx).text().trim().to_owned();
         if body.is_empty() || !self.backend.read(cx).sms_role_held() {
-            return;
+            return false;
         }
         let sub_id = self.current_sim(cx);
         cx.emit(SmsConversationEvent::Schedule {
@@ -301,6 +301,15 @@ impl SmsConversation {
             body,
             sub_id,
         });
+        true
+    }
+
+    /// Long-press on Send: schedules, or says why nothing happened.
+    fn long_press_schedule(&mut self, cx: &mut Context<Self>) {
+        let scheduled = self.request_schedule(cx);
+        if crate::schedule_ui::explain_type_first(scheduled, &self.draft(cx)) {
+            cx.emit(SmsConversationEvent::Notice(crate::schedule_ui::TYPE_FIRST));
+        }
     }
 
     fn is_draft(&self) -> bool {
@@ -1171,10 +1180,10 @@ impl Render for SmsConversation {
             let send = glass_icon_button(theme, Icon::LucideArrowUp, 0.0, false)
                 .id("sms-send")
                 .on_click(cx.listener(|this, _, _, cx| this.send(cx)))
-                .on_long_press(cx.listener(|this, _, _, cx| this.request_schedule(cx)))
+                .on_long_press(cx.listener(|this, _, _, cx| this.long_press_schedule(cx)))
                 .on_mouse_down(
                     gpui::MouseButton::Right,
-                    cx.listener(|this, _, _, cx| this.request_schedule(cx)),
+                    cx.listener(|this, _, _, cx| this.long_press_schedule(cx)),
                 )
                 .into_any_element();
             composer_bar(keyboard, Some(attach), field, send).into_any_element()

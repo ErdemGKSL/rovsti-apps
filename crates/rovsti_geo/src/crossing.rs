@@ -345,7 +345,7 @@ impl CrossingWatch {
     /// Feed one fix. Returns a [`Crossing`] when the confident side changed
     /// and the path from the last confident fix crosses segment AB.
     pub fn observe(&mut self, d: &Diameter, fix: &Fix) -> Option<Crossing> {
-        if fix.accuracy_m.is_nan() || fix.accuracy_m > MAX_ACCURACY_M {
+        if fix.accuracy_m.is_nan() || fix.accuracy_m > MAX_ACCURACY_M || !valid_coord(fix.at) {
             return None;
         }
         let SideReading::Side(now) = d.read_side(fix.at, fix.accuracy_m) else {
@@ -415,6 +415,20 @@ impl CrossingTrip {
     }
 
     pub fn update(&mut self, fix: Fix) -> CrossingUpdate {
+        if !valid_coord(fix.at) {
+            // Garbage position (NaN, off Earth): change nothing, ask again soon.
+            return CrossingUpdate {
+                state: self.state,
+                ring: false,
+                crossing: None,
+                side: self.watch.side(),
+                line_m: self.last_line_m.unwrap_or(0.0),
+                circle_m: 0.0,
+                inside: false,
+                next_fix_in: Duration::from_secs(3),
+                eta: None,
+            };
+        }
         let d = &self.diameter;
         let line_m = d.distance_to_segment_m(fix.at);
         let circle_m = d.distance_to_circle_m(fix.at);
@@ -432,7 +446,7 @@ impl CrossingTrip {
 
         let eta = fix
             .speed_mps
-            .filter(|speed| *speed >= MIN_SPEED_MPS)
+            .filter(|speed| speed.is_finite() && *speed >= MIN_SPEED_MPS)
             .map(|speed| Duration::from_secs_f64(line_m / speed));
         CrossingUpdate {
             state: self.state,
@@ -515,6 +529,24 @@ mod tests {
     fn north(center: Coord, len: f64) -> Diameter {
         let h = len / 2.0;
         Diameter::new(unproject(center, (0.0, -h)), unproject(center, (0.0, h))).expect("valid")
+    }
+
+    #[test]
+    fn garbage_fixes_neither_panic_nor_change_state() {
+        let d = east(ISTANBUL, 1_000.0);
+        let mut trip = CrossingTrip::new(d);
+        let at = |x, y| unproject(ISTANBUL, (x, y));
+        trip.update(fix(at(0.0, 200.0), 5.0));
+        for bad in [Coord::new(f64::NAN, 29.0), Coord::new(95.0, 29.0)] {
+            let u = trip.update(Fix {
+                at: bad,
+                accuracy_m: 5.0,
+                speed_mps: Some(10.0),
+            });
+            assert!(!u.ring && u.line_m.is_finite() && u.eta.is_none());
+            assert_eq!(u.side, Some(Side::Left));
+        }
+        assert!(trip.update(fix(at(0.0, -200.0), 5.0)).ring);
     }
 
     #[test]

@@ -8,7 +8,7 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
+    AnyElement, Context, Hsla, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, px, svg,
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
@@ -24,6 +24,7 @@ use serde_json::Value;
 use crate::{
     StopsApp,
     backend::{self, Preflight},
+    map::side_color,
     picker::{Destination, Slot},
     store::now_ms,
 };
@@ -62,9 +63,11 @@ pub fn wait_text(ms: u64) -> String {
 pub struct Live {
     pub state: TripState,
     /// Metres to the line A-B.
-    pub distance_m: f64,
+    pub line_m: f64,
     pub side: Option<Side>,
     pub inside: bool,
+    /// Metres to the circle; `None` when not known (a restored trip, an old answer).
+    pub circle_m: Option<f64>,
     pub eta_min: Option<u32>,
     pub next_fix_ms: Option<u64>,
     pub notice_sent: bool,
@@ -74,9 +77,10 @@ impl Live {
     pub fn from_out(out: &FixOut) -> Self {
         Self {
             state: out.state,
-            distance_m: out.distance_m,
+            line_m: out.distance_m,
             side: out.side,
             inside: out.inside,
+            circle_m: out.circle_m,
             eta_min: eta_from_text(&out.text),
             next_fix_ms: Some(out.next_fix_ms),
             notice_sent: out.notice_sent,
@@ -87,9 +91,10 @@ impl Live {
     pub fn from_trip(trip: &ActiveTrip) -> Option<Self> {
         Some(Self {
             state: trip.trip.state(),
-            distance_m: trip.trip.last_line_m()?,
+            line_m: trip.trip.last_line_m()?,
             side: trip.trip.side(),
             inside: false,
+            circle_m: None,
             eta_min: None,
             next_fix_ms: None,
             notice_sent: trip.notice.as_ref().is_some_and(|n| n.sent),
@@ -97,18 +102,36 @@ impl Live {
     }
 }
 
-/// "Left side, about 4 min to the line A – B": where you are and how far the
-/// line is.
-pub fn live_text(live: &Live, label: &str) -> String {
-    let place = match (live.inside, live.side) {
-        (false, _) => "Outside the circle".to_owned(),
-        (true, Some(side)) => format!("{} side", side.label()),
-        (true, None) => "On the line".to_owned(),
-    };
-    match live.eta_min {
-        Some(m) => format!("{place}, about {m} min to the line {label}"),
-        None => format!("{place}, to the line {label}"),
+/// "Left side", "Right side" or "On the line": which half you are on.
+pub fn side_text(side: Option<Side>) -> String {
+    match side {
+        Some(side) => format!("{} side", side.label()),
+        None => "On the line".to_owned(),
     }
+}
+
+/// "Inside the circle" or "1.2 km to the circle"; nothing when it is not known.
+pub fn circle_text(live: &Live) -> Option<String> {
+    if live.inside {
+        return Some("Inside the circle".to_owned());
+    }
+    live.circle_m
+        .map(|m| format!("{} to the circle", distance_text(m)))
+}
+
+/// "About 4 min to the line", when there is an estimate.
+pub fn eta_text(eta_min: Option<u32>) -> Option<String> {
+    eta_min.map(|m| format!("About {m} min to the line"))
+}
+
+/// What the alarm screen says under the title: the half you ended up on.
+pub fn crossed_to_text(side: Option<Side>) -> Option<String> {
+    side.map(|s| format!("Now on the {} side", s.label().to_lowercase()))
+}
+
+/// The alarm's title: "Crossed A – B".
+pub fn alarm_title(label: &str) -> String {
+    format!("Crossed {label}")
 }
 
 /// The `about N min` that `FixOut::text` ends with, if any.
@@ -159,6 +182,8 @@ pub fn snooze_text(at_ms: i64, now_ms: i64) -> String {
 pub struct AlarmView {
     pub title: String,
     pub distance_m: Option<f64>,
+    /// The half the phone crossed to.
+    pub side: Option<Side>,
 }
 
 // ---- views -----------------------------------------------------------------------
@@ -325,13 +350,16 @@ impl StopsApp {
         let live = self.live.clone();
         let (big, small): (SharedString, SharedString) = match &live {
             Some(l) if l.state != TripState::Tracking => ("Crossed".into(), label.clone().into()),
-            Some(l) => (
-                distance_text(l.distance_m).into(),
-                live_text(l, &label).into(),
-            ),
+            Some(l) => (distance_text(l.line_m).into(), "to the line".into()),
             None => ("Locating".into(), format!("near the line {label}").into()),
         };
+        let tracking = live.as_ref().filter(|l| l.state == TripState::Tracking);
+        let chip = tracking.map(|l| (side_text(l.side), side_color(theme, l.side)));
         let mut details = Vec::new();
+        if let Some(l) = tracking {
+            details.extend(circle_text(l));
+            details.extend(eta_text(l.eta_min));
+        }
         if let Some(ms) = live.as_ref().and_then(|l| l.next_fix_ms) {
             details.push(format!("Next check in {}", wait_text(ms)));
         }
@@ -364,6 +392,17 @@ impl StopsApp {
                             .text_color(colors.secondary_label)
                             .child(small),
                     )
+                    .children(chip.map(|(text, color)| {
+                        div()
+                            .id("side-chip")
+                            .px(px(12.0))
+                            .py(px(4.0))
+                            .rounded(radius::CARD)
+                            .bg(Hsla { a: 0.18, ..color })
+                            .text_size(typography::HEADLINE.size)
+                            .text_color(color)
+                            .child(text)
+                    }))
                     .child(
                         div()
                             .pt(px(8.0))
@@ -400,6 +439,7 @@ impl StopsApp {
         let colors = theme::colors(theme);
         let snooze = format!("Snooze {} min", self.prefs.snooze_min.clamp(1, 15));
         let distance = alarm.distance_m.map(distance_text);
+        let crossed_to = crossed_to_text(alarm.side);
         Some(
             div()
                 .id("alarm-screen")
@@ -431,6 +471,12 @@ impl StopsApp {
                                 .text_center()
                                 .child(alarm.title),
                         )
+                        .children(crossed_to.map(|t| {
+                            div()
+                                .text_size(typography::TITLE2.size)
+                                .text_color(colors.secondary_label)
+                                .child(t)
+                        }))
                         .children(distance.map(|d| {
                             div()
                                 .text_size(typography::TITLE.size)
@@ -666,8 +712,9 @@ impl StopsApp {
                 }
                 if ringing && self.alarm.is_none() {
                     self.alarm = Some(AlarmView {
-                        title: format!("Crossed {}", trip.label()),
+                        title: alarm_title(&trip.label()),
                         distance_m: trip.trip.last_line_m(),
+                        side: trip.trip.side(),
                     });
                 }
                 self.trip = Some(trip);
@@ -716,7 +763,7 @@ impl StopsApp {
                     self.map_fix(at);
                 }
                 if out.ring {
-                    self.show_alarm(&out.title, Some(out.distance_m), cx);
+                    self.show_alarm(&out.title, Some(out.distance_m), out.side, cx);
                 }
                 cx.notify();
             }
@@ -737,10 +784,17 @@ impl StopsApp {
         }
     }
 
-    fn show_alarm(&mut self, title: &str, distance_m: Option<f64>, cx: &mut Context<Self>) {
+    fn show_alarm(
+        &mut self,
+        title: &str,
+        distance_m: Option<f64>,
+        side: Option<Side>,
+        cx: &mut Context<Self>,
+    ) {
         self.alarm = Some(AlarmView {
             title: title.to_owned(),
             distance_m,
+            side,
         });
         self.sheet.close();
         cx.notify();
@@ -751,12 +805,13 @@ impl StopsApp {
     pub(crate) fn on_alarm_event(&mut self, event: TripAlarmEvent, cx: &mut Context<Self>) {
         match event {
             TripAlarmEvent::Ringing => {
-                let title = self.trip.as_ref().map_or_else(
-                    || "Your stop".to_owned(),
-                    |t| format!("Crossed {}", t.label()),
-                );
-                let distance = self.live.as_ref().map(|l| l.distance_m);
-                self.show_alarm(&title, distance, cx);
+                let title = self
+                    .trip
+                    .as_ref()
+                    .map_or_else(|| "Your stop".to_owned(), |t| alarm_title(&t.label()));
+                let distance = self.live.as_ref().map(|l| l.line_m);
+                let side = self.live.as_ref().and_then(|l| l.side);
+                self.show_alarm(&title, distance, side, cx);
             }
             TripAlarmEvent::Snoozed { at_ms } => self.on_snoozed(at_ms, cx),
             TripAlarmEvent::Dismissed => self.trip_over(cx),
@@ -773,9 +828,10 @@ impl StopsApp {
             cx.background_executor().timer(wait).await;
             this.update(cx, |this, cx| {
                 if let Some(trip) = &this.trip {
-                    let title = format!("Crossed {}", trip.label());
-                    let distance = this.live.as_ref().map(|l| l.distance_m);
-                    this.show_alarm(&title, distance, cx);
+                    let title = alarm_title(&trip.label());
+                    let distance = this.live.as_ref().map(|l| l.line_m);
+                    let side = this.live.as_ref().and_then(|l| l.side);
+                    this.show_alarm(&title, distance, side, cx);
                 }
             })
             .ok();
@@ -817,36 +873,57 @@ mod tests {
     use super::*;
     use rovsti_geo::Coord;
 
-    fn live(side: Option<Side>, inside: bool, eta_min: Option<u32>) -> Live {
+    fn live(side: Option<Side>, inside: bool, circle_m: Option<f64>) -> Live {
         Live {
             state: TripState::Tracking,
-            distance_m: 120.0,
+            line_m: 120.0,
             side,
             inside,
-            eta_min,
+            circle_m,
+            eta_min: None,
             next_fix_ms: None,
             notice_sent: false,
         }
     }
 
     #[test]
-    fn the_live_text_names_the_side() {
+    fn the_side_reads_left_right_or_on_the_line() {
+        assert_eq!(side_text(Some(Side::Left)), "Left side");
+        assert_eq!(side_text(Some(Side::Right)), "Right side");
+        assert_eq!(side_text(None), "On the line");
         assert_eq!(
-            live_text(&live(Some(Side::Left), true, None), "A – B"),
-            "Left side, to the line A – B"
+            crossed_to_text(Some(Side::Right)).as_deref(),
+            Some("Now on the right side")
+        );
+        assert_eq!(crossed_to_text(None), None);
+    }
+
+    #[test]
+    fn the_distance_texts_read_for_the_card() {
+        assert_eq!(distance_text(120.0), "120 m");
+        assert_eq!(
+            eta_text(Some(3)).as_deref(),
+            Some("About 3 min to the line")
+        );
+        assert_eq!(eta_text(None), None);
+    }
+
+    #[test]
+    fn the_circle_text_is_inside_or_a_distance() {
+        assert_eq!(
+            circle_text(&live(Some(Side::Left), true, Some(0.0))).as_deref(),
+            Some("Inside the circle")
         );
         assert_eq!(
-            live_text(&live(Some(Side::Right), true, Some(3)), "A – B"),
-            "Right side, about 3 min to the line A – B"
+            circle_text(&live(None, false, Some(1_240.0))).as_deref(),
+            Some("1.2 km to the circle")
         );
-        assert_eq!(
-            live_text(&live(None, true, None), "A – B"),
-            "On the line, to the line A – B"
-        );
-        assert_eq!(
-            live_text(&live(Some(Side::Left), false, None), "A – B"),
-            "Outside the circle, to the line A – B"
-        );
+        assert_eq!(circle_text(&live(None, false, None)), None);
+    }
+
+    #[test]
+    fn the_alarm_title_names_the_pair() {
+        assert_eq!(alarm_title("Home – Work"), "Crossed Home – Work");
     }
 
     #[test]
@@ -940,7 +1017,7 @@ mod tests {
             0,
         );
         let live = Live::from_trip(&trip).unwrap();
-        assert!((live.distance_m - 222.0).abs() < 5.0, "{}", live.distance_m);
+        assert!((live.line_m - 222.0).abs() < 5.0, "{}", live.line_m);
         assert_eq!(live.side, Some(Side::Left));
         assert_eq!(live.state, TripState::Tracking);
         assert!(!live.notice_sent);
@@ -957,12 +1034,27 @@ mod tests {
         };
         let live = Live::from_out(&out);
         assert_eq!((live.side, live.inside), (Some(Side::Right), true));
+        assert_eq!(live.circle_m, None);
         // An older answer without the fields.
         let Some(Status::Fix(old)) = parse_status(&out_json("Tracking", false)) else {
             panic!("expected a fix");
         };
         let live = Live::from_out(&old);
-        assert_eq!((live.side, live.inside), (None, false));
+        assert_eq!((live.side, live.inside, live.circle_m), (None, false, None));
+        assert_eq!(live.line_m, 420.0);
+    }
+
+    #[test]
+    fn a_status_with_a_circle_distance_is_read() {
+        let json = r#"{"state":"Tracking","distance_m":900.0,"next_fix_ms":5000,
+            "high_accuracy":false,"ring":false,"title":"A – B","text":"Outside","notice_sent":false,
+            "side":"left","inside":false,"circle_m":640.0}"#;
+        let Some(Status::Fix(out)) = parse_status(json) else {
+            panic!("expected a fix");
+        };
+        let live = Live::from_out(&out);
+        assert_eq!(live.circle_m, Some(640.0));
+        assert_eq!(circle_text(&live).as_deref(), Some("640 m to the circle"));
     }
 
     #[test]

@@ -558,6 +558,17 @@ pub struct Palette {
     halo: Hsla,
 }
 
+/// The colour of a half of the circle; the live card's side chip uses it too.
+/// Unknown (on the line) is neutral.
+pub fn side_color(theme: Theme, side: Option<Side>) -> Hsla {
+    let c = theme::colors(theme);
+    match side {
+        Some(Side::Left) => c.accent,
+        Some(Side::Right) => c.green,
+        None => c.secondary_label,
+    }
+}
+
 fn with_alpha(color: Hsla, a: f32) -> Hsla {
     Hsla { a, ..color }
 }
@@ -574,8 +585,8 @@ impl Palette {
             line: c.orange,
             stop: with_alpha(c.secondary_label, 0.85),
             ring: c.red,
-            left: c.accent,
-            right: c.green,
+            left: side_color(theme, Some(Side::Left)),
+            right: side_color(theme, Some(Side::Right)),
             left_wash: with_alpha(c.accent, 0.18),
             right_wash: with_alpha(c.green, 0.18),
             halo: gpui::white(),

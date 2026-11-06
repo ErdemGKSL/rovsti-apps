@@ -20,7 +20,7 @@ pub enum NoticeWhen {
     /// Together with the alarm.
     #[default]
     WithAlarm,
-    /// This many minutes before arrival.
+    /// This many minutes before the circle is reached.
     MinutesBefore(u8),
 }
 
@@ -35,8 +35,8 @@ impl NoticeWhen {
 
     pub fn label(self) -> String {
         match self {
-            Self::WithAlarm => "With the alarm".to_owned(),
-            Self::MinutesBefore(m) => format!("{m} min before"),
+            Self::WithAlarm => "When you cross the line".to_owned(),
+            Self::MinutesBefore(m) => format!("{m} min before the circle"),
         }
     }
 }
@@ -72,7 +72,7 @@ impl NoticePrefs {
         Ok(())
     }
 
-    /// The notice for a new trip. "With the alarm" goes out with the
+    /// The notice for a new trip. "When you cross the line" goes out with the
     /// crossing; "N minutes before" when the circle is that far away.
     pub fn to_notice_state(&self) -> NoticeState {
         let rule = match self.when {
@@ -190,8 +190,8 @@ mod tests {
 
     #[test]
     fn notice_when_choices() {
-        assert_eq!(NoticeWhen::ALL[0].label(), "With the alarm");
-        assert_eq!(NoticeWhen::ALL[2].label(), "10 min before");
+        assert_eq!(NoticeWhen::ALL[0].label(), "When you cross the line");
+        assert_eq!(NoticeWhen::ALL[2].label(), "10 min before the circle");
     }
 
     #[test]

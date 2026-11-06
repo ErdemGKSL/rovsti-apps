@@ -136,6 +136,9 @@ pub struct FixOut {
     /// Inside the circle.
     #[serde(default)]
     pub inside: bool,
+    /// Metres from the fix to the circle (0 inside). Absent in older answers.
+    #[serde(default)]
+    pub circle_m: Option<f64>,
     /// Where the phone was, for the map. Absent in answers from older builds.
     #[serde(default)]
     pub at: Option<FixPos>,
@@ -261,6 +264,7 @@ impl ActiveTrip {
             notice_sent: self.notice.as_ref().is_some_and(|n| n.sent),
             side: u.side,
             inside: u.inside,
+            circle_m: Some(u.circle_m),
             at: Some(FixPos {
                 lat: outcome.fix.at.lat,
                 lon: outcome.fix.at.lon,
@@ -527,8 +531,10 @@ mod tests {
         obj.remove("at");
         obj.remove("side");
         obj.remove("inside");
+        obj.remove("circle_m");
         let old: FixOut = serde_json::from_value(json).unwrap();
         assert_eq!((old.at, old.side, old.inside), (None, None, false));
+        assert_eq!(old.circle_m, None);
     }
 
     #[test]

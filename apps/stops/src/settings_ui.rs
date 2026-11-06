@@ -99,10 +99,20 @@ pub fn outcome_text(outcome: Outcome) -> &'static str {
     }
 }
 
-/// "5 Nov  ·  18 min  ·  3.4 km" under a history row's label.
+/// "A – B" for a trip with two points, the single label of a legacy record.
+pub fn record_pair(record: &TripRecord) -> String {
+    match (&record.a, &record.b) {
+        (Some(a), Some(b)) => format!("{} – {}", a.label, b.label),
+        _ if record.label.is_empty() => "Trip".to_owned(),
+        _ => record.label.clone(),
+    }
+}
+
+/// "A – B  ·  5 Nov  ·  18 min  ·  3.4 km" under a history row's title.
 pub fn record_subtitle(record: &TripRecord, now_ms: i64) -> String {
     format!(
-        "{}  ·  {}  ·  {}",
+        "{}  ·  {}  ·  {}  ·  {}",
+        record_pair(record),
         date_text(record.ended_ms, now_ms),
         duration_text(record.duration_ms()),
         distance_text(record.travelled_m)
@@ -502,7 +512,7 @@ impl StopsApp {
                 list_row(
                     theme,
                     None,
-                    if r.label.is_empty() { "Trip" } else { &r.label }.to_owned(),
+                    "Trip",
                     Some(record_subtitle(r, now).into()),
                     Some(outcome_text(r.outcome).into()),
                 )
@@ -842,22 +852,49 @@ mod tests {
         assert_eq!(distance_text(152_400.0), "152 km");
     }
 
-    #[test]
-    fn a_record_row_has_date_duration_distance() {
-        let r = TripRecord {
+    fn legacy_record() -> TripRecord {
+        TripRecord {
             label: "Kadikoy".into(),
             destination: Some(Coord::new(41.0, 29.0)),
             started_ms: 1_700_000_000_000,
             ended_ms: 1_700_000_000_000 + 18 * 60_000,
             travelled_m: 3_400.0,
             ..TripRecord::default()
-        };
+        }
+    }
+
+    #[test]
+    fn a_legacy_record_row_shows_its_single_label() {
         // 14 Nov 2023, seen from 2023.
         assert_eq!(
-            record_subtitle(&r, 1_700_100_000_000),
-            "14 Nov  ·  18 min  ·  3.4 km"
+            record_subtitle(&legacy_record(), 1_700_100_000_000),
+            "Kadikoy  ·  14 Nov  ·  18 min  ·  3.4 km"
         );
+        let unnamed = TripRecord {
+            label: String::new(),
+            ..legacy_record()
+        };
+        assert_eq!(record_pair(&unnamed), "Trip");
         assert_eq!(outcome_text(Outcome::Cancelled), "Cancelled");
+    }
+
+    #[test]
+    fn a_record_row_shows_both_points() {
+        let end = |label: &str, lon: f64| rovsti_geo::Endpoint {
+            label: label.into(),
+            coord: Coord::new(41.0, lon),
+        };
+        let r = TripRecord {
+            label: "Home – Work".into(),
+            a: Some(end("Home", 29.0)),
+            b: Some(end("Work", 29.01)),
+            destination: None,
+            ..legacy_record()
+        };
+        assert_eq!(
+            record_subtitle(&r, 1_700_100_000_000),
+            "Home – Work  ·  14 Nov  ·  18 min  ·  3.4 km"
+        );
     }
 
     #[test]
@@ -927,7 +964,10 @@ mod tests {
             when: NoticeWhen::MinutesBefore(10),
             ..NoticePrefs::default()
         });
-        assert_eq!(notice_summary(&prefs, true), "Family  ·  10 min before");
+        assert_eq!(
+            notice_summary(&prefs, true),
+            "Family  ·  10 min before the circle"
+        );
         assert_eq!(notice_summary(&prefs, false), "Needs WhatsApp");
     }
 

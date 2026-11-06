@@ -28,7 +28,10 @@ pub const MORE_H: f32 = 36.0;
 const SIDE_PAD: f32 = 16.0;
 const BAR_GAP: f32 = 8.0;
 const COLUMN_MAX_W: f32 = 420.0;
-const LANDSCAPE_HEADER_MAX: f32 = 48.0;
+/// Height the page title block needs below the status bar (portrait, compact).
+pub const TITLE_BLOCK_MIN: f32 = 49.0;
+/// Landscape header: one row below the status bar.
+pub const LANDSCAPE_HEADER_H: f32 = 48.0;
 /// Share of the free width the landscape key grid may take.
 const LANDSCAPE_GRID_SHARE: f32 = 0.55;
 const MATCHES_CAP: f32 = 3.0 * MATCH_ROW_H + 2.0 * MATCH_GAP + MATCH_GAP + MORE_H;
@@ -126,6 +129,8 @@ pub struct NumberFit {
 pub struct KeypadLayout {
     pub mode: KeypadMode,
     pub header: Rect,
+    /// True when the header is the one-row landscape variant.
+    pub header_compact: bool,
     pub number: Rect,
     pub matches: Rect,
     pub actions: Rect,
@@ -322,16 +327,14 @@ pub fn keypad_layout(input: &KeypadInput) -> KeypadLayout {
         h: input.tab_bar_h,
     };
 
-    let landscape_probe = {
-        let top = input.header_h.max(ins.top);
-        avail_w > bottom - top
-    };
-    let header_h = if landscape_probe {
-        input.header_h.min(LANDSCAPE_HEADER_MAX)
+    let landscape_top = ins.top + LANDSCAPE_HEADER_H;
+    // Orientation of the safe area, so a short portrait screen stays portrait.
+    let is_landscape = avail_w > (input.viewport_h - ins.top - ins.bottom).max(0.0);
+    let top = if is_landscape {
+        landscape_top
     } else {
-        input.header_h
+        input.header_h.max(ins.top + TITLE_BLOCK_MIN)
     };
-    let top = header_h.max(ins.top);
     let avail_h = (bottom - top).max(0.0);
     let header = Rect {
         x: left,
@@ -341,7 +344,7 @@ pub fn keypad_layout(input: &KeypadInput) -> KeypadLayout {
     };
     let col_w = (avail_w - 2.0 * SIDE_PAD).clamp(0.0, COLUMN_MAX_W);
 
-    if avail_w > avail_h {
+    if is_landscape {
         return landscape(input, header, tab_bar, top, bottom, avail_w, avail_h);
     }
 
@@ -468,6 +471,7 @@ fn finish(
     KeypadLayout {
         mode,
         header,
+        header_compact: mode == KeypadMode::Landscape,
         number: col.number,
         matches: col.matches,
         actions: col.actions,
@@ -643,15 +647,59 @@ mod tests {
             bottom: 34.0,
             left: 0.0,
         };
+        let more_insets = Insets {
+            top: 32.0,
+            right: 0.0,
+            bottom: 24.0,
+            left: 0.0,
+        };
         let mut w = 280.0;
         while w <= 1400.0 {
             let mut h = 280.0;
             while h <= 2400.0 {
                 check(plain(w, h));
                 check(input(w, h, with_insets, 40));
+                check(input(w, h, more_insets, 40));
                 h += 40.0;
             }
             w += 40.0;
+        }
+    }
+
+    fn top_inset(top: f32) -> Insets {
+        Insets {
+            top,
+            bottom: 24.0,
+            ..Insets::default()
+        }
+    }
+
+    #[test]
+    fn header_holds_the_title_block() {
+        for (w, h) in [(360.0, 640.0), (412.0, 915.0), (320.0, 480.0)] {
+            for top in [0.0, 24.0, 48.0, 80.0] {
+                let l = check(input(w, h, top_inset(top), 0));
+                let ctx = format!("{w}x{h} top {top}");
+                assert!(l.header.h >= TITLE_BLOCK_MIN, "{ctx}: {:?}", l.header);
+                assert!(l.header.bottom() >= 105.0, "{ctx}: {:?}", l.header);
+                assert!(l.header.bottom() <= l.number.y + 0.01, "{ctx}");
+                assert!(!l.header_compact, "{ctx}");
+            }
+        }
+    }
+
+    #[test]
+    fn landscape_header_is_one_row() {
+        for (w, h) in [(915.0, 412.0), (800.0, 360.0)] {
+            for top in [0.0, 24.0] {
+                let l = check(input(w, h, top_inset(top), 0));
+                let ctx = format!("{w}x{h} top {top}");
+                assert_eq!(l.mode, KeypadMode::Landscape, "{ctx}");
+                assert!((l.header.h - LANDSCAPE_HEADER_H).abs() < 0.001, "{ctx}");
+                assert!(l.header_compact, "{ctx}");
+                assert!(l.header.bottom() <= l.number.y + 0.01, "{ctx}");
+                assert!(l.header.bottom() <= l.grid.y + 0.01, "{ctx}");
+            }
         }
     }
 

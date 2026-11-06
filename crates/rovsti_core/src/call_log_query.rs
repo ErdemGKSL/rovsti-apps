@@ -293,7 +293,7 @@ const HEADER: &str = "date,time,direction,name,number,duration_s,duration,channe
 const NOTE_HEADER: &str = ",note";
 
 /// Escapes one text cell: injection guard first, then RFC 4180 quoting.
-fn cell(raw: &str) -> String {
+pub(crate) fn cell(raw: &str) -> String {
     let mut chars = raw.chars();
     let risky = match chars.next() {
         Some('=' | '@' | '\t' | '\r') => true,

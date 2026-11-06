@@ -298,10 +298,9 @@ pub fn relative_time(
     tz_offset_s: i32,
     format: TimeFormat,
 ) -> RelativeTime {
-    let local = |ms: i64| ms.div_euclid(1000) + i64::from(tz_offset_s);
-    let (now_s, then_s) = (local(now_ms), local(then_ms));
-    let age_days = now_s.div_euclid(SECS_PER_DAY) - then_s.div_euclid(SECS_PER_DAY);
+    let then_s = local_secs(then_ms, tz_offset_s);
     let then_day = then_s.div_euclid(SECS_PER_DAY);
+    let age_days = day_key(now_ms, tz_offset_s) - then_day;
 
     let mut out = RelativeTime::new();
     match age_days {
@@ -311,6 +310,40 @@ pub fn relative_time(
         _ => push_short_date(&mut out, then_day, format.date_order),
     }
     out
+}
+
+/// Seconds since the epoch on the local wall clock.
+fn local_secs(ms: i64, tz_offset_s: i32) -> i64 {
+    ms.div_euclid(1000) + i64::from(tz_offset_s)
+}
+
+/// The local day number (days since 1970-01-01) of a timestamp.
+pub fn day_key(at_ms: i64, tz_offset_s: i32) -> i64 {
+    local_secs(at_ms, tz_offset_s).div_euclid(SECS_PER_DAY)
+}
+
+pub(crate) const MONTHS_SHORT: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/// Section label of a day: "Today", "Yesterday", the weekday for two to six
+/// days back, else "3 Nov" (or "3 Nov 2025" in another year than `now_ms`).
+pub fn day_section(now_ms: i64, at_ms: i64, tz_offset_s: i32) -> String {
+    let (now_day, day) = (day_key(now_ms, tz_offset_s), day_key(at_ms, tz_offset_s));
+    match now_day - day {
+        ..=0 => "Today".to_owned(),
+        1 => "Yesterday".to_owned(),
+        2..=6 => WEEKDAYS[weekday_index(day)].to_owned(),
+        _ => {
+            let (year, month, d) = civil_from_days(day);
+            let month = MONTHS_SHORT[(month as usize - 1) % 12];
+            if year == civil_from_days(now_day).0 {
+                format!("{d} {month}")
+            } else {
+                format!("{d} {month} {year}")
+            }
+        }
+    }
 }
 
 /// 1970-01-01 was a Thursday; index 0 is Sunday.
@@ -538,6 +571,44 @@ mod tests {
         assert_eq!(clock_text(ms, 0, true).as_str(), "3:14 pm");
         assert_eq!(clock_text(ms, 3600, false).as_str(), "16:14");
         assert_eq!(clock_text(0, 0, true).as_str(), "12:00 am");
+    }
+
+    /// 2026-11-06 15:14 UTC (a Friday).
+    const FRI: i64 = 1_793_978_040_000;
+
+    #[test]
+    fn day_section_labels() {
+        let midnight = FRI - (15 * 3600 + 14 * 60) * 1000;
+        assert_eq!(day_section(FRI, FRI, 0), "Today");
+        assert_eq!(day_section(FRI, midnight, 0), "Today");
+        assert_eq!(day_section(FRI, midnight - 1, 0), "Yesterday");
+        assert_eq!(day_section(FRI, FRI + 3 * DAY, 0), "Today");
+        assert_eq!(day_section(FRI, FRI - 2 * DAY, 0), "Wednesday");
+        assert_eq!(day_section(FRI, FRI - 3 * DAY, 0), "Tuesday");
+        assert_eq!(day_section(FRI, FRI - 6 * DAY, 0), "Saturday");
+        assert_eq!(day_section(FRI, FRI - 7 * DAY, 0), "30 Oct");
+    }
+
+    #[test]
+    fn day_section_timezones() {
+        let midnight = FRI - (15 * 3600 + 14 * 60) * 1000;
+        let then = midnight - 30 * 60_000; // 23:30 UTC yesterday
+        assert_eq!(day_section(FRI, then, 0), "Yesterday");
+        assert_eq!(day_section(FRI, then, 3 * 3600), "Today");
+        assert_eq!(day_section(FRI, then, -8 * 3600), "Yesterday");
+        assert_eq!(day_key(midnight, 0) - day_key(midnight - 1, 0), 1);
+        assert_eq!(day_key(midnight, -3600), day_key(midnight - 1, -3600));
+    }
+
+    #[test]
+    fn day_section_year_change() {
+        // 2026-01-02 12:00 UTC.
+        let now = 1_767_355_200_000;
+        assert_eq!(day_section(now, now - DAY, 0), "Yesterday");
+        assert_eq!(day_section(now, now - 3 * DAY, 0), "Tuesday");
+        assert_eq!(day_section(now, now - 10 * DAY, 0), "23 Dec 2025");
+        assert_eq!(day_section(now, now - 400 * DAY, 0), "28 Nov 2024");
+        assert_eq!(day_section(now, now - 2 * DAY, 0), "Wednesday");
     }
 
     fn e(id: i64, number: &str, kind: CallLogKind, date_ms: i64) -> CallLogEntry {

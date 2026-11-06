@@ -200,6 +200,39 @@ pub fn call_line(entry: &CallLogEntry, contact_name: Option<&str>, time: &str) -
     }
 }
 
+/// The whole list as shareable text: a header, then one line per number
+/// (`Name  number` when `name_of` knows the number). Empty for no rows.
+pub fn list_text(rows: &[BlockedNumber], name_of: impl Fn(&str) -> Option<String>) -> String {
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("Blocked numbers");
+    for row in rows {
+        let raw = if row.number_raw.trim().is_empty() {
+            row.normalized.as_str()
+        } else {
+            row.number_raw.as_str()
+        };
+        let number = shown_number(raw);
+        out.push('\n');
+        match name_of(raw).filter(|n| !n.trim().is_empty()) {
+            Some(name) => out.push_str(&format!("{}  {number}", name.trim())),
+            None => out.push_str(&number),
+        }
+    }
+    out
+}
+
+/// Title and message of the "Unblock all" confirmation.
+pub fn unblock_all_text(n: usize) -> (String, String) {
+    let message = if n == 1 {
+        "1 number can call and text you again.".to_owned()
+    } else {
+        format!("{n} numbers can call and text you again.")
+    };
+    ("Unblock all numbers?".to_owned(), message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,5 +419,44 @@ mod tests {
         assert_eq!(line.aria, "Unknown number, Blocked by the system, Monday");
         let unknown = call_line(&CallLogEntry::default(), None, "9:41");
         assert_eq!(unknown.subtitle, "");
+    }
+
+    #[test]
+    fn list_text_has_header_names_and_order() {
+        let rows = [
+            row(1, "+442079460958", ""),
+            row(2, "+90 532 111 22 33", ""),
+            row(3, "", "ACME"),
+        ];
+        let text = list_text(&rows, |raw| {
+            raw.contains("532").then(|| "Anna Smith".to_owned())
+        });
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "Blocked numbers");
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[1], shown_number("+442079460958"));
+        assert_eq!(
+            lines[2],
+            format!("Anna Smith  {}", shown_number("+90 532 111 22 33"))
+        );
+        assert_eq!(lines[3], "ACME");
+    }
+
+    #[test]
+    fn list_text_empty_and_blank_names() {
+        assert_eq!(list_text(&[], |_| Some("x".into())), "");
+        let text = list_text(&[row(1, "ACME", "")], |_| Some("  ".into()));
+        assert_eq!(text, "Blocked numbers\nACME");
+    }
+
+    #[test]
+    fn unblock_all_singular_and_plural() {
+        let (t, m) = unblock_all_text(1);
+        assert_eq!(t, "Unblock all numbers?");
+        assert_eq!(m, "1 number can call and text you again.");
+        assert_eq!(
+            unblock_all_text(3).1,
+            "3 numbers can call and text you again."
+        );
     }
 }

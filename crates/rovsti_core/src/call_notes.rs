@@ -332,6 +332,16 @@ pub fn details_text(d: &CallDetails, note: Option<&str>) -> String {
     out
 }
 
+/// Details for sharing: `Call with <who>` on top (left out for no name),
+/// then [`details_text`].
+pub fn share_text(d: &CallDetails, who: Option<&str>, note: Option<&str>) -> String {
+    let body = details_text(d, note);
+    match who.map(str::trim).filter(|w| !w.is_empty()) {
+        Some(who) => format!("Call with {who}\n{body}"),
+        None => body,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,5 +543,24 @@ mod tests {
         assert_eq!(hit.map(|n| n.text.as_str()), Some("Bring the Invoice"));
         assert!(notes.matching("0555 111 22 33", T, T, "other").is_none());
         assert!(notes.matching("0555 111 22 33", T, T, "").is_none());
+    }
+
+    #[test]
+    fn share_text_with_and_without_who() {
+        let d = CallDetails {
+            title: "Incoming call".into(),
+            when: "Thu 5 Nov 2026, 14:32".into(),
+            duration: Some("1:05".into()),
+            channel: "Mobile".into(),
+            number: "+90 532 111 22 33".into(),
+        };
+        let plain = details_text(&d, Some("Call me back"));
+        assert_eq!(
+            share_text(&d, Some(" Anna Smith "), Some("Call me back")),
+            format!("Call with Anna Smith\n{plain}")
+        );
+        assert_eq!(share_text(&d, None, Some("Call me back")), plain);
+        assert_eq!(share_text(&d, Some("  "), Some("Call me back")), plain);
+        assert_eq!(share_text(&d, None, None), details_text(&d, None));
     }
 }

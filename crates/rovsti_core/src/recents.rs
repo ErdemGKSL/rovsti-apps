@@ -7,8 +7,8 @@
 use crate::{
     avatar,
     call_log::{
-        CallType, DateOrder, EntryRef, MAX_ENTRIES, RecentsRow, TimeFormat, clock_text,
-        format_duration, relative_time,
+        CallType, DateOrder, EntryRef, MAX_ENTRIES, RecentsRow, TimeFormat, clock_text, day_key,
+        day_section, format_duration, relative_time,
     },
     phone_number::PhoneNumber,
     wire::{CallLogEntry, CallLogKind},
@@ -556,6 +556,33 @@ pub fn history_text(line: &HistoryLine, now_ms: i64, locale: LocaleTime) -> (Str
     (title, detail)
 }
 
+/// Day label of the row at `visible[first_visible]`, by its newest call.
+pub fn section_for(
+    rows: &[RecentsRow],
+    visible: &[usize],
+    first_visible: usize,
+    now_ms: i64,
+    tz_offset_s: i32,
+) -> Option<String> {
+    let row = rows.get(*visible.get(first_visible)?)?;
+    Some(day_section(now_ms, row.last_ms, tz_offset_s))
+}
+
+/// Visible positions where the local day changes (position 0 included).
+pub fn section_starts(rows: &[RecentsRow], visible: &[usize], tz_offset_s: i32) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut prev = None;
+    for (pos, &idx) in visible.iter().enumerate() {
+        let Some(row) = rows.get(idx) else { continue };
+        let day = day_key(row.last_ms, tz_offset_s);
+        if prev != Some(day) {
+            out.push(pos);
+            prev = Some(day);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1063,5 +1090,38 @@ mod tests {
             [format!("wa-{MIN}-+905551112233")]
         );
         assert!(extra_ids_for_numbers(&extras, &[""]).is_empty());
+    }
+
+    #[test]
+    fn sections_follow_the_visible_rows() {
+        const DAY: i64 = 86_400_000;
+        let log = [
+            entry(1, "111", CallLogKind::Incoming, 0, None),
+            entry(2, "222", CallLogKind::Incoming, 10 * MIN, None),
+            entry(3, "333", CallLogKind::Incoming, DAY, None),
+            entry(4, "444", CallLogKind::Incoming, 20 * DAY, None),
+        ];
+        let rows = group(&log);
+        assert_eq!(rows.len(), 4);
+        let all: Vec<usize> = (0..4).collect();
+        // The first two rows share a day unless the clock sits right at midnight.
+        let starts = section_starts(&rows, &all, 0);
+        assert_eq!(starts.last(), Some(&3));
+        assert_eq!(starts[0], 0);
+        assert!(starts.len() == 3 || starts.len() == 4);
+        assert_eq!(section_starts(&rows, &[], 0), Vec::<usize>::new());
+        // A filtered view: positions are into `visible`, not into `rows`.
+        assert_eq!(section_starts(&rows, &[3, 2], 0), vec![0, 1]);
+        assert_eq!(
+            section_for(&rows, &all, 0, NOW, 0).as_deref(),
+            Some("Today")
+        );
+        assert_eq!(
+            section_for(&rows, &all, 3, NOW, 0),
+            Some(day_section(NOW, NOW - 20 * DAY, 0))
+        );
+        assert_eq!(section_for(&rows, &all, 9, NOW, 0), None);
+        assert_eq!(section_for(&rows, &[], 0, NOW, 0), None);
+        assert_eq!(section_for(&rows, &[99], 0, NOW, 0), None);
     }
 }

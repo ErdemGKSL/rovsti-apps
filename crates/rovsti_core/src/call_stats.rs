@@ -386,6 +386,42 @@ pub fn share_text(name: &str, all: &Totals, week: &Totals) -> String {
     )
 }
 
+const PEOPLE_CSV_HEADER: &str =
+    "name,number,calls,incoming,outgoing,missed,talk_seconds,longest_seconds,range";
+
+/// Per-person totals as CSV (CRLF lines, header always present).
+pub fn people_csv(people: &[PersonStat], range: Range) -> String {
+    use crate::call_log_query::cell;
+    let mut out = String::from(PEOPLE_CSV_HEADER);
+    out.push_str("\r\n");
+    for p in people {
+        let t = &p.totals;
+        out.push_str(&format!(
+            "{},{},{},{},{},{},{},{},{}\r\n",
+            cell(p.name.as_deref().unwrap_or("")),
+            cell(&p.number),
+            t.calls,
+            t.incoming,
+            t.outgoing,
+            t.missed,
+            t.talk_s,
+            t.longest_s,
+            cell(range.label())
+        ));
+    }
+    out
+}
+
+/// `rovsti-call-stats-this-week-2026-11-06.csv` for the local date of `now_ms`.
+pub fn stats_csv_file_name(range: Range, now_ms: i64, tz_offset_s: i32) -> String {
+    let (y, m, d) = civil_from_days(local_day(now_ms, tz_offset_s));
+    let slug = crate::number_format::file_slug(range.label());
+    format!(
+        "rovsti-call-stats-{}-{y:04}-{m:02}-{d:02}.csv",
+        slug.to_lowercase()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -610,5 +646,63 @@ mod tests {
         assert_eq!((t.calls, t.talk_s), (1, 30));
         assert_eq!(for_numbers_since(&calls, &["2"], 50).calls, 0);
         assert_eq!(for_numbers_since(&calls, &["2"], 0).talk_s, 99);
+    }
+
+    fn person(name: Option<&str>, number: &str, calls: u32) -> PersonStat {
+        PersonStat {
+            key: number.to_owned(),
+            name: name.map(str::to_owned),
+            number: number.to_owned(),
+            totals: Totals {
+                calls,
+                incoming: 2,
+                outgoing: 1,
+                missed: 1,
+                talk_s: 125,
+                longest_s: 60,
+            },
+        }
+    }
+
+    #[test]
+    fn people_csv_header_only_when_empty() {
+        assert_eq!(
+            people_csv(&[], Range::Week),
+            "name,number,calls,incoming,outgoing,missed,talk_seconds,longest_seconds,range\r\n"
+        );
+    }
+
+    #[test]
+    fn people_csv_escapes_and_fills_columns() {
+        let people = [
+            person(Some("Smith, \"Anna\""), "+905321112233", 4),
+            person(None, "=1+1", 1),
+        ];
+        let csv = people_csv(&people, Range::Days7);
+        let lines: Vec<&str> = csv.split("\r\n").collect();
+        assert_eq!(
+            lines[1],
+            "\"Smith, \"\"Anna\"\"\",+905321112233,4,2,1,1,125,60,7 days"
+        );
+        assert!(lines[2].starts_with(",'=1+1,1,"));
+        assert_eq!(lines[3], "");
+    }
+
+    #[test]
+    fn stats_file_names_per_range() {
+        // 2026-11-06 15:14 UTC.
+        let now = 1_793_978_040_000;
+        assert_eq!(
+            stats_csv_file_name(Range::Week, now, 0),
+            "rovsti-call-stats-this-week-2026-11-06.csv"
+        );
+        assert_eq!(
+            stats_csv_file_name(Range::Days7, now, 0),
+            "rovsti-call-stats-7-days-2026-11-06.csv"
+        );
+        assert_eq!(
+            stats_csv_file_name(Range::Weeks8, now, 10 * 3600),
+            "rovsti-call-stats-8-weeks-2026-11-07.csv"
+        );
     }
 }

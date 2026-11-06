@@ -133,8 +133,11 @@ list in `docs/phone-acceptance.md`.
       contact picker, Favorites "+" with the same picker, per-field actions on the card
       (call, message, copy, share, email), export of every contact (also those without a
       number), and the "Save to" setting for new contacts (done without a device)
+- [x] UX completeness pass, round 2: import dedup for contacts without a number (done
+      without a device), search by email (done without a device), groups show and choose
+      their account (done without a device), Undo for Delete Contact (done without a device)
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
-- [ ] Check the group member write and the mailto handoff on a phone
+- [ ] Check the group member write and the mailto handoff on a phone; a delete commits after 5 s or when leaving the app
 
 ## Rovsti Stops
 

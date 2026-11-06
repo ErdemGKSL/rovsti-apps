@@ -107,6 +107,11 @@ Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19),
 - [x] C18 `apps/contacts/src/main.rs:1162-1173`, `transfer.rs:19,50` | Low | Dimmed Export/Import still tappable while busy, with no feedback.
 - [-] C19 `crates/rovsti_ui/src/touch.rs:33`, `tab_bar.rs:443` | Low | `touch_surface` ignores occlusion: a finger on a scrim over the tab bar still swells the bar. Skipped: needs hit-test occlusion inside the shared touch_surface (every tab bar); only a press animation, and touch hover on gpui_android is unverified.
 - [x] C20 `apps/contacts/src/whatsapp.rs:374-401` | Low | "Use as Contact Photo" has no in-flight guard; a double tap applies it twice.
+- [x] R1 `crates/rovsti_core/src/import_plan.rs` | High | Re-importing an export duplicated every contact without a number (round 2).
+- [x] R2 `apps/contacts/src/confirm.rs` | Medium | Delete Contact could not be undone; now deferred 5 s behind an Undo pill (round 2).
+- [x] R3 `apps/contacts/src/groups.rs`, `picker.rs` | Medium | Groups hid their account on multi-account phones; now shown and choosable (round 2).
+- [x] R4 `crates/rovsti_core/src/search.rs` | Medium | Search did not find the email shown on a row (round 2).
+- [x] R5 `apps/contacts/src/confirm.rs`, `transfer.rs` | Low | Wrong import wording and a stale export doc (round 2).
 
 ## Stops (S)
 

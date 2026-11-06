@@ -31,7 +31,7 @@ Checks after every step:
 (if `df` shows under 6 GB free, `rm -rf target/debug/incremental` first).
 Commit each step on its own with a focused message ("Rovsti contacts: ...").
 
-### V1. rovsti_core: import dedup for cards without a number, and search by email (R1, R4)
+### V1. rovsti_core: import dedup for cards without a number, and search by email (R1, R4) (done, 4457acb)
 
 In `crates/rovsti_core/src/import_plan.rs`:
 - Keep the number keys. When a contact has **no** number key, give it these fallback keys:
@@ -68,7 +68,7 @@ In `crates/rovsti_core/src/search.rs`:
   contact with no email is not matched by "@". Phone shares this index, and showing a contact
   matched by its visible email is correct there too.
 
-### V2. Import wording and stale docs (R5)
+### V2. Import wording and stale docs (R5) (done, d3aa51e)
 
 - `apps/contacts/src/confirm.rs::import_summary`: the unreadable part reads
   "{n} without a name, or with a broken number or email" (it replaces "without a name or a
@@ -78,7 +78,7 @@ In `crates/rovsti_core/src/search.rs`:
 - Grep `apps/contacts` for other "with a number" or "phone number appear" leftovers and fix
   any that are wrong now.
 
-### V3. Groups show and choose their account (R3)
+### V3. Groups show and choose their account (R3) (done, e00019a)
 
 Pure helpers in `crates/rovsti_core/src/contact_edit.rs`, with tests:
 - `pub fn group_subtitle(members: usize, account: Option<&str>) -> String`. It returns
@@ -116,7 +116,7 @@ In `apps/contacts/src/picker.rs::picker_item`:
   `group_join_hint` footnote under the "N selected" line, so the owner knows before Done
   which contacts can join.
 
-### V4. Undo for Delete Contact (R2, closes G10)
+### V4. Undo for Delete Contact (R2, closes G10) (done, 9e83e87)
 
 The confirm card stays. After "Delete", the contact disappears at once and the notice reads
 "Contact deleted." with an **Undo** button for 5 s. The real delete runs only when that time
@@ -170,7 +170,7 @@ In `apps/contacts/src/main.rs` and `confirm.rs`:
 Tests: the `without` tests in rovsti_core. The app-side state stays thin glue with no new
 pure logic beyond them.
 
-### V5. Docs and plan status
+### V5. Docs and plan status (done, this commit)
 
 - `docs/roadmap.md` (Rovsti Contacts): tick a "UX completeness pass, round 2" line covering
   import dedup for contacts without a number, search by email, group accounts, and Undo for

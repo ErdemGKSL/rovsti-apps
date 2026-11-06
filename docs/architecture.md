@@ -88,10 +88,16 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   switched off in Settings, never both), holds a wake lock for at most 10 minutes. Snooze re-rings
   through `AlarmManager.setAlarmClock`; a watchdog alarm asks for a fix when none arrived. GPUI draws
   its own alarm screen only while the app is open.
-- **AD-ST4 Map: no tiles.** A bundled region bloats the APK and goes stale, and there is no tile
-  renderer for GPUI here. The map is a vector radar drawn with `canvas` and `PathBuilder`
-  (A and B, the circle with the diameter line and its left and right halves, position, breadcrumb, GTFS stops and the chosen line) over
-  `rovsti_geo::view`.
+- **AD-ST4 Map: vector tiles under a vector radar.** No region is bundled with the app (it bloats
+  the APK and goes stale). Stops downloads Shortbread 1.0 vector tiles (MVT, zoom 0-14, overzoomed
+  beyond 14) from a VersaTiles-compatible server that the user sets (default
+  `https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}`). `rovsti_geo::tiles` decodes and styles them
+  (colorful in the light theme, eclipse in the dark one). `rovsti_tiles` fetches them and keeps the
+  disk cache. The app paints them with `canvas` and `PathBuilder` under the radar layers (A and B,
+  the circle with the diameter line and its halves, position, breadcrumb, GTFS stops and line) over
+  `rovsti_geo::view`. Where a tile is missing, the radar look shows. Tiles around the trip circle
+  are prefetched when a trip starts. Text labels are not drawn. The map shows
+  "(c) OpenStreetMap contributors".
 - **AD-ST5 Points are local.** A and B each come from the same sources: are `geo:` URIs and maps links (shared, opened or
   pasted), saved places, recent trips and GTFS stops. No geocoding: a link without coordinates is
   refused and nothing is fetched to resolve it.

@@ -136,6 +136,14 @@ impl ContactDraft {
         }
     }
 
+    /// The best "New Contact" draft for what was typed in the search box, or
+    /// `None` for a blank query. A number becomes a mobile number, a single
+    /// word with an `@` an email, anything else a name (the last word is the
+    /// family name).
+    pub fn from_query(query: &str) -> Option<Self> {
+        draft_from_query(query)
+    }
+
     /// The name the list shows: given and family, else the organisation, else
     /// the first number, else the first email.
     pub fn display_name(&self) -> String {
@@ -193,6 +201,35 @@ impl ContactDraft {
         self.validate()?;
         Ok(self)
     }
+}
+
+/// A new-contact draft for a search query: see [`ContactDraft::from_query`].
+pub fn draft_from_query(query: &str) -> Option<ContactDraft> {
+    let q = query.trim();
+    if q.is_empty() {
+        return None;
+    }
+    if let Some(number) = crate::contacts_view::query_number(q) {
+        return Some(ContactDraft {
+            numbers: vec![DraftField::new(number, FieldKind::Mobile)],
+            ..ContactDraft::default()
+        });
+    }
+    if !q.contains(char::is_whitespace) && q.contains('@') {
+        return Some(ContactDraft {
+            emails: vec![DraftField::new(q, FieldKind::Home)],
+            ..ContactDraft::blank()
+        });
+    }
+    let (given, family) = match q.rsplit_once(char::is_whitespace) {
+        Some((head, tail)) => (head.trim(), tail.trim()),
+        None => (q, ""),
+    };
+    Some(ContactDraft {
+        given: given.to_owned(),
+        family: family.to_owned(),
+        ..ContactDraft::blank()
+    })
 }
 
 /// What Kotlin returns for one contact (`contactDetail`).
@@ -750,6 +787,52 @@ mod tests {
                 removed: 0,
                 skipped: 0
             }
+        );
+    }
+
+    #[test]
+    fn draft_from_query_blank_is_none() {
+        assert_eq!(draft_from_query(""), None);
+        assert_eq!(draft_from_query("  \t "), None);
+    }
+
+    #[test]
+    fn draft_from_query_number() {
+        let text = "0555 111 22 33";
+        let d = draft_from_query(text).expect("draft");
+        let expected = crate::contacts_view::query_number(text).expect("draft");
+        assert_eq!(
+            d.numbers,
+            vec![DraftField::new(expected, FieldKind::Mobile)]
+        );
+        assert!(d.given.is_empty() && d.family.is_empty());
+        assert!(d.emails.is_empty());
+        assert_eq!(d.validate(), Err(DraftError::NoName));
+    }
+
+    #[test]
+    fn draft_from_query_email() {
+        let d = draft_from_query("ayse@example.com").expect("draft");
+        assert_eq!(
+            d.emails,
+            vec![DraftField::new("ayse@example.com", FieldKind::Home)]
+        );
+        assert!(d.given.is_empty() && d.family.is_empty());
+    }
+
+    #[test]
+    fn draft_from_query_names() {
+        let d = draft_from_query("Ayşe Yılmaz").expect("draft");
+        assert_eq!((d.given.as_str(), d.family.as_str()), ("Ayşe", "Yılmaz"));
+        let d = draft_from_query("Ayşe").expect("draft");
+        assert_eq!((d.given.as_str(), d.family.as_str()), ("Ayşe", ""));
+        let d = draft_from_query("Mary Ann  Smith").expect("draft");
+        assert_eq!((d.given.as_str(), d.family.as_str()), ("Mary Ann", "Smith"));
+        assert!(
+            draft_from_query("Ayşe Yılmaz")
+                .expect("draft")
+                .finish()
+                .is_ok()
         );
     }
 }

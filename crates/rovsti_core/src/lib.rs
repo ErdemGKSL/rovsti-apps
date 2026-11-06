@@ -11,6 +11,7 @@ pub mod call_log;
 pub mod call_log_query;
 pub mod call_notes;
 pub mod call_stats;
+pub mod calling_code;
 pub mod contact;
 pub mod contact_card;
 pub mod contact_edit;

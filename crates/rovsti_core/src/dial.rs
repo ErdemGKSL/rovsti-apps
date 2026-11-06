@@ -433,6 +433,95 @@ pub fn redial_target(entries: &[crate::wire::CallLogEntry]) -> Option<String> {
         .map(|e| e.number_raw.trim().to_owned())
 }
 
+/// How long one tone sounds, in milliseconds.
+pub const TONE_ON_MS: u64 = 160;
+/// Silence between two tones, in milliseconds.
+pub const TONE_GAP_MS: u64 = 90;
+/// Length of one pause step, in milliseconds.
+pub const PAUSE_MS: u64 = 2000;
+/// Most tones one paste sends.
+pub const TONE_MAX: usize = 40;
+
+/// One step of a tone sequence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToneStep {
+    Tone(char),
+    Pause,
+}
+
+/// Tones to send during a call, built from pasted text.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TonePlan {
+    pub steps: Vec<ToneStep>,
+    pub tones: usize,
+    pub truncated: bool,
+}
+
+/// Keeps `0-9 * #` as tones and `, ; p w` as pauses (collapsed, never
+/// leading or trailing); everything else is dropped. Stops after
+/// [`TONE_MAX`] tones.
+pub fn tone_plan(text: &str) -> TonePlan {
+    let mut plan = TonePlan::default();
+    let mut pending_pause = false;
+    for c in text.chars() {
+        match c {
+            '0'..='9' | '*' | '#' => {
+                if plan.tones == TONE_MAX {
+                    plan.truncated = true;
+                    break;
+                }
+                if pending_pause {
+                    plan.steps.push(ToneStep::Pause);
+                    pending_pause = false;
+                }
+                plan.steps.push(ToneStep::Tone(c));
+                plan.tones += 1;
+            }
+            ',' | ';' | 'p' | 'P' | 'w' | 'W' => pending_pause = plan.tones > 0,
+            _ => {}
+        }
+    }
+    plan
+}
+
+/// Feedback line after sending a plan.
+pub fn tones_text(plan: &TonePlan) -> String {
+    if plan.truncated {
+        format!("Sent the first {} tones", plan.tones)
+    } else if plan.tones == 1 {
+        "Sent 1 tone".to_owned()
+    } else {
+        format!("Sent {} tones", plan.tones)
+    }
+}
+
+/// The plan as typed text, for example `4821#,12`.
+pub fn tone_preview(plan: &TonePlan) -> String {
+    plan.steps
+        .iter()
+        .map(|s| match s {
+            ToneStep::Tone(c) => *c,
+            ToneStep::Pause => ',',
+        })
+        .collect()
+}
+
+/// Label of the keypad "Paste" button, or `None` when the clipboard holds
+/// no tone.
+pub fn paste_tones_label(clip: Option<&str>) -> Option<String> {
+    let plan = tone_plan(clip?);
+    if plan.tones == 0 {
+        return None;
+    }
+    let preview = tone_preview(&plan);
+    if preview.chars().count() > 12 {
+        let cut: String = preview.chars().take(12).collect();
+        Some(format!("Paste {cut}\u{2026}"))
+    } else {
+        Some(format!("Paste {preview}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -860,5 +949,51 @@ mod tests {
         assert_eq!(redial_target(&log).as_deref(), Some("333"));
         assert_eq!(redial_target(&log[2..4]), None);
         assert_eq!(redial_target(&[out(" ", 5, Outgoing)]), None);
+    }
+
+    #[test]
+    fn tone_plan_cases() {
+        let p = tone_plan("PIN: 4821 #");
+        assert_eq!(tone_preview(&p), "4821#");
+        assert_eq!(p.tones, 5);
+        assert!(!p.truncated);
+        assert_eq!(tone_preview(&tone_plan("123,,456")), "123,456");
+        assert_eq!(tone_preview(&tone_plan(",12;")), "12");
+        assert_eq!(tone_preview(&tone_plan("4821#W12")), "4821#,12");
+        assert_eq!(
+            tone_preview(&tone_plan("+90 (532) 111-22-33")),
+            "905321112233"
+        );
+        assert_eq!(tone_plan("abc xyz"), TonePlan::default());
+        let long = tone_plan(&"1".repeat(41));
+        assert_eq!(long.tones, TONE_MAX);
+        assert!(long.truncated);
+        let exact = tone_plan(&"1".repeat(40));
+        assert!(!exact.truncated);
+    }
+
+    #[test]
+    fn tones_text_variants() {
+        assert_eq!(tones_text(&tone_plan("12345678")), "Sent 8 tones");
+        assert_eq!(tones_text(&tone_plan("5")), "Sent 1 tone");
+        assert_eq!(
+            tones_text(&tone_plan(&"1".repeat(50))),
+            "Sent the first 40 tones"
+        );
+    }
+
+    #[test]
+    fn paste_label_variants() {
+        assert_eq!(paste_tones_label(None), None);
+        assert_eq!(paste_tones_label(Some("hello")), None);
+        assert_eq!(paste_tones_label(Some(",;")), None);
+        assert_eq!(
+            paste_tones_label(Some("PIN 4821#")).as_deref(),
+            Some("Paste 4821#")
+        );
+        assert_eq!(
+            paste_tones_label(Some("1234567890123456")).as_deref(),
+            Some("Paste 123456789012\u{2026}")
+        );
     }
 }

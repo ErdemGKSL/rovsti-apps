@@ -16,9 +16,10 @@ use serde::{Deserialize, Serialize};
 /// Where the link is kept, in the app's own data directory.
 pub const LINK_FILE: &str = "whatsapp-link.json";
 
-/// What a fresh install proposes: the gateway on the host machine, as seen
-/// from the Android emulator. A real gateway address is entered once.
-pub const DEFAULT_GATEWAY_URL: &str = "http://10.0.2.2:8787";
+/// What a fresh install proposes: the owner's gateway behind the Cloudflare
+/// tunnel. Another address can be typed once and is remembered. (The Android
+/// emulator reaches a gateway on the host as `http://10.0.2.2:8787`.)
+pub const DEFAULT_GATEWAY_URL: &str = "https://rovsti.erdemdev.tr";
 
 pub const OPTION_LINK_NEW: &str = "Link WhatsApp for the first time";
 pub const OPTION_CONNECT_EXISTING: &str = "Connect to an existing instance";

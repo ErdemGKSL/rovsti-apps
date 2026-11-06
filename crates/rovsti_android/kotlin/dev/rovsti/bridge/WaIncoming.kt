@@ -59,6 +59,9 @@ object WaIncoming {
     const val EXTRA_ACTION = "wa_call_action"
     const val ANSWER = "answer"
     const val DECLINE = "decline"
+
+    /** How long a ring notice stays: the gateway gives up on an unanswered call after 60 s (`wa::calls::RING_TIMEOUT`). */
+    const val RING_TIMEOUT_MS = 60_000L
     private const val MISSED_ID_MASK = 0x5A5A5A5A
 
     /** Pure: the `wa_call_action` payload, or null for an unknown [action] or empty [callId]. */

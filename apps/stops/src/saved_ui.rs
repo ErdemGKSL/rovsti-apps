@@ -232,7 +232,19 @@ impl StopsApp {
             return;
         };
         let name = place.name.clone();
-        let text = rovsti_geo::share_text(&place.name, place.coord);
+        self.share_point(name.clone(), place.coord, &name, cx);
+    }
+
+    /// Shares a point as text (`label` plus the map link; the link alone when
+    /// the label is empty). Falls back to the clipboard with a pill naming `name`.
+    pub(crate) fn share_point(
+        &mut self,
+        name: String,
+        coord: Coord,
+        label: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let text = rovsti_geo::share_text(label, coord);
         cx.spawn(async move |this, cx| {
             let sent = text.clone();
             let result = cx

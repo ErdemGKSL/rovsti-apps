@@ -287,7 +287,7 @@ pub fn fallback_centre(history: &History, saved: &SavedPlaces) -> Option<Coord> 
 
 /// Width and height of the small menu over a tapped pin.
 pub const PIN_MENU_W: f32 = 180.0;
-pub const PIN_MENU_H: f32 = 168.0;
+pub const PIN_MENU_H: f32 = 204.0;
 /// Height of one row of the pin menu.
 const PIN_MENU_ROW_H: f32 = 36.0;
 const PIN_MENU_MARGIN: f32 = 8.0;
@@ -1810,8 +1810,9 @@ impl StopsApp {
         )
     }
 
-    /// The small card over a tapped pin and its box in map-local pixels: Move,
-    /// Remove, Lines for a stop, and the coordinates as a details line.
+    /// The small card over a tapped pin and its box in map-local pixels: Save
+    /// or Rename, Share, Move, Remove, Lines for a stop, and the coordinates as
+    /// a details line.
     fn pin_menu(
         &mut self,
         theme: Theme,
@@ -1829,6 +1830,7 @@ impl StopsApp {
             .and_then(|id| stop_index(self.gtfs.as_deref(), id));
         let details = pick::details_text(dest);
         let known = self.saved.near(dest.coord).map(|p| p.id);
+        let share_dest = dest.clone();
         let dest = dest.clone();
         let colors = theme::colors(theme);
         let row = |id: &'static str, label: &'static str, color: Hsla| {
@@ -1867,6 +1869,15 @@ impl StopsApp {
                     },
                 )),
             })
+            .child(
+                row("pin-share", "Share", colors.label).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.pick.close_menu();
+                        let name = pick::point_label(slot, Some(&share_dest));
+                        this.share_point(name, share_dest.coord, &share_dest.label, cx);
+                    },
+                )),
+            )
             .child(row("pin-move", "Move", colors.label).on_click(cx.listener(
                 move |this, _, _, cx| {
                     this.pick.begin_move(slot);
@@ -2983,8 +2994,8 @@ mod tests {
 
     #[test]
     fn the_menu_rows_fit_the_menu_box() {
-        // Save or Rename, Move, Remove, Lines and the details line.
-        const { assert!(4.0 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
+        // Save or Rename, Share, Move, Remove, Lines and the details line.
+        const { assert!(5.0 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
     }
 
     #[test]

@@ -71,7 +71,7 @@ impl ContactsApp {
             .into_iter()
             .map(|vm| {
                 let mut row = Row::from(vm);
-                row.set_whatsapp(self.wa.marked.contains(&row.vm.id));
+                row.set_whatsapp(self.wa.marked.get(&row.vm.id).map(String::as_str));
                 row
             })
             .collect()

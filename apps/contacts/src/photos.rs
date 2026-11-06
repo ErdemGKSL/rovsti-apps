@@ -13,8 +13,8 @@ use std::{
 };
 
 use gpui::{
-    Context, Div, Hsla, ObjectFit, ParentElement, RenderImage, SharedString, Styled, StyledImage,
-    px,
+    App, Context, Div, Hsla, ObjectFit, ParentElement, RenderImage, SharedString, Styled,
+    StyledImage, px,
 };
 use rovsti_core::lru::Lru;
 use rovsti_ui::tokens::Theme;
@@ -85,6 +85,12 @@ impl Photos {
             && self.pending.len() < MAX_PARALLEL
     }
 
+    /// Whether the WhatsApp picture stands in for contact `id`: it has no
+    /// photo of its own (`has_photo` is false), or that photo can't be read.
+    pub(crate) fn wa_stands_in(&self, id: i64, has_photo: bool) -> bool {
+        !has_photo || self.missing.contains(&id)
+    }
+
     /// A photo is still fading in (keep frames coming).
     pub(crate) fn fading(&self) -> bool {
         self.last_arrival.is_some_and(|at| at.elapsed() < FADE)
@@ -151,6 +157,42 @@ pub(crate) fn photo_avatar(
 }
 
 impl ContactsApp {
+    /// The picture to draw for contact `id`: its own photo, else (when it has
+    /// none or it can't be read) its WhatsApp picture, else `None` (the
+    /// monogram). `wa_jid` is the contact's WhatsApp JID, when known. Cheap:
+    /// clones an `Arc`.
+    pub(crate) fn avatar_picture(
+        &self,
+        id: i64,
+        has_photo: bool,
+        wa_jid: Option<&str>,
+        cx: &App,
+    ) -> Option<(Arc<RenderImage>, f32)> {
+        if has_photo && let Some((image, opacity)) = self.photos.get(id) {
+            return Some((Arc::clone(image), opacity));
+        }
+        let jid = wa_jid.filter(|_| self.photos.wa_stands_in(id, has_photo))?;
+        self.avatars.read(cx).picture(jid)
+    }
+
+    /// Asks for the WhatsApp picture of `jid` when it stands in for the
+    /// photo of contact `id`. Cheap when nothing is due.
+    pub(crate) fn want_wa_picture(
+        &mut self,
+        id: i64,
+        has_photo: bool,
+        jid: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.photos.wa_stands_in(id, has_photo) {
+            return;
+        }
+        self.avatars.update(cx, |avatars, cx| {
+            let picture_id = avatars.profile(jid).and_then(|p| p.picture_id.clone());
+            avatars.want(jid, picture_id.as_deref(), cx);
+        });
+    }
+
     /// Marks the avatars about to be drawn as used and starts decoding the
     /// ones that are missing. `wanted` is `(contact id, photo uri)`.
     pub(crate) fn want_photos<'a>(

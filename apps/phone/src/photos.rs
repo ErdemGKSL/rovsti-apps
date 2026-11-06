@@ -84,6 +84,11 @@ impl Photos {
         })
     }
 
+    /// The photo of `id` could not be read (until the next contacts snapshot).
+    pub(crate) fn is_missing(&self, id: i64) -> bool {
+        self.missing.contains(&id)
+    }
+
     /// A photo is still fading in (keep frames coming).
     pub(crate) fn fading(&self) -> bool {
         self.last_arrival.is_some_and(|at| at.elapsed() < FADE)

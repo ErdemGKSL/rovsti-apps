@@ -41,7 +41,7 @@ use rovsti_wa_proto::{
     CallDirection, CallPhase, CallSummary, CallUpdate, ConnectKey, EndReason, GatewayEvent,
     GatewayUrl, WaCallHistory, WaCallView, WaScreen, plan_snapshot, tracked_end,
 };
-use rovsti_wa_ui::{StoredLink, WhatsAppSettings};
+use rovsti_wa_ui::{StoredLink, WaAvatars, WhatsAppSettings};
 
 /// An ended call stays on screen this long, so "Call ended" can be read.
 const ENDED_HOLD: Duration = Duration::from_millis(2000);
@@ -466,10 +466,23 @@ pub struct WaCallUi {
 }
 
 impl WaCallUi {
-    pub fn new(settings: Entity<WhatsAppSettings>, cx: &mut Context<Self>) -> Self {
-        cx.observe(&settings, |this, settings, cx| {
+    /// `avatars` gets every gateway event this entity takes from `settings`
+    /// (profiles and picture changes).
+    pub fn new(
+        settings: Entity<WhatsAppSettings>,
+        avatars: Entity<WaAvatars>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        cx.observe(&settings, move |this, settings, cx| {
             settings.update(cx, |settings, cx| settings.register_push(cx));
             let events = settings.update(cx, |settings, _| settings.take_events());
+            if !events.is_empty() {
+                avatars.update(cx, |avatars, cx| {
+                    for event in &events {
+                        avatars.on_event(event, cx);
+                    }
+                });
+            }
             let linked = settings.read(cx).link().is_some();
             let connected = settings.read(cx).is_connected();
             let resync = events.iter().any(|e| matches!(e, GatewayEvent::Resync));
@@ -537,6 +550,11 @@ impl WaCallUi {
         self.tracker
             .view(now_ms())
             .map(|view| WaScreen::from_view(&view, self.speaker))
+    }
+
+    /// A WhatsApp call is on screen (cheap: no view is built).
+    pub fn has_call(&self) -> bool {
+        !self.tracker.is_empty()
     }
 
     /// The raw call view, for arbitration against the cellular call.

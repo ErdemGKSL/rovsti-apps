@@ -10,12 +10,12 @@
 //! a call), but press feedback runs on the raw finger-down. Neither waits for
 //! an animation: the command is issued first, the animation runs alongside.
 
-use std::{cell::Cell, f32::consts::TAU, rc::Rc, time::Duration, time::Instant};
+use std::{cell::Cell, f32::consts::TAU, rc::Rc, sync::Arc, time::Duration, time::Instant};
 
 use gpui::{
     AnyElement, Bounds, Context, Corners, Edges, Entity, HapticFeedback, Hsla, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Render, Role, SharedString,
-    StatefulInteractiveElement, Styled, Task, Window, canvas, div, linear_color_stop,
+    IntoElement, MouseButton, ObjectFit, ParentElement, Render, RenderImage, Role, SharedString,
+    StatefulInteractiveElement, Styled, StyledImage, Task, Window, canvas, div, linear_color_stop,
     linear_gradient, point, prelude::*, px, size, svg,
 };
 use rovsti_core::{
@@ -106,6 +106,9 @@ pub struct RingFx {
     marks: Marks,
     /// S30: 0 ringing, 1 hushed (rings, breath and glow ease to rest).
     calm: Spring,
+    /// The caller's picture and its opacity, written by the screen before each
+    /// frame (this view renders in the same frame, so no notify is needed).
+    photo: Option<(Arc<RenderImage>, f32)>,
     /// Where the card is dragged to (S29); written by the screen each frame, read here.
     offset: Rc<Cell<(f32, f32, f32)>>,
 }
@@ -116,6 +119,7 @@ impl RingFx {
             avatar_hidden: false,
             marks,
             calm: sp(0.0, motion_tokens::select()),
+            photo: None,
             offset,
             motion: Motion::default(),
             clock: 0.0,
@@ -328,10 +332,19 @@ impl Render for RingFx {
                                     a: 0.35,
                                     ..gpui::white()
                                 })
+                                .relative()
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(inner),
+                                .child(inner)
+                                .children(self.photo.clone().map(|(image, opacity)| {
+                                    gpui::img(image)
+                                        .absolute()
+                                        .inset_0()
+                                        .rounded_full()
+                                        .object_fit(ObjectFit::Cover)
+                                        .opacity(opacity)
+                                })),
                         ),
                 ),
         )
@@ -1032,10 +1045,10 @@ impl PhoneApp {
             inc.hidden[other].set_target(1.0);
             if act == Act::Answer {
                 // S8: the Answer circle becomes End and the avatar flies to its slot.
-                let look = inc.view.as_ref().map(|v| Look {
+                let look = self.incoming.view.as_ref().map(|v| Look {
                     hue: v.hue,
                     monogram: v.monogram.clone(),
-                    photo: None,
+                    photo: self.caller_photo(&v.photo, cx).map(|(image, _)| image),
                 });
                 self.begin_button_flight(ButtonFrom::Answer, window);
                 if let Some(look) = look {
@@ -1349,6 +1362,11 @@ impl PhoneApp {
             .child(backdrop(theme, theme::accent_glow(theme)))
             .child(self.incoming.aura.clone())
             .child(self.incoming.fx.clone());
+        let photo = view.as_ref().and_then(|v| {
+            self.want_caller_photo(&v.photo, cx);
+            self.caller_photo(&v.photo, cx)
+        });
+        self.incoming.fx.update(cx, |fx, _| fx.photo = photo);
         let Some(view) = view else {
             return Some(root.into_any_element());
         };

@@ -188,6 +188,7 @@ impl PhoneApp {
         if t < 0.003 && !ic.waiting_open {
             return None;
         }
+        let photo = self.caller_photo(&w.photo, cx);
         let colors = theme::colors(theme);
         let call = call_colors(theme);
         let width = f32::from(window.viewport_size().width);
@@ -285,7 +286,7 @@ impl PhoneApp {
                 w.hue,
                 w.monogram.as_ref(),
                 40.0,
-                None,
+                photo.as_ref().map(|(image, opacity)| (image, *opacity)),
             ))
             .child(
                 div()

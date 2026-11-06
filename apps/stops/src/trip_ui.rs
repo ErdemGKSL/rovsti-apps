@@ -284,9 +284,14 @@ impl StopsApp {
                     .id("clear-ends")
                     .h(px(52.0))
                     .on_click(cx.listener(|this, _, _, cx| {
+                        let ends = this.pick.ends.clone();
                         this.pick.clear();
                         this.map.follow = true;
-                        cx.notify();
+                        this.show_pill(
+                            "Points cleared",
+                            Some(crate::PillAction::RestoreEnds(ends)),
+                            cx,
+                        );
                     })),
             );
         }

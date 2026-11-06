@@ -78,6 +78,7 @@ pub(crate) enum Page {
 pub(crate) enum PillAction {
     UndoDelete(Place, usize),
     RestoreHistory(History),
+    RestoreEnds(picker::Ends),
 }
 
 pub(crate) struct StopsApp {
@@ -496,6 +497,11 @@ impl StopsApp {
         match action {
             PillAction::UndoDelete(place, index) => self.undo_delete(place, index, cx),
             PillAction::RestoreHistory(history) => self.restore_history(history, cx),
+            PillAction::RestoreEnds(ends) => {
+                self.pick.restore(ends);
+                self.map.follow = true;
+                cx.notify();
+            }
         }
     }
 

@@ -564,7 +564,7 @@ impl StopsApp {
                 theme,
                 "dest-field",
                 &self.field,
-                "Paste a link or coordinates",
+                "Search stops and saved places, or paste a link",
                 window,
                 cx,
             )));

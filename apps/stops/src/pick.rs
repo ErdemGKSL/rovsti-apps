@@ -165,7 +165,6 @@ impl Picking {
     }
 
     /// Puts back ends captured earlier (undo), dropping gestures in progress.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn restore(&mut self, ends: Ends) {
         self.ends = ends;
         self.moving = None;

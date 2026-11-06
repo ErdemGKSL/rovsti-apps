@@ -235,6 +235,31 @@ pub fn load(
     Ok(geometry)
 }
 
+/// Total size in bytes of every file under `root` (tiles and index files of
+/// all servers). 0 when `root` does not exist.
+pub fn disk_usage(root: &Path) -> u64 {
+    let Ok(entries) = fs::read_dir(root) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| match e.metadata() {
+            Ok(m) if m.is_dir() => disk_usage(&e.path()),
+            Ok(m) => m.len(),
+            Err(_) => 0,
+        })
+        .sum()
+}
+
+/// Deletes the whole tile cache under `root`. A missing directory is fine.
+/// Any open `DiskCache` on `root` should be dropped or reopened afterwards.
+pub fn clear_all(root: &Path) -> io::Result<()> {
+    match fs::remove_dir_all(root) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
 fn to_geometry(id: TileId, bytes: &[u8]) -> Result<TileGeometry, TileError> {
     if bytes.is_empty() {
         return Ok(TileGeometry::empty(id));
@@ -278,6 +303,33 @@ mod tests {
         assert_eq!(again.get(id(1)).unwrap(), b"hello");
         assert_eq!(again.total_bytes(), 5);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn usage_counts_all_sources_and_clear_all_resets() {
+        let root = tmp();
+        assert_eq!(disk_usage(&root), 0);
+        let other = TileSource::parse("https://tiles.example.org/{z}/{x}/{y}").unwrap();
+        let mut a = open(&root, 1000);
+        let mut b = DiskCache::open(&root, &other, 1000).unwrap();
+        a.put(id(1), b"hello").unwrap();
+        b.put(id(2), b"abc").unwrap();
+        a.flush().unwrap();
+        b.flush().unwrap();
+        assert!(disk_usage(&root) >= 8);
+        clear_all(&root).unwrap();
+        assert_eq!(disk_usage(&root), 0);
+        let mut c = open(&root, 1000);
+        assert!(c.is_empty());
+        c.put(id(3), b"xyz").unwrap();
+        assert_eq!(c.get(id(3)).unwrap(), b"xyz");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn clear_all_on_missing_dir_is_ok() {
+        let root = tmp();
+        assert!(clear_all(&root).is_ok());
     }
 
     #[test]

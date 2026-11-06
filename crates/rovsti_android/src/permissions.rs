@@ -22,6 +22,10 @@ pub enum Group {
     /// `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION`, asked by Rovsti Stops
     /// only; not in [`Group::ALL`].
     Location,
+    /// `ACCESS_BACKGROUND_LOCATION` ("Allow all the time"), asked by Rovsti Stops
+    /// only; not in [`Group::ALL`]. Android 11+ answers a request with the app's
+    /// location settings page instead of a dialog.
+    BackgroundLocation,
 }
 
 impl Group {
@@ -36,6 +40,7 @@ impl Group {
             Self::Notifications => "notifications",
             Self::Bluetooth => "bluetooth",
             Self::Location => "location",
+            Self::BackgroundLocation => "background_location",
         }
     }
 }
@@ -123,10 +128,35 @@ mod tests {
         assert!(!Group::ALL.contains(&Group::Location));
     }
 
+    #[test]
+    fn group_keys_are_unique_and_all_excludes_on_demand_groups() {
+        let every = [
+            Group::Phone,
+            Group::Contacts,
+            Group::Notifications,
+            Group::Bluetooth,
+            Group::Location,
+            Group::BackgroundLocation,
+        ];
+        let keys: std::collections::HashSet<_> = every.iter().map(|g| g.key()).collect();
+        assert_eq!(keys.len(), every.len());
+        assert_eq!(Group::BackgroundLocation.key(), "background_location");
+        assert!(!Group::ALL.contains(&Group::Location));
+        assert!(!Group::ALL.contains(&Group::BackgroundLocation));
+    }
+
     #[cfg(not(target_os = "android"))]
     #[test]
     fn desktop_is_unsupported() {
         use crate::Error;
+        assert!(matches!(
+            state(Group::BackgroundLocation),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(
+            request(Group::BackgroundLocation),
+            Err(Error::Unsupported)
+        ));
         assert!(matches!(state(Group::Phone), Err(Error::Unsupported)));
         assert!(matches!(has(Group::Contacts), Err(Error::Unsupported)));
         assert!(matches!(

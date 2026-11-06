@@ -484,6 +484,7 @@ object RovstiBridge {
             android.Manifest.permission.ACCESS_FINE_LOCATION,
             android.Manifest.permission.ACCESS_COARSE_LOCATION,
         ),
+        "background_location" to listOf(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION),
     )
 
     private fun missing(group: String): List<String>? =

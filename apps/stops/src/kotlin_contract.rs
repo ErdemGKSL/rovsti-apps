@@ -9,6 +9,8 @@ const ALARM_SOUND: &str =
     include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/AlarmSound.kt");
 const TRIP_ALARM: &str =
     include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/TripAlarm.kt");
+const BRIDGE: &str =
+    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/RovstiBridge.kt");
 const TRIP_SERVICE_RECOVER: &str = "TripAlarm.recover(this)";
 const MANIFEST: &str = include_str!("../platforms/android/app/src/main/AndroidManifest.xml");
 
@@ -159,4 +161,12 @@ fn digit_grouping_matches_kotlin_literals() {
     assert_eq!(group(80), "80");
     assert_eq!(group(4_000), "4_000");
     assert_eq!(group(600_000), "600_000");
+}
+
+#[test]
+fn background_location_is_declared_and_mapped() {
+    use rovsti_android::permissions::Group;
+    assert!(MANIFEST.contains("android.permission.ACCESS_BACKGROUND_LOCATION"));
+    let key = format!("\"{}\"", Group::BackgroundLocation.key());
+    assert!(BRIDGE.contains(&key), "RovstiBridge.kt lacks {key}");
 }

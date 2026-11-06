@@ -9,7 +9,7 @@
 //! entries there are.
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     ops::Range,
     rc::Rc,
     sync::Arc,
@@ -31,8 +31,9 @@ use rovsti_core::{
 };
 use rovsti_ui::{
     Icon,
-    components::glass_pill,
+    components::{flat_glass, glass_pill},
     glass::{GlassSpec, glass},
+    moments::Fade,
     motion::{Entrance, press_scale},
     motion_tokens::scale,
     theme::{self, call_colors},
@@ -53,6 +54,39 @@ use crate::{
 const FIELD_H: f32 = 44.0;
 /// Height of the filter chip capsule.
 const CHIP_H: f32 = 36.0;
+/// Height of the sticky day capsule.
+const CAP_H: f32 = 24.0;
+/// The capsule shows once the list is scrolled this far.
+const CAP_MIN_SCROLL: f32 = 4.0;
+
+/// How far the sticky capsule moves (px, 0 or negative): the next section's
+/// first row at `next_start_px` pushes it up once it is within `h` of the top
+/// edge (`first_visible_px` is the scroll offset).
+pub(crate) fn capsule_offset(first_visible_px: f32, next_start_px: Option<f32>, h: f32) -> f32 {
+    match next_start_px {
+        Some(next) => -(h - (next - first_visible_px)).clamp(0.0, h),
+        None => 0.0,
+    }
+}
+
+/// The capsule's label for one (first row, rebuild revision), and the section
+/// starts of that revision, so a frame does no string work unless the row changes.
+#[derive(Default)]
+struct CapCache {
+    rev: u64,
+    starts_rev: Option<u64>,
+    starts: Vec<usize>,
+    first: Option<usize>,
+    label: Option<SharedString>,
+}
+
+/// The capsule's fade state: wanted on or off, and the last frame's time.
+struct CapFade {
+    fade: Fade,
+    on: bool,
+    at: Option<Instant>,
+}
+
 /// Select mode's pills and the floating bar.
 pub(crate) const SEL_ALL: &str = "rc-sel-all";
 pub(crate) const SEL_DONE: &str = "rc-sel-done";
@@ -290,6 +324,10 @@ pub(crate) struct RecentsView {
     fresh_in: Entrance,
     /// Select mode: the rows chosen so far (`None` = normal mode).
     pub(crate) select: Option<call_log_query::Selection>,
+    /// Bumped whenever `visible` is recomputed (the capsule cache key).
+    rev: u64,
+    cap_cache: RefCell<CapCache>,
+    cap_fade: RefCell<CapFade>,
 }
 
 impl RecentsView {
@@ -336,6 +374,13 @@ impl RecentsView {
             fresh: 0,
             fresh_in: Entrance::default(),
             select: None,
+            rev: 0,
+            cap_cache: RefCell::new(CapCache::default()),
+            cap_fade: RefCell::new(CapFade {
+                fade: Fade::default(),
+                on: false,
+                at: None,
+            }),
         }
     }
 
@@ -363,6 +408,7 @@ impl RecentsView {
 
     /// Recomputes `visible` from the current rows and query.
     fn reveal(&mut self) {
+        self.rev = self.rev.wrapping_add(1);
         self.visible = call_log_query::apply_with_notes(&self.merged, &self.query, &self.notes);
         self.note_hits = note_only_hits(&self.merged, &self.visible, &self.query, &self.notes);
     }
@@ -411,6 +457,53 @@ impl RecentsView {
     pub(crate) fn perf_scroll(&self, y: f32) {
         let handle = self.scroll.0.borrow().base_handle.clone();
         handle.set_offset(gpui::point(px(0.0), px(-y)));
+    }
+
+    /// The sticky day capsule: its label and its slide (px, 0 or negative), or
+    /// `None` when the list is not far enough down or has nothing to show.
+    fn capsule(&self, scrolled: f32) -> Option<(SharedString, f32)> {
+        if self.visible.is_empty() || self.select.is_some() || scrolled < CAP_MIN_SCROLL {
+            return None;
+        }
+        let log = self.log.as_ref()?;
+        let tz = log.locale.tz_offset_s;
+        let first = (scrolled / ROW_H).floor() as usize;
+        let mut cache = self.cap_cache.borrow_mut();
+        if cache.starts_rev != Some(self.rev) {
+            cache.starts = recents::section_starts(&self.merged, &self.visible, tz);
+            cache.starts_rev = Some(self.rev);
+        }
+        if cache.rev != self.rev || cache.first != Some(first) {
+            cache.rev = self.rev;
+            cache.first = Some(first);
+            cache.label =
+                recents::section_for(&self.merged, &self.visible, first, backend::now_ms(), tz)
+                    .map(SharedString::from);
+        }
+        let next = cache
+            .starts
+            .get(cache.starts.partition_point(|&s| s <= first));
+        let offset = capsule_offset(scrolled, next.map(|&n| n as f32 * ROW_H), CAP_H);
+        Some((cache.label.clone()?, offset))
+    }
+
+    /// Advances the capsule's fade for this frame and returns its opacity.
+    /// Under reduced motion it snaps. The flag is true while it plays.
+    fn capsule_opacity(&self, wanted: bool, reduced: bool) -> (f32, bool) {
+        let mut f = self.cap_fade.borrow_mut();
+        let now = Instant::now();
+        let mut dt = f.at.map_or(Duration::ZERO, |t| now.duration_since(t));
+        f.at = Some(now);
+        if wanted != f.on {
+            f.on = wanted;
+            dt = Duration::ZERO;
+            if !reduced {
+                f.fade.restart();
+            }
+        }
+        let playing = !reduced && f.fade.tick(dt);
+        let v = if reduced { 1.0 } else { f.fade.value() };
+        (if f.on { v } else { 1.0 - v }, playing)
     }
 
     pub(crate) fn scrolled(&self) -> f32 {
@@ -1419,7 +1512,7 @@ impl PhoneApp {
                         cx,
                     )
                 } else {
-                    self.recents_list(cx)
+                    self.recents_list(theme, window.prefers_reduced_motion(), cx)
                 };
                 div()
                     .flex_1()
@@ -1474,7 +1567,7 @@ impl PhoneApp {
         }
     }
 
-    fn recents_list(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn recents_list(&self, theme: Theme, reduced: bool, cx: &mut Context<Self>) -> AnyElement {
         let r = &self.recents;
         let list = uniform_list(
             "recents",
@@ -1489,12 +1582,44 @@ impl PhoneApp {
         .size_full();
 
         let entity = cx.entity();
+        let cap = r.capsule(r.scrolled());
+        let (alpha, playing) = r.capsule_opacity(cap.is_some(), reduced);
+        if playing {
+            cx.notify();
+        }
+        let capsule = cap.filter(|_| alpha > 0.01).map(|(label, offset)| {
+            let colors = theme::colors(theme);
+            div()
+                .absolute()
+                .top(px(offset))
+                .left_0()
+                .w_full()
+                .flex()
+                .justify_center()
+                .opacity(alpha)
+                .child(
+                    flat_glass(theme, None)
+                        .id("rc-day")
+                        .role(Role::Label)
+                        .h(px(CAP_H))
+                        .px(px(12.0))
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .text_size(typography::CAPTION2.size)
+                        .text_color(colors.secondary_label)
+                        .aria_label(label.clone())
+                        .child(label),
+                )
+        });
         div()
             .relative()
             .flex_1()
             .min_h_0()
             .w_full()
+            .overflow_hidden()
             .child(list)
+            .children(capsule)
             .child(pointer_surface(
                 Rc::clone(&r.bounds),
                 move |pointer, position, window, cx| {
@@ -3046,6 +3171,16 @@ pub(crate) fn state_pill_button(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capsule_offset_edges() {
+        assert_eq!(capsule_offset(100.0, None, 24.0), 0.0);
+        assert_eq!(capsule_offset(100.0, Some(300.0), 24.0), 0.0);
+        assert_eq!(capsule_offset(100.0, Some(124.0), 24.0), 0.0);
+        assert_eq!(capsule_offset(100.0, Some(112.0), 24.0), -12.0);
+        assert_eq!(capsule_offset(100.0, Some(100.0), 24.0), -24.0);
+        assert_eq!(capsule_offset(100.0, Some(90.0), 24.0), -24.0);
+    }
 
     #[test]
     fn whatsapp_rows_call_back_over_whatsapp_only_when_connected() {

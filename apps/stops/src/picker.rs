@@ -247,6 +247,8 @@ pub enum PickItem {
     Saved {
         id: u64,
         dest: Destination,
+        /// What the place is and how far it is.
+        detail: String,
         at: lists::Place,
     },
     Pair {
@@ -623,30 +625,44 @@ impl StopsApp {
         group(&mut items, "Stops", stops, |_, (index, lines), at| {
             PickItem::Stop { index, lines, at }
         });
+        let here = self.map.position.map(|p| p.0);
         let saved: Vec<_> = self
             .saved
             .search(query)
             .into_iter()
-            .map(|p| (p.id, Destination::from_place(p)))
+            .map(|p| {
+                (
+                    p.id,
+                    Destination::from_place(p),
+                    crate::saved_ui::place_detail(p, here),
+                )
+            })
             .collect();
-        group(&mut items, "Saved", saved, |_, (id, dest), at| {
-            PickItem::Saved { id, dest, at }
+        group(&mut items, "Saved", saved, |_, (id, dest, detail), at| {
+            PickItem::Saved {
+                id,
+                dest,
+                detail,
+                at,
+            }
         });
         if query.is_empty() {
             let pairs = self.history.recent_pairs(3);
+            let saved = &self.saved;
             group(&mut items, "Recent trips", pairs, |i, (a, b), at| {
                 PickItem::Pair {
                     i,
-                    a: Destination::new(a.label, a.coord),
-                    b: Destination::new(b.label, b.coord),
+                    a: pick::dest_from_endpoint(&a, saved),
+                    b: pick::dest_from_endpoint(&b, saved),
                     at,
                 }
             });
             let recent = self.history.recent_points(5);
+            let saved = &self.saved;
             group(&mut items, "Recent", recent, |i, point, at| {
                 PickItem::Recent {
                     i,
-                    dest: Destination::new(point.label, point.coord),
+                    dest: pick::dest_from_endpoint(&point, saved),
                     at,
                 }
             });
@@ -700,12 +716,23 @@ impl StopsApp {
                     .on_click(cx.listener(move |this, _, _, cx| this.open_stop(index, cx)));
                 lists::grouped(theme, at, row).into_any_element()
             }
-            PickItem::Saved { id, dest, at } => {
-                let row = list_row(theme, None, pick::row_label(&dest.label), None, None)
-                    .id(("pick-saved", id as usize))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.choose_destination(dest.clone(), cx);
-                    }));
+            PickItem::Saved {
+                id,
+                dest,
+                detail,
+                at,
+            } => {
+                let row = list_row(
+                    theme,
+                    None,
+                    pick::row_label(&dest.label),
+                    Some(detail.into()),
+                    None,
+                )
+                .id(("pick-saved", id as usize))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.choose_destination(dest.clone(), cx);
+                }));
                 lists::grouped(theme, at, row).into_any_element()
             }
             PickItem::Pair { i, a, b, at } => {
@@ -1272,6 +1299,7 @@ mod tests {
             PickItem::Saved {
                 id,
                 dest: dest("x", 29.0),
+                detail: String::new(),
                 at,
             }
         });
@@ -1280,6 +1308,7 @@ mod tests {
             PickItem::Saved {
                 id,
                 dest: dest("x", 29.0),
+                detail: String::new(),
                 at,
             }
         });
@@ -1306,6 +1335,7 @@ mod tests {
             PickItem::Saved {
                 id: 1,
                 dest: dest("x", 29.0),
+                detail: String::new(),
                 at: lists::Place::ALONE
             }
             .key()

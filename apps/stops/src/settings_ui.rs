@@ -656,10 +656,8 @@ impl StopsApp {
                     Some((a, b)) => {
                         let row = row.id(("history-use", i)).on_click(cx.listener(
                             move |this, _, _, cx| {
-                                let a = crate::picker::Destination::new(a.label.clone(), a.coord)
-                                    .named_from(&this.saved);
-                                let b = crate::picker::Destination::new(b.label.clone(), b.coord)
-                                    .named_from(&this.saved);
+                                let a = crate::pick::dest_from_endpoint(&a, &this.saved);
+                                let b = crate::pick::dest_from_endpoint(&b, &this.saved);
                                 this.choose_pair(a, b, cx);
                                 this.tabs.jump_to(0);
                                 this.open_settings(SettingsPage::Main, cx);

@@ -13,7 +13,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::coord::{Coord, EARTH_RADIUS_M};
-use crate::trip::{Fix, MAX_ACCURACY_M, MAX_SPEED_MPS, MIN_SPEED_MPS, TripState};
+use crate::poll::{IDLE_POLL, poll_interval};
+use crate::trip::{Fix, MAX_ACCURACY_M, MIN_SPEED_MPS, TripState};
 
 /// Half-width of the band around line AB where the side is unknown (the
 /// effective band is `max(DEAD_BAND_M, fix accuracy)`).
@@ -425,7 +426,7 @@ impl CrossingTrip {
                 line_m: self.last_line_m.unwrap_or(0.0),
                 circle_m: 0.0,
                 inside: false,
-                next_fix_in: Duration::from_secs(3),
+                next_fix_in: self.next_fix_in(None),
                 eta: None,
             };
         }
@@ -456,24 +457,22 @@ impl CrossingTrip {
             line_m,
             circle_m,
             inside,
-            next_fix_in: self.next_fix_in(line_m, &fix),
+            next_fix_in: self.next_fix_in(usable.then_some((line_m, fix.accuracy_m))),
             eta,
         }
     }
 
-    /// Far away -> sleep long; close -> poll every few seconds. Assumes the
-    /// worst-case speed so the diameter cannot be skipped between fixes.
-    fn next_fix_in(&self, line_m: f64, fix: &Fix) -> Duration {
+    /// See [`crate::poll`]. A usable fix drives the curve; an unusable one
+    /// (poor accuracy or garbage position) falls back to the last usable
+    /// distance with unknown accuracy, or the 300 s cap if there is none.
+    fn next_fix_in(&self, usable: Option<(f64, f64)>) -> Duration {
         if self.state != TripState::Tracking {
-            return Duration::from_secs(60);
+            return IDLE_POLL;
         }
-        let acc = if fix.accuracy_m.is_finite() {
-            fix.accuracy_m.max(0.0)
-        } else {
-            0.0
-        };
-        let slack = (line_m - acc - DEAD_BAND_M.max(acc)).max(0.0);
-        Duration::from_secs_f64((slack / MAX_SPEED_MPS / 2.0).clamp(3.0, 300.0))
+        match usable {
+            Some((line, acc)) => poll_interval(Some(line), Some(acc)),
+            None => poll_interval(self.last_line_m, None),
+        }
     }
 }
 
@@ -544,6 +543,8 @@ mod tests {
                 speed_mps: Some(10.0),
             });
             assert!(!u.ring && u.line_m.is_finite() && u.eta.is_none());
+            // Last usable line was 200 m: with unknown accuracy that is 3 s.
+            assert_eq!(u.next_fix_in, Duration::from_secs(3));
             assert_eq!(u.side, Some(Side::Left));
         }
         assert!(trip.update(fix(at(0.0, -200.0), 5.0)).ring);
@@ -931,12 +932,21 @@ mod tests {
         step(&mut t, (0.0, 300.0), 5.0);
         let u = step(&mut t, (0.0, -300.0), 1_000.0);
         assert!(!u.ring);
+        // Unusable accuracy: curve over last usable distance (300 m), unknown acc.
+        assert_eq!(u.next_fix_in, Duration::from_secs(3));
         assert_eq!(t.last_line_m().map(|m| m.round()), Some(300.0));
         t.dismiss();
         let u = step(&mut t, (0.0, -300.0), 5.0);
         assert!(!u.ring);
         assert_eq!(u.state, TripState::Dismissed);
         assert_eq!(t.state(), TripState::Dismissed);
+    }
+
+    #[test]
+    fn first_inaccurate_fix_polls_at_max() {
+        let mut t = trip();
+        let u = step(&mut t, (0.0, 100.0), 1_000.0);
+        assert_eq!(u.next_fix_in, Duration::from_secs(300));
     }
 
     #[test]

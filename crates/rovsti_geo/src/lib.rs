@@ -13,6 +13,7 @@ pub mod gtfs;
 pub mod history;
 pub mod notice;
 pub mod places;
+pub mod poll;
 pub mod prefs;
 mod session;
 pub mod tiles;

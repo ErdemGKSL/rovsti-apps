@@ -2058,6 +2058,8 @@ impl StopsApp {
                 let at = self.map.to_view(at);
                 self.map.viewport.zoom_about(2.0, at);
             }
+            // While a saved place is being moved, A/B pins stay quiet: a tap sets its spot.
+            Gesture::PinTap { .. } if self.relocating.is_some() => {}
             Gesture::PinTap { slot } => self.pick.open_menu(slot),
             Gesture::PinDrag { slot, at } => {
                 // The auto view would chase the pin under the finger.

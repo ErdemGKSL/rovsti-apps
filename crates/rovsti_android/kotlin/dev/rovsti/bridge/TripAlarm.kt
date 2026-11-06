@@ -8,16 +8,10 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.MediaPlayer
-import android.media.RingtoneManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
-import android.os.VibrationAttributes
-import android.os.VibrationEffect
-import android.os.VibratorManager
 import org.json.JSONException
 import org.json.JSONObject
 import java.util.concurrent.Executors
@@ -84,12 +78,11 @@ object TripAlarm {
     const val ACTION_DISMISS = "dev.rovsti.trip.DISMISS"
     const val ACTION_CLOSE = "dev.rovsti.trip.CLOSE_ALARM"
     const val EVENT = "trip_alarm"
-    private val VIBRATION = longArrayOf(0, 700, 500, 700, 1500)
 
     private val lock = Any()
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
-    private var player: MediaPlayer? = null
+    private var sound: AlarmSound? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var capTask: Runnable? = null
 
@@ -109,9 +102,11 @@ object TripAlarm {
             testRing = test
             cancelSnooze(app)
             postNotification(app)
-            val (sound, vibrate) = alarmChannels(readPrefs(app))
-            if (sound) startSound(app)
-            if (vibrate) startVibration(app)
+            val (wantSound, vibrate) = alarmChannels(readPrefs(app))
+            val out = AlarmSound(app, AlarmPlan.parse(TripPrefs.alarmPlan(app)))
+            this.sound = out
+            if (wantSound) out.start()
+            if (vibrate) out.vibrate()
             holdWakeLock(app)
             val cap = Runnable { silence(app) }
             capTask = cap
@@ -202,58 +197,36 @@ object TripAlarm {
         null
     }
 
+    /**
+     * Restores a volume a dead process left raised (the saved level survives in SharedPreferences) when
+     * nothing rings. Call from service start, receivers and bridge init.
+     */
+    fun recover(context: Context) {
+        val app = context.applicationContext
+        synchronized(lock) {
+            if (!ringing) AlarmSound.restoreVolume(app)
+        }
+    }
+
     private fun silence(context: Context) {
         synchronized(lock) {
             ringing = false
-            capTask?.let(main::removeCallbacks)
-            capTask = null
             try {
-                player?.stop()
-            } catch (_: IllegalStateException) {
+                capTask?.let(main::removeCallbacks)
+                capTask = null
+                sound?.let {
+                    it.stop()
+                    it.cancelVibration()
+                }
+                sound = null
+            } finally {
+                try {
+                    AlarmSound.restoreVolume(context)
+                } finally {
+                    wakeLock?.takeIf { it.isHeld }?.release()
+                    wakeLock = null
+                }
             }
-            player?.release()
-            player = null
-            context.getSystemService(VibratorManager::class.java)?.cancel()
-            wakeLock?.takeIf { it.isHeld }?.release()
-            wakeLock = null
-        }
-    }
-
-    private fun startSound(context: Context) {
-        val uri = RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_ALARM)
-            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-            ?: return
-        try {
-            player = MediaPlayer().apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build(),
-                )
-                setDataSource(context, uri)
-                isLooping = true
-                prepare()
-                start()
-            }
-        } catch (e: java.io.IOException) {
-            android.util.Log.w("Rovsti", "alarm sound failed", e)
-            player?.release()
-            player = null
-        } catch (e: RuntimeException) {
-            android.util.Log.w("Rovsti", "alarm sound failed", e)
-            player?.release()
-            player = null
-        }
-    }
-
-    private fun startVibration(context: Context) {
-        val vibrator = context.getSystemService(VibratorManager::class.java)?.defaultVibrator ?: return
-        if (!vibrator.hasVibrator()) return
-        val effect = VibrationEffect.createWaveform(VIBRATION, 0)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(effect, AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build())
         }
     }
 
@@ -270,7 +243,7 @@ object TripAlarm {
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL, "Destination alarm", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "Rings when you are about to arrive"
-                setSound(null, null) // the sound is played on the alarm stream, not by the notification
+                setSound(null, null) // played by AlarmSound on the alarm stream, not by the notification
                 enableVibration(false)
             },
         )
@@ -311,6 +284,7 @@ object TripAlarm {
 /** Notification actions and the snooze alarm; declare it (not exported) in the host manifest. */
 class TripAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        TripAlarm.recover(context)
         val pending = goAsync()
         val done = { pending.finish() }
         when (intent.action) {

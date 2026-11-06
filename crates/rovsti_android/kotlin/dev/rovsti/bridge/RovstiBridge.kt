@@ -88,6 +88,7 @@ object RovstiBridge {
     fun install(application: Application) {
         app = application
         SettingsMirror.restore(application)
+        TripAlarm.recover(application)
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) { foreground = activity }
             override fun onActivityPaused(activity: Activity) { if (foreground === activity) foreground = null }

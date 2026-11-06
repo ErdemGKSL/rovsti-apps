@@ -170,6 +170,7 @@ class TripService : Service() {
         locations = getSystemService(LocationManager::class.java)
         alarms = getSystemService(AlarmManager::class.java)
         running = true
+        TripAlarm.recover(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

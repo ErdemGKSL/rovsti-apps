@@ -112,6 +112,35 @@ fn kotlin_alarm_defaults_equal_the_rust_plan() {
     assert!(ALARM_SOUND.contains(&format!("longArrayOf({})", pattern.join(", "))));
 }
 
+#[test]
+fn alarm_lifecycle_has_channel_timeout_guard_and_full_screen_check() {
+    for token in [
+        "trip_alarm_v2",
+        "deleteNotificationChannel",
+        "setBypassDnd(true)",
+        "canUseFullScreenIntent",
+        "\"timeout\"",
+        "timed_out",
+        "CATEGORY_ALARM",
+        "VISIBILITY_PUBLIC",
+        "setOnlyAlertOnce(true)",
+        "full_screen",
+        "guardRingAt",
+        "onRingTimeout",
+    ] {
+        assert!(TRIP_ALARM.contains(token), "TripAlarm.kt lacks {token}");
+    }
+    let activity =
+        include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/AlarmActivity.kt");
+    for token in [
+        "setShowWhenLocked",
+        "setTurnScreenOn",
+        "FLAG_KEEP_SCREEN_ON",
+    ] {
+        assert!(activity.contains(token), "AlarmActivity.kt lacks {token}");
+    }
+}
+
 /// Kotlin digit grouping: 4000 -> "4_000", 600000 -> "600_000".
 fn group(n: u64) -> String {
     let s = n.to_string();

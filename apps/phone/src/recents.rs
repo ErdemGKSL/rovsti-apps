@@ -228,6 +228,8 @@ pub(crate) struct RecentsView {
     pub(crate) number: Option<RowVm>,
     /// The calls with that number, built when the sheet opened.
     pub(crate) number_history: Arc<[HistoryVm]>,
+    /// The Number sheet's "Recent calls" shows a delete button on each line.
+    pub(crate) number_history_edit: bool,
     long_task: Option<Task<()>>,
     /// Unseen missed calls (the Recents tab's spoken label).
     missed: u32,
@@ -271,6 +273,7 @@ impl RecentsView {
             last_pressed: None,
             number: None,
             number_history: Arc::from(Vec::new()),
+            number_history_edit: false,
             long_task: None,
             missed: 0,
             missed_counted: false,
@@ -508,7 +511,36 @@ impl PhoneApp {
         } else {
             self.recents.wa_history_seen = self.wa_call.read(cx).history_rev();
         }
+        self.refresh_sheet_history(cx);
         cx.notify();
+    }
+
+    /// The call log changed under an open sheet: its "Recent calls" follow.
+    pub(crate) fn refresh_sheet_history(&mut self, cx: &gpui::App) {
+        if self.sheet.is_visible()
+            && self.sheet_kind == crate::SheetKind::Number
+            && let Some(number) = self.recents.number.as_ref().map(|r| r.number.clone())
+        {
+            self.recents.number_history = self.history_for(&[number.as_ref()], cx);
+            if self.recents.number_history.is_empty() {
+                self.recents.number_history_edit = false;
+            }
+        }
+        if let Some(sheet) = &self.contact_sheet {
+            let numbers: Vec<&str> = sheet
+                .contact
+                .numbers
+                .iter()
+                .map(|n| n.raw.as_str())
+                .collect();
+            let history = self.history_for(&numbers, cx);
+            if let Some(sheet) = &mut self.contact_sheet {
+                if history.is_empty() {
+                    sheet.history_edit = false;
+                }
+                sheet.history = history;
+            }
+        }
     }
 
     fn recents_failed(&mut self, state: State) {
@@ -594,6 +626,7 @@ impl PhoneApp {
         self.recents.last_pressed = None;
         self.recents.inserted = 0;
         self.recents.fresh = 0;
+        self.refresh_sheet_history(cx);
     }
 
     // ---- Tab lifecycle ------------------------------------------------
@@ -914,6 +947,7 @@ impl PhoneApp {
             return;
         }
         self.recents.number_history = self.history_for(&[row.number.as_ref()], cx);
+        self.recents.number_history_edit = false;
         self.recents.number = Some(row.clone());
         self.setup_note = None;
         self.sheet_kind = crate::SheetKind::Number;
@@ -1230,7 +1264,13 @@ impl PhoneApp {
                 .into_any_element(),
             ));
         }
-        if let Some(section) = history_section(theme, &self.recents.number_history) {
+        let edit = HistoryEdit {
+            editing: self.recents.number_history_edit,
+            toggle_id: "sheet-nhist-edit",
+            line_prefix: NUMBER_HISTORY_DELETE,
+        };
+        let lines = Arc::clone(&self.recents.number_history);
+        if let Some(section) = history_section(theme, &lines, Some(edit), self, cx) {
             let del = self.history_delete_button(theme, crate::history_ui::NUMBER_SHEET_DELETE, cx);
             children.push(reveal(
                 4,
@@ -1282,6 +1322,18 @@ impl PhoneApp {
         let Some(row) = self.recents.number.clone() else {
             return;
         };
+        if id == "sheet-nhist-edit" {
+            self.recents.number_history_edit = !self.recents.number_history_edit;
+            cx.notify();
+            return;
+        }
+        if let Some(i) = history_index(id, NUMBER_HISTORY_DELETE) {
+            if let Some(vm) = self.recents.number_history.get(i) {
+                let entry = vm.entry.clone();
+                self.delete_row_calls(Arc::from([entry]), window, cx);
+            }
+            return;
+        }
         if let Some(action) = crate::actions_ui::StripAction::from_id(id) {
             if !row.number.is_empty() {
                 let number = row.number.clone();
@@ -1400,6 +1452,10 @@ pub(crate) struct HistoryVm {
     icon: Icon,
     missed: bool,
     whatsapp: bool,
+    /// The stored call this line stands for (deleting it, restoring it).
+    pub(crate) entry: rovsti_core::call_log::EntryRef,
+    /// A call the phone blocked.
+    pub(crate) blocked: bool,
 }
 
 impl HistoryVm {
@@ -1413,6 +1469,8 @@ impl HistoryVm {
             icon: direction_icon(direction),
             missed: direction == Direction::Missed,
             whatsapp: line.whatsapp,
+            entry: line.entry.clone(),
+            blocked: line.blocked,
         }
     }
 
@@ -1420,6 +1478,11 @@ impl HistoryVm {
         format!("{}, {}", self.title, self.detail).into()
     }
 }
+
+/// Id prefix of a Number sheet history line's delete button.
+pub(crate) const NUMBER_HISTORY_DELETE: &str = "sheet-nhx-";
+/// Id prefix of a Contact sheet history line's delete button.
+pub(crate) const CONTACT_HISTORY_DELETE: &str = "sheet-chx-";
 
 /// Most calls a sheet lists.
 const HISTORY_LIMIT: usize = 10;
@@ -1442,50 +1505,129 @@ impl PhoneApp {
     }
 }
 
+/// How a sheet's "Recent calls" block edits: the Edit/Done toggle and the per-line delete ids.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HistoryEdit {
+    pub editing: bool,
+    pub toggle_id: &'static str,
+    pub line_prefix: &'static str,
+}
+
+/// The line index a delete button id `{prefix}{i}` stands for.
+pub(crate) fn history_index(id: &str, prefix: &str) -> Option<usize> {
+    id.strip_prefix(prefix)?.parse().ok()
+}
+
 /// The "Recent calls" block of a sheet; `None` when there are no calls.
-pub(crate) fn history_section(theme: Theme, lines: &[HistoryVm]) -> Option<AnyElement> {
+pub(crate) fn history_section(
+    theme: Theme,
+    lines: &[HistoryVm],
+    edit: Option<HistoryEdit>,
+    app: &PhoneApp,
+    cx: &mut Context<PhoneApp>,
+) -> Option<AnyElement> {
     if lines.is_empty() {
         return None;
     }
     let colors = theme::colors(theme);
     let danger = call_colors(theme).danger;
-    let rows = lines.iter().enumerate().map(|(i, line)| {
-        let ink = if line.missed { danger } else { colors.label };
+    let rows: Vec<AnyElement> = lines
+        .iter()
+        .enumerate()
+        .map(|(i, line)| {
+            let ink = if line.missed { danger } else { colors.label };
+            let trash = edit.filter(|e| e.editing).map(|e| {
+                let id: SharedString = format!("{}{i}", e.line_prefix).into();
+                let press = app.presses.value(&id).clamp(0.0, 1.0);
+                let k = press_scale(press, scale::PRESS);
+                div()
+                    .id(id.clone())
+                    .role(Role::Button)
+                    .aria_label(SharedString::from(format!("Delete {}", line.aria())))
+                    .relative()
+                    .flex_none()
+                    .size(px(HISTORY_ROW_H * k))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        svg()
+                            .path(Icon::LucideTrash2.path())
+                            .size(px(18.0))
+                            .text_color(danger),
+                    )
+                    .on_mouse_down(MouseButton::Left, {
+                        let id = id.clone();
+                        cx.listener(move |this, _, window, cx| {
+                            this.presses.down(id.clone());
+                            this.number_sheet_act(&id, window, cx);
+                        })
+                    })
+                    .child(touch_surface(PhoneApp::touch_listener(cx, Some(id))))
+            });
+            div()
+                .id(SharedString::from(format!("sheet-hist-{i}")))
+                .aria_label(line.aria())
+                .h(px(HISTORY_ROW_H))
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .px(px(16.0))
+                .child(if line.whatsapp {
+                    whatsapp_badge(theme)
+                } else {
+                    svg()
+                        .path(line.icon.path())
+                        .size(px(16.0))
+                        .flex_none()
+                        .text_color(ink)
+                        .into_any_element()
+                })
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(typography::BODY.size)
+                        .text_color(ink)
+                        .child(line.title.clone()),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(typography::FOOTNOTE.size)
+                        .text_color(colors.secondary_label)
+                        .child(line.detail.clone()),
+                )
+                .children(trash)
+                .into_any_element()
+        })
+        .collect();
+    let toggle = edit.map(|e| {
+        let id = e.toggle_id;
+        let press = app.presses.value(id).clamp(0.0, 1.0);
         div()
-            .id(SharedString::from(format!("sheet-hist-{i}")))
-            .aria_label(line.aria())
-            .h(px(HISTORY_ROW_H))
-            .w_full()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(if e.editing { "Done" } else { "Edit" })
+            .relative()
+            .flex_none()
+            .h(px(28.0 * press_scale(press, scale::PRESS)))
+            .px(px(4.0))
             .flex()
             .items_center()
-            .gap(px(10.0))
-            .px(px(16.0))
-            .child(if line.whatsapp {
-                whatsapp_badge(theme)
-            } else {
-                svg()
-                    .path(line.icon.path())
-                    .size(px(16.0))
-                    .flex_none()
-                    .text_color(ink)
-                    .into_any_element()
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(typography::BODY.size)
-                    .text_color(ink)
-                    .child(line.title.clone()),
+            .text_size(typography::FOOTNOTE.size)
+            .text_color(colors.accent)
+            .child(if e.editing { "Done" } else { "Edit" })
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    this.presses.down(id);
+                    this.number_sheet_act(id, window, cx);
+                }),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(typography::FOOTNOTE.size)
-                    .text_color(colors.secondary_label)
-                    .child(line.detail.clone()),
-            )
+            .child(touch_surface(PhoneApp::touch_listener(cx, Some(id.into()))))
     });
     Some(
         div()
@@ -1494,11 +1636,15 @@ pub(crate) fn history_section(theme: Theme, lines: &[HistoryVm]) -> Option<AnyEl
             .pt(px(6.0))
             .child(
                 div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
                     .px(px(16.0))
                     .pb(px(4.0))
                     .text_size(typography::FOOTNOTE.size)
                     .text_color(colors.secondary_label)
-                    .child("Recent calls"),
+                    .child("Recent calls")
+                    .children(toggle),
             )
             .child(
                 div()
@@ -2002,5 +2148,27 @@ mod tests {
         );
         assert!(!answered.missed && !answered.whatsapp);
         assert!(answered.detail.ends_with("1:05"), "{}", answered.detail);
+    }
+
+    #[test]
+    fn history_index_reads_only_its_own_prefix() {
+        assert_eq!(history_index("sheet-nhx-3", NUMBER_HISTORY_DELETE), Some(3));
+        assert_eq!(
+            history_index("sheet-chx-9", CONTACT_HISTORY_DELETE),
+            Some(9)
+        );
+        assert_eq!(history_index("sheet-chx-3", NUMBER_HISTORY_DELETE), None);
+        assert_eq!(history_index("sheet-nhx-x", NUMBER_HISTORY_DELETE), None);
+        assert_eq!(history_index("sheet-nhx-", NUMBER_HISTORY_DELETE), None);
+        assert_eq!(
+            history_index("sheet-nhx-10", NUMBER_HISTORY_DELETE),
+            Some(10)
+        );
+        assert_eq!(
+            history_index("sheet-nhist-edit", NUMBER_HISTORY_DELETE),
+            None
+        );
+        assert!(!"sheet-nhist-edit".starts_with("sheet-del-"));
+        assert!(!"sheet-chist-edit".starts_with("sheet-del-"));
     }
 }

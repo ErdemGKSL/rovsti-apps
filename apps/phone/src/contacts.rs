@@ -428,7 +428,9 @@ pub(crate) struct ContactSheet {
     /// The speed-dial digit row is showing.
     sd_open: bool,
     /// The calls with the contact's numbers, built when the sheet opened.
-    history: Arc<[crate::recents::HistoryVm]>,
+    pub(crate) history: Arc<[crate::recents::HistoryVm]>,
+    /// The "Recent calls" list shows a delete button on each line.
+    pub(crate) history_edit: bool,
     note: Option<SharedString>,
     note_task: Option<Task<()>>,
     /// Opened from this Favorites tile: shows Move earlier / Move later.
@@ -701,15 +703,12 @@ impl PhoneApp {
             .iter()
             .find(|r| r.id == sheet.contact.id)
             .cloned();
-        let contact = fresh.as_ref().unwrap_or(&sheet.contact);
-        let numbers: Vec<&str> = contact.numbers.iter().map(|n| n.raw.as_str()).collect();
-        let history = self.history_for(&numbers, cx);
-        if let Some(sheet) = &mut self.contact_sheet {
-            if let Some(fresh) = fresh {
-                sheet.contact = fresh;
-            }
-            sheet.history = history;
+        if let Some(fresh) = fresh
+            && let Some(sheet) = &mut self.contact_sheet
+        {
+            sheet.contact = fresh;
         }
+        self.refresh_sheet_history(cx);
     }
 
     /// Re-filters the list for the field's text. The index folds names once
@@ -1157,6 +1156,7 @@ impl PhoneApp {
             pending: None,
             sd_open: false,
             history,
+            history_edit: false,
             note: None,
             note_task: None,
             fav_index: None,
@@ -1278,6 +1278,18 @@ impl PhoneApp {
             return;
         };
         let contact_id = sheet.contact.id;
+        if id == "sheet-chist-edit" {
+            sheet.history_edit = !sheet.history_edit;
+            cx.notify();
+            return;
+        }
+        if let Some(i) = crate::recents::history_index(id, crate::recents::CONTACT_HISTORY_DELETE) {
+            if let Some(vm) = sheet.history.get(i) {
+                let entry = vm.entry.clone();
+                self.delete_row_calls(Arc::from([entry]), window, cx);
+            }
+            return;
+        }
         if let Some(index) = id
             .strip_prefix("sheet-cn-")
             .and_then(|i| i.parse::<usize>().ok())
@@ -2351,7 +2363,15 @@ impl PhoneApp {
             children.push(reveal(3, speed_dial_row(self, theme, cx)));
         }
         if !sheet.chooser
-            && let Some(section) = crate::recents::history_section(theme, &sheet.history)
+            && let Some(section) = {
+                let edit = crate::recents::HistoryEdit {
+                    editing: sheet.history_edit,
+                    toggle_id: "sheet-chist-edit",
+                    line_prefix: crate::recents::CONTACT_HISTORY_DELETE,
+                };
+                let lines = Arc::clone(&sheet.history);
+                crate::recents::history_section(theme, &lines, Some(edit), self, cx)
+            }
         {
             let del =
                 self.history_delete_button(theme, crate::history_ui::CONTACT_SHEET_DELETE, cx);

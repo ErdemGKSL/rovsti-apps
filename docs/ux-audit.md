@@ -46,6 +46,8 @@ Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19),
   - Key size is the smaller of the width-derived and height-derived sizes, clamped to 36..78.
   - Modes: Portrait (key 56 and up), Compact (smaller labels, optional rows dropped to keep keys at 36 or more) and Landscape (grid on the right, number, chips and call row on the left).
   - Letters under digits show at key 60 and above.
+  - Header budget: Portrait and Compact keep at least `TITLE_BLOCK_MIN` (49 px) below the top inset so the 105 px large title always fits; Landscape uses a one-row header of `LANDSCAPE_HEADER_H` (48 px) with a single-line title beside the setup and gear buttons.
+  - All sections are drawn in one viewport coordinate space; a headless test renders the real `PhoneApp` and asserts the drawn key, field and call bounds land on the layout rects.
   - Number font shrinks to 22, then shows a leading ellipsis and keeps the end of the number.
   - Matches and chips have a fixed height; extra matches collapse into "N more".
 

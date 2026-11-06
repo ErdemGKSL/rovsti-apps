@@ -166,6 +166,9 @@ pub fn parse_status(json: &str) -> Option<Status> {
 fn error_message(code: &str) -> &'static str {
     match code {
         "permission" => "Location was turned off for Stops. Allow it in Settings to keep tracking.",
+        "full_screen" => {
+            "The alarm cannot cover the lock screen. Allow full-screen alerts in Settings."
+        }
         "foreground" => "Android would not keep the tracking service running.",
         _ => "Tracking hit a problem.",
     }
@@ -785,7 +788,11 @@ impl StopsApp {
                 })
                 .detach();
             }
-            Status::Error(why) => self.show_pill(why, None, cx),
+            Status::Error(why) => {
+                // A refused full-screen intent shows up as the settings row on the Trip tab.
+                self.refresh_preflight(cx);
+                self.show_pill(why, None, cx);
+            }
         }
     }
 

@@ -1672,6 +1672,14 @@ impl PhoneApp {
                     .into_any_element(),
             ));
         }
+        if !row.number.is_empty()
+            && let Some(vm) = self.stats_block_vm(&[row.number.as_ref()], &row.title, cx)
+        {
+            children.push(reveal(
+                4,
+                self.stats_section(theme, &vm, crate::stats_ui::NUMBER_SHARE, cx),
+            ));
+        }
         if !row.named && !row.number.is_empty() {
             children.push(reveal(
                 5,
@@ -1730,6 +1738,10 @@ impl PhoneApp {
                     self.delete_row_calls(Arc::from([entry]), window, cx);
                 }
             }
+            return;
+        }
+        if id == crate::stats_ui::NUMBER_SHARE {
+            self.stats_share(&[row.number.to_string()], &row.title, cx);
             return;
         }
         if let Some(action) = crate::actions_ui::StripAction::from_id(id) {

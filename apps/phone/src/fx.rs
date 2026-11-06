@@ -35,7 +35,9 @@ pub const A_AUDIO: usize = 19;
 /// The In-Call SIM chip (S26 lands here) and the chooser's first two rows.
 pub const A_CHIP_SLOT: usize = 20;
 pub const A_SIM_ROW: usize = 21;
-pub const A_COUNT: usize = 23;
+/// The seven bars of the Call statistics page.
+pub const A_STAT_BAR: usize = 23;
+pub const A_COUNT: usize = 30;
 
 pub type Marks = Anchors<A_COUNT>;
 

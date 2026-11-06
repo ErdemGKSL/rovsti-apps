@@ -48,6 +48,7 @@ mod setup_ui;
 mod signature;
 mod sim_ui;
 mod speed_dial_ui;
+mod stats_ui;
 mod wa_call;
 mod wa_peer;
 mod waiting_card;
@@ -237,6 +238,8 @@ struct PhoneApp {
     pill_action: Option<(u64, block_ui::PillAction)>,
     /// The Speed dial page and a digit waiting for a contact.
     speed_dial: speed_dial_ui::SpeedDialUi,
+    /// Call statistics: the merged call list and the page's range.
+    stats: stats_ui::StatsUi,
     /// The Recents row menu and S27 (Epic 17).
     row_menu: block_ui::RowMenu,
     /// The Blocked numbers page behind Settings (stories 17.5, 17.6).
@@ -579,6 +582,7 @@ impl PhoneApp {
             pill: NoticePill::new(),
             pill_action: None,
             speed_dial: speed_dial_ui::SpeedDialUi::default(),
+            stats: stats_ui::StatsUi::default(),
             row_menu: block_ui::RowMenu::new(),
             blocked: blocked_ui,
             reply: replies_ui::ReplyUi::default(),

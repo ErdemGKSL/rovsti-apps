@@ -111,26 +111,30 @@ fn digits_key(raw: &str) -> String {
         .collect()
 }
 
-/// Totals over the calls whose number matches any of `numbers`.
-pub fn for_numbers(calls: &[StatCall], numbers: &[&str]) -> Totals {
+/// The calls whose number matches any of `numbers`, in their order.
+pub fn calls_for_numbers(calls: &[StatCall], numbers: &[&str]) -> Vec<StatCall> {
     let wanted: Vec<(Option<PhoneNumber>, String)> = numbers
         .iter()
         .map(|n| (PhoneNumber::parse(n).ok(), digits_key(n)))
         .filter(|(_, k)| !k.is_empty())
         .collect();
-    let mut totals = Totals::default();
-    for c in calls {
-        let parsed = PhoneNumber::parse(&c.number).ok();
-        let key = digits_key(&c.number);
-        let hit = wanted.iter().any(|(p, k)| match (p, &parsed) {
-            (Some(a), Some(b)) => a.matches(b),
-            _ => !key.is_empty() && *k == key,
-        });
-        if hit {
-            totals.add(c);
-        }
-    }
-    totals
+    calls
+        .iter()
+        .filter(|c| {
+            let parsed = PhoneNumber::parse(&c.number).ok();
+            let key = digits_key(&c.number);
+            wanted.iter().any(|(p, k)| match (p, &parsed) {
+                (Some(a), Some(b)) => a.matches(b),
+                _ => !key.is_empty() && *k == key,
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// Totals over the calls whose number matches any of `numbers`.
+pub fn for_numbers(calls: &[StatCall], numbers: &[&str]) -> Totals {
+    totals_since(&calls_for_numbers(calls, numbers), i64::MIN)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -287,6 +291,63 @@ pub fn top_people(calls: &[StatCall], since_ms: i64, limit: usize) -> Vec<Person
     });
     out.truncate(limit);
     out
+}
+
+/// The span a statistics page looks at.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Range {
+    /// Since Monday 00:00 local.
+    #[default]
+    Week,
+    /// The last seven local days, today included.
+    Days7,
+    /// The last eight Monday-based weeks, the current one included.
+    Weeks8,
+}
+
+impl Range {
+    pub const ALL: [Self; 3] = [Self::Week, Self::Days7, Self::Weeks8];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Week => "This week",
+            Self::Days7 => "7 days",
+            Self::Weeks8 => "8 weeks",
+        }
+    }
+
+    /// The first instant (UTC ms) the range covers.
+    pub fn since_ms(self, now_ms: i64, tz_offset_s: i32) -> i64 {
+        let today = local_day(now_ms, tz_offset_s);
+        let first = match self {
+            Self::Week => today - weekday(today) as i64,
+            Self::Days7 => today - 6,
+            Self::Weeks8 => today - weekday(today) as i64 - 49,
+        };
+        (first * DAY_S - i64::from(tz_offset_s)) * 1000
+    }
+
+    /// The bars the page draws: seven days, or eight weeks.
+    pub fn bars(self, calls: &[StatCall], now_ms: i64, tz_offset_s: i32) -> Vec<DayBar> {
+        match self {
+            Self::Week | Self::Days7 => last_days(calls, now_ms, tz_offset_s, 7),
+            Self::Weeks8 => last_weeks(calls, now_ms, tz_offset_s, 8),
+        }
+    }
+}
+
+/// Totals over all calls since `since_ms`.
+pub fn totals_since(calls: &[StatCall], since_ms: i64) -> Totals {
+    let mut totals = Totals::default();
+    for c in calls.iter().filter(|c| c.date_ms >= since_ms) {
+        totals.add(c);
+    }
+    totals
+}
+
+/// [`for_numbers`] over the calls since `since_ms`.
+pub fn for_numbers_since(calls: &[StatCall], numbers: &[&str], since_ms: i64) -> Totals {
+    totals_since(&calls_for_numbers(calls, numbers), since_ms)
 }
 
 /// `0 min`, `45 s`, `12 min`, `1 h 05 min`, `26 h 10 min`.
@@ -518,5 +579,36 @@ mod tests {
         assert_eq!(top_people(&calls, 2, 2).len(), 2);
         assert_eq!(top[1].name.as_deref(), Some("Bea"));
         assert!(top.iter().all(|p| p.key != "999"));
+    }
+
+    #[test]
+    fn ranges_start_on_local_midnight() {
+        // Thursday 5 Nov 2026 14:00 UTC, tz +3: local Thursday 17:00.
+        let now = 1_793_887_200_000_i64;
+        let tz = 10_800;
+        let local = |ms: i64| (ms / 1000 + i64::from(tz)).rem_euclid(DAY_S);
+        for r in Range::ALL {
+            assert_eq!(local(r.since_ms(now, tz)), 0, "{r:?}");
+        }
+        let week = Range::Week.since_ms(now, tz);
+        let days7 = Range::Days7.since_ms(now, tz);
+        assert_eq!(now - week, (3 * 86_400 + 17 * 3600) * 1000);
+        assert_eq!(now - days7, (6 * 86_400 + 17 * 3600) * 1000);
+        assert_eq!(Range::Weeks8.since_ms(now, tz), week - 49 * 86_400 * 1000);
+        assert_eq!(Range::Week.bars(&[], now, tz).len(), 7);
+        assert_eq!(Range::Days7.bars(&[], now, tz).len(), 7);
+        assert_eq!(Range::Weeks8.bars(&[], now, tz).len(), 8);
+    }
+
+    #[test]
+    fn totals_since_skips_older_calls() {
+        let calls = [
+            call("1", 100, 30, StatDir::Incoming),
+            call("2", 10, 99, StatDir::Outgoing),
+        ];
+        let t = totals_since(&calls, 50);
+        assert_eq!((t.calls, t.talk_s), (1, 30));
+        assert_eq!(for_numbers_since(&calls, &["2"], 50).calls, 0);
+        assert_eq!(for_numbers_since(&calls, &["2"], 0).talk_s, 99);
     }
 }

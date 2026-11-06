@@ -1306,6 +1306,17 @@ impl PhoneApp {
             return;
         };
         let contact_id = sheet.contact.id;
+        if id == crate::stats_ui::CONTACT_SHARE {
+            let numbers: Vec<String> = sheet
+                .contact
+                .numbers
+                .iter()
+                .map(|n| n.raw.to_string())
+                .collect();
+            let name = sheet.contact.name.to_string();
+            self.stats_share(&numbers, &name, cx);
+            return;
+        }
         if let Some((true, i)) = crate::details_ui::details_line_index(id) {
             self.open_call_details(true, i, window, cx);
             return;
@@ -2455,6 +2466,20 @@ impl PhoneApp {
                     .child(del)
                     .into_any_element(),
             ));
+        }
+        if !sheet.chooser {
+            let numbers: Vec<&str> = sheet
+                .contact
+                .numbers
+                .iter()
+                .map(|n| n.raw.as_str())
+                .collect();
+            if let Some(vm) = self.stats_block_vm(&numbers, &sheet.contact.name, cx) {
+                children.push(reveal(
+                    4,
+                    self.stats_section(theme, &vm, crate::stats_ui::CONTACT_SHARE, cx),
+                ));
+            }
         }
         if !sheet.chooser {
             children.push(reveal(

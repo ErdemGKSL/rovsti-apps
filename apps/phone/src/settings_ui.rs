@@ -53,6 +53,8 @@ const TRACK_H: f32 = 31.0;
 const THUMB: f32 = 27.0;
 const SEG_W: f32 = 200.0;
 const SEG_H: f32 = 32.0;
+/// Title of the row (and page) of the call statistics.
+pub(crate) const CALL_STATS_TITLE: &str = "Call statistics";
 
 /// Every control the page can show. The discriminant indexes the spring table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,10 +88,11 @@ pub(crate) enum RowId {
     WhatsApp,
     SpeedDial,
     ShowFrequent,
+    CallStats,
 }
 
 impl RowId {
-    const COUNT: usize = 29;
+    const COUNT: usize = 30;
 
     const fn index(self) -> usize {
         self as usize
@@ -127,6 +130,8 @@ impl RowId {
             Self::WhatsApp => "set-whatsapp",
             Self::SpeedDial => "set-speed-dial",
             Self::ShowFrequent => "set-frequent",
+            // Not "set-st-...": that prefix belongs to the statistics page itself.
+            Self::CallStats => "set-call-stats",
         }
     }
 }
@@ -470,6 +475,20 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
                 None => row,
             }
         },
+        {
+            let row = Row::new(
+                RowId::CallStats,
+                CALL_STATS_TITLE,
+                Control::Link {
+                    value: None,
+                    icon: Icon::LucideChevronRight,
+                },
+            );
+            match crate::backup_ui::export_calls_note(key.calls_loaded) {
+                Some(note) => row.disabled(note),
+                None => row,
+            }
+        },
         Row::new(
             RowId::Import,
             "Import",
@@ -594,6 +613,7 @@ pub(crate) enum Sub {
     Replies,
     WhatsApp,
     SpeedDial,
+    Stats,
 }
 
 impl Sub {
@@ -604,6 +624,7 @@ impl Sub {
             Self::Replies => "set-qr-",
             Self::WhatsApp => "set-wa-",
             Self::SpeedDial => "set-sd-",
+            Self::Stats => "set-st-",
         }
     }
 
@@ -613,6 +634,7 @@ impl Sub {
             Self::Replies => "Quick replies",
             Self::WhatsApp => "WhatsApp",
             Self::SpeedDial => "Speed dial",
+            Self::Stats => CALL_STATS_TITLE,
         }
     }
 }
@@ -878,7 +900,7 @@ impl PhoneApp {
         match sub {
             Sub::Blocked => self.blocked_opened(cx),
             Sub::Replies => self.replies_opened(cx),
-            Sub::WhatsApp | Sub::SpeedDial => {}
+            Sub::WhatsApp | Sub::SpeedDial | Sub::Stats => {}
         }
         self.presses.release_all();
         self.update_back(window);
@@ -901,7 +923,7 @@ impl PhoneApp {
             Sub::Blocked => self.blocked_closed(cx),
             Sub::Replies => self.replies_closed(cx),
             Sub::SpeedDial => self.speed_dial_closed(),
-            Sub::WhatsApp => {}
+            Sub::WhatsApp | Sub::Stats => {}
         }
     }
 
@@ -968,7 +990,7 @@ impl PhoneApp {
         }
         if matches!(
             id,
-            "set-bk-back" | "set-qr-back" | "set-wa-back" | "set-sd-back"
+            "set-bk-back" | "set-qr-back" | "set-wa-back" | "set-sd-back" | "set-st-back"
         ) {
             self.settings_close_sub(window, cx);
             return;
@@ -996,6 +1018,8 @@ impl PhoneApp {
                 self.replies_tap(id, window, cx);
             } else if id.starts_with(Sub::SpeedDial.prefix()) {
                 self.speed_dial_tap(id, window, cx);
+            } else if id.starts_with(Sub::Stats.prefix()) {
+                self.stats_tap(id, cx);
             }
             return;
         };
@@ -1077,6 +1101,7 @@ impl PhoneApp {
             (RowId::Replies, _) => self.settings_open_sub(Sub::Replies, window, cx),
             (RowId::WhatsApp, _) => self.settings_open_sub(Sub::WhatsApp, window, cx),
             (RowId::SpeedDial, _) => self.settings_open_sub(Sub::SpeedDial, window, cx),
+            (RowId::CallStats, _) => self.settings_open_sub(Sub::Stats, window, cx),
             (RowId::BlockedAccess, _) => self.blocked_grant(cx),
             (RowId::Export, _) => self.backup_export(cx),
             (RowId::ExportCalls, _) => self.backup_export_calls(cx),
@@ -1675,6 +1700,7 @@ impl PhoneApp {
             Sub::Replies => "set-qr-back",
             Sub::WhatsApp => "set-wa-back",
             Sub::SpeedDial => "set-sd-back",
+            Sub::Stats => "set-st-back",
         };
         let back_press = self.presses.value(back_id);
         let back = div()
@@ -1714,6 +1740,7 @@ impl PhoneApp {
             Sub::Replies => self.replies_body(theme, window, cx),
             Sub::WhatsApp => self.whatsapp_body(),
             Sub::SpeedDial => self.speed_dial_body(theme, cx),
+            Sub::Stats => self.stats_body(theme, cx),
         };
         Some(
             div()
@@ -1897,10 +1924,10 @@ mod tests {
             .into_iter()
             .find(|s| s.title == "Data")
             .expect("present");
-        assert_eq!(data.rows.len(), 6);
-        assert_eq!(data.rows[3].id, RowId::ImportError);
-        assert_eq!(data.rows[4].id, RowId::DeleteHistory);
-        assert_eq!(data.rows[5].id, RowId::ResetSettings);
+        assert_eq!(data.rows.len(), 7);
+        assert_eq!(data.rows[4].id, RowId::ImportError);
+        assert_eq!(data.rows[5].id, RowId::DeleteHistory);
+        assert_eq!(data.rows[6].id, RowId::ResetSettings);
     }
 
     #[test]
@@ -1916,6 +1943,25 @@ mod tests {
         let ready = row(&k);
         assert!(ready.enabled);
         assert_eq!(ready.title, "Export call history (CSV)");
+        k.calls_loaded = false;
+        let waiting = row(&k);
+        assert!(!waiting.enabled);
+        assert_eq!(waiting.footnote, Some("Call history isn't loaded yet"));
+    }
+
+    #[test]
+    fn the_call_statistics_row_waits_for_the_call_log() {
+        let mut k = key();
+        let row = |k: &RowsKey| {
+            build_sections(k)
+                .into_iter()
+                .flat_map(|s| s.rows)
+                .find(|r| r.id == RowId::CallStats)
+                .expect("present")
+        };
+        let ready = row(&k);
+        assert!(ready.enabled);
+        assert_eq!(ready.title, "Call statistics");
         k.calls_loaded = false;
         let waiting = row(&k);
         assert!(!waiting.enabled);
@@ -1960,13 +2006,14 @@ mod tests {
             [
                 RowId::Export,
                 RowId::ExportCalls,
+                RowId::CallStats,
                 RowId::Import,
                 RowId::DeleteHistory,
                 RowId::ResetSettings
             ]
         );
-        assert_eq!(data.rows[3].control, Control::Danger);
-        assert_eq!(&*data.rows[3].aria, "Delete all call history");
+        assert_eq!(data.rows[4].control, Control::Danger);
+        assert_eq!(&*data.rows[4].aria, "Delete all call history");
     }
 
     #[test]
@@ -2044,6 +2091,7 @@ mod tests {
             RowId::WhatsApp,
             RowId::SpeedDial,
             RowId::ShowFrequent,
+            RowId::CallStats,
         ];
         assert_eq!(all.len(), RowId::COUNT);
         for (i, a) in all.iter().enumerate() {
@@ -2102,7 +2150,13 @@ mod tests {
 
     #[test]
     fn second_level_pages_have_distinct_prefixes_that_row_keys_do_not_use() {
-        let subs = [Sub::Blocked, Sub::Replies, Sub::WhatsApp, Sub::SpeedDial];
+        let subs = [
+            Sub::Blocked,
+            Sub::Replies,
+            Sub::WhatsApp,
+            Sub::SpeedDial,
+            Sub::Stats,
+        ];
         for (i, a) in subs.iter().enumerate() {
             assert!(a.prefix().starts_with("set-") && a.prefix().ends_with('-'));
             for b in &subs[i + 1..] {
@@ -2117,11 +2171,14 @@ mod tests {
             RowId::Blocked,
             RowId::WhatsApp,
             RowId::SpeedDial,
+            RowId::CallStats,
         ];
         for row in rows {
             assert!(subs.iter().all(|s| !row.key().starts_with(s.prefix())));
         }
         assert_eq!(Sub::SpeedDial.prefix(), "set-sd-");
+        assert_eq!(Sub::Stats.prefix(), "set-st-");
+        assert_eq!(Sub::Stats.title(), "Call statistics");
         assert_eq!(Sub::WhatsApp.prefix(), "set-wa-");
         assert_eq!(Sub::WhatsApp.title(), "WhatsApp");
     }

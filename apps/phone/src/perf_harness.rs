@@ -878,6 +878,34 @@ mod tests {
         });
     }
 
+    /// U7: Settings > Call statistics draws its seven day bars inside the
+    /// viewport with the sample call log.
+    #[test]
+    fn the_call_statistics_page_draws_seven_bars_inside_the_viewport() {
+        use crate::fx::A_STAT_BAR;
+        let mut rig = Rig::new();
+        rig.settle();
+        rig.with_app(|app, window, cx| {
+            app.settings_open(window, cx);
+            app.settings_open_sub(crate::settings_ui::Sub::Stats, window, cx);
+        });
+        rig.settle();
+        rig.draw();
+        let (bars, size) = rig.with_app(|app, window, _| {
+            let bars: Vec<_> = (0..7).map(|i| app.marks.get(A_STAT_BAR + i)).collect();
+            (bars, window.viewport_size())
+        });
+        let (w, h) = (f32::from(size.width), f32::from(size.height));
+        for (i, bar) in bars.into_iter().enumerate() {
+            let r = rect(bar.unwrap_or_else(|| panic!("bar {i} not drawn")));
+            assert!(r.w > 0.0 && r.h > 0.0, "bar {i} is empty: {r:?}");
+            assert!(
+                r.x >= -0.5 && r.y >= -0.5 && r.x + r.w <= w + 0.5 && r.y + r.h <= h + 0.5,
+                "bar {i} {r:?} outside {w}x{h}"
+            );
+        }
+    }
+
     /// Story 12.3: with no spring moving and no call, nothing is drawn for 30 s
     /// on any tab and no timer wakes the app.
     #[test]

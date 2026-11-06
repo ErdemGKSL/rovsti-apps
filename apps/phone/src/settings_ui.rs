@@ -29,7 +29,7 @@ use rovsti_ui::{
     moments::Fade,
     motion_tokens,
     spring::Spring,
-    theme,
+    theme::{self, call_colors},
     tokens::{Theme, mix, radius, typography},
     touch::touch_surface,
 };
@@ -72,6 +72,7 @@ pub(crate) enum RowId {
     Export,
     Import,
     ImportError,
+    DeleteHistory,
     Forwarding,
     Accessibility,
     DefaultApps,
@@ -86,7 +87,7 @@ pub(crate) enum RowId {
 }
 
 impl RowId {
-    const COUNT: usize = 26;
+    const COUNT: usize = 27;
 
     const fn index(self) -> usize {
         self as usize
@@ -109,6 +110,7 @@ impl RowId {
             Self::Export => "set-export",
             Self::Import => "set-import",
             Self::ImportError => "set-import-error",
+            Self::DeleteHistory => "set-delete-history",
             Self::Forwarding => "set-forwarding",
             Self::Accessibility => "set-access",
             Self::DefaultApps => "set-default-apps",
@@ -140,6 +142,8 @@ pub(crate) enum Control {
     Info(SharedString),
     /// The inline red line of a refused import.
     Error(SharedString),
+    /// A destructive text-only row (red title, no trailing control).
+    Danger,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -458,6 +462,11 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
             Control::Error(message.into()),
         ));
     }
+    data.push(Row::new(
+        RowId::DeleteHistory,
+        "Delete all call history",
+        Control::Danger,
+    ));
     out.push(Section {
         title: "Data",
         rows: data,
@@ -543,6 +552,7 @@ fn aria_for(row: &Row, settings: &Settings, system_tones: bool) -> SharedString 
         },
         Control::Info(v) => format!("{}, {v}", row.title),
         Control::Error(message) => message.to_string(),
+        Control::Danger => row.title.to_owned(),
     }
     .into()
 }
@@ -1037,6 +1047,9 @@ impl PhoneApp {
             (RowId::BlockedAccess, _) => self.blocked_grant(cx),
             (RowId::Export, _) => self.backup_export(cx),
             (RowId::Import, _) => self.backup_import(cx),
+            (RowId::DeleteHistory, _) => {
+                self.open_confirm_delete(crate::history_ui::DeleteScope::All, cx);
+            }
             _ => {}
         }
         cx.notify();
@@ -1314,7 +1327,11 @@ impl PhoneApp {
         let colors = theme::colors(theme);
         let id = SharedString::new_static(row.id.key());
         let press = self.presses.value(row.id.key());
-        let tappable = row.enabled && matches!(row.control, Control::Toggle | Control::Link { .. });
+        let tappable = row.enabled
+            && matches!(
+                row.control,
+                Control::Toggle | Control::Link { .. } | Control::Danger
+            );
         if let Control::Error(message) = &row.control {
             return div()
                 .id(id)
@@ -1334,7 +1351,11 @@ impl PhoneApp {
             div()
                 .text_size(typography::HEADLINE.size)
                 .font_weight(typography::HEADLINE.weight)
-                .text_color(title_color)
+                .text_color(if row.control == Control::Danger && row.enabled {
+                    call_colors(theme).danger
+                } else {
+                    title_color
+                })
                 .child(row.title),
         );
         if let Some(note) = row.footnote {
@@ -1377,13 +1398,13 @@ impl PhoneApp {
                 })
                 .child(value.clone())
                 .into_any_element(),
-            Control::Error(_) => div().into_any_element(),
+            Control::Error(_) | Control::Danger => div().into_any_element(),
         };
         let mut el = div()
             .id(id.clone())
             .role(match row.control {
                 Control::Toggle => Role::Switch,
-                Control::Link { .. } => Role::Button,
+                Control::Link { .. } | Control::Danger => Role::Button,
                 _ => Role::Row,
             })
             .aria_label(row.aria.clone())
@@ -1821,8 +1842,21 @@ mod tests {
             .into_iter()
             .find(|s| s.title == "Data")
             .expect("present");
-        assert_eq!(data.rows.len(), 3);
+        assert_eq!(data.rows.len(), 4);
         assert_eq!(data.rows[2].id, RowId::ImportError);
+        assert_eq!(data.rows[3].id, RowId::DeleteHistory);
+    }
+
+    #[test]
+    fn delete_history_follows_export_and_import_as_a_danger_row() {
+        let data = build_sections(&key())
+            .into_iter()
+            .find(|s| s.title == "Data")
+            .expect("present");
+        let ids: Vec<RowId> = data.rows.iter().map(|r| r.id).collect();
+        assert_eq!(ids, [RowId::Export, RowId::Import, RowId::DeleteHistory]);
+        assert_eq!(data.rows[2].control, Control::Danger);
+        assert_eq!(&*data.rows[2].aria, "Delete all call history");
     }
 
     #[test]
@@ -1886,6 +1920,7 @@ mod tests {
             RowId::Export,
             RowId::Import,
             RowId::ImportError,
+            RowId::DeleteHistory,
             RowId::Forwarding,
             RowId::Accessibility,
             RowId::DefaultApps,

@@ -704,7 +704,6 @@ impl WaCallUi {
     }
 
     /// Deletes the whole WhatsApp history. Returns how many calls went.
-    #[allow(dead_code)] // as above
     pub fn forget_all_calls(&mut self, cx: &mut Context<Self>) -> usize {
         let count = self.history.forget_all();
         self.history_changed(cx);

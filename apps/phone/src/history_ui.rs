@@ -30,7 +30,6 @@ pub(crate) enum DeleteScope {
         who: SharedString,
     },
     /// The whole call log (opened from Settings > Data).
-    #[allow(dead_code, reason = "Settings > Data opens it (S6)")]
     All,
 }
 
@@ -89,10 +88,43 @@ impl PhoneApp {
         if id != YES {
             return;
         }
-        if let Some(scope @ DeleteScope::Numbers { .. }) = scope {
-            let (ids, wa_ids) = self.scope_ids(&scope, cx);
-            self.delete_call_ids(ids, wa_ids, window, cx);
+        match scope {
+            Some(scope @ DeleteScope::Numbers { .. }) => {
+                let (ids, wa_ids) = self.scope_ids(&scope, cx);
+                self.delete_call_ids(ids, wa_ids, window, cx);
+            }
+            Some(DeleteScope::All) => self.delete_all_history(window, cx),
+            None => {}
         }
+    }
+
+    /// Settings > Data > Delete all call history, after the confirm sheet.
+    fn delete_all_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        let task = self.backend.update(cx, |b, cx| b.delete_all_calls(cx));
+        cx.spawn(async move |this, cx| {
+            let outcome = task.await;
+            this.update(cx, |this, cx| {
+                match outcome {
+                    backend::WriteOutcome::Done(_) => {
+                        this.wa_call.update(cx, |ui, cx| {
+                            ui.forget_all_calls(cx);
+                        });
+                        this.show_notice_pill("Call history deleted", None, false, cx);
+                    }
+                    backend::WriteOutcome::Permission => this.show_pill_action(
+                        "Allow call log access",
+                        "Allow",
+                        crate::block_ui::PillAction::GrantCallLog,
+                        cx,
+                    ),
+                    _ => this.show_notice_pill("Not allowed on this phone", None, false, cx),
+                }
+                this.sync_recents(cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// The confirm sheet.

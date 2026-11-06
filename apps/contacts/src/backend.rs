@@ -171,7 +171,7 @@ pub(crate) fn delete_group(group_id: i64) -> Result<(), String> {
     done(contacts_edit::delete_group(group_id))
 }
 
-/// Every contact that has a number as vCard text, and how many that is.
+/// Every contact (with or without a number) as vCard text, and how many that is.
 pub(crate) fn export_text() -> Result<(String, usize), String> {
     let mut contacts = match decode::<FullPayload>(contacts_edit::full()) {
         Ok(payload) => payload.contacts,

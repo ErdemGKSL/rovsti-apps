@@ -99,6 +99,11 @@ pub fn send_sms_to(number: &str) -> Result<bool> {
     bridge::call_bool_str("sendSmsTo", number)
 }
 
+/// Opens the e-mail composer for `address` (`mailto:`). `false` when no app answered.
+pub fn send_email_to(address: &str) -> Result<bool> {
+    bridge::call_bool_str("sendEmailTo", address)
+}
+
 /// Puts `text` on the clipboard.
 pub fn copy_text(text: &str) -> Result<bool> {
     bridge::call_bool_str("copyText", text)
@@ -157,6 +162,7 @@ mod tests {
             assert!(matches!(open_system(page), Err(Error::Unsupported)));
         }
         assert!(matches!(send_sms_to("1"), Err(Error::Unsupported)));
+        assert!(matches!(send_email_to("a@b.c"), Err(Error::Unsupported)));
         assert!(matches!(copy_text("x"), Err(Error::Unsupported)));
         assert!(matches!(share_text("x"), Err(Error::Unsupported)));
         assert!(matches!(hearing_aid_compatible(), Err(Error::Unsupported)));

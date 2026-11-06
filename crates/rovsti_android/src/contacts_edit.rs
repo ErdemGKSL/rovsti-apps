@@ -17,7 +17,7 @@ pub fn detail(contact_id: i64) -> Result<String> {
     bridge::call_string("contactDetail", &[Arg::Str(&contact_id.to_string())])
 }
 
-/// Every contact that has a number, for export (`{contacts}`).
+/// Every contact, number or not, for export (`{contacts}`).
 pub fn full() -> Result<String> {
     bridge::call_string("contactsFull", &[])
 }
@@ -52,6 +52,17 @@ pub fn save_group(group_id: i64, title: &str, account: &str) -> Result<String> {
             Arg::Str(title),
             Arg::Str(account),
         ],
+    )
+}
+
+/// Adds and removes group members from `change_json`
+/// (`{add:[contact_id], remove:[contact_id]}`, a `SelectionChange`) in one batch;
+/// answers `{added, removed, skipped}`. Contacts with no raw contact in the
+/// group's account are skipped.
+pub fn set_group_members(group_id: i64, change_json: &str) -> Result<String> {
+    bridge::call_string(
+        "setContactGroupMembers",
+        &[Arg::Str(&group_id.to_string()), Arg::Str(change_json)],
     )
 }
 
@@ -105,6 +116,10 @@ mod tests {
         assert!(matches!(groups(), Err(Error::Unsupported)));
         assert!(matches!(
             save_group(0, "Family", ""),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(
+            set_group_members(1, "{}"),
             Err(Error::Unsupported)
         ));
         assert!(matches!(accounts(), Err(Error::Unsupported)));

@@ -197,7 +197,7 @@ object ContactsEdit {
         ProviderJson.ok(JSONObject().put("contact", builder.toJson()))
     }
 
-    /** `{contacts: [ContactDraft]}` for every contact that has a number: the export. */
+    /** `{contacts: [ContactDraft]}` for every contact, with or without a number: the export. */
     fun fullJson(context: Context): String = guard {
         val builders = LinkedHashMap<Long, DraftBuilder>()
         context.contentResolver.query(
@@ -208,7 +208,7 @@ object ContactsEdit {
             while (c.moveToNext()) builders.getOrPut(c.getLong(0)) { DraftBuilder(c.getLong(0)) }.add(c, 1)
         }
         val contacts = JSONArray()
-        for (b in builders.values) if (b.numbers.length() > 0) contacts.put(b.toJson())
+        for (b in builders.values) contacts.put(b.toJson())
         ProviderJson.ok(JSONObject().put("contacts", contacts))
     }
 
@@ -465,6 +465,71 @@ object ContactsEdit {
             val uri = resolver.insert(Groups.CONTENT_URI, values)
             if (uri != null) ProviderJson.ok(JSONObject().put("id", ContentUris.parseId(uri))) else ProviderJson.error("refused")
         }
+    }
+
+    /**
+     * Applies `{add:[contactId], remove:[contactId]}` to the group [groupId] in one `applyBatch`;
+     * the answer is `{added, removed, skipped}`. A contact without a live raw contact in the
+     * group's account is skipped, and one already in the group is left alone.
+     */
+    fun setGroupMembers(context: Context, groupId: Long, json: String): String = guard {
+        val resolver = context.contentResolver
+        val account = resolver.query(
+            Groups.CONTENT_URI, arrayOf(Groups.ACCOUNT_TYPE, Groups.ACCOUNT_NAME),
+            "${Groups._ID} = ?", arrayOf(groupId.toString()), null,
+        )?.use { if (it.moveToFirst()) accountKey(it.getString(0), it.getString(1)) else null }
+            ?: return ProviderJson.error("not_found")
+        val change = JSONObject(json)
+        val ops = ArrayList<ContentProviderOperation>()
+        var added = 0
+        var removed = 0
+        var skipped = 0
+        for (contactId in longs(change.optJSONArray("add"))) {
+            var target: Long? = null
+            var member = false
+            resolver.query(
+                RawContacts.CONTENT_URI,
+                arrayOf(RawContacts._ID, RawContacts.ACCOUNT_TYPE, RawContacts.ACCOUNT_NAME),
+                "${RawContacts.CONTACT_ID} = ? AND ${RawContacts.DELETED} = 0", arrayOf(contactId.toString()),
+                "${RawContacts._ID} ASC",
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    if (target == null && accountKey(c.getString(1), c.getString(2)) == account) target = c.getLong(0)
+                }
+            }
+            val rawId = target
+            if (rawId == null) {
+                skipped++
+                continue
+            }
+            resolver.query(
+                Data.CONTENT_URI, arrayOf(Data._ID),
+                "${Data.CONTACT_ID} = ? AND ${Data.MIMETYPE} = ? AND ${GroupMembership.GROUP_ROW_ID} = ?",
+                arrayOf(contactId.toString(), GroupMembership.CONTENT_ITEM_TYPE, groupId.toString()), null,
+            )?.use { member = it.moveToFirst() }
+            if (member) continue
+            ops.add(
+                ContentProviderOperation.newInsert(Data.CONTENT_URI)
+                    .withValue(Data.RAW_CONTACT_ID, rawId)
+                    .withValue(Data.MIMETYPE, GroupMembership.CONTENT_ITEM_TYPE)
+                    .withValue(GroupMembership.GROUP_ROW_ID, groupId)
+                    .build(),
+            )
+            added++
+        }
+        for (contactId in longs(change.optJSONArray("remove"))) {
+            ops.add(
+                ContentProviderOperation.newDelete(Data.CONTENT_URI)
+                    .withSelection(
+                        "${Data.CONTACT_ID} = ? AND ${Data.MIMETYPE} = ? AND ${GroupMembership.GROUP_ROW_ID} = ?",
+                        arrayOf(contactId.toString(), GroupMembership.CONTENT_ITEM_TYPE, groupId.toString()),
+                    )
+                    .build(),
+            )
+            removed++
+        }
+        if (ops.isNotEmpty()) resolver.applyBatch(ContactsContract.AUTHORITY, ops)
+        ProviderJson.ok(JSONObject().put("added", added).put("removed", removed).put("skipped", skipped))
     }
 
     fun deleteGroup(context: Context, groupId: Long): Boolean = try {

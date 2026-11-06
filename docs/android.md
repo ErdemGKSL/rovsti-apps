@@ -269,3 +269,11 @@ Rust (`backend::contact_photo`, background executor only) reads and decodes the 
 `photos` module keeps 64 decoded `RenderImage`s in an LRU keyed by contact id. Avatars never
 decode while painting. A photo edited in Contacts shows after the cached file is older than
 10 minutes and the LRU entry was evicted or the app restarted.
+
+## Contacts bridge additions
+
+`RovstiBridge.setContactGroupMembers(groupId, json)` (`ContactsEdit.setGroupMembers`) applies
+`{add:[contactId], remove:[contactId]}` to a group in one `applyBatch` and answers
+`{added, removed, skipped}`; contacts with no raw contact in the group's account are skipped.
+`RovstiBridge.sendEmailTo(address)` opens the e-mail composer (`mailto:`). `contactsFull` now
+exports every contact, not only those with a number.

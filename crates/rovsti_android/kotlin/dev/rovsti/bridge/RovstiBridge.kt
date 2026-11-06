@@ -271,6 +271,10 @@ object RovstiBridge {
     @JvmStatic fun saveContactGroup(groupId: String, title: String, account: String): String =
         groupId.toLongOrNull()?.let { ContactsEdit.saveGroup(app, it, title, account) } ?: ProviderJson.error("not_found")
 
+    /** [groupId] is a decimal string; [json] is `{add:[id], remove:[id]}`; the answer is `{added, removed, skipped}`. */
+    @JvmStatic fun setContactGroupMembers(groupId: String, json: String): String =
+        groupId.toLongOrNull()?.let { ContactsEdit.setGroupMembers(app, it, json) } ?: ProviderJson.error("not_found")
+
     /** The accounts contacts can be saved to; the answer is `{accounts}`. */
     @JvmStatic fun contactAccounts(): String = ContactsEdit.accountsJson(app)
 
@@ -710,6 +714,10 @@ object RovstiBridge {
     /** Story 14.4: the SMS composer for [number] (`smsto:`). */
     @JvmStatic
     fun sendSmsTo(number: String): Boolean = start(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", number, null)))
+
+    /** The e-mail composer for [address] (`mailto:`). */
+    @JvmStatic
+    fun sendEmailTo(address: String): Boolean = start(Intent(Intent.ACTION_SENDTO, Uri.fromParts("mailto", address, null)))
 
     /** Story 14.4: puts [text] on the clipboard. */
     @JvmStatic

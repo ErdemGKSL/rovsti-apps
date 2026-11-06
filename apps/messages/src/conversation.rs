@@ -3134,7 +3134,9 @@ fn cache_stem(id: &str) -> String {
 /// The pill text for the end of the download and "Save as" hand-off, and
 /// whether the sheet is open (its answer is still to come). `Err(true)` in
 /// the inner result means the seam is unsupported (desktop).
-fn save_outcome(result: Result<Result<bool, bool>, String>) -> (Option<&'static str>, bool) {
+pub(crate) fn save_outcome(
+    result: Result<Result<bool, bool>, String>,
+) -> (Option<&'static str>, bool) {
     match result {
         Ok(Ok(true)) => (None, true),
         Ok(Err(true)) => (Some("Saving needs an Android phone."), false),

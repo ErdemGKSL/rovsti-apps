@@ -10,6 +10,7 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TextInputAction,
     TextInputPurpose, Window, div, img, list, prelude::*, px,
 };
+use rovsti_android::{Error as AndroidError, documents};
 use rovsti_core::{
     ThreadId,
     sms::{DeliveryState, SmsSend, SmsSimsPayload, SmsStatus, segments},
@@ -122,6 +123,8 @@ pub struct SmsConversation {
     muted: bool,
     /// The bubble (by `message_key`) whose copy pills are showing.
     selected: Option<u64>,
+    /// A picture or file is being handed to the "Save as" sheet.
+    saving: bool,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -182,6 +185,7 @@ impl SmsConversation {
             strip_expanded: false,
             muted: false,
             selected: None,
+            saving: false,
             _subscriptions: subscriptions,
         };
         this.fill_from_thread(cx);
@@ -297,6 +301,15 @@ impl SmsConversation {
             }
             BackendEvent::Document(result) if result.op == DocumentOp::Attachment => {
                 self.on_attachment(result, cx);
+            }
+            // The answer of "Save as" for a picture or file of a message.
+            BackendEvent::Document(result)
+                if result.op == DocumentOp::ExportMessages && self.saving =>
+            {
+                self.saving = false;
+                let notice = if result.ok { "Saved" } else { "Not saved" };
+                cx.emit(SmsConversationEvent::Notice(notice));
+                cx.notify();
             }
             _ => {}
         }
@@ -588,6 +601,38 @@ impl SmsConversation {
         cx.notify();
     }
 
+    /// Hands one picture or file of a message to the "Save as" sheet.
+    fn save_part(&mut self, part: SavePart, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.rows_dirty = true;
+        if self.saving {
+            cx.emit(SmsConversationEvent::Notice("Already saving a file"));
+            cx.notify();
+            return;
+        }
+        self.saving = true;
+        let task = cx.background_executor().spawn(async move {
+            documents::export_file(&part.name, &part.mime, &part.path)
+                .map_err(|e| matches!(e, AndroidError::Unsupported))
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let (notice, started) = crate::conversation::save_outcome(Ok(result));
+                if !started {
+                    this.saving = false;
+                }
+                if let Some(notice) = notice {
+                    cx.emit(SmsConversationEvent::Notice(notice));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
     fn pick_attachment(&mut self, cx: &mut Context<Self>) {
         self.awaiting_attachment = true;
         self.notice = None;
@@ -804,6 +849,7 @@ impl SmsConversation {
                 .child(meta),
         );
         let key = message_key(item);
+        let has_files = !saveable_parts(item).is_empty();
         if let Some(local_id) = retry {
             bubble = bubble
                 .on_click(cx.listener(move |this, _, _, cx| this.retry(local_id, cx)))
@@ -814,8 +860,13 @@ impl SmsConversation {
                 }));
         } else if selectable(item) {
             bubble = bubble
-                .on_click(cx.listener(|this, _, _, cx| {
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    // A tap on a picture opens the selection so it can be saved.
                     if this.selected.take().is_some() {
+                        this.rows_dirty = true;
+                        cx.notify();
+                    } else if has_files {
+                        this.selected = Some(key);
                         this.rows_dirty = true;
                         cx.notify();
                     }
@@ -874,6 +925,18 @@ impl SmsConversation {
                         .id(("sms-share", index))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.share(shared.clone(), cx);
+                        })),
+                );
+            }
+            let files = saveable_parts(item);
+            let total = files.len();
+            for (n, part) in files.into_iter().enumerate() {
+                let label = save_label(&part.mime, total, n + 1);
+                pills = pills.child(
+                    glass_pill(theme, label)
+                        .id(("sms-save", index * 100 + n))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.save_part(part.clone(), cx);
                         })),
                 );
             }
@@ -1249,7 +1312,6 @@ pub fn failed_local(item: &SmsItem) -> Option<u64> {
 
 /// One MMS picture or file that can be saved to the phone's storage.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct SavePart {
     pub name: String,
     pub mime: String,
@@ -1257,7 +1319,6 @@ pub struct SavePart {
 }
 
 /// The parts of a message that are files (not text or the SMIL layout).
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn saveable_parts(item: &SmsItem) -> Vec<SavePart> {
     item.parts
         .iter()
@@ -1275,9 +1336,21 @@ pub fn saveable_parts(item: &SmsItem) -> Vec<SavePart> {
         .collect()
 }
 
+/// The Save pill text: "Save picture" for a lone image, "Save file" for a lone
+/// other file, else "Save 1", "Save 2" and so on.
+pub fn save_label(mime: &str, total: usize, number: usize) -> String {
+    match (
+        total,
+        mime.trim().to_ascii_lowercase().starts_with("image/"),
+    ) {
+        (1, true) => "Save picture".to_owned(),
+        (1, false) => "Save file".to_owned(),
+        _ => format!("Save {number}"),
+    }
+}
+
 /// `mms-20261105-140500-1.jpg`: the UTC time of the message, the part number
 /// and the extension of the type.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn mms_save_name(content_type: &str, at_ms: i64, number: usize) -> String {
     let secs = at_ms.div_euclid(1000);
     let (year, month, day) = crate::conversation::civil_from_days(secs.div_euclid(86_400));
@@ -1473,6 +1546,13 @@ mod tests {
         assert!(parts[0].name.starts_with("mms-") && parts[0].name.ends_with("-1.jpg"));
         m.state = DeliveryState::Pending;
         assert!(!selectable(&m));
+    }
+
+    #[test]
+    fn save_labels() {
+        assert_eq!(save_label("image/jpeg", 1, 1), "Save picture");
+        assert_eq!(save_label("application/pdf", 1, 1), "Save file");
+        assert_eq!(save_label("image/png", 3, 2), "Save 2");
     }
 
     #[test]

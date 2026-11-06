@@ -9,6 +9,7 @@ mod backend;
 mod backup_ui;
 mod conversation;
 mod drafts;
+mod files;
 // Only the Android JNI entry calls `handle`; desktop builds exercise it from the tests.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod headless;

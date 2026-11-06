@@ -29,8 +29,9 @@ use rovsti_ui::{
     tokens::{Theme, typography},
 };
 use rovsti_wa_proto::{
-    ChatActionKind, ChatMeta, DeliveryStatus, MUTED_FOREVER, MessageBody, MessageMeta, RichChat,
-    WaMessage, event::ReceiptKind, is_status_chat, jid_user, meta::body_preview, to_rovsti,
+    ChatActionKind, ChatMeta, DeliveryStatus, InstanceState, MUTED_FOREVER, MessageBody,
+    MessageMeta, RichChat, WaMessage, event::ReceiptKind, is_status_chat, jid_user,
+    meta::body_preview, to_rovsti,
 };
 use rovsti_wa_ui::{display_name, photo_avatar};
 
@@ -279,6 +280,53 @@ pub fn preview_tick(info: &WaChatInfo) -> Option<Tick> {
         .filter(|l| l.from_me && !l.meta.revoked)?;
     let voice = last.meta.media.as_ref().is_some_and(|m| m.voice_note);
     Some(Tick::of_status(last.meta.status, voice))
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+/// The action that takes `action` back, given the chat's meta `before` it
+/// was applied. `None` for mark-read (nothing to undo from a pill).
+pub fn undo_of(action: &ChatActionKind, before: &ChatMeta) -> Option<ChatActionKind> {
+    match *action {
+        ChatActionKind::Archive { archived } => Some(ChatActionKind::Archive {
+            archived: !archived,
+        }),
+        ChatActionKind::Pin { pinned } => Some(ChatActionKind::Pin { pinned: !pinned }),
+        ChatActionKind::Mute { .. } => Some(ChatActionKind::Unmute),
+        ChatActionKind::Unmute => before.muted_until_ms.map(|until| ChatActionKind::Mute {
+            until_ms: (until != MUTED_FOREVER).then_some(until),
+        }),
+        ChatActionKind::MarkRead { .. } => None,
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+/// What to tell the user after `action`; `None` when the row itself shows the
+/// change (pin, mark read).
+pub fn action_notice(action: &ChatActionKind) -> Option<&'static str> {
+    match *action {
+        ChatActionKind::Archive { archived: true } => Some("Archived"),
+        ChatActionKind::Archive { archived: false } => Some("Unarchived"),
+        ChatActionKind::Mute { .. } => Some("Muted"),
+        ChatActionKind::Unmute => Some("Unmuted"),
+        ChatActionKind::Pin { .. } | ChatActionKind::MarkRead { .. } => None,
+    }
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+/// The inbox banner for the WhatsApp connection; `None` when there is nothing
+/// to say (not linked, connected, or still linking).
+pub fn wa_banner(linked: bool, state: Option<InstanceState>) -> Option<&'static str> {
+    if !linked {
+        return None;
+    }
+    match state {
+        Some(InstanceState::Connected | InstanceState::Linking) => None,
+        Some(InstanceState::Disconnected) | None => Some("WhatsApp is offline. Reconnecting…"),
+        Some(InstanceState::LoggedOut) => {
+            Some("WhatsApp logged this phone out. Tap to link again.")
+        }
+        Some(InstanceState::Banned) => Some("WhatsApp blocked this account. Tap for details."),
+    }
 }
 
 /// What a chat action does to the chat before the gateway confirms it (its
@@ -966,6 +1014,89 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn undo_reverses_archive_pin_and_mute() {
+        let none = ChatMeta::default();
+        assert_eq!(
+            undo_of(&ChatActionKind::Archive { archived: true }, &none),
+            Some(ChatActionKind::Archive { archived: false })
+        );
+        assert_eq!(
+            undo_of(&ChatActionKind::Pin { pinned: false }, &none),
+            Some(ChatActionKind::Pin { pinned: true })
+        );
+        assert_eq!(
+            undo_of(&ChatActionKind::Mute { until_ms: Some(5) }, &none),
+            Some(ChatActionKind::Unmute)
+        );
+        assert_eq!(undo_of(&ChatActionKind::Unmute, &none), None);
+        let forever = ChatMeta {
+            muted_until_ms: Some(MUTED_FOREVER),
+            ..ChatMeta::default()
+        };
+        assert_eq!(
+            undo_of(&ChatActionKind::Unmute, &forever),
+            Some(ChatActionKind::Mute { until_ms: None })
+        );
+        let timed = ChatMeta {
+            muted_until_ms: Some(9_000),
+            ..ChatMeta::default()
+        };
+        assert_eq!(
+            undo_of(&ChatActionKind::Unmute, &timed),
+            Some(ChatActionKind::Mute {
+                until_ms: Some(9_000)
+            })
+        );
+        assert_eq!(
+            undo_of(&ChatActionKind::MarkRead { read: true }, &none),
+            None
+        );
+    }
+
+    #[test]
+    fn notices_only_for_hidden_changes() {
+        let n = action_notice;
+        assert_eq!(
+            n(&ChatActionKind::Archive { archived: true }),
+            Some("Archived")
+        );
+        assert_eq!(
+            n(&ChatActionKind::Archive { archived: false }),
+            Some("Unarchived")
+        );
+        assert_eq!(n(&ChatActionKind::Mute { until_ms: None }), Some("Muted"));
+        assert_eq!(n(&ChatActionKind::Unmute), Some("Unmuted"));
+        assert_eq!(n(&ChatActionKind::Pin { pinned: true }), None);
+        assert_eq!(n(&ChatActionKind::MarkRead { read: false }), None);
+    }
+
+    #[test]
+    fn banner_only_when_linked_and_not_connected() {
+        use InstanceState::*;
+        for state in [None, Some(Connected), Some(Linking), Some(LoggedOut)] {
+            assert_eq!(wa_banner(false, state), None);
+        }
+        assert_eq!(wa_banner(true, Some(Connected)), None);
+        assert_eq!(wa_banner(true, Some(Linking)), None);
+        assert!(wa_banner(true, None).expect("banner").contains("offline"));
+        assert!(
+            wa_banner(true, Some(Disconnected))
+                .expect("banner")
+                .contains("offline")
+        );
+        assert!(
+            wa_banner(true, Some(LoggedOut))
+                .expect("banner")
+                .contains("link again")
+        );
+        assert!(
+            wa_banner(true, Some(Banned))
+                .expect("banner")
+                .contains("blocked")
+        );
+    }
 
     const NOW: i64 = 1_793_887_500_000; // 2026-11-05 14:05 UTC
     const MIN: i64 = 60_000;

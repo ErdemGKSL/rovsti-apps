@@ -211,41 +211,58 @@ fn is_short_code(sender: &str) -> bool {
 /// no regex: `http(s)://`, `www.`, or a bare `host.tld` with a path or a
 /// well-known TLD.
 pub fn contains_link(body: &str) -> bool {
+    !links(body).is_empty()
+}
+
+/// The links in `body`, in order, without duplicates, ready to open: the
+/// original case is kept and `https://` is prepended when a token has no
+/// scheme. Uses the same scanner as [`contains_link`].
+pub fn links(body: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in body.split(|c: char| c.is_whitespace()) {
+        if let Some(url) = link_token(raw)
+            && !out.contains(&url)
+        {
+            out.push(url);
+        }
+    }
+    out
+}
+
+/// The openable URL for one whitespace-free token, if it looks like a link.
+fn link_token(raw: &str) -> Option<String> {
     const TLDS: [&str; 30] = [
         "com", "net", "org", "io", "ly", "me", "co", "tr", "info", "biz", "xyz", "top", "link",
         "click", "app", "gl", "cc", "ru", "cn", "tk", "ml", "ga", "cf", "gq", "online", "site",
         "shop", "live", "icu", "vip",
     ];
-    body.split(|c: char| c.is_whitespace()).any(|raw| {
-        let token = raw
-            .trim_matches(|c: char| "()<>[]{}\"'`,;!?.".contains(c))
-            .to_ascii_lowercase();
-        if token.starts_with("http://") || token.starts_with("https://") {
-            return token.len() > 8;
-        }
-        if token.starts_with("www.") {
-            return token.len() > 6;
-        }
-        let (host, rest) = match token.find(['/', '?', '#']) {
-            Some(i) => (&token[..i], Some(&token[i..])),
-            None => (token.as_str(), None),
-        };
-        let labels: Vec<&str> = host.split('.').collect();
-        if labels.len() < 2 {
-            return false;
-        }
-        let host_ok = labels.iter().all(|l| {
-            !l.is_empty()
-                && !l.starts_with('-')
-                && !l.ends_with('-')
-                && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-        });
-        let tld = labels[labels.len() - 1];
-        if !host_ok || tld.len() < 2 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
-            return false;
-        }
-        TLDS.contains(&tld) || rest.is_some_and(|r| r.len() > 1)
-    })
+    let shown = raw.trim_matches(|c: char| "()<>[]{}\"'`,;!?.".contains(c));
+    let token = shown.to_ascii_lowercase();
+    if token.starts_with("http://") || token.starts_with("https://") {
+        return (token.len() > 8).then(|| shown.to_owned());
+    }
+    if token.starts_with("www.") {
+        return (token.len() > 6).then(|| format!("https://{shown}"));
+    }
+    let (host, rest) = match token.find(['/', '?', '#']) {
+        Some(i) => (&token[..i], Some(&token[i..])),
+        None => (token.as_str(), None),
+    };
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 2 {
+        return None;
+    }
+    let host_ok = labels.iter().all(|l| {
+        !l.is_empty()
+            && !l.starts_with('-')
+            && !l.ends_with('-')
+            && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    });
+    let tld = labels[labels.len() - 1];
+    if !host_ok || tld.len() < 2 || !tld.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    (TLDS.contains(&tld) || rest.is_some_and(|r| r.len() > 1)).then(|| format!("https://{shown}"))
 }
 
 pub fn classify(
@@ -459,6 +476,30 @@ mod tests {
             "file.txt",
         ] {
             assert!(!contains_link(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn links_are_openable() {
+        assert_eq!(links("see https://x.co/a"), ["https://x.co/a"]);
+        assert_eq!(links("go to bit.ly/3abc now"), ["https://bit.ly/3abc"]);
+        assert_eq!(links("(Example.com)."), ["https://Example.com"]);
+        assert_eq!(links("www.a.com"), ["https://www.a.com"]);
+        assert_eq!(
+            links("a.com then http://b.org/x"),
+            ["https://a.com", "http://b.org/x"]
+        );
+        assert_eq!(links("a.com and a.com"), ["https://a.com"]);
+        for no in [
+            "hello.how are you",
+            "v1.2",
+            "3.14 tl",
+            "end of sentence.Next one",
+            "https://",
+            "a@b",
+            "file.txt",
+        ] {
+            assert!(links(no).is_empty(), "{no}");
         }
     }
 

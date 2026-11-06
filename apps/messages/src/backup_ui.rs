@@ -247,12 +247,23 @@ pub fn backup_file_name(now_ms: i64, tz_offset_s: i32) -> String {
     format!("rovsti-messages-{year:04}{month:02}{day:02}.rmb")
 }
 
+/// Shown when a restore needs the default-SMS-app role and it is not held.
+pub const RESTORE_NEEDS_ROLE: &str =
+    "Make Rovsti Messages your default SMS app to restore messages.";
+
+/// Whether a restore must wait for the role: it is not held and this is not
+/// just the preview (which reads the archive without writing).
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn restore_blocked(role_held: bool, preview: bool) -> bool {
+    !role_held && !preview
+}
+
 /// How the restore result of `sms::insert_restored` reads.
 pub fn restore_outcome(answer: &str) -> Result<String, String> {
     let value: serde_json::Value = serde_json::from_str(answer)
         .map_err(|_| "Android gave an unreadable answer.".to_owned())?;
     if value.get("error").and_then(|e| e.as_str()) == Some("role") {
-        return Err("Make Rovsti Messages your default SMS app to restore messages.".to_owned());
+        return Err(RESTORE_NEEDS_ROLE.to_owned());
     }
     let count = |key: &str| {
         value
@@ -280,6 +291,18 @@ mod tests {
     use rovsti_core::{schedule::ScheduledSms, spam::SpamRule};
 
     use super::*;
+
+    #[test]
+    fn restore_blocked() {
+        assert!(super::restore_blocked(false, false));
+        assert!(!super::restore_blocked(false, true));
+        assert!(!super::restore_blocked(true, false));
+        assert!(!super::restore_blocked(true, true));
+        assert_eq!(
+            restore_outcome(r#"{"error":"role"}"#),
+            Err(RESTORE_NEEDS_ROLE.to_owned())
+        );
+    }
 
     const STRONG: &str = "correct horse battery staple";
 

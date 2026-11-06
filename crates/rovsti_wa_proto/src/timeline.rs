@@ -274,6 +274,16 @@ impl Timeline {
         Some(self.items[pos].message.body.clone())
     }
 
+    /// Removes a failed send (text or media) and returns its body. `None`
+    /// (nothing removed) when `local_id` is not a failed item.
+    pub fn discard(&mut self, local_id: u64) -> Option<MessageBody> {
+        let pos = self
+            .items
+            .iter()
+            .position(|i| i.state == ItemState::Failed { local_id })?;
+        Some(self.items.remove(pos).message.body)
+    }
+
     /// Optimistically sets our own reaction on a message (`""` removes it),
     /// replacing any earlier one of ours. The gateway's `MessageUpdate`
     /// overwrites this later. Returns `true` when something changed.
@@ -945,5 +955,19 @@ mod tests {
         let body = t.restart_body(1).unwrap();
         assert!(matches!(body, MessageBody::Media { size: 42, .. }));
         assert_eq!(t.items()[0].state, ItemState::Pending { local_id: 1 });
+    }
+
+    #[test]
+    fn discard_removes_only_failed_items() {
+        let mut t = Timeline::new(CHAT);
+        pending_image(&mut t, 1);
+        assert_eq!(t.discard(1), None);
+        assert_eq!(t.items().len(), 1);
+        t.fail(1);
+        assert_eq!(t.discard(2), None);
+        let body = t.discard(1).unwrap();
+        assert!(matches!(body, MessageBody::Media { size: 42, .. }));
+        assert!(t.items().is_empty());
+        assert_eq!(t.discard(1), None);
     }
 }

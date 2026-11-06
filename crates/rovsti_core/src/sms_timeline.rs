@@ -219,6 +219,16 @@ impl SmsTimeline {
         })
     }
 
+    /// Removes a local `Failed` item and returns its text. `None` (nothing
+    /// removed) for pending, sent or unknown items.
+    pub fn discard(&mut self, local_id: u64) -> Option<String> {
+        let pos = self.position(SmsKey::Local(local_id))?;
+        if self.items[pos].state != DeliveryState::Failed {
+            return None;
+        }
+        Some(self.items.remove(pos).body)
+    }
+
     fn position(&self, key: SmsKey) -> Option<usize> {
         self.items.iter().position(|i| i.key == key)
     }
@@ -360,6 +370,21 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(t.items()[0].state, DeliveryState::Delivered);
+    }
+
+    #[test]
+    fn discard_only_removes_failed_local_items() {
+        let mut t = SmsTimeline::new(1);
+        t.push_pending(1, "hi".into(), None, 100);
+        assert_eq!(t.discard(1), None);
+        t.apply_status(&status(1, DeliveryState::Sent));
+        assert_eq!(t.discard(1), None);
+        t.push_pending(2, "yo".into(), None, 200);
+        t.apply_status(&status(2, DeliveryState::Failed));
+        assert_eq!(t.discard(99), None);
+        assert_eq!(t.discard(2).as_deref(), Some("yo"));
+        assert_eq!(t.items().len(), 1);
+        assert_eq!(t.discard(2), None);
     }
 
     #[test]

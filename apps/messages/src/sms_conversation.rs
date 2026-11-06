@@ -1115,7 +1115,7 @@ pub fn load_error_text(error: &str) -> String {
         "SMS access is off" | "this needs an Android phone" => {
             format!("Couldn't load messages: {error}.")
         }
-        _ => "Couldn't load messages. Leave and open the conversation to try again.".to_owned(),
+        _ => "Couldn't load messages. Tap to try again.".to_owned(),
     }
 }
 
@@ -1191,7 +1191,61 @@ pub fn attachment_label(path: &str) -> String {
 /// ones still sending or failed.
 fn selectable(item: &SmsItem) -> bool {
     !matches!(item.state, DeliveryState::Pending | DeliveryState::Failed)
-        && copy_text(item).is_some()
+        && (copy_text(item).is_some() || !saveable_parts(item).is_empty())
+}
+
+/// The local id of a failed send of ours, which can be retried, copied or
+/// deleted. `None` for everything else.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn failed_local(item: &SmsItem) -> Option<u64> {
+    match item.key {
+        SmsKey::Local(id) if item.state == DeliveryState::Failed => Some(id),
+        _ => None,
+    }
+}
+
+/// One MMS picture or file that can be saved to the phone's storage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct SavePart {
+    pub name: String,
+    pub mime: String,
+    pub path: String,
+}
+
+/// The parts of a message that are files (not text or the SMIL layout).
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn saveable_parts(item: &SmsItem) -> Vec<SavePart> {
+    item.parts
+        .iter()
+        .filter(|p| {
+            let t = p.content_type.trim().to_ascii_lowercase();
+            !t.starts_with("text/plain") && !t.starts_with("application/smil")
+        })
+        .filter_map(|p| p.path.as_deref().map(|path| (p, path)))
+        .enumerate()
+        .map(|(index, (p, path))| SavePart {
+            name: mms_save_name(&p.content_type, item.at_ms, index + 1),
+            mime: p.content_type.clone(),
+            path: path.to_owned(),
+        })
+        .collect()
+}
+
+/// `mms-20261105-140500-1.jpg`: the UTC time of the message, the part number
+/// and the extension of the type.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn mms_save_name(content_type: &str, at_ms: i64, number: usize) -> String {
+    let secs = at_ms.div_euclid(1000);
+    let (year, month, day) = crate::conversation::civil_from_days(secs.div_euclid(86_400));
+    let rem = secs.rem_euclid(86_400);
+    format!(
+        "mms-{year:04}{month:02}{day:02}-{:02}{:02}{:02}-{number}.{}",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60,
+        crate::files::ext_for_mime(content_type)
+    )
 }
 
 /// The text of a message to copy; `None` when it has none (a picture alone).
@@ -1347,12 +1401,76 @@ mod tests {
     }
 
     #[test]
+    fn picture_only_mms_is_selectable_and_saveable() {
+        let mut m = item(false, DeliveryState::None, T);
+        m.body = String::new();
+        assert!(!selectable(&m));
+        m.parts = vec![
+            MmsPart {
+                content_type: "application/smil".into(),
+                text: Some("<smil/>".into()),
+                path: None,
+            },
+            MmsPart {
+                content_type: "image/jpeg".into(),
+                text: None,
+                path: Some("/cache/a.jpg".into()),
+            },
+            MmsPart {
+                content_type: "text/plain".into(),
+                text: Some("x".into()),
+                path: Some("/cache/t.txt".into()),
+            },
+        ];
+        assert!(selectable(&m));
+        let parts = saveable_parts(&m);
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].mime, "image/jpeg");
+        assert_eq!(parts[0].path, "/cache/a.jpg");
+        assert!(parts[0].name.starts_with("mms-") && parts[0].name.ends_with("-1.jpg"));
+        m.state = DeliveryState::Pending;
+        assert!(!selectable(&m));
+    }
+
+    #[test]
+    fn mms_names_get_extensions() {
+        // 2026-11-05 14:05:00 UTC
+        let at = 1_793_887_500_000;
+        assert_eq!(
+            mms_save_name("image/jpeg", at, 1),
+            "mms-20261105-140500-1.jpg"
+        );
+        assert_eq!(
+            mms_save_name("application/pdf", at, 2),
+            "mms-20261105-140500-2.pdf"
+        );
+        assert_eq!(
+            mms_save_name("video/3gpp", at, 3),
+            "mms-20261105-140500-3.bin"
+        );
+    }
+
+    #[test]
+    fn failed_local_items() {
+        let mut m = item(true, DeliveryState::Failed, T);
+        assert_eq!(failed_local(&m), None);
+        m.key = SmsKey::Local(7);
+        assert_eq!(failed_local(&m), Some(7));
+        m.state = DeliveryState::Pending;
+        assert_eq!(failed_local(&m), None);
+        m.state = DeliveryState::Failed;
+        m.key = SmsKey::Sms(7);
+        assert_eq!(failed_local(&m), None);
+    }
+
+    #[test]
     fn load_errors_read_plainly() {
         assert_eq!(
             load_error_text("SMS access is off"),
             "Couldn't load messages: SMS access is off."
         );
         assert!(!load_error_text("Internal(\"cursor\")").contains("Internal"));
+        assert!(load_error_text("x").ends_with("Tap to try again."));
     }
 
     #[test]

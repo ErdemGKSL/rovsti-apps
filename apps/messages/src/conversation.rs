@@ -3086,23 +3086,7 @@ fn save_name(kind: MediaKind, media: Option<&MediaMeta>, mime: &str, message_id:
         MediaKind::Document => "document",
         MediaKind::Sticker => "sticker",
     };
-    let base = mime
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    let ext = match base.as_str() {
-        "image/jpeg" | "image/jpg" => "jpg",
-        "image/png" => "png",
-        "image/webp" => "webp",
-        "image/gif" => "gif",
-        "video/mp4" => "mp4",
-        "audio/ogg" => "ogg",
-        "audio/mpeg" => "mp3",
-        "application/pdf" => "pdf",
-        _ => "bin",
-    };
+    let ext = crate::files::ext_for_mime(mime);
     let id: String = message_id.chars().take(8).collect();
     format!("WhatsApp {word} {id}.{ext}")
 }

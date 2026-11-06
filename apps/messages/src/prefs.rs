@@ -63,6 +63,22 @@ impl Default for MessagesPrefs {
 }
 
 impl MessagesPrefs {
+    /// The defaults, except that the SIM choices stay: they are not a
+    /// setting the user can see.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn reset(&self) -> MessagesPrefs {
+        MessagesPrefs {
+            sim_choices: self.sim_choices.clone(),
+            ..MessagesPrefs::default()
+        }
+    }
+
+    /// Whether the settings already equal [`MessagesPrefs::reset`].
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn is_reset(&self) -> bool {
+        self.reset() == *self
+    }
+
     /// Reads the file. A missing, unreadable or corrupt file gives the
     /// defaults; SIM choices from the old `sim-choices.json` are folded in.
     pub fn load(dir: &Path) -> Self {
@@ -156,6 +172,27 @@ mod tests {
         prefs.save(&dir).expect("saved");
         assert_eq!(MessagesPrefs::load(&dir), prefs);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn reset_keeps_sim_choices_only() {
+        let mut prefs = MessagesPrefs::default();
+        assert!(prefs.is_reset());
+        prefs.sim_choices.insert(4, 2);
+        assert!(prefs.is_reset());
+        prefs.notifications = false;
+        prefs.otp_copy = false;
+        prefs.muted.insert("sms:1".into());
+        prefs
+            .spam
+            .add_rule(SpamRule::Keyword { text: "win".into() })
+            .expect("ok");
+        assert!(!prefs.is_reset());
+        let reset = prefs.reset();
+        assert!(reset.is_reset());
+        assert_eq!(reset.sim_choices.get(&4), Some(&2));
+        assert!(reset.notifications && reset.otp_copy && reset.muted.is_empty());
+        assert_eq!(reset.spam, MessagesPrefs::default().spam);
     }
 
     #[test]

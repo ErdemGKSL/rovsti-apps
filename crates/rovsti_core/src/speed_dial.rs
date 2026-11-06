@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::phone_number::PhoneNumber;
 use crate::settings::{MAX_FIELD_CHARS, SPEED_DIAL_DIGITS, SpeedDialEntry};
 
 /// What holding a dialpad digit should do.
@@ -88,6 +89,39 @@ pub fn unassign(map: &mut BTreeMap<u8, SpeedDialEntry>, digit: u8) -> bool {
 /// Speed-dial digits that have no entry yet, ascending.
 pub fn free_digits(map: &BTreeMap<u8, SpeedDialEntry>) -> impl Iterator<Item = u8> + '_ {
     SPEED_DIAL_DIGITS.filter(|d| !map.contains_key(d))
+}
+
+/// The lowest speed-dial digit whose entry is one of `numbers` (parsed match
+/// or equal trimmed text).
+pub fn digit_for(map: &BTreeMap<u8, SpeedDialEntry>, numbers: &[&str]) -> Option<u8> {
+    let wanted: Vec<(&str, Option<PhoneNumber>)> = numbers
+        .iter()
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+        .map(|n| (n, PhoneNumber::parse(n).ok()))
+        .collect();
+    map.iter().find_map(|(digit, entry)| {
+        let raw = entry.number_raw.trim();
+        if raw.is_empty() {
+            return None;
+        }
+        let parsed = PhoneNumber::parse(raw).ok();
+        wanted
+            .iter()
+            .any(|(text, number)| match (&parsed, number) {
+                (Some(a), Some(b)) if a.matches(b) => true,
+                _ => *text == raw,
+            })
+            .then_some(*digit)
+    })
+}
+
+/// Pill text after assigning `digit`.
+pub fn assigned_text(digit: u8, name: &str, previous: Option<&SpeedDialEntry>) -> String {
+    match previous {
+        Some(prev) => format!("Speed dial {digit}: {name} (was {})", prev.name),
+        None => format!("Speed dial {digit}: {name}"),
+    }
 }
 
 #[cfg(test)]
@@ -186,5 +220,31 @@ mod tests {
         assign(&mut m, 2, entry("1")).expect("assign");
         assign(&mut m, 9, entry("1")).expect("assign");
         assert_eq!(free_digits(&m).collect::<Vec<_>>(), vec![3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn digit_for_finds_the_lowest_match() {
+        let mut m = BTreeMap::new();
+        assign(&mut m, 7, entry("+905551112233")).expect("assign");
+        assign(&mut m, 4, entry("0555 111 22 33")).expect("assign");
+        assign(&mut m, 2, entry("0555 999 88 77")).expect("assign");
+        assert_eq!(digit_for(&m, &["05551112233"]), Some(4));
+        assert_eq!(digit_for(&m, &["", "0555 999 88 77"]), Some(2));
+        assert_eq!(digit_for(&m, &["0500 000 00 00"]), None);
+        assert_eq!(digit_for(&m, &[" "]), None);
+    }
+
+    #[test]
+    fn assigned_text_mentions_the_previous_entry() {
+        assert_eq!(assigned_text(5, "Ana", None), "Speed dial 5: Ana");
+        let prev = entry("1");
+        let prev = SpeedDialEntry {
+            name: "Bob".into(),
+            ..prev
+        };
+        assert_eq!(
+            assigned_text(5, "Ana", Some(&prev)),
+            "Speed dial 5: Ana (was Bob)"
+        );
     }
 }

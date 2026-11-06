@@ -560,6 +560,8 @@ pub enum BlockReason {
 /// One row pulled from the system call log.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallLogEntry {
+    /// Absent in restore JSON: the provider assigns a new id.
+    #[serde(default)]
     pub id: i64,
     #[serde(default, deserialize_with = "null_default")]
     pub number_raw: String,
@@ -595,6 +597,65 @@ pub struct CallLogEntry {
         skip_serializing_if = "is_zero_u32"
     )]
     pub features: u32,
+}
+
+/// JSON for restoring deleted call-log rows (undo):
+/// `{"entries":[{number_raw,kind,date_ms,duration_s,account_key?}]}`.
+pub fn call_log_restore_json(entries: &[CallLogEntry]) -> String {
+    #[derive(Serialize)]
+    struct Row<'a> {
+        number_raw: &'a str,
+        kind: CallLogKind,
+        date_ms: i64,
+        duration_s: i64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        account_key: Option<&'a str>,
+    }
+    #[derive(Serialize)]
+    struct Out<'a> {
+        entries: Vec<Row<'a>>,
+    }
+    let out = Out {
+        entries: entries
+            .iter()
+            .map(|e| Row {
+                number_raw: &e.number_raw,
+                kind: e.kind,
+                date_ms: e.date_ms,
+                duration_s: e.duration_s,
+                account_key: e.account_key.as_deref(),
+            })
+            .collect(),
+    };
+    serde_json::to_string(&out).unwrap_or_else(|_| r#"{"entries":[]}"#.to_owned())
+}
+
+/// Data of a call-log write (delete or restore): how many rows changed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WriteCount {
+    #[serde(default, deserialize_with = "null_default")]
+    pub count: u32,
+}
+
+/// Why a call-log write failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WriteError {
+    /// The write permission is missing.
+    Permission,
+    /// The system refused (not the default dialer).
+    Refused,
+    Other(String),
+}
+
+/// Reads the envelope a call-log write returns.
+pub fn parse_write_count(envelope: &str) -> Result<u32, WriteError> {
+    let parsed: Envelope<WriteCount> =
+        serde_json::from_str(envelope).map_err(|e| WriteError::Other(e.to_string()))?;
+    parsed.into_result().map(|d| d.count).map_err(|e| match e {
+        WireError::Permission => WriteError::Permission,
+        WireError::Refused => WriteError::Refused,
+        other => WriteError::Other(other.to_string()),
+    })
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1260,5 +1321,62 @@ mod tests {
         let r: DocumentResult =
             serde_json::from_str(r#"{"op":"teleport","ok":false}"#).expect("parse");
         assert_eq!(r.op, DocumentOp::Unknown);
+    }
+
+    #[test]
+    fn restore_json_round_trips_through_the_entry_parser() {
+        let entries = [
+            CallLogEntry {
+                id: 9,
+                number_raw: "0555 111 22 33".into(),
+                kind: CallLogKind::Missed,
+                date_ms: 1_700_000_000_000,
+                duration_s: 0,
+                account_key: Some("acc".into()),
+                ..Default::default()
+            },
+            CallLogEntry {
+                id: 8,
+                number_raw: "112".into(),
+                kind: CallLogKind::Outgoing,
+                date_ms: 5,
+                duration_s: 42,
+                ..Default::default()
+            },
+        ];
+        let json = call_log_restore_json(&entries);
+        let back: CallLogPayload = serde_json::from_str(&json).expect("parse");
+        assert_eq!(back.entries.len(), 2);
+        for (a, b) in entries.iter().zip(&back.entries) {
+            assert_eq!(a.number_raw, b.number_raw);
+            assert_eq!(a.kind, b.kind);
+            assert_eq!(a.date_ms, b.date_ms);
+            assert_eq!(a.duration_s, b.duration_s);
+            assert_eq!(a.account_key, b.account_key);
+        }
+    }
+
+    #[test]
+    fn write_count_parses_ok_and_errors() {
+        assert_eq!(
+            parse_write_count(r#"{"v":1,"ok":true,"data":{"count":3}}"#),
+            Ok(3)
+        );
+        assert_eq!(
+            parse_write_count(r#"{"v":1,"ok":false,"error":"permission"}"#),
+            Err(WriteError::Permission)
+        );
+        assert_eq!(
+            parse_write_count(r#"{"v":1,"ok":false,"error":"refused"}"#),
+            Err(WriteError::Refused)
+        );
+        assert!(matches!(
+            parse_write_count("garbage"),
+            Err(WriteError::Other(_))
+        ));
+        assert!(matches!(
+            parse_write_count(r#"{"v":1,"ok":true}"#),
+            Err(WriteError::Other(_))
+        ));
     }
 }

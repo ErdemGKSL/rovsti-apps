@@ -59,7 +59,7 @@ pub fn plan_snapshot(
     let ended = summaries
         .iter()
         .filter(|s| s.update.phase.is_ended())
-        .filter(|s| !history.iter().any(|r| r.call_id == s.update.call_id))
+        .filter(|s| !history.knows(&s.update.call_id))
         .cloned()
         .collect();
     SnapshotPlan { show, ended }
@@ -79,6 +79,9 @@ pub fn tracked_end(tracked: Option<&str>, summaries: &[CallSummary]) -> Option<C
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WaCallHistory {
     records: VecDeque<WaCallRecord>,
+    /// Ids of calls the user deleted, newest first; a gateway snapshot must
+    /// not bring them back.
+    forgotten: VecDeque<String>,
 }
 
 impl WaCallHistory {
@@ -90,7 +93,7 @@ impl WaCallHistory {
     /// recorded. A call is missed when it was incoming and never became
     /// active: `Hangup` and `Remote` only follow a call we answered.
     pub fn record_end(&mut self, view: &WaCallView, started_ms: i64, reason: &EndReason) -> bool {
-        if self.records.iter().any(|r| r.call_id == view.call_id) {
+        if self.knows(&view.call_id) {
             return false;
         }
         self.records.push_front(WaCallRecord {
@@ -114,7 +117,7 @@ impl WaCallHistory {
         let CallPhase::Ended(reason) = &s.update.phase else {
             return false;
         };
-        if self.records.iter().any(|r| r.call_id == s.update.call_id) {
+        if self.knows(&s.update.call_id) {
             return false;
         }
         let missed = is_missed(s.update.direction, 0, reason);
@@ -140,11 +143,82 @@ impl WaCallHistory {
     /// of this one, skipping call ids already present.
     pub fn extend_newest(&mut self, newer: &WaCallHistory) {
         for record in newer.records.iter().rev() {
-            if !self.records.iter().any(|r| r.call_id == record.call_id) {
+            if !self.knows(&record.call_id) {
                 self.records.push_front(record.clone());
             }
         }
         self.records.truncate(MAX_RECORDS);
+    }
+
+    /// Whether `call_id` is recorded or was deleted by the user.
+    pub fn knows(&self, call_id: &str) -> bool {
+        self.records.iter().any(|r| r.call_id == call_id)
+            || self.forgotten.iter().any(|f| f == call_id)
+    }
+
+    fn tombstone(&mut self, id: &str) {
+        if !self.forgotten.iter().any(|f| f == id) {
+            self.forgotten.push_front(id.to_owned());
+        }
+        self.forgotten.truncate(MAX_RECORDS);
+    }
+
+    /// Deletes the records with these call ids and remembers the ids so a
+    /// snapshot does not record them again. Returns the removed records (for
+    /// undo), newest first.
+    pub fn forget(&mut self, ids: &[String]) -> Vec<WaCallRecord> {
+        let mut removed = Vec::new();
+        let mut kept = VecDeque::with_capacity(self.records.len());
+        for record in std::mem::take(&mut self.records) {
+            if ids.contains(&record.call_id) {
+                removed.push(record);
+            } else {
+                kept.push_back(record);
+            }
+        }
+        self.records = kept;
+        for id in ids {
+            self.tombstone(id);
+        }
+        removed
+    }
+
+    /// Deletes every record, remembering their ids. Returns how many.
+    pub fn forget_all(&mut self) -> usize {
+        let ids: Vec<String> = self.records.iter().map(|r| r.call_id.clone()).collect();
+        self.records.clear();
+        for id in &ids {
+            self.tombstone(id);
+        }
+        ids.len()
+    }
+
+    /// Undo of [`Self::forget`]: puts the records back in `started_ms` order
+    /// and lifts their tombstones. Ids already present are skipped.
+    pub fn restore(&mut self, records: Vec<WaCallRecord>) {
+        for record in records {
+            self.forgotten.retain(|f| *f != record.call_id);
+            if !self.records.iter().any(|r| r.call_id == record.call_id) {
+                self.records.push_back(record);
+            }
+        }
+        self.records
+            .make_contiguous()
+            .sort_by_key(|r| std::cmp::Reverse(r.started_ms));
+        self.records.truncate(MAX_RECORDS);
+    }
+
+    pub fn forgotten_to_json(&self) -> String {
+        serde_json::to_string(&self.forgotten).unwrap_or_else(|_| "[]".to_owned())
+    }
+
+    /// Sets the deleted-call ids from stored JSON; corrupt input yields none.
+    #[must_use]
+    pub fn with_forgotten_json(mut self, json: &str) -> Self {
+        let mut forgotten: VecDeque<String> = serde_json::from_str(json).unwrap_or_default();
+        forgotten.truncate(MAX_RECORDS);
+        self.forgotten = forgotten;
+        self
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &WaCallRecord> {
@@ -167,7 +241,10 @@ impl WaCallHistory {
     pub fn from_json(json: &str) -> Self {
         let mut records: VecDeque<WaCallRecord> = serde_json::from_str(json).unwrap_or_default();
         records.truncate(MAX_RECORDS);
-        Self { records }
+        Self {
+            records,
+            forgotten: VecDeque::new(),
+        }
     }
 }
 
@@ -397,5 +474,77 @@ mod tests {
         old.extend_newest(&new);
         let ids: Vec<_> = old.iter().map(|r| r.call_id.as_str()).collect();
         assert_eq!(ids, ["c", "b", "a"]);
+    }
+
+    fn ended(id: &str, at: i64) -> CallSummary {
+        let mut s = summary(id, CallDirection::In, CallPhase::Ended(EndReason::Missed));
+        s.started_ms = at;
+        s
+    }
+
+    #[test]
+    fn forgotten_call_is_not_recorded_again() {
+        let mut h = WaCallHistory::new();
+        assert!(h.record_summary(&ended("a", 1), "Ann"));
+        let removed = h.forget(&["a".to_owned()]);
+        assert_eq!(removed.len(), 1);
+        assert!(h.is_empty());
+        assert!(h.knows("a"));
+        assert!(!h.record_summary(&ended("a", 1), "Ann"));
+        assert!(!h.record_end(&view("a", CallDirection::Out, 5), 1, &EndReason::Hangup));
+        let mut newer = WaCallHistory::new();
+        newer.record_summary(&ended("a", 1), "Ann");
+        h.extend_newest(&newer);
+        assert!(h.is_empty());
+    }
+
+    #[test]
+    fn plan_snapshot_skips_forgotten_ids() {
+        let mut h = WaCallHistory::new();
+        h.record_summary(&ended("a", 1), "Ann");
+        h.forget(&["a".to_owned()]);
+        let plan = plan_snapshot(false, &[ended("a", 1), ended("b", 2)], &h);
+        let ids: Vec<_> = plan
+            .ended
+            .iter()
+            .map(|s| s.update.call_id.as_str())
+            .collect();
+        assert_eq!(ids, ["b"]);
+    }
+
+    #[test]
+    fn restore_resorts_and_lifts_tombstones() {
+        let mut h = WaCallHistory::new();
+        for (id, at) in [("a", 1), ("b", 2), ("c", 3)] {
+            h.record_summary(&ended(id, at), "Ann");
+        }
+        let removed = h.forget(&["a".to_owned(), "c".to_owned()]);
+        assert_eq!(removed.len(), 2);
+        h.restore(removed.clone());
+        h.restore(removed);
+        let ids: Vec<_> = h.iter().map(|r| r.call_id.as_str()).collect();
+        assert_eq!(ids, ["c", "b", "a"]);
+        assert!(!h.forgotten_to_json().contains('a'));
+    }
+
+    #[test]
+    fn forget_all_clears_and_remembers() {
+        let mut h = WaCallHistory::new();
+        h.record_summary(&ended("a", 1), "Ann");
+        h.record_summary(&ended("b", 2), "Ann");
+        assert_eq!(h.forget_all(), 2);
+        assert!(h.is_empty());
+        assert!(h.knows("a") && h.knows("b"));
+    }
+
+    #[test]
+    fn tombstones_round_trip_and_survive_corruption() {
+        let mut h = WaCallHistory::new();
+        h.record_summary(&ended("a", 1), "Ann");
+        h.forget(&["a".to_owned()]);
+        let back = WaCallHistory::new().with_forgotten_json(&h.forgotten_to_json());
+        assert!(back.knows("a"));
+        let bad = WaCallHistory::new().with_forgotten_json("garbage");
+        assert!(!bad.knows("a"));
     }
 }

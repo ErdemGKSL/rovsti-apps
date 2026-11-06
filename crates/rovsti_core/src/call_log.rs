@@ -4,6 +4,7 @@
 //! exactly as the provider returns it.
 
 use crate::phone_number::PhoneNumber;
+use crate::recents::{number_in, wanted_numbers};
 use crate::small_text::SmallText;
 use crate::wire::{CallLogEntry, CallLogKind};
 
@@ -37,6 +38,15 @@ impl CallType {
     }
 }
 
+/// Identifies one stored call behind a Recents row, for deleting or restoring it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum EntryRef {
+    /// A row of the phone's call log (`CallLog.Calls._ID`).
+    Log(i64),
+    /// A WhatsApp call kept by the app (its call id).
+    WhatsApp(String),
+}
+
 /// One line in Recents: a run of consecutive same-number, same-type calls.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecentsRow {
@@ -62,6 +72,8 @@ pub struct RecentsRow {
     /// A call made over WhatsApp (merged in from the app's own history, never
     /// from the provider); such a row only groups with other WhatsApp rows.
     pub whatsapp: bool,
+    /// Every stored call collapsed into this row, in input order.
+    pub refs: Vec<EntryRef>,
 }
 
 /// How an entry's number is compared. Parsed once per entry.
@@ -118,6 +130,7 @@ pub fn group(entries: &[CallLogEntry]) -> Vec<RecentsRow> {
             && prev.same_line(&key)
         {
             row.count += 1;
+            row.refs.push(EntryRef::Log(entry.id));
             row.first_ms = row.first_ms.min(entry.date_ms);
             row.last_ms = row.last_ms.max(entry.date_ms);
             if row.name.is_none() {
@@ -145,10 +158,54 @@ pub fn group(entries: &[CallLogEntry]) -> Vec<RecentsRow> {
             callable: !matches!(key, Key::Private),
             account_key: entry.account_key.clone(),
             whatsapp: false,
+            refs: vec![EntryRef::Log(entry.id)],
         });
         last_key = Some(key);
     }
     rows
+}
+
+/// The entries of `source` whose id is in `ids`, newest first. Unknown ids are
+/// ignored.
+pub fn entries_by_id(source: &[CallLogEntry], ids: &[i64]) -> Vec<CallLogEntry> {
+    let mut found: Vec<CallLogEntry> = source
+        .iter()
+        .filter(|e| ids.contains(&e.id))
+        .cloned()
+        .collect();
+    found.sort_by_key(|e| std::cmp::Reverse(e.date_ms));
+    found
+}
+
+/// Ids of the entries (blocked ones excluded) whose number is one of
+/// `numbers`; blank numbers match nothing. Same matching as the history list.
+pub fn ids_for_numbers(entries: &[CallLogEntry], numbers: &[&str]) -> Vec<i64> {
+    let wanted = wanted_numbers(numbers);
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+    entries
+        .iter()
+        .filter(|e| e.kind != CallLogKind::Blocked)
+        .filter(|e| {
+            let raw = if e.number_raw.trim().is_empty() {
+                e.normalized.as_str()
+            } else {
+                e.number_raw.as_str()
+            };
+            number_in(raw, &wanted)
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
+/// Confirmation text after deleting `n` calls.
+pub fn deleted_text(n: usize) -> String {
+    if n == 1 {
+        "Deleted 1 call".to_owned()
+    } else {
+        format!("Deleted {n} calls")
+    }
 }
 
 /// Missed calls newer than `last_seen_ms` (strictly). Other types and older
@@ -907,5 +964,48 @@ mod tests {
         // A 3-day window keeps days 0 to 3 (the boundary itself counts).
         assert_eq!(frequent(&rows, NOW, 3, 10, |_| false).len(), 4);
         assert!(frequent(&rows, NOW, 90, 0, |_| false).is_empty());
+    }
+
+    #[test]
+    fn group_fills_refs_in_input_order() {
+        let rows = group(&[
+            e(3, "0555 111 22 33", CallLogKind::Missed, 30),
+            e(2, "+905551112233", CallLogKind::Missed, 20),
+            e(1, "0850 123 45 67", CallLogKind::Incoming, 10),
+        ]);
+        assert_eq!(rows[0].refs, [EntryRef::Log(3), EntryRef::Log(2)]);
+        assert_eq!(rows[1].refs, [EntryRef::Log(1)]);
+    }
+
+    #[test]
+    fn entries_by_id_is_newest_first_and_ignores_missing() {
+        let src = [
+            e(3, "1", CallLogKind::Incoming, 30),
+            e(2, "1", CallLogKind::Incoming, 20),
+            e(1, "1", CallLogKind::Incoming, 10),
+        ];
+        let got: Vec<i64> = entries_by_id(&src, &[1, 3, 99])
+            .iter()
+            .map(|x| x.id)
+            .collect();
+        assert_eq!(got, [3, 1]);
+    }
+
+    #[test]
+    fn ids_for_numbers_matches_forms_skips_blank_and_blocked() {
+        let src = [
+            e(4, "+905551112233", CallLogKind::Incoming, 40),
+            e(3, "05551112233", CallLogKind::Blocked, 30),
+            e(2, "0555 999 88 77", CallLogKind::Incoming, 20),
+            e(1, "", CallLogKind::Incoming, 10),
+        ];
+        assert_eq!(ids_for_numbers(&src, &["0555 111 22 33"]), [4]);
+        assert!(ids_for_numbers(&src, &["", "  "]).is_empty());
+    }
+
+    #[test]
+    fn deleted_text_pluralises() {
+        assert_eq!(deleted_text(1), "Deleted 1 call");
+        assert_eq!(deleted_text(3), "Deleted 3 calls");
     }
 }

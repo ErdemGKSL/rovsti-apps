@@ -282,6 +282,7 @@ pub fn extra_calls(history: &WaCallHistory) -> Vec<ExtraCall> {
                 duration_s: record.duration_s,
                 missed: record.missed,
                 label,
+                call_id: record.call_id.clone(),
             })
         })
         .collect()

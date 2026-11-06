@@ -7,8 +7,8 @@
 use crate::{
     avatar,
     call_log::{
-        CallType, DateOrder, MAX_ENTRIES, RecentsRow, TimeFormat, clock_text, format_duration,
-        relative_time,
+        CallType, DateOrder, EntryRef, MAX_ENTRIES, RecentsRow, TimeFormat, clock_text,
+        format_duration, relative_time,
     },
     phone_number::PhoneNumber,
     wire::{CallLogEntry, CallLogKind},
@@ -247,6 +247,8 @@ pub struct ExtraCall {
     pub missed: bool,
     /// The peer's name when known; `None` shows the number as the title.
     pub label: Option<String>,
+    /// The id of the stored call (for forgetting it).
+    pub call_id: String,
 }
 
 impl ExtraCall {
@@ -256,6 +258,7 @@ impl ExtraCall {
             .chars()
             .filter(|c| c.is_ascii_digit() || *c == '+')
             .collect();
+        let call_id = self.call_id.clone();
         RecentsRow {
             callable: !number.is_empty(),
             normalized: number,
@@ -273,6 +276,7 @@ impl ExtraCall {
             contact_id: None,
             account_key: None,
             whatsapp: true,
+            refs: vec![EntryRef::WhatsApp(call_id)],
         }
     }
 }
@@ -322,6 +326,7 @@ pub fn merge_extras(rows: &[RecentsRow], extras: &[ExtraCall]) -> Vec<RecentsRow
                     && same_line(prev, &next) =>
             {
                 prev.count += next.count;
+                prev.refs.extend(next.refs);
                 prev.first_ms = prev.first_ms.min(next.first_ms);
                 prev.last_ms = prev.last_ms.max(next.last_ms);
                 if prev.name.is_none() {
@@ -355,7 +360,7 @@ pub struct HistoryLine {
 
 /// Whether `raw` is one of `numbers` (parsed match, or exact trimmed text for
 /// numbers that do not parse). A blank number never matches.
-fn number_in(raw: &str, numbers: &[(&str, Option<PhoneNumber>)]) -> bool {
+pub(crate) fn number_in(raw: &str, numbers: &[(&str, Option<PhoneNumber>)]) -> bool {
     let raw = raw.trim();
     if raw.is_empty() {
         return false;
@@ -369,6 +374,39 @@ fn number_in(raw: &str, numbers: &[(&str, Option<PhoneNumber>)]) -> bool {
         })
 }
 
+/// Non-blank trimmed `numbers`, each with its parsed form.
+pub(crate) fn wanted_numbers<'a>(numbers: &[&'a str]) -> Vec<(&'a str, Option<PhoneNumber>)> {
+    numbers
+        .iter()
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+        .map(|n| (n, PhoneNumber::parse(n).ok()))
+        .collect()
+}
+
+/// Splits row refs into call-log ids and WhatsApp call ids.
+pub fn split_refs(refs: &[EntryRef]) -> (Vec<i64>, Vec<String>) {
+    let mut ids = Vec::new();
+    let mut calls = Vec::new();
+    for r in refs {
+        match r {
+            EntryRef::Log(id) => ids.push(*id),
+            EntryRef::WhatsApp(id) => calls.push(id.clone()),
+        }
+    }
+    (ids, calls)
+}
+
+/// Call ids of the `extras` whose number is one of `numbers`.
+pub fn extra_ids_for_numbers(extras: &[ExtraCall], numbers: &[&str]) -> Vec<String> {
+    let wanted = wanted_numbers(numbers);
+    extras
+        .iter()
+        .filter(|e| number_in(&e.number_raw, &wanted))
+        .map(|e| e.call_id.clone())
+        .collect()
+}
+
 /// Calls (cellular and WhatsApp) with any of `numbers`, newest first, at most
 /// `limit`. Blocked entries are dropped; only the newest
 /// [`MAX_ENTRIES`] log entries are read.
@@ -378,12 +416,7 @@ pub fn history(
     numbers: &[&str],
     limit: usize,
 ) -> Vec<HistoryLine> {
-    let wanted: Vec<(&str, Option<PhoneNumber>)> = numbers
-        .iter()
-        .map(|n| n.trim())
-        .filter(|n| !n.is_empty())
-        .map(|n| (n, PhoneNumber::parse(n).ok()))
-        .collect();
+    let wanted = wanted_numbers(numbers);
     if wanted.is_empty() || limit == 0 {
         return Vec::new();
     }
@@ -506,6 +539,7 @@ mod tests {
             duration_s: 30,
             missed,
             label: None,
+            call_id: format!("wa-{ago}"),
         }
     }
 
@@ -786,6 +820,7 @@ mod tests {
             duration_s: 10,
             missed,
             label: label.map(str::to_owned),
+            call_id: format!("wa-{ago}-{number}"),
         }
     }
 
@@ -868,5 +903,56 @@ mod tests {
         ];
         assert_eq!(missed_extras(&calls, NOW - 5 * MIN), 2);
         assert_eq!(missed_extras(&calls, NOW), 0);
+    }
+
+    #[test]
+    fn merge_extras_collects_whatsapp_refs() {
+        let rows = group(&[entry(
+            1,
+            "0850 123 45 67",
+            CallLogKind::Incoming,
+            9 * MIN,
+            None,
+        )]);
+        let merged = merge_extras(
+            &rows,
+            &[
+                extra("+905551112233", MIN, true, None),
+                extra("+905551112233", 2 * MIN, true, None),
+            ],
+        );
+        assert_eq!(merged[0].count, 2);
+        assert_eq!(
+            merged[0].refs,
+            [
+                EntryRef::WhatsApp(format!("wa-{MIN}-+905551112233")),
+                EntryRef::WhatsApp(format!("wa-{}-+905551112233", 2 * MIN)),
+            ]
+        );
+        assert_eq!(merged[1].refs, [EntryRef::Log(1)]);
+    }
+
+    #[test]
+    fn split_refs_separates_kinds() {
+        let (ids, calls) = split_refs(&[
+            EntryRef::Log(2),
+            EntryRef::WhatsApp("x".into()),
+            EntryRef::Log(1),
+        ]);
+        assert_eq!(ids, [2, 1]);
+        assert_eq!(calls, ["x"]);
+    }
+
+    #[test]
+    fn extra_ids_for_numbers_matches_forms() {
+        let extras = [
+            extra("+905551112233", MIN, false, None),
+            extra("+905550000000", 2 * MIN, false, None),
+        ];
+        assert_eq!(
+            extra_ids_for_numbers(&extras, &["0555 111 22 33"]),
+            [format!("wa-{MIN}-+905551112233")]
+        );
+        assert!(extra_ids_for_numbers(&extras, &[""]).is_empty());
     }
 }

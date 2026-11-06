@@ -1876,9 +1876,15 @@ impl StopsApp {
             .child(
                 row("pin-remove", "Remove", colors.red).on_click(cx.listener(
                     move |this, _, _, cx| {
+                        let ends = this.pick.ends.clone();
+                        let label = pick::point_label(slot, ends.get(slot));
                         this.pick.remove(slot);
                         this.map.follow = true;
-                        cx.notify();
+                        this.show_pill(
+                            format!("Removed {label}"),
+                            Some(crate::PillAction::RestoreEnds(ends)),
+                            cx,
+                        );
                     },
                 )),
             );

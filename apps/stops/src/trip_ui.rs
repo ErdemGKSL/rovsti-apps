@@ -703,6 +703,12 @@ impl StopsApp {
         if self.busy {
             return;
         }
+        let ends = self.trip.as_ref().map(|t| {
+            (
+                pick::dest_from_endpoint(&t.a, &self.saved),
+                pick::dest_from_endpoint(&t.b, &self.saved),
+            )
+        });
         self.busy = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -712,7 +718,18 @@ impl StopsApp {
             this.update(cx, |this, cx| {
                 this.busy = false;
                 this.trip_over(cx);
-                this.show_pill("Trip stopped.", None, cx);
+                match ends {
+                    Some((a, b)) => {
+                        this.pick.set_pair(a.clone(), b.clone());
+                        this.map.follow = true;
+                        this.show_pill(
+                            "Trip stopped",
+                            Some(crate::PillAction::RestartTrip(a, b)),
+                            cx,
+                        );
+                    }
+                    None => this.show_pill("Trip stopped.", None, cx),
+                }
             })
             .ok();
         })

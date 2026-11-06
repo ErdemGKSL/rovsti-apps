@@ -152,7 +152,9 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   "(c) OpenStreetMap contributors".
 - **AD-ST5 Points are local.** A and B each come from the same sources: are `geo:` URIs and maps links (shared, opened or
   pasted), saved places, recent trips and GTFS stops. No geocoding: a link without coordinates is
-  refused and nothing is fetched to resolve it.
+  refused and nothing is fetched to resolve it. The picking state (A, B, pin menu, drag, the
+  hint line, labels) is the pure `apps/stops/src/pick.rs`; a point without a name is shown as
+  "Point A" / "Point B" and the pair as "A-B 850 m", never as coordinates.
 - **AD-ST6 GTFS is optional and local.** A `.zip` picked with the file picker is parsed on the
   background executor into `gtfs.json` (caps on stops, patterns and rows). It names stops
   (a point source for A or B) and draws them and their lines on the map; it has no alarm rule.

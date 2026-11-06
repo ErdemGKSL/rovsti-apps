@@ -1105,7 +1105,7 @@ impl StopsApp {
     fn map_diameter(&self) -> Option<Diameter> {
         match &self.trip {
             Some(trip) => Some(trip.trip.diameter),
-            None => self.ends.diameter().and_then(Result::ok),
+            None => self.pick.ends.diameter().and_then(Result::ok),
         }
     }
 
@@ -1113,7 +1113,7 @@ impl StopsApp {
     fn map_has_content(&self) -> bool {
         self.map.position.is_some()
             || self.trip.is_some()
-            || !self.ends.is_empty()
+            || !self.pick.ends.is_empty()
             || self.gtfs.is_some()
     }
 

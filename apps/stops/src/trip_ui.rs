@@ -25,6 +25,7 @@ use crate::{
     StopsApp,
     backend::{self, Preflight},
     map::side_color,
+    pick,
     picker::{Destination, Slot},
     store::now_ms,
 };
@@ -263,22 +264,23 @@ impl StopsApp {
         let colors = theme::colors(theme);
         let mut rows: Vec<AnyElement> = Vec::new();
         for slot in [Slot::A, Slot::B] {
-            let (title, subtitle) = match self.ends.get(slot) {
-                Some(d) => (d.label.clone(), Some(d.coords_text())),
-                None => (format!("Choose {}", slot.label()), None),
+            let dest = self.pick.ends.get(slot);
+            let title = match dest {
+                Some(_) => pick::point_label(slot, dest),
+                None => format!("Choose {}", slot.label()),
             };
-            let active = slot == self.active_slot;
+            let active = slot == self.pick.sheet_slot();
             rows.push(
                 list_row(
                     theme,
                     None,
                     format!("{}  {title}", slot.label()),
-                    subtitle.map(Into::into),
+                    None,
                     Some(if active { "Next" } else { "" }.into()),
                 )
                 .id(("end-row", slot as usize))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.active_slot = slot;
+                    this.pick.set_sheet_slot(slot);
                     this.open_picker(cx);
                 }))
                 .into_any_element(),
@@ -300,13 +302,13 @@ impl StopsApp {
             )
             .id("swap-ends")
             .on_click(cx.listener(|this, _, _, cx| {
-                this.ends.swap();
+                this.pick.swap();
                 cx.notify();
             }))
             .into_any_element(),
         );
         let mut page = div().flex().flex_col().gap(px(24.0));
-        if self.ends.is_empty() {
+        if self.pick.ends.is_empty() {
             page = page.child(empty_state(
                 theme,
                 "Where are you going?",
@@ -314,11 +316,10 @@ impl StopsApp {
             ));
         }
         page = page.child(section(theme, Some("Line".into()), rows));
-        let ready = self.ends.diameter().and_then(Result::ok).is_some();
-        match self.ends.diameter() {
-            Some(Ok(d)) => page = page.child(text_block(theme, trigger_text(&d))),
-            Some(Err(error)) => page = page.child(text_block(theme, error.message())),
-            None => {}
+        let ready = self.pick.can_start();
+        page = page.child(text_block(theme, self.pick.hint().text()));
+        if let Some(Ok(d)) = self.pick.ends.diameter() {
+            page = page.child(text_block(theme, trigger_text(&d)));
         }
         if self.notice_available(cx) {
             let chat = self
@@ -347,7 +348,7 @@ impl StopsApp {
             ));
         }
         let label = if self.busy { "Starting..." } else { "Start" };
-        let pair = self.ends.a.clone().zip(self.ends.b.clone());
+        let pair = self.pick.ends.a.clone().zip(self.pick.ends.b.clone());
         let start = glass_pill(theme, label)
             .id("start")
             .w(px(220.0))
@@ -628,8 +629,8 @@ impl StopsApp {
         let started = now_ms();
         let trip = match backend::build_trip(
             started.max(1) as u64,
-            a.endpoint(),
-            b.endpoint(),
+            pick::trip_endpoint(Slot::A, &a),
+            pick::trip_endpoint(Slot::B, &b),
             started,
             notice.as_ref(),
         ) {
@@ -661,8 +662,7 @@ impl StopsApp {
                         this.live = None;
                         this.map.pattern = line;
                         this.map.follow = true;
-                        this.ends = crate::picker::Ends::default();
-                        this.active_slot = Slot::A;
+                        this.pick.clear();
                         this.alarm = None;
                         this.tabs.jump_to(0);
                     }

@@ -8,7 +8,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_geo::{Coord, Diameter, DiameterError, Endpoint, Place, dest::parse_location};
+use rovsti_geo::{Coord, Diameter, DiameterError, Place, dest::parse_location};
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
     field::field_box,
@@ -55,16 +55,22 @@ impl Destination {
         }
     }
 
-    /// The confirmation sheet's heading.
-    pub fn title(&self) -> String {
-        format!("Use {}", self.label)
+    /// A raw point dropped on the map: it has no name.
+    pub fn dropped(coord: Coord) -> Self {
+        Self::new(String::new(), coord)
     }
 
-    /// The point as the trip stores it.
-    pub fn endpoint(&self) -> Endpoint {
-        Endpoint {
-            label: self.label.clone(),
-            coord: self.coord,
+    /// Whether the point has a name worth showing.
+    pub fn is_named(&self) -> bool {
+        !self.label.trim().is_empty()
+    }
+
+    /// The confirmation sheet's heading.
+    pub fn title(&self) -> String {
+        if self.is_named() {
+            format!("Use {}", self.label)
+        } else {
+            "Use this point".to_owned()
         }
     }
 
@@ -163,8 +169,7 @@ pub enum Offer {
 }
 
 /// Reads a location out of `text` (a `geo:` URI, a maps link, bare
-/// coordinates). Nothing is fetched. A pin without a name is labelled with its
-/// coordinates.
+/// coordinates). Nothing is fetched. A pin without a name stays unnamed.
 pub fn offer(text: &str) -> Offer {
     match parse_location(text) {
         Ok(place) => {
@@ -172,7 +177,7 @@ pub fn offer(text: &str) -> Offer {
                 .label
                 .map(|l| l.trim().to_owned())
                 .filter(|l| !l.is_empty())
-                .unwrap_or_else(|| coord_text(place.coord));
+                .unwrap_or_default();
             Offer::Confirm(Destination::new(label, place.coord))
         }
         Err(error) => Offer::Refused(error.message()),
@@ -242,7 +247,11 @@ impl StopsApp {
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // A line looked at but not chosen leaves the map again.
-            self.map.pattern = self.ends.get(self.active_slot).and_then(|d| d.pattern);
+            self.map.pattern = self
+                .pick
+                .ends
+                .get(self.pick.sheet_slot())
+                .and_then(|d| d.pattern);
         }
         self.sheet.close();
         cx.notify();
@@ -251,7 +260,7 @@ impl StopsApp {
     /// A saved or recent point was tapped: it fills the active slot, and the
     /// next pick goes to the other end.
     pub(crate) fn choose_destination(&mut self, dest: Destination, cx: &mut Context<Self>) {
-        let slot = self.active_slot;
+        let slot = self.pick.sheet_slot();
         self.use_as(slot, dest, false, cx);
     }
 
@@ -268,16 +277,14 @@ impl StopsApp {
         }
         self.map.pattern = dest.pattern;
         self.map.follow = true;
-        self.ends.set(slot, dest);
-        self.active_slot = self.ends.next_slot();
+        self.pick.place(slot, dest);
         self.sheet.close();
         cx.notify();
     }
 
     /// Both ends at once, from a recent trip.
     pub(crate) fn choose_pair(&mut self, a: Destination, b: Destination, cx: &mut Context<Self>) {
-        self.ends.set_pair(a, b);
-        self.active_slot = self.ends.next_slot();
+        self.pick.set_pair(a, b);
         self.map.pattern = None;
         self.map.follow = true;
         self.sheet.close();
@@ -332,7 +339,7 @@ impl StopsApp {
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
         let (label, content) = match self.sheet_mode.clone() {
             SheetMode::Pick => (
-                self.active_slot.picker_title(),
+                self.pick.sheet_slot().picker_title(),
                 self.pick_body(theme, window, cx),
             ),
             SheetMode::Confirm(dest) => ("Use this point", self.confirm_body(theme, &dest, cx)),
@@ -386,7 +393,10 @@ impl StopsApp {
         let query = self.field.read(cx).text().trim().to_owned();
         let mut body = div().flex().flex_col().gap(px(8.0));
         body = body
-            .child(Self::sheet_title(theme, self.active_slot.picker_title()))
+            .child(Self::sheet_title(
+                theme,
+                self.pick.sheet_slot().picker_title(),
+            ))
             .child(div().px(px(16.0)).child(field_box(
                 theme,
                 "dest-field",
@@ -691,7 +701,7 @@ impl StopsApp {
         }));
         let as_a = dest.clone();
         let as_b = dest.clone();
-        let default = self.ends.next_slot();
+        let default = self.pick.ends.next_slot();
         let pill = |label: &'static str, slot: Slot| {
             let p = glass_pill(theme, label);
             if slot == default {
@@ -815,12 +825,13 @@ mod tests {
     }
 
     #[test]
-    fn a_pin_without_a_name_is_named_by_its_coordinates() {
+    fn a_pin_without_a_name_stays_unnamed() {
         let d = confirm("geo:40.9917,29.0233");
-        assert_eq!(d.label, "40.9917, 29.0233");
+        assert!(!d.is_named());
+        assert_eq!(d.title(), "Use this point");
         assert_eq!(d.coords_text(), "40.9917, 29.0233");
         let d = confirm("https://www.google.com/maps/@41.0082,28.9784,15z");
-        assert_eq!(d.label, "41.0082, 28.9784");
+        assert!(d.label.is_empty());
     }
 
     #[test]
@@ -866,8 +877,7 @@ mod tests {
         let d = Destination::from_place(&place);
         assert_eq!(d.label, "Home");
         assert_eq!(d.gtfs_stop.as_deref(), Some("S1"));
-        let e = d.endpoint();
-        assert_eq!((e.label.as_str(), e.coord), ("Home", place.coord));
+        assert_eq!(d.coord, place.coord);
     }
 
     #[test]

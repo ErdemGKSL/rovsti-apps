@@ -41,6 +41,7 @@ mod headless;
 #[cfg(test)]
 mod kotlin_contract;
 mod map;
+mod pick;
 mod picker;
 mod saved_ui;
 mod settings_ui;
@@ -90,9 +91,7 @@ pub(crate) struct StopsApp {
     pub(crate) stop_pattern: Option<u32>,
 
     /// The two points chosen, not started.
-    pub(crate) ends: picker::Ends,
-    /// Which end the next picked point fills.
-    pub(crate) active_slot: picker::Slot,
+    pub(crate) pick: pick::Picking,
     /// Text the chat when arriving, for the next trip.
     pub(crate) notice_on: bool,
     /// The trip in progress.
@@ -247,8 +246,7 @@ impl StopsApp {
             map_tiles: tiles::MapTiles::default(),
             stop_hits: picker::StopHits::default(),
             stop_pattern: None,
-            ends: picker::Ends::default(),
-            active_slot: picker::Slot::default(),
+            pick: pick::Picking::default(),
             notice_on: true,
             trip: None,
             live: None,

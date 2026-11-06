@@ -165,6 +165,10 @@ pub(crate) struct StopsApp {
     pub(crate) history_open: Option<usize>,
     /// The first tap on "Remove transit data" has armed the second.
     pub(crate) confirm_remove_feed: bool,
+    /// Bytes of downloaded map tiles on disk; `None` while being measured.
+    pub(crate) tile_usage: Option<u64>,
+    /// The first tap on "Downloaded maps" has armed the second.
+    pub(crate) confirm_clear_tiles: bool,
 }
 
 impl StopsApp {
@@ -317,6 +321,8 @@ impl StopsApp {
             confirm_clear: false,
             history_open: None,
             confirm_remove_feed: false,
+            tile_usage: None,
+            confirm_clear_tiles: false,
         };
         app.refresh_preflight_later(cx);
         app.load_last_location(cx);

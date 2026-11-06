@@ -134,8 +134,18 @@ pub fn distance_text(metres: f64) -> String {
     }
 }
 
+/// Title and subtitle of the "Downloaded maps" row.
+pub fn tile_cache_texts(usage: Option<u64>, armed: bool) -> (&'static str, String) {
+    let title = if armed {
+        "Tap again to clear"
+    } else {
+        "Downloaded maps"
+    };
+    let subtitle = usage.map_or_else(|| "Checking...".to_owned(), bytes_text);
+    (title, subtitle)
+}
+
 /// Cache size: "None", "< 1 MB", "4.2 MB", "37 MB".
-#[allow(dead_code)] // wired up by a later step
 pub fn bytes_text(bytes: u64) -> String {
     const MIB: u64 = 1024 * 1024;
     match bytes {
@@ -375,6 +385,7 @@ impl StopsApp {
         self.confirm_clear = false;
         self.history_open = None;
         self.confirm_remove_feed = false;
+        self.confirm_clear_tiles = false;
         self.page.restart();
         self.history_list.scroll_to_top();
         self.notice_list.scroll_to_top();
@@ -383,7 +394,10 @@ impl StopsApp {
                 self.sync_template_field(cx);
                 self.load_chats(false, cx);
             }
-            SettingsPage::MapTiles => self.sync_tile_field(cx),
+            SettingsPage::MapTiles => {
+                self.sync_tile_field(cx);
+                self.measure_tiles(cx);
+            }
             SettingsPage::Main => self.refresh_preflight(cx),
             _ => {}
         }
@@ -1047,6 +1061,17 @@ impl StopsApp {
         .id("tiles-reset")
         .on_click(cx.listener(|this, _, _, cx| this.reset_tiles(cx)))
         .into_any_element();
+        let (title, subtitle) = tile_cache_texts(self.tile_usage, self.confirm_clear_tiles);
+        let downloaded = list_row(
+            theme,
+            None,
+            title,
+            Some(subtitle.into()),
+            Some("Clear".into()),
+        )
+        .id("tiles-clear")
+        .on_click(cx.listener(|this, _, _, cx| this.clear_tiles(cx)))
+        .into_any_element();
         div()
             .flex()
             .flex_col()
@@ -1083,7 +1108,53 @@ impl StopsApp {
                 false,
             ))
             .child(section(theme, None, [save, reset]))
+            .child(section(theme, None, [downloaded]))
+            .child(note(
+                theme,
+                "Kept for offline use, up to 128 MB per map server.",
+                false,
+            ))
             .into_any_element()
+    }
+
+    /// Measures the tile cache off the UI thread.
+    fn measure_tiles(&mut self, cx: &mut Context<Self>) {
+        self.tile_usage = None;
+        let Some(root) = self.map_tiles.root() else {
+            self.tile_usage = Some(0);
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let bytes = cx
+                .background_executor()
+                .spawn(async move { rovsti_tiles::disk_usage(&root) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.tile_usage = Some(bytes);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Two taps: the first asks, the second clears. Refused during a trip.
+    fn clear_tiles(&mut self, cx: &mut Context<Self>) {
+        if self.trip.is_some() {
+            self.show_pill("Not while a trip is running", None, cx);
+            return;
+        }
+        if !self.confirm_clear_tiles {
+            self.confirm_clear_tiles = true;
+            cx.notify();
+            return;
+        }
+        self.confirm_clear_tiles = false;
+        self.map_tiles.clear_disk(cx, |app, cx| {
+            app.tile_usage = Some(0);
+            app.show_pill("Downloaded maps cleared", None, cx);
+        });
+        cx.notify();
     }
 
     /// Paste button: fills the field only; the user still taps Test and save.
@@ -1270,6 +1341,16 @@ impl StopsApp {
 mod tests {
     use super::*;
     use rovsti_geo::Coord;
+
+    #[test]
+    fn tile_cache_texts_cover_states() {
+        assert_eq!(
+            tile_cache_texts(None, false),
+            ("Downloaded maps", "Checking...".to_owned())
+        );
+        assert_eq!(tile_cache_texts(Some(0), true).0, "Tap again to clear");
+        assert_eq!(tile_cache_texts(Some(0), false).1, bytes_text(0));
+    }
 
     #[test]
     fn bytes_text_edges() {

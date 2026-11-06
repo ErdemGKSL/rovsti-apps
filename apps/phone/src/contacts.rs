@@ -1138,6 +1138,17 @@ impl PhoneApp {
 
     // ---- The sheet ------------------------------------------------------
 
+    /// Opens the header picture of the Contact sheet in the photo viewer.
+    pub(crate) fn open_contact_photo(&mut self, cx: &mut Context<Self>) {
+        let Some(sheet) = &self.contact_sheet else {
+            return;
+        };
+        let row = &sheet.contact;
+        let thumb = self.row_photo(row, cx).map(|(image, _)| image);
+        let (title, uri) = (row.name.clone(), row.photo.clone());
+        self.open_photo_viewer(title, thumb, uri, cx);
+    }
+
     /// Opens the Contact sheet (or, with `chooser`, the number chooser).
     pub(crate) fn open_contact_sheet(
         &mut self,
@@ -2200,6 +2211,36 @@ impl PhoneApp {
         };
         let contact = &sheet.contact;
         let sheet_photo = self.row_photo(contact, cx);
+        // U1: a contact with a picture opens it full screen from the header avatar.
+        let has_photo = sheet_photo.is_some();
+        let avatar_slot = div()
+            .size(px(SHEET_AVATAR))
+            .flex_none()
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(person_avatar(
+                theme,
+                contact.hue,
+                contact.monogram.as_ref(),
+                SHEET_AVATAR * self.sheet.avatar_scale(),
+                sheet_photo
+                    .as_ref()
+                    .map(|(image, opacity)| (image, *opacity)),
+            ));
+        let avatar_slot = if has_photo {
+            avatar_slot
+                .id("sheet-photo")
+                .role(Role::Button)
+                .aria_label("View photo")
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.open_contact_photo(cx)),
+                )
+                .into_any_element()
+        } else {
+            avatar_slot.into_any_element()
+        };
         let header = if sheet.chooser {
             div()
                 .flex()
@@ -2238,23 +2279,7 @@ impl PhoneApp {
                 .gap(px(4.0))
                 .pb(px(4.0))
                 // S16: the avatar grows 0.8 to 1.0 inside a fixed slot, so nothing shifts.
-                .child(
-                    div()
-                        .size(px(SHEET_AVATAR))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(person_avatar(
-                            theme,
-                            contact.hue,
-                            contact.monogram.as_ref(),
-                            SHEET_AVATAR * self.sheet.avatar_scale(),
-                            sheet_photo
-                                .as_ref()
-                                .map(|(image, opacity)| (image, *opacity)),
-                        )),
-                )
+                .child(avatar_slot)
                 .child(
                     div()
                         .pt(px(8.0))

@@ -115,7 +115,7 @@ fn ease(t: f32) -> f32 {
 }
 
 /// RGBA pixels as the GPU image gpui draws (BGRA).
-fn render_image(mut pixels: image::RgbaImage) -> RenderImage {
+pub(crate) fn render_image(mut pixels: image::RgbaImage) -> RenderImage {
     for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }

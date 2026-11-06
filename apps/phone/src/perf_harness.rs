@@ -747,6 +747,51 @@ mod tests {
         assert_eq!(held, crate::photos::CAPACITY);
     }
 
+    /// U1: tapping the Contact sheet's avatar opens the viewer on the contact's
+    /// photo; at scale 1 the drawn image sits inside the viewport, and the full
+    /// photo replaces the thumbnail without moving it.
+    #[test]
+    fn the_photo_viewer_draws_the_photo_inside_the_viewport() {
+        let mut rig = Rig::new();
+        rig.settle();
+        let uri = gpui::SharedString::from("sample:1");
+        rig.with_app(|app, window, cx| {
+            app.want_photos([(1_i64, &uri)], cx);
+            app.preview_contact_sheet("1", window, cx);
+        });
+        rig.settle();
+        rig.with_app(|app, _, cx| {
+            assert!(app.viewer.is_none());
+            app.open_contact_photo(cx);
+            assert!(app.viewer.is_some(), "the contact has a photo to open");
+        });
+        // The full photo loads on the background executor and swaps in.
+        rig.settle();
+        let (rect, viewport, full) = rig.with_app(|app, window, _| {
+            let viewer = app.viewer.as_ref().expect("the viewer is open");
+            let size = window.viewport_size();
+            let viewport = rovsti_core::zoom::Size {
+                w: f32::from(size.width),
+                h: f32::from(size.height),
+            };
+            (viewer.rect(viewport), viewport, viewer.file.is_some())
+        });
+        assert!(full, "the full photo never arrived");
+        let (x, y, w, h) = rect;
+        assert!(w > 0.0 && h > 0.0);
+        assert!(
+            x >= -0.01 && y >= -0.01 && x + w <= viewport.w + 0.01 && y + h <= viewport.h + 0.01,
+            "image rect {rect:?} outside {viewport:?}"
+        );
+        // Back closes it and leaves the sheet underneath.
+        rig.with_app(|app, window, cx| app.on_back(window, cx));
+        rig.settle();
+        rig.with_app(|app, _, _| {
+            assert!(app.viewer.is_none());
+            assert!(app.contact_sheet.is_some());
+        });
+    }
+
     /// Story 12.3: with no spring moving and no call, nothing is drawn for 30 s
     /// on any tab and no timer wakes the app.
     #[test]

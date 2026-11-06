@@ -1182,6 +1182,23 @@ impl PhoneApp {
 
     // ---- The Number sheet ------------------------------------------------
 
+    /// Opens the Number sheet's picture in the photo viewer. Only a contact's
+    /// own photo has a full-size version to load behind the thumbnail.
+    pub(crate) fn open_number_photo(&mut self, cx: &mut Context<Self>) {
+        let Some(row) = self.recents.number.as_ref() else {
+            return;
+        };
+        let thumb = self.caller_photo(&row.photo, cx).map(|(image, _)| image);
+        let uri = row
+            .photo
+            .contact
+            .as_ref()
+            .filter(|(id, _)| self.photos.get(*id).is_some())
+            .map(|(_, uri)| uri.clone());
+        let title = row.title.clone();
+        self.open_photo_viewer(title, thumb, uri, cx);
+    }
+
     /// Info on a row: the number, "Call" and "Add to contacts" (UX-DR9).
     pub(crate) fn number_sheet_body(
         &self,
@@ -1198,18 +1215,30 @@ impl PhoneApp {
                 .when(alpha < 1.0, |d| d.opacity(alpha))
                 .child(el)
         };
+        // U1: a row with a picture opens it full screen from the header avatar.
+        let photo = self.caller_photo(&row.photo, cx);
+        let has_photo = photo.is_some();
+        let avatar = avatar_view(theme, row, 72.0, photo);
+        let avatar = if has_photo {
+            avatar
+                .id("sheet-photo")
+                .role(Role::Button)
+                .aria_label("View photo")
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| this.open_number_photo(cx)),
+                )
+                .into_any_element()
+        } else {
+            avatar.into_any_element()
+        };
         let header = div()
             .flex()
             .flex_col()
             .items_center()
             .gap(px(4.0))
             .pb(px(8.0))
-            .child(avatar_view(
-                theme,
-                row,
-                72.0,
-                self.caller_photo(&row.photo, cx),
-            ))
+            .child(avatar)
             .child(
                 div()
                     .pt(px(8.0))

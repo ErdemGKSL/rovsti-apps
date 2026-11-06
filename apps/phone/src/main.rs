@@ -34,6 +34,7 @@ mod notice;
 mod perf_harness;
 #[cfg(any(feature = "perf", test))]
 mod perf_run;
+mod photo_viewer;
 mod photos;
 mod recents;
 mod replies_ui;
@@ -250,6 +251,8 @@ struct PhoneApp {
     favorites: FavoritesView,
     /// The open Contact sheet or number chooser.
     contact_sheet: Option<ContactSheet>,
+    /// The full-screen photo viewer, drawn above the sheets (U1, U2).
+    viewer: Option<photo_viewer::PhotoViewer>,
     /// What the confirm-delete sheet will remove.
     confirm_delete: Option<history_ui::DeleteScope>,
     /// 0 = Tab Bar in place, 1 = slid away under the keyboard.
@@ -564,6 +567,7 @@ impl PhoneApp {
             contacts: contacts_view,
             favorites: FavoritesView::new(),
             contact_sheet: None,
+            viewer: None,
             confirm_delete: None,
             tabs_away: Spring::new(0.0, motion_tokens::select()).with_epsilon(0.002),
             safe_bottom: 0.0,
@@ -755,7 +759,10 @@ impl PhoneApp {
         // While the In-Call screen shows, what is open on the tabs under it (a menu,
         // a tab sheet, Settings, the keyboard) stays put: Back acts on the call.
         let on_call = self.incall.shown;
-        if self.reply_is_open() {
+        if self.viewer.as_ref().is_some_and(|v| !v.is_closing()) {
+            // The photo viewer is the top layer: Back closes it first.
+            self.close_photo_viewer(window, cx);
+        } else if self.reply_is_open() {
             // Back puts the reply sheet away and returns to the ringing card.
             self.reply_close(window, cx);
         } else if self.incoming.covers() {
@@ -830,6 +837,7 @@ impl PhoneApp {
                 || self.contacts.typing
                 || self.tabs.selected() != KEYPAD_TAB);
         let want = self.incoming.wants_back()
+            || self.viewer.is_some()
             || self.reply_is_open()
             || self.route.is_open()
             || (self.sheet.is_open() && self.sheet_kind_over_call())
@@ -904,6 +912,14 @@ impl PhoneApp {
     ) {
         match phase {
             TouchPhase::Started => {
+                // The photo viewer owns the screen: only its own buttons react.
+                if self.viewer.is_some() {
+                    if let Some(id) = id.as_deref().filter(|i| i.starts_with("pv-")) {
+                        self.presses.touch_down(id.to_owned());
+                        cx.notify();
+                    }
+                    return;
+                }
                 // Under the open sheet only the sheet's own buttons react, and
                 // under the In-Call screen only its own controls.
                 // The Settings page owns the screen: only its own controls (and sheets) react.
@@ -1045,6 +1061,12 @@ impl PhoneApp {
         moving |= self.melt.tick(dt);
         if let Some(sheet) = &mut self.contact_sheet {
             moving |= sheet.tick_star(dt);
+        }
+        if let Some(viewer) = &mut self.viewer {
+            moving |= viewer.tick(dt);
+            if viewer.finished() {
+                self.viewer = None;
+            }
         }
         moving |= self.incall.tick(dt);
         moving |= self.add.tick(dt);
@@ -1199,7 +1221,10 @@ impl PhoneApp {
     /// bottom inset over a sheet.
     fn pill_bottom(&self) -> f32 {
         const GAP: f32 = 12.0;
-        if self.incall.covers() {
+        if self.viewer.is_some() {
+            // Above the viewer's bottom bar (64 px + 16 px margin).
+            self.safe_bottom + 64.0 + 16.0 + GAP
+        } else if self.incall.covers() {
             // pb(58) + the 64 px End button.
             58.0 + 64.0 + GAP
         } else if self.sheet.is_visible() || self.settings.covers() {
@@ -1330,6 +1355,10 @@ impl PhoneApp {
             move |_, cx| entity.update(cx, |this, cx| this.close_sheet(cx)),
             move |phase, y, _, cx| {
                 drag_entity.update(cx, |this, cx| {
+                    // A finger on the photo viewer above is not a sheet drag.
+                    if this.viewer.is_some() {
+                        return;
+                    }
                     this.sheet.drag_touch(phase, y);
                     cx.notify();
                 });
@@ -1439,6 +1468,9 @@ impl Render for PhoneApp {
         let add_call = self.add_call_overlay(theme, window, cx);
         let sim_sheet = self.sim_overlay(theme, window, cx);
         let incoming = self.render_incoming(theme, cx);
+        if self.incoming.covers() {
+            self.viewer = None;
+        }
         let tabs_visible = self.restored
             && !self.incall.hides_tabs()
             && !self.incall.blank
@@ -1496,6 +1528,7 @@ impl Render for PhoneApp {
             .children(add_call)
             .children(sim_sheet)
             .children(route)
+            .children(self.photo_viewer_overlay(theme, window, cx))
             .children(pill)
             .children(incoming)
             .child(self.wa_call.clone())

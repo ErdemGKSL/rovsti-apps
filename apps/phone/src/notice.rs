@@ -166,9 +166,9 @@ impl PhoneApp {
                 .role(Role::Button)
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
+                    cx.listener(|this, _, window, cx| {
                         this.presses.down("notice-act");
-                        this.notice_act(cx);
+                        this.notice_act(window, cx);
                     }),
                 )
                 .child(touch_surface(Self::touch_listener(
@@ -336,7 +336,7 @@ impl PhoneApp {
         )
     }
 
-    fn notice_act(&mut self, cx: &mut Context<Self>) {
+    fn notice_act(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.notice_shown {
             // "Fix" opens Setup, where the default-app item comes first.
             Some(Notice::Preview) if self.can_open_sheet() => {
@@ -349,6 +349,14 @@ impl PhoneApp {
                 self.call_note = None;
                 self.backend
                     .update(cx, |backend, cx| backend.grant_phone_access(&number, cx));
+            }
+            // "Connect" opens Settings > WhatsApp, where the gateway is linked.
+            Some(Notice::WhatsApp(why)) if why == crate::wa_call::NOT_CONNECTED => {
+                self.call_note = None;
+                self.settings_open(window, cx);
+                if self.settings.is_open() {
+                    self.settings_open_sub(crate::settings_ui::Sub::WhatsApp, window, cx);
+                }
             }
             _ => {}
         }

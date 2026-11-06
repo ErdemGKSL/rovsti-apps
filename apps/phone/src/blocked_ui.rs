@@ -740,7 +740,7 @@ impl PhoneApp {
 
     /// Blocks `many.to_block` one by one, then shows `text_of(blocked ones)` with
     /// Undo. Shared by the pasted list and the file import.
-    fn bulk_block_run(
+    pub(crate) fn bulk_block_run(
         &mut self,
         many: blocklist::BulkParse,
         text_of: impl FnOnce(&blocklist::BulkParse) -> String + 'static,

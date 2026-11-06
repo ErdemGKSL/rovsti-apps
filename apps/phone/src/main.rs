@@ -124,6 +124,8 @@ enum SheetKind {
     UnblockAll,
     /// "Delete calls with {who}?" / "Delete all call history?" (`history_ui`).
     ConfirmDelete,
+    /// "Block n numbers?" from Recents select mode (`recents::recents_block_sheet`).
+    ConfirmBlockSelected,
     /// Every T9 match behind the keypad strip's "N more" (`keypad::t9_results_sheet`).
     T9Results,
     /// "Copy as" / "Share as": the number in each format (`actions_ui::copy_as_sheet`).
@@ -295,6 +297,8 @@ struct PhoneApp {
     photo_edit: Option<photo_edit::PhotoEdit>,
     /// What the confirm-delete sheet will remove.
     confirm_delete: Option<history_ui::DeleteScope>,
+    /// The numbers the select-mode block sheet will block.
+    confirm_block: Vec<String>,
     /// 0 = Tab Bar in place, 1 = slid away under the keyboard.
     tabs_away: Spring,
     /// Effective bottom inset (system bar / gesture area) from the last render, in px.
@@ -637,6 +641,7 @@ impl PhoneApp {
             viewer: None,
             photo_edit: None,
             confirm_delete: None,
+            confirm_block: Vec::new(),
             tabs_away: Spring::new(0.0, motion_tokens::select()).with_epsilon(0.002),
             safe_bottom: 0.0,
             pill_in: Spring::new(0.0, motion_tokens::appear()).with_epsilon(0.002),
@@ -1497,6 +1502,7 @@ impl PhoneApp {
             SheetKind::ClearSpeedDial => self.speed_dial_clear_sheet(theme, window, cx),
             SheetKind::UnblockAll => self.blocked_unall_sheet(theme, window, cx),
             SheetKind::ConfirmDelete => self.confirm_delete_sheet(theme, window, cx),
+            SheetKind::ConfirmBlockSelected => self.recents_block_sheet(theme, window, cx),
             SheetKind::T9Results => self.t9_results_sheet(theme, window, cx),
             SheetKind::CopyAs => self.copy_as_sheet(theme, window, cx),
             SheetKind::QuickReplyPick => self.quick_reply_sheet(theme, window, cx),

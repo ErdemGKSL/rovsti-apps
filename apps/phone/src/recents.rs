@@ -23,11 +23,13 @@ use gpui::{
     Window, div, linear_color_stop, linear_gradient, prelude::*, px, svg, uniform_list,
 };
 use rovsti_core::{
+    blocklist,
     call_log::RecentsRow,
     call_log_query::{self, Query, RecentsFilter},
     call_notes::{self, Notes},
     recents::{self, Direction, RowView},
     sim::SimInfo,
+    wire::EmergencyList,
 };
 use rovsti_ui::{
     Icon,
@@ -49,6 +51,11 @@ use crate::{
     notice::Notice,
     wa_peer::CallerPhoto,
 };
+
+/// Block and Share work on callable numbers only: dimmed and inert with none.
+pub(crate) fn select_tools_enabled(numbers: usize) -> bool {
+    numbers > 0
+}
 
 /// Height of the search field under the title.
 const FIELD_H: f32 = 44.0;
@@ -91,6 +98,13 @@ struct CapFade {
 pub(crate) const SEL_ALL: &str = "rc-sel-all";
 pub(crate) const SEL_DONE: &str = "rc-sel-done";
 pub(crate) const SEL_DEL: &str = "rc-sel-del";
+pub(crate) const SEL_BLOCK: &str = "rc-sel-block";
+pub(crate) const SEL_SHARE: &str = "rc-sel-share";
+/// The block confirm sheet's buttons.
+pub(crate) const BS_YES: &str = "sheet-bs-yes";
+pub(crate) const BS_NO: &str = "sheet-bs-no";
+/// Side of the Block and Share buttons in the select bar.
+const SEL_TOOL: f32 = 36.0;
 const SELECT_BAR_H: f32 = 56.0;
 /// Gap between the select bar and the tab bar.
 const SELECT_BAR_GAP: f32 = 6.0;
@@ -1181,9 +1195,184 @@ impl PhoneApp {
                     self.open_confirm_delete(scope, cx);
                 }
             }
+            SEL_SHARE => self.recents_select_share(cx),
+            SEL_BLOCK => self.recents_select_block_ask(window, cx),
             _ => {}
         }
         cx.notify();
+    }
+
+    /// The numbers behind the chosen rows (private and duplicate rows left out).
+    fn recents_selected_numbers(&self) -> Vec<String> {
+        let r = &self.recents;
+        r.select
+            .as_ref()
+            .map(|sel| sel.numbers(&r.merged))
+            .unwrap_or_default()
+    }
+
+    /// Share: one line per chosen number through the share sheet. Select mode stays on.
+    fn recents_select_share(&mut self, cx: &mut Context<Self>) {
+        let r = &self.recents;
+        let Some(sel) = r.select.as_ref() else {
+            return;
+        };
+        let text = call_log_query::select_share_text(&r.merged, sel, |raw| {
+            r.merged
+                .iter()
+                .find(|row| row.number_raw.trim() == raw)
+                .and_then(|row| row.name.clone())
+        });
+        if text.is_empty() {
+            self.show_notice_pill(
+                call_log_query::select_nothing_callable_text(),
+                None,
+                false,
+                cx,
+            );
+            return;
+        }
+        let outcome = backend::share_text(&text);
+        if outcome != backend::Outcome::Done {
+            self.show_notice_pill(
+                outcome.why_not("Couldn't open the share sheet"),
+                None,
+                false,
+                cx,
+            );
+        }
+    }
+
+    /// Block: asks first. Select mode stays on until the owner says Yes.
+    fn recents_select_block_ask(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sheet.is_visible() {
+            return;
+        }
+        let numbers = self.recents_selected_numbers();
+        if !select_tools_enabled(numbers.len()) {
+            self.show_notice_pill(
+                call_log_query::select_nothing_callable_text(),
+                None,
+                false,
+                cx,
+            );
+            return;
+        }
+        if !self.backend.read(cx).can_block_here() {
+            self.show_notice_pill("Not available on this platform", None, false, cx);
+            return;
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.confirm_block = numbers;
+        self.sheet_kind = crate::SheetKind::ConfirmBlockSelected;
+        self.sheet.open();
+    }
+
+    /// Yes or Cancel on the block confirm sheet.
+    pub(crate) fn recents_block_sheet_act(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let numbers = std::mem::take(&mut self.confirm_block);
+        self.close_sheet(cx);
+        if id != BS_YES || numbers.is_empty() {
+            return;
+        }
+        let many = {
+            let backend = self.backend.read(cx);
+            blocklist::parse_many(
+                &numbers.join("\n"),
+                &EmergencyList::default(),
+                &backend.blocked_numbers_set(),
+            )
+        };
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        self.recents_leave_select(cx);
+        if many.to_block.is_empty() {
+            let text = if many.already_blocked > 0 {
+                "Already blocked"
+            } else {
+                call_log_query::select_nothing_callable_text()
+            };
+            self.show_notice_pill(text, None, false, cx);
+            return;
+        }
+        self.bulk_block_run(many, blocklist::bulk_text, cx);
+    }
+
+    /// The confirm sheet of Block in select mode.
+    pub(crate) fn recents_block_sheet(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.sheet.is_visible() {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        let (title, text) = call_log_query::select_block_text(self.confirm_block.len());
+        let button = |id: &'static str,
+                      label: &'static str,
+                      fill: gpui::Hsla,
+                      ink: gpui::Hsla,
+                      cx: &mut Context<Self>| {
+            let press = self.presses.value(id).clamp(0.0, 1.0);
+            div()
+                .id(id)
+                .role(Role::Button)
+                .aria_label(label)
+                .relative()
+                .h(px(52.0 * press_scale(press, scale::PRESS)))
+                .rounded_full()
+                .bg(mix(fill, gpui::white(), 0.16 * press))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(typography::HEADLINE.size)
+                .font_weight(typography::HEADLINE.weight)
+                .text_color(ink)
+                .child(label)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.presses.down(id);
+                        this.recents_block_sheet_act(id, window, cx);
+                    }),
+                )
+                .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
+        };
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .px(px(18.0))
+            .pb(px(18.0))
+            .child(
+                div()
+                    .text_size(typography::TITLE3.size)
+                    .font_weight(typography::TITLE3.weight)
+                    .text_color(colors.label)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_size(typography::SUBHEADLINE.size)
+                    .text_color(colors.secondary_label)
+                    .child(text),
+            )
+            .child(button(
+                BS_YES,
+                "Block",
+                call_colors(theme).danger,
+                gpui::white(),
+                cx,
+            ))
+            .child(button(BS_NO, "Cancel", colors.fill, colors.label, cx))
+            .into_any_element();
+        self.modal_sheet(theme, window, "Block selected numbers", body, cx)
     }
 
     /// Height from the window bottom up to the select bar's top edge.
@@ -1239,6 +1428,42 @@ impl PhoneApp {
                     Some(SEL_DEL.into()),
                 )));
         }
+        let tools = n > 0 && select_tools_enabled(self.recents_selected_numbers().len());
+        let tool = |id: &'static str, label: &'static str, icon: Icon, cx: &mut Context<Self>| {
+            let press = self.presses.value(id).clamp(0.0, 1.0);
+            let mut b = div()
+                .id(id)
+                .role(Role::Button)
+                .aria_label(label)
+                .aria_disabled(!tools)
+                .relative()
+                .flex_none()
+                .size(px(SEL_TOOL * press_scale(press, scale::PRESS)))
+                .rounded_full()
+                .bg(colors.fill)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(svg().path(icon.path()).size(px(20.0)).text_color(if tools {
+                    colors.label
+                } else {
+                    colors.tertiary_label
+                }));
+            if tools {
+                b = b
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            this.presses.down(id);
+                            this.recents_select_act(id, window, cx);
+                        }),
+                    )
+                    .child(touch_surface(Self::touch_listener(cx, Some(id.into()))));
+            }
+            b
+        };
+        let block = tool(SEL_BLOCK, "Block", Icon::LucideBan, cx);
+        let share = tool(SEL_SHARE, "Share", Icon::LucideShare2, cx);
         Some(
             div()
                 .id("rc-sel-bar")
@@ -1271,6 +1496,8 @@ impl PhoneApp {
                                 .text_color(colors.label)
                                 .child(call_log_query::select_title(n)),
                         )
+                        .child(block)
+                        .child(share)
                         .child(del),
                 )
                 .into_any_element(),
@@ -3357,5 +3584,22 @@ mod tests {
         q.filter = RecentsFilter::All;
         q.text = "ann".into();
         assert!(notes_affect_list(&q));
+    }
+
+    #[test]
+    fn select_tools_ids_and_gate() {
+        let ids = [SEL_ALL, SEL_DONE, SEL_DEL, SEL_BLOCK, SEL_SHARE];
+        for (i, a) in ids.iter().enumerate() {
+            assert!(a.starts_with("rc-sel-"));
+            assert!(ids[i + 1..].iter().all(|b| a != b));
+        }
+        for id in [BS_YES, BS_NO] {
+            assert!(id.starts_with("sheet-bs-"));
+            assert!(!id.starts_with("sheet-del-") && !id.starts_with("sheet-bk-"));
+            assert!(!id.starts_with("sheet-n") && !id.starts_with("sheet-c"));
+        }
+        assert_ne!(BS_YES, BS_NO);
+        assert!(!select_tools_enabled(0));
+        assert!(select_tools_enabled(1) && select_tools_enabled(5));
     }
 }

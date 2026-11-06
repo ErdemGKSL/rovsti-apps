@@ -24,7 +24,7 @@ use std::{
 use futures::StreamExt;
 use gpui::{App, AppContext as _, Context, Entity, Task};
 use rovsti_android::{
-    Error, calls, documents,
+    Error, calls, contacts_edit, documents,
     events::{self, RawEvent, kind},
     media, permissions, providers, roles, telecom, xiaomi,
 };
@@ -32,6 +32,7 @@ use rovsti_core::{
     blocklist::BlockSet,
     call::CallModel,
     call_log::{self, RecentsRow},
+    contact_photo::{self, PhotoError},
     recents::LocaleTime,
     scene::SceneDiff,
     search::ContactIndex,
@@ -1214,6 +1215,11 @@ impl Backend {
         })
     }
 
+    /// Pulls the address book again (a photo changed).
+    pub fn reload_contacts(&mut self, cx: &mut Context<Self>) {
+        self.refresh_contacts(cx);
+    }
+
     fn refresh_contacts(&mut self, cx: &mut Context<Self>) {
         self.contacts_pull += 1;
         let pull = self.contacts_pull;
@@ -1376,6 +1382,121 @@ pub fn full_photo(uri: &str) -> Option<(image::RgbaImage, std::path::PathBuf)> {
             None
         }
     }
+}
+
+/// Opens the system photo picker for a contact photo; the answer is a
+/// `document_result` (`DocumentOp::ContactPhoto`).
+pub fn pick_contact_photo() -> Outcome {
+    Outcome::from(documents::pick_contact_photo(), "picking a photo")
+}
+
+/// Removes the contact's photo.
+pub fn remove_contact_photo(contact_id: i64) -> Outcome {
+    Outcome::from(
+        contacts_edit::remove_photo(contact_id),
+        "removing the photo",
+    )
+}
+
+/// Why a photo write failed.
+#[derive(Debug)]
+enum PhotoFailed {
+    /// Desktop: there is no Android to ask.
+    Unsupported,
+    Wire(WireError),
+    /// The picked image has no readable size.
+    Unreadable,
+    Other(String),
+}
+
+impl PhotoFailed {
+    /// What the notice says after "Can't change the photo: ".
+    fn words(&self) -> String {
+        match self {
+            Self::Unsupported => "this needs an Android phone".to_owned(),
+            Self::Wire(WireError::Permission) => "Contacts access is off".to_owned(),
+            Self::Wire(WireError::Refused) => "Android refused the change".to_owned(),
+            Self::Wire(WireError::NotFound) => "that contact is gone".to_owned(),
+            Self::Wire(_) => "something went wrong".to_owned(),
+            Self::Unreadable => "that image can't be read".to_owned(),
+            Self::Other(detail) => {
+                log::warn!("contact photo call failed: {detail}");
+                "something went wrong".to_owned()
+            }
+        }
+    }
+}
+
+/// Reads the pixel size out of the answer of `photo_size`: `{"w":..,"h":..}`,
+/// bare or inside an envelope. A size of zero means Android could not read it.
+fn decode_size(raw: rovsti_android::Result<String>) -> Result<(u32, u32), PhotoFailed> {
+    let json = match raw {
+        Ok(json) => json,
+        Err(Error::Unsupported) => return Err(PhotoFailed::Unsupported),
+        Err(error) => return Err(PhotoFailed::Other(error.to_string())),
+    };
+    let value: serde_json::Value =
+        serde_json::from_str(&json).map_err(|error| PhotoFailed::Other(error.to_string()))?;
+    if value.get("ok").and_then(serde_json::Value::as_bool) == Some(false) {
+        let error = value
+            .get("error")
+            .and_then(|e| serde_json::from_value(e.clone()).ok())
+            .unwrap_or_default();
+        return Err(PhotoFailed::Wire(error));
+    }
+    let body = value.get("data").unwrap_or(&value);
+    let side = |key: &str| {
+        body.get(key)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| u32::try_from(n).ok())
+    };
+    match (side("w"), side("h")) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => Ok((w, h)),
+        _ => Err(PhotoFailed::Unreadable),
+    }
+}
+
+/// What a refused crop plan says after "Can't change the photo: ".
+fn photo_words(error: PhotoError) -> String {
+    match error {
+        PhotoError::Empty => "that image is empty".to_owned(),
+        PhotoError::TooSmall => "that image is too small".to_owned(),
+    }
+}
+
+/// Sets the picked image at `path` as the photo of `contact_id`: asks for its
+/// size, plans the centred crop and has Android crop, scale and store it.
+/// Blocks: only call it on the background executor.
+pub fn change_contact_photo(contact_id: i64, path: &str) -> Result<(), String> {
+    let (width, height) =
+        decode_size(contacts_edit::photo_size(path)).map_err(|error| error.words())?;
+    let plan = contact_photo::plan(width, height).map_err(photo_words)?;
+    let plan = serde_json::to_string(&plan)
+        .map_err(|error| PhotoFailed::Other(error.to_string()).words())?;
+    match contacts_edit::set_photo(contact_id, path, &plan) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(PhotoFailed::Wire(WireError::Refused).words()),
+        Err(Error::Unsupported) => Err(PhotoFailed::Unsupported.words()),
+        Err(error) => Err(PhotoFailed::Other(error.to_string()).words()),
+    }
+}
+
+/// Side length of a share QR, in px.
+const QR_SIZE: u32 = 720;
+
+/// A QR code for `payload`: the decoded image and the PNG file it was read
+/// from (in the photo viewer's export dir) so Save and Share have a path.
+/// Blocks: only call it on the background executor.
+pub fn qr_image(payload: &str) -> Option<(Arc<gpui::RenderImage>, std::path::PathBuf)> {
+    let png = rovsti_wa_ui::qr_png(payload, QR_SIZE)
+        .map_err(|error| log::debug!("qr failed: {error}"))
+        .ok()?;
+    let pixels = image::load_from_memory_with_format(&png, image::ImageFormat::Png)
+        .ok()?
+        .into_rgba8();
+    let path = std::env::temp_dir().join("rovsti-phone-qr.png");
+    std::fs::write(&path, &png).ok()?;
+    Some((Arc::new(crate::photos::render_image(pixels)), path))
 }
 
 /// Opens the system Contacts app.
@@ -1709,6 +1830,63 @@ fn load_favorites() -> Load<Vec<WireContact>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_size_answer_reads_bare_or_in_an_envelope() {
+        let bare = r#"{"w":4000,"h":3000}"#;
+        assert!(matches!(decode_size(Ok(bare.to_owned())), Ok((4000, 3000))));
+        let wrapped = r#"{"v":1,"ok":true,"data":{"w":300,"h":900}}"#;
+        assert!(matches!(
+            decode_size(Ok(wrapped.to_owned())),
+            Ok((300, 900))
+        ));
+    }
+
+    #[test]
+    fn a_bad_size_answer_is_a_failure() {
+        let zero = r#"{"w":0,"h":0}"#;
+        assert!(matches!(
+            decode_size(Ok(zero.to_owned())),
+            Err(PhotoFailed::Unreadable)
+        ));
+        let denied = r#"{"v":1,"ok":false,"error":"permission"}"#;
+        assert!(matches!(
+            decode_size(Ok(denied.to_owned())),
+            Err(PhotoFailed::Wire(WireError::Permission))
+        ));
+        assert!(matches!(
+            decode_size(Ok("nope".to_owned())),
+            Err(PhotoFailed::Other(_))
+        ));
+        assert!(matches!(
+            decode_size(Err(Error::Unsupported)),
+            Err(PhotoFailed::Unsupported)
+        ));
+    }
+
+    #[test]
+    fn desktop_photo_actions_are_unsupported() {
+        assert_eq!(pick_contact_photo(), Outcome::NotAvailable);
+        assert_eq!(remove_contact_photo(1), Outcome::NotAvailable);
+        assert_eq!(
+            change_contact_photo(1, "/c/p").expect_err("no provider"),
+            "this needs an Android phone"
+        );
+        assert_eq!(PhotoFailed::Unreadable.words(), "that image can't be read");
+    }
+
+    #[test]
+    fn the_qr_image_is_a_decodable_png_file() {
+        let (image, path) = qr_image("BEGIN:VCARD\nFN:Ada\nEND:VCARD").expect("qr");
+        let bytes = std::fs::read(&path).expect("file written");
+        let decoded = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+            .expect("decodable png");
+        assert!(decoded.width() >= QR_SIZE && decoded.width() == decoded.height());
+        assert_eq!(
+            image.size(0).width.0,
+            i32::try_from(decoded.width()).expect("fits")
+        );
+    }
 
     #[test]
     fn desktop_permission_facts_have_a_microphone() {

@@ -6,7 +6,10 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Role,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_core::{settings::ImportPreview, wire::DocumentOp};
+use rovsti_core::{
+    settings::ImportPreview,
+    wire::{DocumentOp, DocumentResult},
+};
 
 use crate::block_ui::PillAction;
 use rovsti_ui::{
@@ -73,6 +76,7 @@ impl PhoneApp {
             }
         };
         let extras = self.wa_call.read(cx).recents_extras();
+        let notes = self.notes.snapshot();
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_millis() as i64);
@@ -82,7 +86,9 @@ impl PhoneApp {
                 .spawn(async move {
                     (
                         rovsti_core::call_log_query::csv_file_name(now_ms, tz),
-                        rovsti_core::call_log_query::to_csv(&source, &extras, tz),
+                        rovsti_core::call_log_query::to_csv_with_notes(
+                            &source, &extras, tz, &notes,
+                        ),
                     )
                 })
                 .await;
@@ -133,6 +139,7 @@ impl PhoneApp {
                     self.show_notice_pill(text, None, false, cx);
                 }
             }
+            DocumentOp::ContactPhoto => self.photo_picked(result, cx),
             DocumentOp::ImportBackup => {
                 if !(result.ok || result.error.is_some()) {
                     return; // the picker was cancelled
@@ -282,6 +289,81 @@ impl PhoneApp {
                 .child(self.backup_button(theme, "sheet-import-cancel", "Cancel", false, cx))
                 .into_any_element(),
         )
+    }
+}
+
+// The photo viewer's set/replace/remove buttons (S8) call the two entry points.
+#[allow(dead_code)]
+impl PhoneApp {
+    /// Starts the picker for a new photo of `contact_id`. Only the answer to
+    /// this request is applied (see [`Self::photo_picked`]).
+    pub(crate) fn pick_photo_for(&mut self, contact_id: i64, cx: &mut Context<Self>) {
+        if crate::backend::pick_contact_photo().failed() {
+            self.show_notice_pill("Couldn't open the photo picker", None, false, cx);
+            return;
+        }
+        self.pending_photo_for = Some(contact_id);
+    }
+
+    /// Removes the photo of `contact_id` (the caller has confirmed).
+    pub(crate) fn remove_photo_of(&mut self, contact_id: i64, cx: &mut Context<Self>) {
+        let outcome = crate::backend::remove_contact_photo(contact_id);
+        if outcome.failed() {
+            self.show_notice_pill("Couldn't remove the photo", None, false, cx);
+        } else if outcome == Outcome::NotAvailable {
+            self.show_notice_pill("Not available on this platform", None, false, cx);
+        } else {
+            self.photo_changed(contact_id, "Photo removed", cx);
+        }
+    }
+
+    /// The picker answered. Ignored unless the phone asked for it.
+    fn photo_picked(&mut self, result: DocumentResult, cx: &mut Context<Self>) {
+        let Some(id) = self.pending_photo_for.take() else {
+            return;
+        };
+        // A cancelled picker answers `ok: false` with no error: say nothing.
+        if !result.ok {
+            if result.error.is_some() {
+                self.show_notice_pill("That image can't be read", None, false, cx);
+            }
+            return;
+        }
+        let Some(path) = result.path else {
+            self.show_notice_pill("That image can't be read", None, false, cx);
+            return;
+        };
+        if !rovsti_core::contact_photo::accepts(result.mime.as_deref()) {
+            self.show_notice_pill("That is not an image", None, false, cx);
+            return;
+        }
+        self.show_notice_pill("Saving the photo\u{2026}", None, false, cx);
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { crate::backend::change_contact_photo(id, &path) })
+                .await;
+            this.update(cx, |this, cx| match result {
+                Ok(()) => this.photo_changed(id, "Photo updated", cx),
+                Err(words) => this.show_notice_pill(
+                    format!("Can't change the photo: {words}"),
+                    None,
+                    false,
+                    cx,
+                ),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// A photo write succeeded: drop the cached thumbnail so it is decoded
+    /// again, and pull the address book (the next pull carries the new URI).
+    fn photo_changed(&mut self, id: i64, said: &'static str, cx: &mut Context<Self>) {
+        self.photos.forget(id);
+        self.backend.update(cx, |b, cx| b.reload_contacts(cx));
+        self.show_notice_pill(said, None, false, cx);
+        cx.notify();
     }
 }
 

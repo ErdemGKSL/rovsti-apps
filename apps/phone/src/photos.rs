@@ -71,6 +71,13 @@ impl Photos {
         }
     }
 
+    /// Drops what is known about the photo of `id`, so the next draw decodes
+    /// it again (its photo was changed or removed).
+    pub(crate) fn forget(&mut self, id: i64) {
+        self.cache.remove(&id);
+        self.missing.remove(&id);
+    }
+
     /// The contacts changed: photos that failed may exist now.
     pub(crate) fn forget_misses(&mut self) {
         self.missing.clear();

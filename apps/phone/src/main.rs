@@ -29,6 +29,7 @@ mod history_ui;
 mod incall;
 mod incoming;
 mod keypad;
+mod notes;
 mod notice;
 #[cfg(test)]
 mod perf_harness;
@@ -278,6 +279,11 @@ struct PhoneApp {
     window_active: bool,
     /// Decoded contact photos (story 10.5).
     photos: Photos,
+    /// Per-call notes (U8), persisted next to the preferences.
+    notes: notes::NotesStore,
+    /// The contact whose photo the phone itself asked the picker for: only
+    /// then is a `ContactPhoto` answer applied.
+    pending_photo_for: Option<i64>,
     /// The first tab was chosen (stored tab, `tel:` intent, or the fallback
     /// after 400 ms): until then only the backdrop is drawn, so the app never
     /// shows the Keypad for a moment and then jumps to the stored tab.
@@ -591,11 +597,14 @@ impl PhoneApp {
             last_dialed: SharedString::default(),
             window_active: true,
             photos: Photos::new(),
+            notes: notes::NotesStore::default(),
+            pending_photo_for: None,
             restored,
             _restore_timeout: None,
             #[cfg(any(feature = "perf", test))]
             recorder: rovsti_ui::perf::Recorder::default(),
         };
+        app.load_notes(cx);
         #[cfg(feature = "perf")]
         app.start_perf_runner(window, cx);
         if !app.restored {

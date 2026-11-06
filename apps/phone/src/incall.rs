@@ -14,14 +14,15 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, Context, Entity, HapticFeedback, Hsla, InteractiveElement, IntoElement,
-    MouseButton, ObjectFit, ParentElement, Render, RenderImage, Role, SharedString,
+    AnyElement, ClipboardItem, Context, Entity, HapticFeedback, Hsla, InteractiveElement,
+    IntoElement, MouseButton, ObjectFit, ParentElement, Render, RenderImage, Role, SharedString,
     StatefulInteractiveElement, Styled, StyledImage, Task, Window, div, linear_color_stop,
     linear_gradient, prelude::*, px, svg,
 };
 use rovsti_core::{
     avatar,
     call::{CallState, caller_label, format_number, status_text},
+    dial::{self, TonePlan, ToneStep},
     scene::{CallScene, DisabledReason},
     wire::{AudioRoute, DisconnectCause, PendingOp},
 };
@@ -63,6 +64,20 @@ fn push_digit(buf: &mut String, key: char) {
         let extra = buf.len() - DIGIT_BUFFER;
         buf.drain(..extra);
     }
+}
+
+/// How long a paste holds each step: (tone on or pause, gap after it), in ms.
+pub(crate) fn step_wait_ms(step: ToneStep) -> (u64, u64) {
+    match step {
+        ToneStep::Tone(_) => (dial::TONE_ON_MS, dial::TONE_GAP_MS),
+        ToneStep::Pause => (dial::PAUSE_MS, 0),
+    }
+}
+
+/// Whether the keypad shows the Paste (or Stop) button: a live Telecom call and
+/// something to send.
+pub(crate) fn paste_shown(live: bool, telecom: bool, label: Option<&str>) -> bool {
+    live && telecom && label.is_some()
 }
 
 /// The keypad's digit line: the whole buffer, or `…` and its last keys.
@@ -683,6 +698,12 @@ pub struct InCall {
     /// When each grid slot was tapped, for its pending look (indexed by [`Slot`]).
     pending: [Option<Instant>; 6],
     dtmf_down: bool,
+    /// The clipboard's tones, read once when the keypad opened.
+    paste_plan: Option<TonePlan>,
+    paste_label: Option<String>,
+    /// Which paste is the latest; a change stops the running one.
+    paste_gen: u64,
+    pasting: bool,
     pub(crate) aura: Entity<Aura>,
     pub(crate) status: Entity<CallStatus>,
     /// The waiting caller; kept while the card rises away.
@@ -757,6 +778,10 @@ impl InCall {
             blank: false,
             pending: [None; 6],
             dtmf_down: false,
+            paste_plan: None,
+            paste_label: None,
+            paste_gen: 0,
+            pasting: false,
             aura: cx.new(|_| Aura::new()),
             status: cx.new(|_| CallStatus::new()),
             waiting: None,
@@ -1123,6 +1148,10 @@ impl PhoneApp {
                     ic.keypad_t.snap(0.0);
                     ic.digits.clear();
                     ic.digit_line = SharedString::default();
+                    ic.paste_gen += 1;
+                    ic.pasting = false;
+                    ic.paste_plan = None;
+                    ic.paste_label = None;
                     ic.blank = false;
                     ic.end_in.snap(0.0);
                     ic.end_in.set_target(1.0);
@@ -1676,7 +1705,23 @@ impl PhoneApp {
             "ic-keypad" if live && zone.enabled(Slot::Keypad) => {
                 self.incall.keypad_open = true;
                 self.incall.keypad_t.set_target(1.0);
+                // One read per opening, never per frame.
+                let clip = cx.read_from_clipboard().and_then(|item| item.text());
+                self.incall.paste_plan = clip.as_deref().map(dial::tone_plan);
+                self.incall.paste_label = dial::paste_tones_label(clip.as_deref());
             }
+            "ic-paste"
+                if live
+                    && zone.enabled(Slot::Keypad)
+                    && paste_shown(live, true, self.incall.paste_label.as_deref()) =>
+            {
+                if self.incall.pasting {
+                    self.stop_paste(cx);
+                } else {
+                    self.start_paste(call_id, window, cx);
+                }
+            }
+            "ic-digits" => {}
             "ic-hide" => {
                 self.incall.keypad_open = false;
                 self.incall.keypad_t.set_target(0.0);
@@ -1685,6 +1730,9 @@ impl PhoneApp {
                 if let Some(digit) = id.strip_prefix("ik-").and_then(|d| d.chars().next())
                     && live
                 {
+                    if self.incall.pasting {
+                        self.stop_paste(cx);
+                    }
                     rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
                     push_digit(&mut self.incall.digits, digit);
                     self.incall.digit_line = digit_line(&self.incall.digits).into();
@@ -1809,6 +1857,101 @@ impl PhoneApp {
         };
         self.send(CallCommand::Route(target), cx);
         cx.notify();
+    }
+
+    /// Stops a running paste and its tone.
+    fn stop_paste(&mut self, cx: &mut Context<Self>) {
+        self.incall.paste_gen += 1;
+        self.incall.pasting = false;
+        self.send(CallCommand::DtmfStop, cx);
+    }
+
+    /// Sends the clipboard's tones one by one; the task ends when `paste_gen`
+    /// changes, the call stops being live or the call changes.
+    fn start_paste(&mut self, call_id: i32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(plan) = self.incall.paste_plan.clone() else {
+            return;
+        };
+        self.incall.paste_gen += 1;
+        let generation = self.incall.paste_gen;
+        self.incall.pasting = true;
+        let source = CallSource::Telecom(call_id);
+        let alive = move |this: &mut PhoneApp| {
+            let ic = &this.incall;
+            let ok = ic.paste_gen == generation
+                && ic.ending.is_none()
+                && ic.view.as_ref().is_some_and(|v| v.source == source);
+            if !ok && ic.paste_gen == generation {
+                this.incall.pasting = false;
+            }
+            ok
+        };
+        cx.spawn_in(window, async move |this, cx| {
+            for step in plan.steps.iter().copied() {
+                let (on, gap) = step_wait_ms(step);
+                if let ToneStep::Tone(d) = step {
+                    let sent = this
+                        .update_in(cx, |this, _, cx| {
+                            if !alive(this) {
+                                return false;
+                            }
+                            push_digit(&mut this.incall.digits, d);
+                            this.incall.digit_line = digit_line(&this.incall.digits).into();
+                            this.send(CallCommand::Dtmf(d), cx);
+                            cx.notify();
+                            true
+                        })
+                        .unwrap_or(false);
+                    if !sent {
+                        return;
+                    }
+                }
+                cx.background_executor()
+                    .timer(Duration::from_millis(on))
+                    .await;
+                if matches!(step, ToneStep::Tone(_)) {
+                    let more = this
+                        .update_in(cx, |this, _, cx| {
+                            if !alive(this) {
+                                return false;
+                            }
+                            this.send(CallCommand::DtmfStop, cx);
+                            true
+                        })
+                        .unwrap_or(false);
+                    if !more {
+                        return;
+                    }
+                }
+                if gap > 0 {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(gap))
+                        .await;
+                }
+            }
+            this.update_in(cx, |this, window, cx| {
+                if alive(this) {
+                    this.incall.pasting = false;
+                    rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                    this.show_notice_pill(dial::tones_text(&plan), None, false, cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The digit line was held: copy the tones typed or pasted so far.
+    pub(crate) fn incall_copy_digits(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.incall.digits.is_empty() {
+            return;
+        }
+        let text = self.incall.digits.clone();
+        if backend::copy_text(&text) != backend::Outcome::Done {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+        self.show_notice_pill("Copied tones", None, false, cx);
     }
 
     /// The finger lifted: stop the touch tone that is playing.
@@ -2231,6 +2374,18 @@ impl PhoneApp {
     fn in_call_keypad(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
         let line = self.incall.digit_line.clone();
+        let ic = &self.incall;
+        let telecom = ic.view.as_ref().is_some_and(|v| !v.source.is_whatsapp());
+        let live = ic.ending.is_none() && ic.zone.enablement.enabled(Slot::Keypad);
+        let paste = if paste_shown(live, telecom, ic.paste_label.as_deref()) {
+            if ic.pasting {
+                Some("Stop".to_owned())
+            } else {
+                ic.paste_label.clone()
+            }
+        } else {
+            None
+        };
         div()
             .flex()
             .flex_col()
@@ -2238,14 +2393,27 @@ impl PhoneApp {
             .gap(px(12.0))
             .child(
                 div()
+                    .id("ic-digits")
+                    .relative()
                     .h(px(36.0))
                     .text_size(px(28.0))
                     .font_weight(gpui::FontWeight(300.0))
                     .text_color(colors.label)
-                    .child(line),
+                    .child(line)
+                    .child(touch_surface(Self::touch_listener(
+                        cx,
+                        Some("ic-digits".into()),
+                    ))),
             )
             .child(self.dial_pad(theme, IN_KEY, 16.0, 12.0, true, cx))
-            .child(self.text_button(theme, "ic-hide", "Hide", cx))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .children(paste.map(|label| self.text_button(theme, "ic-paste", label, cx)))
+                    .child(self.text_button(theme, "ic-hide", "Hide", cx)),
+            )
             .into_any_element()
     }
 
@@ -2253,15 +2421,16 @@ impl PhoneApp {
         &self,
         theme: Theme,
         id: &'static str,
-        label: &'static str,
+        label: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let label: SharedString = label.into();
         let colors = theme::colors(theme);
         let press = self.presses.value(id);
         div()
             .id(id)
             .role(Role::Button)
-            .aria_label(label)
+            .aria_label(label.clone())
             .h(px(44.0))
             .px(px(24.0))
             .flex()
@@ -2669,6 +2838,23 @@ mod tests {
     }
 
     #[test]
+    fn paste_button_shows_only_for_live_telecom_with_tones() {
+        assert!(paste_shown(true, true, Some("Paste 12")));
+        assert!(!paste_shown(false, true, Some("Paste 12")));
+        assert!(!paste_shown(true, false, Some("Paste 12")));
+        assert!(!paste_shown(true, true, None));
+    }
+
+    #[test]
+    fn step_waits_per_kind() {
+        assert_eq!(
+            step_wait_ms(ToneStep::Tone('5')),
+            (dial::TONE_ON_MS, dial::TONE_GAP_MS)
+        );
+        assert_eq!(step_wait_ms(ToneStep::Pause), (dial::PAUSE_MS, 0));
+    }
+
+    #[test]
     fn copy_text_is_the_number_or_nothing() {
         let view = CallView::from_model(&model_with(WireCallState::Active, None, false))
             .expect("foreground call");
@@ -2872,6 +3058,8 @@ mod tests {
         assert_eq!(wa_control_of_id("ic-mute"), Some(WaControl::Mute));
         assert_eq!(wa_control_of_id("ic-audio"), Some(WaControl::Speaker));
         assert_eq!(wa_control_of_id("ic-keypad"), Some(WaControl::Keypad));
+        assert_eq!(wa_control_of_id("ic-paste"), None);
+        assert_eq!(wa_control_of_id("ic-digits"), None);
         assert_eq!(wa_control_of_id("ik-5"), None);
     }
 

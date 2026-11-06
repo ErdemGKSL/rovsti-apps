@@ -436,6 +436,8 @@ pub(crate) enum HoldAction {
     },
     /// The caller block was held on the In-Call screen: copy the number.
     CopyCaller,
+    /// The in-call digit line was held: copy the tones.
+    CopyDigits,
     /// The dialed-number field was held: Copy / Paste / Clear popover.
     FieldMenu,
 }
@@ -615,6 +617,7 @@ impl PhoneApp {
             HoldAction::Reason(slot) => self.show_reason(usize::from(slot), window, cx),
             HoldAction::CopyAs { share } => self.open_copy_as(share, window, cx),
             HoldAction::CopyCaller => self.incall_copy_number(window, cx),
+            HoldAction::CopyDigits => self.incall_copy_digits(window, cx),
             HoldAction::FieldMenu => self.open_field_menu(window, cx),
         }
         cx.notify();

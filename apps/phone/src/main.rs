@@ -1100,6 +1100,13 @@ impl PhoneApp {
                             window,
                             cx,
                         );
+                    } else if &*id == "ic-digits" {
+                        self.arm_hold(
+                            contacts::LONG_PRESS.as_millis() as u64,
+                            keypad::HoldAction::CopyDigits,
+                            window,
+                            cx,
+                        );
                     } else if Self::acts_on_down(&id) {
                         self.activate(&id, window, cx);
                     } else if let Some(n) = id

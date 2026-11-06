@@ -357,11 +357,9 @@ pub fn speaker_applied(result: &rovsti_android::Result<bool>) -> bool {
 }
 
 /// Shown when a WhatsApp call needs the microphone and it is not allowed.
-#[allow(dead_code, reason = "wired up by the next step")]
 pub(crate) const MIC_OFF: &str = "Allow the microphone so they can hear you";
 
 /// What to do about the microphone before a call's audio starts.
-#[allow(dead_code, reason = "wired up by the next step")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MicAsk {
     Ready,
@@ -370,7 +368,6 @@ pub(crate) enum MicAsk {
 }
 
 /// Maps the microphone permission state to the next step.
-#[allow(dead_code, reason = "wired up by the next step")]
 pub(crate) fn mic_ask(access: rovsti_android::permissions::Access) -> MicAsk {
     use rovsti_android::permissions::Access;
     match access {
@@ -382,7 +379,6 @@ pub(crate) fn mic_ask(access: rovsti_android::permissions::Access) -> MicAsk {
 
 /// Whether the microphone start counts as started. Without Android (desktop)
 /// or on any error there is nothing to wait for, so the call carries on.
-#[allow(dead_code, reason = "wired up by the next step")]
 pub(crate) fn mic_started(result: &rovsti_android::Result<bool>) -> bool {
     !matches!(result, Ok(false))
 }
@@ -455,15 +451,26 @@ fn parse_link(link: &StoredLink) -> Result<(GatewayUrl, ConnectKey), ClientError
 }
 
 /// Opens the call audio socket and starts Kotlin's microphone and speaker.
-fn open_call_audio(link: &StoredLink, call_id: &str) -> Result<CallAudio, ClientError> {
+/// The flag says whether the microphone started (see [`mic_started`]).
+fn open_call_audio(link: &StoredLink, call_id: &str) -> Result<(CallAudio, bool), ClientError> {
     let (url, key) = parse_link(link)?;
     let audio = rovsti_wa_client::call_audio(url, key, call_id)?;
-    match rovsti_android::wa::call_audio_start() {
+    let started = rovsti_android::wa::call_audio_start();
+    match &started {
         Ok(true) => {}
         Ok(false) => log::warn!("call audio did not start: is RECORD_AUDIO granted?"),
         Err(error) => log::debug!("no call audio on this platform: {error}"),
     }
-    Ok(audio)
+    Ok((audio, mic_started(&started)))
+}
+
+/// Asks Android for the microphone when it is not allowed yet. The call is
+/// never held back by the dialog.
+fn ask_mic() {
+    use rovsti_android::permissions::{self, Group};
+    if let Ok(MicAsk::Ask) = permissions::state(Group::Microphone).map(mic_ask) {
+        let _ = permissions::request(Group::Microphone);
+    }
 }
 
 // ---- the entity ------------------------------------------------------------------
@@ -476,6 +483,8 @@ pub struct WaCallUi {
     answering: bool,
     /// A call is being placed (the gateway has not answered yet).
     placing: bool,
+    /// The microphone did not start for the current call.
+    mic_off: bool,
     /// The loudspeaker is on for the current call.
     speaker: bool,
     /// The glass In-Call screen draws the call; this entity draws nothing itself.
@@ -561,6 +570,7 @@ impl WaCallUi {
             session: None,
             answering: false,
             placing: false,
+            mic_off: false,
             speaker: false,
             incall_mounted: false,
             once: AnswerOnce::default(),
@@ -898,6 +908,7 @@ impl WaCallUi {
     fn finish(&mut self, cx: &mut Context<Self>) {
         self.answering = false;
         self.placing = false;
+        self.mic_off = false;
         self.speaker = false;
         if self.session.take().is_some() {
             cx.background_executor()
@@ -936,6 +947,7 @@ impl WaCallUi {
         };
         self.answering = true;
         self.error = None;
+        ask_mic();
         let call_id = view.call_id;
         self.cancel_notice(&call_id, cx);
         let task = cx.background_executor().spawn(async move {
@@ -949,7 +961,7 @@ impl WaCallUi {
             this.update(cx, |this, cx| {
                 this.answering = false;
                 match result {
-                    Ok(audio) => this.attach_audio(audio, cx),
+                    Ok((audio, mic)) => this.attach_audio(audio, mic, cx),
                     Err((what, error)) => this.fail(what, error, cx),
                 }
                 cx.notify();
@@ -962,10 +974,14 @@ impl WaCallUi {
     }
 
     /// Starts the pump for an opened call audio socket.
-    fn attach_audio(&mut self, audio: CallAudio, cx: &mut Context<Self>) {
+    fn attach_audio(&mut self, audio: CallAudio, mic: bool, cx: &mut Context<Self>) {
         // The call may have ended while the audio was opening.
         if self.tracker.is_empty() {
             return;
+        }
+        if !mic {
+            self.mic_off = true;
+            self.fail(MIC_OFF, "RECORD_AUDIO missing", cx);
         }
         let muted = Arc::new(AtomicBool::new(
             self.tracker.view(now_ms()).is_some_and(|v| v.muted),
@@ -986,6 +1002,32 @@ impl WaCallUi {
         }
     }
 
+    /// The microphone did not start for the current call.
+    pub(crate) fn mic_off(&self) -> bool {
+        self.mic_off
+    }
+
+    /// Tries the microphone again after it was allowed.
+    pub(crate) fn retry_mic(&mut self, cx: &mut Context<Self>) {
+        if !self.mic_off || self.session.is_none() {
+            return;
+        }
+        let task = cx
+            .background_executor()
+            .spawn(async { rovsti_android::wa::call_audio_start() });
+        cx.spawn(async move |this, cx| {
+            let started = task.await;
+            this.update(cx, |this, cx| {
+                if matches!(started, Ok(true)) {
+                    this.mic_off = false;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// Starts an outgoing WhatsApp call to `number`. `Err` is the reason it
     /// cannot start at all; a failure after that shows up in [`Self::take_error`].
     pub fn place(&mut self, number: &str, cx: &mut Context<Self>) -> Result<(), &'static str> {
@@ -998,6 +1040,7 @@ impl WaCallUi {
         };
         self.placing = true;
         self.error = None;
+        ask_mic();
         let number = number.to_owned();
         let place = cx.background_executor().spawn(async move {
             let jid = rovsti_wa_proto::user_jid(&number).map_err(|e| e.to_string())?;
@@ -1050,7 +1093,7 @@ impl WaCallUi {
                 .await;
             this.update(cx, |this, cx| {
                 match audio {
-                    Ok(audio) => this.attach_audio(audio, cx),
+                    Ok((audio, mic)) => this.attach_audio(audio, mic, cx),
                     Err(error) => this.fail("Could not open the call audio", error, cx),
                 }
                 cx.notify();

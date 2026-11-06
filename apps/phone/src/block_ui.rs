@@ -67,6 +67,8 @@ pub(crate) enum PillAction {
     RestoreSettings(Box<rovsti_core::settings::Settings>),
     /// Open the system prompt for call log access.
     GrantCallLog,
+    /// Ask for the microphone, or open App info when Android won't ask again.
+    GrantMic,
 }
 
 /// The menu's Delete label for a row that stands for `count` calls.
@@ -300,6 +302,21 @@ impl PhoneApp {
                 self.show_notice_pill("Settings restored", None, false, cx);
             }
             PillAction::GrantCallLog => self.recents_grant(cx),
+            PillAction::GrantMic => self.grant_mic(cx),
+        }
+    }
+
+    /// The pill's Allow for the microphone during a WhatsApp call.
+    fn grant_mic(&mut self, cx: &mut Context<Self>) {
+        use crate::wa_call::{MicAsk, mic_ask};
+        match mic_ask(self.backend.read(cx).permissions().microphone) {
+            MicAsk::Ask => {
+                backend::request_permission(rovsti_android::permissions::Group::Microphone);
+            }
+            MicAsk::OpenSettings => {
+                backend::open_app_details();
+            }
+            MicAsk::Ready => self.wa_call.update(cx, |w, cx| w.retry_mic(cx)),
         }
     }
 

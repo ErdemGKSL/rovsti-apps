@@ -187,6 +187,8 @@ pub struct PermissionFacts {
     pub phone: Access,
     pub contacts: Access,
     pub notifications: Access,
+    /// Needed for WhatsApp call audio.
+    pub microphone: Access,
     pub full_screen_intent: bool,
     pub dialer_role: bool,
     /// `PowerManager.isIgnoringBatteryOptimizations`.
@@ -204,6 +206,7 @@ impl Default for PermissionFacts {
             phone: Access::Granted,
             contacts: Access::Granted,
             notifications: Access::Granted,
+            microphone: Access::Granted,
             full_screen_intent: true,
             dialer_role: true,
             battery_exempt: true,
@@ -1390,6 +1393,7 @@ fn load_permissions() -> PermissionFacts {
         phone: access(Group::Phone),
         contacts: access(Group::Contacts),
         notifications: access(Group::Notifications),
+        microphone: access(Group::Microphone),
         full_screen_intent: permissions::can_use_full_screen_intent()
             .unwrap_or(desktop.full_screen_intent),
         dialer_role: roles::is_held(roles::Role::Dialer).unwrap_or(desktop.dialer_role),
@@ -1638,6 +1642,11 @@ fn load_favorites() -> Load<Vec<WireContact>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_permission_facts_have_a_microphone() {
+        assert!(PermissionFacts::default().microphone.is_granted());
+    }
 
     const LOG_OK: &str =
         include_str!("../../../crates/rovsti_core/tests/fixtures/call_log_ok.json");

@@ -375,6 +375,12 @@ impl PhoneApp {
                         }
                     });
                 }
+                // The microphone was allowed during a call that has none yet.
+                if backend.read(cx).permissions().microphone.is_granted()
+                    && this.wa_call.read(cx).mic_off()
+                {
+                    this.wa_call.update(cx, |w, cx| w.retry_mic(cx));
+                }
                 this.sync_restore(cx);
                 this.sync_calls(window, cx);
                 this.sync_documents(window, cx);
@@ -393,7 +399,10 @@ impl PhoneApp {
                 if let Some(what) = this.wa_call.update(cx, |ui, _| ui.take_error()) {
                     // A failed Answer or Decline gives the ringing screen its buttons back.
                     this.incoming_rearm(cx);
-                    if this.incall.covers() || this.incoming.covers() {
+                    if what == wa_call::MIC_OFF {
+                        // Over the call screens and the tabs alike: Allow asks again.
+                        this.show_pill_action(what, "Allow", block_ui::PillAction::GrantMic, cx);
+                    } else if this.incall.covers() || this.incoming.covers() {
                         // Over a call screen the pill says it; the tab notice would be hidden.
                         this.show_notice_pill(what, None, false, cx);
                     } else {

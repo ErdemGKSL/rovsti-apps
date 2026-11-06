@@ -14,6 +14,19 @@ use crate::{
     trip_ui::distance_text,
 };
 
+/// The empty-search line of the place picker.
+#[allow(dead_code)] // wired up by a later step of the UX pass
+pub fn no_match_text(query: &str, has_feed: bool) -> String {
+    let q = query.trim();
+    if has_feed {
+        format!("No stops or saved places match \u{201c}{q}\u{201d}.")
+    } else {
+        format!(
+            "No saved places match \u{201c}{q}\u{201d}. Import a GTFS feed in Settings to search stops too."
+        )
+    }
+}
+
 /// How much of the pair is chosen.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -365,6 +378,18 @@ pub fn trip_endpoint(slot: Slot, dest: &Destination) -> Endpoint {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_match_text_names_the_query() {
+        assert_eq!(
+            no_match_text("  moda ", true),
+            "No stops or saved places match \u{201c}moda\u{201d}."
+        );
+        assert_eq!(
+            no_match_text("moda", false),
+            "No saved places match \u{201c}moda\u{201d}. Import a GTFS feed in Settings to search stops too."
+        );
+    }
 
     /// 0.001 degrees of longitude at 41N is about 84 m.
     fn at(metres: f64) -> Destination {

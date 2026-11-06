@@ -231,17 +231,92 @@ fn chat_title(chat: &ChatSummary) -> String {
     }
 }
 
-/// The picker rows: the gateway's order, groups kept and marked, capped.
+/// The picker rows: the gateway's order, groups kept and marked.
 pub fn chat_rows(chats: &[ChatSummary]) -> Vec<ChatRow> {
     chats
         .iter()
-        .take(MAX_CHATS)
         .map(|c| ChatRow {
             jid: c.jid.clone(),
             title: chat_title(c),
             group: c.is_group,
         })
         .collect()
+}
+
+/// The rows to show for `query`: at most `cap` matches by title or phone
+/// digits. With no query the selected chat `(jid, name)` is pinned first.
+pub fn visible_chats(
+    rows: &[ChatRow],
+    query: &str,
+    selected: Option<(&str, &str)>,
+    cap: usize,
+) -> Vec<ChatRow> {
+    let folded = rovsti_core::search::fold(query.trim());
+    if folded.is_empty() {
+        let mut out: Vec<ChatRow> = rows.iter().take(cap).cloned().collect();
+        if let Some((jid, name)) = selected
+            && !out.iter().any(|r| r.jid == jid)
+        {
+            let row = rows
+                .iter()
+                .find(|r| r.jid == jid)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let name = name.trim();
+                    ChatRow {
+                        jid: jid.to_owned(),
+                        title: if name.is_empty() {
+                            "Selected chat"
+                        } else {
+                            name
+                        }
+                        .to_owned(),
+                        group: jid.ends_with("@g.us"),
+                    }
+                });
+            out.insert(0, row);
+        }
+        return out;
+    }
+    let digits: String = folded.chars().filter(char::is_ascii_digit).collect();
+    rows.iter()
+        .filter(|r| {
+            rovsti_core::search::fold(&r.title).contains(&folded)
+                || (!digits.is_empty()
+                    && r.jid.split('@').next().is_some_and(|user| {
+                        user.split(':').next().unwrap_or(user).contains(&digits)
+                    }))
+        })
+        .take(cap)
+        .cloned()
+        .collect()
+}
+
+/// The single status row of the chat list, as (title, subtitle, trailing
+/// action), or `None` when chat rows show.
+#[allow(dead_code)] // wired up by a later step of the UX pass
+pub fn chat_status_text(
+    list: &ChatList,
+    query: &str,
+) -> Option<(&'static str, Option<String>, Option<&'static str>)> {
+    match list {
+        ChatList::Idle | ChatList::Loading => Some(("Loading chats...", None, None)),
+        ChatList::Failed(reason) => Some((
+            "Could not load your chats",
+            Some(reason.clone()),
+            Some("Retry"),
+        )),
+        ChatList::Ready(rows) if rows.is_empty() => Some((
+            "No chats yet",
+            Some("Chats appear after history sync.".to_owned()),
+            Some("Refresh"),
+        )),
+        ChatList::Ready(rows) => {
+            visible_chats(rows, query, None, 1)
+                .is_empty()
+                .then_some(("No chats match", None, None))
+        }
+    }
 }
 
 /// The message as it would read for a four-minute ETA to "Kadikoy".
@@ -1363,7 +1438,9 @@ impl StopsApp {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.chats = match result {
-                    Ok(chats) => ChatList::Ready(chat_rows(&chats)),
+                    Ok(chats) => {
+                        ChatList::Ready(visible_chats(&chat_rows(&chats), "", None, MAX_CHATS))
+                    }
                     Err(error) => ChatList::Failed(error.to_string()),
                 };
                 cx.notify();
@@ -1575,7 +1652,91 @@ mod tests {
         let chats: Vec<_> = (0..200)
             .map(|i| chat(&format!("{i}@s.whatsapp.net"), None, false))
             .collect();
-        assert_eq!(chat_rows(&chats).len(), MAX_CHATS);
+        let rows = chat_rows(&chats);
+        assert_eq!(rows.len(), 200);
+        assert_eq!(visible_chats(&rows, "", None, MAX_CHATS).len(), MAX_CHATS);
+    }
+
+    fn row(jid: &str, title: &str) -> ChatRow {
+        ChatRow {
+            jid: jid.into(),
+            title: title.into(),
+            group: jid.ends_with("@g.us"),
+        }
+    }
+
+    fn many() -> Vec<ChatRow> {
+        (0..100)
+            .map(|i| match i {
+                80 => row("80@s.whatsapp.net", "Family"),
+                81 => row("905321234567@s.whatsapp.net", "Ali"),
+                82 => row("82@s.whatsapp.net", "Kadıköy Group"),
+                _ => row(&format!("{i}@s.whatsapp.net"), &format!("Chat {i}")),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn visible_chats_caps_and_searches_deep() {
+        let rows = many();
+        assert_eq!(visible_chats(&rows, " ", None, 60).len(), 60);
+        let fam = visible_chats(&rows, "fam", None, 60);
+        assert_eq!(fam.len(), 1);
+        assert_eq!(fam[0].title, "Family");
+        assert_eq!(
+            visible_chats(&rows, "kadikoy", None, 60)[0].jid,
+            "82@s.whatsapp.net"
+        );
+        assert_eq!(visible_chats(&rows, "5321", None, 60)[0].title, "Ali");
+        assert_eq!(visible_chats(&rows, "chat", None, 5).len(), 5);
+    }
+
+    #[test]
+    fn visible_chats_pins_the_selected_chat_once() {
+        let rows = many();
+        let out = visible_chats(&rows, "", Some(("80@s.whatsapp.net", "Family")), 10);
+        assert_eq!(out.len(), 11);
+        assert_eq!(out[0].title, "Family");
+        assert_eq!(
+            out.iter().filter(|r| r.jid == "80@s.whatsapp.net").count(),
+            1
+        );
+        let inside = visible_chats(&rows, "", Some(("3@s.whatsapp.net", "x")), 10);
+        assert_eq!(inside.len(), 10);
+        assert_eq!(inside[0].jid, "0@s.whatsapp.net");
+        let unknown = visible_chats(&rows, "", Some(("9@g.us", " ")), 10);
+        assert_eq!(unknown[0].title, "Selected chat");
+        assert!(unknown[0].group);
+        // A query shows only matches, no pinned chat.
+        assert_eq!(
+            visible_chats(&rows, "fam", Some(("9@g.us", "")), 10).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn chat_status_covers_each_state() {
+        let none = |l: &ChatList| chat_status_text(l, "");
+        assert_eq!(none(&ChatList::Idle).unwrap().0, "Loading chats...");
+        assert_eq!(none(&ChatList::Loading).unwrap().0, "Loading chats...");
+        let failed = none(&ChatList::Failed("offline".into())).unwrap();
+        assert_eq!(
+            failed,
+            (
+                "Could not load your chats",
+                Some("offline".into()),
+                Some("Retry")
+            )
+        );
+        let empty = none(&ChatList::Ready(vec![])).unwrap();
+        assert_eq!((empty.0, empty.2), ("No chats yet", Some("Refresh")));
+        let ready = ChatList::Ready(many());
+        assert_eq!(none(&ready), None);
+        assert_eq!(chat_status_text(&ready, "fam"), None);
+        assert_eq!(
+            chat_status_text(&ready, "zzz"),
+            Some(("No chats match", None, None))
+        );
     }
 
     #[test]

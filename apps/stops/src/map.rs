@@ -13,6 +13,7 @@
 use std::{
     cell::{Cell, RefCell},
     collections::VecDeque,
+    hash::{DefaultHasher, Hash, Hasher},
     rc::Rc,
     sync::Arc,
     time::Duration,
@@ -26,7 +27,7 @@ use gpui::{
 };
 use rovsti_android::location;
 use rovsti_geo::{
-    Coord, Diameter, EARTH_RADIUS_M, Feed, History, SavedPlaces, Side, Stop,
+    Coord, Diameter, EARTH_RADIUS_M, Feed, History, Place, SavedPlaces, Side, Stop,
     tiles::{
         ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileCover, TileGeometry,
         TileLayer, build_layer, line_width, tiles_for_view,
@@ -179,15 +180,46 @@ pub fn pick_stop(
     )
 }
 
-/// What a tap or a dropped pin at `at` (pixels from the view centre) means: the
-/// GTFS stop within [`PICK_RADIUS_PX`] (its name, id and place), else the raw
-/// point under the finger, unnamed.
+/// The saved place under a tap at `at` (pixels from the view centre): the
+/// nearest one drawn within `max_px`.
+pub fn pick_saved(
+    places: &[Place],
+    viewport: &Viewport,
+    _size: (f32, f32),
+    at: (f32, f32),
+    max_px: f32,
+) -> Option<usize> {
+    let coords: Vec<Coord> = places.iter().map(|p| p.coord).collect();
+    viewport.nearest_on_screen(&coords, at, max_px)
+}
+
+/// A fingerprint of the saved places (id and position), to tell when the
+/// drawn markers need rebuilding.
+#[allow(dead_code)] // wired up by a later step of the UX pass
+pub fn saved_key(saved: &SavedPlaces) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    for place in &saved.places {
+        place.id.hash(&mut hasher);
+        place.coord.lat.to_bits().hash(&mut hasher);
+        place.coord.lon.to_bits().hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// What a tap or a dropped pin at `at` (pixels from the view centre) means: a
+/// saved place within [`PICK_RADIUS_PX`] (exactly, with its name), else the
+/// GTFS stop within it (its name, id and place), else the raw point under the
+/// finger. Stops and raw points take the name of a saved place close to them.
 pub fn snap_destination(
     feed: Option<&Feed>,
+    saved: &SavedPlaces,
     viewport: &Viewport,
     size: (f32, f32),
     at: (f32, f32),
 ) -> Destination {
+    if let Some(k) = pick_saved(&saved.places, viewport, size, at, PICK_RADIUS_PX) {
+        return Destination::from_place(&saved.places[k]);
+    }
     let stop = feed.and_then(|feed| {
         let index = pick_stop(feed, viewport, size, at, PICK_RADIUS_PX)?;
         feed.stops.get(index as usize)
@@ -201,6 +233,7 @@ pub fn snap_destination(
         },
         None => Destination::dropped(viewport.unproject(at)),
     }
+    .named_from(saved)
 }
 
 /// Index of the GTFS stop `id` in the feed, for the pin menu's "Lines" row.
@@ -2000,11 +2033,11 @@ impl StopsApp {
                 let at = self.map.to_view(at);
                 let dest = snap_destination(
                     self.gtfs.as_deref(),
+                    &self.saved,
                     &self.map.viewport,
                     self.map.size(),
                     at,
-                )
-                .named_from(&self.saved);
+                );
                 self.pick.drag_end(slot, dest);
             }
             Gesture::PinCancel { .. } => self.pick.drag_cancel(),
@@ -2023,11 +2056,11 @@ impl StopsApp {
         self.map.take_over();
         let dest = snap_destination(
             self.gtfs.as_deref(),
+            &self.saved,
             &self.map.viewport,
             self.map.size(),
             at,
-        )
-        .named_from(&self.saved);
+        );
         match self.pick.tap(dest) {
             TapOutcome::Placed(_) | TapOutcome::MenuClosed => cx.notify(),
             TapOutcome::Full => {
@@ -2258,20 +2291,70 @@ mod tests {
         // 10 m/px: S2 sits 100 px right of the centre.
         let vp = Viewport::new(IST, 10.0);
         let size = (400.0, 300.0);
+        let none = SavedPlaces::default();
 
-        let snapped = snap_destination(Some(&feed), &vp, size, (103.0, -4.0));
+        let snapped = snap_destination(Some(&feed), &none, &vp, size, (103.0, -4.0));
         assert_eq!(snapped.label, "Moda");
         assert_eq!(snapped.gtfs_stop.as_deref(), Some("S2"));
         assert_eq!(snapped.coord, feed.stops[1].coord);
         assert!(snapped.is_named());
 
-        let raw = snap_destination(Some(&feed), &vp, size, (50.0, 0.0));
+        let raw = snap_destination(Some(&feed), &none, &vp, size, (50.0, 0.0));
         assert!(!raw.is_named());
         assert_eq!(raw.gtfs_stop, None);
         assert_eq!(raw.coord, vp.unproject((50.0, 0.0)));
 
-        let no_feed = snap_destination(None, &vp, size, (0.0, 0.0));
+        let no_feed = snap_destination(None, &none, &vp, size, (0.0, 0.0));
         assert!(!no_feed.is_named());
+    }
+
+    #[test]
+    fn a_tap_near_a_saved_place_picks_it_exactly() {
+        let feed = Feed::new(vec![named_stop("S2", "Moda", 1_000.0)], vec![], vec![], 0);
+        let vp = Viewport::new(IST, 10.0);
+        let size = (400.0, 300.0);
+        let mut saved = SavedPlaces::default();
+        // The stop is 10 px from the tap, the place 30 px.
+        let spot = vp.unproject((140.0, 0.0));
+        let id = saved.add("Home", spot).unwrap();
+        saved.places[0].gtfs_stop = Some("H1".into());
+
+        let picked = snap_destination(Some(&feed), &saved, &vp, size, (110.0, 0.0));
+        assert_eq!(picked.label, "Home");
+        assert_eq!(picked.coord, spot);
+        assert_eq!(picked.gtfs_stop.as_deref(), Some("H1"));
+        assert_eq!(saved.get(id).unwrap().coord, spot);
+
+        // 60 px away is out of reach: the stop wins.
+        let mut far = SavedPlaces::default();
+        far.add("Far", vp.unproject((170.0, 0.0))).unwrap();
+        let picked = snap_destination(Some(&feed), &far, &vp, size, (110.0, 0.0));
+        assert_eq!(picked.label, "Moda");
+        assert_eq!(picked.gtfs_stop.as_deref(), Some("S2"));
+        assert_eq!(pick_saved(&far.places, &vp, size, (110.0, 0.0), 40.0), None);
+        assert_eq!(
+            pick_saved(&far.places, &vp, size, (150.0, 0.0), 40.0),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn saved_key_changes_with_the_places() {
+        let vp = Viewport::new(IST, 10.0);
+        let mut a = SavedPlaces::default();
+        let empty = saved_key(&a);
+        a.add("One", vp.unproject((0.0, 0.0))).unwrap();
+        let one = saved_key(&a);
+        assert_ne!(empty, one);
+        let id = a.add("Two", vp.unproject((100.0, 0.0))).unwrap();
+        let two = saved_key(&a);
+        assert_ne!(one, two);
+        let mut b = SavedPlaces::default();
+        b.add("One", vp.unproject((0.0, 0.0))).unwrap();
+        b.add("Two", vp.unproject((100.0, 0.0))).unwrap();
+        assert_eq!(saved_key(&b), two);
+        a.remove(id);
+        assert_eq!(saved_key(&a), one);
     }
 
     // -- polyline thinning --

@@ -1237,7 +1237,7 @@ impl PhoneApp {
         let text = call_log_query::select_share_text(&r.merged, sel, |raw| {
             r.merged
                 .iter()
-                .find(|row| row.number_raw.trim() == raw)
+                .find(|row| row.number_raw.trim() == raw.trim())
                 .and_then(|row| row.name.clone())
         });
         if text.is_empty() {

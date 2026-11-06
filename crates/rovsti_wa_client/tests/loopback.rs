@@ -94,3 +94,17 @@ fn garbage_success_bodies_are_decode_errors() {
     assert!(matches!(err, ClientError::Decode(_)), "{err:?}");
     request.join().unwrap();
 }
+
+/// An `https` gateway builds the rustls config (WebPKI roots) on the first
+/// connection. Without ureq's `rustls-webpki-roots` feature that panicked
+/// ("WebPki is disabled") instead of returning an error.
+#[test]
+fn https_builds_tls_and_fails_cleanly() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let handle = thread::spawn(move || drop(listener.accept().unwrap()));
+    let url = GatewayUrl::parse(&format!("https://127.0.0.1:{port}")).unwrap();
+    let err = Gateway::new(url, Some(key())).status().unwrap_err();
+    assert!(matches!(err, ClientError::Http(_)), "{err:?}");
+    handle.join().unwrap();
+}

@@ -223,6 +223,51 @@ pub fn list_text(rows: &[BlockedNumber], name_of: impl Fn(&str) -> Option<String
     out
 }
 
+/// What pasting several numbers into "Block a number" would do.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct BulkParse {
+    /// Canonical numbers to block, without repeats.
+    pub to_block: Vec<String>,
+    pub skipped_emergency: usize,
+    pub already_blocked: usize,
+}
+
+/// Finds every number in `text` ([`crate::dial::extract_numbers`]) and sorts
+/// them: to block, emergency (never blocked) or already on the list.
+/// Entries that are not blockable numbers are ignored.
+pub fn parse_many(text: &str, emergency: &EmergencyList, already: &BlockSet) -> BulkParse {
+    let mut out = BulkParse::default();
+    for found in crate::dial::extract_numbers(text) {
+        match parse_input(&found, emergency) {
+            Ok(number) => {
+                if already.is_blocked(&number) {
+                    out.already_blocked += 1;
+                } else if !out.to_block.iter().any(|n| {
+                    matches!((PhoneNumber::parse(n), PhoneNumber::parse(&number)),
+                        (Ok(a), Ok(b)) if a.matches(&b))
+                }) {
+                    out.to_block.push(number);
+                }
+            }
+            Err(BlockInputError::Emergency) => out.skipped_emergency += 1,
+            Err(BlockInputError::Invalid) => {}
+        }
+    }
+    out
+}
+
+/// The pill after a bulk block: "Blocked 3 numbers", "Blocked 2 numbers, 1
+/// already blocked".
+pub fn bulk_text(b: &BulkParse) -> String {
+    let n = b.to_block.len();
+    let noun = if n == 1 { "number" } else { "numbers" };
+    let mut out = format!("Blocked {n} {noun}");
+    if b.already_blocked > 0 {
+        out.push_str(&format!(", {} already blocked", b.already_blocked));
+    }
+    out
+}
+
 /// Title and message of the "Unblock all" confirmation.
 pub fn unblock_all_text(n: usize) -> (String, String) {
     let message = if n == 1 {
@@ -458,5 +503,21 @@ mod tests {
             unblock_all_text(3).1,
             "3 numbers can call and text you again."
         );
+    }
+
+    #[test]
+    fn parse_many_sorts_numbers() {
+        let emergency = EmergencyList::default();
+        let already = set();
+        let text =
+            "0532 444 55 66, +90 555 111 22 33 / 0532 444 55 66 or 112 and 0850 000 00 00 hi";
+        let p = parse_many(text, &emergency, &already);
+        assert_eq!(p.to_block, ["05324445566"]);
+        assert_eq!(p.already_blocked, 2);
+        assert_eq!(p.skipped_emergency, 1);
+        assert_eq!(bulk_text(&p), "Blocked 1 number, 2 already blocked");
+        let none = parse_many("nothing here", &emergency, &already);
+        assert_eq!(none, BulkParse::default());
+        assert_eq!(bulk_text(&none), "Blocked 0 numbers");
     }
 }

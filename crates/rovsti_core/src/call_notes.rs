@@ -342,6 +342,79 @@ pub fn share_text(d: &CallDetails, who: Option<&str>, note: Option<&str>) -> Str
     }
 }
 
+/// One line of the Notes page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoteRow {
+    /// Position in `Notes::notes`.
+    pub index: usize,
+    pub number: String,
+    pub at_ms: i64,
+    pub preview: String,
+}
+
+impl Notes {
+    fn newest_first(&self) -> Vec<(usize, &CallNote)> {
+        let mut all: Vec<_> = self.notes.iter().enumerate().collect();
+        all.sort_by(|a, b| b.1.at_ms.cmp(&a.1.at_ms).then(b.0.cmp(&a.0)));
+        all
+    }
+
+    /// Notes for the Notes page, newest call first. A query (trimmed, folded)
+    /// matches the note text, the digits of the number or the contact name
+    /// from `name_of`; an empty query lists everything.
+    pub fn rows(&self, query: &str, name_of: impl Fn(&str) -> Option<String>) -> Vec<NoteRow> {
+        let folded = fold(query.trim());
+        let digits: String = folded.chars().filter(char::is_ascii_digit).collect();
+        self.newest_first()
+            .into_iter()
+            .filter(|(_, note)| {
+                folded.is_empty()
+                    || fold(&note.text).contains(&folded)
+                    || (!digits.is_empty()
+                        && note
+                            .number
+                            .chars()
+                            .filter(char::is_ascii_digit)
+                            .collect::<String>()
+                            .contains(&digits))
+                    || name_of(&note.number).is_some_and(|name| fold(&name).contains(&folded))
+            })
+            .map(|(index, note)| NoteRow {
+                index,
+                number: note.number.clone(),
+                at_ms: note.at_ms,
+                preview: preview(&note.text),
+            })
+            .collect()
+    }
+
+    /// Every note as shareable text, newest first: `Name, Thu 5 Nov 2026,
+    /// 14:32` (the number when no name) then the note, blocks separated by a
+    /// blank line. Empty for no notes.
+    pub fn all_text(&self, name_of: impl Fn(&str) -> Option<String>, tz_offset_s: i32) -> String {
+        let locale = LocaleTime {
+            tz_offset_s,
+            ..LocaleTime::default()
+        };
+        self.newest_first()
+            .into_iter()
+            .map(|(_, note)| {
+                let who = name_of(&note.number)
+                    .map(|n| n.trim().to_owned())
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| note.number.trim().to_owned());
+                let head = when_text(note.at_ms, locale);
+                if who.is_empty() {
+                    format!("{head}\n{}", note.text)
+                } else {
+                    format!("{who}, {head}\n{}", note.text)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -562,5 +635,68 @@ mod tests {
         assert_eq!(share_text(&d, None, Some("Call me back")), plain);
         assert_eq!(share_text(&d, Some("  "), Some("Call me back")), plain);
         assert_eq!(share_text(&d, None, None), details_text(&d, None));
+    }
+
+    fn note(number: &str, at_ms: i64, text: &str) -> CallNote {
+        CallNote {
+            number: number.into(),
+            at_ms,
+            text: text.into(),
+            edited_ms: at_ms,
+        }
+    }
+
+    fn sample() -> Notes {
+        Notes {
+            schema: 1,
+            notes: vec![
+                note(
+                    "+905551112233",
+                    1_793_889_120_000,
+                    "Bring the invoice\nand the key",
+                ),
+                note(
+                    "0532 444 55 66",
+                    1_793_000_000_000,
+                    "Plumber Ayse says Tuesday",
+                ),
+                note("+905559998877", 1_794_000_000_000, "Dentist"),
+            ],
+        }
+    }
+
+    fn names(n: &str) -> Option<String> {
+        n.ends_with("2233").then(|| "Anna Smith".to_owned())
+    }
+
+    #[test]
+    fn note_rows_are_newest_first_and_filtered() {
+        let notes = sample();
+        let all = notes.rows("  ", names);
+        assert_eq!(all.iter().map(|r| r.index).collect::<Vec<_>>(), [2, 0, 1]);
+        assert_eq!(all[1].preview, "Bring the invoice\u{2026}");
+        assert_eq!(notes.rows("anna", names).len(), 1);
+        assert_eq!(notes.rows("ANNA", names)[0].index, 0);
+        assert_eq!(notes.rows("444 55", names)[0].index, 1);
+        assert_eq!(notes.rows("plumber", names)[0].index, 1);
+        assert!(notes.rows("zzz", names).is_empty());
+        assert!(Notes::default().rows("", names).is_empty());
+    }
+
+    #[test]
+    fn all_text_lists_every_note() {
+        let text = sample().all_text(names, 0);
+        assert_eq!(
+            text,
+            "+905559998877, Fri 6 Nov 2026, 21:20\nDentist\n\n\
+Anna Smith, Thu 5 Nov 2026, 14:32\nBring the invoice\nand the key\n\n\
+0532 444 55 66, Mon 26 Oct 2026, 07:33\nPlumber Ayse says Tuesday"
+        );
+        assert_eq!(Notes::default().all_text(names, 0), "");
+        assert!(
+            sample()
+                .all_text(names, 3600)
+                .contains("Thu 5 Nov 2026, 15:32")
+        );
     }
 }

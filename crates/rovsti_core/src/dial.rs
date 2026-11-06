@@ -317,6 +317,122 @@ pub fn field_menu(dialed: &str, clipboard_has_text: bool) -> Vec<FieldAction> {
     out
 }
 
+/// Most numbers [`extract_numbers`] returns.
+pub const MAX_EXTRACTED: usize = 8;
+
+/// Characters that may sit inside a run that looks like a phone number.
+fn is_run_char(c: char) -> bool {
+    matches!(
+        c,
+        '0'..='9' | '*' | '#' | '+' | '(' | ')' | '-' | '.' | ' ' | ',' | ';'
+    )
+}
+
+/// Whether a number run ends right before the char at `at`.
+fn ends_run(text: &str, at: usize, c: char) -> bool {
+    match c {
+        '\n' | '\r' => true,
+        ',' | ';' | '/' => text[at + c.len_utf8()..]
+            .chars()
+            .next()
+            .is_some_and(char::is_whitespace),
+        ' ' => text
+            .get(at..at + 4)
+            .is_some_and(|s| s.eq_ignore_ascii_case(" or ")),
+        _ => false,
+    }
+}
+
+fn keep_run(cleaned: &str) -> bool {
+    let digits = cleaned.chars().filter(char::is_ascii_digit).count();
+    (3..=MAX_LEN).contains(&digits)
+        || ((1..=MAX_LEN).contains(&digits) && cleaned.contains(['*', '#']))
+}
+
+/// Phone numbers found in free text (a message, an e-mail, a web page),
+/// each cleaned like [`normalise_paste`]. Runs of digits with `+ ( ) - .` and
+/// spaces form a number; a letter, a newline, `, ` / `; ` / `/ ` or ` or `
+/// ends it. A run needs 3 to [`MAX_LEN`] digits. Numbers that
+/// `PhoneNumber::matches` an earlier one are dropped, and at most
+/// [`MAX_EXTRACTED`] are returned. A `tel:` URI gives one entry.
+pub fn extract_numbers(text: &str) -> Vec<String> {
+    let trimmed = text.trim();
+    let is_uri = trimmed
+        .get(..4)
+        .is_some_and(|s| s.eq_ignore_ascii_case("tel:"));
+    let mut found: Vec<String> = Vec::new();
+    let push = |run: &str, found: &mut Vec<String>| {
+        let cleaned = normalise_paste(run);
+        if keep_run(&cleaned) && !is_duplicate(&cleaned, found) {
+            found.push(cleaned);
+        }
+    };
+    if is_uri {
+        push(trimmed, &mut found);
+        return found;
+    }
+    let mut start: Option<usize> = None;
+    for (at, c) in trimmed.char_indices() {
+        if is_run_char(c) && !ends_run(trimmed, at, c) {
+            start.get_or_insert(at);
+            continue;
+        }
+        if let Some(from) = start.take() {
+            push(&trimmed[from..at], &mut found);
+            if found.len() >= MAX_EXTRACTED {
+                return found;
+            }
+        }
+    }
+    if let Some(from) = start {
+        push(&trimmed[from..], &mut found);
+    }
+    found.truncate(MAX_EXTRACTED);
+    found
+}
+
+fn is_duplicate(cleaned: &str, found: &[String]) -> bool {
+    let parsed = crate::PhoneNumber::parse(cleaned).ok();
+    found
+        .iter()
+        .any(|f| match (&parsed, crate::PhoneNumber::parse(f)) {
+            (Some(a), Ok(b)) => a.matches(&b),
+            _ => f == cleaned,
+        })
+}
+
+/// What a paste of clipboard text should do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PastePlan {
+    /// No number in the text.
+    Nothing,
+    /// Put this number in the field.
+    One(String),
+    /// Ask which one ("Which number?").
+    Choose(Vec<String>),
+}
+
+pub fn paste_plan(text: &str) -> PastePlan {
+    let mut numbers = extract_numbers(text);
+    match numbers.len() {
+        0 => PastePlan::Nothing,
+        1 => PastePlan::One(numbers.remove(0)),
+        _ => PastePlan::Choose(numbers),
+    }
+}
+
+/// The number the Call key on an empty keypad redials: the `number_raw` of
+/// the newest outgoing call that has something to call. WhatsApp calls are
+/// not in the provider log, so they never count.
+pub fn redial_target(entries: &[crate::wire::CallLogEntry]) -> Option<String> {
+    entries
+        .iter()
+        .filter(|e| e.kind == crate::wire::CallLogKind::Outgoing)
+        .filter(|e| validate(e.number_raw.trim()).is_ok())
+        .max_by_key(|e| e.date_ms)
+        .map(|e| e.number_raw.trim().to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -658,5 +774,91 @@ mod tests {
         assert!(steps.windows(2).all(|w| w[1] <= w[0]), "{steps:?}");
         assert_eq!(erase_interval_ms(u32::MAX), ERASE_FASTEST_MS);
         assert!(steps.iter().all(|ms| *ms >= ERASE_FASTEST_MS));
+    }
+
+    #[test]
+    fn extract_finds_two_numbers_in_a_sentence() {
+        assert_eq!(
+            extract_numbers("Call Anna on 0555 111 22 33, or Bob (0532) 444-55-66 today"),
+            ["05551112233", "05324445566"]
+        );
+        assert_eq!(
+            extract_numbers("a: +90 555 111 22 33; b: 0850 000 00 00\n+1 212 555 0100"),
+            ["+905551112233", "08500000000", "+12125550100"]
+        );
+    }
+
+    #[test]
+    fn extract_handles_uri_and_single_numbers_like_normalise_paste() {
+        assert_eq!(extract_numbers("tel:%2B90555;ext=12"), ["+90555"]);
+        assert_eq!(extract_numbers("TEL:+90 555 111 22 33"), ["+905551112233"]);
+        for single in [
+            "+90 (555) 111-22-33",
+            "0555.111.22.33",
+            "1,2;3",
+            "*#06#",
+            "*123#",
+        ] {
+            assert_eq!(
+                extract_numbers(single),
+                [normalise_paste(single)],
+                "{single}"
+            );
+        }
+    }
+
+    #[test]
+    fn extract_dedupes_national_and_international() {
+        assert_eq!(
+            extract_numbers("+90 555 111 22 33 or 0555 111 22 33 / 0555 111 22 33"),
+            ["+905551112233"]
+        );
+    }
+
+    #[test]
+    fn extract_drops_digit_poor_text_and_caps() {
+        assert!(extract_numbers("Room 12").is_empty());
+        assert!(extract_numbers("").is_empty());
+        let many: Vec<String> = (0..12).map(|i| format!("0555 111 22 {i:02}")).collect();
+        assert_eq!(extract_numbers(&many.join(", ")).len(), MAX_EXTRACTED);
+    }
+
+    #[test]
+    fn paste_plan_variants() {
+        assert_eq!(paste_plan("hello"), PastePlan::Nothing);
+        assert_eq!(
+            paste_plan(" 0555 111 22 33 "),
+            PastePlan::One("05551112233".into())
+        );
+        assert_eq!(
+            paste_plan("0555 111 22 33, 0532 444 55 66"),
+            PastePlan::Choose(vec!["05551112233".into(), "05324445566".into()])
+        );
+    }
+
+    fn out(raw: &str, date_ms: i64, kind: crate::wire::CallLogKind) -> crate::wire::CallLogEntry {
+        crate::wire::CallLogEntry {
+            number_raw: raw.into(),
+            date_ms,
+            kind,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn redial_picks_newest_callable_outgoing() {
+        use crate::wire::CallLogKind::*;
+        assert_eq!(redial_target(&[]), None);
+        let log = [
+            out("111", 10, Outgoing),
+            out("222", 50, Outgoing),
+            out("333", 90, Incoming),
+            out("444", 80, Missed),
+            out("", 70, Outgoing),
+            out("333 ", 60, Outgoing),
+        ];
+        assert_eq!(redial_target(&log).as_deref(), Some("333"));
+        assert_eq!(redial_target(&log[2..4]), None);
+        assert_eq!(redial_target(&[out(" ", 5, Outgoing)]), None);
     }
 }

@@ -289,12 +289,7 @@ pub fn extra_calls(history: &WaCallHistory) -> Vec<ExtraCall> {
 
 /// `m:ss`, or `h:mm:ss` from an hour on.
 pub fn format_elapsed(seconds: u64) -> String {
-    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
-    if h > 0 {
-        format!("{h}:{m:02}:{s:02}")
-    } else {
-        format!("{m}:{s:02}")
-    }
+    rovsti_core::call_log::format_duration(seconds).to_string()
 }
 
 /// The line under the caller's name.

@@ -24,7 +24,7 @@ pub enum CallType {
 
 impl CallType {
     /// `None` for blocked calls, which Recents drops.
-    fn from_kind(kind: CallLogKind) -> Option<Self> {
+    pub(crate) fn from_kind(kind: CallLogKind) -> Option<Self> {
         Some(match kind {
             CallLogKind::Incoming => Self::Incoming,
             CallLogKind::Outgoing => Self::Outgoing,
@@ -239,6 +239,30 @@ fn weekday_index(days_since_epoch: i64) -> usize {
     (days_since_epoch + 4).rem_euclid(7) as usize
 }
 
+/// Clock time of one timestamp: `3:14 pm` or `15:14`.
+pub fn clock_text(then_ms: i64, tz_offset_s: i32, hour12: bool) -> RelativeTime {
+    let local = then_ms.div_euclid(1000) + i64::from(tz_offset_s);
+    let mut out = RelativeTime::new();
+    push_clock(&mut out, local.rem_euclid(SECS_PER_DAY), hour12);
+    out
+}
+
+/// `m:ss`, or `h:mm:ss` from an hour on.
+pub fn format_duration(seconds: u64) -> SmallText<16> {
+    let (h, m, s) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    let mut out = SmallText::<16>::new();
+    if h > 0 {
+        out.push_padded(h, 1);
+        out.push_str(":");
+        out.push_padded(m, 2);
+    } else {
+        out.push_padded(m, 1);
+    }
+    out.push_str(":");
+    out.push_padded(s, 2);
+    out
+}
+
 fn push_clock(out: &mut RelativeTime, secs_of_day: i64, hour12: bool) {
     let hour = (secs_of_day / 3600) as u64;
     let minute = ((secs_of_day / 60) % 60) as u64;
@@ -418,6 +442,24 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duration_formats() {
+        assert_eq!(format_duration(0).as_str(), "0:00");
+        assert_eq!(format_duration(59).as_str(), "0:59");
+        assert_eq!(format_duration(61).as_str(), "1:01");
+        assert_eq!(format_duration(3_725).as_str(), "1:02:05");
+    }
+
+    #[test]
+    fn clock_text_12_and_24_hour() {
+        // 1970-01-01 15:14 UTC, shifted by +1 h.
+        let ms = (15 * 3600 + 14 * 60) * 1000;
+        assert_eq!(clock_text(ms, 0, false).as_str(), "15:14");
+        assert_eq!(clock_text(ms, 0, true).as_str(), "3:14 pm");
+        assert_eq!(clock_text(ms, 3600, false).as_str(), "16:14");
+        assert_eq!(clock_text(0, 0, true).as_str(), "12:00 am");
+    }
 
     fn e(id: i64, number: &str, kind: CallLogKind, date_ms: i64) -> CallLogEntry {
         CallLogEntry {

@@ -6,8 +6,12 @@
 
 use crate::{
     avatar,
-    call_log::{CallType, DateOrder, RecentsRow, TimeFormat, relative_time},
+    call_log::{
+        CallType, DateOrder, MAX_ENTRIES, RecentsRow, TimeFormat, clock_text, format_duration,
+        relative_time,
+    },
     phone_number::PhoneNumber,
+    wire::{CallLogEntry, CallLogKind},
 };
 
 /// What the leading glyph in the subtitle shows.
@@ -340,6 +344,122 @@ pub fn missed_extras(extras: &[ExtraCall], last_seen_ms: i64) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
+/// One call in a contact's or number's history.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HistoryLine {
+    pub call_type: CallType,
+    pub whatsapp: bool,
+    pub date_ms: i64,
+    pub duration_s: u64,
+}
+
+/// Whether `raw` is one of `numbers` (parsed match, or exact trimmed text for
+/// numbers that do not parse). A blank number never matches.
+fn number_in(raw: &str, numbers: &[(&str, Option<PhoneNumber>)]) -> bool {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return false;
+    }
+    let parsed = PhoneNumber::parse(raw).ok();
+    numbers
+        .iter()
+        .any(|(text, number)| match (&parsed, number) {
+            (Some(a), Some(b)) => a.matches(b),
+            _ => *text == raw,
+        })
+}
+
+/// Calls (cellular and WhatsApp) with any of `numbers`, newest first, at most
+/// `limit`. Blocked entries are dropped; only the newest
+/// [`MAX_ENTRIES`] log entries are read.
+pub fn history(
+    entries: &[CallLogEntry],
+    extras: &[ExtraCall],
+    numbers: &[&str],
+    limit: usize,
+) -> Vec<HistoryLine> {
+    let wanted: Vec<(&str, Option<PhoneNumber>)> = numbers
+        .iter()
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+        .map(|n| (n, PhoneNumber::parse(n).ok()))
+        .collect();
+    if wanted.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let mut lines: Vec<HistoryLine> = Vec::new();
+    for entry in entries.iter().take(MAX_ENTRIES) {
+        if entry.kind == CallLogKind::Blocked {
+            continue;
+        }
+        let Some(call_type) = CallType::from_kind(entry.kind) else {
+            continue;
+        };
+        let raw = if entry.number_raw.trim().is_empty() {
+            entry.normalized.as_str()
+        } else {
+            entry.number_raw.as_str()
+        };
+        if number_in(raw, &wanted) {
+            lines.push(HistoryLine {
+                call_type,
+                whatsapp: false,
+                date_ms: entry.date_ms,
+                duration_s: u64::try_from(entry.duration_s).unwrap_or(0),
+            });
+        }
+    }
+    for extra in extras {
+        if number_in(&extra.number_raw, &wanted) {
+            lines.push(HistoryLine {
+                call_type: if extra.missed {
+                    CallType::Missed
+                } else {
+                    CallType::Unknown
+                },
+                whatsapp: true,
+                date_ms: extra.started_ms,
+                duration_s: extra.duration_s,
+            });
+        }
+    }
+    lines.sort_by_key(|l| std::cmp::Reverse(l.date_ms));
+    lines.truncate(limit);
+    lines
+}
+
+/// Title and detail of one history line.
+pub fn history_text(line: &HistoryLine, now_ms: i64, locale: LocaleTime) -> (String, String) {
+    let base = match line.call_type {
+        CallType::Missed => "Missed call",
+        CallType::Incoming => "Incoming call",
+        CallType::Outgoing => "Outgoing call",
+        CallType::Declined => "Declined",
+        CallType::Voicemail => "Voicemail",
+        CallType::Unknown => "Call",
+    };
+    let title = if line.whatsapp {
+        format!("WhatsApp {base}")
+    } else {
+        base.to_owned()
+    };
+
+    let day = |ms: i64| (ms.div_euclid(1000) + i64::from(locale.tz_offset_s)).div_euclid(86_400);
+    let mut detail = relative_time(now_ms, line.date_ms, locale.tz_offset_s, locale.format)
+        .as_str()
+        .to_owned();
+    if day(now_ms) > day(line.date_ms) {
+        detail.push(' ');
+        detail
+            .push_str(clock_text(line.date_ms, locale.tz_offset_s, locale.format.hour12).as_str());
+    }
+    if line.duration_s > 0 && !matches!(line.call_type, CallType::Missed | CallType::Declined) {
+        detail.push_str(" \u{b7} ");
+        detail.push_str(format_duration(line.duration_s).as_str());
+    }
+    (title, detail)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,6 +490,125 @@ mod tests {
             contact_id: name.map(|_| id),
             ..Default::default()
         }
+    }
+
+    fn call(id: i64, number: &str, kind: CallLogKind, ago: i64, dur: i64) -> CallLogEntry {
+        CallLogEntry {
+            duration_s: dur,
+            ..entry(id, number, kind, ago, None)
+        }
+    }
+
+    fn wa_call(number: &str, ago: i64, missed: bool) -> ExtraCall {
+        ExtraCall {
+            number_raw: number.to_owned(),
+            started_ms: NOW - ago,
+            duration_s: 30,
+            missed,
+            label: None,
+        }
+    }
+
+    #[test]
+    fn history_matches_national_and_international_forms() {
+        let entries = [
+            call(2, "+905551112233", CallLogKind::Incoming, MIN, 10),
+            call(1, "05551112233", CallLogKind::Outgoing, 2 * MIN, 20),
+            call(3, "05559998877", CallLogKind::Outgoing, 3 * MIN, 20),
+        ];
+        let h = history(&entries, &[], &["0555 111 22 33"], 10);
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].call_type, CallType::Incoming);
+        assert_eq!(h[1].duration_s, 20);
+        assert!(!h[0].whatsapp);
+    }
+
+    #[test]
+    fn history_merges_extras_in_date_order_and_limits() {
+        let entries = [
+            call(2, "05551112233", CallLogKind::Outgoing, MIN, 0),
+            call(1, "05551112233", CallLogKind::Outgoing, 5 * MIN, 0),
+        ];
+        let extras = [
+            wa_call("+905551112233", 3 * MIN, true),
+            wa_call("+905551112233", 4 * MIN, false),
+        ];
+        let h = history(&entries, &extras, &["05551112233"], 10);
+        let ago: Vec<i64> = h.iter().map(|l| NOW - l.date_ms).collect();
+        assert_eq!(ago, [MIN, 3 * MIN, 4 * MIN, 5 * MIN]);
+        assert!(h[1].whatsapp && h[1].call_type == CallType::Missed);
+        assert!(h[2].whatsapp && h[2].call_type == CallType::Unknown);
+        assert_eq!(history(&entries, &extras, &["05551112233"], 2).len(), 2);
+        assert!(history(&entries, &extras, &["05551112233"], 0).is_empty());
+    }
+
+    #[test]
+    fn history_drops_blocked_and_blank_numbers() {
+        let entries = [
+            call(1, "05551112233", CallLogKind::Blocked, MIN, 0),
+            call(2, "", CallLogKind::Incoming, 2 * MIN, 0),
+        ];
+        assert!(history(&entries, &[], &["05551112233"], 10).is_empty());
+        assert!(history(&entries, &[], &["", "  "], 10).is_empty());
+        let e = [call(3, "  ", CallLogKind::Incoming, MIN, 0)];
+        assert!(history(&e, &[], &[""], 10).is_empty());
+    }
+
+    #[test]
+    fn history_matches_unparsable_numbers_by_exact_text() {
+        let entries = [
+            call(1, " *123# ", CallLogKind::Outgoing, MIN, 0),
+            call(2, "*124#", CallLogKind::Outgoing, 2 * MIN, 0),
+        ];
+        assert_eq!(history(&entries, &[], &["*123#"], 10).len(), 1);
+    }
+
+    fn line(call_type: CallType, whatsapp: bool, ago: i64, duration_s: u64) -> HistoryLine {
+        HistoryLine {
+            call_type,
+            whatsapp,
+            date_ms: NOW - ago,
+            duration_s,
+        }
+    }
+
+    #[test]
+    fn history_text_today_shows_clock_only() {
+        let l = line(CallType::Incoming, false, MIN, 65);
+        let (title, detail) = history_text(&l, NOW, LocaleTime::default());
+        assert_eq!(title, "Incoming call");
+        let clock = clock_text(l.date_ms, 0, false);
+        assert_eq!(detail, format!("{clock} \u{b7} 1:05"));
+    }
+
+    #[test]
+    fn history_text_yesterday_adds_the_clock() {
+        let l = line(CallType::Outgoing, false, 24 * 60 * MIN, 0);
+        let (title, detail) = history_text(&l, NOW, LocaleTime::default());
+        assert_eq!(title, "Outgoing call");
+        let clock = clock_text(l.date_ms, 0, false);
+        assert_eq!(detail, format!("Yesterday {clock}"));
+    }
+
+    #[test]
+    fn history_text_missed_has_no_duration_and_whatsapp_prefix() {
+        let l = line(CallType::Missed, true, MIN, 30);
+        let (title, detail) = history_text(&l, NOW, LocaleTime::default());
+        assert_eq!(title, "WhatsApp Missed call");
+        assert!(!detail.contains('\u{b7}'));
+        let (t, d) = history_text(
+            &line(CallType::Declined, false, MIN, 9),
+            NOW,
+            LocaleTime::default(),
+        );
+        assert_eq!(t, "Declined");
+        assert!(!d.contains('\u{b7}'));
+        let (t, _) = history_text(
+            &line(CallType::Unknown, true, MIN, 0),
+            NOW,
+            LocaleTime::default(),
+        );
+        assert_eq!(t, "WhatsApp Call");
     }
 
     fn views(entries: &[CallLogEntry]) -> Vec<RowView> {

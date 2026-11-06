@@ -208,6 +208,30 @@ pub fn favorite_columns(width_dp: f32) -> usize {
     if width_dp >= 440.0 { 3 } else { 2 }
 }
 
+/// Favorites in the user's saved order. Contacts whose `lookup_key` is in
+/// `order` come first, by index there; the rest follow by name, then id. Keys
+/// of vanished contacts are skipped.
+pub fn order_favorites<'a>(favorites: &'a [WireContact], order: &[String]) -> Vec<&'a WireContact> {
+    let rank = |c: &WireContact| {
+        c.lookup_key
+            .as_deref()
+            .and_then(|key| order.iter().position(|k| k == key))
+    };
+    let mut shown: Vec<&WireContact> = favorites.iter().collect();
+    shown.sort_by_cached_key(|c| (rank(c).unwrap_or(usize::MAX), fold(&c.display_name), c.id));
+    shown
+}
+
+/// The key list after moving the favorite at `from` to `to`. Contacts without
+/// a key are left out; an out-of-range index returns the list unchanged.
+pub fn reordered_keys(shown: &[&WireContact], from: usize, to: usize) -> Vec<String> {
+    let mut keys: Vec<String> = shown.iter().filter_map(|c| c.lookup_key.clone()).collect();
+    if from < keys.len() && to < keys.len() {
+        crate::settings::move_reply(&mut keys, from, to);
+    }
+    keys
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +253,60 @@ mod tests {
             photo_uri: None,
             ..Default::default()
         }
+    }
+
+    fn fav(id: i64, name: &str, key: Option<&str>) -> WireContact {
+        WireContact {
+            lookup_key: key.map(str::to_owned),
+            ..person(id, name, Vec::new())
+        }
+    }
+
+    fn keys(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    fn ids(v: &[&WireContact]) -> Vec<i64> {
+        v.iter().map(|c| c.id).collect()
+    }
+
+    #[test]
+    fn favorites_follow_saved_order_then_name() {
+        let all = [
+            fav(1, "Zeynep", Some("z")),
+            fav(2, "ali", Some("a")),
+            fav(3, "Burak", Some("b")),
+            fav(4, "Cem", None),
+            fav(5, "Ece", Some("e")),
+        ];
+        // "gone" vanished; "e" is saved first, "z" second.
+        let shown = order_favorites(&all, &keys(&["e", "gone", "z"]));
+        assert_eq!(ids(&shown), [5, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn favorites_duplicate_key_and_tie_break_by_id() {
+        let all = [fav(9, "Same", Some("x")), fav(3, "same", Some("x"))];
+        let shown = order_favorites(&all, &keys(&["x"]));
+        assert_eq!(ids(&shown), [3, 9]);
+        let shown = order_favorites(&all, &[]);
+        assert_eq!(ids(&shown), [3, 9]);
+    }
+
+    #[test]
+    fn reordered_keys_moves_and_guards() {
+        let all = [
+            fav(1, "A", Some("a")),
+            fav(2, "B", None),
+            fav(3, "C", Some("c")),
+            fav(4, "D", Some("d")),
+        ];
+        let shown: Vec<&WireContact> = all.iter().collect();
+        assert_eq!(reordered_keys(&shown, 0, 2), keys(&["c", "d", "a"]));
+        assert_eq!(reordered_keys(&shown, 2, 0), keys(&["d", "a", "c"]));
+        assert_eq!(reordered_keys(&shown, 0, 0), keys(&["a", "c", "d"]));
+        assert_eq!(reordered_keys(&shown, 0, 9), keys(&["a", "c", "d"]));
+        assert_eq!(reordered_keys(&shown, 9, 0), keys(&["a", "c", "d"]));
     }
 
     #[test]

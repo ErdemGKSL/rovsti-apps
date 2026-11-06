@@ -30,7 +30,7 @@ use rovsti_ui::{
 };
 use rovsti_wa_proto::{
     ChatActionKind, ChatMeta, DeliveryStatus, InstanceState, MUTED_FOREVER, MessageBody,
-    MessageMeta, RichChat, WaMessage, event::ReceiptKind, is_status_chat, jid_user,
+    MessageMeta, RichChat, WaMessage, event::ReceiptKind, is_pn_jid, is_status_chat, jid_user,
     meta::body_preview, to_rovsti,
 };
 use rovsti_wa_ui::{display_name, photo_avatar};
@@ -417,8 +417,9 @@ pub fn wa_snippet(info: &WaChatInfo, contacts: &ContactIndex) -> Option<String> 
     }
     if info.is_group {
         let sender = last.sender.as_deref().unwrap_or("");
-        let contact = contacts
-            .match_number(&format!("+{}", jid_user(sender)))
+        let contact = is_pn_jid(sender)
+            .then(|| contacts.match_number(&format!("+{}", jid_user(sender))))
+            .flatten()
             .map(|c| c.display_name.as_str());
         let name = display_name(contact, meta.sender_name.as_deref(), sender);
         if !name.is_empty() {
@@ -772,7 +773,8 @@ fn contact_photo(row: &InboxRow, sms: &SmsIndex<'_>, contacts: &ContactIndex) ->
     row.threads.iter().find_map(|thread| {
         let number = match &thread.id {
             ThreadId::Sms(_) => sms.get(&thread.id)?.addresses.first()?.clone(),
-            ThreadId::WhatsApp(jid) => format!("+{}", jid_user(jid)),
+            ThreadId::WhatsApp(jid) if is_pn_jid(jid) => format!("+{}", jid_user(jid)),
+            ThreadId::WhatsApp(_) => return None,
         };
         contacts
             .match_number(&number)

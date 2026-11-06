@@ -42,8 +42,8 @@ use rovsti_wa_proto::{
     ChatState, DeleteForMe, EditMessage, GatewayEvent, Item, ItemState, Location, MarkRead,
     MediaKind, MediaMeta, MediaOptions, MessageBody, MessageMeta, Quoted, RevokeMessage,
     SendReaction, SendText, Sent, SharedContact, StarMessage, Timeline, TypingState,
-    TypingThrottle, WaMessage, check_size, classify, day_breaks, jid_user, meta::body_preview,
-    reaction_chips, read_requests,
+    TypingThrottle, WaMessage, check_size, classify, day_breaks, is_pn_jid, jid_user,
+    meta::body_preview, reaction_chips, read_requests,
 };
 
 /// The text "Copy" puts on the clipboard: the text or a media caption. Nothing
@@ -1145,7 +1145,10 @@ impl Conversation {
                 jid,
                 available,
                 last_seen_ms,
-            } if !self.is_group && jid_user(jid) == jid_user(&self.chat) => {
+            } if !self.is_group
+                && jid_user(jid) == jid_user(&self.chat)
+                && is_pn_jid(jid) == is_pn_jid(&self.chat) =>
+            {
                 self.presence = Some((*available, *last_seen_ms));
                 cx.notify();
                 return;
@@ -1746,12 +1749,15 @@ impl Conversation {
             // One-to-one chats leave the sender out: it is the other person.
             return self.title.to_string();
         };
-        let contact = self
-            .backend
-            .read(cx)
-            .contacts()
-            .match_number(&format!("+{}", jid_user(jid)))
-            .map(|c| c.display_name.clone());
+        let contact = is_pn_jid(jid)
+            .then(|| {
+                self.backend
+                    .read(cx)
+                    .contacts()
+                    .match_number(&format!("+{}", jid_user(jid)))
+                    .map(|c| c.display_name.clone())
+            })
+            .flatten();
         display_name(
             contact.as_deref(),
             meta.and_then(|m| m.sender_name.as_deref()),

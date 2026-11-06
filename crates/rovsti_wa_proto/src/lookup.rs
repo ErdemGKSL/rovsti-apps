@@ -140,7 +140,7 @@ pub fn wa_target(numbers: &[&str], chat_users: &[&str]) -> WaTarget {
 pub fn chat_users(chats: &[ChatSummary]) -> Vec<String> {
     chats
         .iter()
-        .filter(|c| !c.is_group && !c.jid.ends_with("@g.us"))
+        .filter(|c| !c.is_group && crate::api::is_pn_jid(&c.jid))
         .map(|c| crate::api::jid_user(&c.jid).to_owned())
         .filter(|user| !user.is_empty())
         .collect()
@@ -243,6 +243,16 @@ mod tests {
             wa_target(&["+49 170 1234567"], &refs),
             WaTarget::Number("491701234567@s.whatsapp.net".into())
         );
+    }
+
+    #[test]
+    fn chat_users_drops_lids() {
+        let chats = vec![
+            chat("905321234567@s.whatsapp.net", false),
+            chat("96413459456093@lid", false),
+            chat("120363@g.us", true),
+        ];
+        assert_eq!(chat_users(&chats), vec!["905321234567".to_owned()]);
     }
 
     #[test]

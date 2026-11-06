@@ -69,14 +69,25 @@ fn resolve_number(raw: &str, contacts: &ContactIndex) -> Option<Resolved> {
     })
 }
 
+/// Mirrors `rovsti_wa_proto::is_pn_jid`: a phone-number JID (digits-only user
+/// on `s.whatsapp.net`, device suffix allowed).
+fn is_pn_jid(jid: &str) -> bool {
+    let Some((local, server)) = jid.split_once('@') else {
+        return false;
+    };
+    let user = local.split(':').next().unwrap_or(local);
+    server == "s.whatsapp.net" && !user.is_empty() && user.bytes().all(|b| b.is_ascii_digit())
+}
+
 fn resolve_jid(jid: &str, contacts: &ContactIndex) -> Option<Resolved> {
-    if jid.ends_with("@g.us") {
-        return Some(Resolved {
-            key: PersonKey::Group(ThreadId::WhatsApp(jid.to_owned())),
-            name: None,
-        });
+    if is_pn_jid(jid) {
+        return resolve_number(&format!("+{}", jid_user(jid)), contacts);
     }
-    resolve_number(&format!("+{}", jid_user(jid)), contacts)
+    // Groups, `@lid` identities and broadcast lists: never merged by number.
+    Some(Resolved {
+        key: PersonKey::Group(ThreadId::WhatsApp(jid.to_owned())),
+        name: None,
+    })
 }
 
 /// The person behind a phone number as the provider reports it (national or
@@ -88,6 +99,9 @@ pub fn person_for_number(raw: &str, contacts: &ContactIndex) -> Option<PersonKey
 /// The person behind a WhatsApp JID; `@g.us` is a [`PersonKey::Group`]. `None`
 /// when the JID is not a phone-number JID (a `@lid` identity, a broadcast list).
 pub fn person_for_jid(jid: &str, contacts: &ContactIndex) -> Option<PersonKey> {
+    if !jid.ends_with("@g.us") && !is_pn_jid(jid) {
+        return None;
+    }
     resolve_jid(jid, contacts).map(|r| r.key)
 }
 
@@ -253,7 +267,10 @@ fn finish(mut entry: Entry) -> InboxRow {
         .unwrap_or_else(|| match &entry.key {
             PersonKey::Number(n) => n.as_str().to_owned(),
             PersonKey::Contact(_) => String::new(),
-            PersonKey::Group(ThreadId::WhatsApp(jid)) => jid_user(jid).to_owned(),
+            PersonKey::Group(ThreadId::WhatsApp(jid)) if jid.ends_with("@g.us") => {
+                jid_user(jid).to_owned()
+            }
+            PersonKey::Group(ThreadId::WhatsApp(_)) => "WhatsApp user".to_owned(),
             PersonKey::Group(ThreadId::Sms(id)) => format!("#{id}"),
         });
     InboxRow {
@@ -428,6 +445,30 @@ mod tests {
         let rows = merge(&[sms(9, &["BANKA"], 1, 1)], &[], &idx);
         assert_eq!(rows[0].key, PersonKey::Group(ThreadId::Sms(9)));
         assert_eq!(rows[0].title, "#9");
+    }
+
+    #[test]
+    fn lid_chat_never_merges_by_number() {
+        let idx = index(vec![]);
+        let mut lid = wa("905321234567@lid", 300, 1, false);
+        let rows = merge(
+            &[],
+            &[
+                wa("905321234567@s.whatsapp.net", 200, 2, false),
+                lid.clone(),
+            ],
+            &idx,
+        );
+        assert_eq!(rows.len(), 2);
+        let lid_row = rows
+            .iter()
+            .find(|r| matches!(&r.key, PersonKey::Group(ThreadId::WhatsApp(j)) if j.ends_with("@lid")))
+            .expect("lid row");
+        assert_eq!(lid_row.title, "WhatsApp user");
+        assert!(!lid_row.title.contains('+'));
+        lid.title = Some("Annem".into());
+        let rows = merge(&[], &[lid], &idx);
+        assert_eq!(rows[0].title, "Annem");
     }
 
     #[test]

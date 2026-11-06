@@ -369,6 +369,27 @@ pub fn jid_user(jid: &str) -> &str {
     local.split(':').next().unwrap_or(local)
 }
 
+/// What to call a WhatsApp user whose only identity is a LID.
+pub const WHATSAPP_USER_LABEL: &str = "WhatsApp user";
+
+fn jid_server(jid: &str) -> Option<(&str, &str)> {
+    jid.split_once('@')
+}
+
+/// A phone-number JID: digits-only user on `s.whatsapp.net`; a device suffix
+/// (`:12`) is allowed.
+pub fn is_pn_jid(jid: &str) -> bool {
+    jid_server(jid).is_some_and(|(_, server)| server == "s.whatsapp.net") && {
+        let user = jid_user(jid);
+        !user.is_empty() && user.bytes().all(|b| b.is_ascii_digit())
+    }
+}
+
+/// A WhatsApp LID identity (`...@lid`), which is not a phone number.
+pub fn is_lid_jid(jid: &str) -> bool {
+    jid_server(jid).is_some_and(|(_, server)| server == "lid")
+}
+
 fn media_label(kind: MediaKind) -> &'static str {
     match kind {
         MediaKind::Image => "[Photo]",
@@ -386,9 +407,8 @@ pub fn to_rovsti(m: &WaMessage) -> Message {
     } else {
         // Group chats carry the sender's JID; one-to-one chats are the chat JID.
         let jid = m.sender.as_deref().unwrap_or(&m.chat);
-        let user = jid_user(jid);
-        (!user.is_empty())
-            .then(|| PhoneNumber::parse(&format!("+{user}")).ok())
+        is_pn_jid(jid)
+            .then(|| PhoneNumber::parse(&format!("+{}", jid_user(jid))).ok())
             .flatten()
     };
     let body = match &m.body {
@@ -636,6 +656,33 @@ mod tests {
             to_rovsti(&wa(false, None, MessageBody::Unsupported)).body,
             "[Unsupported message]"
         );
+    }
+
+    #[test]
+    fn pn_and_lid_jids() {
+        for (jid, pn, lid) in [
+            ("905321234567@s.whatsapp.net", true, false),
+            ("905321234567:12@s.whatsapp.net", true, false),
+            ("96413459456093@lid", false, true),
+            ("96413459456093:3@lid", false, true),
+            ("120363@g.us", false, false),
+            ("abc@s.whatsapp.net", false, false),
+            ("@s.whatsapp.net", false, false),
+            ("905321234567", false, false),
+            ("status@broadcast", false, false),
+        ] {
+            assert_eq!(is_pn_jid(jid), pn, "{jid}");
+            assert_eq!(is_lid_jid(jid), lid, "{jid}");
+        }
+    }
+
+    #[test]
+    fn to_rovsti_lid_sender_is_none() {
+        let mut w = wa(false, None, MessageBody::Text("x".into()));
+        w.chat = "96413459456093@lid".into();
+        assert!(to_rovsti(&w).sender.is_none());
+        w.sender = Some("96413459456093@lid".into());
+        assert!(to_rovsti(&w).sender.is_none());
     }
 
     #[test]

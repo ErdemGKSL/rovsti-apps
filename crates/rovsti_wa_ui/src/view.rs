@@ -930,6 +930,7 @@ impl WhatsAppSettings {
                 status
                     .own_jid
                     .as_deref()
+                    .filter(|jid| rovsti_wa_proto::is_pn_jid(jid))
                     .map(|jid| format!("+{}", rovsti_wa_proto::jid_user(jid)))
             })
             .unwrap_or_else(|| "WhatsApp".to_owned());

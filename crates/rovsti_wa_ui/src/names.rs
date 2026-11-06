@@ -2,22 +2,25 @@
 //! know them: the contact name, then WhatsApp's own name for them, then the
 //! number.
 
-use rovsti_wa_proto::{WaProfile, jid_user};
+use rovsti_wa_proto::{WHATSAPP_USER_LABEL, WaProfile, is_pn_jid, jid_user};
 
 fn non_empty(name: Option<&str>) -> Option<&str> {
     name.map(str::trim).filter(|n| !n.is_empty())
 }
 
 /// `905321234567@s.whatsapp.net` → `+905321234567`. Groups and other JIDs
-/// without a phone number give their user part as is; an empty JID gives "".
+/// keep their user part; a LID or any other non-phone JID gives
+/// "WhatsApp user" (never digits or a `+`); an empty JID gives "".
 pub fn number_label(jid: &str) -> String {
     let user = jid_user(jid);
     if user.is_empty() {
         String::new()
-    } else if jid.ends_with("@s.whatsapp.net") && user.bytes().all(|b| b.is_ascii_digit()) {
+    } else if is_pn_jid(jid) {
         format!("+{user}")
-    } else {
+    } else if jid.ends_with("@g.us") {
         user.to_owned()
+    } else {
+        WHATSAPP_USER_LABEL.to_owned()
     }
 }
 
@@ -75,7 +78,17 @@ mod tests {
     #[test]
     fn numbers_and_other_jids() {
         assert_eq!(number_label("120363@g.us"), "120363");
-        assert_eq!(number_label("abc@lid"), "abc");
+        assert_eq!(number_label("abc@lid"), "WhatsApp user");
         assert_eq!(number_label(""), "");
+    }
+
+    #[test]
+    fn lid_is_never_a_number() {
+        let lid = "96413459456093@lid";
+        assert_eq!(display_name(None, None, lid), "WhatsApp user");
+        assert_eq!(display_name(None, Some("Annem"), lid), "Annem");
+        assert_eq!(display_name(Some("Ana"), Some("Annem"), lid), "Ana");
+        assert!(!number_label(lid).contains('+'));
+        assert!(!number_label(lid).contains("964"));
     }
 }

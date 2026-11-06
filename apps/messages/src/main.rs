@@ -72,7 +72,7 @@ use photos::ContactPhotos;
 use rovsti_wa_client::ClientError;
 use rovsti_wa_proto::{
     ChatAction, ChatActionKind, ChatMeta, GatewayEvent, ScheduleText, ScheduledText, SendText,
-    WaMessage, is_status_chat, jid_user, to_rovsti,
+    WaMessage, is_pn_jid, is_status_chat, jid_user, to_rovsti,
 };
 use rovsti_wa_ui::{AppId, WaAvatars, WhatsAppSettings, display_name};
 use schedule_ui::{Dest, Draft, ScheduleSheet, StripKey, StripTarget};
@@ -847,7 +847,7 @@ impl MessagesApp {
                     if announce {
                         let title = self
                             .title_of(&ThreadId::WhatsApp(chat.clone()))
-                            .unwrap_or_else(|| jid_user(&chat).to_owned());
+                            .unwrap_or_else(|| display_name(None, None, &chat));
                         self.show_pill_action(
                             schedule_ui::remote_failed_text(&title),
                             "Open",
@@ -2503,15 +2503,18 @@ impl MessagesApp {
         let title = known
             .and_then(|t| t.title.clone())
             .or_else(|| self.title_of(&thread))
-            .unwrap_or_else(|| jid_user(&message.chat).to_owned());
+            .unwrap_or_else(|| display_name(None, None, &message.chat));
         // The sender in a group: the contact, WhatsApp's name, the number.
         let sender_title = message.sender.as_deref().map_or_else(String::new, |jid| {
-            let contact = self
-                .backend
-                .read(cx)
-                .contacts()
-                .match_number(&format!("+{}", jid_user(jid)))
-                .map(|c| c.display_name.clone());
+            let contact = is_pn_jid(jid)
+                .then(|| {
+                    self.backend
+                        .read(cx)
+                        .contacts()
+                        .match_number(&format!("+{}", jid_user(jid)))
+                        .map(|c| c.display_name.clone())
+                })
+                .flatten();
             let wa_name = self.avatars.read(cx).name(jid).map(str::to_owned);
             display_name(contact.as_deref(), wa_name.as_deref(), jid)
         });

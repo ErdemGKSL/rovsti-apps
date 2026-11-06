@@ -621,6 +621,22 @@ mod tests {
     }
 
     #[test]
+    fn lid_chats_never_mark_a_contact() {
+        let chat = |jid: &str| rovsti_wa_proto::ChatSummary {
+            jid: jid.into(),
+            name: None,
+            last: None,
+            unread: 0,
+            is_group: false,
+        };
+        let users = rovsti_wa_proto::chat_users(&[chat("96413459456093@lid")]);
+        let c = contact(1, &["+96413459456093"]);
+        assert!(marked_contacts([&c], &users).is_empty());
+        let users = rovsti_wa_proto::chat_users(&[chat("96413459456093@s.whatsapp.net")]);
+        assert_eq!(marked_contacts([&c], &users).len(), 1);
+    }
+
+    #[test]
     fn lookup_asks_for_one_contact_and_caps_numbers() {
         let panel = WaPanel::default();
         let many: Vec<String> = (0..20).map(|i| format!("+9053212345{i:02}")).collect();

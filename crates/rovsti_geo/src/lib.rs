@@ -5,6 +5,7 @@
 //! it wants the next fix, so the location service can sleep while the
 //! diameter is far away.
 
+pub mod alarm;
 mod coord;
 mod crossing;
 pub mod csv;
@@ -20,6 +21,7 @@ pub mod tiles;
 mod trip;
 pub mod view;
 
+pub use alarm::{AlarmPlan, SoundSource};
 pub use coord::{Coord, EARTH_RADIUS_M};
 pub use crossing::{
     Crossing, CrossingTrip, CrossingUpdate, CrossingWatch, DEAD_BAND_M, Diameter, DiameterError,

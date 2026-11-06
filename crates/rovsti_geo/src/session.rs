@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::alarm::MAX_TIMEOUT_RERINGS;
 use crate::notice;
+use crate::poll::retry_after;
 use crate::trip::MAX_ACCURACY_M;
 use crate::{
     Coord, CrossingTrip, CrossingUpdate, Diameter, DiameterError, Endpoint, Fix, NoticeRule, Side,
@@ -96,6 +98,9 @@ pub struct ActiveTrip {
     pub ring_at_ms: Option<i64>,
     pub track: Track,
     pub notice: Option<NoticeState>,
+    /// Ring timeouts so far (each re-rings; capped at [`MAX_TIMEOUT_RERINGS`]).
+    #[serde(default)]
+    pub timeouts: u8,
 }
 
 /// A location fix as delivered by the Android side.
@@ -125,6 +130,9 @@ pub struct FixOut {
     /// Metres from the fix to the line A-B.
     pub distance_m: f64,
     pub next_fix_ms: u64,
+    /// Wait this long for a fix before assuming it is missing and re-requesting.
+    #[serde(default)]
+    pub retry_ms: u64,
     pub high_accuracy: bool,
     pub ring: bool,
     pub title: String,
@@ -166,6 +174,7 @@ impl ActiveTrip {
             ring_at_ms: None,
             track: Track::default(),
             notice: None,
+            timeouts: 0,
         })
     }
 
@@ -222,6 +231,20 @@ impl ActiveTrip {
         Some(at)
     }
 
+    /// The alarm rang for the whole ring timeout unanswered: ring again in
+    /// `minutes` (clamped to 1..=15). Does not use up a snooze. `None` when not
+    /// ringing or after [`MAX_TIMEOUT_RERINGS`] timeouts.
+    pub fn ring_timed_out(&mut self, now_ms: i64, minutes: u8) -> Option<i64> {
+        if self.trip.state() != TripState::Arrived || self.timeouts >= MAX_TIMEOUT_RERINGS {
+            return None;
+        }
+        self.timeouts += 1;
+        let minutes = minutes.clamp(1, MAX_SNOOZE_MINUTES);
+        let at = now_ms.saturating_add(i64::from(minutes) * 60_000);
+        self.ring_at_ms = Some(at);
+        Some(at)
+    }
+
     pub fn dismiss(&mut self) {
         self.trip.dismiss();
         self.ring_at_ms = None;
@@ -253,6 +276,10 @@ impl ActiveTrip {
             state: u.state,
             distance_m: u.line_m,
             next_fix_ms: u.next_fix_in.as_millis().try_into().unwrap_or(u64::MAX),
+            retry_ms: retry_after(u.next_fix_in)
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX),
             high_accuracy: u.next_fix_in <= HIGH_ACCURACY_BELOW,
             ring: u.ring,
             title: if ringing {
@@ -568,5 +595,73 @@ mod tests {
             "started_ms":0,"snoozes":0,"ring_at_ms":null,
             "track":{"last":null,"travelled_m":0.0,"fixes":0},"notice":null}"#;
         assert!(serde_json::from_str::<ActiveTrip>(json).is_err());
+    }
+
+    #[test]
+    fn retry_ms_follows_the_interval() {
+        let mut t = trip();
+        let far = t.on_fix(fix(0.0, 50_000.0, 5.0, None), 0);
+        let out = t.fix_out(&far);
+        assert_eq!(out.next_fix_ms, 300_000);
+        assert_eq!(out.retry_ms, 330_000);
+        let near = t.on_fix(fix(0.0, 3.0, 5.0, None), 1);
+        let out = t.fix_out(&near);
+        assert!(out.next_fix_ms <= 5_000);
+        assert!(out.retry_ms > out.next_fix_ms);
+        assert!(out.retry_ms <= out.next_fix_ms + 30_000);
+    }
+
+    #[test]
+    fn fix_out_without_retry_ms_still_parses() {
+        let mut t = trip();
+        let o = t.on_fix(fix(0.0, 700.0, 5.0, None), 0);
+        let mut json = serde_json::to_value(t.fix_out(&o)).unwrap();
+        assert!(json.as_object_mut().unwrap().remove("retry_ms").is_some());
+        let old: FixOut = serde_json::from_value(json).unwrap();
+        assert_eq!(old.retry_ms, 0);
+    }
+
+    fn arrived() -> ActiveTrip {
+        let mut t = trip();
+        t.on_fix(fix(0.0, 150.0, 5.0, None), 0);
+        t.on_fix(fix(0.0, -150.0, 5.0, None), 1);
+        assert_eq!(t.trip.state(), TripState::Arrived);
+        t
+    }
+
+    #[test]
+    fn ring_timed_out_caps_and_leaves_snoozes_alone() {
+        let mut t = arrived();
+        assert_eq!(t.ring_timed_out(1_000, 5), Some(1_000 + 300_000));
+        assert_eq!(t.ring_at_ms, Some(301_000));
+        assert_eq!(t.snoozes, 0);
+        for _ in 1..MAX_TIMEOUT_RERINGS {
+            assert!(t.ring_timed_out(0, 0).is_some());
+        }
+        assert_eq!(t.ring_timed_out(0, 5), None);
+        assert_eq!(t.timeouts, MAX_TIMEOUT_RERINGS);
+        // Snoozes are independent of timeouts.
+        assert!(t.snooze(0, 5).is_some());
+        assert_eq!(t.snoozes, 1);
+    }
+
+    #[test]
+    fn ring_timed_out_needs_a_ringing_trip() {
+        let mut t = trip();
+        assert_eq!(t.ring_timed_out(0, 5), None);
+        let mut d = arrived();
+        d.dismiss();
+        assert_eq!(d.ring_timed_out(0, 5), None);
+        assert_eq!(d.timeouts, 0);
+    }
+
+    #[test]
+    fn old_trip_json_without_timeouts_loads() {
+        let t = arrived();
+        let mut json = serde_json::to_value(&t).unwrap();
+        assert!(json.as_object_mut().unwrap().remove("timeouts").is_some());
+        let back: ActiveTrip = serde_json::from_value(json).unwrap();
+        assert_eq!(back.timeouts, 0);
+        assert_eq!(back.trip, t.trip);
     }
 }

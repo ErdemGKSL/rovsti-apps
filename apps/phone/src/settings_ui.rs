@@ -82,10 +82,11 @@ pub(crate) enum RowId {
     BlockedAccess,
     WhatsApp,
     SpeedDial,
+    ShowFrequent,
 }
 
 impl RowId {
-    const COUNT: usize = 25;
+    const COUNT: usize = 26;
 
     const fn index(self) -> usize {
         self as usize
@@ -119,6 +120,7 @@ impl RowId {
             // Not "set-wa-...": that prefix belongs to the WhatsApp page itself.
             Self::WhatsApp => "set-whatsapp",
             Self::SpeedDial => "set-speed-dial",
+            Self::ShowFrequent => "set-frequent",
         }
     }
 }
@@ -253,6 +255,7 @@ pub(crate) fn toggle_value(row: RowId, s: &Settings, system_tones: bool) -> bool
         RowId::KeypadTones => {
             rovsti_core::settings::effective_keypad_tones(s.keypad_tones, system_tones)
         }
+        RowId::ShowFrequent => s.show_frequent,
         _ => false,
     }
 }
@@ -367,6 +370,8 @@ pub(crate) fn build_sections(key: &RowsKey) -> Vec<Section> {
                 "Theme",
                 Control::Info("Follows system".into()),
             ),
+            Row::new(RowId::ShowFrequent, "Show Frequent", Control::Toggle)
+                .note("People you call most, under Favorites"),
         ],
         footer: None,
     });
@@ -877,6 +882,7 @@ impl PhoneApp {
             RowId::VibrateConnect,
             RowId::VibrateEnd,
             RowId::KeypadTones,
+            RowId::ShowFrequent,
         ] {
             let target = f32::from(u8::from(toggle_value(row, &key.settings, system_tones)));
             self.settings_target(row, target, snap);
@@ -953,6 +959,12 @@ impl PhoneApp {
             (RowId::Proximity, _) => self.toggle_setting(row, window, cx, |s| {
                 s.proximity = !s.proximity;
             }),
+            (RowId::ShowFrequent, _) => {
+                self.toggle_setting(row, window, cx, |s| {
+                    s.show_frequent = !s.show_frequent;
+                });
+                self.sync_frequent(cx);
+            }
             (RowId::Flip, _) => self.toggle_setting(row, window, cx, |s| {
                 s.flip_to_silence = !s.flip_to_silence;
             }),
@@ -1856,12 +1868,34 @@ mod tests {
             RowId::BlockedAccess,
             RowId::WhatsApp,
             RowId::SpeedDial,
+            RowId::ShowFrequent,
         ];
         assert_eq!(all.len(), RowId::COUNT);
         for (i, a) in all.iter().enumerate() {
             assert_eq!(a.index(), i);
             assert!(all.iter().skip(i + 1).all(|b| b.key() != a.key()));
         }
+    }
+
+    #[test]
+    fn show_frequent_is_a_display_toggle_that_follows_the_setting() {
+        let sections = build_sections(&key());
+        let display = sections
+            .iter()
+            .find(|s| s.title == "Display")
+            .expect("section");
+        let row = display
+            .rows
+            .iter()
+            .find(|r| r.id == RowId::ShowFrequent)
+            .expect("row");
+        assert_eq!(row.title, "Show Frequent");
+        assert_eq!(row.control, Control::Toggle);
+        assert!(row.enabled);
+        let mut s = Settings::default();
+        assert!(toggle_value(RowId::ShowFrequent, &s, false));
+        s.show_frequent = false;
+        assert!(!toggle_value(RowId::ShowFrequent, &s, false));
     }
 
     #[test]

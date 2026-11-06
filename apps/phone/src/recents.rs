@@ -398,6 +398,7 @@ impl PhoneApp {
         self.sync_missed_label(cx);
         self.arm_view_timer(cx);
         self.sync_wa_names(cx);
+        self.sync_frequent(cx);
     }
 
     /// Asks for the profiles of unnamed WhatsApp rows, and rebuilds the rows

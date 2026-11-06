@@ -51,6 +51,12 @@ const TILE_GAP: f32 = 12.0;
 const TILE_TOP: f32 = 6.0;
 /// One grid row: a tile and the gap under it.
 const GRID_ROW_H: f32 = TILE_H + TILE_GAP;
+/// Frequent row: people shown at most (matches `FREQUENT_LIMIT`).
+const FREQUENT_COLS: usize = 4;
+/// Frequent row: flat avatar size.
+const FREQUENT_AVATAR: f32 = 56.0;
+/// Frequent row: top of the avatars inside its block (below the label).
+const FREQUENT_TOP: f32 = 34.0;
 /// A held finger on a tile or row opens the sheet (story 8.7).
 pub(crate) const LONG_PRESS: Duration = Duration::from_millis(450);
 const NOTE_FOR: Duration = Duration::from_secs(3);
@@ -105,6 +111,40 @@ impl From<ContactVm> for ContactRow {
             photo: v.photo_uri.map(Into::into),
             wa_jid,
         }
+    }
+}
+
+impl ContactRow {
+    /// A person the phone has no contact for: just a number and the name the
+    /// call log remembered, if any. `id` is negative.
+    pub(crate) fn for_number(number: &str, name: Option<&str>) -> Self {
+        let title = name
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .unwrap_or(number)
+            .to_owned();
+        Self::from(ContactVm {
+            id: -1,
+            name: title,
+            subtitle: None,
+            letter: '#',
+            header: false,
+            monogram: None,
+            hue: None,
+            numbers: vec![NumberVm {
+                raw: number.to_owned(),
+                display: number.to_owned(),
+                label: "Other".to_owned(),
+                default: true,
+            }],
+            starred: false,
+            photo_uri: None,
+        })
+    }
+
+    /// Built by [`Self::for_number`]: there is no contact behind it.
+    pub(crate) fn is_bare(&self) -> bool {
+        self.id < 0
     }
 }
 
@@ -239,6 +279,10 @@ pub(crate) struct FavoritesView {
     pub(crate) state: State,
     source: Option<Arc<Vec<WireContact>>>,
     pub(crate) tiles: Arc<[ContactRow]>,
+    /// The Frequent row; empty when hidden (setting off or fewer than two).
+    pub(crate) frequent: Arc<[ContactRow]>,
+    /// What `frequent` was built from (call log, favorites, contacts, setting).
+    frequent_key: (usize, usize, usize, bool),
     touch: Option<Point<Pixels>>,
     tap: TapGuard,
     last_pressed: Option<usize>,
@@ -261,6 +305,8 @@ impl FavoritesView {
             state: State::Loading,
             source: None,
             tiles: Arc::from(Vec::new()),
+            frequent: Arc::from(Vec::new()),
+            frequent_key: (0, 0, 0, true),
             touch: None,
             tap: TapGuard::default(),
             last_pressed: None,
@@ -434,6 +480,34 @@ pub(crate) fn tile_at(x: f32, y: f32, scrolled: f32, width: f32, count: usize) -
     (index < count).then_some(index)
 }
 
+/// First tile index of the row after the last tile row.
+fn rows_start(tiles: usize, cols: usize) -> usize {
+    tiles.div_ceil(cols) * cols
+}
+
+/// Width of one column of the Frequent row.
+fn frequent_col_width(width: f32) -> f32 {
+    (width - f32::from(metrics::ROW_INSET) * 2.0) / FREQUENT_COLS as f32
+}
+
+/// Which Frequent avatar a point is on. `y` is relative to the list, `scrolled`
+/// its scroll offset; the block follows `tile_rows` grid rows.
+fn frequent_at(
+    x: f32,
+    y: f32,
+    scrolled: f32,
+    width: f32,
+    tile_rows: usize,
+    count: usize,
+) -> Option<usize> {
+    let within_y = y + scrolled - tile_rows as f32 * GRID_ROW_H;
+    if count == 0 || !(FREQUENT_TOP..GRID_ROW_H).contains(&within_y) {
+        return None;
+    }
+    let col = ((x - f32::from(metrics::ROW_INSET)) / frequent_col_width(width)).floor();
+    (col >= 0.0 && (col as usize) < count.min(FREQUENT_COLS)).then_some(col as usize)
+}
+
 impl PhoneApp {
     // ---- Data ---------------------------------------------------------
 
@@ -506,6 +580,70 @@ impl PhoneApp {
             self.favorites.tiles = Arc::from(Vec::new());
             self.favorites.settle();
         }
+        self.sync_frequent(cx);
+    }
+
+    /// Rebuilds the Frequent row when the call log, favorites, contacts or the
+    /// Show Frequent setting changed (never per frame).
+    pub(crate) fn sync_frequent(&mut self, cx: &gpui::App) {
+        fn addr<T: ?Sized>(a: &Arc<T>) -> usize {
+            Arc::as_ptr(a).cast::<()>() as usize
+        }
+        let backend = self.backend.read(cx);
+        let show = backend.settings().show_frequent;
+        let log = match backend.call_log() {
+            Load::Ready(log) => Some(log),
+            _ => None,
+        };
+        let key = (
+            log.as_ref().map_or(0, addr),
+            self.favorites.source.as_ref().map_or(0, addr),
+            addr(&self.contacts.all),
+            show,
+        );
+        if key == self.favorites.frequent_key {
+            return;
+        }
+        self.favorites.frequent_key = key;
+        let rows = match log {
+            Some(log) if show => self.frequent_rows(&log.entries, cx),
+            _ => Vec::new(),
+        };
+        self.favorites.frequent = if rows.len() >= 2 {
+            rows.into()
+        } else {
+            Arc::from(Vec::new())
+        };
+    }
+
+    fn frequent_rows(
+        &self,
+        entries: &[rovsti_core::wire::CallLogEntry],
+        cx: &gpui::App,
+    ) -> Vec<ContactRow> {
+        let backend = self.backend.read(cx);
+        let starred: std::collections::HashSet<i64> = self
+            .favorites
+            .source
+            .iter()
+            .flat_map(|list| list.iter().map(|c| c.id))
+            .collect();
+        rovsti_core::call_log::frequent(
+            entries,
+            backend::now_ms(),
+            rovsti_core::call_log::FREQUENT_WINDOW_DAYS,
+            rovsti_core::call_log::FREQUENT_LIMIT,
+            |id| starred.contains(&id),
+        )
+        .into_iter()
+        .filter(|f| !backend.is_blocked(&f.number_raw))
+        .map(|f| {
+            f.contact_id
+                .and_then(|id| self.contacts.all.iter().find(|r| r.id == id).cloned())
+                .or_else(|| self.contact_for_number(&f.number_raw, cx))
+                .unwrap_or_else(|| ContactRow::for_number(&f.number_raw, f.name.as_deref()))
+        })
+        .collect()
     }
 
     /// The Favorites tiles in the owner's order (new stars follow, by name).
@@ -885,6 +1023,7 @@ impl PhoneApp {
                     return;
                 }
                 let Some(index) = hit(self) else {
+                    self.frequent_tap(position, window, cx);
                     return;
                 };
                 self.favorites.last_pressed = Some(index);
@@ -894,6 +1033,61 @@ impl PhoneApp {
                 }
             }
         }
+    }
+
+    /// A tap on the Frequent row opens the person's sheet; it never calls.
+    fn frequent_tap(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if f32::from(position.y) > Self::list_limit(window)
+            || self
+                .overlay_band_top(window)
+                .is_some_and(|top| position.y > top)
+        {
+            return;
+        }
+        let bounds = self.favorites.bounds.get();
+        let width = f32::from(bounds.size.width);
+        let tile_rows = self
+            .favorites
+            .tiles
+            .len()
+            .div_ceil(contacts_view::favorite_columns(width));
+        let Some(index) = frequent_at(
+            f32::from(position.x - bounds.origin.x),
+            f32::from(position.y - bounds.origin.y),
+            self.favorites.scrolled(),
+            width,
+            tile_rows,
+            self.favorites.frequent.len(),
+        ) else {
+            return;
+        };
+        let Some(row) = self.favorites.frequent.get(index).cloned() else {
+            return;
+        };
+        if !row.is_bare() {
+            self.open_contact_sheet(row, false, window, cx);
+            return;
+        }
+        if !self.can_open_sheet() {
+            return;
+        }
+        let number = row.numbers[0].raw.clone();
+        let named = row.name.as_ref() != number.as_str();
+        self.recents.number_history = self.history_for(&[number.as_str()], cx);
+        self.recents.number = Some(crate::recents::RowVm::for_number(
+            number.into(),
+            row.name.clone(),
+            named,
+        ));
+        self.setup_note = None;
+        self.sheet_kind = SheetKind::Number;
+        self.sheet.open();
+        cx.notify();
     }
 
     /// Desktop preview: tap the first Favorites tile.
@@ -1592,15 +1786,22 @@ impl PhoneApp {
         let f = &self.favorites;
         let permanent = self.backend.read(cx).permissions().contacts == Access::PermanentlyDenied;
         match f.state {
-            State::Ready if f.tiles.is_empty() => state_view(
-                theme,
-                Icon::LucideStar,
-                false,
-                "No favorites yet",
-                "Star someone in Contacts to call them with one tap.",
-                Some(("fv-go", "Go to Contacts", self.presses.value("fv-go"))),
-                cx,
-            ),
+            State::Ready if f.tiles.is_empty() => {
+                let empty = state_view(
+                    theme,
+                    Icon::LucideStar,
+                    false,
+                    "No favorites yet",
+                    "Star someone in Contacts to call them with one tap.",
+                    Some(("fv-go", "Go to Contacts", self.presses.value("fv-go"))),
+                    cx,
+                );
+                if f.frequent.is_empty() {
+                    empty
+                } else {
+                    self.favorites_empty_with_frequent(theme, empty, window, cx)
+                }
+            }
             State::Ready => self.favorites_grid(window, cx),
             State::Denied => state_view(
                 theme,
@@ -1636,14 +1837,114 @@ impl PhoneApp {
         }
     }
 
+    /// The empty state with the Frequent row under it (its own touch surface).
+    fn favorites_empty_with_frequent(
+        &self,
+        theme: Theme,
+        empty: AnyElement,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let width = f32::from(window.viewport_size().width);
+        let entity = cx.entity();
+        div()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(empty)
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .h(px(GRID_ROW_H))
+                    .mb(rovsti_ui::tab_bar::content_bottom_inset())
+                    .child(self.frequent_block(theme, width, cx))
+                    .child(pointer_surface(
+                        Rc::clone(&self.favorites.bounds),
+                        move |pointer, position, window, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.favorites_pointer(pointer, position, window, cx);
+                            });
+                        },
+                    )),
+            )
+            .into_any_element()
+    }
+
+    /// "Frequent" and up to four flat avatars with names. Purely visual; taps
+    /// are placed by [`frequent_at`].
+    fn frequent_block(&self, theme: Theme, width: f32, cx: &gpui::App) -> AnyElement {
+        let colors = theme::colors(theme);
+        let col_w = frequent_col_width(width);
+        div()
+            .w_full()
+            .h(px(GRID_ROW_H))
+            .px(metrics::ROW_INSET)
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .h(px(FREQUENT_TOP))
+                    .flex()
+                    .items_center()
+                    .text_size(typography::FOOTNOTE.size)
+                    .font_weight(typography::FOOTNOTE.weight)
+                    .text_color(colors.secondary_label)
+                    .child("Frequent"),
+            )
+            .child(
+                div().flex().children(
+                    self.favorites
+                        .frequent
+                        .iter()
+                        .take(FREQUENT_COLS)
+                        .enumerate()
+                        .map(|(i, row)| {
+                            let photo = self.row_photo(row, cx);
+                            div()
+                                .id(("freq", i))
+                                .role(Role::Button)
+                                .aria_label(row.aria.clone())
+                                .w(px(col_w))
+                                .flex_none()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .gap(px(6.0))
+                                .child(person_avatar(
+                                    theme,
+                                    row.hue,
+                                    row.monogram.as_ref(),
+                                    FREQUENT_AVATAR,
+                                    photo.as_ref().map(|(image, opacity)| (image, *opacity)),
+                                ))
+                                .child(
+                                    div()
+                                        .max_w(px(col_w - 6.0))
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis()
+                                        .text_size(typography::FOOTNOTE.size)
+                                        .text_color(colors.label)
+                                        .child(row.name.clone()),
+                                )
+                        }),
+                ),
+            )
+            .into_any_element()
+    }
+
     fn favorites_grid(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let f = &self.favorites;
         let width = f32::from(window.viewport_size().width);
         let cols = contacts_view::favorite_columns(width);
         let rows = f.tiles.len().div_ceil(cols);
+        let extra = usize::from(!f.frequent.is_empty());
         let list = uniform_list(
             "favorites",
-            rows + 1,
+            rows + extra + 1,
             cx.processor(move |this, range: Range<usize>, window, cx| {
                 let theme = rovsti_ui::current_theme(window);
                 let width = f32::from(window.viewport_size().width);
@@ -1664,6 +1965,14 @@ impl PhoneApp {
                         .take(range.len() * cols),
                     cx,
                 );
+                let frequent = Arc::clone(&this.favorites.frequent);
+                this.want_photos(
+                    frequent
+                        .iter()
+                        .filter_map(|r| r.photo.as_ref().map(|uri| (r.id, uri))),
+                    cx,
+                );
+                this.want_wa_pictures(frequent.iter(), cx);
                 this.favorite_rows(theme, width, range, window.prefers_reduced_motion(), cx)
             }),
         )
@@ -1727,6 +2036,9 @@ impl PhoneApp {
             .map(|r| {
                 let start = r * cols;
                 if start >= f.tiles.len() {
+                    if start == rows_start(f.tiles.len(), cols) && !f.frequent.is_empty() {
+                        return self.frequent_block(theme, width, cx);
+                    }
                     // The tail row keeps the last tiles clear of the tab bar.
                     return div().h(px(GRID_ROW_H * 0.8)).into_any_element();
                 }
@@ -2568,6 +2880,42 @@ mod tests {
         assert_eq!(tile_at(16.0 + 179.0 + 4.0, 10.0, 0.0, 402.0, 5), None);
         assert_eq!(tile_at(20.0, TILE_TOP + TILE_H + 2.0, 0.0, 402.0, 5), None);
         assert_eq!(tile_at(250.0, 2.0 * GRID_ROW_H + 10.0, 0.0, 402.0, 3), None);
+    }
+
+    #[test]
+    fn frequent_hits_follow_the_grid_rows() {
+        let inset = f32::from(metrics::ROW_INSET);
+        let col = frequent_col_width(402.0);
+        let y = 2.0 * GRID_ROW_H + FREQUENT_TOP + 10.0;
+        assert_eq!(frequent_at(inset + 5.0, y, 0.0, 402.0, 2, 3), Some(0));
+        assert_eq!(frequent_at(inset + col * 2.5, y, 0.0, 402.0, 2, 3), Some(2));
+        // Past the last person, on the label, above the block or scrolled away.
+        assert_eq!(frequent_at(inset + col * 3.5, y, 0.0, 402.0, 2, 3), None);
+        assert_eq!(frequent_at(inset + 5.0, y - 20.0, 0.0, 402.0, 2, 3), None);
+        assert_eq!(frequent_at(inset + 5.0, y, 0.0, 402.0, 3, 3), None);
+        assert_eq!(
+            frequent_at(inset + 5.0, y, GRID_ROW_H, 402.0, 3, 3),
+            Some(0)
+        );
+        assert_eq!(frequent_at(inset + 5.0, y, 0.0, 402.0, 2, 0), None);
+        assert_eq!(frequent_at(1.0, y, 0.0, 402.0, 2, 3), None);
+        // With no tiles the block is the first thing in the list.
+        assert_eq!(
+            frequent_at(inset + 5.0, FREQUENT_TOP + 1.0, 0.0, 402.0, 0, 2),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn a_bare_number_row_has_no_contact_behind_it() {
+        let named = ContactRow::for_number("+905551112233", Some(" Ayşe "));
+        assert!(named.is_bare());
+        assert_eq!(named.name.as_ref(), "Ayşe");
+        assert_eq!(named.numbers[0].raw, "+905551112233");
+        let unnamed = ContactRow::for_number("0212 555 00 00", None);
+        assert_eq!(unnamed.name.as_ref(), "0212 555 00 00");
+        assert_eq!(rows_start(5, 2), 6);
+        assert_eq!(rows_start(0, 2), 0);
         assert_eq!(tile_at(5.0, 10.0, 0.0, 402.0, 5), None);
     }
 

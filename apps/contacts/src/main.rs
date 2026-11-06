@@ -20,13 +20,14 @@ mod transfer;
 mod ui;
 mod whatsapp;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{iter, path::PathBuf, sync::Arc};
 
 use futures::StreamExt;
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, MouseButton, ParentElement, Render,
-    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window, WindowBounds,
-    WindowOptions, div, prelude::*, px, size, svg,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, FocusHandle, ListAlignment,
+    ListOffset, ListState, MouseButton, ParentElement, Pixels, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div, list, prelude::*,
+    px, size, svg,
 };
 use rovsti_android::{
     events,
@@ -75,12 +76,37 @@ const FAVORITES_TAB: usize = 1;
 const GROUPS_TAB: usize = 2;
 const SETTINGS_TAB: usize = 3;
 const FIELD_H: f32 = 44.0;
-/// A list row is about this tall; used to guess which rows are on screen.
+/// A list row is about this tall: the height a virtualised list assumes for
+/// rows it has not measured yet (it measures the real one when drawn).
 const ROW_PX: f32 = 58.0;
-/// What sits above the first row (title and search field), in pixels.
-const LIST_TOP_PX: f32 = 150.0;
-/// Rows kept ready beyond the screen's edges when asking for photos.
-const PHOTO_MARGIN: usize = 10;
+/// Rows measured (and their photos asked for) beyond the screen's edges.
+const LIST_OVERDRAW_PX: f32 = 600.0;
+
+/// A virtualised page: item 0 is the header (title, search, notes), the rows
+/// follow. Only the items on screen are built and laid out.
+fn page_list() -> ListState {
+    ListState::new(1, ListAlignment::Top, px(LIST_OVERDRAW_PX)).with_uniform_item_height(px(ROW_PX))
+}
+
+/// Points `list` at a header and `rows` rows. `header_focus` is the field in
+/// the header, kept drawn while it has focus even when scrolled away, so
+/// typing keeps working. The scroll position stays unless `to_top`.
+fn refill(list: &ListState, rows: usize, header_focus: Option<FocusHandle>, to_top: bool) {
+    let keep = list.logical_scroll_top();
+    list.splice_focusable(
+        0..list.item_count(),
+        iter::once(header_focus).chain(iter::repeat_n(None, rows)),
+    );
+    list.scroll_to(if to_top { ListOffset::default() } else { keep });
+}
+
+/// Which built rows a contact list item reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowSet {
+    Contacts,
+    Favorites,
+    Group,
+}
 
 /// Section letters and row texts as shared strings, built once per change.
 struct Row {
@@ -138,7 +164,16 @@ struct ContactsApp {
     /// The owner picked a style before the saved one was read.
     style_touched: bool,
     rows: Vec<Row>,
+    /// The query `rows` was built for: a new query scrolls back to the top.
+    built_query: String,
     favorites: Vec<Row>,
+    /// The Groups tab's rows (title and member count), built once per change.
+    group_items: Vec<groups::GroupItem>,
+    /// The virtualised Contacts, Favorites, Groups and group pages.
+    contacts_list: ListState,
+    favorites_list: ListState,
+    groups_list: ListState,
+    group_list: ListState,
     open: Option<ContactCard>,
     /// The open contact in full (organisation, emails, note, groups).
     open_draft: Option<ContactDraft>,
@@ -174,7 +209,7 @@ impl ContactsApp {
             let edits = field.read(cx).edits;
             if edits != this.seen_edits {
                 this.seen_edits = edits;
-                this.rebuild(cx);
+                this.rebuild_rows(cx);
             }
         })
         .detach();
@@ -262,7 +297,13 @@ impl ContactsApp {
             prefs_dir: None,
             style_touched: false,
             rows: Vec::new(),
+            built_query: String::new(),
             favorites: Vec::new(),
+            group_items: Vec::new(),
+            contacts_list: page_list(),
+            favorites_list: page_list(),
+            groups_list: page_list(),
+            group_list: page_list(),
             open: None,
             open_draft: None,
             editor: None,
@@ -281,6 +322,7 @@ impl ContactsApp {
             whatsapp_open: false,
             wa: whatsapp::WaPanel::default(),
         };
+        refill(&app.contacts_list, 0, Some(app.search_focus(cx)), true);
         app.pull_wa_offset(cx);
         app.reload(cx);
         app
@@ -339,23 +381,15 @@ impl ContactsApp {
     /// Rebuilds the list rows, favorites, the open card and the open group
     /// from the book, the query and the name style.
     fn rebuild(&mut self, cx: &mut Context<Self>) {
-        let query = self.field.read(cx).text().to_owned();
+        self.rebuild_rows(cx);
         let Some(index) = self.index().cloned() else {
-            self.rows.clear();
             self.favorites.clear();
             self.group_rows.clear();
+            self.group_items.clear();
+            self.refill_others(cx);
             cx.notify();
             return;
         };
-        let shown: Vec<&WireContact> = if query.trim().is_empty() {
-            contacts_view::ordered(index.all(), self.style)
-        } else {
-            index.search(&query)
-        };
-        self.rows = contacts_view::build_rows_styled(shown, &query, self.style)
-            .into_iter()
-            .map(Row::from)
-            .collect();
         let favorites = contacts_view::ordered(contact_card::favorites(index.all()), self.style);
         self.favorites = contacts_view::build_rows_styled(favorites, "", self.style)
             .into_iter()
@@ -377,8 +411,56 @@ impl ContactsApp {
                 }
             }
         }
+        self.group_items = self.build_group_items();
         self.apply_marks();
+        self.refill_others(cx);
         cx.notify();
+    }
+
+    /// Rebuilds the Contacts rows alone, for the query and the name style
+    /// (each keystroke lands here; Favorites and groups do not follow it).
+    fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
+        let query = self.field.read(cx).text().to_owned();
+        self.rows = match self.index() {
+            Some(index) => {
+                let shown: Vec<&WireContact> = if query.trim().is_empty() {
+                    contacts_view::ordered(index.all(), self.style)
+                } else {
+                    index.search(&query)
+                };
+                contacts_view::build_rows_styled(shown, &query, self.style)
+                    .into_iter()
+                    .map(|vm| {
+                        let mut row = Row::from(vm);
+                        row.set_whatsapp(self.wa.marked.contains(&row.vm.id));
+                        row
+                    })
+                    .collect()
+            }
+            None => Vec::new(),
+        };
+        // A new query starts at the top; a pull or a star keeps the place.
+        let new_query = query != self.built_query;
+        refill(
+            &self.contacts_list,
+            self.rows.len(),
+            Some(self.search_focus(cx)),
+            new_query,
+        );
+        self.built_query = query;
+        cx.notify();
+    }
+
+    /// The search field's focus handle (the Contacts header keeps it drawn).
+    fn search_focus(&self, cx: &App) -> FocusHandle {
+        self.field.read(cx).focus_handle()
+    }
+
+    /// Re-points the Favorites and group lists at the rows just built,
+    /// keeping their scroll positions.
+    fn refill_others(&self, cx: &App) {
+        refill(&self.favorites_list, self.favorites.len(), None, false);
+        self.refill_groups(false, cx);
     }
 
     fn open_contact(&mut self, id: i64, cx: &mut Context<Self>) {
@@ -389,6 +471,8 @@ impl ContactsApp {
             .map(|c| ContactCard::new(c, format));
         self.open_draft = None;
         self.notice = None;
+        // The lists keep their own scroll; the card starts at its top.
+        self.scroll.set_offset(gpui::point(px(0.0), px(0.0)));
         self.page.restart();
         cx.notify();
         if self.open.is_none() {
@@ -586,47 +670,19 @@ impl ContactsApp {
 
     // ---- photos ----
 
-    /// Asks for the photos of the rows near the screen, and of the open card.
-    fn request_photos(&mut self, tab: usize, cx: &mut Context<Self>) {
-        let mut wanted: Vec<(i64, String)> = Vec::new();
-        if let Some(id) = self.editor.as_ref().and_then(|e| e.id) {
-            if let Some(uri) = self.photo_uri_of(id) {
-                wanted.push((id, uri.to_owned()));
-            }
-        } else if let Some(card) = &self.open {
-            if let Some(uri) = self.photo_uri_of(card.id) {
-                wanted.push((card.id, uri.to_owned()));
-            }
-        } else if self.editor.is_none() {
-            let list = if self.group_page.is_some() {
-                Some(&self.group_rows)
-            } else {
-                match tab {
-                    CONTACTS_TAB => Some(&self.rows),
-                    FAVORITES_TAB => Some(&self.favorites),
-                    _ => None,
-                }
-            };
-            if let Some(list) = list {
-                let scrolled = f32::from(-self.scroll.offset().y).max(0.0);
-                let viewport = f32::from(self.scroll.bounds().size.height);
-                let first = ((scrolled - LIST_TOP_PX) / ROW_PX).max(0.0) as usize;
-                let visible = (viewport / ROW_PX) as usize + 2;
-                wanted.extend(
-                    list.iter()
-                        .skip(first.saturating_sub(PHOTO_MARGIN))
-                        .take(visible + 2 * PHOTO_MARGIN)
-                        .filter_map(|row| {
-                            row.vm
-                                .photo_uri
-                                .as_ref()
-                                .map(|uri| (row.vm.id, uri.clone()))
-                        }),
-                );
-            }
-        }
-        if !wanted.is_empty() {
-            self.want_photos(wanted.iter().map(|(id, uri)| (*id, uri.as_str())), cx);
+    /// Asks for the photo of the open card or of the contact being edited.
+    /// List rows ask for their own photos as the virtualised lists draw them.
+    fn request_photos(&mut self, cx: &mut Context<Self>) {
+        let id = match (&self.editor, &self.open) {
+            (Some(editor), _) => editor.id,
+            (None, Some(card)) => Some(card.id),
+            (None, None) => None,
+        };
+        let Some(id) = id.filter(|id| self.photos.needs(*id)) else {
+            return;
+        };
+        if let Some(uri) = self.photo_uri_of(id).map(str::to_owned) {
+            self.want_photos([(id, uri.as_str())], cx);
         }
     }
 
@@ -751,6 +807,64 @@ impl ContactsApp {
         .into_any_element()
     }
 
+    fn row_set(&self, set: RowSet) -> &[Row] {
+        match set {
+            RowSet::Contacts => &self.rows,
+            RowSet::Favorites => &self.favorites,
+            RowSet::Group => &self.group_rows,
+        }
+    }
+
+    /// Item `i` of a virtualised contact list: the row, under its section
+    /// letter when it starts one. Asks for the row's photo as it is drawn
+    /// (the list also draws the rows just beyond the screen's edges).
+    fn contact_item(
+        &mut self,
+        theme: Theme,
+        set: RowSet,
+        i: usize,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let wanted = {
+            let rows = match set {
+                RowSet::Contacts => &self.rows,
+                RowSet::Favorites => &self.favorites,
+                RowSet::Group => &self.group_rows,
+            };
+            let photos = &mut self.photos;
+            rows.get(i).and_then(|row| {
+                let id = row.vm.id;
+                row.vm
+                    .photo_uri
+                    .as_ref()
+                    .filter(|_| photos.needs(id))
+                    .map(|uri| (id, uri.clone()))
+            })
+        };
+        if let Some((id, uri)) = wanted {
+            self.want_photos([(id, uri.as_str())], cx);
+        }
+        let Some(row) = self.row_set(set).get(i) else {
+            return div().into_any_element();
+        };
+        let key = match set {
+            RowSet::Contacts => "contact",
+            RowSet::Favorites => "favorite",
+            RowSet::Group => "group-contact",
+        };
+        let item = self.contact_row(theme, row, key, cx);
+        if row.vm.header && set == RowSet::Contacts {
+            div()
+                .flex()
+                .flex_col()
+                .child(Self::letter_header(theme, row.letter.clone()))
+                .child(item)
+                .into_any_element()
+        } else {
+            item
+        }
+    }
+
     fn letter_header(theme: Theme, letter: SharedString) -> AnyElement {
         let colors = theme::colors(theme);
         div()
@@ -812,13 +926,47 @@ impl ContactsApp {
         }
     }
 
-    fn contacts_tab(&self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let field = self.search_field(theme, window, cx);
+    /// A virtualised page: `item` builds item `ix` (0 is the header) only for
+    /// the items on screen. `bottom` keeps the last rows clear of the tab bar
+    /// and the keyboard.
+    fn list_page(
+        list_state: &ListState,
+        bottom: Pixels,
+        item: impl Fn(&mut Self, usize, &mut Window, &mut Context<Self>) -> AnyElement + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        list(
+            list_state.clone(),
+            cx.processor(move |this, ix: usize, window, cx| item(this, ix, window, cx)),
+        )
+        .size_full()
+        .pb(bottom)
+        .into_any_element()
+    }
+
+    /// The Contacts tab: the header (title, search field, any state), then
+    /// one item per row.
+    fn contacts_item(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = current_theme(window);
+        if ix > 0 {
+            return self.contact_item(theme, RowSet::Contacts, ix - 1, cx);
+        }
+        let trailing = matches!(self.book, Book::Ready(_)).then(|| {
+            glass_icon_button(theme, Icon::LucidePlus, 0.0, false)
+                .id("new-contact")
+                .on_click(cx.listener(|this, _, _, cx| this.open_new_editor(cx)))
+                .into_any_element()
+        });
         let body = if let Some(state) = self.book_state(theme, cx) {
-            state
+            Some(state)
         } else if self.rows.is_empty() {
-            let query = self.field.read(cx).text().to_owned();
-            if query.trim().is_empty() {
+            let query = self.field.read(cx).text();
+            Some(if query.trim().is_empty() {
                 empty_state(
                     theme,
                     "No Contacts",
@@ -829,53 +977,49 @@ impl ContactsApp {
                 empty_state(
                     theme,
                     "No Results",
-                    format!(
-                        "No contact matches “{}”.",
-                        contacts_view::clip_query(&query)
-                    ),
+                    format!("No contact matches “{}”.", contacts_view::clip_query(query)),
                 )
                 .into_any_element()
-            }
+            })
         } else {
-            let mut children: Vec<AnyElement> = Vec::with_capacity(self.rows.len() + 27);
-            for row in &self.rows {
-                if row.vm.header {
-                    children.push(Self::letter_header(theme, row.letter.clone()));
-                }
-                children.push(self.contact_row(theme, row, "contact", cx));
-            }
-            div()
-                .flex()
-                .flex_col()
-                .children(children)
-                .into_any_element()
+            None
         };
         div()
             .flex()
             .flex_col()
-            .child(field)
-            .child(body)
+            .child(large_title(theme, TABS[CONTACTS_TAB], trailing))
+            .child(self.search_field(theme, window, cx))
+            .children(body)
             .into_any_element()
     }
 
-    fn favorites_tab(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        if let Some(state) = self.book_state(theme, cx) {
-            return state;
+    /// The Favorites tab: the header (title, any state), then the rows.
+    fn favorites_item(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = current_theme(window);
+        if ix > 0 {
+            return self.contact_item(theme, RowSet::Favorites, ix - 1, cx);
         }
-        if self.favorites.is_empty() {
-            return empty_state(
-                theme,
-                "No Favorites",
-                "Open a contact and tap the star to keep them here.",
-            )
-            .into_any_element();
-        }
-        let rows: Vec<AnyElement> = self
-            .favorites
-            .iter()
-            .map(|row| self.contact_row(theme, row, "favorite", cx))
-            .collect();
-        div().flex().flex_col().children(rows).into_any_element()
+        let body = self.book_state(theme, cx).or_else(|| {
+            self.favorites.is_empty().then(|| {
+                empty_state(
+                    theme,
+                    "No Favorites",
+                    "Open a contact and tap the star to keep them here.",
+                )
+                .into_any_element()
+            })
+        });
+        div()
+            .flex()
+            .flex_col()
+            .child(large_title(theme, TABS[FAVORITES_TAB], None))
+            .children(body)
+            .into_any_element()
     }
 
     fn choice_row(
@@ -1057,7 +1201,7 @@ impl Render for ContactsApp {
             self.back_enabled = want_back;
             window.set_back_enabled(want_back);
         }
-        self.request_photos(tab, cx);
+        self.request_photos(cx);
         let fading = self.photos.fading();
         let mut motion = std::mem::take(&mut self.motion);
         motion.frame_timed(window, |dt, real| {
@@ -1072,37 +1216,65 @@ impl Render for ContactsApp {
         let touch_entity = entity.clone();
         let editing = self.editor.is_some();
 
-        let page = if editing {
-            self.editor_view(theme, window, cx)
-        } else if let Some(card) = self.open.clone() {
-            self.detail(&card, theme, cx)
-        } else if let Some(id) = self.group_page {
-            self.group_page_view(theme, id, window, cx)
-        } else if self.whatsapp_open && tab == SETTINGS_TAB {
-            self.whatsapp_page(theme, cx)
-        } else {
-            let body = match tab {
-                CONTACTS_TAB => self.contacts_tab(theme, window, cx),
-                FAVORITES_TAB => self.favorites_tab(theme, cx),
-                GROUPS_TAB => self.groups_tab(theme, window, cx),
-                _ => self.settings_tab(theme, cx),
-            };
-            let trailing =
-                (tab == CONTACTS_TAB && matches!(self.book, Book::Ready(_))).then(|| {
-                    glass_icon_button(theme, Icon::LucidePlus, 0.0, false)
-                        .id("new-contact")
-                        .on_click(cx.listener(|this, _, _, cx| this.open_new_editor(cx)))
-                        .into_any_element()
-                });
-            div()
-                .child(large_title(theme, TABS[tab], trailing))
-                .child(body)
-                .into_any_element()
-        };
-
         // The keyboard covers the bottom of the screen: leave room to scroll.
         let insets = window.insets();
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
+        let bottom = content_bottom_inset() + keyboard;
+
+        // Lists that grow with the address book are virtualised and scroll
+        // themselves; the other pages scroll as one block.
+        let (page, listed) = if editing {
+            (self.editor_view(theme, window, cx), false)
+        } else if let Some(card) = &self.open {
+            (self.detail(card, theme, cx), false)
+        } else if let Some(id) = self.group_page {
+            let page = Self::list_page(
+                &self.group_list,
+                bottom,
+                move |this, ix, window, cx| this.group_page_item(id, ix, window, cx),
+                cx,
+            );
+            (page, true)
+        } else if self.whatsapp_open && tab == SETTINGS_TAB {
+            (self.whatsapp_page(theme, cx), false)
+        } else {
+            match tab {
+                CONTACTS_TAB => (
+                    Self::list_page(&self.contacts_list, bottom, Self::contacts_item, cx),
+                    true,
+                ),
+                FAVORITES_TAB => (
+                    Self::list_page(&self.favorites_list, bottom, Self::favorites_item, cx),
+                    true,
+                ),
+                GROUPS_TAB => (
+                    Self::list_page(&self.groups_list, bottom, Self::groups_item, cx),
+                    true,
+                ),
+                _ => (
+                    div()
+                        .child(large_title(theme, TABS[tab], None))
+                        .child(self.settings_tab(theme, cx))
+                        .into_any_element(),
+                    false,
+                ),
+            }
+        };
+        let page = div()
+            .relative()
+            .top(px(self.page.offset(24.0)))
+            .when(listed, |page| page.size_full())
+            .child(page);
+        let scroller = div().id("page").size_full().opacity(self.page.progress());
+        let scroller = if listed {
+            scroller.child(page)
+        } else {
+            scroller
+                .overflow_y_scroll()
+                .track_scroll(&self.scroll)
+                .pb(bottom)
+                .child(page)
+        };
 
         div()
             .size_full()
@@ -1118,16 +1290,7 @@ impl Render for ContactsApp {
                 theme,
                 theme::colors(theme).green,
             ))
-            .child(
-                div()
-                    .id("page")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .pb(content_bottom_inset() + keyboard)
-                    .opacity(self.page.progress())
-                    .child(div().relative().top(px(self.page.offset(24.0))).child(page)),
-            )
+            .child(scroller)
             .children(self.notice(theme))
             // No tab bar while a form is open: no stray tap loses the edits.
             .children((!editing).then(|| {

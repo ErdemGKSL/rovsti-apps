@@ -5,9 +5,11 @@
 //! here the owner sees who is in each group and manages the groups
 //! themselves. New groups live on the phone only (no account).
 
+use std::collections::HashSet;
+
 use gpui::{
-    AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
+    AnyElement, App, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px, svg,
 };
 use rovsti_core::{
     contact_edit::{Group, group_title},
@@ -16,15 +18,24 @@ use rovsti_core::{
 use rovsti_ui::{
     Icon,
     components::{empty_state, glass_icon_button, large_title, list_row, section},
-    theme,
-    tokens::{Theme, metrics, typography},
+    current_theme, theme,
+    tokens::{Theme, metrics, radius, typography},
 };
 
 use crate::{
-    ContactsApp, Row, backend, editor,
+    ContactsApp, GROUPS_TAB, Row, RowSet, TABS, backend, editor,
     field::{Config, TextField},
+    refill,
     ui::{Tone, field_box, form_row, pill, tap_row},
 };
+
+/// One row of the Groups tab, with its texts built once per change.
+pub(crate) struct GroupItem {
+    id: i64,
+    title: SharedString,
+    /// "3 contacts": members that are in the address book.
+    count: SharedString,
+}
 
 /// The title box shown while a group is being created or renamed.
 pub(crate) struct GroupEdit {
@@ -66,6 +77,44 @@ impl ContactsApp {
             .collect()
     }
 
+    /// The Groups tab's rows: each group's title and how many of its members
+    /// are in the address book. Built per pull, never per frame.
+    pub(crate) fn build_group_items(&self) -> Vec<GroupItem> {
+        let Some(index) = self.index() else {
+            return Vec::new();
+        };
+        let known: HashSet<i64> = index.all().map(|c| c.id).collect();
+        self.groups
+            .iter()
+            .map(|group| {
+                let members: HashSet<i64> = group.members.iter().copied().collect();
+                let count = members.iter().filter(|id| known.contains(id)).count();
+                GroupItem {
+                    id: group.id,
+                    title: group.title.clone().into(),
+                    count: count_words(count).into(),
+                }
+            })
+            .collect()
+    }
+
+    /// Re-points the Groups tab and the group page lists at their rows. The
+    /// open title box is the header's field. The group page goes back to the
+    /// top when `page_to_top`.
+    pub(crate) fn refill_groups(&self, page_to_top: bool, cx: &App) {
+        let focus = self
+            .group_edit
+            .as_ref()
+            .map(|edit| edit.field.read(cx).focus_handle());
+        refill(
+            &self.groups_list,
+            self.group_items.len(),
+            focus.clone(),
+            false,
+        );
+        refill(&self.group_list, self.group_rows.len(), focus, page_to_top);
+    }
+
     pub(crate) fn open_group(&mut self, id: i64, cx: &mut Context<Self>) {
         self.group_page = Some(id);
         self.group_rows = self
@@ -74,6 +123,7 @@ impl ContactsApp {
             .unwrap_or_default();
         self.group_edit = None;
         self.notice = None;
+        self.refill_groups(true, cx);
         self.page.restart();
         cx.notify();
     }
@@ -82,6 +132,7 @@ impl ContactsApp {
         self.group_page = None;
         self.group_rows.clear();
         self.group_edit = None;
+        self.refill_groups(true, cx);
         self.page.restart();
         cx.notify();
     }
@@ -100,6 +151,8 @@ impl ContactsApp {
             saving: false,
         });
         self.notice = None;
+        // The title box sits in the header: keep it drawn while it has focus.
+        self.refill_groups(false, cx);
         cx.notify();
     }
 
@@ -246,92 +299,105 @@ impl ContactsApp {
         )
     }
 
-    /// The Groups tab: the title box, a New Group row and the groups.
-    pub(crate) fn groups_tab(
-        &self,
-        theme: Theme,
-        window: &Window,
+    /// Item `ix` of the virtualised Groups tab: 0 is the header (title, the
+    /// title box, a New Group row), then one group per item, drawn as the
+    /// rows of one rounded card.
+    pub(crate) fn groups_item(
+        &mut self,
+        ix: usize,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some(state) = self.book_state(theme, cx) {
-            return state;
-        }
+        let theme = current_theme(window);
         let colors = theme::colors(theme);
-        let rows: Vec<AnyElement> = self
-            .groups
-            .iter()
-            .enumerate()
-            .map(|(i, group)| {
-                let id = group.id;
-                let count = self.member_count(group);
-                list_row(
-                    theme,
-                    Some(
-                        svg()
-                            .path(Icon::LucideUsers.path())
-                            .size(px(22.0))
-                            .text_color(colors.accent)
-                            .into_any_element(),
-                    ),
-                    SharedString::from(group.title.clone()),
-                    Some(count_words(count).into()),
-                    None,
+        if let Some(i) = ix.checked_sub(1) {
+            let Some(group) = self.group_items.get(i) else {
+                return div().into_any_element();
+            };
+            let id = group.id;
+            let last = i + 1 == self.group_items.len();
+            return div()
+                .px(metrics::ROW_INSET)
+                .child(
+                    div()
+                        .bg(colors.secondary_background)
+                        .overflow_hidden()
+                        .when(i == 0, |card| card.rounded_t(radius::GROUPED_LIST))
+                        .when(last, |card| card.rounded_b(radius::GROUPED_LIST))
+                        .child(
+                            list_row(
+                                theme,
+                                Some(
+                                    svg()
+                                        .path(Icon::LucideUsers.path())
+                                        .size(px(22.0))
+                                        .text_color(colors.accent)
+                                        .into_any_element(),
+                                ),
+                                group.title.clone(),
+                                Some(group.count.clone()),
+                                None,
+                            )
+                            .id(("group", i))
+                            .on_click(cx.listener(move |this, _, _, cx| this.open_group(id, cx))),
+                        ),
                 )
-                .id(("group", i))
-                .on_click(cx.listener(move |this, _, _, cx| this.open_group(id, cx)))
-                .into_any_element()
-            })
-            .collect();
-        let list = if rows.is_empty() {
+                .into_any_element();
+        }
+        let title = large_title(theme, TABS[GROUPS_TAB], None);
+        if let Some(state) = self.book_state(theme, cx) {
+            return div().child(title).child(state).into_any_element();
+        }
+        let empty = self.group_items.is_empty().then(|| {
             empty_state(
                 theme,
                 "No Groups",
                 "Make a group, then add contacts to it from their Edit screen.",
             )
-            .into_any_element()
-        } else {
-            section(theme, None, rows).into_any_element()
-        };
+        });
         div()
             .flex()
             .flex_col()
-            .gap(px(16.0))
-            .children(self.group_edit_section(theme, window, cx))
-            .child(section(
-                theme,
-                None,
-                [tap_row(
-                    theme,
-                    "new-group",
-                    Some(Icon::LucidePlus),
-                    "New Group",
-                    Tone::Accent,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.start_group_edit(None, cx)))
-                .into_any_element()],
-            ))
-            .child(list)
+            .child(title)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(16.0))
+                    // The gap between the New Group row and the groups' card.
+                    .when(empty.is_none(), |body| body.pb(px(16.0)))
+                    .children(self.group_edit_section(theme, window, cx))
+                    .child(section(
+                        theme,
+                        None,
+                        [tap_row(
+                            theme,
+                            "new-group",
+                            Some(Icon::LucidePlus),
+                            "New Group",
+                            Tone::Accent,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.start_group_edit(None, cx)))
+                        .into_any_element()],
+                    ))
+                    .children(empty),
+            )
             .into_any_element()
     }
 
-    /// How many of a group's members are in the address book.
-    fn member_count(&self, group: &Group) -> usize {
-        self.index().map_or(0, |index| {
-            index
-                .all()
-                .filter(|c| group.members.contains(&c.id))
-                .count()
-        })
-    }
-
-    /// One group's page: its contacts, with Rename and Delete.
-    pub(crate) fn group_page_view(
-        &self,
-        theme: Theme,
+    /// Item `ix` of the virtualised page of group `id`: 0 is the header (Back,
+    /// Rename, Delete, the title and the title box), then its contacts.
+    pub(crate) fn group_page_item(
+        &mut self,
         id: i64,
-        window: &Window,
+        ix: usize,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = current_theme(window);
+        if let Some(i) = ix.checked_sub(1) {
+            return self.contact_item(theme, RowSet::Group, i, cx);
+        }
         let Some(group) = self.group(id) else {
             return div().into_any_element();
         };
@@ -367,29 +433,23 @@ impl ContactsApp {
                             })),
                     ),
             );
-        let rows: Vec<AnyElement> = self
-            .group_rows
-            .iter()
-            .map(|row| self.contact_row(theme, row, "group-contact", cx))
-            .collect();
-        let body = if rows.is_empty() {
+        let empty = self.group_rows.is_empty().then(|| {
             empty_state(
                 theme,
                 "Empty Group",
                 "Add contacts to this group from their Edit screen.",
             )
-            .into_any_element()
-        } else {
-            div().flex().flex_col().children(rows).into_any_element()
-        };
+        });
         div()
             .flex()
             .flex_col()
             .gap(px(8.0))
+            // The gap above the first contact.
+            .when(empty.is_none(), |header| header.pb(px(8.0)))
             .child(top)
             .child(large_title(theme, title, None))
             .children(self.group_edit_section(theme, window, cx))
-            .child(body)
+            .children(empty)
             .into_any_element()
     }
 }

@@ -75,6 +75,16 @@ impl Photos {
         })
     }
 
+    /// Marks the photo of `id` as used, and says whether a decode for it
+    /// should start now (it is not held, not on its way, not known missing,
+    /// and a decode slot is free). Lets callers skip building a request.
+    pub(crate) fn needs(&mut self, id: i64) -> bool {
+        self.cache.get(&id).is_none()
+            && !self.pending.contains(&id)
+            && !self.missing.contains(&id)
+            && self.pending.len() < MAX_PARALLEL
+    }
+
     /// A photo is still fading in (keep frames coming).
     pub(crate) fn fading(&self) -> bool {
         self.last_arrival.is_some_and(|at| at.elapsed() < FADE)
@@ -150,11 +160,7 @@ impl ContactsApp {
     ) {
         for (id, uri) in wanted {
             let photos = &mut self.photos;
-            if photos.cache.get(&id).is_some()
-                || photos.pending.contains(&id)
-                || photos.missing.contains(&id)
-                || photos.pending.len() >= MAX_PARALLEL
-            {
+            if !photos.needs(id) {
                 continue;
             }
             photos.pending.insert(id);

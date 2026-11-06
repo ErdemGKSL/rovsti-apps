@@ -75,25 +75,38 @@ pub fn can_schedule_exact_alarms() -> Result<bool> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TripAlarmEvent {
     Ringing,
-    Snoozed { at_ms: i64 },
+    Snoozed {
+        at_ms: i64,
+    },
+    /// Rang for the whole timeout unanswered; rings again at `at_ms`.
+    TimedOut {
+        at_ms: i64,
+    },
     Dismissed,
 }
 
 /// Decodes a `trip_alarm` payload: `{"event":"ringing"}`,
-/// `{"event":"snoozed","at_ms":1700000000000}` or `{"event":"dismissed"}`.
-/// `None` for malformed JSON, an unknown event, or `snoozed` without a
+/// `{"event":"snoozed","at_ms":1700000000000}`,
+/// `{"event":"timed_out","at_ms":...}` or `{"event":"dismissed"}`.
+/// `None` for malformed JSON, an unknown event, or `snoozed`/`timed_out` without a
 /// positive `at_ms`.
 pub fn parse_trip_alarm(json: &str) -> Option<TripAlarmEvent> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     match value.get("event")?.as_str()? {
         "ringing" => Some(TripAlarmEvent::Ringing),
         "dismissed" => Some(TripAlarmEvent::Dismissed),
-        "snoozed" => {
-            let at_ms = value.get("at_ms")?.as_i64().filter(|ms| *ms > 0)?;
-            Some(TripAlarmEvent::Snoozed { at_ms })
-        }
+        "snoozed" => Some(TripAlarmEvent::Snoozed {
+            at_ms: at_ms(&value)?,
+        }),
+        "timed_out" => Some(TripAlarmEvent::TimedOut {
+            at_ms: at_ms(&value)?,
+        }),
         _ => None,
     }
+}
+
+fn at_ms(value: &serde_json::Value) -> Option<i64> {
+    value.get("at_ms")?.as_i64().filter(|ms| *ms > 0)
 }
 
 #[cfg(test)]
@@ -102,7 +115,7 @@ mod tests {
 
     #[test]
     fn alarm_events_parse() {
-        let cases: [(&str, Option<TripAlarmEvent>); 11] = [
+        let cases: [(&str, Option<TripAlarmEvent>); 15] = [
             (r#"{"event":"ringing"}"#, Some(TripAlarmEvent::Ringing)),
             (r#"{"event":"dismissed"}"#, Some(TripAlarmEvent::Dismissed)),
             (
@@ -114,6 +127,15 @@ mod tests {
             (r#"{"event":"snoozed"}"#, None),
             (r#"{"event":"snoozed","at_ms":0}"#, None),
             (r#"{"event":"snoozed","at_ms":"5"}"#, None),
+            (
+                r#"{"event":"timed_out","at_ms":1700000000000}"#,
+                Some(TripAlarmEvent::TimedOut {
+                    at_ms: 1_700_000_000_000,
+                }),
+            ),
+            (r#"{"event":"timed_out"}"#, None),
+            (r#"{"event":"timed_out","at_ms":0}"#, None),
+            (r#"{"event":"timed_out","at_ms":"5"}"#, None),
             (r#"{"event":"exploded"}"#, None),
             (r#"{"event":7}"#, None),
             (r#"{}"#, None),

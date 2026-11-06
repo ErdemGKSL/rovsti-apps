@@ -15,8 +15,8 @@ use rovsti_android::{
     xiaomi,
 };
 use rovsti_geo::{
-    ActiveTrip, Diameter, DiameterError, Endpoint, Feed, FixIn, History, NoticePrefs, Outcome,
-    SavedPlaces, StopsPrefs,
+    ActiveTrip, AlarmPlan, Diameter, DiameterError, Endpoint, Feed, FixIn, History, NoticePrefs,
+    Outcome, SavedPlaces, StopsPrefs,
 };
 use rovsti_ui::storage;
 use serde_json::json;
@@ -224,6 +224,7 @@ pub fn start_spec(dir: &Path, label: &str) -> String {
         "text": "Waiting for a location fix",
         "next_fix_ms": 5_000,
         "high_accuracy": true,
+        "alarm": AlarmPlan::default(),
     })
     .to_string()
 }
@@ -472,6 +473,7 @@ mod tests {
         assert_eq!(spec["title"], "Kadikoy");
         assert_eq!(spec["high_accuracy"], true);
         assert!(spec["next_fix_ms"].as_u64().unwrap() > 0);
+        assert!(spec["alarm"]["volume_pct"].as_u64().unwrap() >= 80);
     }
 
     #[test]

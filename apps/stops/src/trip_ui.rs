@@ -818,7 +818,9 @@ impl StopsApp {
                 let side = self.live.as_ref().and_then(|l| l.side);
                 self.show_alarm(&title, distance, side, cx);
             }
-            TripAlarmEvent::Snoozed { at_ms } => self.on_snoozed(at_ms, cx),
+            TripAlarmEvent::Snoozed { at_ms } | TripAlarmEvent::TimedOut { at_ms } => {
+                self.on_snoozed(at_ms, cx);
+            }
             TripAlarmEvent::Dismissed => self.trip_over(cx),
         }
     }

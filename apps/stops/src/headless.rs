@@ -8,8 +8,13 @@
 //! | kind         | in                                          | out                                              |
 //! |--------------|---------------------------------------------|--------------------------------------------------|
 //! | `trip_fix`   | `{dir, lat, lon, accuracy_m, speed_mps?, at_ms}` | a `FixOut`, or `{"state":"ended"}`          |
-//! | `trip_alarm` | `{dir, action: "dismiss" \| "snooze"}`      | `{dismissed:true}` or `{ring_at_ms}`             |
+//! | `trip_alarm` | `{dir, action: "dismiss" \| "snooze" \| "timeout"}` | `{dismissed:true}`, `{ring_at_ms}` or `{silenced:true}` |
 //! | `trip_end`   | `{dir, reason: "arrived" \| "cancelled"}`   | `{"state":"ended"}`                              |
+//!
+//! `timeout` means the alarm rang for the whole ring timeout unanswered: it
+//! re-arms the ring without using up a snooze, and answers `{silenced:true}`
+//! once the re-ring cap is spent (the trip stays arrived). `trip_fix` answers
+//! carry `retry_ms`, the watchdog window for a missing fix.
 //!
 //! `dir` is the app data directory (`Headless.dataDir`). With no trip in
 //! progress every kind answers `{"state":"ended"}`, which stops the service.
@@ -121,17 +126,25 @@ fn trip_alarm(_: &str, json: &str) -> String {
 }
 
 fn alarm_in(dir: &Path, action: &str, now_ms: i64) -> String {
-    if !matches!(action, "dismiss" | "snooze") {
+    if !matches!(action, "dismiss" | "snooze" | "timeout") {
         return String::new();
     }
     let _guard = store::lock();
     let Some(mut trip) = store::load_trip(dir) else {
         return ENDED.to_owned();
     };
+    if action == "timeout" {
+        let minutes = snooze_minutes(dir);
+        return match trip.ring_timed_out(now_ms, minutes) {
+            Some(at) => {
+                save(dir, &trip);
+                json!({ "ring_at_ms": at }).to_string()
+            }
+            None => json!({ "silenced": true }).to_string(),
+        };
+    }
     if action == "snooze" {
-        let minutes = storage::load_json::<StopsPrefs>(dir, store::PREFS_FILE)
-            .unwrap_or_default()
-            .snooze_min;
+        let minutes = snooze_minutes(dir);
         if let Some(at) = trip.snooze(now_ms, minutes) {
             save(dir, &trip);
             return json!({ "ring_at_ms": at }).to_string();
@@ -140,6 +153,12 @@ fn alarm_in(dir: &Path, action: &str, now_ms: i64) -> String {
     }
     end(dir, Outcome::Arrived, now_ms);
     json!({ "dismissed": true }).to_string()
+}
+
+fn snooze_minutes(dir: &Path) -> u8 {
+    storage::load_json::<StopsPrefs>(dir, store::PREFS_FILE)
+        .unwrap_or_default()
+        .snooze_min
 }
 
 fn trip_end(_: &str, json: &str) -> String {
@@ -328,6 +347,66 @@ mod tests {
         // Kotlin follows a refused snooze with a dismiss: nothing is recorded twice.
         assert_eq!(alarm_in(&dir, "dismiss", 2_000), ENDED);
         assert_eq!(history(&dir).records.len(), 1);
+    }
+
+    fn arrived_trip(dir: &Path) {
+        let mut t = trip(3);
+        t.on_fix(fix(300.0, 1).fix(), 1);
+        t.on_fix(fix(-300.0, 2).fix(), 2);
+        assert_eq!(t.trip.state(), TripState::Arrived);
+        store::save_trip(dir, &t).unwrap();
+        storage::save_json(
+            dir,
+            store::PREFS_FILE,
+            &StopsPrefs {
+                snooze_min: 4,
+                ..StopsPrefs::default()
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn timeout_rearms_without_using_snoozes() {
+        let dir = tmp("hl-timeout");
+        arrived_trip(&dir);
+        let out: serde_json::Value =
+            serde_json::from_str(&alarm_in(&dir, "timeout", 1_000)).unwrap();
+        assert_eq!(out["ring_at_ms"], 1_000 + 4 * 60_000);
+        let t = store::load_trip(&dir).unwrap();
+        assert_eq!(t.snoozes, 0);
+        assert_eq!(t.timeouts, 1);
+        assert_eq!(t.trip.state(), TripState::Arrived);
+    }
+
+    #[test]
+    fn timeout_cap_answers_silenced_and_keeps_the_trip() {
+        let dir = tmp("hl-timeout-cap");
+        arrived_trip(&dir);
+        for _ in 0..rovsti_geo::alarm::MAX_TIMEOUT_RERINGS {
+            let out: serde_json::Value =
+                serde_json::from_str(&alarm_in(&dir, "timeout", 1_000)).unwrap();
+            assert!(out.get("ring_at_ms").is_some());
+        }
+        let out: serde_json::Value =
+            serde_json::from_str(&alarm_in(&dir, "timeout", 1_000)).unwrap();
+        assert_eq!(out["silenced"], true);
+        assert!(store::load_trip(&dir).is_some());
+        assert_eq!(history(&dir).records.len(), 0);
+    }
+
+    #[test]
+    fn timeout_with_no_trip_answers_ended() {
+        let dir = tmp("hl-timeout-none");
+        assert_eq!(alarm_in(&dir, "timeout", 5), ENDED);
+    }
+
+    #[test]
+    fn answers_carry_retry_ms() {
+        let dir = tmp("hl-retry-ms");
+        store::save_trip(&dir, &trip(1)).unwrap();
+        let out = run(&dir, fix(5_000.0, 1));
+        assert!(out.retry_ms > out.next_fix_ms);
     }
 
     #[test]

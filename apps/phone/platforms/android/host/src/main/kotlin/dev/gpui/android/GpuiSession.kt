@@ -82,7 +82,7 @@ class GpuiSession : AutoCloseable {
                 } catch (error: RuntimeException) {
                     error.message ?: "Unable to enter picture-in-picture"
                 }
-                nativePictureInPictureResult(id, error)
+                guarded { nativePictureInPictureResult(id, error) }
             }
         }, this, SystemClock.uptimeMillis())
     }
@@ -102,7 +102,7 @@ class GpuiSession : AutoCloseable {
         try {
             val monitor = ThermalMonitor(context, handler) { status ->
                 thermalStatus = status
-                if (!closed && id != 0L) nativeThermalStateChanged(id, status)
+                if (!closed && id != 0L) guarded { nativeThermalStateChanged(id, status) }
             }
             thermalMonitor = monitor
             thermalStatus = monitor.status
@@ -121,7 +121,7 @@ class GpuiSession : AutoCloseable {
     private fun dispatchMemoryTrim(level: Int) {
         // A system callback can arrive during an Activity or Surface operation.
         handler.postAtTime({
-            if (!closed && id != 0L) nativeTrimMemory(id, level)
+            if (!closed && id != 0L) guarded { nativeTrimMemory(id, level) }
         }, this, SystemClock.uptimeMillis())
     }
 
@@ -130,7 +130,7 @@ class GpuiSession : AutoCloseable {
         checkThread()
         check(!closed)
         return audioRoutes ?: AudioRouteMonitor(requireContext(), handler) { token, json, error ->
-            if (!closed && id != 0L) nativeAudioOutputs(id, token, json, error)
+            if (!closed && id != 0L) guarded { nativeAudioOutputs(id, token, json, error) }
         }.also { audioRoutes = it }
     }
 
@@ -150,7 +150,7 @@ class GpuiSession : AutoCloseable {
                         AudioRouteMonitor.openSettings(requireContext())
                         null
                     } catch (error: Exception) { error.message ?: "Could not open audio output settings" }
-                    nativeSettingsResult(id, token, error)
+                    guarded { nativeSettingsResult(id, token, error) }
                 }
             }, this, SystemClock.uptimeMillis())
             4 -> audioRoutes?.refresh()
@@ -162,7 +162,7 @@ class GpuiSession : AutoCloseable {
         checkThread()
         check(!closed) { "GpuiSession is closed" }
         return networkMonitor ?: NetworkMonitor(requireContext(), handler) { token, status ->
-            if (!closed && id != 0L) nativeNetworkChanged(id, token, status)
+            if (!closed && id != 0L) guarded { nativeNetworkChanged(id, token, status) }
         }.also { networkMonitor = it }
     }
 
@@ -196,18 +196,18 @@ class GpuiSession : AutoCloseable {
                 } catch (error: Exception) {
                     error.toString()
                 }
-                if (!closed && id != 0L) nativeSettingsResult(id, token, error)
+                if (!closed && id != 0L) guarded { nativeSettingsResult(id, token, error) }
             }
         }, this, SystemClock.uptimeMillis())
     }
     private val permissions = PermissionHost { token, status ->
         handler.postAtTime({
-            if (!closed && id != 0L) nativePermissionResult(id, token, status)
+            if (!closed && id != 0L) guarded { nativePermissionResult(id, token, status) }
         }, this, SystemClock.uptimeMillis())
     }
     private val files = FilePickerHost { token, documents, error ->
         handler.postAtTime({
-            if (!closed && id != 0L) nativeFileResult(id, token, documents, error)
+            if (!closed && id != 0L) guarded { nativeFileResult(id, token, documents, error) }
         }, this, SystemClock.uptimeMillis())
     }
 
@@ -260,7 +260,7 @@ class GpuiSession : AutoCloseable {
         if (operation.startsWith("media_")) unsupported("media-notifications")
         val store = notificationStore ?: NotificationStore(requireContext()) {
             handler.post {
-                if (!closed && id != 0L) notificationStore?.deliver { nativeNotificationEvent(id, it) }
+                if (!closed && id != 0L) guarded { notificationStore?.deliver { nativeNotificationEvent(id, it) } }
             }
         }.also { notificationStore = it }
         return store.operation(operation, payload)
@@ -285,7 +285,7 @@ class GpuiSession : AutoCloseable {
         if (motionPreferences == null) {
             try {
                 motionPreferences = MotionPreferences(next.context, handler) { reduced ->
-                    if (!closed && id != 0L) nativeReducedMotionChanged(id, reduced)
+                    if (!closed && id != 0L) guarded { nativeReducedMotionChanged(id, reduced) }
                 }
             } catch (error: RuntimeException) {
                 android.util.Log.w("GPUI", "Motion preferences unavailable", error)
@@ -373,7 +373,7 @@ class GpuiSession : AutoCloseable {
         }
     }
 
-    internal fun detachSurface() { checkThread(); cancelBackGesture(); if (id != 0L) nativeDetach(id) }
+    internal fun detachSurface() { checkThread(); cancelBackGesture(); if (id != 0L) guarded { nativeDetach(id) } }
     internal fun frame(): Boolean { checkThread(); return id != 0L && nativeFrame(id) }
 
     private fun accessibilityView(): android.view.View? = view.get()?.takeIf {
@@ -448,7 +448,7 @@ class GpuiSession : AutoCloseable {
     internal fun focus(focused: Boolean) {
         checkThread()
         if (!focused) keyboardRequestVersion++
-        if (id != 0L) nativeFocus(id, focused)
+        if (id != 0L) guarded { nativeFocus(id, focused) }
     }
     internal fun touch(pointer: Int, phase: Int, x: Float, y: Float) =
         id != 0L && nativeTouch(id, pointer, phase, x, y)
@@ -491,7 +491,7 @@ class GpuiSession : AutoCloseable {
         handler.postAtTime({
             if (!closed) {
                 if (version == permissionHostVersion) permissions.request(permission, token, active())
-                else if (id != 0L) nativePermissionResult(id, token, -1)
+                else if (id != 0L) guarded { nativePermissionResult(id, token, -1) }
             }
         }, this, SystemClock.uptimeMillis())
     }
@@ -636,7 +636,7 @@ class GpuiSession : AutoCloseable {
         if (next != ACTIVE) cancelBackGesture()
         phase = next
         if (next != ACTIVE) keyboardRequestVersion++
-        if (id != 0L) nativeLifecycle(id, phase)
+        if (id != 0L) guarded { nativeLifecycle(id, phase) }
         view.get()?.updateFrameScheduling()
     }
 
@@ -649,8 +649,27 @@ class GpuiSession : AutoCloseable {
     internal fun fail(error: RuntimeException) {
         val callback = errorHandler
         try { close() } catch (closeError: RuntimeException) { error.addSuppressed(closeError) }
-        if (callback != null) callback.accept(error)
-        else handler.post { throw error }
+        if (callback != null) {
+            callback.accept(error)
+        } else {
+            // No host left to show it (the Activity is gone). Rethrowing on the main Looper would kill
+            // the process, and with it every service it hosts (an InCallService, a push receiver).
+            android.util.Log.e("GPUI", "GPUI session failed with no host attached", error)
+        }
+    }
+
+    /**
+     * Runs a native call made from a system callback (a Handler task, a lifecycle or Surface
+     * callback). The JNI bridge reports a Rust error or panic as an exception; escaping into the
+     * framework it would kill the whole process. It fails the session instead, and is only logged
+     * while the session is already closing.
+     */
+    private inline fun guarded(block: () -> Unit) {
+        try {
+            block()
+        } catch (error: RuntimeException) {
+            if (closed) android.util.Log.w("GPUI", "Native call failed while closing", error) else fail(error)
+        }
     }
 
     // JNI callbacks retain their JVM names. Dispatch is asynchronous to avoid

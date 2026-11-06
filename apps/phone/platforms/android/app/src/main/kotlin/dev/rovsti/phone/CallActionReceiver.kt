@@ -11,10 +11,15 @@ import android.content.Intent
  */
 class CallActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-            CallNotifications.ACTION_END -> CallRegistry.endAll()
-            CallNotifications.ACTION_DECLINE ->
-                CallRegistry.declineRinging(intent.getIntExtra(CallNotifications.EXTRA_CALL_ID, -1))
+        // A receiver that throws kills the process (and the call's InCallService with it).
+        try {
+            when (intent.action) {
+                CallNotifications.ACTION_END -> CallRegistry.endAll()
+                CallNotifications.ACTION_DECLINE ->
+                    CallRegistry.declineRinging(intent.getIntExtra(CallNotifications.EXTRA_CALL_ID, -1))
+            }
+        } catch (e: RuntimeException) {
+            android.util.Log.e("Rovsti", "call action failed", e)
         }
     }
 }

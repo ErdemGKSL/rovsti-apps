@@ -401,9 +401,27 @@ fn preview_line(text: &str) -> String {
     text.lines().collect::<Vec<_>>().join("  ")
 }
 
+/// Whether the number chooser shows its "All numbers" row: only for a pending Copy or
+/// Share on a contact with at least two numbers.
+pub(crate) fn all_numbers_row(pending: Option<StripAction>, count: usize) -> bool {
+    matches!(pending, Some(StripAction::Copy | StripAction::Share)) && count >= 2
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_numbers_row_needs_copy_or_share_and_two_numbers() {
+        assert!(all_numbers_row(Some(StripAction::Copy), 2));
+        assert!(all_numbers_row(Some(StripAction::Share), 3));
+        assert!(!all_numbers_row(Some(StripAction::Copy), 1));
+        assert!(!all_numbers_row(Some(StripAction::Share), 0));
+        assert!(!all_numbers_row(Some(StripAction::Message), 3));
+        assert!(!all_numbers_row(Some(StripAction::Block), 3));
+        assert!(!all_numbers_row(Some(StripAction::SpeedDial(2)), 3));
+        assert!(!all_numbers_row(None, 3));
+    }
 
     #[test]
     fn format_ids_round_trip() {

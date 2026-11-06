@@ -1345,6 +1345,41 @@ impl PhoneApp {
             }
             return;
         }
+        if id == ALL_NUMBERS_ID {
+            let (pending, numbers, name) = (
+                sheet.pending,
+                sheet.contact.numbers.clone(),
+                sheet.contact.name.to_string(),
+            );
+            if !crate::actions_ui::all_numbers_row(pending, numbers.len()) {
+                return;
+            }
+            self.close_sheet(cx);
+            if pending == Some(StripAction::Share) {
+                let outcome = backend::share_text(&contacts_view::contact_text(&name, &numbers));
+                if outcome != backend::Outcome::Done {
+                    self.show_notice_pill(
+                        outcome.why_not("Couldn't open the share sheet"),
+                        None,
+                        false,
+                        cx,
+                    );
+                }
+            } else {
+                let text = contacts_view::numbers_text(&numbers);
+                if backend::copy_text(&text) != backend::Outcome::Done {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                }
+                rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                self.show_notice_pill(
+                    contacts_view::copied_numbers_text(numbers.len()),
+                    None,
+                    false,
+                    cx,
+                );
+            }
+            return;
+        }
         if let Some(index) = id
             .strip_prefix("sheet-cn-")
             .and_then(|i| i.parse::<usize>().ok())
@@ -2418,6 +2453,7 @@ impl PhoneApp {
         };
 
         let count = contact.numbers.len();
+        let all_row = crate::actions_ui::all_numbers_row(sheet.pending, count);
         let numbers = div()
             .flex()
             .flex_col()
@@ -2432,8 +2468,9 @@ impl PhoneApp {
                     .numbers
                     .iter()
                     .enumerate()
-                    .map(|(i, n)| number_row(self, theme, i, n, i + 1 < count, cx)),
-            );
+                    .map(|(i, n)| number_row(self, theme, i, n, all_row || i + 1 < count, cx)),
+            )
+            .children(all_row.then(|| all_numbers_row(self, theme, count, cx)));
 
         let strip_target = match contacts_view::call_target(&contact.numbers) {
             CallTarget::Direct(i) => Some(&contact.numbers[i]),
@@ -2825,6 +2862,65 @@ fn speed_dial_row(app: &PhoneApp, theme: Theme, cx: &mut Context<PhoneApp>) -> A
         .flex_col()
         .child(head)
         .children(keys)
+        .into_any_element()
+}
+
+/// The chooser row that copies or shares every number at once.
+const ALL_NUMBERS_ID: &str = "sheet-cn-all";
+
+/// The "All numbers" chooser row: same recipe as `number_row`, no call button.
+fn all_numbers_row(
+    app: &PhoneApp,
+    theme: Theme,
+    count: usize,
+    cx: &mut Context<PhoneApp>,
+) -> AnyElement {
+    let colors = theme::colors(theme);
+    let id: SharedString = ALL_NUMBERS_ID.into();
+    let press = app.presses.value(&id).clamp(0.0, 1.0);
+    let act_id = id.clone();
+    div()
+        .id(id.clone())
+        .role(Role::Button)
+        .aria_label(SharedString::from(format!("All numbers, {count} numbers")))
+        .relative()
+        .h(px(58.0))
+        .w_full()
+        .flex()
+        .items_center()
+        .px(px(16.0))
+        .bg(gpui::Hsla {
+            a: 0.9 * press,
+            ..colors.fill
+        })
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(typography::FOOTNOTE.size)
+                        .text_color(colors.secondary_label)
+                        .child(format!("{count} numbers")),
+                )
+                .child(
+                    div()
+                        .truncate()
+                        .text_size(typography::HEADLINE.size)
+                        .text_color(colors.label)
+                        .child("All numbers"),
+                ),
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, window, cx| {
+                this.presses.down(act_id.clone());
+                this.contact_sheet_act(&act_id, window, cx);
+            }),
+        )
+        .child(touch_surface(PhoneApp::touch_listener(cx, Some(id))))
         .into_any_element()
 }
 
@@ -3330,6 +3426,17 @@ mod tests {
         ] {
             assert_eq!(sd_digit(id), None, "{id}");
         }
+    }
+
+    #[test]
+    fn all_numbers_id_is_not_an_index() {
+        assert_eq!(ALL_NUMBERS_ID, "sheet-cn-all");
+        assert!(
+            ALL_NUMBERS_ID
+                .strip_prefix("sheet-cn-")
+                .and_then(|i| i.parse::<usize>().ok())
+                .is_none()
+        );
     }
 
     #[test]

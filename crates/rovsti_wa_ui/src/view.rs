@@ -204,6 +204,11 @@ impl WhatsAppSettings {
         }
     }
 
+    /// The app's data folder, once the platform handed it over.
+    pub fn data_dir(&self) -> Option<&std::path::Path> {
+        self.data_dir.as_deref()
+    }
+
     /// The saved link, once this app is connected to an instance.
     pub fn link(&self) -> Option<&StoredLink> {
         self.model.link.as_ref()

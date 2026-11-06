@@ -14,7 +14,8 @@ rovsti_ui.workspace = true
 rovsti_wa_client.workspace = true
 rovsti_wa_proto.workspace = true
 futures.workspace = true
-image.workspace = true
+# JPEG and WebP: WhatsApp profile pictures (gpui already builds both).
+image = { workspace = true, features = ["jpeg", "webp"] }
 log.workspace = true
 qrcode.workspace = true
 serde.workspace = true

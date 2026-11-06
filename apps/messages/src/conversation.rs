@@ -12,8 +12,8 @@ use gpui::TextInputAction;
 use gpui::TextInputPurpose;
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, Image, ImageFormat, InteractiveElement, IntoElement,
-    ListAlignment, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, img, list, prelude::*, px,
+    ListAlignment, ObjectFit, ParentElement, Render, SharedString, StatefulInteractiveElement,
+    Styled, StyledImage, Window, div, img, list, prelude::*, px,
 };
 use rovsti_core::{ThreadId, recents::LocaleTime, wire::DocumentOp};
 use rovsti_ui::{
@@ -27,16 +27,21 @@ use rovsti_ui::{
 };
 use rovsti_wa_client::Gateway;
 pub(crate) use rovsti_wa_proto::presence::{civil_from_days, clock, day_label, presence_label};
+use rovsti_wa_ui::{WaAvatars, display_name, photo_avatar};
 
 use crate::{
     backend::{Backend, BackendEvent},
+    inbox::duration_label,
     keyed_list::{KeyedList, key_of},
+    photos::ContactPhotos,
     schedule_ui::{self, StripItem, StripKey},
 };
 use rovsti_wa_proto::{
-    ChatState, GatewayEvent, Item, ItemState, MarkRead, MediaKind, MessageBody, SendReaction,
-    SendText, Sent, Timeline, TypingState, TypingThrottle, check_size, classify, day_breaks,
-    jid_user, reaction_chips,
+    ChatState, DeleteForMe, DeliveryStatus, EditMessage, GatewayEvent, Item, ItemState, Location,
+    MarkRead, MediaKind, MediaMeta, MediaOptions, MessageBody, MessageMeta, Quoted, RevokeMessage,
+    SendReaction, SendText, Sent, SharedContact, StarMessage, Timeline, TypingState,
+    TypingThrottle, WaMessage, check_size, classify, day_breaks, jid_user, meta::body_preview,
+    reaction_chips,
 };
 
 /// Messages per history request.
@@ -47,6 +52,14 @@ const QUICK_EMOJIS: [&str; 6] = ["👍", "❤️", "😂", "😮", "😢", "🙏
 
 /// Downloaded images kept in memory.
 const MEDIA_CACHE: usize = 16;
+/// Media preview thumbnails kept in memory.
+const THUMB_CACHE: usize = 48;
+/// Thumbnails fetched at once.
+const THUMB_PARALLEL: usize = 3;
+/// WhatsApp lets a text or caption be edited this long after sending.
+const EDIT_WINDOW_MS: i64 = 15 * 60_000;
+/// A message jumped to from a quote glows this long.
+const HIGHLIGHT_FOR: Duration = Duration::from_millis(1_600);
 
 /// How long a "typing" event keeps the header line alive.
 const TYPING_SHOW_MS: i64 = 6_000;
@@ -67,6 +80,45 @@ pub enum ConversationEvent {
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
+
+/// Who the chat is with, for the header avatar.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Peer {
+    pub initials: SharedString,
+    /// The matched contact's photo.
+    pub photo_uri: Option<SharedString>,
+    /// The chat's WhatsApp picture id, when the gateway told one.
+    pub picture_id: Option<SharedString>,
+}
+
+/// Everything a conversation starts from.
+pub struct Setup {
+    pub chat: String,
+    pub title: SharedString,
+    pub is_group: bool,
+    pub gateway: Gateway,
+    pub locale: LocaleTime,
+    pub backend: Entity<Backend>,
+    pub avatars: Entity<WaAvatars>,
+    pub photos: Entity<ContactPhotos>,
+    pub peer: Peer,
+}
+
+/// The message the composer answers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ReplyTarget {
+    id: String,
+    author: SharedString,
+    preview: SharedString,
+}
+
+/// The message the Delete menu is open for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DeleteTarget {
+    id: String,
+    /// "Delete for everyone" is offered (my own message).
+    for_everyone: bool,
+}
 
 /// A picked file waiting in the chip above the composer.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -154,41 +206,74 @@ pub struct Conversation {
     pending_paths: HashMap<u64, String>,
     /// A line above the composer (attach and send problems).
     notice: Option<SharedString>,
+    avatars: Entity<WaAvatars>,
+    photos: Entity<ContactPhotos>,
+    peer: Peer,
+    /// Preview thumbnails by message id, oldest first (at most [`THUMB_CACHE`]).
+    thumbs: Vec<(String, Arc<Image>)>,
+    thumbs_loading: HashSet<String>,
+    thumbs_failed: HashSet<String>,
+    /// The composer answers this message.
+    reply_to: Option<ReplyTarget>,
+    /// The composer edits this message of mine.
+    editing: Option<String>,
+    /// Quotes of replies just sent, until the gateway's meta has them; keyed
+    /// by message id (`pending-N`, then the real id).
+    local_quotes: HashMap<String, Quoted>,
+    /// The quoted id of each pending or failed reply, by local id (a retry
+    /// answers the same message).
+    pending_quotes: HashMap<u64, String>,
+    /// Stars set here, until the gateway's `message_meta` confirms them.
+    star_override: HashMap<String, bool>,
+    /// Deleted for me here, until the gateway's `message_deleted` drops them.
+    hidden: HashSet<String>,
+    /// The Delete menu.
+    delete_confirm: Option<DeleteTarget>,
+    /// The message a quote tap jumped to (it glows for a moment).
+    highlight: Option<String>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
 impl Conversation {
-    pub fn new(
-        chat: String,
-        title: impl Into<SharedString>,
-        is_group: bool,
-        gateway: Gateway,
-        locale: LocaleTime,
-        backend: Entity<Backend>,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(setup: Setup, cx: &mut Context<Self>) -> Self {
+        let Setup {
+            chat,
+            title,
+            is_group,
+            gateway,
+            locale,
+            backend,
+            avatars,
+            photos,
+            peer,
+        } = setup;
         let composer =
             cx.new(|cx| TextField::with_input(TextInputPurpose::Text, TextInputAction::Send, cx));
         // Typing re-renders the composer box.
         cx.observe(&composer, |this, _, cx| this.on_composer_changed(cx))
             .detach();
-        let subscriptions = vec![cx.subscribe(&backend, |this, _, event, cx| {
-            if let BackendEvent::Document(result) = event
-                && result.op == DocumentOp::Attachment
-            {
-                this.on_attachment(
-                    result.ok,
-                    result.path.clone(),
-                    result.name.clone(),
-                    result.mime.clone(),
-                    cx,
-                );
-            }
-        })];
+        let subscriptions = vec![
+            cx.subscribe(&backend, |this, _, event, cx| {
+                if let BackendEvent::Document(result) = event
+                    && result.op == DocumentOp::Attachment
+                {
+                    this.on_attachment(
+                        result.ok,
+                        result.path.clone(),
+                        result.name.clone(),
+                        result.mime.clone(),
+                        cx,
+                    );
+                }
+            }),
+            // A picture arrived: the header and the bubbles repaint.
+            cx.observe(&avatars, |_, _, cx| cx.notify()),
+            cx.observe(&photos, |_, _, cx| cx.notify()),
+        ];
         let mut this = Self {
             timeline: Timeline::new(chat.clone()),
             chat,
-            title: title.into(),
+            title,
             is_group,
             composer,
             gateway,
@@ -218,6 +303,20 @@ impl Conversation {
             attachment: None,
             pending_paths: HashMap::new(),
             notice: None,
+            avatars,
+            photos,
+            peer,
+            thumbs: Vec::new(),
+            thumbs_loading: HashSet::new(),
+            thumbs_failed: HashSet::new(),
+            reply_to: None,
+            editing: None,
+            local_quotes: HashMap::new(),
+            pending_quotes: HashMap::new(),
+            star_override: HashMap::new(),
+            hidden: HashSet::new(),
+            delete_confirm: None,
+            highlight: None,
             _subscriptions: subscriptions,
         };
         this.load(None, cx);
@@ -245,6 +344,292 @@ impl Conversation {
     pub fn clear_draft(&mut self, cx: &mut Context<Self>) {
         self.composer.update(cx, |field, cx| field.clear(cx));
         self.last_text.clear();
+    }
+
+    /// System Back inside the page: closes the Delete menu, a message's menu,
+    /// or the edit or reply bar; `false` when there is none of them.
+    pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.delete_confirm.is_some() {
+            self.delete_confirm = None;
+        } else if self.strip.is_some() {
+            self.strip = None;
+            self.rows_dirty = true;
+        } else if self.editing.is_some() || self.reply_to.is_some() {
+            self.cancel_compose_context(cx);
+        } else {
+            return false;
+        }
+        cx.notify();
+        true
+    }
+
+    /// The ✕ of the reply or edit bar.
+    fn cancel_compose_context(&mut self, cx: &mut Context<Self>) {
+        if self.editing.take().is_some() {
+            // The edited text was never sent: the composer empties again.
+            self.composer.update(cx, |field, cx| field.clear(cx));
+            self.last_text.clear();
+        }
+        self.reply_to = None;
+        cx.notify();
+    }
+
+    /// Reply on a message's menu: the composer answers it.
+    fn begin_reply(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(item) = self.timeline.items().iter().find(|i| i.message.id == id) else {
+            return;
+        };
+        let message = &item.message;
+        let meta = self.timeline.meta(id);
+        let author = self.author(message.from_me, message.sender.as_deref(), meta, cx);
+        let preview = preview_of(&message.body, meta);
+        self.reply_to = Some(ReplyTarget {
+            id: id.to_owned(),
+            author: author.into(),
+            preview: preview.into(),
+        });
+        if self.editing.take().is_some() {
+            self.composer.update(cx, |field, cx| field.clear(cx));
+        }
+        self.strip = None;
+        self.rows_dirty = true;
+        cx.notify();
+    }
+
+    /// Edit on my message's menu: its text goes into the composer.
+    fn begin_edit(&mut self, id: &str, cx: &mut Context<Self>) {
+        let Some(item) = self.timeline.items().iter().find(|i| i.message.id == id) else {
+            return;
+        };
+        let text = match &item.message.body {
+            MessageBody::Text(text) => text.clone(),
+            MessageBody::Media { caption, .. } => caption.clone().unwrap_or_default(),
+            MessageBody::Unsupported => return,
+        };
+        self.composer.update(cx, |field, cx| field.set(&text, cx));
+        self.last_text = text;
+        self.editing = Some(id.to_owned());
+        self.reply_to = None;
+        self.strip = None;
+        self.rows_dirty = true;
+        cx.notify();
+    }
+
+    /// Sends the edited text; the gateway's `message_meta` brings it back.
+    fn send_edit(&mut self, id: String, text: String, cx: &mut Context<Self>) {
+        self.editing = None;
+        self.composer.update(cx, |field, cx| field.clear(cx));
+        self.last_text.clear();
+        let request = EditMessage {
+            chat: self.chat.clone(),
+            message_id: id,
+            text,
+        };
+        let gateway = self.gateway.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { gateway.edit_message(&request) });
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = task.await {
+                log::warn!("editing a WhatsApp message failed: {error}");
+                this.update(cx, |this, cx| {
+                    this.notice = Some("Couldn't edit the message".into());
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Star or Unstar on a message's menu; shown at once.
+    fn set_starred(&mut self, id: &str, starred: bool, cx: &mut Context<Self>) {
+        self.strip = None;
+        self.star_override.insert(id.to_owned(), starred);
+        self.rows_dirty = true;
+        let request = StarMessage {
+            chat: self.chat.clone(),
+            message_id: id.to_owned(),
+            starred,
+        };
+        let gateway = self.gateway.clone();
+        let wanted = id.to_owned();
+        let task = cx
+            .background_executor()
+            .spawn(async move { gateway.star_message(&request) });
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = task.await {
+                log::warn!("starring a WhatsApp message failed: {error}");
+                this.update(cx, |this, cx| {
+                    this.star_override.remove(&wanted);
+                    this.rows_dirty = true;
+                    this.notice = Some("Couldn't star the message".into());
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Delete for me: the bubble goes at once, the gateway's
+    /// `message_deleted` confirms it.
+    fn delete_for_me(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.delete_confirm = None;
+        self.hidden.insert(id.to_owned());
+        self.forget_targets(id);
+        self.rows_dirty = true;
+        let request = DeleteForMe {
+            chat: self.chat.clone(),
+            message_id: id.to_owned(),
+        };
+        let gateway = self.gateway.clone();
+        let wanted = id.to_owned();
+        let task = cx
+            .background_executor()
+            .spawn(async move { gateway.delete_for_me(&request) });
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = task.await {
+                log::warn!("deleting a WhatsApp message failed: {error}");
+                this.update(cx, |this, cx| {
+                    this.hidden.remove(&wanted);
+                    this.rows_dirty = true;
+                    this.notice = Some("Couldn't delete the message".into());
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Delete for everyone; the gateway's `message_meta` (revoked) follows.
+    fn revoke(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.delete_confirm = None;
+        self.forget_targets(id);
+        let request = RevokeMessage {
+            chat: self.chat.clone(),
+            message_id: id.to_owned(),
+            sender: None,
+        };
+        let gateway = self.gateway.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { gateway.revoke_message(&request) });
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = task.await {
+                log::warn!("deleting a WhatsApp message for everyone failed: {error}");
+                this.update(cx, |this, cx| {
+                    this.notice = Some("Couldn't delete the message for everyone".into());
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// A message went away: it can no longer be answered or edited.
+    fn forget_targets(&mut self, id: &str) {
+        if self.reply_to.as_ref().is_some_and(|r| r.id == id) {
+            self.reply_to = None;
+        }
+        if self.editing.as_deref() == Some(id) {
+            self.editing = None;
+        }
+        if self.strip.as_deref() == Some(id) {
+            self.strip = None;
+        }
+    }
+
+    /// A tap on a quote: shows the quoted message and lets it glow.
+    fn jump_to(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.rows_dirty {
+            self.sync_rows();
+        }
+        let items = self.timeline.items();
+        let found = self.entries.iter().position(|entry| {
+            matches!(entry, Entry::Message(at) if items.get(*at).is_some_and(|i| i.message.id == id))
+        });
+        let Some(position) = found else {
+            self.notice = Some(if self.timeline.has_older() {
+                "That message is further back: load earlier messages".into()
+            } else {
+                "That message isn't here any more".into()
+            });
+            cx.notify();
+            return;
+        };
+        // Item 0 of the list is the "Load earlier" slot.
+        self.list.reveal(position + 1);
+        self.highlight = Some(id.to_owned());
+        let wanted = id.to_owned();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(HIGHLIGHT_FOR).await;
+            this.update(cx, |this, cx| {
+                if this.highlight.as_deref() == Some(wanted.as_str()) {
+                    this.highlight = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn cached_thumb(&self, id: &str) -> Option<Arc<Image>> {
+        self.thumbs
+            .iter()
+            .find(|(cached, _)| cached == id)
+            .map(|(_, image)| image.clone())
+    }
+
+    /// Fetches the small preview that came with a media message, for a
+    /// bubble on screen.
+    fn want_thumbnail(&mut self, id: &str, cx: &mut Context<Self>) {
+        if self.thumbs_loading.contains(id)
+            || self.thumbs_failed.contains(id)
+            || self.thumbs_loading.len() >= THUMB_PARALLEL
+            || self.cached_thumb(id).is_some()
+        {
+            return;
+        }
+        self.thumbs_loading.insert(id.to_owned());
+        let gateway = self.gateway.clone();
+        let wanted = id.to_owned();
+        let task = cx
+            .background_executor()
+            .spawn(async move { gateway.thumbnail(&wanted) });
+        let id = id.to_owned();
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.thumbs_loading.remove(&id);
+                match result.ok().and_then(|bytes| {
+                    sniff_format(&bytes).map(|format| Arc::new(Image::from_bytes(format, bytes)))
+                }) {
+                    Some(image) => {
+                        this.thumbs.retain(|(cached, _)| *cached != id);
+                        this.thumbs.push((id, image));
+                        if this.thumbs.len() > THUMB_CACHE {
+                            this.thumbs.remove(0);
+                        }
+                    }
+                    None => {
+                        this.thumbs_failed.insert(id);
+                    }
+                }
+                this.rows_dirty = true;
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Long-press (or right-click) on Send. Only a typed text can wait.
@@ -431,7 +816,7 @@ impl Conversation {
         let chat = self.chat.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { gateway.messages(&chat, before_ms, PAGE) });
+            .spawn(async move { gateway.messages_with_meta(&chat, before_ms, PAGE) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
@@ -439,7 +824,7 @@ impl Conversation {
                 match result {
                     Ok(page) => {
                         this.error = None;
-                        this.timeline.apply_page(page, PAGE);
+                        this.timeline.apply_rich_page(page, PAGE);
                         this.sync_rows();
                         if before_ms.is_none() {
                             this.list.scroll_to_end();
@@ -526,6 +911,30 @@ impl Conversation {
             GatewayEvent::Message(m) if m.chat == self.chat && !m.from_me => {
                 self.typing_until = None;
             }
+            GatewayEvent::MessageMeta { chat, id, meta, .. } if *chat == self.chat => {
+                // The gateway has the star now; a deleted one can't be answered.
+                self.star_override.remove(id);
+                if meta.revoked {
+                    self.forget_targets(id);
+                }
+                if meta.quoted.is_some() {
+                    self.local_quotes.remove(id);
+                }
+            }
+            GatewayEvent::MessageDeleted { chat, id } if *chat == self.chat => {
+                self.hidden.remove(id);
+                self.forget_targets(id);
+            }
+            GatewayEvent::ChatCleared { jid } | GatewayEvent::ChatDeleted { jid }
+                if *jid == self.chat =>
+            {
+                self.reply_to = None;
+                self.editing = None;
+                self.strip = None;
+                self.delete_confirm = None;
+                self.hidden.clear();
+                self.rows_dirty = true;
+            }
             _ => {}
         }
         if self.timeline.apply_event(event) {
@@ -551,6 +960,12 @@ impl Conversation {
 
     fn send(&mut self, cx: &mut Context<Self>) {
         let text = self.composer.read(cx).text().trim().to_owned();
+        if let Some(id) = self.editing.clone() {
+            if !text.is_empty() {
+                self.send_edit(id, text, cx);
+            }
+            return;
+        }
         match send_plan(&text, self.attachment.is_some()) {
             Plan::Nothing => {}
             Plan::Text => {
@@ -622,6 +1037,7 @@ impl Conversation {
         }
         let local_id = self.next_local;
         self.next_local += 1;
+        self.take_reply(local_id);
         let (kind, mime) = classify(attached.mime.as_deref(), &attached.name, &[]);
         let size = std::fs::metadata(&attached.path).map_or(0, |m| m.len());
         self.timeline.push_pending_media(
@@ -656,6 +1072,11 @@ impl Conversation {
         caption: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        let options = MediaOptions {
+            quoted_id: self.pending_quotes.get(&local_id).cloned(),
+            file_name: Some(name.clone()).filter(|n| !n.is_empty()),
+            ..MediaOptions::default()
+        };
         let read = cx.background_executor().spawn(async move {
             let bytes = std::fs::read(&path).map_err(|_| MediaError::Gone)?;
             check_size(bytes.len() as u64).map_err(|_| MediaError::TooLarge)?;
@@ -691,9 +1112,14 @@ impl Conversation {
                 .ok()
                 .flatten();
             let Prepared { bytes, kind, mime } = prepared;
+            // Only documents show a file name.
+            let options = MediaOptions {
+                file_name: options.file_name.filter(|_| kind == MediaKind::Document),
+                ..options
+            };
             let send = cx.background_executor().spawn(async move {
                 gateway
-                    .send_media(&chat, kind, &mime, caption.as_deref(), bytes)
+                    .send_media_with(&chat, kind, &mime, caption.as_deref(), &options, bytes)
                     .map_err(|error| MediaError::Gateway(error.to_string()))
             });
             let result = send.await;
@@ -711,6 +1137,7 @@ impl Conversation {
 
     fn media_sent(&mut self, local_id: u64, sent: &Sent, shown: Option<Arc<Image>>) {
         self.timeline.confirm(local_id, sent);
+        self.settle_reply(local_id, sent);
         self.rows_dirty = true;
         // The cache copy of the picked file has done its job.
         if let Some(path) = self.pending_paths.remove(&local_id)
@@ -754,11 +1181,38 @@ impl Conversation {
         }
         let local_id = self.next_local;
         self.next_local += 1;
+        self.take_reply(local_id);
         self.timeline.push_pending(local_id, text.clone(), now_ms());
         self.sync_rows();
         self.list.scroll_to_end();
         self.dispatch(local_id, text, cx);
         cx.notify();
+    }
+
+    /// The reply bar's message becomes the quote of send `local_id`.
+    fn take_reply(&mut self, local_id: u64) {
+        let Some(reply) = self.reply_to.take() else {
+            return;
+        };
+        self.local_quotes.insert(
+            format!("pending-{local_id}"),
+            Quoted {
+                id: reply.id.clone(),
+                sender: None,
+                preview: Some(reply.preview.to_string()),
+            },
+        );
+        self.pending_quotes.insert(local_id, reply.id);
+    }
+
+    /// A reply went out: its quote moves to the real id.
+    fn settle_reply(&mut self, local_id: u64, sent: &Sent) {
+        self.pending_quotes.remove(&local_id);
+        if let Some(quote) = self.local_quotes.remove(&format!("pending-{local_id}"))
+            && self.quote_of(&sent.message_id).is_none()
+        {
+            self.local_quotes.insert(sent.message_id.clone(), quote);
+        }
     }
 
     fn retry(&mut self, local_id: u64, cx: &mut Context<Self>) {
@@ -787,7 +1241,7 @@ impl Conversation {
         let request = SendText {
             chat: self.chat.clone(),
             text,
-            quoted_id: None,
+            quoted_id: self.pending_quotes.get(&local_id).cloned(),
         };
         let task = cx
             .background_executor()
@@ -797,7 +1251,10 @@ impl Conversation {
             this.update(cx, |this, cx| {
                 this.rows_dirty = true;
                 match result {
-                    Ok(sent) => this.timeline.confirm(local_id, &sent),
+                    Ok(sent) => {
+                        this.timeline.confirm(local_id, &sent);
+                        this.settle_reply(local_id, &sent);
+                    }
                     Err(error) => {
                         log::warn!("sending a WhatsApp message failed: {error}");
                         this.timeline.fail(local_id);
@@ -818,8 +1275,15 @@ impl Conversation {
         let breaks = day_breaks(items, self.locale.tz_offset_s);
         let mut entries = Vec::with_capacity(items.len() + breaks.len());
         let mut next_break = breaks.iter().peekable();
-        for index in 0..items.len() {
-            if let Some(&(_, day_ms)) = next_break.next_if(|(at, _)| *at == index) {
+        for (index, item) in items.iter().enumerate() {
+            let day = next_break
+                .next_if(|(at, _)| *at == index)
+                .map(|&(_, day_ms)| day_ms);
+            // Deleted for me here: gone before the gateway confirms it.
+            if self.hidden.contains(&item.message.id) {
+                continue;
+            }
+            if let Some(day_ms) = day {
                 entries.push(Entry::Day(day_ms));
             }
             entries.push(Entry::Message(index));
@@ -861,6 +1325,11 @@ impl Conversation {
             .map(|r| (r.emoji.as_str(), r.from_me))
             .collect();
         let strip = self.strip.as_deref() == Some(message.id.as_str());
+        let local = (
+            self.cached_thumb(&message.id).is_some(),
+            self.local_quotes.get(&message.id).map(|q| &q.id),
+            self.star_override.get(&message.id).copied(),
+        );
         key_of((
             2u8,
             &message.id,
@@ -870,6 +1339,8 @@ impl Conversation {
             media,
             reactions,
             strip,
+            meta_key(self.timeline.meta(&message.id)),
+            local,
         ))
     }
 
@@ -895,10 +1366,25 @@ impl Conversation {
                 .text_color(colors.secondary_label)
                 .child(day_label(day_ms, now, offset))
                 .into_any_element(),
-            Some(Some(Entry::Message(at))) => match self.timeline.items().get(at) {
-                Some(item) => self.bubble(theme, item, now, cx),
-                None => div().into_any_element(),
-            },
+            Some(Some(Entry::Message(at))) => {
+                // A preview image is fetched only for bubbles on screen.
+                let wants_thumb = self.timeline.items().get(at).and_then(|item| {
+                    let id = &item.message.id;
+                    let has = self
+                        .timeline
+                        .meta(id)
+                        .and_then(|m| m.media.as_ref())
+                        .is_some_and(|m| m.thumbnail);
+                    (has && self.cached_image(id).is_none()).then(|| id.clone())
+                });
+                if let Some(id) = wants_thumb {
+                    self.want_thumbnail(&id, cx);
+                }
+                match self.timeline.items().get(at) {
+                    Some(item) => self.bubble(theme, item, now, cx),
+                    None => div().into_any_element(),
+                }
+            }
             Some(None) => div().into_any_element(),
         };
         // The padding stands in for the old column gap.
@@ -962,6 +1448,70 @@ impl Conversation {
             .into_any_element()
     }
 
+    /// What to call the author of a message in this chat: "You", the
+    /// contact, WhatsApp's name for them, or the number.
+    fn author(
+        &self,
+        from_me: bool,
+        sender: Option<&str>,
+        meta: Option<&MessageMeta>,
+        cx: &gpui::App,
+    ) -> String {
+        if from_me {
+            return "You".to_owned();
+        }
+        let Some(jid) = sender.filter(|s| !s.is_empty()) else {
+            // One-to-one chats leave the sender out: it is the other person.
+            return self.title.to_string();
+        };
+        let contact = self
+            .backend
+            .read(cx)
+            .contacts()
+            .match_number(&format!("+{}", jid_user(jid)))
+            .map(|c| c.display_name.clone());
+        display_name(
+            contact.as_deref(),
+            meta.and_then(|m| m.sender_name.as_deref()),
+            jid,
+        )
+    }
+
+    /// The author of a quoted message, looked up in the timeline when it is
+    /// loaded (it knows whether the message was mine).
+    fn quote_author(&self, quoted: &Quoted, cx: &gpui::App) -> String {
+        if let Some(item) = self
+            .timeline
+            .items()
+            .iter()
+            .find(|i| i.message.id == quoted.id)
+        {
+            let message = &item.message;
+            return self.author(
+                message.from_me,
+                message.sender.as_deref().or(quoted.sender.as_deref()),
+                self.timeline.meta(&message.id),
+                cx,
+            );
+        }
+        self.author(false, quoted.sender.as_deref(), None, cx)
+    }
+
+    /// The quote a bubble shows: the gateway's, else the one we just sent.
+    fn quote_of(&self, id: &str) -> Option<&Quoted> {
+        self.timeline
+            .meta(id)
+            .and_then(|m| m.quoted.as_ref())
+            .or_else(|| self.local_quotes.get(id))
+    }
+
+    fn starred(&self, id: &str) -> bool {
+        self.star_override
+            .get(id)
+            .copied()
+            .unwrap_or_else(|| self.timeline.meta(id).is_some_and(|m| m.starred))
+    }
+
     fn bubble(
         &self,
         theme: Theme,
@@ -971,8 +1521,11 @@ impl Conversation {
     ) -> gpui::AnyElement {
         let colors = theme::colors(theme);
         let message = &item.message;
+        let meta = self.timeline.meta(&message.id);
+        let revoked = meta.is_some_and(|m| m.revoked);
         let own = message.from_me;
         let failed = matches!(item.state, ItemState::Failed { .. });
+        let highlighted = self.highlight.as_deref() == Some(message.id.as_str());
         let (fill, text, quiet) = if own {
             let white = gpui::white();
             (colors.accent, white, white.opacity(0.72))
@@ -983,6 +1536,11 @@ impl Conversation {
                 colors.tertiary_label,
             )
         };
+        let fill = if highlighted {
+            colors.orange.opacity(if own { 0.9 } else { 0.35 })
+        } else {
+            fill
+        };
         let meta_color = if failed {
             colors.red
         } else if item.state == ItemState::Read {
@@ -990,10 +1548,17 @@ impl Conversation {
         } else {
             quiet
         };
-        let meta: SharedString = if failed {
+        let line: SharedString = if failed {
             "Not sent · Tap to retry".into()
         } else {
-            bubble_meta(item, now, self.locale.tz_offset_s).into()
+            meta_line(
+                item,
+                meta,
+                self.starred(&message.id),
+                now,
+                self.locale.tz_offset_s,
+            )
+            .into()
         };
 
         let mut bubble = div()
@@ -1012,18 +1577,64 @@ impl Conversation {
                     .text_size(typography::CAPTION.size)
                     .font_weight(typography::HEADLINE.weight)
                     .text_color(colors.accent)
-                    .child(sender_label(message.sender.as_deref().unwrap_or(""))),
+                    .child(self.author(false, message.sender.as_deref(), meta, cx)),
             );
         }
-        bubble = bubble
-            .child(self.body(theme, message, text, quiet, cx))
-            .child(
+        if meta.is_some_and(|m| m.forwarded) && !revoked {
+            bubble = bubble.child(
                 div()
-                    .self_end()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.0))
                     .text_size(typography::CAPTION.size)
-                    .text_color(meta_color)
-                    .child(meta),
+                    .italic()
+                    .text_color(quiet)
+                    .child(
+                        gpui::svg()
+                            .path(Icon::LucideForward.path())
+                            .size(px(12.0))
+                            .text_color(quiet),
+                    )
+                    .child("Forwarded"),
             );
+        }
+        if !revoked && let Some(quoted) = self.quote_of(&message.id) {
+            bubble = bubble.child(self.quote_block(theme, &message.id, quoted, own, cx));
+        }
+        let content = if revoked {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_size(typography::BODY.size)
+                .italic()
+                .text_color(quiet)
+                .child(
+                    gpui::svg()
+                        .path(Icon::LucideBan.path())
+                        .size(px(14.0))
+                        .text_color(quiet),
+                )
+                .child(if own {
+                    "You deleted this message"
+                } else {
+                    "This message was deleted"
+                })
+                .into_any_element()
+        } else if let Some(location) = meta.and_then(|m| m.location.as_ref()) {
+            location_card(theme, location, text, quiet)
+        } else if let Some(contact) = meta.and_then(|m| m.contact.as_ref()) {
+            contact_card(theme, contact, text, quiet)
+        } else {
+            self.body(theme, message, meta, text, quiet, cx)
+        };
+        bubble = bubble.child(content).child(
+            div()
+                .self_end()
+                .text_size(typography::CAPTION.size)
+                .text_color(meta_color)
+                .child(line),
+        );
         let confirmed = !matches!(
             item.state,
             ItemState::Pending { .. } | ItemState::Failed { .. }
@@ -1052,11 +1663,14 @@ impl Conversation {
             .when(own, |c| c.items_end())
             .child(bubble);
         let chips = reaction_chips(&message.reactions);
-        if !chips.is_empty() {
+        if !chips.is_empty() && !revoked {
             column = column.child(self.chips(theme, message, &chips, cx));
         }
         if confirmed && self.strip.as_deref() == Some(message.id.as_str()) {
-            column = column.child(self.quick_strip(theme, message, cx));
+            if !revoked {
+                column = column.child(self.quick_strip(theme, message, cx));
+            }
+            column = column.child(self.actions(theme, item, meta, now, cx));
         }
         div()
             .flex()
@@ -1065,11 +1679,74 @@ impl Conversation {
             .into_any_element()
     }
 
-    /// The content of a bubble: text, or a media card.
+    /// The quoted message at the top of a reply; a tap shows it.
+    fn quote_block(
+        &self,
+        theme: Theme,
+        owner: &str,
+        quoted: &Quoted,
+        own: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let colors = theme::colors(theme);
+        let (bar, text, quiet) = if own {
+            let white = gpui::white();
+            (white, white, white.opacity(0.8))
+        } else {
+            (colors.accent, colors.label, colors.secondary_label)
+        };
+        let author = self.quote_author(quoted, cx);
+        let preview = quoted
+            .preview
+            .clone()
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or_else(|| "Message".to_owned());
+        let target = quoted.id.clone();
+        div()
+            .id(SharedString::from(format!("quote-{owner}")))
+            .flex()
+            .gap(px(8.0))
+            .px(px(8.0))
+            .py(px(4.0))
+            .rounded(px(8.0))
+            .bg(text.opacity(0.08))
+            .child(div().flex_none().w(px(3.0)).rounded_full().bg(bar))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(typography::CAPTION.size)
+                            .font_weight(typography::HEADLINE.weight)
+                            .text_color(bar)
+                            .child(author),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(typography::FOOTNOTE.size)
+                            .text_color(quiet)
+                            .child(preview),
+                    ),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.jump_to(&target, cx);
+            }))
+            .into_any_element()
+    }
+
+    /// The content of a bubble: text, or a media card with its preview
+    /// image, file name, duration and size.
     fn body(
         &self,
         theme: Theme,
-        message: &rovsti_wa_proto::WaMessage,
+        message: &WaMessage,
+        meta: Option<&MessageMeta>,
         text: gpui::Hsla,
         quiet: gpui::Hsla,
         cx: &mut Context<Self>,
@@ -1088,6 +1765,7 @@ impl Conversation {
                 .into_any_element();
         };
         let colors = theme::colors(theme);
+        let media = meta.and_then(|m| m.media.as_ref());
         let downloadable = matches!(kind, MediaKind::Image | MediaKind::Sticker);
         let mut card = div().flex().flex_col().gap(px(4.0));
         if let Some(image) = self.cached_image(&message.id) {
@@ -1107,30 +1785,58 @@ impl Conversation {
             } else {
                 ""
             };
+            let thumb = self.cached_thumb(&message.id).map(|thumb| {
+                let (w, h) = thumb_size(media);
+                img(thumb)
+                    .w(px(w))
+                    .h(px(h))
+                    .rounded(radius::CARD)
+                    .object_fit(ObjectFit::Cover)
+            });
+            let icon = media_icon(*kind, media);
             let mut inner = div()
                 .id(SharedString::from(format!("media-{}", message.id)))
-                .px(px(10.0))
-                .py(px(8.0))
-                .rounded(radius::CARD)
-                .bg(colors.label.opacity(0.08))
                 .flex()
                 .flex_col()
+                .gap(px(4.0))
+                .children(thumb)
                 .child(
                     div()
-                        .text_size(typography::BODY.size)
-                        .font_weight(typography::HEADLINE.weight)
-                        .text_color(text)
-                        .child(media_label(*kind)),
-                )
-                .child(
-                    div()
-                        .text_size(typography::CAPTION.size)
-                        .text_color(quiet)
-                        .child(if status.is_empty() {
-                            format_size(*size)
-                        } else {
-                            format!("{} · {status}", format_size(*size))
-                        }),
+                        .px(px(10.0))
+                        .py(px(8.0))
+                        .rounded(radius::CARD)
+                        .bg(colors.label.opacity(0.08))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            gpui::svg()
+                                .flex_none()
+                                .path(icon.path())
+                                .size(px(20.0))
+                                .text_color(text),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(typography::BODY.size)
+                                        .font_weight(typography::HEADLINE.weight)
+                                        .text_color(text)
+                                        .child(media_title(*kind, media)),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(typography::CAPTION.size)
+                                        .text_color(quiet)
+                                        .child(media_details(*size, media, status)),
+                                ),
+                        ),
                 );
             if downloadable {
                 let id = message.id.clone();
@@ -1156,7 +1862,7 @@ impl Conversation {
     fn chips(
         &self,
         theme: Theme,
-        message: &rovsti_wa_proto::WaMessage,
+        message: &WaMessage,
         chips: &[(String, u32, bool)],
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
@@ -1198,7 +1904,7 @@ impl Conversation {
     fn quick_strip(
         &self,
         theme: Theme,
-        message: &rovsti_wa_proto::WaMessage,
+        message: &WaMessage,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let mine = message
@@ -1232,6 +1938,234 @@ impl Conversation {
             );
         }
         row.into_any_element()
+    }
+
+    /// The actions under the emoji strip: Reply, Star, Edit and Delete.
+    fn actions(
+        &self,
+        theme: Theme,
+        item: &Item,
+        meta: Option<&MessageMeta>,
+        now: i64,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let message = &item.message;
+        let revoked = meta.is_some_and(|m| m.revoked);
+        let id = message.id.clone();
+        let pill = |key: &str, icon: Icon, label: &'static str, danger: bool| {
+            let colors = theme::colors(theme);
+            let color = if danger { colors.red } else { colors.label };
+            glass_pill(theme, label)
+                .id(SharedString::from(format!("act-{key}-{id}")))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_color(color)
+                .child(
+                    gpui::svg()
+                        .path(icon.path())
+                        .size(px(14.0))
+                        .text_color(color),
+                )
+        };
+        let mut row = div().flex().flex_wrap().gap(px(6.0)).px(px(4.0));
+        if !revoked {
+            let target = id.clone();
+            row = row.child(
+                pill("reply", Icon::LucideReply, "Reply", false)
+                    .on_click(cx.listener(move |this, _, _, cx| this.begin_reply(&target, cx))),
+            );
+            let starred = self.starred(&id);
+            let target = id.clone();
+            row = row.child(
+                pill(
+                    "star",
+                    Icon::LucideStar,
+                    if starred { "Unstar" } else { "Star" },
+                    false,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.set_starred(&target, !starred, cx);
+                })),
+            );
+        }
+        if can_edit(item, meta, now) {
+            let target = id.clone();
+            row = row.child(
+                pill("edit", Icon::LucidePencil, "Edit", false)
+                    .on_click(cx.listener(move |this, _, _, cx| this.begin_edit(&target, cx))),
+            );
+        }
+        let for_everyone = message.from_me && !revoked;
+        let target = id.clone();
+        row = row.child(
+            pill("delete", Icon::LucideTrash2, "Delete", true).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.strip = None;
+                    this.rows_dirty = true;
+                    this.delete_confirm = Some(DeleteTarget {
+                        id: target.clone(),
+                        for_everyone,
+                    });
+                    cx.notify();
+                },
+            )),
+        );
+        row.into_any_element()
+    }
+
+    /// The header's avatar: the contact photo, else the WhatsApp picture,
+    /// else the initials.
+    fn header_avatar(&self, theme: Theme, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let colors = theme::colors(theme);
+        let mut photo = None;
+        if let Some(uri) = &self.peer.photo_uri {
+            self.photos.update(cx, |photos, cx| photos.want(uri, cx));
+            photo = self.photos.read(cx).photo(uri);
+        }
+        if photo.is_none() {
+            let picture_id = self.peer.picture_id.as_deref();
+            let chat = self.chat.as_str();
+            self.avatars
+                .update(cx, |avatars, cx| avatars.want(chat, picture_id, cx));
+            photo = self.avatars.read(cx).picture(chat);
+        }
+        let monogram = if self.is_group {
+            SharedString::default()
+        } else {
+            self.peer.initials.clone()
+        };
+        photo_avatar(theme, monogram, 36.0, colors.green, photo).into_any_element()
+    }
+
+    /// The bar above the composer while replying or editing.
+    fn compose_context(&self, theme: Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let colors = theme::colors(theme);
+        let (title, preview): (SharedString, SharedString) = if self.editing.is_some() {
+            ("Edit message".into(), "Send saves the new text".into())
+        } else {
+            let reply = self.reply_to.as_ref()?;
+            (
+                format!("Replying to {}", reply.author).into(),
+                reply.preview.clone(),
+            )
+        };
+        Some(
+            div()
+                .flex_none()
+                .mx(px(12.0))
+                .px(px(12.0))
+                .py(px(6.0))
+                .rounded(px(12.0))
+                .bg(colors.secondary_background)
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(3.0))
+                        .h(px(32.0))
+                        .rounded_full()
+                        .bg(colors.accent),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(typography::CAPTION.size)
+                                .font_weight(typography::HEADLINE.weight)
+                                .text_color(colors.accent)
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(typography::FOOTNOTE.size)
+                                .text_color(colors.secondary_label)
+                                .child(preview),
+                        ),
+                )
+                .child(
+                    div()
+                        .id("conv-context-close")
+                        .flex_none()
+                        .size(px(32.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            gpui::svg()
+                                .path(Icon::LucideX.path())
+                                .size(px(16.0))
+                                .text_color(colors.secondary_label),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.cancel_compose_context(cx))),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// "Delete for everyone / for me" over the conversation.
+    fn delete_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let target = self.delete_confirm.as_ref()?;
+        let colors = theme::colors(theme);
+        let mut items = Vec::new();
+        if target.for_everyone {
+            let id = target.id.clone();
+            items.push(
+                crate::menu_item(
+                    theme,
+                    "del-everyone",
+                    Icon::LucideTrash2,
+                    "Delete for everyone".into(),
+                    colors.red,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.revoke(&id, cx)))
+                .into_any_element(),
+            );
+        }
+        let id = target.id.clone();
+        items.push(
+            crate::menu_item(
+                theme,
+                "del-me",
+                Icon::LucideTrash2,
+                "Delete for me".into(),
+                colors.red,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.delete_for_me(&id, cx)))
+            .into_any_element(),
+        );
+        items.push(
+            crate::menu_item(
+                theme,
+                "del-cancel",
+                Icon::LucideX,
+                "Cancel".into(),
+                colors.label,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.delete_confirm = None;
+                cx.notify();
+            }))
+            .into_any_element(),
+        );
+        Some(crate::menu_card(
+            theme,
+            "delete-menu",
+            "Delete message?".into(),
+            items,
+            cx.listener(|this, _, _, cx| {
+                this.delete_confirm = None;
+                cx.notify();
+            }),
+        ))
     }
 }
 
@@ -1277,9 +2211,11 @@ impl Render for Conversation {
             .children(switch)
             .child(mute)
             .into_any_element();
-        let header = header_bar(
+        let avatar = self.header_avatar(theme, cx);
+        let header = header_bar_with(
             theme,
             back,
+            Some(avatar),
             self.title.clone(),
             self.subtitle(now),
             Some(trailing),
@@ -1353,15 +2289,21 @@ impl Render for Conversation {
                 }))
         });
 
+        let context = self.compose_context(theme, cx);
+        let overlay = self.delete_overlay(theme, cx);
+
         div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .child(header)
             .child(timeline)
             .children(strip)
             .children(info)
+            .children(context)
             .child(composer)
+            .children(overlay)
     }
 }
 
@@ -1371,6 +2313,18 @@ impl Render for Conversation {
 pub(crate) fn header_bar(
     theme: Theme,
     back: gpui::AnyElement,
+    title: SharedString,
+    subtitle: Option<String>,
+    trailing: Option<gpui::AnyElement>,
+) -> gpui::Div {
+    header_bar_with(theme, back, None, title, subtitle, trailing)
+}
+
+/// [`header_bar`] with an avatar between the back button and the title.
+pub(crate) fn header_bar_with(
+    theme: Theme,
+    back: gpui::AnyElement,
+    avatar: Option<gpui::AnyElement>,
     title: SharedString,
     subtitle: Option<String>,
     trailing: Option<gpui::AnyElement>,
@@ -1385,6 +2339,7 @@ pub(crate) fn header_bar(
         .pt(px(48.0))
         .pb(px(8.0))
         .child(back)
+        .children(avatar)
         .child(
             div()
                 .flex_1()
@@ -1440,10 +2395,6 @@ pub(crate) fn now_ms() -> i64 {
 /// The line under a bubble's text: the time, then "Sending…", "Not sent" or
 /// the delivery ticks for our own messages. Within a minute the time reads
 /// "Now".
-pub fn bubble_meta(item: &Item, now_ms: i64, offset_s: i32) -> String {
-    meta_at(item, now_ms, offset_s)
-}
-
 fn meta_at(item: &Item, now_ms: i64, offset_s: i32) -> String {
     let ts = item.message.timestamp_ms;
     let time = if (0..60_000).contains(&(now_ms - ts)) {
@@ -1460,14 +2411,335 @@ fn meta_at(item: &Item, now_ms: i64, offset_s: i32) -> String {
     }
 }
 
-/// `+905321234567@s.whatsapp.net` shown as `+905321234567`.
-fn sender_label(jid: &str) -> String {
-    let user = jid.split(['@', ':']).next().unwrap_or("");
-    if user.is_empty() {
-        String::new()
-    } else {
-        format!("+{user}")
+/// The line under a bubble: a star, "Edited", the time and ticks, and
+/// "Played" once a voice note I sent was heard.
+fn meta_line(
+    item: &Item,
+    meta: Option<&MessageMeta>,
+    starred: bool,
+    now_ms: i64,
+    offset_s: i32,
+) -> String {
+    let mut line = meta_at(item, now_ms, offset_s);
+    let failed_or_pending = matches!(
+        item.state,
+        ItemState::Pending { .. } | ItemState::Failed { .. }
+    );
+    if let Some(meta) = meta
+        && !failed_or_pending
+    {
+        if meta.edited_ms.is_some() && !meta.revoked {
+            line = format!("Edited · {line}");
+        }
+        let voice = meta.media.as_ref().is_some_and(|m| m.voice_note);
+        if item.message.from_me && voice && meta.status == Some(DeliveryStatus::Played) {
+            line.push_str(" · Played");
+        }
     }
+    if starred {
+        line = format!("★ {line}");
+    }
+    line
+}
+
+/// Whether my message may still be edited: a confirmed text, or a photo,
+/// video or document caption, within WhatsApp's 15 minutes.
+fn can_edit(item: &Item, meta: Option<&MessageMeta>, now_ms: i64) -> bool {
+    let message = &item.message;
+    let confirmed = !matches!(
+        item.state,
+        ItemState::Pending { .. } | ItemState::Failed { .. }
+    );
+    let editable = match &message.body {
+        MessageBody::Text(_) => true,
+        MessageBody::Media { kind, .. } => {
+            matches!(
+                kind,
+                MediaKind::Image | MediaKind::Video | MediaKind::Document
+            )
+        }
+        MessageBody::Unsupported => false,
+    };
+    message.from_me
+        && confirmed
+        && editable
+        && !meta.is_some_and(|m| m.revoked)
+        && now_ms.saturating_sub(message.timestamp_ms) <= EDIT_WINDOW_MS
+}
+
+/// The one-line preview of a message for the reply bar.
+fn preview_of(body: &MessageBody, meta: Option<&MessageMeta>) -> String {
+    if let Some(location) = meta.and_then(|m| m.location.as_ref()) {
+        return location
+            .name
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| "Location".to_owned());
+    }
+    if let Some(contact) = meta.and_then(|m| m.contact.as_ref()) {
+        return format!("Contact · {}", contact.display_name);
+    }
+    body_preview(body, 80).unwrap_or_else(|| "Message".to_owned())
+}
+
+/// A hash of what the meta changes in a bubble (the meta holds a float, so
+/// it has no `Hash` of its own).
+fn meta_key(meta: Option<&MessageMeta>) -> u64 {
+    let Some(meta) = meta else {
+        return 0;
+    };
+    let quoted = meta
+        .quoted
+        .as_ref()
+        .map(|q| (&q.id, q.sender.as_deref(), q.preview.as_deref()));
+    let media = meta.media.as_ref().map(|m| {
+        (
+            m.file_name.as_deref(),
+            m.seconds,
+            m.width,
+            m.height,
+            m.pages,
+            m.voice_note,
+            m.thumbnail,
+        )
+    });
+    let location = meta.location.as_ref().map(|l| {
+        (
+            l.latitude.to_bits(),
+            l.longitude.to_bits(),
+            l.name.as_deref(),
+            l.address.as_deref(),
+            l.live,
+        )
+    });
+    let contact = meta.contact.as_ref().map(|c| (&c.display_name, &c.vcard));
+    key_of((
+        1u8,
+        quoted,
+        meta.forwarded,
+        meta.edited_ms,
+        meta.revoked,
+        meta.status,
+        meta.sender_name.as_deref(),
+        media,
+        location,
+        contact,
+        meta.starred,
+    ))
+}
+
+/// The image format of thumbnail bytes, from their magic number.
+fn sniff_format(bytes: &[u8]) -> Option<ImageFormat> {
+    match bytes {
+        [0xFF, 0xD8, 0xFF, ..] => Some(ImageFormat::Jpeg),
+        [0x89, b'P', b'N', b'G', ..] => Some(ImageFormat::Png),
+        [
+            b'R',
+            b'I',
+            b'F',
+            b'F',
+            _,
+            _,
+            _,
+            _,
+            b'W',
+            b'E',
+            b'B',
+            b'P',
+            ..,
+        ] => Some(ImageFormat::Webp),
+        [b'G', b'I', b'F', ..] => Some(ImageFormat::Gif),
+        _ => None,
+    }
+}
+
+/// The size a preview thumbnail is drawn at: 240 px wide (180 for stickers
+/// and squares), its height from the media's aspect ratio.
+fn thumb_size(media: Option<&MediaMeta>) -> (f32, f32) {
+    const WIDTH: f32 = 240.0;
+    match media.and_then(|m| Some((m.width?, m.height?))) {
+        Some((w, h)) if w > 0 && h > 0 => {
+            let height = WIDTH * h as f32 / w as f32;
+            (WIDTH, height.clamp(90.0, 320.0))
+        }
+        _ => (180.0, 180.0),
+    }
+}
+
+fn media_icon(kind: MediaKind, media: Option<&MediaMeta>) -> Icon {
+    match kind {
+        MediaKind::Image | MediaKind::Sticker => Icon::LucideImage,
+        MediaKind::Video => Icon::LucideVideo,
+        MediaKind::Audio if media.is_some_and(|m| m.voice_note) => Icon::LucideMic,
+        MediaKind::Audio => Icon::LucideHeadphones,
+        MediaKind::Document => Icon::LucidePaperclip,
+    }
+}
+
+/// The card's first line: a document's file name, else what it is.
+fn media_title(kind: MediaKind, media: Option<&MediaMeta>) -> String {
+    if kind == MediaKind::Document
+        && let Some(name) = media
+            .and_then(|m| m.file_name.as_deref())
+            .filter(|n| !n.trim().is_empty())
+    {
+        return name.to_owned();
+    }
+    match kind {
+        MediaKind::Audio if !media.is_some_and(|m| m.voice_note) => "Audio".to_owned(),
+        MediaKind::Video if media.is_some_and(|m| m.animated) => "GIF".to_owned(),
+        _ => media_label(kind).to_owned(),
+    }
+}
+
+/// The card's second line: duration, pages, size, view once, and the
+/// download state.
+fn media_details(size: u64, media: Option<&MediaMeta>, status: &str) -> String {
+    let mut parts = Vec::new();
+    if let Some(media) = media {
+        if let Some(seconds) = media.seconds {
+            parts.push(duration_label(seconds));
+        }
+        if let Some(pages) = media.pages {
+            parts.push(format!("{pages} page{}", if pages == 1 { "" } else { "s" }));
+        }
+    }
+    parts.push(format_size(size));
+    if media.is_some_and(|m| m.view_once) {
+        parts.push("View once".to_owned());
+    }
+    if !status.is_empty() {
+        parts.push(status.to_owned());
+    }
+    parts.join(" · ")
+}
+
+/// The first phone number of a vCard (`TEL;TYPE=CELL:+90 532 …`).
+fn vcard_phone(vcard: &str) -> Option<String> {
+    vcard.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        // `TEL`, `TEL;TYPE=CELL` or a grouped `item1.TEL;waid=…`.
+        let name = key
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_uppercase();
+        let is_tel = name == "TEL" || name.ends_with(".TEL");
+        let value = value.trim();
+        (is_tel && !value.is_empty()).then(|| value.to_owned())
+    })
+}
+
+/// `41.00820, 28.97840`.
+fn coordinates(location: &Location) -> String {
+    format!("{:.5}, {:.5}", location.latitude, location.longitude)
+}
+
+/// A shared location: its name, address and coordinates.
+fn location_card(
+    theme: Theme,
+    location: &Location,
+    text: gpui::Hsla,
+    quiet: gpui::Hsla,
+) -> gpui::AnyElement {
+    let colors = theme::colors(theme);
+    let title = location
+        .name
+        .clone()
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| {
+            if location.live {
+                "Live location".to_owned()
+            } else {
+                "Location".to_owned()
+            }
+        });
+    let mut lines = vec![];
+    if let Some(address) = location.address.as_deref().filter(|a| !a.trim().is_empty()) {
+        lines.push(address.to_owned());
+    }
+    lines.push(coordinates(location));
+    if location.live {
+        lines.push("Live location".to_owned());
+    }
+    info_card(
+        Icon::LucideMapPin,
+        title,
+        lines,
+        colors.label.opacity(0.08),
+        text,
+        quiet,
+    )
+}
+
+/// A shared contact card: the name and its first number.
+fn contact_card(
+    theme: Theme,
+    contact: &SharedContact,
+    text: gpui::Hsla,
+    quiet: gpui::Hsla,
+) -> gpui::AnyElement {
+    let colors = theme::colors(theme);
+    let mut lines = vec![];
+    if let Some(phone) = vcard_phone(&contact.vcard) {
+        lines.push(phone);
+    }
+    lines.push("Contact card".to_owned());
+    info_card(
+        Icon::LucideContact,
+        contact.display_name.clone(),
+        lines,
+        colors.label.opacity(0.08),
+        text,
+        quiet,
+    )
+}
+
+fn info_card(
+    icon: Icon,
+    title: String,
+    lines: Vec<String>,
+    fill: gpui::Hsla,
+    text: gpui::Hsla,
+    quiet: gpui::Hsla,
+) -> gpui::AnyElement {
+    div()
+        .px(px(10.0))
+        .py(px(8.0))
+        .rounded(radius::CARD)
+        .bg(fill)
+        .flex()
+        .items_start()
+        .gap(px(8.0))
+        .child(
+            gpui::svg()
+                .flex_none()
+                .path(icon.path())
+                .size(px(20.0))
+                .text_color(text),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .text_size(typography::BODY.size)
+                        .font_weight(typography::HEADLINE.weight)
+                        .text_color(text)
+                        .child(title),
+                )
+                .children(lines.into_iter().map(|line| {
+                    div()
+                        .text_size(typography::CAPTION.size)
+                        .text_color(quiet)
+                        .child(line)
+                })),
+        )
+        .into_any_element()
 }
 
 /// The gpui image format for a MIME type, `None` when it cannot be shown.
@@ -1604,20 +2876,159 @@ mod tests {
             meta_at(&item(T, false, ItemState::Sent), later, 3 * 3600),
             "17:05"
         );
+        assert_eq!(meta_at(&item(T, false, ItemState::Sent), later, 0), "14:05");
+    }
+
+    fn with_meta(item: &Item, meta: MessageMeta) -> (Item, MessageMeta) {
+        (item.clone(), meta)
+    }
+
+    #[test]
+    fn meta_lines_show_stars_edits_and_played_voice_notes() {
+        let later = T + 3_600_000;
+        let (sent, edited) = with_meta(
+            &item(T, true, ItemState::Delivered),
+            MessageMeta {
+                edited_ms: Some(T + 1),
+                ..MessageMeta::default()
+            },
+        );
         assert_eq!(
-            bubble_meta(&item(T, false, ItemState::Sent), later, 0),
-            "14:05"
+            meta_line(&sent, Some(&edited), false, later, 0),
+            "Edited · 14:05 ✓✓"
+        );
+        assert_eq!(meta_line(&sent, None, true, later, 0), "★ 14:05 ✓✓");
+        let voice = MessageMeta {
+            status: Some(DeliveryStatus::Played),
+            media: Some(MediaMeta {
+                voice_note: true,
+                ..MediaMeta::default()
+            }),
+            ..MessageMeta::default()
+        };
+        let read = item(T, true, ItemState::Read);
+        assert_eq!(
+            meta_line(&read, Some(&voice), false, later, 0),
+            "14:05 ✓✓ · Played"
+        );
+        let pending = item(T, true, ItemState::Pending { local_id: 1 });
+        assert_eq!(
+            meta_line(&pending, Some(&edited), false, later, 0),
+            "Sending…"
         );
     }
 
     #[test]
-    fn sender_and_body_text() {
-        assert_eq!(sender_label("905321234567@s.whatsapp.net"), "+905321234567");
+    fn only_my_recent_texts_and_captions_can_be_edited() {
+        let mine = item(T, true, ItemState::Sent);
+        assert!(can_edit(&mine, None, T + EDIT_WINDOW_MS));
+        assert!(!can_edit(&mine, None, T + EDIT_WINDOW_MS + 1));
+        assert!(!can_edit(&item(T, false, ItemState::Sent), None, T));
+        assert!(!can_edit(
+            &item(T, true, ItemState::Pending { local_id: 1 }),
+            None,
+            T
+        ));
+        let revoked = MessageMeta {
+            revoked: true,
+            ..MessageMeta::default()
+        };
+        assert!(!can_edit(&mine, Some(&revoked), T));
+        let mut voice = mine.clone();
+        voice.message.body = MessageBody::Media {
+            kind: MediaKind::Audio,
+            caption: None,
+            mime: "audio/ogg".into(),
+            size: 1,
+        };
+        assert!(!can_edit(&voice, None, T));
+        let mut photo = mine;
+        photo.message.body = MessageBody::Media {
+            kind: MediaKind::Image,
+            caption: Some("sea".into()),
+            mime: "image/jpeg".into(),
+            size: 1,
+        };
+        assert!(can_edit(&photo, None, T));
+    }
+
+    #[test]
+    fn meta_keys_follow_what_the_bubble_shows() {
+        let plain = MessageMeta::default();
+        let starred = MessageMeta {
+            starred: true,
+            ..MessageMeta::default()
+        };
+        assert_eq!(meta_key(None), 0);
+        assert_eq!(meta_key(Some(&plain)), meta_key(Some(&plain)));
+        assert_ne!(meta_key(Some(&plain)), meta_key(Some(&starred)));
+    }
+
+    #[test]
+    fn thumbnails_media_lines_and_cards() {
         assert_eq!(
-            sender_label("905321234567:12@s.whatsapp.net"),
-            "+905321234567"
+            sniff_format(&[0xFF, 0xD8, 0xFF, 0xE0]),
+            Some(ImageFormat::Jpeg)
         );
-        assert_eq!(sender_label(""), "");
+        assert_eq!(sniff_format(b"\x89PNG\r\n"), Some(ImageFormat::Png));
+        assert_eq!(
+            sniff_format(b"RIFF\0\0\0\0WEBPVP8 "),
+            Some(ImageFormat::Webp)
+        );
+        assert_eq!(sniff_format(b"nope"), None);
+        let wide = MediaMeta {
+            width: Some(1600),
+            height: Some(900),
+            ..MediaMeta::default()
+        };
+        assert_eq!(thumb_size(Some(&wide)), (240.0, 135.0));
+        assert_eq!(thumb_size(None), (180.0, 180.0));
+        let doc = MediaMeta {
+            file_name: Some("rapor.pdf".into()),
+            pages: Some(3),
+            ..MediaMeta::default()
+        };
+        assert_eq!(media_title(MediaKind::Document, Some(&doc)), "rapor.pdf");
+        assert_eq!(
+            media_details(2048, Some(&doc), "Tap to load"),
+            "3 pages · 2 KB · Tap to load"
+        );
+        let voice = MediaMeta {
+            voice_note: true,
+            seconds: Some(42),
+            ..MediaMeta::default()
+        };
+        assert_eq!(media_title(MediaKind::Audio, Some(&voice)), "Voice message");
+        assert_eq!(media_title(MediaKind::Audio, None), "Audio");
+        assert_eq!(media_details(12, Some(&voice), ""), "0:42 · 12 B");
+        assert_eq!(
+            vcard_phone("BEGIN:VCARD\nFN:Ada\nitem1.TEL;waid=90:+90 532 123 45 67\nEND:VCARD"),
+            Some("+90 532 123 45 67".into())
+        );
+        assert_eq!(vcard_phone("TEL;TYPE=CELL:+1 555"), Some("+1 555".into()));
+        assert_eq!(vcard_phone("FN:Ada"), None);
+        let location = Location {
+            latitude: 41.0082,
+            longitude: 28.9784,
+            ..Location::default()
+        };
+        assert_eq!(coordinates(&location), "41.00820, 28.97840");
+        assert_eq!(
+            preview_of(
+                &MessageBody::Unsupported,
+                Some(&MessageMeta {
+                    location: Some(location),
+                    ..MessageMeta::default()
+                })
+            ),
+            "Location"
+        );
+        assert_eq!(preview_of(&MessageBody::Text("hi".into()), None), "hi");
+        assert_eq!(preview_of(&MessageBody::Unsupported, None), "Message");
+    }
+
+    #[test]
+    fn body_text_labels() {
         assert_eq!(
             body_text(&MessageBody::Media {
                 kind: MediaKind::Image,

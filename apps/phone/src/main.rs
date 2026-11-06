@@ -1094,7 +1094,7 @@ impl PhoneApp {
         let now = self.checklist(cx);
         if self.setup_seen != Some(now) {
             if let Some(seen) = self.setup_seen {
-                let mut reopened = std::mem::take(&mut self.setup_reopened);
+                let mut reopened = self.setup_reopened.clone();
                 for item in now.reopened_since(&seen) {
                     if !reopened.contains(&item) {
                         reopened.push(item);

@@ -1541,6 +1541,18 @@ pub(crate) struct HistoryEdit {
     pub line_prefix: &'static str,
 }
 
+impl PhoneApp {
+    /// A history Edit/Delete control was pressed: the Contact sheet's ids start with
+    /// `sheet-c`, the Number sheet's with `sheet-n`.
+    fn history_edit_act(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if id.starts_with("sheet-c") {
+            self.contact_sheet_act(id, window, cx);
+        } else {
+            self.number_sheet_act(id, window, cx);
+        }
+    }
+}
+
 /// The line index a delete button id `{prefix}{i}` stands for.
 pub(crate) fn history_index(id: &str, prefix: &str) -> Option<usize> {
     id.strip_prefix(prefix)?.parse().ok()
@@ -1588,7 +1600,7 @@ pub(crate) fn history_section(
                         let id = id.clone();
                         cx.listener(move |this, _, window, cx| {
                             this.presses.down(id.clone());
-                            this.number_sheet_act(&id, window, cx);
+                            this.history_edit_act(&id, window, cx);
                         })
                     })
                     .child(touch_surface(PhoneApp::touch_listener(cx, Some(id))))
@@ -1652,7 +1664,7 @@ pub(crate) fn history_section(
                 MouseButton::Left,
                 cx.listener(move |this, _, window, cx| {
                     this.presses.down(id);
-                    this.number_sheet_act(id, window, cx);
+                    this.history_edit_act(id, window, cx);
                 }),
             )
             .child(touch_surface(PhoneApp::touch_listener(cx, Some(id.into()))))

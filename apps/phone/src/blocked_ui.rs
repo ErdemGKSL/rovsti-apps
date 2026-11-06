@@ -684,6 +684,7 @@ impl PhoneApp {
             Ok(number) => {
                 if self.backend.read(cx).is_blocked(&number) {
                     self.blocked.error = Some("Already blocked");
+                    rovsti_ui::haptics::perform(window, HapticFeedback::Reject);
                     return;
                 }
                 self.blocked.field.update(cx, |f, cx| f.clear(cx));

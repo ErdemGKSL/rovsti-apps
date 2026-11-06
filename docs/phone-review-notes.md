@@ -19,3 +19,22 @@ are covered by tests and commits; this file records what was deliberately left a
   `dev.rovsti.phone.perf/dev.rovsti.phone.MainActivity`.
 - **Eject paths.** `build.gradle.kts` derives `phoneAppDir` from the Gradle project directory;
   `scripts/fix-eject-paths.sh` re-applies that after a `gpuiforge platform eject android`.
+
+## Utilities feedback audit (R4)
+
+Audit of U1-U34 for a pill on success and failure, the haptic (Confirm for completions, Selection
+tick for toggles and opening a system sheet), a confirm or Undo on destructive actions, and the
+desktop wording through `Outcome::why_not`.
+
+| Utility | Gap | Fix |
+|---|---|---|
+| U5 Export call log (CSV) | Only `failed()` was checked, so desktop (`NotAvailable`) showed nothing. | Any outcome other than Done now shows `why_not("Couldn't export")`. |
+| U16 Export one person's calls | Same as U5. | Same fix in `person_ui.rs`. |
+| U34 / U27 Blocked add field | "Already blocked" gave no haptic, while the other refusals use Reject. | Reject haptic added. |
+| U28 Stats CSV | The pill "Exported n people" shows when the picker opens; the picker's own answer ("Call history exported", "Export cancelled", "Couldn't export") follows. | Left alone: the later pill corrects it, and it matches the other exports. |
+| U26, U27 Share, U33 Share all, U18, U22 | Share opens the system sheet, so no success pill; they use the Selection tick and `why_not("Couldn't open the share sheet")` on failure. | No change. |
+| U2, U9, U10 Photo save/share/set/remove | Pill, Confirm haptic and the remove confirm sheet are in place; desktop uses `why_not`. | No change. |
+| U12, U22, U24, U27, U30 Destructive actions | Confirm sheet and/or Undo pill exist on each (multi-delete, Clear all, Delete all, Unblock all, note delete). | No change. |
+| U13, U14, U31, U32 | Pill or status text plus Confirm/Selection haptic present. | No change. |
+
+Test added: `Outcome::why_not` wording (`backend.rs`).

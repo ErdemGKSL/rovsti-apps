@@ -1892,6 +1892,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn why_not_words_the_desktop_case() {
+        assert_eq!(
+            Outcome::NotAvailable.why_not("x"),
+            "Not available on this platform"
+        );
+        assert_eq!(
+            Outcome::Declined.why_not("Couldn't export"),
+            "Couldn't export"
+        );
+        assert!(Outcome::Declined.failed() && !Outcome::NotAvailable.failed());
+    }
+
+    #[test]
     fn the_size_answer_reads_bare_or_in_an_envelope() {
         let bare = r#"{"w":4000,"h":3000}"#;
         assert!(matches!(decode_size(Ok(bare.to_owned())), Ok((4000, 3000))));

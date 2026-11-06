@@ -342,6 +342,25 @@ that accepts photo writes (the system Contacts app does).
 | R3-U22c | Confirm Clear all. | Keys 2-9 are free, pill "Speed dial cleared" with Undo; Undo restores every entry. | | |
 | R3-U24 | Recents, Delete all, confirm. | Pill with Undo; Undo restores the whole log. | | |
 
+## Round 4 utilities (U15, U26-U28, U30-U34)
+
+| ID | Steps | Expected | Result | Notes |
+|---|---|---|---|---|
+| R4-U15 | Recents with calls on several days, scroll down slowly. | A small capsule under the filter row shows Today, Yesterday, a weekday or a date, and is pushed up and swapped at each day change. Hidden at the top, in select mode and with an empty list. Touches pass through to the rows. | | |
+| R4-U26 | Open a call's details sheet, tap Share. | The share sheet opens with "Call with <name>" and the details (and note). Copy still says "Details copied". | | |
+| R4-U27a | Settings, Blocked numbers, tap Share (hidden when the list is empty). | The share sheet opens with "Blocked numbers" and one line per number. | | |
+| R4-U27b | Tap Unblock all, then Cancel. | A sheet states the count; Cancel changes nothing. | | |
+| R4-U27c | Unblock all, confirm. | The list empties, pill "Unblocked n numbers" with Undo; Undo blocks them all again with a pill. | | |
+| R4-U28 | Settings, Call statistics, pick a range, Export CSV. | The document picker saves `rovsti-call-stats-<range>-<date>.csv`; pill "Exported n people", or "No calls in this range" for an empty range. | | |
+| R4-U30a | Settings, Call notes. | All notes are listed newest first with the person, date and preview; the empty state reads "No call notes yet. Add one from a call's details." | | |
+| R4-U30b | Search by a word, a name and digits. | The list filters; a tap opens that call's details sheet. | | |
+| R4-U30c | Tap a row's delete glyph. | Pill "Note deleted" with Undo; Undo restores it. | | |
+| R4-U31 | Empty keypad, tap Call with an earlier outgoing call. | The last dialed number fills the field with the status "Tap Call again to redial"; no call yet. A second tap calls. With no outgoing call it says "No recent calls to redial". | | |
+| R4-U32 | Copy text with two numbers ("Office 0212 555 01 01 or mobile 0532 111 22 33"), long-press the field, Paste. | A "Which number?" sheet lists both; choosing one fills the field. A text with one number pastes straight in. | | |
+| R4-U33 | On the Call notes page tap Share all (hidden when empty). | The share sheet opens with every note, newest first, separated by blank lines. | | |
+| R4-U34 | Blocked numbers, paste several numbers into the add field, Block. | All are blocked; pill "Blocked n numbers" (with "already blocked" count if any) with Undo that unblocks them. Emergency numbers are skipped; an emergency-only paste is refused inline. | | |
+| R4-fb | Run every utility above on a desktop preview. | Android-only ones show "Not available on this platform" rather than staying silent. | | |
+
 ## In-call note and copy number
 
 - On a connected or held call with a number, tap "Note" under the status line, type, press Done: the pill says "Note saved" and the capsule shows a check.

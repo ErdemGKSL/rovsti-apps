@@ -64,16 +64,16 @@ New gaps found in this audit:
 | U24 | Delete all call history gains Undo | done R3 |
 | U29 | Keypad "Add to contacts" for an unknown typed number | done (pre-existing `kp-add`) |
 | U25 | Recents long-press name to copy | dropped (covered by `rm-copy`) |
-| U31 | Redial: Call on an empty keypad fills the last dialed number (second tap calls) | planned R4 (S2, S7) |
-| U32 | Smart paste: clipboard with several numbers opens a "Which number?" chooser | planned R4 (S2, S7) |
-| U26 | Call details: "Share" (text through `share_text`) next to Copy | planned R4 (S1, S3) |
-| U27 | Blocked page: Share the list as text; Unblock all with a confirm and Undo | planned R4 (S1, S3) |
-| U30 | Notes page (Settings > Call notes): list, search, open the call, delete with Undo | planned R4 (S2, S6) |
-| U33 | Notes page: Share all notes as text | planned R4 (S2, S6) |
-| U15 | Recents sticky day capsule (Today, Yesterday, weekday, date) over the list | planned R4 (S1, S5) |
-| U28 | Stats page: Export CSV of per-person totals for the chosen range | planned R4 (S1, S4) |
-| U34 | Blocked page: paste several numbers and block them all at once (with Undo) | planned R4 (S2, S7) |
-| U23 | Haptic and pill feedback audit over every utility | planned R4 (S8) |
+| U31 | Redial: Call on an empty keypad fills the last dialed number (second tap calls) | done R4 |
+| U32 | Smart paste: clipboard with several numbers opens a "Which number?" chooser | done R4 |
+| U26 | Call details: "Share" (text through `share_text`) next to Copy | done R4 |
+| U27 | Blocked page: Share the list as text; Unblock all with a confirm and Undo | done R4 |
+| U30 | Notes page (Settings > Call notes): list, search, open the call, delete with Undo | done R4 |
+| U33 | Notes page: Share all notes as text | done R4 |
+| U15 | Recents sticky day capsule (Today, Yesterday, weekday, date) over the list | done R4 |
+| U28 | Stats page: Export CSV of per-person totals for the chosen range | done R4 |
+| U34 | Blocked page: paste several numbers and block them all at once (with Undo) | done R4 |
+| U23 | Haptic and pill feedback audit over every utility | done R4 |
 | U35 | Recents filter chip "With notes" | backlog R5 |
 | U36 | Contact sheet: "Copy all numbers" / share every number as text | backlog R5 |
 | U37 | In-call: copy the call timer / "Share call summary" after the call ends | backlog R5 |

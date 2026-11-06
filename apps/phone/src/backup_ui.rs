@@ -93,8 +93,9 @@ impl PhoneApp {
                 })
                 .await;
             this.update(cx, |this, cx| {
-                if crate::backend::export_calls(&name, &csv).failed() {
-                    this.show_notice_pill("Couldn't export", None, false, cx);
+                let outcome = crate::backend::export_calls(&name, &csv);
+                if outcome != Outcome::Done {
+                    this.show_notice_pill(outcome.why_not("Couldn't export"), None, false, cx);
                 }
             })
             .ok();

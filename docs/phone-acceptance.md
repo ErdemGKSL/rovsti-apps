@@ -23,6 +23,9 @@ APK: `~/Downloads/rovsti-phone-release.apk` (signed by `CN=ErdemGKSL`, built wit
 | 10 | Close and reopen the app. | Confirmed rows stay Done; when all rows are Done the Setup button stops asking for attention. | | |
 | **D. Outgoing call** | | | | |
 | 11 | Keypad: type a number. Keys react the moment the finger touches. | Digits appear without the layout jumping. | | |
+| 11a | Keypad: type 30 digits on a small (360x640) and a tall phone. | Number font shrinks to 22, then a leading ellipsis keeps the end visible; the number never wraps into the keys and the keys do not move. Layout comes from `rovsti_core::keypad_layout`. | | |
+| 11b | Keypad: type a number with many matches and a valid unsaved number. | Matches and the Add to contacts / Message / WhatsApp chips keep a fixed height (extras collapse into "N more"); nothing overlaps the keys, call row or tab bar and the bottom inset is respected. | | |
+| 11c | Keypad: check Portrait (key 56 and up), Compact (small height) and Landscape (rotate). | Keys stay 36..78; letters under digits show only at key 60 and above; in Landscape the grid sits right and the call row left, all inside the screen. | | |
 | 12 | Tap Call. | "Calling..." then the In-Call screen. The other phone rings. | | |
 | 13 | Answer on the other phone. Talk. | Timer runs. Speaker toggles the audio route. Mute silences you (the other side hears nothing). | | |
 | 14 | Open the in-call keypad and press a digit. | A tone plays to the other side. | | |

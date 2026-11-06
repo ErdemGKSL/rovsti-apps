@@ -39,6 +39,16 @@ Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19),
 - [x] PC19 `apps/phone/src/flight.rs:453-461` | Low | The flying avatar fades its photo while landing on an avatar that shows it (photo, monogram, photo flash).
 - [x] PC20 `apps/phone/src/incall.rs:2137-2144` | Low | The in-call digit line can show 24 digits at 28 px and overflow a 360 px screen.
 
+### Dial keypad layout (PC21)
+
+- [x] PC21 `apps/phone/src/keypad.rs`, `crates/rovsti_core/src/keypad_layout.rs` | High | Typing a number could make the number, matches, action chips and key grid overlap or run off-screen. Fixed by one pure layout budget, `rovsti_core::keypad_layout`, that gives each section its own clipped rect.
+  - Vertical budget, top to bottom: header (inset-aware), number field, matches row, action chips (these flex and shrink or drop first), 3x4 key grid, call/backspace row, 8 px gap, tab bar slot, bottom inset. The grid, call row and tab bar are reserved first.
+  - Key size is the smaller of the width-derived and height-derived sizes, clamped to 36..78.
+  - Modes: Portrait (key 56 and up), Compact (smaller labels, optional rows dropped to keep keys at 36 or more) and Landscape (grid on the right, number, chips and call row on the left).
+  - Letters under digits show at key 60 and above.
+  - Number font shrinks to 22, then shows a leading ellipsis and keeps the end of the number.
+  - Matches and chips have a fixed height; extra matches collapse into "N more".
+
 ## Phone: other pages (PP)
 
 - [x] PP1 `apps/phone/src/sim_ui.rs:343-361` | High | Dismissing the "Call with" SIM sheet while another app waits for a SIM choice leaves `sim.chooser` set; the sheet never shows again and the call is stuck.

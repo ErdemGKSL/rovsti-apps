@@ -43,7 +43,8 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 
 - **Pure-core rule.** Logic that can be tested without a phone goes in `rovsti_core`
   or `rovsti_geo`: phone number matching, the alarm state machine, and later thread
-  merging and search.
+  merging and search. The dial keypad's layout budget is `rovsti_core::keypad_layout`
+  (rects and sizes from viewport, insets and text length); the view only places boxes.
 - **JNI seam.** `gpui_android` keeps its `JavaVM` private, so the Kotlin host passes
   its own through `RovstiBridge.install(app)` and, after the activity loaded the library, `RovstiBridge.attachNative()` → `nativeInit`. Rust
   calls static Kotlin methods that take only strings, ints and bools. Android logic

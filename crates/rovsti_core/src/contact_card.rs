@@ -3,7 +3,7 @@
 
 use crate::{
     avatar,
-    contacts_view::NumberVm,
+    contacts_view::{NumberVm, contact_text},
     names,
     wire::{NameFormat, WireContact},
 };
@@ -44,14 +44,7 @@ impl ContactCard {
     /// Plain text for the share sheet: the name, then one `Label: number`
     /// line per number.
     pub fn share_text(&self) -> String {
-        let mut out = self.name.clone();
-        for number in &self.numbers {
-            out.push('\n');
-            out.push_str(&number.label);
-            out.push_str(": ");
-            out.push_str(&number.display);
-        }
-        out
+        contact_text(&self.name, &self.numbers)
     }
 }
 
@@ -129,6 +122,9 @@ mod tests {
         let text = card.share_text();
         assert!(text.starts_with("Burak Demir\nWork: "), "{text}");
         assert!(text.contains("\nOther: "), "{text}");
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[1], format!("Work: {}", card.numbers[0].display));
     }
 
     #[test]

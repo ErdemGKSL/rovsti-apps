@@ -258,8 +258,69 @@ pub fn without<'a>(
         .collect()
 }
 
+/// One `Label: number` line per number, `Mobile: +90 532 111 22 33`.
+pub fn numbers_text(numbers: &[NumberVm]) -> String {
+    numbers
+        .iter()
+        .map(|n| format!("{}: {}", n.label, n.display))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The name, then [`numbers_text`] on following lines (just the name when
+/// there are no numbers).
+pub fn contact_text(name: &str, numbers: &[NumberVm]) -> String {
+    if numbers.is_empty() {
+        return name.to_owned();
+    }
+    format!("{name}\n{}", numbers_text(numbers))
+}
+
+/// Feedback after copying `n` numbers.
+pub fn copied_numbers_text(n: usize) -> String {
+    if n == 1 {
+        "Copied number".to_owned()
+    } else {
+        format!("Copied {n} numbers")
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    fn vm(label: &str, display: &str) -> super::NumberVm {
+        super::NumberVm {
+            raw: display.replace(' ', ""),
+            display: display.to_owned(),
+            label: label.to_owned(),
+            default: false,
+        }
+    }
+
+    #[test]
+    fn numbers_and_contact_text() {
+        use super::{contact_text, numbers_text};
+        assert_eq!(numbers_text(&[]), "");
+        assert_eq!(contact_text("Ada", &[]), "Ada");
+        let two = [
+            vm("Mobile", "+90 532 111 22 33"),
+            vm("Work", "+44 20 7946 0958"),
+        ];
+        assert_eq!(
+            numbers_text(&two),
+            "Mobile: +90 532 111 22 33\nWork: +44 20 7946 0958"
+        );
+        assert_eq!(
+            contact_text("Ada", &two),
+            "Ada\nMobile: +90 532 111 22 33\nWork: +44 20 7946 0958"
+        );
+    }
+
+    #[test]
+    fn copied_numbers_feedback() {
+        assert_eq!(super::copied_numbers_text(1), "Copied number");
+        assert_eq!(super::copied_numbers_text(3), "Copied 3 numbers");
+    }
+
     #[test]
     fn query_number_accepts_numbers_only() {
         use super::query_number;

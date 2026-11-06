@@ -386,6 +386,39 @@ pub fn share_text(name: &str, all: &Totals, week: &Totals) -> String {
     )
 }
 
+/// Plain text for sharing a statistics page: the range, the summed totals and
+/// one line per person (the first 10). Empty when there is nothing to share.
+pub fn range_share_text(people: &[PersonStat], range: Range) -> String {
+    const MAX_LINES: usize = 10;
+    let mut sum = Totals::default();
+    for p in people {
+        let t = &p.totals;
+        sum.calls += t.calls;
+        sum.incoming += t.incoming;
+        sum.outgoing += t.outgoing;
+        sum.missed += t.missed;
+        sum.talk_s += t.talk_s;
+        sum.longest_s = sum.longest_s.max(t.longest_s);
+    }
+    if sum.calls == 0 {
+        return String::new();
+    }
+    let mut out = format!(
+        "Call statistics, {}\n{}",
+        range.label().to_lowercase(),
+        summary_line(&sum)
+    );
+    for p in people.iter().take(MAX_LINES) {
+        let who = p.name.clone().unwrap_or_else(|| {
+            PhoneNumber::parse(&p.number)
+                .map(|n| crate::call::format_number(&n))
+                .unwrap_or_else(|_| p.number.clone())
+        });
+        out.push_str(&format!("\n{who}: {}", summary_line(&p.totals)));
+    }
+    out
+}
+
 const PEOPLE_CSV_HEADER: &str =
     "name,number,calls,incoming,outgoing,missed,talk_seconds,longest_seconds,range";
 
@@ -704,5 +737,51 @@ mod tests {
             stats_csv_file_name(Range::Weeks8, now, 10 * 3600),
             "rovsti-call-stats-8-weeks-2026-11-07.csv"
         );
+    }
+
+    fn stat_of(name: Option<&str>, number: &str, calls: u32, talk_s: u64) -> PersonStat {
+        PersonStat {
+            key: number.to_owned(),
+            name: name.map(str::to_owned),
+            number: number.to_owned(),
+            totals: Totals {
+                calls,
+                incoming: calls,
+                talk_s,
+                longest_s: talk_s,
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn range_share_text_formats_and_sums() {
+        assert_eq!(range_share_text(&[], Range::Week), "");
+        assert_eq!(
+            range_share_text(&[stat_of(None, "+905551112233", 0, 0)], Range::Week),
+            ""
+        );
+        let text = range_share_text(
+            &[
+                stat_of(Some("Anna Smith"), "+49151", 5, 1920),
+                stat_of(None, "+905551112233", 7, 1920),
+            ],
+            Range::Week,
+        );
+        assert_eq!(
+            text,
+            "Call statistics, this week\n12 calls · 1 h 04 min\nAnna Smith: 5 calls · 32 min\n+90 555 111 22 33: 7 calls · 32 min"
+        );
+    }
+
+    #[test]
+    fn range_share_text_caps_at_ten_people() {
+        let people: Vec<PersonStat> = (0..12)
+            .map(|i| stat_of(Some(&format!("P{i}")), &format!("+4915{i}"), 1, 60))
+            .collect();
+        let text = range_share_text(&people, Range::Days7);
+        assert!(text.starts_with("Call statistics, 7 days\n12 calls · 12 min\n"));
+        assert_eq!(text.lines().count(), 12);
+        assert!(text.contains("P9:") && !text.contains("P10:"));
     }
 }

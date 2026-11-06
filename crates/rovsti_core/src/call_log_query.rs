@@ -17,15 +17,18 @@ pub enum RecentsFilter {
     Incoming,
     Outgoing,
     WhatsApp,
+    /// Calls that have a note; needs the notes, see [`apply_with_notes`].
+    WithNotes,
 }
 
 impl RecentsFilter {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::All,
         Self::Missed,
         Self::Incoming,
         Self::Outgoing,
         Self::WhatsApp,
+        Self::WithNotes,
     ];
 
     pub fn label(self) -> &'static str {
@@ -35,6 +38,7 @@ impl RecentsFilter {
             Self::Incoming => "Incoming",
             Self::Outgoing => "Outgoing",
             Self::WhatsApp => "WhatsApp",
+            Self::WithNotes => "Notes",
         }
     }
 
@@ -45,6 +49,8 @@ impl RecentsFilter {
             Self::Incoming => row.call_type == CallType::Incoming,
             Self::Outgoing => row.call_type == CallType::Outgoing,
             Self::WhatsApp => row.whatsapp,
+            // Needs the notes: only `apply_with_notes` can keep these.
+            Self::WithNotes => false,
         }
     }
 }
@@ -111,9 +117,13 @@ pub fn apply_with_notes(rows: &[RecentsRow], query: &Query, notes: &Notes) -> Ve
     rows.iter()
         .enumerate()
         .filter(|(_, r)| {
-            query.filter.keeps(r)
-                && (matches(r, &query.text)
-                    || notes.mentions(&r.number_raw, r.first_ms, r.last_ms, &folded))
+            let text_ok = matches(r, &query.text)
+                || notes.mentions(&r.number_raw, r.first_ms, r.last_ms, &folded);
+            if query.filter == RecentsFilter::WithNotes {
+                text_ok && notes.has_note(&r.number_raw, r.first_ms, r.last_ms)
+            } else {
+                query.filter.keeps(r) && text_ok
+            }
         })
         .map(|(i, _)| i)
         .collect()
@@ -274,6 +284,83 @@ pub fn person_export(
     ))
 }
 
+/// How old a call must be to be pruned from the log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PruneAge {
+    Days30,
+    Days90,
+    Year,
+}
+
+impl PruneAge {
+    pub const ALL: [Self; 3] = [Self::Days30, Self::Days90, Self::Year];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Days30 => "Older than 30 days",
+            Self::Days90 => "Older than 90 days",
+            Self::Year => "Older than 1 year",
+        }
+    }
+
+    fn days(self) -> i64 {
+        match self {
+            Self::Days30 => 30,
+            Self::Days90 => 90,
+            Self::Year => 365,
+        }
+    }
+
+    /// Calls that started before this instant are older (`now_ms` minus the age).
+    pub fn cutoff_ms(self, now_ms: i64) -> i64 {
+        now_ms.saturating_sub(self.days() * 86_400_000)
+    }
+
+    /// The age in the confirmation text: `30 days`, `1 year`.
+    fn span(self) -> &'static str {
+        match self {
+            Self::Days30 => "30 days",
+            Self::Days90 => "90 days",
+            Self::Year => "1 year",
+        }
+    }
+}
+
+/// Log ids and WhatsApp call ids of the calls that started strictly before
+/// `cutoff_ms`.
+pub fn ids_older_than(
+    entries: &[CallLogEntry],
+    extras: &[ExtraCall],
+    cutoff_ms: i64,
+) -> (Vec<i64>, Vec<String>) {
+    let log = entries
+        .iter()
+        .filter(|e| e.date_ms < cutoff_ms)
+        .map(|e| e.id)
+        .collect();
+    let wa = extras
+        .iter()
+        .filter(|x| x.started_ms < cutoff_ms)
+        .map(|x| x.call_id.clone())
+        .collect();
+    (log, wa)
+}
+
+/// Title and body of the confirmation before pruning `count` calls.
+pub fn prune_text(age: PruneAge, count: usize) -> (String, String) {
+    let body = if count == 1 {
+        "1 call will be removed from this phone's call log.".to_owned()
+    } else {
+        format!("{count} calls will be removed from this phone's call log.")
+    };
+    (format!("Delete calls older than {}?", age.span()), body)
+}
+
+/// Shown when there is nothing to prune.
+pub fn prune_none_text(age: PruneAge) -> String {
+    format!("No calls older than {}", age.span())
+}
+
 /// What to show when [`apply`] finds nothing.
 pub fn empty_text(query: &Query) -> String {
     let text = query.text.trim();
@@ -286,6 +373,7 @@ pub fn empty_text(query: &Query) -> String {
         RecentsFilter::Incoming => "No incoming calls".to_owned(),
         RecentsFilter::Outgoing => "No outgoing calls".to_owned(),
         RecentsFilter::WhatsApp => "No WhatsApp calls".to_owned(),
+        RecentsFilter::WithNotes => "No calls with notes".to_owned(),
     }
 }
 
@@ -506,8 +594,11 @@ mod tests {
         assert_eq!(run(RecentsFilter::Outgoing), vec![2]);
         assert_eq!(run(RecentsFilter::WhatsApp), vec![3]);
         assert_eq!(RecentsFilter::default(), RecentsFilter::All);
-        assert_eq!(RecentsFilter::ALL.len(), 5);
+        assert_eq!(RecentsFilter::ALL.len(), 6);
         assert_eq!(RecentsFilter::WhatsApp.label(), "WhatsApp");
+        assert_eq!(RecentsFilter::WithNotes.label(), "Notes");
+        // Plain apply has no notes, so nothing passes.
+        assert!(run(RecentsFilter::WithNotes).is_empty());
     }
 
     #[test]
@@ -709,6 +800,90 @@ mod tests {
         assert_eq!(
             apply_with_notes(&rows, &q("i", RecentsFilter::All), &n),
             apply(&rows, &q("i", RecentsFilter::All))
+        );
+    }
+
+    #[test]
+    fn with_notes_filter_needs_a_note_with_or_without_text() {
+        let mut rows = sample();
+        rows[2].first_ms = 5_000;
+        rows[2].last_ms = 5_000;
+        let n = notes_of(vec![note("05321112233", 5_000, "Invoice")]);
+        let notes_only = q("", RecentsFilter::WithNotes);
+        assert_eq!(apply_with_notes(&rows, &notes_only, &n), [2]);
+        // Text matches by name/number or by the note.
+        assert_eq!(
+            apply_with_notes(&rows, &q("invoice", RecentsFilter::WithNotes), &n),
+            [2]
+        );
+        assert_eq!(
+            apply_with_notes(&rows, &q("532", RecentsFilter::WithNotes), &n),
+            [2]
+        );
+        assert!(apply_with_notes(&rows, &q("nothing", RecentsFilter::WithNotes), &n).is_empty());
+        assert!(apply_with_notes(&rows, &notes_only, &Notes::default()).is_empty());
+        assert!(apply(&rows, &notes_only).is_empty());
+        assert_eq!(empty_text(&notes_only), "No calls with notes");
+    }
+
+    #[test]
+    fn prune_age_cutoffs() {
+        let now = 1_000_000_000_000;
+        assert_eq!(PruneAge::ALL.len(), 3);
+        assert_eq!(PruneAge::Days30.cutoff_ms(now), now - 30 * 86_400_000);
+        assert_eq!(PruneAge::Days90.cutoff_ms(now), now - 90 * 86_400_000);
+        assert_eq!(PruneAge::Year.cutoff_ms(now), now - 365 * 86_400_000);
+        assert_eq!(PruneAge::Days30.label(), "Older than 30 days");
+        assert_eq!(PruneAge::Days90.label(), "Older than 90 days");
+        assert_eq!(PruneAge::Year.label(), "Older than 1 year");
+    }
+
+    #[test]
+    fn ids_older_than_keeps_the_boundary() {
+        let e = |id, date_ms| CallLogEntry {
+            id,
+            date_ms,
+            ..Default::default()
+        };
+        let x = |id: &str, started_ms| ExtraCall {
+            number_raw: "+1".into(),
+            started_ms,
+            duration_s: 0,
+            missed: false,
+            outgoing: false,
+            label: None,
+            call_id: id.into(),
+        };
+        let (log, wa) = ids_older_than(
+            &[e(1, 99), e(2, 100), e(3, 101)],
+            &[x("a", 99), x("b", 100), x("c", 101)],
+            100,
+        );
+        assert_eq!(log, [1]);
+        assert_eq!(wa, ["a"]);
+        let (log, wa) = ids_older_than(&[], &[], 100);
+        assert!(log.is_empty() && wa.is_empty());
+    }
+
+    #[test]
+    fn prune_texts_singular_and_plural() {
+        assert_eq!(
+            prune_text(PruneAge::Days30, 42),
+            (
+                "Delete calls older than 30 days?".to_owned(),
+                "42 calls will be removed from this phone's call log.".to_owned()
+            )
+        );
+        assert_eq!(
+            prune_text(PruneAge::Year, 1),
+            (
+                "Delete calls older than 1 year?".to_owned(),
+                "1 call will be removed from this phone's call log.".to_owned()
+            )
+        );
+        assert_eq!(
+            prune_none_text(PruneAge::Days90),
+            "No calls older than 90 days"
         );
     }
 

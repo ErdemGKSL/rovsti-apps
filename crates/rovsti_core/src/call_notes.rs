@@ -157,13 +157,32 @@ impl Notes {
         if folded_text.is_empty() {
             return None;
         }
-        let wanted = parse_number(number)?;
+        self.in_window(number, first_ms, last_ms)
+            .find(|n| fold(&n.text).contains(folded_text))
+    }
+
+    /// Whether any note (whatever its text) belongs to a call of `number`
+    /// that spanned `first_ms..=last_ms`, with the same window and number
+    /// match as [`Self::matching`].
+    pub fn has_note(&self, number: &str, first_ms: i64, last_ms: i64) -> bool {
+        self.in_window(number, first_ms, last_ms).next().is_some()
+    }
+
+    /// The notes of `number` inside the call window, in stored order.
+    fn in_window<'a>(
+        &'a self,
+        number: &str,
+        first_ms: i64,
+        last_ms: i64,
+    ) -> impl Iterator<Item = &'a CallNote> + 'a {
+        let wanted = parse_number(number);
         let lo = first_ms.saturating_sub(MATCH_WINDOW_MS);
         let hi = last_ms.saturating_add(MATCH_WINDOW_MS);
-        self.notes.iter().find(|n| {
-            (lo..=hi).contains(&n.at_ms)
-                && fold(&n.text).contains(folded_text)
-                && parse_number(&n.number).is_some_and(|p| p.matches(&wanted))
+        self.notes.iter().filter(move |n| {
+            wanted.as_ref().is_some_and(|w| {
+                (lo..=hi).contains(&n.at_ms)
+                    && parse_number(&n.number).is_some_and(|p| p.matches(w))
+            })
         })
     }
 
@@ -743,5 +762,31 @@ Anna Smith, Thu 5 Nov 2026, 14:32\nBring the invoice\nand the key\n\n\
                 .all_text(names, 3600)
                 .contains("Thu 5 Nov 2026, 15:32")
         );
+    }
+
+    #[test]
+    fn has_note_window_number_and_text() {
+        let at = 10_000_000;
+        let n = Notes {
+            schema: 1,
+            notes: vec![CallNote {
+                number: "+905551234567".into(),
+                at_ms: at,
+                text: "x".into(),
+                edited_ms: at,
+            }],
+        };
+        let w = MATCH_WINDOW_MS;
+        assert!(n.has_note("+905551234567", at + w, at + w));
+        assert!(!n.has_note("+905551234567", at + w + 1, at + w + 1));
+        assert!(n.has_note("+905551234567", at - w, at - w));
+        assert!(!n.has_note("+905551234567", at - w - 1, at - w - 1));
+        assert!(n.has_note("+905551234567", 0, at * 2));
+        // National form of the same number.
+        assert!(n.has_note("0555 123 45 67", at, at));
+        assert!(!n.has_note("+905559999999", at, at));
+        assert!(!n.has_note("", at, at));
+        assert!(!n.has_note("private", at, at));
+        assert!(!Notes::default().has_note("+905551234567", at, at));
     }
 }

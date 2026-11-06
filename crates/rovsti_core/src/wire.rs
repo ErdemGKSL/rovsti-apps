@@ -350,6 +350,13 @@ pub struct WireCall {
         skip_serializing_if = "is_zero"
     )]
     pub connect_time_ms: i64,
+    /// Milliseconds since the epoch when the call was placed or rang; `0` when unknown.
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "is_zero"
+    )]
+    pub started_ms: i64,
     #[serde(
         default,
         deserialize_with = "null_default",

@@ -28,6 +28,7 @@ mod flight;
 mod fx;
 mod history_ui;
 mod incall;
+mod incall_note;
 mod incoming;
 mod keypad;
 mod notes;
@@ -153,6 +154,8 @@ struct PhoneApp {
     t9: keypad::T9Match,
     /// The open "Copy as" / "Share as" chooser.
     copy_as: Option<actions_ui::CopyAs>,
+    /// The open in-call note card (`incall_note`).
+    incall_note: Option<incall_note::InCallNote>,
     backend: Entity<Backend>,
     xiaomi: Option<XiaomiOs>,
     _subscriptions: Vec<Subscription>,
@@ -532,6 +535,7 @@ impl PhoneApp {
             dial_match: keypad::DialMatch::default(),
             t9: keypad::T9Match::default(),
             copy_as: None,
+            incall_note: None,
             _subscriptions: subscriptions,
             incall: InCall::new(cx),
             incoming: Incoming::new(cx, marks.clone()),
@@ -988,6 +992,9 @@ impl PhoneApp {
                 };
                 let blocked_by_call =
                     self.incall.covers() && !owned && !id.as_deref().is_some_and(is_call_id);
+                // The open note card owns the call screen: only its own controls react.
+                let blocked_by_note =
+                    self.incall_note.is_some() && !id.as_deref().is_some_and(incall_note::owns);
                 // The open route list owns the screen: only End still works.
                 let blocked_by_route = self.route.is_open()
                     && id
@@ -1003,6 +1010,7 @@ impl PhoneApp {
                 if blocked_by_incoming
                     || blocked_by_sheet
                     || blocked_by_call
+                    || blocked_by_note
                     || blocked_by_tabs
                     || blocked_by_route
                     || call_under_sheet
@@ -1022,6 +1030,13 @@ impl PhoneApp {
                         self.arm_hold(
                             incall::REASON_AFTER_MS,
                             keypad::HoldAction::Reason(slot),
+                            window,
+                            cx,
+                        );
+                    } else if &*id == incall_note::WHO {
+                        self.arm_hold(
+                            contacts::LONG_PRESS.as_millis() as u64,
+                            keypad::HoldAction::CopyCaller,
                             window,
                             cx,
                         );

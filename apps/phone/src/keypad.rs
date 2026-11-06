@@ -380,6 +380,8 @@ pub(crate) enum HoldAction {
     CopyAs {
         share: bool,
     },
+    /// The caller block was held on the In-Call screen: copy the number.
+    CopyCaller,
 }
 
 impl PhoneApp {
@@ -548,6 +550,7 @@ impl PhoneApp {
             HoldAction::RouteList => self.route_long_press(window, cx),
             HoldAction::Reason(slot) => self.show_reason(usize::from(slot), window, cx),
             HoldAction::CopyAs { share } => self.open_copy_as(share, window, cx),
+            HoldAction::CopyCaller => self.incall_copy_number(window, cx),
         }
         cx.notify();
     }

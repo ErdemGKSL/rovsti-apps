@@ -124,8 +124,41 @@ pub struct CallView {
     pub photo: CallerPhoto,
     pub can_hold: bool,
     pub connect_time_ms: i64,
+    /// When the call was placed or rang (`0` if Android did not say); the in-call note's key.
+    pub started_ms: i64,
     pub muted: bool,
     pub route: AudioRoute,
+}
+
+/// The digits of a number worth copying or noting, or `None` for a private caller.
+fn callable_number(number: &str) -> Option<&str> {
+    let number = number.trim();
+    number.chars().any(|c| c.is_ascii_digit()).then_some(number)
+}
+
+/// The Note capsule shows for a connected or held call with a callable number.
+pub(crate) fn note_allowed(view: &CallView) -> bool {
+    matches!(view.state, CallState::Active | CallState::Holding)
+        && view.source.telecom_id().is_some()
+        && callable_number(&view.number).is_some()
+        && note_call_ms(view) > 0
+}
+
+/// The call time a note is saved under: when it rang or was placed, else when it connected.
+pub(crate) fn note_call_ms(view: &CallView) -> i64 {
+    if view.started_ms > 0 {
+        view.started_ms
+    } else {
+        view.connect_time_ms
+    }
+}
+
+/// The number as the screen would show it, for a long-press copy; `None` for a private caller.
+pub(crate) fn copy_number_text(view: &CallView) -> Option<String> {
+    let raw = callable_number(&view.number)?;
+    Some(
+        rovsti_core::PhoneNumber::parse(raw).map_or_else(|_| raw.to_owned(), |n| format_number(&n)),
+    )
 }
 
 /// The second caller of a waiting call (stories 9.2, 15.8) and what the card may offer.
@@ -278,6 +311,7 @@ impl CallView {
             photo: CallerPhoto::default(),
             can_hold: call.can_hold,
             connect_time_ms: call.connect_time_ms,
+            started_ms: call.started_ms,
             muted: audio.muted,
             route: audio.route,
         })
@@ -316,6 +350,7 @@ impl CallView {
             photo: CallerPhoto::default(),
             can_hold: false,
             connect_time_ms,
+            started_ms: connect_time_ms,
             muted: screen.muted,
             route: if screen.speaker {
                 AudioRoute::Speaker
@@ -1445,6 +1480,7 @@ impl PhoneApp {
 
     fn begin_ending_with(&mut self, failed: bool, _cause: DisconnectCause, cx: &mut Context<Self>) {
         let hold = if failed { FAILED_HOLD } else { ENDED_HOLD };
+        self.incall_note_commit(cx);
         let task = cx.spawn(async move |this, cx| {
             cx.background_executor().timer(hold).await;
             this.update(cx, |this, cx| this.finish_ending(cx)).ok();
@@ -1558,6 +1594,10 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if crate::incall_note::owns(id) || id == crate::incall_note::CAPSULE {
+            self.incall_note_act(id, window, cx);
+            return;
+        }
         let Some(view) = self.incall.view.clone() else {
             return;
         };
@@ -2434,7 +2474,8 @@ impl PhoneApp {
         let content = content.child(self.end_button(theme, cx));
         root = root
             .child(content)
-            .children(self.waiting_card(theme, window, cx));
+            .children(self.waiting_card(theme, window, cx))
+            .children(self.incall_note_card(theme, window, cx));
         Some(root.into_any_element())
     }
 }
@@ -2491,6 +2532,7 @@ mod tests {
             display_name: name.map(str::to_owned),
             contact_id: name.map(|_| 42),
             connect_time_ms: 5,
+            started_ms: 2,
             can_hold: true,
             is_incoming: false,
             disconnect_cause: None,
@@ -2498,6 +2540,58 @@ mod tests {
         }];
         model.apply(snapshot);
         model
+    }
+
+    #[test]
+    fn the_view_carries_when_the_call_started() {
+        let model = model_with(WireCallState::Active, Some("Ada"), false);
+        let view = CallView::from_model(&model).expect("foreground call");
+        assert_eq!(view.started_ms, 2);
+        assert_eq!(note_call_ms(&view), 2);
+        let older = CallView {
+            started_ms: 0,
+            ..view
+        };
+        assert_eq!(note_call_ms(&older), 5);
+    }
+
+    #[test]
+    fn the_note_capsule_needs_a_live_call_with_a_number() {
+        let live =
+            |state| CallView::from_model(&model_with(state, None, false)).expect("foreground call");
+        assert!(note_allowed(&live(WireCallState::Active)));
+        assert!(note_allowed(&live(WireCallState::Holding)));
+        assert!(!note_allowed(&live(WireCallState::Ringing)));
+        assert!(!note_allowed(&live(WireCallState::Dialing)));
+        let private = CallView {
+            number: "".into(),
+            ..live(WireCallState::Active)
+        };
+        assert!(!note_allowed(&private));
+    }
+
+    #[test]
+    fn a_whatsapp_call_gets_no_note_capsule() {
+        let view = CallView::from_wa_at(&wa_screen(WaScreenPhase::Active, false), 100_000);
+        assert!(!note_allowed(&view));
+    }
+
+    #[test]
+    fn copy_text_is_the_number_or_nothing() {
+        let view = CallView::from_model(&model_with(WireCallState::Active, None, false))
+            .expect("foreground call");
+        let text = copy_number_text(&view).expect("a number");
+        assert!(text.contains("555"), "{text}");
+        let private = CallView {
+            number: " ".into(),
+            ..view.clone()
+        };
+        assert_eq!(copy_number_text(&private), None);
+        let odd = CallView {
+            number: "*21#".into(),
+            ..view
+        };
+        assert_eq!(copy_number_text(&odd).as_deref(), Some("*21#"));
     }
 
     #[test]

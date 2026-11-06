@@ -329,6 +329,21 @@ impl PhoneApp {
                         .text_color(colors.secondary_label)
                         .children(secondary),
                 )
+                // The caller block: held, it copies the number (no tap action).
+                .child(
+                    div()
+                        .id(crate::incall_note::WHO)
+                        .absolute()
+                        .top(px(name_y))
+                        .left_0()
+                        .w_full()
+                        .h(px(slots::ONE_NUMBER_Y + 18.0 - slots::ONE_NAME_Y))
+                        .aria_label("Caller, hold to copy the number")
+                        .child(touch_surface(Self::touch_listener(
+                            cx,
+                            Some(crate::incall_note::WHO.into()),
+                        ))),
+                )
                 // The reserved chip row: SIM (16.5) and quality (21.4) chips land here.
                 .child(
                     div()
@@ -342,7 +357,8 @@ impl PhoneApp {
                         .justify_center()
                         .items_center()
                         .gap(px(6.0))
-                        .children(self.incall_sim_chip(theme, cx)),
+                        .children(self.incall_sim_chip(theme, cx))
+                        .children(self.incall_note_capsule(theme, view, cx)),
                 );
 
             // ---- The Held card ----------------------------------------------------

@@ -920,6 +920,7 @@ object CallRegistry : CallsApi {
                 displayNameAlt = e.displayNameAlt,
                 contactId = e.contactId,
                 connectTimeMs = d.connectTimeMillis.coerceAtLeast(0),
+                startedMs = d.creationTimeMillis.coerceAtLeast(0),
                 canHold = d.can(Call.Details.CAPABILITY_HOLD),
                 isIncoming = d.callDirection == Call.Details.DIRECTION_INCOMING,
                 disconnectCause = if (state == "disconnected") SnapshotJson.causeName(d.disconnectCause?.code ?: 0) else null,

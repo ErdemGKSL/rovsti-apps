@@ -286,3 +286,9 @@ outgoing and WhatsApp calls. Save needs Android 10 or newer (no storage permissi
 | U15 | Type 1, hold #. | The # becomes a semicolon and the pill "Wait added" shows. | | |
 | U16 | Hold * as the very first key. | It stays a *. | | |
 | U17 | Dial 5551234,1 and place the call. | The call starts and, after the pause, the dialer sends 1 as a tone; a ; asks to confirm before sending. | | |
+
+## In-call note and copy number
+
+- On a connected or held call with a number, tap "Note" under the status line, type, press Done: the pill says "Note saved" and the capsule shows a check.
+- A call that lasts longer than the 2 minute match window after ringing still gets its note in the call log, because the note is keyed by the time the call rang or was placed, which is the log's `DATE`.
+- Hold the caller's name or number for about half a second: "Number copied". A private caller shows "No number to copy".

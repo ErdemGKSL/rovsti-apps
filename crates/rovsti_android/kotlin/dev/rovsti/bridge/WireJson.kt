@@ -77,6 +77,7 @@ data class CallInfo(
     val displayName: String? = null,
     val contactId: Long? = null,
     val connectTimeMs: Long = 0,
+    val startedMs: Long = 0,
     val canHold: Boolean = false,
     val isIncoming: Boolean = false,
     val disconnectCause: String? = null,
@@ -217,6 +218,7 @@ object SnapshotJson {
         c.displayName?.let { o.put("display_name", it) }
         c.contactId?.let { o.put("contact_id", it) }
         if (c.connectTimeMs != 0L) o.put("connect_time_ms", c.connectTimeMs)
+        if (c.startedMs != 0L) o.put("started_ms", c.startedMs)
         if (c.canHold) o.put("can_hold", true)
         if (c.isIncoming) o.put("is_incoming", true)
         c.disconnectCause?.let { o.put("disconnect_cause", it) }
@@ -262,6 +264,7 @@ object SnapshotJson {
                 displayName = if (c.has("display_name")) c.getString("display_name") else null,
                 contactId = if (c.has("contact_id")) c.getLong("contact_id") else null,
                 connectTimeMs = c.optLong("connect_time_ms", 0),
+                startedMs = c.optLong("started_ms", 0),
                 canHold = c.optBoolean("can_hold", false),
                 isIncoming = c.optBoolean("is_incoming", false),
                 disconnectCause = if (c.has("disconnect_cause")) c.getString("disconnect_cause") else null,

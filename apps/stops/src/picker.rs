@@ -88,6 +88,14 @@ impl Slot {
             Self::B => "B",
         }
     }
+
+    /// The picker sheet's heading while this end is being chosen.
+    pub fn picker_title(self) -> &'static str {
+        match self {
+            Self::A => "Choose A",
+            Self::B => "Choose B",
+        }
+    }
 }
 
 /// The two points chosen so far.
@@ -119,6 +127,12 @@ impl Ends {
     /// Where the next picked point goes: A until it is set, then B.
     pub fn next_slot(&self) -> Slot {
         if self.a.is_none() { Slot::A } else { Slot::B }
+    }
+
+    /// Fills both ends at once (a recent trip).
+    pub fn set_pair(&mut self, a: Destination, b: Destination) {
+        self.a = Some(a);
+        self.b = Some(b);
     }
 
     /// Exchanges A and B (the left and right sides trade places).
@@ -185,8 +199,6 @@ pub struct StopHits {
     query: String,
     hits: Vec<u32>,
 }
-
-const PICKER_LABEL: &str = "Choose a point";
 
 impl StopsApp {
     /// Opens the picker from the Trip tab.
@@ -264,8 +276,7 @@ impl StopsApp {
 
     /// Both ends at once, from a recent trip.
     pub(crate) fn choose_pair(&mut self, a: Destination, b: Destination, cx: &mut Context<Self>) {
-        self.ends.set(Slot::A, a);
-        self.ends.set(Slot::B, b);
+        self.ends.set_pair(a, b);
         self.active_slot = self.ends.next_slot();
         self.map.pattern = None;
         self.map.follow = true;
@@ -320,7 +331,10 @@ impl StopsApp {
         let insets = window.insets();
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
         let (label, content) = match self.sheet_mode.clone() {
-            SheetMode::Pick => (PICKER_LABEL, self.pick_body(theme, window, cx)),
+            SheetMode::Pick => (
+                self.active_slot.picker_title(),
+                self.pick_body(theme, window, cx),
+            ),
             SheetMode::Confirm(dest) => ("Use this point", self.confirm_body(theme, &dest, cx)),
             SheetMode::Rename(id) => ("Rename place", self.rename_body(theme, id, window, cx)),
             SheetMode::Stop(stop) => ("Transit stop", self.stop_body(theme, stop, cx)),
@@ -372,7 +386,7 @@ impl StopsApp {
         let query = self.field.read(cx).text().trim().to_owned();
         let mut body = div().flex().flex_col().gap(px(8.0));
         body = body
-            .child(Self::sheet_title(theme, PICKER_LABEL))
+            .child(Self::sheet_title(theme, self.active_slot.picker_title()))
             .child(div().px(px(16.0)).child(field_box(
                 theme,
                 "dest-field",
@@ -892,6 +906,25 @@ mod tests {
         ends.swap();
         assert_eq!(ends.a.as_ref().unwrap().label, "A");
         assert_eq!(ends.b.as_ref().unwrap().label, "B");
+    }
+
+    #[test]
+    fn the_picker_is_titled_by_the_slot() {
+        assert_eq!(Slot::A.picker_title(), "Choose A");
+        assert_eq!(Slot::B.picker_title(), "Choose B");
+    }
+
+    #[test]
+    fn a_recent_pair_fills_both_ends() {
+        let mut ends = Ends::default();
+        ends.set(Slot::A, dest("Old", 28.90));
+        ends.set_pair(dest("A", 28.99), dest("B", 29.01));
+        assert_eq!(ends.get(Slot::A).unwrap().label, "A");
+        assert_eq!(ends.get(Slot::B).unwrap().label, "B");
+        assert_eq!(ends.next_slot(), Slot::B);
+        assert!(matches!(ends.diameter(), Some(Ok(_))));
+        ends.swap();
+        assert_eq!(ends.get(Slot::A).unwrap().label, "B");
     }
 
     #[test]

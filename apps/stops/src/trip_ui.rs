@@ -9,11 +9,12 @@ use std::time::Duration;
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, div, px,
+    StatefulInteractiveElement, Styled, div, px, svg,
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
-use rovsti_geo::{ActiveTrip, FixOut, Side, TripState};
+use rovsti_geo::{ActiveTrip, Diameter, FixOut, Side, TripState};
 use rovsti_ui::{
+    Icon,
     components::{backdrop, empty_state, flat_glass, glass_pill, list_row, section},
     theme,
     tokens::{Theme, radius, typography},
@@ -36,6 +37,14 @@ pub fn distance_text(metres: f64) -> String {
     } else {
         format!("{:.1} km", metres / 1_000.0)
     }
+}
+
+/// The line under the A and B rows: what the circle is and what wakes you.
+pub fn trigger_text(diameter: &Diameter) -> String {
+    format!(
+        "Circle {} across. Crossing the line A – B either way wakes you.",
+        distance_text(diameter.length_m())
+    )
 }
 
 /// "12 s", "4 min": how long until the next location check.
@@ -223,13 +232,25 @@ impl StopsApp {
             );
         }
         rows.push(
-            list_row(theme, None, "Swap A and B", None, None)
-                .id("swap-ends")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.ends.swap();
-                    cx.notify();
-                }))
-                .into_any_element(),
+            list_row(
+                theme,
+                Some(
+                    svg()
+                        .path(Icon::LucideArrowLeftRight.path())
+                        .size(px(18.0))
+                        .text_color(colors.accent)
+                        .into_any_element(),
+                ),
+                "Swap A and B",
+                None,
+                None,
+            )
+            .id("swap-ends")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.ends.swap();
+                cx.notify();
+            }))
+            .into_any_element(),
         );
         let mut page = div().flex().flex_col().gap(px(24.0));
         if self.ends.is_empty() {
@@ -241,8 +262,10 @@ impl StopsApp {
         }
         page = page.child(section(theme, Some("Line".into()), rows));
         let ready = self.ends.diameter().and_then(Result::ok).is_some();
-        if let Some(error) = self.ends.diameter().and_then(Result::err) {
-            page = page.child(text_block(theme, error.message()));
+        match self.ends.diameter() {
+            Some(Ok(d)) => page = page.child(text_block(theme, trigger_text(&d))),
+            Some(Err(error)) => page = page.child(text_block(theme, error.message())),
+            None => {}
         }
         if self.notice_available(cx) {
             let chat = self
@@ -824,6 +847,17 @@ mod tests {
             live_text(&live(Some(Side::Left), false, None), "A – B"),
             "Outside the circle, to the line A – B"
         );
+    }
+
+    #[test]
+    fn the_trigger_text_states_the_circle() {
+        let d = Diameter::new(Coord::new(41.0, 29.0), Coord::new(41.0, 29.0142)).unwrap();
+        assert_eq!(
+            trigger_text(&d),
+            "Circle 1.2 km across. Crossing the line A – B either way wakes you."
+        );
+        let short = Diameter::new(Coord::new(41.0, 29.0), Coord::new(41.0, 29.001)).unwrap();
+        assert!(trigger_text(&short).starts_with("Circle 80 m across."));
     }
 
     #[test]

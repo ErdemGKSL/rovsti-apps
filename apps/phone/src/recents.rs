@@ -2069,7 +2069,31 @@ impl PhoneApp {
                     .text_size(typography::SUBHEADLINE.size)
                     .text_color(colors.secondary_label)
                     .child(row.number.clone())
-            }));
+            }))
+            .children(
+                (!row.named)
+                    .then(|| {
+                        let home_cc = match self.backend.read(cx).call_log() {
+                            backend::Load::Ready(log) => log.home_cc.clone(),
+                            _ => None,
+                        };
+                        crate::details_ui::header_caption(
+                            None,
+                            rovsti_core::calling_code::country_line(
+                                &row.number,
+                                home_cc.as_deref(),
+                            )
+                            .as_deref(),
+                        )
+                    })
+                    .flatten()
+                    .map(|c| {
+                        div()
+                            .text_size(typography::SUBHEADLINE.size)
+                            .text_color(colors.secondary_label)
+                            .child(c)
+                    }),
+            );
         let answer = call_colors(theme).answer;
         let mut children = vec![reveal(0, header.into_any_element())];
         if !row.number.is_empty() {

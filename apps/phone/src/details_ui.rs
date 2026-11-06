@@ -50,6 +50,7 @@ const NOTE: &str = "sheet-dt-note";
 const DONE: &str = "sheet-dt-done";
 const DEL_NOTE: &str = "sheet-dt-delnote";
 const DEL_CALL: &str = "sheet-dt-delcall";
+const REMIND: &str = "sheet-dt-remind";
 const FIELD: &str = "sheet-dt-field";
 
 /// Height of the note field row.
@@ -103,6 +104,26 @@ pub(crate) fn delete_note_label(armed: bool) -> &'static str {
     }
 }
 
+/// The label of the reminder action: set one, or cancel the armed one.
+pub(crate) fn remind_label(armed: bool) -> &'static str {
+    if armed {
+        "Cancel reminder"
+    } else {
+        "Remind me"
+    }
+}
+
+/// The header subtitle of an unnamed number: an optional label and the
+/// country, joined with " · ".
+pub(crate) fn header_caption(label: Option<&str>, country: Option<&str>) -> Option<String> {
+    let parts: Vec<&str> = [label, country]
+        .into_iter()
+        .flatten()
+        .filter(|p| !p.trim().is_empty())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" \u{b7} "))
+}
+
 /// The open call details.
 pub(crate) struct DetailsSheet {
     pub(crate) details: CallDetails,
@@ -119,6 +140,8 @@ pub(crate) struct DetailsSheet {
     pub(crate) field: Entity<SearchField>,
     /// The call was blocked (it lives in the blocked list).
     blocked: bool,
+    /// The call was a missed one (offers Remind me).
+    missed: bool,
     /// Delete note was tapped once.
     armed: bool,
     seen_submits: u64,
@@ -194,6 +217,7 @@ impl PhoneApp {
             editing: false,
             field,
             blocked: vm.blocked,
+            missed: vm.line.call_type == rovsti_core::call_log::CallType::Missed,
             armed: false,
             seen_submits: 0,
             _field_sub: sub,
@@ -380,6 +404,19 @@ impl PhoneApp {
                     }
                 }
             }
+            REMIND => {
+                let (number, name) = (
+                    d.number.clone(),
+                    d.who.clone().unwrap_or_else(|| d.number.clone()),
+                );
+                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                let armed = self.remind_armed(&number, cx);
+                if armed {
+                    self.remind_cancel(&number, cx);
+                } else {
+                    self.open_remind_pick(number, name, true, cx);
+                }
+            }
             DEL_CALL => {
                 let entry = d.entry.clone();
                 let blocked = d.blocked;
@@ -393,6 +430,11 @@ impl PhoneApp {
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Whether a reminder is armed for `number`.
+    fn remind_armed(&self, number: &str, cx: &Context<Self>) -> bool {
+        crate::remind_ui::remind_caption(self.backend.read(cx).reminders(), number, 0).is_some()
     }
 
     /// Undo of Delete note.
@@ -452,6 +494,17 @@ impl PhoneApp {
                 )
                 .child(touch_surface(Self::touch_listener(cx, Some(BACK.into()))))
         };
+        let home_cc = match self.backend.read(cx).call_log() {
+            backend::Load::Ready(log) => log.home_cc.clone(),
+            _ => None,
+        };
+        let caption = d.who.is_none().then(|| {
+            header_caption(
+                None,
+                rovsti_core::calling_code::country_line(&d.number, home_cc.as_deref()).as_deref(),
+            )
+        });
+        let caption = caption.flatten();
         let header = div()
             .flex()
             .flex_col()
@@ -464,7 +517,13 @@ impl PhoneApp {
                     .font_weight(typography::TITLE3.weight)
                     .text_color(colors.label)
                     .child(d.details.title.clone()),
-            );
+            )
+            .children(caption.map(|c| {
+                div()
+                    .text_size(typography::SUBHEADLINE.size)
+                    .text_color(colors.secondary_label)
+                    .child(c)
+            }));
 
         let info_row = |label: &'static str, value: String| {
             div()
@@ -663,6 +722,19 @@ impl PhoneApp {
             action(COPY, Icon::LucideCopy, "Copy details", colors.accent, cx).into_any_element(),
             action(SHARE, Icon::LucideShare2, "Share", colors.accent, cx).into_any_element(),
         ];
+        if d.missed && crate::remind_ui::can_remind(&d.number) {
+            let armed = self.remind_armed(&d.number, cx);
+            actions.push(
+                action(
+                    REMIND,
+                    Icon::LucideBell,
+                    remind_label(armed),
+                    colors.accent,
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
         if !d.editing {
             actions.push(
                 action(
@@ -747,7 +819,9 @@ mod tests {
         assert!(!is_contact_id(&details_line_id(false, 3)));
         assert!(is_contact_id(&details_line_id(true, 3)));
         // The details sheet's own controls never reach either history router.
-        for id in [BACK, COPY, SHARE, NOTE, DONE, DEL_NOTE, DEL_CALL, FIELD] {
+        for id in [
+            BACK, COPY, SHARE, NOTE, DONE, DEL_NOTE, DEL_CALL, FIELD, REMIND,
+        ] {
             assert!(id.starts_with("sheet-dt-"));
             assert!(
                 !id.starts_with("sheet-c") && !id.starts_with("sheet-n"),
@@ -794,5 +868,25 @@ mod tests {
         assert_eq!(note_action_label(true), "Edit note");
         assert_eq!(delete_note_label(false), "Delete note");
         assert_eq!(delete_note_label(true), "Tap again to delete");
+        assert_eq!(remind_label(false), "Remind me");
+        assert_eq!(remind_label(true), "Cancel reminder");
+        assert!(REMIND.starts_with("sheet-dt-"));
+    }
+
+    #[test]
+    fn header_captions() {
+        assert_eq!(header_caption(None, None), None);
+        assert_eq!(
+            header_caption(Some("Mobile"), None).as_deref(),
+            Some("Mobile")
+        );
+        assert_eq!(
+            header_caption(None, Some("Germany")).as_deref(),
+            Some("Germany")
+        );
+        assert_eq!(
+            header_caption(Some("Mobile"), Some("Germany")).as_deref(),
+            Some("Mobile \u{b7} Germany")
+        );
     }
 }

@@ -43,7 +43,7 @@ pub(crate) enum Notice {
 }
 
 impl Notice {
-    fn text(self) -> &'static str {
+    pub(crate) fn text(self) -> &'static str {
         match self {
             Self::Preview => "Not the default phone app",
             Self::System => "Placed through the system phone app",
@@ -64,7 +64,6 @@ impl Notice {
 
     /// A notice that fades by itself: it offers no action and is not the
     /// standing Preview banner.
-    #[allow(dead_code, reason = "wired up by the next step")]
     pub(crate) fn transient(self) -> bool {
         self.action().is_none() && self != Self::Preview
     }
@@ -78,6 +77,18 @@ impl Notice {
 }
 
 impl PhoneApp {
+    /// Records a call-outcome notice: transient ones show as a short pill,
+    /// the rest stay in the banner slot until acted on or replaced.
+    pub(crate) fn set_call_note(&mut self, note: Option<Notice>, cx: &mut Context<Self>) {
+        match note {
+            Some(n) if n.transient() => {
+                self.call_note = None;
+                self.show_notice_pill(n.text(), None, false, cx);
+            }
+            other => self.call_note = other,
+        }
+    }
+
     /// What the slot should show now.
     fn current_notice(&self, cx: &gpui::App) -> Option<Notice> {
         self.call_note.or_else(|| {
@@ -377,6 +388,7 @@ mod tests {
 
     #[test]
     fn transient_notices_have_no_action_and_are_not_preview() {
+        assert_eq!(Notice::System.text(), "Placed through the system phone app");
         assert!(Notice::Failed.transient());
         assert!(Notice::System.transient());
         assert!(Notice::WhatsApp("Another call is in progress").transient());

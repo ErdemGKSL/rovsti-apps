@@ -406,7 +406,7 @@ impl PhoneApp {
                         // Over a call screen the pill says it; the tab notice would be hidden.
                         this.show_notice_pill(what, None, false, cx);
                     } else {
-                        this.call_note = Some(notice::Notice::WhatsApp(what));
+                        this.set_call_note(Some(notice::Notice::WhatsApp(what)), cx);
                     }
                 }
             }),
@@ -998,7 +998,7 @@ impl PhoneApp {
     /// Places a WhatsApp call to `number`; what stops it from starting shows as a notice.
     pub(crate) fn place_whatsapp(&mut self, number: &str, cx: &mut Context<Self>) {
         let placed = self.wa_call.update(cx, |ui, cx| ui.place(number, cx));
-        self.call_note = placed.err().map(notice::Notice::WhatsApp);
+        self.set_call_note(placed.err().map(notice::Notice::WhatsApp), cx);
         cx.notify();
     }
 

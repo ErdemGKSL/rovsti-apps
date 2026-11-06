@@ -904,7 +904,7 @@ impl PhoneApp {
             .backend
             .update(cx, |backend, cx| backend.place_call_on(number, account, cx));
         let default_dialer = self.backend.read(cx).is_default_dialer();
-        self.call_note = match placement {
+        let note = match placement {
             Placement::Placed | Placement::Requesting if !default_dialer => Some(Notice::System),
             Placement::Placed | Placement::Requesting | Placement::Debounced => None,
             Placement::Blocked => {
@@ -913,6 +913,7 @@ impl PhoneApp {
             }
             Placement::Failed | Placement::NoVoicemail => Some(Notice::Failed),
         };
+        self.set_call_note(note, cx);
         cx.notify();
         // Only a call the In-Call screen will show gets a flight.
         default_dialer && matches!(placement, Placement::Placed | Placement::Requesting)

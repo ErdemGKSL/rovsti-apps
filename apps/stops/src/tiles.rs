@@ -96,6 +96,11 @@ impl Default for MapTiles {
 }
 
 impl MapTiles {
+    /// A handle to the HTTP client, for testing a server off the UI thread.
+    pub fn client(&self) -> TileClient {
+        self.client.clone()
+    }
+
     /// The data directory is known and the prefs are read: use their server.
     pub fn attach(&mut self, data_dir: &Path, source: TileSource, cx: &mut Context<StopsApp>) {
         self.root = Some(cache_root(data_dir));

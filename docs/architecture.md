@@ -33,6 +33,8 @@ crates/rovsti_wa_client ═══ HTTP + WebSocket (TLS) ═══▶ services/w
         │                                                  owns the whatsapp-rust sessions
 crates/rovsti_wa_proto             wire types, connect keys, events, call state (pure,
         │                          shared by the client and the gateway)
+crates/rovsti_tiles ═══ HTTPS (rustls) ═══▶ the user's tile server (default tiles.versatiles.org)
+        │                          fetch + disk cache of map tiles, used by Stops
 crates/rovsti_android ──JNI──▶ kotlin/dev/rovsti/bridge/RovstiBridge.kt
         │                           (roles, telecom, Xiaomi settings, services,
         │                            WaPush, WaCallAudio)
@@ -50,9 +52,16 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 - **Async.** GPUI runs the UI on Android's main Looper. WhatsApp runs on the
   gateway; `rovsti_wa_client` keeps its event WebSocket on its own thread and
   `rovsti_wa_ui` forwards `GatewayEvent`s to the app through a GPUI task.
+- **Map tiles.** Stops draws Shortbread vector tiles under its radar map. The logic is pure
+  and tested in `rovsti_geo::tiles` (slippy math, MVT decoding, styles for colorful and
+  eclipse, clipping, the LRU index and fetch queue); the I/O is in `rovsti_tiles` (ureq over
+  rustls, disk cache). It is the only network traffic besides the WhatsApp gateway.
+  The server is a setting (`tile_url` in `stops-prefs.json`).
 - **Storage.** Each app keeps its files in its no-backup directory
   (`rovsti_ui::storage::data_dir`). Nothing leaves the device except WhatsApp traffic
-  to the user's own gateway, and what the user chooses to share. An app keeps its
+  to the user's own gateway, map tile requests to the chosen tile server, and what the
+  user chooses to share. Stops caches tiles in `tiles/<server key>/`, one directory per
+  server, capped at 128 MiB with least-recently-used eviction. An app keeps its
   WhatsApp link (`whatsapp-link.json`: gateway URL, instance id, connect key) there.
 
 ## What each app needs from Android

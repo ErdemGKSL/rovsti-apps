@@ -122,6 +122,10 @@ pub(crate) struct StopsApp {
     pub(crate) settings_page: SettingsPage,
     /// The arriving-soon template being edited.
     pub(crate) template_field: Entity<TextField>,
+    /// The tile server URL being edited.
+    pub(crate) tile_field: Entity<TextField>,
+    /// A tile server test is running.
+    pub(crate) tile_testing: bool,
     /// The chats the message can go to.
     pub(crate) chats: ChatList,
     /// Clear history was tapped once.
@@ -140,6 +144,8 @@ impl StopsApp {
         let field = cx.new(TextField::new);
         cx.observe(&field, |_, _, cx| cx.notify()).detach();
         let template_field = cx.new(TextField::new);
+        let tile_field = cx.new(TextField::new);
+        cx.observe(&tile_field, |_, _, cx| cx.notify()).detach();
         cx.observe(&template_field, |this, _, cx| this.on_template_edited(cx))
             .detach();
 
@@ -259,6 +265,8 @@ impl StopsApp {
             whatsapp,
             settings_page: SettingsPage::default(),
             template_field,
+            tile_field,
+            tile_testing: false,
             chats: ChatList::default(),
             confirm_clear: false,
         };

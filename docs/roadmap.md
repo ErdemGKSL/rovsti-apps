@@ -114,7 +114,12 @@ list in `docs/phone-acceptance.md`.
       max(10 m, fix accuracy) around the line keeps GPS jitter quiet, and a crossing counts only
       when the path between the last confident fixes cuts the segment AB, so sparse fixes still
       fire and passing outside the circle never does (done without a device)
-- [x] Offline map tiles or a minimal vector map (decided: vector radar map, no tiles)
+- [x] Tile map under the vector radar: Shortbread vector tiles (zoom 0-14, overzoomed beyond)
+      from a settable VersaTiles-compatible server (Settings > Map tiles: test before save,
+      reset to default), VersaTiles colorful in the light theme and eclipse in the dark one,
+      OSM attribution, disk cache with LRU and prefetch around the trip circle for offline
+      use, radar look where a tile is missing (done without a device)
+- [ ] Check tile drawing speed on a phone (vertex budget, tiles per view)
 - [x] Optional GTFS import: stop names and lines on the map; a stop is a point source for A or B
       (done without a device)
 - [x] Trip history and statistics, all local (done without a device)

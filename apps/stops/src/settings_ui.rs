@@ -15,8 +15,11 @@ use gpui::{
 };
 use rovsti_android::{Error as AndroidError, trip, trip::AlarmAction, xiaomi};
 use rovsti_geo::{
-    NoticePrefs, NoticeWhen, Outcome, Stats, StopsPrefs, TripRecord, notice::DEFAULT_TEMPLATE,
+    NoticePrefs, NoticeWhen, Outcome, Stats, StopsPrefs, TripRecord,
+    notice::DEFAULT_TEMPLATE,
+    tiles::{DEFAULT_TILE_URL, TileSource, TileUrlError},
 };
+use rovsti_tiles::TileError;
 use rovsti_ui::{
     Icon,
     components::{empty_state, glass_icon_button, glass_pill, large_title, list_row, section},
@@ -48,6 +51,7 @@ pub enum SettingsPage {
     History,
     Notice,
     WhatsApp,
+    MapTiles,
 }
 
 /// One chat the arriving-soon message can go to.
@@ -193,6 +197,38 @@ pub fn notice_summary(prefs: &StopsPrefs, connected: bool) -> String {
     }
 }
 
+/// The host of the tile server in use ("tiles.versatiles.org").
+pub fn tile_server_summary(prefs: &StopsPrefs) -> String {
+    let source = prefs.tile_source();
+    let template = source.template();
+    let rest = template.split_once("://").map_or(template, |(_, r)| r);
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let host = rest[..end].rsplit('@').next().unwrap_or_default();
+    if host.is_empty() { template } else { host }.to_owned()
+}
+
+/// Why a typed tile URL was refused (no network involved).
+pub fn tile_url_error_text(error: &TileUrlError) -> &'static str {
+    match error {
+        TileUrlError::Empty => "Enter a tile URL.",
+        TileUrlError::Scheme => "The URL must start with http:// or https://.",
+        TileUrlError::Missing("{z}") => "The URL needs {z} exactly once.",
+        TileUrlError::Missing("{x}") => "The URL needs {x} exactly once.",
+        TileUrlError::Missing(_) => "The URL needs {y} exactly once.",
+        TileUrlError::Whitespace => "The URL must not contain spaces.",
+        TileUrlError::TooLong => "The URL is too long.",
+    }
+}
+
+/// The pill after "Test and save".
+pub fn tile_test_text(result: &Result<usize, TileError>) -> String {
+    match result {
+        Ok(1) => "Map server works (1 layer)".to_owned(),
+        Ok(n) => format!("Map server works ({n} layers)"),
+        Err(error) => format!("Map server not saved: {error}"),
+    }
+}
+
 pub fn exact_alarm_text(allowed: Option<bool>) -> &'static str {
     match allowed {
         Some(true) => "Allowed",
@@ -247,6 +283,10 @@ impl StopsApp {
                 let body = self.whatsapp.clone().into_any_element();
                 self.settings_subpage(theme, "WhatsApp", body, cx)
             }
+            SettingsPage::MapTiles => {
+                let body = self.tiles_body(theme, window, cx);
+                self.settings_subpage(theme, "Map tiles", body, cx)
+            }
         }
     }
 
@@ -285,6 +325,7 @@ impl StopsApp {
                 self.sync_template_field(cx);
                 self.load_chats(false, cx);
             }
+            SettingsPage::MapTiles => self.sync_tile_field(cx),
             SettingsPage::Main => self.refresh_preflight(cx),
             _ => {}
         }
@@ -434,6 +475,16 @@ impl StopsApp {
             )
             .id("set-history")
             .on_click(cx.listener(|this, _, _, cx| this.open_settings(SettingsPage::History, cx)))
+            .into_any_element(),
+            list_row(
+                theme,
+                None,
+                "Map tiles",
+                Some(tile_server_summary(&self.prefs).into()),
+                Some("Open".into()),
+            )
+            .id("set-tiles")
+            .on_click(cx.listener(|this, _, _, cx| this.open_settings(SettingsPage::MapTiles, cx)))
             .into_any_element(),
             list_row(
                 theme,
@@ -732,6 +783,114 @@ impl StopsApp {
         page.into_any_element()
     }
 
+    // ---- Map tiles -----------------------------------------------------------------------
+
+    fn tiles_body(&mut self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let default = TileSource::default_source();
+        let testing = self.tile_testing;
+        let save = list_row(
+            theme,
+            None,
+            "Test and save",
+            Some("Downloads one tile first. A server that fails is not saved.".into()),
+            Some(if testing { "Testing..." } else { "Test" }.into()),
+        )
+        .id("tiles-save")
+        .on_click(cx.listener(|this, _, _, cx| this.test_and_save_tiles(cx)))
+        .into_any_element();
+        let reset = list_row(
+            theme,
+            None,
+            "Reset to default",
+            Some(default.template().to_owned().into()),
+            None,
+        )
+        .id("tiles-reset")
+        .on_click(cx.listener(|this, _, _, cx| this.reset_tiles(cx)))
+        .into_any_element();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(20.0))
+            .child(note(
+                theme,
+                "Map tiles come from this server and are kept on the phone. Any VersaTiles-compatible Shortbread vector tile server works.",
+                false,
+            ))
+            .child(div().px(px(16.0)).child(field_box(
+                theme,
+                "tiles-url",
+                &self.tile_field,
+                DEFAULT_TILE_URL,
+                window,
+                cx,
+            )))
+            .child(note(
+                theme,
+                "Use {z}, {x} and {y} for the tile position.",
+                false,
+            ))
+            .child(section(theme, None, [save, reset]))
+            .into_any_element()
+    }
+
+    /// Puts the saved server URL into the text field.
+    fn sync_tile_field(&mut self, cx: &mut Context<Self>) {
+        let template = self.prefs.tile_source().template().to_owned();
+        self.tile_field
+            .update(cx, |field, cx| field.set(&template, cx));
+    }
+
+    /// Parses the field (no network on a parse error), tests the server on the
+    /// background executor, and only a working server is saved.
+    fn test_and_save_tiles(&mut self, cx: &mut Context<Self>) {
+        if self.tile_testing {
+            return;
+        }
+        let text = self.tile_field.read(cx).text().trim().to_owned();
+        let source = match TileSource::parse(&text) {
+            Ok(source) => source,
+            Err(error) => {
+                self.show_pill(tile_url_error_text(&error), None, cx);
+                return;
+            }
+        };
+        self.tile_testing = true;
+        cx.notify();
+        let client = self.map_tiles.client();
+        let tested = source.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { client.test_server(&tested) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.tile_testing = false;
+                if result.is_ok() {
+                    this.use_tile_source(source, cx);
+                }
+                this.show_pill(tile_test_text(&result), None, cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn reset_tiles(&mut self, cx: &mut Context<Self>) {
+        let source = TileSource::default_source();
+        self.use_tile_source(source, cx);
+        self.sync_tile_field(cx);
+        self.show_pill("Map server reset to default", None, cx);
+    }
+
+    /// Saves `source` as the setting and switches the map to it.
+    fn use_tile_source(&mut self, source: TileSource, cx: &mut Context<Self>) {
+        self.prefs.set_tile_url(&source);
+        self.save_prefs(cx);
+        self.map_tiles.set_source(source, cx);
+    }
+
     /// Puts the saved template into the text field.
     fn sync_template_field(&mut self, cx: &mut Context<Self>) {
         let template = self
@@ -833,6 +992,41 @@ mod tests {
             unread: 0,
             is_group: group,
         }
+    }
+
+    #[test]
+    fn tile_server_summary_is_the_host() {
+        let mut prefs = StopsPrefs::default();
+        assert_eq!(tile_server_summary(&prefs), "tiles.versatiles.org");
+        let m = TileSource::parse("https://user:pw@maps.maltepe.edu.tr:8443/tiles/osm/{z}/{x}/{y}")
+            .unwrap();
+        prefs.set_tile_url(&m);
+        assert_eq!(tile_server_summary(&prefs), "maps.maltepe.edu.tr:8443");
+    }
+
+    #[test]
+    fn tile_url_errors_have_texts() {
+        let bad = [
+            "",
+            "ftp://x/{z}/{x}/{y}",
+            "https://x/{x}/{y}",
+            "https://x/{z}/{x} {y}",
+        ];
+        for text in bad {
+            let error = TileSource::parse(text).unwrap_err();
+            assert!(tile_url_error_text(&error).ends_with('.'), "{text}");
+        }
+        assert_eq!(
+            tile_url_error_text(&TileUrlError::Missing("{x}")),
+            "The URL needs {x} exactly once."
+        );
+    }
+
+    #[test]
+    fn tile_test_texts() {
+        assert_eq!(tile_test_text(&Ok(12)), "Map server works (12 layers)");
+        assert_eq!(tile_test_text(&Ok(1)), "Map server works (1 layer)");
+        assert!(tile_test_text(&Err(TileError::Status(404))).contains("404"));
     }
 
     #[test]

@@ -20,7 +20,9 @@
 - Everything is local except WhatsApp, which runs on the user's gateway
   (`services/wa_gateway`). Apps reach it only through `rovsti_wa_client`. A
   linked WhatsApp instance is shared by apps via a connect key (link once in any app,
-  or paste the key from another app). No other backend, analytics or cloud sync.
+  or paste the key from another app). Stops also downloads map tiles from the
+  user-chosen tile server (default the public VersaTiles server, `tiles.versatiles.org`)
+  and caches them on the device. No other backend, analytics or cloud sync.
 - Planning uses BMAD (`/bmad-help`). Its outputs go to `_bmad-output/`, and project
   knowledge goes to `docs/`.
 

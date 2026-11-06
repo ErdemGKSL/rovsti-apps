@@ -11,7 +11,9 @@
       "application-id": "dev.rovsti.phone",
       "features": [
         "notifications",
-        "audio-routing"
+        "audio-routing",
+        "files",
+        "sharing"
       ],
       "icon": "assets/app.png",
       "management": "manual",

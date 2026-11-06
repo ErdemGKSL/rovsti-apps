@@ -1,5 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <receiver android:name="dev.gpui.android.NotificationReceiver" android:exported="false" />
+        <provider
+            android:name="dev.gpui.android.GpuiFileProvider"
+            android:authorities="${applicationId}.gpui.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/gpui_file_paths" />
+        </provider>
     </application>
 </manifest>

@@ -30,6 +30,7 @@ class GpuiSession : AutoCloseable {
     private val frameWakePosted = AtomicBoolean(false)
     private val delayedFrameWake = Runnable { if (!closed) view.get()?.requestFrame() }
     private val pendingUrls = ArrayList<String>()
+    private val pendingShares = ArrayList<IncomingShare>()
     private var phase = BACKGROUND
     private var closeRequested: Runnable? = null
     private var errorHandler: Consumer<RuntimeException>? = null
@@ -204,10 +205,43 @@ class GpuiSession : AutoCloseable {
             if (!closed && id != 0L) nativePermissionResult(id, token, status)
         }, this, SystemClock.uptimeMillis())
     }
-    private fun requestFiles(token: Long, multiple: Boolean, writable: Boolean, mimeTypes: Array<String>) { unsupported("files") }
-    private fun requestDirectory(token: Long) { unsupported("files") }
-    private fun requestFileSave(token: Long, name: String, mime: String) { unsupported("files") }
-    private fun fileStore(): Any = unsupported("files")
+    private val files = FilePickerHost { token, documents, error ->
+        handler.postAtTime({
+            if (!closed && id != 0L) nativeFileResult(id, token, documents, error)
+        }, this, SystemClock.uptimeMillis())
+    }
+
+    /** Attach the Activity used by the system document picker. */
+    fun attachFileHost(activity: Activity) { checkThread(); check(!closed); files.attach(activity) }
+
+    /** Retained configuration changes keep the pending picker; other detachments cancel it. */
+    fun detachFileHost(activity: Activity) { checkThread(); files.detach(activity) }
+
+    /** Returns true for a file result owned by this session. Codes 0x8000..0xbfff are reserved. */
+    fun onActivityResult(activity: Activity, code: Int, result: Int, data: Intent?): Boolean {
+        checkThread()
+        return !closed && files.result(activity, code, result, data)
+    }
+
+    private fun requestFiles(token: Long, multiple: Boolean, writable: Boolean, mimeTypes: Array<String>) {
+        handler.postAtTime({
+            if (!closed) files.request(token, multiple, writable, active(), mimeTypes)
+        }, this, SystemClock.uptimeMillis())
+    }
+
+    private fun requestDirectory(token: Long) {
+        handler.postAtTime({
+            if (!closed) files.directory(token, active())
+        }, this, SystemClock.uptimeMillis())
+    }
+
+    private fun requestFileSave(token: Long, name: String, mime: String) {
+        handler.postAtTime({
+            if (!closed) files.create(token, name, mime, active())
+        }, this, SystemClock.uptimeMillis())
+    }
+
+    private fun fileStore(): Any = FileStore(requireContext())
     private fun credentialStore(): Any = unsupported("credentials")
     private fun unsupported(feature: String): Nothing = error("Enable '$feature' in platforms.android.features and run gpuiforge sync")
     private fun backgroundOperation(operation: String, payload: String): String? = try {
@@ -281,12 +315,19 @@ class GpuiSession : AutoCloseable {
         updateConfiguration()
         for (url in pendingUrls) nativeOpenUrl(id, url)
         pendingUrls.clear()
+        deliverShares()
     }
 
     /** Forwards VIEW URLs and SEND/SEND_MULTIPLE shares, including before the first Surface. */
     fun onOpenIntent(intent: Intent): Boolean {
         checkThread()
         if (closed) return false
+        if (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE) {
+            pendingShares.add(IncomingShare.parse(intent))
+            deliverShares()
+            view.get()?.requestFrame()
+            return true
+        }
         if (intent.action != Intent.ACTION_VIEW) return false
         val uri = intent.data ?: return false
         if (uri.scheme.isNullOrEmpty()) return false
@@ -296,6 +337,16 @@ class GpuiSession : AutoCloseable {
         return true
     }
 
+    private fun deliverShares() {
+        if (id == 0L || pendingShares.isEmpty()) return
+        val context = view.get()?.context?.applicationContext ?: return
+        val shares = pendingShares.toList()
+        pendingShares.clear()
+        for (share in shares) {
+            val documents = share.uris.map { SelectedDocument(context.contentResolver, it, false) }.toTypedArray()
+            nativeReceiveShare(id, share.text, share.mime, documents, share.error)
+        }
+    }
 
     private fun darkAppearance(): Boolean =
         view.get()?.resources?.configuration?.uiMode?.and(Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
@@ -697,11 +748,13 @@ class GpuiSession : AutoCloseable {
     }
 
     private fun clipboardImage(): Any {
-        unsupported("files")
+        return ClipboardImage(requireContext())
     }
 
     private fun publishClipboardImage(image: Any) {
-        unsupported("files")
+        val export = image as ClipboardImage
+        requireContext().getSystemService(ClipboardManager::class.java).setPrimaryClip(export.clip())
+        export.retain()
     }
 
     private fun writeClipboard(text: String) {
@@ -734,7 +787,12 @@ class GpuiSession : AutoCloseable {
         error.toString()
     }
 
-    private fun share(text: String?, title: String?, files: Array<Intent>): String? = "Enable 'sharing' in platforms.android.features and run gpuiforge sync"
+    private fun share(text: String?, title: String?, files: Array<Intent>): String? = try {
+        startIntent(ShareIntent.create(text, title, files))
+        null
+    } catch (error: Exception) {
+        error.toString()
+    }
 
     /** Releases the Rust application. Do not close during a retained Activity recreation. */
     override fun close() {
@@ -761,9 +819,11 @@ class GpuiSession : AutoCloseable {
         componentContext = null
         cancelBackGesture()
         pendingUrls.clear()
+        pendingShares.clear()
         permissions.close()
         networkMonitor?.close()
         networkMonitor = null
+        files.close()
         try {
             view.get()?.releaseSurface()
         } finally {

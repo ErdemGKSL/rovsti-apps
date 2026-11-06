@@ -264,6 +264,8 @@ pub enum PickItem {
     },
     /// How to get a destination in at all.
     Hint,
+    /// Why a typed query found nothing.
+    NoMatch(String),
 }
 
 impl PickItem {
@@ -278,6 +280,7 @@ impl PickItem {
             Self::Pair { i, .. } => lists::key(5, *i as u64),
             Self::Recent { i, .. } => lists::key(6, *i as u64),
             Self::Hint => lists::key(7, 0),
+            Self::NoMatch(text) => lists::key(8, text.len() as u64),
         }
     }
 }
@@ -684,6 +687,12 @@ impl StopsApp {
                 at,
             }
         });
+        if !query.is_empty() && items.is_empty() {
+            items.push(PickItem::NoMatch(pick::no_match_text(
+                query,
+                self.gtfs.is_some(),
+            )));
+        }
         if query.is_empty() {
             let pairs = self.history.recent_pairs(3);
             let saved = &self.saved;
@@ -729,6 +738,7 @@ impl StopsApp {
                 lists::grouped(theme, lists::Place::ALONE, row).into_any_element()
             }
             PickItem::Refusal(why) => Self::footnote(theme, why),
+            PickItem::NoMatch(text) => Self::footnote(theme, text),
             PickItem::Header(text) => lists::section_header(theme, text, 8.0),
             PickItem::Stop { index, lines, at } => {
                 let Some(stop) = self
@@ -1403,6 +1413,13 @@ mod tests {
             }
             .key()
         );
+    }
+
+    #[test]
+    fn no_match_key_differs_from_hint_and_refusal() {
+        let k = PickItem::NoMatch("abc".into()).key();
+        assert_ne!(k, PickItem::Hint.key());
+        assert_ne!(k, PickItem::Refusal("abc").key());
     }
 
     #[test]

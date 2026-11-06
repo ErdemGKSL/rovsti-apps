@@ -667,6 +667,26 @@ object RovstiBridge {
         return true
     }
 
+    /**
+     * Whether the default SIM has a voicemail number. Never throws; unknown (no
+     * permission, no SIM, any error) answers true so it never blocks the call.
+     */
+    @JvmStatic
+    @SuppressLint("MissingPermission")
+    fun voicemailConfigured(): Boolean = try {
+        if (app.checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            true
+        } else {
+            val telecom = app.getSystemService(TelecomManager::class.java)
+            val handle = telecom?.getDefaultOutgoingPhoneAccount("tel")
+                ?: telecom?.callCapablePhoneAccounts?.firstOrNull()
+            if (telecom == null || handle == null) true
+            else !telecom.getVoiceMailNumber(handle).isNullOrBlank()
+        }
+    } catch (_: Exception) {
+        true
+    }
+
     /** Opens the system "add contact" screen (create or add to existing) with [number] filled in. */
     @JvmStatic
     fun addContact(number: String): Boolean = start(

@@ -222,6 +222,8 @@ pub struct Key {
     pub in_id: &'static str,
     /// What a screen reader says (UX-DR22).
     pub label: &'static str,
+    /// Spoken label on the Keypad tab when the key also does something on hold.
+    pub hold_label: Option<&'static str>,
 }
 
 impl Key {
@@ -238,13 +240,19 @@ impl Key {
             id,
             in_id,
             label,
+            hold_label: None,
         }
+    }
+
+    const fn with_hold(mut self, hold_label: &'static str) -> Self {
+        self.hold_label = Some(hold_label);
+        self
     }
 }
 
 /// Dial pad keys in reading order.
 pub const KEYS: [Key; 12] = [
-    Key::new("1", "", "key-1", "ik-1", "1"),
+    Key::new("1", "", "key-1", "ik-1", "1").with_hold("1, hold for voicemail"),
     Key::new("2", "ABC", "key-2", "ik-2", "2 A B C"),
     Key::new("3", "DEF", "key-3", "ik-3", "3 D E F"),
     Key::new("4", "GHI", "key-4", "ik-4", "4 G H I"),
@@ -316,7 +324,7 @@ impl PhoneApp {
         id.starts_with("key-")
             || id.starts_with("ik-")
             || id.starts_with("ic-")
-            || matches!(id, "delete" | "paste" | "grant" | "wa-call")
+            || matches!(id, "delete" | "paste" | "grant" | "wa-call" | "kp-vm-set")
     }
 
     pub(crate) fn activate(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -325,6 +333,13 @@ impl PhoneApp {
             "call" => self.call_press(window, cx),
             "paste" => self.paste_press(window, cx),
             "wa-call" => self.whatsapp_press(window, cx),
+            "kp-vm-set" => {
+                let outcome =
+                    backend::open_system(rovsti_android::telecom::SystemPage::CallSettings);
+                if let Some(text) = outcome.notice() {
+                    self.set_status(text);
+                }
+            }
             "kp-add" => {
                 let outcome = backend::add_contact(&self.dialed);
                 if outcome != backend::Outcome::Done {
@@ -602,6 +617,7 @@ impl PhoneApp {
             Placement::Debounced => {}
             Placement::Blocked => self.status = Some(Status::NeedsPhone),
             Placement::Failed => self.set_status("The call could not be placed"),
+            Placement::NoVoicemail => self.status = Some(Status::NoVoicemail),
         }
     }
 
@@ -679,6 +695,7 @@ impl PhoneApp {
             Placement::Debounced => {}
             Placement::Blocked => self.status = Some(Status::NeedsPhone),
             Placement::Failed => self.set_status("The call could not be placed"),
+            Placement::NoVoicemail => self.status = Some(Status::NoVoicemail),
         }
     }
 
@@ -1013,11 +1030,23 @@ impl PhoneApp {
             .text_size(typography::CAPTION2.size)
             .font_weight(typography::CAPTION2.weight)
             .text_color(colors.secondary_label)
+            .when(!in_call && key.hold_label.is_some(), |el| {
+                el.flex().items_center().justify_center().child(
+                    svg()
+                        .path(Icon::LucideVoicemail.path())
+                        .size(px(12.0))
+                        .flex_none()
+                        .text_color(colors.secondary_label),
+                )
+            })
             .child(key.letters);
         div()
             .id(id)
             .role(Role::Button)
-            .aria_label(key.label)
+            .aria_label(match key.hold_label {
+                Some(hold) if !in_call => hold,
+                _ => key.label,
+            })
             .size(px(size))
             .flex()
             .items_center()
@@ -1231,6 +1260,10 @@ impl PhoneApp {
                             ))),
                     )
             }
+            Some(Status::NoVoicemail) => area
+                .aria_label("No voicemail number set")
+                .child("No voicemail number set")
+                .child(self.status_button(theme, "kp-vm-set", "Open call settings", cx)),
             // The status line is 36 px tall whether or not it speaks, so a
             // name appearing never moves the keys.
             None => match &self.dial_match.found {
@@ -1506,6 +1539,14 @@ mod tests {
         assert_eq!(byte_range("Ali", (1, 9)), Some(1..3));
         assert_eq!(byte_range("Ali", (2, 2)), None);
         assert_eq!(byte_range("Ali", (5, 6)), None);
+    }
+
+    #[test]
+    fn only_the_one_key_has_a_hold_label() {
+        for (index, key) in KEYS.iter().enumerate() {
+            assert_eq!(key.hold_label.is_some(), index == 0, "key {}", key.digit);
+        }
+        assert_eq!(KEYS[0].hold_label, Some("1, hold for voicemail"));
     }
 
     #[test]

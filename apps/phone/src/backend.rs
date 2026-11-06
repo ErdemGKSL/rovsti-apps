@@ -254,6 +254,13 @@ pub enum Placement {
     Blocked,
     /// Android did not accept the call.
     Failed,
+    /// The SIM has no voicemail number; nothing was placed.
+    NoVoicemail,
+}
+
+/// Desktop preview switch: pretend the SIM has no voicemail number.
+fn preview_no_voicemail() -> bool {
+    std::env::var("ROVSTI_PREVIEW_NO_VOICEMAIL").is_ok_and(|v| v == "1")
 }
 
 /// A second Call press inside this window is ignored.
@@ -881,6 +888,19 @@ impl Backend {
         self.place_now(raw, cx)
     }
 
+    /// Whether a voicemail number is set. `true` when unknown; on desktop only
+    /// `ROVSTI_PREVIEW_NO_VOICEMAIL=1` makes it `false`.
+    pub fn voicemail_configured(&self) -> bool {
+        match telecom::voicemail_configured() {
+            Ok(set) => set,
+            Err(Error::Unsupported) => !preview_no_voicemail(),
+            Err(error) => {
+                log::warn!("voicemail_configured failed: {error}");
+                true
+            }
+        }
+    }
+
     /// Calls the voicemail box (long-press on 1). Shares the debounce and the
     /// Phone permission rules of [`Self::place_call`]; on desktop the preview
     /// starts a call so the flow can be seen.
@@ -891,6 +911,9 @@ impl Backend {
             .is_some_and(|t| now.duration_since(t) < PLACE_DEBOUNCE)
         {
             return Placement::Debounced;
+        }
+        if !self.voicemail_configured() {
+            return Placement::NoVoicemail;
         }
         self.last_place = Some(now);
         self.call_blocked = false;

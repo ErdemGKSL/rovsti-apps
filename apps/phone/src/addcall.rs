@@ -283,7 +283,7 @@ impl PhoneApp {
             Placement::Blocked => {
                 self.add.failed = Some("Call failed: Phone access is off".into());
             }
-            Placement::Failed => {
+            Placement::Failed | Placement::NoVoicemail => {
                 self.add.failed = Some("Call failed: the call could not be placed".into());
             }
         }

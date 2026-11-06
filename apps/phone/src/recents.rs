@@ -911,7 +911,7 @@ impl PhoneApp {
                 self.last_dialed = number.into();
                 Some(Notice::NeedsPhone)
             }
-            Placement::Failed => Some(Notice::Failed),
+            Placement::Failed | Placement::NoVoicemail => Some(Notice::Failed),
         };
         cx.notify();
         // Only a call the In-Call screen will show gets a flight.

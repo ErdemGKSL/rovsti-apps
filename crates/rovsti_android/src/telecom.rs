@@ -109,6 +109,12 @@ pub fn share_text(text: &str) -> Result<bool> {
     bridge::call_bool_str("shareText", text)
 }
 
+/// Whether the default SIM has a voicemail number; `true` when unknown, so
+/// an unreadable state never blocks the call.
+pub fn voicemail_configured() -> Result<bool> {
+    bridge::call_bool0("voicemailConfigured")
+}
+
 /// Whether the phone reports hearing-aid compatibility
 /// (`TelephonyManager.isHearingAidCompatibilitySupported()`); feeds the
 /// informational row in Settings (story 16.10).
@@ -154,6 +160,7 @@ mod tests {
         assert!(matches!(copy_text("x"), Err(Error::Unsupported)));
         assert!(matches!(share_text("x"), Err(Error::Unsupported)));
         assert!(matches!(hearing_aid_compatible(), Err(Error::Unsupported)));
+        assert!(matches!(voicemail_configured(), Err(Error::Unsupported)));
         assert!(matches!(edit_contact(1), Err(Error::Unsupported)));
         assert!(matches!(open_contacts(), Err(Error::Unsupported)));
     }

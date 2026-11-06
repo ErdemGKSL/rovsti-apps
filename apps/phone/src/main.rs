@@ -117,6 +117,8 @@ enum Status {
     Text(SharedString),
     /// `CALL_PHONE` was refused: explain and offer "Grant access".
     NeedsPhone,
+    /// The SIM has no voicemail number: explain and offer "Open call settings".
+    NoVoicemail,
 }
 
 struct PhoneApp {

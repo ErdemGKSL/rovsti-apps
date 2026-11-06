@@ -332,7 +332,7 @@ impl ContactsApp {
                 empty_state(
                     theme,
                     "No Contacts",
-                    "Contacts with a phone number appear here.",
+                    "Add contacts in the Contacts tab first.",
                 )
                 .into_any_element()
             } else {

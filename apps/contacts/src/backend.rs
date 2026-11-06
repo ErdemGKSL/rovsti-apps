@@ -12,7 +12,7 @@ use rovsti_android::{Error, contacts_edit, documents, providers};
 use rovsti_core::{
     contact_edit::{
         Account, AccountsPayload, ContactDraft, DetailPayload, FullPayload, Group, GroupsPayload,
-        ImportPayload, SavedPayload,
+        ImportPayload, MembersPayload, SavedPayload, SelectionChange,
     },
     contact_photo::{self, PhotoError},
     search::{ContactIndex, fold},
@@ -164,6 +164,16 @@ pub(crate) fn delete(contact_id: i64) -> Result<(), String> {
 pub(crate) fn save_group(group_id: i64, title: &str, account: &str) -> Result<i64, String> {
     decode::<SavedPayload>(contacts_edit::save_group(group_id, title, account))
         .map(|saved| saved.id)
+        .map_err(|error| error.words())
+}
+
+/// Adds and removes members of a group; how many changed.
+pub(crate) fn set_group_members(
+    group_id: i64,
+    change: &SelectionChange,
+) -> Result<MembersPayload, String> {
+    let json = serde_json::json!({ "add": change.add, "remove": change.remove }).to_string();
+    decode::<MembersPayload>(contacts_edit::set_group_members(group_id, &json))
         .map_err(|error| error.words())
 }
 

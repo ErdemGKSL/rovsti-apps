@@ -14,6 +14,7 @@ mod editor;
 mod field;
 mod groups;
 mod photos;
+mod picker;
 mod prefs;
 mod sample;
 mod transfer;
@@ -61,6 +62,7 @@ use crate::{
     field::{TextField, input_layer, on_backspace},
     groups::GroupEdit,
     photos::{Photos, photo_avatar},
+    picker::Picker,
     ui::{Tone, tap_row},
 };
 
@@ -194,6 +196,10 @@ struct ContactsApp {
     /// The open contact in full (organisation, emails, note, groups).
     open_draft: Option<ContactDraft>,
     editor: Option<Editor>,
+    /// The contact picker, its rows and list.
+    picker: Option<Picker>,
+    picker_rows: Vec<Row>,
+    picker_list: ListState,
     /// The group whose page is open, and its rows.
     group_page: Option<i64>,
     group_rows: Vec<Row>,
@@ -201,6 +207,8 @@ struct ContactsApp {
     confirm: Option<Confirm>,
     /// Open this contact once the next pull lands (after a save).
     pending_open: Option<i64>,
+    /// Open this group once the next pull lands (after it was created).
+    pending_group: Option<i64>,
     /// A file picker is open.
     transfer_busy: bool,
     /// How many contacts the export in flight holds.
@@ -354,11 +362,15 @@ impl ContactsApp {
             open: None,
             open_draft: None,
             editor: None,
+            picker: None,
+            picker_rows: Vec::new(),
+            picker_list: page_list(),
             group_page: None,
             group_rows: Vec::new(),
             group_edit: None,
             confirm: None,
             pending_open: None,
+            pending_group: None,
             transfer_busy: false,
             exported: None,
             import_settle: None,
@@ -411,6 +423,12 @@ impl ContactsApp {
                     this.rebuild(cx);
                     if let Some(id) = this.pending_open.take() {
                         this.open_contact(id, cx);
+                    }
+                    if let Some(id) = this.pending_group.take() {
+                        // Opening a page clears the notice: keep the one for the new group.
+                        let notice = this.notice.take();
+                        this.open_group(id, cx);
+                        this.notice = notice;
                     }
                 }
             })
@@ -589,6 +607,7 @@ impl ContactsApp {
     fn can_go_back(&self, cx: &App) -> bool {
         self.confirm.is_some()
             || self.photo_sheet.is_open()
+            || self.picker.is_some()
             || self.editor.is_some()
             || self.group_edit.is_some()
             || self.open.is_some()
@@ -604,6 +623,8 @@ impl ContactsApp {
             self.answer(false, cx);
         } else if self.photo_sheet.is_open() {
             self.close_photo_sheet(cx);
+        } else if self.picker.is_some() {
+            self.close_picker(cx);
         } else if self.editor.is_some() {
             self.leave_editor(cx);
         } else if self.group_edit.is_some() {
@@ -758,8 +779,19 @@ impl ContactsApp {
     // ---- views ----
 
     fn search_field(&self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        self.search_box(&self.field.clone(), theme, window, cx)
+    }
+
+    /// The glass search box for `field`.
+    fn search_box(
+        &self,
+        field: &Entity<TextField>,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = theme::colors(theme);
-        let field = self.field.clone();
+        let field = field.clone();
         let focus = field.read(cx).focus_handle();
         let text: SharedString = field.read(cx).text().to_owned().into();
         let typing = focus.is_focused(window);
@@ -1389,6 +1421,7 @@ impl Render for ContactsApp {
         let entity = cx.entity();
         let touch_entity = entity.clone();
         let editing = self.editor.is_some();
+        let picking = self.picker.is_some();
 
         // The keyboard covers the bottom of the screen: leave room to scroll.
         let insets = window.insets();
@@ -1402,7 +1435,10 @@ impl Render for ContactsApp {
 
         // Lists that grow with the address book are virtualised and scroll
         // themselves; the other pages scroll as one block.
-        let (page, listed) = if editing {
+        let (page, listed) = if picking {
+            let page = Self::list_page(&self.picker_list, bottom, Self::picker_item, cx);
+            (page, true)
+        } else if editing {
             (self.editor_view(theme, window, cx), false)
         } else if let Some(card) = &self.open {
             (self.detail(card, theme, cx), false)
@@ -1472,7 +1508,7 @@ impl Render for ContactsApp {
             .child(scroller)
             .children(self.notice(theme))
             // No tab bar while a form is open: no stray tap loses the edits.
-            .children((!editing).then(|| {
+            .children((!editing && !picking).then(|| {
                 self.tabs.render(
                     theme,
                     move |index, _, cx| {

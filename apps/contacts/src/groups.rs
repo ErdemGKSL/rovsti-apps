@@ -193,8 +193,15 @@ impl ContactsApp {
                 .spawn(async move { backend::save_group(id.unwrap_or(0), &title, &account) })
                 .await;
             this.update(cx, |this, cx| match result {
-                Ok(_) => {
+                Ok(saved) => {
                     this.group_edit = None;
+                    if id.is_some() {
+                        this.notice = Some("Group renamed.".into());
+                    } else {
+                        this.pending_group = Some(saved);
+                        this.notice =
+                            Some("Group created. Add people with Add or Remove Contacts.".into());
+                    }
                     this.reload(cx);
                 }
                 Err(words) => {
@@ -419,6 +426,13 @@ impl ContactsApp {
                     .flex()
                     .gap(px(8.0))
                     .child(
+                        glass_icon_button(theme, Icon::LucideUserPlus, 0.0, false)
+                            .id("group-members")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_group_picker(id, cx);
+                            })),
+                    )
+                    .child(
                         glass_icon_button(theme, Icon::LucidePencil, 0.0, false)
                             .id("group-rename")
                             .on_click(cx.listener(move |this, _, _, cx| {
@@ -437,7 +451,7 @@ impl ContactsApp {
             empty_state(
                 theme,
                 "Empty Group",
-                "Add contacts to this group from their Edit screen.",
+                "Add people with Add or Remove Contacts.",
             )
         });
         div()
@@ -448,6 +462,19 @@ impl ContactsApp {
             .when(empty.is_none(), |header| header.pb(px(8.0)))
             .child(top)
             .child(large_title(theme, title, None))
+            .child(section(
+                theme,
+                None,
+                [tap_row(
+                    theme,
+                    "group-members-row",
+                    Some(Icon::LucideUserPlus),
+                    "Add or Remove Contacts",
+                    Tone::Accent,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.open_group_picker(id, cx)))
+                .into_any_element()],
+            ))
             .children(self.group_edit_section(theme, window, cx))
             .children(empty)
             .into_any_element()

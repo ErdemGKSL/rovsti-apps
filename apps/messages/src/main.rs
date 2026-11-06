@@ -206,6 +206,8 @@ enum PillAction {
     ReopenScheduled { to: String, body: String },
     /// Tries loading the WhatsApp chats again.
     ReloadChats,
+    /// Opens a WhatsApp chat (its JID and title).
+    OpenChat { jid: String, title: String },
 }
 
 /// The page pushed over the tabs.
@@ -835,7 +837,22 @@ impl MessagesApp {
                     }
                 }
                 GatewayEvent::Scheduled(item) => {
+                    let before = self.remote_scheduled.iter().find(|t| t.id == item.id);
+                    let announce = schedule_ui::newly_failed(before, &item)
+                        && !matches!(&self.open, Open::WhatsApp(open, _) if *open == item.chat);
+                    let chat = item.chat.clone();
                     schedule_ui::upsert_remote(&mut self.remote_scheduled, item);
+                    if announce {
+                        let title = self
+                            .title_of(&ThreadId::WhatsApp(chat.clone()))
+                            .unwrap_or_else(|| jid_user(&chat).to_owned());
+                        self.show_pill_action(
+                            schedule_ui::remote_failed_text(&title),
+                            "Open",
+                            PillAction::OpenChat { jid: chat, title },
+                            cx,
+                        );
+                    }
                     self.sync_open_page(cx);
                 }
                 GatewayEvent::StatusChanged { .. } => self.reload_statuses(cx),
@@ -1767,6 +1784,7 @@ impl MessagesApp {
             PillAction::Chat(jid, undo) => self.chat_action(&jid, undo, true, cx),
             PillAction::SmsMute(id, mute) => self.set_sms_mute(id, mute, cx),
             PillAction::ReloadChats => self.load_chats(cx),
+            PillAction::OpenChat { jid, title } => self.open_chat(jid, title, cx),
             PillAction::ReopenScheduled { to, body } => {
                 let title = self
                     .backend

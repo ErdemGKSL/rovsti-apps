@@ -435,14 +435,12 @@ pub fn overview_subtitle(entries: &[ScheduledEntry]) -> String {
 }
 
 /// True when `after` is failed and `before` was not (unknown counts as not failed).
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn newly_failed(before: Option<&ScheduledText>, after: &ScheduledText) -> bool {
     matches!(after.state, ScheduledState::Failed { .. })
         && !before.is_some_and(|b| matches!(b.state, ScheduledState::Failed { .. }))
 }
 
 /// The pill when a gateway-scheduled WhatsApp message failed.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn remote_failed_text(title: &str) -> String {
     format!(
         "Scheduled WhatsApp message to {} couldn't be sent",

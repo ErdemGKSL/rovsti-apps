@@ -8,7 +8,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_geo::{AlarmRule, Coord, Place, dest::parse_location};
+use rovsti_geo::{Coord, Diameter, DiameterError, Endpoint, Place, dest::parse_location};
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
     field::field_box,
@@ -30,11 +30,9 @@ const MAX_STOP_HITS: usize = 20;
 pub struct Destination {
     pub label: String,
     pub coord: Coord,
-    /// A saved place's own rule; `None` follows the "Wake me" chips.
-    pub rule: Option<AlarmRule>,
     /// The transit stop this is, when it came from an imported feed.
     pub gtfs_stop: Option<String>,
-    /// The line it was chosen on ("N stops before"), drawn on the map.
+    /// The line it was chosen on in the stop sheet, drawn on the map.
     pub pattern: Option<u32>,
 }
 
@@ -43,7 +41,6 @@ impl Destination {
         Self {
             label: place.name.clone(),
             coord: place.coord,
-            rule: place.rule,
             gtfs_stop: place.gtfs_stop.clone(),
             pattern: None,
         }
@@ -53,7 +50,6 @@ impl Destination {
         Self {
             label: label.into(),
             coord,
-            rule: None,
             gtfs_stop: None,
             pattern: None,
         }
@@ -61,11 +57,80 @@ impl Destination {
 
     /// The confirmation sheet's heading.
     pub fn title(&self) -> String {
-        format!("Wake me near {}", self.label)
+        format!("Use {}", self.label)
+    }
+
+    /// The point as the trip stores it.
+    pub fn endpoint(&self) -> Endpoint {
+        Endpoint {
+            label: self.label.clone(),
+            coord: self.coord,
+        }
     }
 
     pub fn coords_text(&self) -> String {
         coord_text(self.coord)
+    }
+}
+
+/// Which end of the diameter a point goes to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Slot {
+    #[default]
+    A,
+    B,
+}
+
+impl Slot {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::A => "A",
+            Self::B => "B",
+        }
+    }
+}
+
+/// The two points chosen so far.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Ends {
+    pub a: Option<Destination>,
+    pub b: Option<Destination>,
+}
+
+impl Ends {
+    pub fn get(&self, slot: Slot) -> Option<&Destination> {
+        match slot {
+            Slot::A => self.a.as_ref(),
+            Slot::B => self.b.as_ref(),
+        }
+    }
+
+    pub fn set(&mut self, slot: Slot, dest: Destination) {
+        match slot {
+            Slot::A => self.a = Some(dest),
+            Slot::B => self.b = Some(dest),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.a.is_none() && self.b.is_none()
+    }
+
+    /// Where the next picked point goes: A until it is set, then B.
+    pub fn next_slot(&self) -> Slot {
+        if self.a.is_none() { Slot::A } else { Slot::B }
+    }
+
+    /// Exchanges A and B (the left and right sides trade places).
+    pub fn swap(&mut self) {
+        std::mem::swap(&mut self.a, &mut self.b);
+    }
+
+    /// The circle on AB. `None` until both points are set; `Some(Err)` when
+    /// they cannot form a diameter.
+    pub fn diameter(&self) -> Option<Result<Diameter, DiameterError>> {
+        let (a, b) = (self.a.as_ref()?, self.b.as_ref()?);
+        Some(Diameter::new(a.coord, b.coord))
     }
 }
 
@@ -105,11 +170,11 @@ pub fn offer(text: &str) -> Offer {
 pub enum SheetMode {
     /// Paste field, Saved, Recent.
     Pick,
-    /// "Wake me near ...", rule chips, Save toggle.
+    /// "Use ...": Use as A / Use as B, Save toggle.
     Confirm(Destination),
     /// A new name for a saved place.
     Rename(u64),
-    /// A transit stop (index into the feed): its lines and "N stops before".
+    /// A transit stop (index into the feed): its lines, Use as A / Use as B.
     Stop(u32),
 }
 
@@ -121,7 +186,7 @@ pub struct StopHits {
     hits: Vec<u32>,
 }
 
-const PICKER_LABEL: &str = "Choose destination";
+const PICKER_LABEL: &str = "Choose a point";
 
 impl StopsApp {
     /// Opens the picker from the Trip tab.
@@ -165,20 +230,61 @@ impl StopsApp {
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // A line looked at but not chosen leaves the map again.
-            self.map.pattern = self.dest.as_ref().and_then(|d| d.pattern);
+            self.map.pattern = self.ends.get(self.active_slot).and_then(|d| d.pattern);
         }
         self.sheet.close();
         cx.notify();
     }
 
-    /// A saved or recent destination was tapped: it becomes the trip's
-    /// destination, ready for Start.
+    /// A saved or recent point was tapped: it fills the active slot, and the
+    /// next pick goes to the other end.
     pub(crate) fn choose_destination(&mut self, dest: Destination, cx: &mut Context<Self>) {
+        let slot = self.active_slot;
+        self.use_as(slot, dest, false, cx);
+    }
+
+    /// Puts `dest` into `slot`, optionally keeping it in Saved too.
+    pub(crate) fn use_as(
+        &mut self,
+        slot: Slot,
+        dest: Destination,
+        save: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if save {
+            self.save_point(&dest, cx);
+        }
         self.map.pattern = dest.pattern;
         self.map.follow = true;
-        self.dest = Some(dest);
+        self.ends.set(slot, dest);
+        self.active_slot = self.ends.next_slot();
         self.sheet.close();
         cx.notify();
+    }
+
+    /// Both ends at once, from a recent trip.
+    pub(crate) fn choose_pair(&mut self, a: Destination, b: Destination, cx: &mut Context<Self>) {
+        self.ends.set(Slot::A, a);
+        self.ends.set(Slot::B, b);
+        self.active_slot = self.ends.next_slot();
+        self.map.pattern = None;
+        self.map.follow = true;
+        self.sheet.close();
+        cx.notify();
+    }
+
+    /// Keeps a point in Saved; a duplicate is fine.
+    fn save_point(&mut self, dest: &Destination, cx: &mut Context<Self>) {
+        match self.saved.add(&dest.label, dest.coord) {
+            Ok(id) => {
+                if let Some(place) = self.saved.get_mut(id) {
+                    place.gtfs_stop.clone_from(&dest.gtfs_stop);
+                }
+                self.save_places(cx);
+            }
+            Err(rovsti_geo::PlaceError::Duplicate(_)) => {}
+            Err(error) => self.show_pill(error.message(), None, cx),
+        }
     }
 
     fn rename_place(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -215,7 +321,7 @@ impl StopsApp {
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
         let (label, content) = match self.sheet_mode.clone() {
             SheetMode::Pick => (PICKER_LABEL, self.pick_body(theme, window, cx)),
-            SheetMode::Confirm(dest) => ("Wake me", self.confirm_body(theme, &dest, cx)),
+            SheetMode::Confirm(dest) => ("Use this point", self.confirm_body(theme, &dest, cx)),
             SheetMode::Rename(id) => ("Rename place", self.rename_body(theme, id, window, cx)),
             SheetMode::Stop(stop) => ("Transit stop", self.stop_body(theme, stop, cx)),
         };
@@ -313,7 +419,7 @@ impl StopsApp {
             .collect();
         if !saved.is_empty() {
             let rows = saved.into_iter().map(|(id, dest)| {
-                let subtitle = trip_ui::rule_text(dest.rule.unwrap_or_else(|| self.rule.to_rule()));
+                let subtitle = dest.coords_text();
                 list_row(theme, None, dest.label.clone(), Some(subtitle.into()), None)
                     .id(("pick-saved", id as usize))
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -323,24 +429,43 @@ impl StopsApp {
             });
             body = body.child(section(theme, Some("Saved".into()), rows));
         }
-        let recent = self.history.recent_destinations(5);
-        if !recent.is_empty() && query.is_empty() {
-            let rows = recent.into_iter().enumerate().map(|(i, (label, coord))| {
-                let dest = Destination::new(label, coord);
-                list_row(
-                    theme,
-                    None,
-                    dest.label.clone(),
-                    Some(dest.coords_text().into()),
-                    None,
-                )
-                .id(("pick-recent", i))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.choose_destination(dest.clone(), cx);
-                }))
-                .into_any_element()
-            });
-            body = body.child(section(theme, Some("Recent".into()), rows));
+        if query.is_empty() {
+            let pairs = self.history.recent_pairs(3);
+            if !pairs.is_empty() {
+                let rows = pairs.into_iter().enumerate().map(|(i, (a, b))| {
+                    let title = format!("{} – {}", a.label, b.label);
+                    let (a, b) = (
+                        Destination::new(a.label, a.coord),
+                        Destination::new(b.label, b.coord),
+                    );
+                    list_row(theme, None, title, None, None)
+                        .id(("pick-pair", i))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.choose_pair(a.clone(), b.clone(), cx);
+                        }))
+                        .into_any_element()
+                });
+                body = body.child(section(theme, Some("Recent trips".into()), rows));
+            }
+            let recent = self.history.recent_points(5);
+            if !recent.is_empty() {
+                let rows = recent.into_iter().enumerate().map(|(i, point)| {
+                    let dest = Destination::new(point.label, point.coord);
+                    list_row(
+                        theme,
+                        None,
+                        dest.label.clone(),
+                        Some(dest.coords_text().into()),
+                        None,
+                    )
+                    .id(("pick-recent", i))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.choose_destination(dest.clone(), cx);
+                    }))
+                    .into_any_element()
+                });
+                body = body.child(section(theme, Some("Recent".into()), rows));
+            }
         }
         if self.saved.places.is_empty() && self.history.records.is_empty() && query.is_empty() {
             body = body.child(Self::footnote(
@@ -403,7 +528,7 @@ impl StopsApp {
         Some(rows)
     }
 
-    /// A stop of the feed: wake near it, or a few stops before it on a line.
+    /// A stop of the feed: a line to draw, Use as A / Use as B, Save.
     fn stop_body(&mut self, theme: Theme, stop: u32, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
         let Some(feed) = self.gtfs.clone() else {
@@ -426,40 +551,18 @@ impl StopsApp {
             .child(Self::sheet_title(theme, name.clone()))
             .child(Self::footnote(theme, coord_text(coord)));
 
-        let chosen = self
-            .stop_pattern
-            .filter(|&p| !transit::wake_options(&feed, p, stop).is_empty());
-        match chosen {
-            Some(pattern) => {
-                let line = feed
-                    .patterns
-                    .get(pattern as usize)
-                    .and_then(|p| Some((p, feed.routes.get(p.route as usize)?)));
-                let title = line.map_or_else(String::new, |(p, route)| {
-                    format!("Line {} to {}", transit::route_name(route), p.headsign)
-                });
-                let rows = transit::wake_options(&feed, pattern, stop)
-                    .into_iter()
-                    .map(|(n, wake)| {
-                        let dest = Destination {
-                            rule: Some(wake.rule),
-                            pattern: Some(pattern),
-                            gtfs_stop: here.gtfs_stop.clone(),
-                            ..Destination::new(wake.label.clone(), coord)
-                        };
-                        let text = if n == 1 {
-                            "Wake me 1 stop before".to_owned()
-                        } else {
-                            format!("Wake me {n} stops before")
-                        };
-                        list_row(theme, None, text, Some(wake.label.into()), None)
-                            .id(("stop-before", n))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.choose_destination(dest.clone(), cx);
-                            }))
-                            .into_any_element()
-                    })
-                    .chain(std::iter::once(
+        let chosen = self.stop_pattern;
+        let lines = transit::lines_through(&feed, stop, MAX_LINES);
+        match chosen.and_then(|p| lines.iter().find(|l| l.pattern == p)) {
+            Some(line) => {
+                let title = line_title(&line.name, &line.headsign);
+                body = body.child(section(
+                    theme,
+                    Some("Drawn on the map".into()),
+                    [
+                        list_row(theme, None, title, None, None)
+                            .id("stop-chosen-line")
+                            .into_any_element(),
                         list_row(theme, None, "Choose another line", None, None)
                             .id("stop-other-line")
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -468,66 +571,54 @@ impl StopsApp {
                                 cx.notify();
                             }))
                             .into_any_element(),
-                    ));
-                body = body.child(section(theme, Some(title.into()), rows));
+                    ],
+                ));
             }
-            None => {
-                let lines = transit::lines_through(&feed, stop, MAX_LINES);
-                if !lines.is_empty() {
-                    let rows = lines.into_iter().map(|line| {
-                        let pattern = line.pattern;
-                        let title = if line.headsign.is_empty() {
-                            format!("Line {}", line.name)
-                        } else {
-                            format!("Line {} to {}", line.name, line.headsign)
-                        };
-                        let stops = if line.before == 1 {
-                            "1 stop before".to_owned()
-                        } else {
-                            format!("{} stops before", line.before)
-                        };
-                        list_row(theme, None, title, Some(stops.into()), None)
-                            .id(("stop-line", pattern as usize))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.stop_pattern = Some(pattern);
-                                this.map.pattern = Some(pattern);
-                                cx.notify();
-                            }))
-                            .into_any_element()
-                    });
-                    body = body.child(section(
-                        theme,
-                        Some("Wake me before this stop on".into()),
-                        rows,
-                    ));
-                } else {
-                    body = body.child(Self::footnote(
-                        theme,
-                        "No line in the feed arrives here after another stop.",
-                    ));
-                }
+            None if !lines.is_empty() => {
+                let rows = lines.into_iter().map(|line| {
+                    let pattern = line.pattern;
+                    let title = line_title(&line.name, &line.headsign);
+                    let before = if line.before == 1 {
+                        "1 stop earlier on this line".to_owned()
+                    } else {
+                        format!("{} stops earlier on this line", line.before)
+                    };
+                    list_row(theme, None, title, Some(before.into()), None)
+                        .id(("stop-line", pattern as usize))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.stop_pattern = Some(pattern);
+                            this.map.pattern = Some(pattern);
+                            cx.notify();
+                        }))
+                        .into_any_element()
+                });
+                body = body.child(section(theme, Some("Show a line on the map".into()), rows));
             }
+            None => {}
         }
 
-        let near_dest = here.clone();
+        let a_dest = Destination {
+            pattern: self.stop_pattern,
+            ..here.clone()
+        };
+        let b_dest = a_dest.clone();
         let save_dest = here;
-        let rule = trip_ui::rule_text(self.rule.to_rule());
         body = body.child(section(
             theme,
-            Some("Or".into()),
+            Some("This stop".into()),
             [
-                list_row(
-                    theme,
-                    None,
-                    "Wake me near this stop",
-                    Some(rule.into()),
-                    None,
-                )
-                .id("stop-near")
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.choose_destination(near_dest.clone(), cx);
-                }))
-                .into_any_element(),
+                list_row(theme, None, "Use as A", None, None)
+                    .id("stop-use-a")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.use_as(Slot::A, a_dest.clone(), false, cx);
+                    }))
+                    .into_any_element(),
+                list_row(theme, None, "Use as B", None, None)
+                    .id("stop-use-b")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.use_as(Slot::B, b_dest.clone(), false, cx);
+                    }))
+                    .into_any_element(),
                 list_row(theme, None, "Save this stop", None, None)
                     .id("stop-save")
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -572,7 +663,6 @@ impl StopsApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = theme::colors(theme);
-        let running = self.trip.is_some();
         let save_row = list_row(
             theme,
             None,
@@ -585,14 +675,23 @@ impl StopsApp {
             this.save_place = !this.save_place;
             cx.notify();
         }));
-        let start = dest.clone();
+        let as_a = dest.clone();
+        let as_b = dest.clone();
+        let default = self.ends.next_slot();
+        let pill = |label: &'static str, slot: Slot| {
+            let p = glass_pill(theme, label);
+            if slot == default {
+                p.text_color(colors.accent)
+            } else {
+                p
+            }
+        };
         div()
             .flex()
             .flex_col()
             .gap(px(8.0))
             .child(Self::sheet_title(theme, dest.title()))
             .child(Self::footnote(theme, dest.coords_text()))
-            .child(trip_ui::rule_chips(self, theme, "confirm-rule", cx))
             .child(section(theme, None, [save_row.into_any_element()]))
             .child(
                 div()
@@ -608,14 +707,21 @@ impl StopsApp {
                             .on_click(cx.listener(|this, _, _, cx| this.close_sheet(cx))),
                     )
                     .child(
-                        glass_pill(theme, if running { "Replace trip" } else { "Start" })
-                            .id("confirm-start")
+                        pill("Use as A", Slot::A)
+                            .id("confirm-use-a")
                             .flex_1()
-                            .text_color(colors.accent)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let save = this.save_place;
-                                this.sheet.close();
-                                this.request_start(start.clone(), save, cx);
+                                this.use_as(Slot::A, as_a.clone(), save, cx);
+                            })),
+                    )
+                    .child(
+                        pill("Use as B", Slot::B)
+                            .id("confirm-use-b")
+                            .flex_1()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let save = this.save_place;
+                                this.use_as(Slot::B, as_b.clone(), save, cx);
                             })),
                     ),
             )
@@ -655,6 +761,15 @@ impl StopsApp {
     }
 }
 
+/// "Line 34 to Kadikoy", or "Line 34" without a headsign.
+fn line_title(name: &str, headsign: &str) -> String {
+    if headsign.is_empty() {
+        format!("Line {name}")
+    } else {
+        format!("Line {name} to {headsign}")
+    }
+}
+
 /// Text that was meant as a link or as coordinates, not as a name to search.
 fn looks_like_link(text: &str) -> bool {
     let t = text.trim_start().to_ascii_lowercase();
@@ -681,9 +796,8 @@ mod tests {
     fn a_geo_uri_with_a_label_names_the_trip() {
         let d = confirm("geo:41.0370,28.9850?q=41.0370,28.9850(Taksim%20Square)");
         assert_eq!(d.label, "Taksim Square");
-        assert_eq!(d.title(), "Wake me near Taksim Square");
+        assert_eq!(d.title(), "Use Taksim Square");
         assert!((d.coord.lat - 41.0370).abs() < 1e-9);
-        assert_eq!(d.rule, None);
     }
 
     #[test]
@@ -723,18 +837,84 @@ mod tests {
         );
     }
 
+    fn dest(label: &str, lon: f64) -> Destination {
+        Destination::new(label, Coord::new(41.0, lon))
+    }
+
     #[test]
-    fn a_saved_place_keeps_its_own_rule() {
+    fn a_saved_place_becomes_a_point() {
         let place = Place {
             id: 3,
             name: "Home".into(),
             coord: Coord::new(41.0, 29.0),
-            rule: Some(AlarmRule::Radius { metres: 800.0 }),
-            gtfs_stop: None,
+            gtfs_stop: Some("S1".into()),
         };
         let d = Destination::from_place(&place);
         assert_eq!(d.label, "Home");
-        assert_eq!(d.rule, Some(AlarmRule::Radius { metres: 800.0 }));
+        assert_eq!(d.gtfs_stop.as_deref(), Some("S1"));
+        let e = d.endpoint();
+        assert_eq!((e.label.as_str(), e.coord), ("Home", place.coord));
+    }
+
+    #[test]
+    fn the_next_slot_is_a_until_it_is_set_then_b() {
+        let mut ends = Ends::default();
+        assert!(ends.is_empty());
+        assert_eq!(ends.next_slot(), Slot::A);
+        ends.set(Slot::A, dest("A", 28.99));
+        assert_eq!(ends.next_slot(), Slot::B);
+        ends.set(Slot::B, dest("B", 29.01));
+        assert_eq!(ends.next_slot(), Slot::B);
+        // B picked first leaves A for next.
+        let mut ends = Ends::default();
+        ends.set(Slot::B, dest("B", 29.01));
+        assert_eq!(ends.next_slot(), Slot::A);
+        assert_eq!(Slot::B.label(), "B");
+    }
+
+    #[test]
+    fn set_replaces_one_end() {
+        let mut ends = Ends::default();
+        ends.set(Slot::A, dest("One", 28.99));
+        ends.set(Slot::A, dest("Two", 28.98));
+        assert_eq!(ends.get(Slot::A).unwrap().label, "Two");
+        assert!(ends.get(Slot::B).is_none());
+    }
+
+    #[test]
+    fn swap_exchanges_the_ends() {
+        let mut ends = Ends::default();
+        ends.set(Slot::A, dest("A", 28.99));
+        ends.swap();
+        assert!(ends.a.is_none());
+        assert_eq!(ends.b.as_ref().unwrap().label, "A");
+        ends.set(Slot::A, dest("B", 29.01));
+        ends.swap();
+        assert_eq!(ends.a.as_ref().unwrap().label, "A");
+        assert_eq!(ends.b.as_ref().unwrap().label, "B");
+    }
+
+    #[test]
+    fn the_diameter_needs_two_valid_points() {
+        let mut ends = Ends::default();
+        assert!(ends.diameter().is_none());
+        ends.set(Slot::A, dest("A", 28.99));
+        assert!(ends.diameter().is_none());
+        ends.set(Slot::B, dest("B", 28.99));
+        assert_eq!(ends.diameter(), Some(Err(DiameterError::SamePoint)));
+        ends.set(Slot::B, dest("B", 29.01));
+        let d = ends.diameter().unwrap().unwrap();
+        assert!((d.length_m() - 1_680.0).abs() < 30.0, "{}", d.length_m());
+        // Swapping keeps the circle and flips the direction.
+        ends.swap();
+        let swapped = ends.diameter().unwrap().unwrap();
+        assert_eq!(swapped, d.swapped());
+    }
+
+    #[test]
+    fn line_titles_drop_an_empty_headsign() {
+        assert_eq!(line_title("34", "Kadikoy"), "Line 34 to Kadikoy");
+        assert_eq!(line_title("34", ""), "Line 34");
     }
 
     #[test]

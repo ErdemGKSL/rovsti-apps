@@ -316,6 +316,13 @@ impl Diameter {
     }
 }
 
+/// One end of the diameter: a point with the name shown to the user.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Endpoint {
+    pub label: String,
+    pub coord: Coord,
+}
+
 /// A confirmed crossing of the diameter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Crossing {

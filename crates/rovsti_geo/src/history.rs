@@ -5,11 +5,11 @@ use std::collections::HashMap;
 use rovsti_core::search::fold;
 use serde::{Deserialize, Serialize};
 
-use crate::{ActiveTrip, AlarmRule, Coord};
+use crate::{ActiveTrip, Coord, Endpoint};
 
 /// Records kept; older ones are dropped.
 pub const MAX_RECORDS: usize = 500;
-/// Destinations closer than this count as the same one in "recent".
+/// Points closer than this count as the same one in "recent".
 pub const RECENT_DEDUPE_M: f64 = 100.0;
 const DAY_MS: i64 = 86_400_000;
 const TOP_LEN: usize = 3;
@@ -26,8 +26,13 @@ pub enum Outcome {
 pub struct TripRecord {
     pub id: u64,
     pub label: String,
-    pub destination: Coord,
-    pub rule: AlarmRule,
+    /// Both ends of the diameter. Absent in records from before the crossing
+    /// trigger.
+    pub a: Option<Endpoint>,
+    pub b: Option<Endpoint>,
+    /// The single destination of a legacy record; never written any more.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination: Option<Coord>,
     pub started_ms: i64,
     pub ended_ms: i64,
     pub outcome: Outcome,
@@ -41,8 +46,9 @@ impl Default for TripRecord {
         Self {
             id: 0,
             label: String::new(),
-            destination: Coord::new(0.0, 0.0),
-            rule: AlarmRule::Radius { metres: 500.0 },
+            a: None,
+            b: None,
+            destination: None,
             started_ms: 0,
             ended_ms: 0,
             outcome: Outcome::default(),
@@ -58,9 +64,10 @@ impl TripRecord {
     pub fn from_session(trip: &ActiveTrip, ended_ms: i64, outcome: Outcome) -> Self {
         Self {
             id: trip.id,
-            label: trip.label.clone(),
-            destination: trip.trip.destination,
-            rule: trip.trip.rule,
+            label: trip.label(),
+            a: Some(trip.a.clone()),
+            b: Some(trip.b.clone()),
+            destination: None,
             started_ms: trip.started_ms,
             ended_ms,
             outcome,
@@ -116,18 +123,49 @@ impl History {
         self.records.truncate(MAX_RECORDS);
     }
 
-    /// Distinct recent destinations, newest first.
-    pub fn recent_destinations(&self, limit: usize) -> Vec<(String, Coord)> {
-        let mut out: Vec<(String, Coord)> = Vec::new();
+    /// Distinct recent (A, B) pairs, newest first. Legacy single-destination
+    /// records have no pair and are skipped.
+    pub fn recent_pairs(&self, limit: usize) -> Vec<(Endpoint, Endpoint)> {
+        let mut out: Vec<(Endpoint, Endpoint)> = Vec::new();
         for r in &self.records {
             if out.len() >= limit {
                 break;
             }
-            if out
-                .iter()
-                .all(|(_, c)| c.distance_m(r.destination) > RECENT_DEDUPE_M)
+            let (Some(a), Some(b)) = (&r.a, &r.b) else {
+                continue;
+            };
+            let same = |x: &Endpoint, y: &Endpoint| x.coord.distance_m(y.coord) <= RECENT_DEDUPE_M;
+            if out.iter().all(|(oa, ob)| !(same(oa, a) && same(ob, b))) {
+                out.push((a.clone(), b.clone()));
+            }
+        }
+        out
+    }
+
+    /// Distinct recent points (both ends of new records, destinations of
+    /// legacy ones), newest first.
+    pub fn recent_points(&self, limit: usize) -> Vec<Endpoint> {
+        let mut out: Vec<Endpoint> = Vec::new();
+        let mut add = |label: &str, coord: Coord| {
+            if out.len() < limit
+                && out
+                    .iter()
+                    .all(|p| p.coord.distance_m(coord) > RECENT_DEDUPE_M)
             {
-                out.push((r.label.clone(), r.destination));
+                out.push(Endpoint {
+                    label: label.to_owned(),
+                    coord,
+                });
+            }
+        };
+        for r in &self.records {
+            match (&r.a, &r.b, r.destination) {
+                (Some(a), Some(b), _) => {
+                    add(&a.label, a.coord);
+                    add(&b.label, b.coord);
+                }
+                (_, _, Some(d)) => add(&r.label, d),
+                _ => {}
             }
         }
         out
@@ -172,13 +210,13 @@ impl History {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::{Trip, session::NoticeState};
+    use crate::{NoticeRule, session::NoticeState};
 
     fn rec(id: u64, label: &str, dest: Coord, ended_ms: i64, outcome: Outcome) -> TripRecord {
         TripRecord {
             id,
             label: label.into(),
-            destination: dest,
+            destination: Some(dest),
             started_ms: ended_ms - 600_000,
             ended_ms,
             outcome,
@@ -201,8 +239,26 @@ mod tests {
         assert_eq!(h.records.last().unwrap().id, 20);
     }
 
+    fn ep(label: &str, coord: Coord) -> Endpoint {
+        Endpoint {
+            label: label.into(),
+            coord,
+        }
+    }
+
+    fn pair_rec(id: u64, a: Endpoint, b: Endpoint, ended_ms: i64) -> TripRecord {
+        TripRecord {
+            id,
+            label: format!("{} – {}", a.label, b.label),
+            a: Some(a),
+            b: Some(b),
+            ended_ms,
+            ..TripRecord::default()
+        }
+    }
+
     #[test]
-    fn recent_destinations_dedupe_within_100_m() {
+    fn recent_points_dedupe_within_100_m() {
         let mut h = History::default();
         h.push(rec(1, "Old A", A, 1, Outcome::Arrived));
         h.push(rec(2, "B", B, 2, Outcome::Cancelled));
@@ -214,12 +270,59 @@ mod tests {
             3,
             Outcome::Arrived,
         ));
-        let recent = h.recent_destinations(10);
+        let recent = h.recent_points(10);
         assert_eq!(recent.len(), 2);
-        assert_eq!(recent[0].0, "New A");
-        assert_eq!(recent[1].0, "B");
-        assert_eq!(h.recent_destinations(1).len(), 1);
-        assert!(h.recent_destinations(0).is_empty());
+        assert_eq!(recent[0].label, "New A");
+        assert_eq!(recent[1].label, "B");
+        assert_eq!(h.recent_points(1).len(), 1);
+        assert!(h.recent_points(0).is_empty());
+    }
+
+    #[test]
+    fn recent_points_take_both_ends_of_new_records() {
+        let mut h = History::default();
+        h.push(rec(1, "Legacy", A, 1, Outcome::Arrived));
+        h.push(pair_rec(
+            2,
+            ep("Home", B),
+            ep("Work", Coord::new(41.1, 29.1)),
+            2,
+        ));
+        let labels: Vec<_> = h.recent_points(10).into_iter().map(|p| p.label).collect();
+        assert_eq!(labels, ["Home", "Work", "Legacy"]);
+    }
+
+    #[test]
+    fn recent_pairs_skip_legacy_and_dedupe() {
+        let mut h = History::default();
+        let c = Coord::new(41.1, 29.1);
+        h.push(rec(1, "Legacy", A, 1, Outcome::Arrived));
+        h.push(pair_rec(2, ep("Home", A), ep("Work", c), 2));
+        h.push(pair_rec(3, ep("Work", c), ep("Home", A), 3));
+        h.push(pair_rec(4, ep("Home 2", A), ep("Work 2", c), 4));
+        let pairs = h.recent_pairs(10);
+        // The reverse pair is distinct; the repeat of Home-Work collapses.
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].0.label, "Home 2");
+        assert_eq!(pairs[1].0.label, "Work");
+        assert_eq!(h.recent_pairs(1).len(), 1);
+    }
+
+    #[test]
+    fn old_record_json_still_loads() {
+        let json = r#"{"records":[{"id":3,"label":"Kadikoy",
+            "destination":{"lat":40.99,"lon":29.02},
+            "rule":{"Radius":{"metres":300.0}},
+            "started_ms":1,"ended_ms":2,"outcome":"Arrived"}]}"#;
+        let h: History = serde_json::from_str(json).unwrap();
+        let r = &h.records[0];
+        assert_eq!(r.destination, Some(Coord::new(40.99, 29.02)));
+        assert!(r.a.is_none() && r.b.is_none());
+        assert_eq!(h.recent_points(5)[0].label, "Kadikoy");
+        assert!(h.recent_pairs(5).is_empty());
+        // New records never write the legacy field.
+        let new = pair_rec(1, ep("A", A), ep("B", B), 2);
+        assert!(!serde_json::to_string(&new).unwrap().contains("destination"));
     }
 
     #[test]
@@ -269,23 +372,25 @@ mod tests {
     fn from_session_copies_the_trip() {
         let mut t = ActiveTrip::new(
             7,
-            "Home",
-            Trip::new(A, AlarmRule::Radius { metres: 300.0 }),
+            ep("Home", A),
+            ep("Work", Coord::new(41.0370, 28.9950)),
             1_000,
-        );
+        )
+        .unwrap();
         t.snoozes = 2;
         t.track.travelled_m = 1234.0;
         t.notice = Some(NoticeState {
             chat: "c".into(),
             text_template: "t".into(),
-            rule: AlarmRule::Radius { metres: 900.0 },
+            rule: NoticeRule::WithAlarm,
             sent: true,
             attempts: 1,
         });
         let r = TripRecord::from_session(&t, 61_000, Outcome::Arrived);
-        assert_eq!((r.id, r.label.as_str(), r.snoozes), (7, "Home", 2));
-        assert_eq!(r.destination, A);
-        assert_eq!(r.rule, AlarmRule::Radius { metres: 300.0 });
+        assert_eq!((r.id, r.label.as_str(), r.snoozes), (7, "Home – Work", 2));
+        assert_eq!(r.a.as_ref().unwrap().coord, A);
+        assert_eq!(r.b.as_ref().unwrap().label, "Work");
+        assert_eq!(r.destination, None);
         assert_eq!(r.duration_ms(), 60_000);
         assert_eq!(r.travelled_m, 1234.0);
         assert!(r.notice_sent);

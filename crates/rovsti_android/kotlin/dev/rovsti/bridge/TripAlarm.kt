@@ -193,7 +193,7 @@ object TripAlarm {
     }
 
     /** The title and text the activity shows. */
-    fun message(): Pair<String, String> = "Wake up" to "You are close to your destination"
+    fun message(): Pair<String, String> = "Wake up" to "You crossed the line"
 
     /** The Stops preferences file in the data directory of the last trip; null before the first trip. */
     private fun readPrefs(context: Context): String? = try {

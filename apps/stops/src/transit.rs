@@ -15,7 +15,7 @@ use gpui::{
 };
 use rovsti_android::{Error as AndroidError, documents};
 use rovsti_core::wire::DocumentResult;
-use rovsti_geo::{AlarmRule, Feed, FeedReport, Route, read_zip};
+use rovsti_geo::{Feed, FeedReport, Route, read_zip};
 use rovsti_ui::{
     components::{list_row, section},
     storage, theme,
@@ -26,14 +26,10 @@ use crate::{StopsApp, store};
 
 /// The biggest feed the picker copies in (Kotlin enforces the same cap).
 const MAX_FEED_BYTES: u64 = 64 * 1024 * 1024;
-/// How close to the trigger stop the alarm rings, metres.
-pub const BEFORE_STOP_METRES: f64 = 150.0;
-/// "Wake me N stops before": the choices offered.
-pub const BEFORE_COUNTS: [usize; 3] = [1, 2, 3];
 /// Most lines listed for one stop.
 pub const MAX_LINES: usize = 20;
 
-// ---- pure: the alarm from a pattern ------------------------------------------------
+// ---- pure: lines through a stop ------------------------------------------------
 
 /// "34", or the long name when the route has no short one, or its id.
 pub fn route_name(route: &Route) -> String {
@@ -43,45 +39,6 @@ pub fn route_name(route: &Route) -> String {
         .find(|s| !s.is_empty())
         .unwrap_or("?")
         .to_owned()
-}
-
-/// What "Wake me N stops before" builds: the rule and the trip's label.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StopWake {
-    pub rule: AlarmRule,
-    pub label: String,
-}
-
-/// The alarm that rings `n` stops before `stop` on `pattern`: the trigger is
-/// the position of the stop `n` places back, the label reads
-/// "Kadıköy (2 stops before, line 34)". `None` when the pattern does not call
-/// at `stop` or has fewer than `n` stops before it.
-pub fn stop_wake(feed: &Feed, pattern: u32, stop: u32, n: usize) -> Option<StopWake> {
-    if n == 0 {
-        return None;
-    }
-    let trigger = feed.stops_before(pattern, stop, n)?;
-    let trigger = feed.stops.get(trigger as usize)?.coord;
-    let name = &feed.stops.get(stop as usize)?.name;
-    let route = feed
-        .routes
-        .get(feed.patterns.get(pattern as usize)?.route as usize)?;
-    let plural = if n == 1 { "stop" } else { "stops" };
-    Some(StopWake {
-        rule: AlarmRule::BeforeStop {
-            trigger,
-            metres: BEFORE_STOP_METRES,
-        },
-        label: format!("{name} ({n} {plural} before, line {})", route_name(route)),
-    })
-}
-
-/// Every "N stops before" the pattern allows for `stop`.
-pub fn wake_options(feed: &Feed, pattern: u32, stop: u32) -> Vec<(usize, StopWake)> {
-    BEFORE_COUNTS
-        .into_iter()
-        .filter_map(|n| stop_wake(feed, pattern, stop, n).map(|w| (n, w)))
-        .collect()
 }
 
 /// One line that calls at a stop, as the stop sheet lists it.
@@ -465,7 +422,7 @@ impl StopsApp {
         self.stop_hits = Default::default();
         self.stop_pattern = None;
         self.map.pattern = None;
-        if let Some(dest) = &mut self.dest {
+        for dest in [&mut self.ends.a, &mut self.ends.b].into_iter().flatten() {
             dest.pattern = None;
         }
         if matches!(self.sheet_mode, crate::picker::SheetMode::Stop(_)) {
@@ -539,53 +496,6 @@ mod tests {
             ],
             1_730_764_800_000,
         )
-    }
-
-    #[test]
-    fn the_rule_triggers_at_the_stop_n_back_and_names_the_line() {
-        let f = feed();
-        let wake = stop_wake(&f, 0, 4, 2).unwrap();
-        assert_eq!(wake.label, "Stop 4 (2 stops before, line 34)");
-        assert_eq!(
-            wake.rule,
-            AlarmRule::BeforeStop {
-                trigger: f.stops[2].coord,
-                metres: 150.0
-            }
-        );
-        let one = stop_wake(&f, 0, 4, 1).unwrap();
-        assert_eq!(one.label, "Stop 4 (1 stop before, line 34)");
-        // Metro 4 has no short name: the long one stands in.
-        assert_eq!(
-            stop_wake(&f, 2, 3, 1).unwrap().label,
-            "Stop 3 (1 stop before, line Metro 4)"
-        );
-    }
-
-    #[test]
-    fn no_rule_without_enough_stops_before() {
-        let f = feed();
-        assert_eq!(stop_wake(&f, 0, 1, 2), None);
-        assert_eq!(stop_wake(&f, 0, 0, 1), None);
-        assert_eq!(stop_wake(&f, 0, 4, 0), None);
-        // Not on the pattern, or no such pattern or stop.
-        assert_eq!(stop_wake(&f, 2, 4, 1), None);
-        assert_eq!(stop_wake(&f, 9, 4, 1), None);
-        assert_eq!(stop_wake(&f, 0, 99, 1), None);
-    }
-
-    #[test]
-    fn options_are_the_counts_the_pattern_allows() {
-        let f = feed();
-        let counts = |p, s| {
-            wake_options(&f, p, s)
-                .into_iter()
-                .map(|(n, _)| n)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(counts(0, 4), vec![1, 2, 3]);
-        assert_eq!(counts(0, 2), vec![1, 2]);
-        assert_eq!(counts(0, 0), Vec::<usize>::new());
     }
 
     #[test]
@@ -698,8 +608,7 @@ mod tests {
         assert_eq!(saved.stops.len(), 3);
         assert_eq!(saved.imported_ms, feed.imported_ms);
         // The saved feed answers queries (the index is rebuilt after loading).
-        let wake = stop_wake(&saved, 0, 2, 2).unwrap();
-        assert_eq!(wake.label, "Gamma (2 stops before, line 34)");
+        assert_eq!(saved.patterns_through(2), vec![0]);
         remove_file(&dir);
         assert!(crate::backend::load(&dir).gtfs.is_none());
         // Removing again is harmless.

@@ -1,9 +1,9 @@
-//! Saved places: named destinations with an optional preferred alarm rule.
+//! Saved places: named points, usable as A or B.
 
 use rovsti_core::search::fold;
 use serde::{Deserialize, Serialize};
 
-use crate::{AlarmRule, Coord};
+use crate::Coord;
 
 /// Most places kept.
 pub const MAX_PLACES: usize = 200;
@@ -18,8 +18,6 @@ pub struct Place {
     pub id: u64,
     pub name: String,
     pub coord: Coord,
-    /// Overrides the default rule when this place is the destination.
-    pub rule: Option<AlarmRule>,
     /// GTFS stop id when the place came from an imported feed.
     pub gtfs_stop: Option<String>,
 }
@@ -30,7 +28,6 @@ impl Default for Place {
             id: 0,
             name: String::new(),
             coord: Coord::new(0.0, 0.0),
-            rule: None,
             gtfs_stop: None,
         }
     }
@@ -111,7 +108,6 @@ impl SavedPlaces {
             id,
             name,
             coord,
-            rule: None,
             gtfs_stop: None,
         });
         Ok(id)
@@ -156,6 +152,15 @@ mod tests {
 
     const TAKSIM: Coord = Coord::new(41.0370, 28.9850);
     const KADIKOY: Coord = Coord::new(40.9917, 29.0233);
+
+    #[test]
+    fn old_saved_place_with_a_rule_still_loads() {
+        let json = r#"{"next_id":2,"places":[{"id":1,"name":"Home",
+            "coord":{"lat":41.0,"lon":29.0},"rule":{"Radius":{"metres":300.0}}}]}"#;
+        let p: SavedPlaces = serde_json::from_str(json).unwrap();
+        assert_eq!(p.places[0].name, "Home");
+        assert_eq!(p.places[0].coord, Coord::new(41.0, 29.0));
+    }
 
     #[test]
     fn add_assigns_increasing_ids() {

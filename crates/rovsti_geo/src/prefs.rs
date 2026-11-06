@@ -5,49 +5,9 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::AlarmRule;
+use crate::NoticeRule;
 use crate::notice::{DEFAULT_TEMPLATE, TemplateError, validate};
 use crate::session::NoticeState;
-
-/// The "Wake me" choices.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum RuleChoice {
-    Radius300,
-    #[default]
-    Radius500,
-    Radius1k,
-    Eta2min,
-}
-
-impl RuleChoice {
-    pub const ALL: [RuleChoice; 4] = [
-        Self::Radius300,
-        Self::Radius500,
-        Self::Radius1k,
-        Self::Eta2min,
-    ];
-
-    pub fn to_rule(self) -> AlarmRule {
-        match self {
-            Self::Radius300 => AlarmRule::Radius { metres: 300.0 },
-            Self::Radius500 => AlarmRule::Radius { metres: 500.0 },
-            Self::Radius1k => AlarmRule::Radius { metres: 1_000.0 },
-            Self::Eta2min => AlarmRule::Eta {
-                before: Duration::from_secs(120),
-                min_metres: 300.0,
-            },
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Radius300 => "300 m",
-            Self::Radius500 => "500 m",
-            Self::Radius1k => "1 km",
-            Self::Eta2min => "2 min",
-        }
-    }
-}
 
 /// Snooze lengths the Settings row cycles through, minutes.
 pub const SNOOZE_CHOICES: [u8; 5] = [1, 3, 5, 10, 15];
@@ -112,15 +72,13 @@ impl NoticePrefs {
         Ok(())
     }
 
-    /// The notice for a new trip whose own alarm is `alarm`. "With the
-    /// alarm" copies that rule; "N minutes before" is an ETA rule of its own,
-    /// which falls back to a distance when the speed is unusable.
-    pub fn to_notice_state(&self, alarm: AlarmRule) -> NoticeState {
+    /// The notice for a new trip. "With the alarm" goes out with the
+    /// crossing; "N minutes before" when the circle is that far away.
+    pub fn to_notice_state(&self) -> NoticeState {
         let rule = match self.when {
-            NoticeWhen::WithAlarm => alarm,
-            NoticeWhen::MinutesBefore(m) => AlarmRule::Eta {
+            NoticeWhen::WithAlarm => NoticeRule::WithAlarm,
+            NoticeWhen::MinutesBefore(m) => NoticeRule::BeforeCircle {
                 before: Duration::from_secs(u64::from(m.max(1)) * 60),
-                min_metres: 1_000.0,
             },
         };
         NoticeState {
@@ -136,7 +94,6 @@ impl NoticePrefs {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StopsPrefs {
-    pub rule: RuleChoice,
     pub sound: bool,
     pub vibrate: bool,
     pub snooze_min: u8,
@@ -147,7 +104,6 @@ pub struct StopsPrefs {
 impl Default for StopsPrefs {
     fn default() -> Self {
         Self {
-            rule: RuleChoice::default(),
             sound: true,
             vibrate: true,
             snooze_min: 5,
@@ -241,11 +197,9 @@ mod tests {
     #[test]
     fn defaults() {
         let p = StopsPrefs::default();
-        assert_eq!(p.rule, RuleChoice::Radius500);
         assert!(p.sound && p.vibrate);
         assert_eq!(p.snooze_min, 5);
         assert!(p.notice.is_none());
-        assert_eq!(p.rule.to_rule(), AlarmRule::Radius { metres: 500.0 });
     }
 
     #[test]
@@ -260,14 +214,12 @@ mod tests {
     fn partial_json_keeps_the_rest() {
         let p: StopsPrefs =
             serde_json::from_str(r#"{"rule":"Radius1k","vibrate":false,"future":1}"#).unwrap();
-        assert_eq!(p.rule, RuleChoice::Radius1k);
         assert!(!p.vibrate && p.sound);
     }
 
     #[test]
     fn round_trip() {
         let p = StopsPrefs {
-            rule: RuleChoice::Eta2min,
             notice: Some(NoticePrefs {
                 chat: "123@g.us".into(),
                 chat_name: "Family".into(),
@@ -281,36 +233,28 @@ mod tests {
     }
 
     #[test]
-    fn rule_choices_map() {
-        assert_eq!(
-            RuleChoice::Radius300.to_rule(),
-            AlarmRule::Radius { metres: 300.0 }
-        );
-        assert_eq!(
-            RuleChoice::Radius1k.to_rule(),
-            AlarmRule::Radius { metres: 1_000.0 }
-        );
-        assert!(matches!(
-            RuleChoice::Eta2min.to_rule(),
-            AlarmRule::Eta { .. }
-        ));
-        assert_eq!(RuleChoice::ALL.len(), 4);
-    }
-
-    #[test]
     fn notice_state_from_prefs() {
-        let alarm = AlarmRule::Radius { metres: 500.0 };
         let mut n = NoticePrefs {
             chat: "c".into(),
             ..NoticePrefs::default()
         };
-        let s = n.to_notice_state(alarm);
-        assert_eq!(s.rule, alarm);
+        let s = n.to_notice_state();
+        assert_eq!(s.rule, NoticeRule::WithAlarm);
         assert_eq!((s.chat.as_str(), s.sent, s.attempts), ("c", false, 0));
         n.when = NoticeWhen::MinutesBefore(10);
-        match n.to_notice_state(alarm).rule {
-            AlarmRule::Eta { before, .. } => assert_eq!(before, Duration::from_secs(600)),
-            other => panic!("{other:?}"),
-        }
+        assert_eq!(
+            n.to_notice_state().rule,
+            NoticeRule::BeforeCircle {
+                before: Duration::from_secs(600)
+            }
+        );
+    }
+
+    #[test]
+    fn old_prefs_with_a_rule_and_notice_still_load() {
+        let json = r#"{"rule":"Eta2min","sound":false,"notice":{"chat":"c","when":"WithAlarm"}}"#;
+        let p: StopsPrefs = serde_json::from_str(json).unwrap();
+        assert!(!p.sound);
+        assert_eq!(p.notice.unwrap().chat, "c");
     }
 }

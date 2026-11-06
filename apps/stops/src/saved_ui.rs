@@ -1,5 +1,5 @@
 //! The Saved tab: places kept for one-tap trips. Tapping a row opens its
-//! actions (Start, Rename, Delete); a delete can be undone from the pill.
+//! actions (Use as A, Use as B, Rename, Delete); a delete can be undone from the pill.
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
@@ -12,7 +12,10 @@ use rovsti_ui::{
     tokens::Theme,
 };
 
-use crate::{StopsApp, picker::Destination, trip_ui};
+use crate::{
+    StopsApp,
+    picker::{Destination, Slot},
+};
 
 /// Puts a deleted place back where it was (or at the end if the list shrank).
 pub fn restore(saved: &mut SavedPlaces, place: Place, index: usize) {
@@ -29,7 +32,7 @@ impl StopsApp {
             return empty_state(
                 theme,
                 "No Saved Stops",
-                "Turn on Save this place when you start a trip, and it appears here for one-tap trips.",
+                "Turn on Save this place when you pick a point, and it appears here for one-tap use as A or B.",
             )
             .into_any_element();
         }
@@ -38,13 +41,13 @@ impl StopsApp {
         for place in self.saved.places.clone() {
             let id = place.id;
             let open = self.expanded == Some(id);
-            let rule = place.rule.unwrap_or_else(|| self.rule.to_rule());
+            let coords = Destination::from_place(&place).coords_text();
             rows.push(
                 list_row(
                     theme,
                     None,
                     place.name.clone(),
-                    Some(trip_ui::rule_text(rule).into()),
+                    Some(coords.into()),
                     Some(if open { "Close" } else { "" }.into()),
                 )
                 .id(("place", id as usize))
@@ -61,7 +64,8 @@ impl StopsApp {
             if !open {
                 continue;
             }
-            let dest = Destination::from_place(&place);
+            let dest_a = Destination::from_place(&place);
+            let dest_b = dest_a.clone();
             rows.push(
                 div()
                     .flex()
@@ -69,13 +73,25 @@ impl StopsApp {
                     .px(px(12.0))
                     .py(px(10.0))
                     .child(
-                        glass_pill(theme, "Start")
-                            .id(("place-start", id as usize))
+                        glass_pill(theme, "Use as A")
+                            .id(("place-use-a", id as usize))
                             .flex_1()
                             .text_color(colors.accent)
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.expanded = None;
-                                this.request_start(dest.clone(), false, cx);
+                                this.use_as(Slot::A, dest_a.clone(), false, cx);
+                                this.tabs.jump_to(0);
+                            })),
+                    )
+                    .child(
+                        glass_pill(theme, "Use as B")
+                            .id(("place-use-b", id as usize))
+                            .flex_1()
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.expanded = None;
+                                this.use_as(Slot::B, dest_b.clone(), false, cx);
+                                this.tabs.jump_to(0);
                             })),
                     )
                     .child(

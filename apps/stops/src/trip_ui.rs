@@ -2,7 +2,7 @@
 //! and the alarm screen that covers the app while the alarm rings.
 //!
 //! The pieces that decide something (what the live card says, how a status
-//! event is read, what a rule means in words) are plain functions with tests.
+//! event is read, how a side reads) are plain functions with tests.
 //! The controller methods only move that between the UI and `backend`.
 
 use std::time::Duration;
@@ -12,10 +12,9 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, px,
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
-use rovsti_geo::{ActiveTrip, AlarmRule, FixOut, PlaceError, RuleChoice, TripState};
+use rovsti_geo::{ActiveTrip, FixOut, Side, TripState};
 use rovsti_ui::{
     components::{backdrop, empty_state, flat_glass, glass_pill, list_row, section},
-    glass::{GlassSpec, glass},
     theme,
     tokens::{Theme, radius, typography},
 };
@@ -24,40 +23,11 @@ use serde_json::Value;
 use crate::{
     StopsApp,
     backend::{self, Preflight},
-    picker::Destination,
+    picker::{Destination, Slot},
     store::now_ms,
 };
 
 // ---- pure ------------------------------------------------------------------------
-
-/// The rule in words, for the line under the chips and the saved list.
-pub fn rule_text(rule: AlarmRule) -> String {
-    match rule {
-        AlarmRule::Radius { metres } => {
-            format!("Wakes you {} before the stop", metres_text(metres))
-        }
-        AlarmRule::Eta { before, .. } => format!(
-            "Wakes you about {} min before arriving",
-            before.as_secs().div_ceil(60)
-        ),
-        AlarmRule::BeforeStop { metres, .. } => {
-            format!("Wakes you {} before the previous stop", metres_text(metres))
-        }
-    }
-}
-
-fn metres_text(metres: f64) -> String {
-    if metres >= 1_000.0 {
-        let km = metres / 1_000.0;
-        if (km - km.round()).abs() < 0.05 {
-            format!("{km:.0} km")
-        } else {
-            format!("{km:.1} km")
-        }
-    } else {
-        format!("{metres:.0} m")
-    }
-}
 
 /// "450 m", "1.2 km": metres to the nearest 10 below a kilometre.
 pub fn distance_text(metres: f64) -> String {
@@ -82,7 +52,10 @@ pub fn wait_text(ms: u64) -> String {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Live {
     pub state: TripState,
+    /// Metres to the line A-B.
     pub distance_m: f64,
+    pub side: Option<Side>,
+    pub inside: bool,
     pub eta_min: Option<u32>,
     pub next_fix_ms: Option<u64>,
     pub notice_sent: bool,
@@ -93,6 +66,8 @@ impl Live {
         Self {
             state: out.state,
             distance_m: out.distance_m,
+            side: out.side,
+            inside: out.inside,
             eta_min: eta_from_text(&out.text),
             next_fix_ms: Some(out.next_fix_ms),
             notice_sent: out.notice_sent,
@@ -103,11 +78,27 @@ impl Live {
     pub fn from_trip(trip: &ActiveTrip) -> Option<Self> {
         Some(Self {
             state: trip.trip.state(),
-            distance_m: trip.trip.last_distance_m()?,
+            distance_m: trip.trip.last_line_m()?,
+            side: trip.trip.side(),
+            inside: false,
             eta_min: None,
             next_fix_ms: None,
             notice_sent: trip.notice.as_ref().is_some_and(|n| n.sent),
         })
+    }
+}
+
+/// "Left side, about 4 min to the line A – B": where you are and how far the
+/// line is.
+pub fn live_text(live: &Live, label: &str) -> String {
+    let place = match (live.inside, live.side) {
+        (false, _) => "Outside the circle".to_owned(),
+        (true, Some(side)) => format!("{} side", side.label()),
+        (true, None) => "On the line".to_owned(),
+    };
+    match live.eta_min {
+        Some(m) => format!("{place}, about {m} min to the line {label}"),
+        None => format!("{place}, to the line {label}"),
     }
 }
 
@@ -163,46 +154,6 @@ pub struct AlarmView {
 
 // ---- views -----------------------------------------------------------------------
 
-/// The "Wake me" chips. `prefix` keeps the element ids of two copies apart.
-pub(crate) fn rule_chips(
-    app: &StopsApp,
-    theme: Theme,
-    prefix: &'static str,
-    cx: &mut Context<StopsApp>,
-) -> AnyElement {
-    let colors = theme::colors(theme);
-    div()
-        .flex()
-        .gap(px(8.0))
-        .px(px(16.0))
-        .py(px(8.0))
-        .children(RuleChoice::ALL.into_iter().enumerate().map(|(i, choice)| {
-            let selected = choice == app.rule;
-            let chip = if selected {
-                glass(GlassSpec::lens(theme))
-            } else {
-                div()
-            };
-            chip.id((prefix, i))
-                .flex_1()
-                .h(px(40.0))
-                .rounded_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(typography::SUBHEADLINE.size)
-                .font_weight(typography::HEADLINE.weight)
-                .text_color(if selected {
-                    colors.accent
-                } else {
-                    colors.secondary_label
-                })
-                .child(choice.label())
-                .on_click(cx.listener(move |this, _, _, cx| this.set_rule(choice, cx)))
-        }))
-        .into_any_element()
-}
-
 fn text_block(theme: Theme, text: impl Into<SharedString>) -> AnyElement {
     div()
         .px(px(16.0))
@@ -245,47 +196,54 @@ impl StopsApp {
         page.into_any_element()
     }
 
-    /// Chips, destination and Start: what shows while no trip runs.
+    /// A and B rows and Start: what shows while no trip runs.
     fn setup_cards(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let rule = self
-            .dest
-            .as_ref()
-            .and_then(|d| d.rule)
-            .unwrap_or_else(|| self.rule.to_rule());
-        let mut page = div().flex().flex_col().gap(px(24.0)).child(section(
-            theme,
-            Some("Wake me".into()),
-            [
-                rule_chips(self, theme, "rule", cx),
-                text_block(theme, rule_text(rule)),
-            ],
-        ));
-        let Some(dest) = self.dest.clone() else {
-            return page
-                .child(empty_state(
+        let colors = theme::colors(theme);
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for slot in [Slot::A, Slot::B] {
+            let (title, subtitle) = match self.ends.get(slot) {
+                Some(d) => (d.label.clone(), Some(d.coords_text())),
+                None => (format!("Choose {}", slot.label()), None),
+            };
+            let active = slot == self.active_slot;
+            rows.push(
+                list_row(
                     theme,
-                    "Where are you going?",
-                    "Pick a destination, or share a location to Rovsti Stops from any maps app.",
-                ))
-                .child(
-                    div().flex().justify_center().child(
-                        glass_pill(theme, "Choose destination")
-                            .id("choose")
-                            .on_click(cx.listener(|this, _, _, cx| this.open_picker(cx))),
-                    ),
+                    None,
+                    format!("{}  {title}", slot.label()),
+                    subtitle.map(Into::into),
+                    Some(if active { "Next" } else { "" }.into()),
                 )
-                .into_any_element();
-        };
-        let row = list_row(
-            theme,
-            None,
-            dest.label.clone(),
-            Some(dest.coords_text().into()),
-            Some("Change".into()),
-        )
-        .id("destination-row")
-        .on_click(cx.listener(|this, _, _, cx| this.open_picker(cx)));
-        let mut rows = vec![row.into_any_element()];
+                .id(("end-row", slot as usize))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.active_slot = slot;
+                    this.open_picker(cx);
+                }))
+                .into_any_element(),
+            );
+        }
+        rows.push(
+            list_row(theme, None, "Swap A and B", None, None)
+                .id("swap-ends")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.ends.swap();
+                    cx.notify();
+                }))
+                .into_any_element(),
+        );
+        let mut page = div().flex().flex_col().gap(px(24.0));
+        if self.ends.is_empty() {
+            page = page.child(empty_state(
+                theme,
+                "Where are you going?",
+                "Pick two points, A and B. Crossing the line between them inside their circle wakes you.",
+            ));
+        }
+        page = page.child(section(theme, Some("Line".into()), rows));
+        let ready = self.ends.diameter().and_then(Result::ok).is_some();
+        if let Some(error) = self.ends.diameter().and_then(Result::err) {
+            page = page.child(text_block(theme, error.message()));
+        }
         if self.notice_available(cx) {
             let chat = self
                 .prefs
@@ -294,8 +252,10 @@ impl StopsApp {
                 .map(|n| n.chat_name.clone())
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| "your chat".to_owned());
-            rows.push(
-                list_row(
+            page = page.child(section(
+                theme,
+                None,
+                [list_row(
                     theme,
                     None,
                     format!("Text {chat} when arriving"),
@@ -307,25 +267,28 @@ impl StopsApp {
                     this.notice_on = !this.notice_on;
                     cx.notify();
                 }))
-                .into_any_element(),
-            );
+                .into_any_element()],
+            ));
         }
-        page = page.child(section(theme, Some("Destination".into()), rows));
-        let colors = theme::colors(theme);
         let label = if self.busy { "Starting..." } else { "Start" };
-        page.child(
-            div().flex().justify_center().child(
-                glass_pill(theme, label)
-                    .id("start")
-                    .w(px(220.0))
-                    .h(px(52.0))
-                    .text_color(colors.accent)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.request_start(dest.clone(), false, cx);
-                    })),
-            ),
-        )
-        .into_any_element()
+        let pair = self.ends.a.clone().zip(self.ends.b.clone());
+        let start = glass_pill(theme, label)
+            .id("start")
+            .w(px(220.0))
+            .h(px(52.0))
+            .text_color(if ready {
+                colors.accent
+            } else {
+                colors.tertiary_label
+            });
+        let start = match pair {
+            Some((a, b)) if ready => start.on_click(cx.listener(move |this, _, _, cx| {
+                this.request_start(a.clone(), b.clone(), cx);
+            })),
+            _ => start,
+        };
+        page.child(div().flex().justify_center().child(start))
+            .into_any_element()
     }
 
     /// The running trip: where, how far, how long, and Stop.
@@ -334,19 +297,16 @@ impl StopsApp {
         let Some(trip) = &self.trip else {
             return div().into_any_element();
         };
-        let label = trip.label.clone();
-        let rule = rule_text(trip.trip.rule);
+        let label = trip.label();
+        let rule = format!("Crossing the line {label} wakes you, either way.");
         let live = self.live.clone();
         let (big, small): (SharedString, SharedString) = match &live {
-            Some(l) if l.state != TripState::Tracking => ("Arriving".into(), label.clone().into()),
+            Some(l) if l.state != TripState::Tracking => ("Crossed".into(), label.clone().into()),
             Some(l) => (
                 distance_text(l.distance_m).into(),
-                match l.eta_min {
-                    Some(m) => format!("about {m} min to {label}").into(),
-                    None => format!("to {label}").into(),
-                },
+                live_text(l, &label).into(),
             ),
-            None => ("Locating".into(), format!("on the way to {label}").into()),
+            None => ("Locating".into(), format!("near the line {label}").into()),
         };
         let mut details = Vec::new();
         if let Some(ms) = live.as_ref().and_then(|l| l.next_fix_ms) {
@@ -489,16 +449,6 @@ impl StopsApp {
 
     // ---- controller --------------------------------------------------------------
 
-    pub(crate) fn set_rule(&mut self, rule: RuleChoice, cx: &mut Context<Self>) {
-        if self.rule == rule {
-            return;
-        }
-        self.rule = rule;
-        self.prefs.rule = rule;
-        self.save_prefs(cx);
-        cx.notify();
-    }
-
     /// An arriving-soon message is set up and WhatsApp is linked.
     pub(crate) fn notice_available(&self, cx: &Context<Self>) -> bool {
         self.prefs
@@ -509,26 +459,13 @@ impl StopsApp {
     }
 
     /// Start: the permission checks first, then the trip file and the service.
-    /// With `save`, the place is kept in Saved too.
-    pub(crate) fn request_start(&mut self, dest: Destination, save: bool, cx: &mut Context<Self>) {
+    pub(crate) fn request_start(&mut self, a: Destination, b: Destination, cx: &mut Context<Self>) {
         let Some(dir) = self.dir.clone() else {
             self.show_pill("Still loading. Try again in a moment.", None, cx);
             return;
         };
         if self.busy {
             return;
-        }
-        if save {
-            match self.saved.add(&dest.label, dest.coord) {
-                Ok(id) => {
-                    if let Some(place) = self.saved.get_mut(id) {
-                        place.gtfs_stop.clone_from(&dest.gtfs_stop);
-                    }
-                    self.save_places(cx);
-                }
-                Err(PlaceError::Duplicate(_)) => {}
-                Err(error) => self.show_pill(error.message(), None, cx),
-            }
         }
         self.busy = true;
         cx.notify();
@@ -544,10 +481,10 @@ impl StopsApp {
                 match step {
                     Some(step) => {
                         this.busy = false;
-                        this.pending_start = Some(dest);
+                        this.pending_start = Some((a, b));
                         this.show_pill(step.message(), None, cx);
                     }
-                    None => this.begin_trip(dest, dir, cx),
+                    None => this.begin_trip(a, b, dir, cx),
                 }
                 cx.notify();
             })
@@ -559,7 +496,7 @@ impl StopsApp {
     /// Android came back from a permission prompt: carry on with the start
     /// that was waiting for it, if everything is granted now.
     pub(crate) fn resume_pending_start(&mut self, cx: &mut Context<Self>) {
-        let Some(dest) = self.pending_start.take() else {
+        let Some((a, b)) = self.pending_start.take() else {
             return;
         };
         cx.spawn(async move |this, cx| {
@@ -570,7 +507,7 @@ impl StopsApp {
             this.update(cx, |this, cx| {
                 this.preflight = pre;
                 if pre.next_step().is_none() {
-                    this.request_start(dest, false, cx);
+                    this.request_start(a, b, cx);
                 }
                 cx.notify();
             })
@@ -579,24 +516,36 @@ impl StopsApp {
         .detach();
     }
 
-    fn begin_trip(&mut self, dest: Destination, dir: std::path::PathBuf, cx: &mut Context<Self>) {
-        let rule = dest.rule.unwrap_or_else(|| self.rule.to_rule());
+    fn begin_trip(
+        &mut self,
+        a: Destination,
+        b: Destination,
+        dir: std::path::PathBuf,
+        cx: &mut Context<Self>,
+    ) {
         let notice = if self.notice_on && self.notice_available(cx) {
             self.prefs.notice.clone()
         } else {
             None
         };
         let started = now_ms();
-        let trip = backend::build_trip(
+        let trip = match backend::build_trip(
             started.max(1) as u64,
-            &dest.label,
-            dest.coord,
-            rule,
+            a.endpoint(),
+            b.endpoint(),
             started,
             notice.as_ref(),
-        );
+        ) {
+            Ok(trip) => trip,
+            Err(error) => {
+                self.busy = false;
+                self.show_pill(error.message(), None, cx);
+                cx.notify();
+                return;
+            }
+        };
         let session = trip.clone();
-        let line = dest.pattern;
+        let line = b.pattern.or(a.pattern);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
@@ -610,7 +559,8 @@ impl StopsApp {
                         this.live = None;
                         this.map.pattern = line;
                         this.map.follow = true;
-                        this.dest = None;
+                        this.ends = crate::picker::Ends::default();
+                        this.active_slot = Slot::A;
                         this.alarm = None;
                         this.tabs.jump_to(0);
                     }
@@ -693,8 +643,8 @@ impl StopsApp {
                 }
                 if ringing && self.alarm.is_none() {
                     self.alarm = Some(AlarmView {
-                        title: format!("Arriving at {}", trip.label),
-                        distance_m: trip.trip.last_distance_m(),
+                        title: format!("Crossed {}", trip.label()),
+                        distance_m: trip.trip.last_line_m(),
                     });
                 }
                 self.trip = Some(trip);
@@ -780,7 +730,7 @@ impl StopsApp {
             TripAlarmEvent::Ringing => {
                 let title = self.trip.as_ref().map_or_else(
                     || "Your stop".to_owned(),
-                    |t| format!("Arriving at {}", t.label),
+                    |t| format!("Crossed {}", t.label()),
                 );
                 let distance = self.live.as_ref().map(|l| l.distance_m);
                 self.show_alarm(&title, distance, cx);
@@ -800,7 +750,7 @@ impl StopsApp {
             cx.background_executor().timer(wait).await;
             this.update(cx, |this, cx| {
                 if let Some(trip) = &this.trip {
-                    let title = format!("Arriving at {}", trip.label);
+                    let title = format!("Crossed {}", trip.label());
                     let distance = this.live.as_ref().map(|l| l.distance_m);
                     this.show_alarm(&title, distance, cx);
                 }
@@ -842,32 +792,37 @@ impl StopsApp {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rovsti_geo::{Coord, Trip};
+    use rovsti_geo::Coord;
+
+    fn live(side: Option<Side>, inside: bool, eta_min: Option<u32>) -> Live {
+        Live {
+            state: TripState::Tracking,
+            distance_m: 120.0,
+            side,
+            inside,
+            eta_min,
+            next_fix_ms: None,
+            notice_sent: false,
+        }
+    }
 
     #[test]
-    fn rules_read_in_words() {
+    fn the_live_text_names_the_side() {
         assert_eq!(
-            rule_text(RuleChoice::Radius300.to_rule()),
-            "Wakes you 300 m before the stop"
+            live_text(&live(Some(Side::Left), true, None), "A – B"),
+            "Left side, to the line A – B"
         );
         assert_eq!(
-            rule_text(RuleChoice::Radius1k.to_rule()),
-            "Wakes you 1 km before the stop"
+            live_text(&live(Some(Side::Right), true, Some(3)), "A – B"),
+            "Right side, about 3 min to the line A – B"
         );
         assert_eq!(
-            rule_text(RuleChoice::Eta2min.to_rule()),
-            "Wakes you about 2 min before arriving"
+            live_text(&live(None, true, None), "A – B"),
+            "On the line, to the line A – B"
         );
         assert_eq!(
-            rule_text(AlarmRule::Radius { metres: 1_500.0 }),
-            "Wakes you 1.5 km before the stop"
-        );
-        assert_eq!(
-            rule_text(AlarmRule::BeforeStop {
-                trigger: Coord::new(1.0, 2.0),
-                metres: 150.0
-            }),
-            "Wakes you 150 m before the previous stop"
+            live_text(&live(Some(Side::Left), false, None), "A – B"),
+            "Outside the circle, to the line A – B"
         );
     }
 
@@ -934,30 +889,46 @@ mod tests {
     }
 
     #[test]
-    fn a_restored_trip_shows_its_last_distance() {
-        let mut trip = ActiveTrip::new(
-            1,
-            "Kadikoy",
-            Trip::new(Coord::new(41.0, 29.0), AlarmRule::Radius { metres: 500.0 }),
-            0,
-        );
+    fn a_restored_trip_shows_its_last_distance_to_the_line() {
+        let end = |label: &str, lon: f64| rovsti_geo::Endpoint {
+            label: label.into(),
+            coord: Coord::new(41.0, lon),
+        };
+        // About 1 km apart, west to east: north of it is the left side.
+        let mut trip = ActiveTrip::new(1, end("A", 28.994), end("B", 29.006), 0).unwrap();
         assert_eq!(Live::from_trip(&trip), None);
         trip.on_fix(
             rovsti_geo::Fix {
-                at: Coord::new(41.01, 29.0),
+                at: Coord::new(41.002, 29.0),
                 accuracy_m: 10.0,
                 speed_mps: None,
             },
             0,
         );
         let live = Live::from_trip(&trip).unwrap();
-        assert!(
-            (live.distance_m - 1_112.0).abs() < 20.0,
-            "{}",
-            live.distance_m
-        );
+        assert!((live.distance_m - 222.0).abs() < 5.0, "{}", live.distance_m);
+        assert_eq!(live.side, Some(Side::Left));
         assert_eq!(live.state, TripState::Tracking);
         assert!(!live.notice_sent);
+    }
+
+    #[test]
+    fn a_status_with_a_side_is_read() {
+        let json = r#"{"state":"Tracking","distance_m":80.0,"next_fix_ms":5000,
+            "high_accuracy":true,"ring":false,"title":"A – B",
+            "text":"Right side, 80 m to the line A – B","notice_sent":false,
+            "side":"right","inside":true}"#;
+        let Some(Status::Fix(out)) = parse_status(json) else {
+            panic!("expected a fix");
+        };
+        let live = Live::from_out(&out);
+        assert_eq!((live.side, live.inside), (Some(Side::Right), true));
+        // An older answer without the fields.
+        let Some(Status::Fix(old)) = parse_status(&out_json("Tracking", false)) else {
+            panic!("expected a fix");
+        };
+        let live = Live::from_out(&old);
+        assert_eq!((live.side, live.inside), (None, false));
     }
 
     #[test]

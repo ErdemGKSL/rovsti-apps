@@ -169,16 +169,6 @@ impl Feed {
             .unwrap_or_default()
     }
 
-    /// The stop `n` positions before `stop` in `pattern`. If the pattern calls
-    /// at `stop` several times, the first call that has `n` stops before it
-    /// is used. `None` when there is no such stop.
-    pub fn stops_before(&self, pattern: u32, stop: u32, n: usize) -> Option<u32> {
-        let p = self.patterns.get(pattern as usize)?;
-        (n..p.stops.len())
-            .find(|&i| p.stops[i] == stop)
-            .map(|i| p.stops[i - n])
-    }
-
     /// The stop closest to `coord` within `max_m` metres.
     pub fn nearest(&self, coord: Coord, max_m: f64) -> Option<u32> {
         // One degree of latitude is about 111 km; skip far rows cheaply.
@@ -533,14 +523,8 @@ mod tests {
     }
 
     #[test]
-    fn stops_before_and_through() {
+    fn patterns_through_a_stop() {
         let (f, _) = feed();
-        let d = 3;
-        assert_eq!(f.stops_before(0, d, 2), Some(1));
-        assert_eq!(f.stops_before(0, d, 0), Some(d));
-        assert_eq!(f.stops_before(0, 0, 1), None);
-        assert_eq!(f.stops_before(0, 5, 1), None);
-        assert_eq!(f.stops_before(9, d, 1), None);
         assert_eq!(f.patterns_through(2), [0, 1]);
         assert_eq!(f.patterns_through(1), [0]);
         assert!(f.patterns_through(99).is_empty());

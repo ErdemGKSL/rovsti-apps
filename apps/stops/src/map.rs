@@ -1,7 +1,7 @@
 //! The map: a vector "radar" drawn with `canvas` and `PathBuilder` (no tiles).
 //!
-//! It shows where you are with the accuracy of the fix, the dashed alarm ring,
-//! the breadcrumb of this trip, the destination pin and, after a transit
+//! It shows where you are with the accuracy of the fix, the circle on AB,
+//! the breadcrumb of this trip, the A and B pins and, after a transit
 //! import, the stops in view and the chosen line. A finger drags to pan, two
 //! fingers (or a double tap) zoom, a tap picks the stop under it.
 //!
@@ -17,7 +17,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Task, TouchEvent, TouchPhase, Window, canvas, div, point,
     px, quad,
 };
-use rovsti_geo::{AlarmRule, Coord, EARTH_RADIUS_M, Feed, Stop, view::Viewport};
+use rovsti_geo::{Coord, Diameter, EARTH_RADIUS_M, Feed, Stop, view::Viewport};
 use rovsti_ui::{
     components::flat_glass,
     theme,
@@ -156,16 +156,6 @@ pub fn pick_stop(
     )
 }
 
-/// Where the alarm ring is drawn and how big: around the destination for a
-/// radius or ETA rule, around the trigger stop for "N stops before".
-pub fn alarm_ring(destination: Coord, rule: AlarmRule) -> (Coord, f64) {
-    match rule {
-        AlarmRule::Radius { metres } => (destination, metres),
-        AlarmRule::Eta { min_metres, .. } => (destination, min_metres),
-        AlarmRule::BeforeStop { trigger, metres } => (trigger, metres),
-    }
-}
-
 /// The corners of the box around `centre` that holds a circle of `metres`.
 fn extent(centre: Coord, metres: f64) -> [Coord; 2] {
     let dlat = (metres / EARTH_RADIUS_M).to_degrees();
@@ -176,21 +166,16 @@ fn extent(centre: Coord, metres: f64) -> [Coord; 2] {
     ]
 }
 
-/// The view that shows you, the destination and the alarm ring.
+/// The view that shows you and the whole circle on AB.
 pub fn fit_view(
     position: Option<Coord>,
-    destination: Option<Coord>,
-    ring: Option<(Coord, f64)>,
+    diameter: Option<&Diameter>,
     size: (f32, f32),
 ) -> Option<Viewport> {
-    let mut points: Vec<Coord> = Vec::with_capacity(4);
+    let mut points: Vec<Coord> = Vec::with_capacity(3);
     points.extend(position);
-    points.extend(destination);
-    if let Some((centre, metres)) = ring
-        && metres.is_finite()
-        && metres > 0.0
-    {
-        points.extend(extent(centre, metres));
+    if let Some(d) = diameter {
+        points.extend(extent(d.center(), d.radius_m()));
     }
     if points.is_empty() {
         return None;
@@ -448,7 +433,9 @@ pub fn over_controls(size: (f32, f32), (x, y): (f32, f32)) -> bool {
 pub struct Scene {
     /// Your position and the radius of its accuracy disc.
     pub position: Option<((f32, f32), f32)>,
-    pub destination: Option<(f32, f32)>,
+    /// A and B.
+    pub ends: Option<((f32, f32), (f32, f32))>,
+    /// The circle on AB: centre and radius.
     pub ring: Option<((f32, f32), f32)>,
     pub trail: Vec<(f32, f32)>,
     pub stops: Vec<(f32, f32)>,
@@ -459,8 +446,7 @@ pub struct SceneInput<'a> {
     pub viewport: Viewport,
     pub size: (f32, f32),
     pub position: Option<(Coord, f64)>,
-    pub destination: Option<Coord>,
-    pub rule: Option<AlarmRule>,
+    pub diameter: Option<Diameter>,
     pub trail: &'a Breadcrumb,
     pub feed: Option<&'a Feed>,
     pub pattern: Option<u32>,
@@ -471,10 +457,12 @@ impl Scene {
         let vp = &input.viewport;
         let mpp = vp.metres_per_px;
         let metres = |m: f64| ((m / mpp) as f32).clamp(0.0, MAX_RADIUS_PX);
-        let ring = input.destination.zip(input.rule).map(|(dest, rule)| {
-            let (centre, m) = alarm_ring(dest, rule);
-            (vp.project(centre), metres(m))
-        });
+        let ring = input
+            .diameter
+            .map(|d| (vp.project(d.center()), metres(d.radius_m())));
+        let ends = input
+            .diameter
+            .map(|d| (vp.project(d.a()), vp.project(d.b())));
         let trail: Vec<_> = input.trail.iter().map(|c| vp.project(c)).collect();
         let (stops, line) = match input.feed {
             Some(feed) => {
@@ -501,7 +489,7 @@ impl Scene {
             position: input
                 .position
                 .map(|(c, accuracy)| (vp.project(c), metres(accuracy))),
-            destination: input.destination.map(|c| vp.project(c)),
+            ends,
             ring,
             trail: thin_polyline(&trail, TRAIL_MIN_PX),
             stops,
@@ -650,8 +638,11 @@ fn paint_scene(scene: &Scene, bounds: Bounds<Pixels>, pal: &Palette, window: &mu
 
     stroke_line(window, &to_window_all(&scene.trail), 3.0, pal.trail);
 
-    if let Some(at) = scene.destination {
-        paint_pin(window, to_window(at), pal);
+    if let Some((a, b)) = scene.ends {
+        let (a, b) = (to_window(a), to_window(b));
+        stroke_line(window, &[a, b], 3.0, pal.ring);
+        paint_pin(window, a, pal);
+        paint_pin(window, b, pal);
     }
 
     if let Some((at, accuracy)) = scene.position {
@@ -817,16 +808,12 @@ fn control_button(theme: Theme, label: &'static str) -> gpui::Div {
 }
 
 impl StopsApp {
-    /// What the map is about: your position, where you are going, and the
-    /// rule whose ring to draw.
-    fn map_subjects(&self) -> (Option<Coord>, Option<AlarmRule>) {
-        match (&self.trip, &self.dest) {
-            (Some(trip), _) => (Some(trip.trip.destination), Some(trip.trip.rule)),
-            (None, Some(dest)) => (
-                Some(dest.coord),
-                Some(dest.rule.unwrap_or_else(|| self.rule.to_rule())),
-            ),
-            (None, None) => (None, None),
+    /// The circle the map shows: the running trip's, or the chosen pair's
+    /// when it is valid.
+    fn map_diameter(&self) -> Option<Diameter> {
+        match &self.trip {
+            Some(trip) => Some(trip.trip.diameter),
+            None => self.ends.diameter().and_then(Result::ok),
         }
     }
 
@@ -834,7 +821,7 @@ impl StopsApp {
     fn map_has_content(&self) -> bool {
         self.map.position.is_some()
             || self.trip.is_some()
-            || self.dest.is_some()
+            || !self.ends.is_empty()
             || self.gtfs.is_some()
     }
 
@@ -844,11 +831,10 @@ impl StopsApp {
             return None;
         }
         let size = self.map.size();
-        let (destination, rule) = self.map_subjects();
+        let diameter = self.map_diameter();
         let position = self.map.position;
         if self.map.follow {
-            let ring = destination.zip(rule).map(|(d, r)| alarm_ring(d, r));
-            let fitted = fit_view(position.map(|p| p.0), destination, ring, size).or_else(|| {
+            let fitted = fit_view(position.map(|p| p.0), diameter.as_ref(), size).or_else(|| {
                 // Browsing a feed with no fix and no destination: start at its first stop.
                 self.gtfs
                     .as_ref()
@@ -864,8 +850,7 @@ impl StopsApp {
             viewport,
             size,
             position,
-            destination,
-            rule,
+            diameter,
             trail: &self.map.trail,
             feed: self.gtfs.as_deref(),
             pattern: self.map.pattern,
@@ -1366,12 +1351,16 @@ mod tests {
             viewport: Viewport::new(IST, 10.0),
             size: (400.0, 300.0),
             position: None,
-            destination: None,
-            rule: None,
+            diameter: None,
             trail,
             feed,
             pattern: None,
         }
+    }
+
+    /// A 600 m east-west diameter centred 300 m north of IST.
+    fn diameter_600() -> Diameter {
+        Diameter::new(near(-300.0, 300.0).coord, near(300.0, 300.0).coord).unwrap()
     }
 
     #[test]
@@ -1379,50 +1368,25 @@ mod tests {
         let mut trail = Breadcrumb::default();
         trail.record(Some(1), IST, 10.0);
         trail.record(Some(1), near(0.0, 100.0).coord, 10.0);
-        let rule = AlarmRule::Radius { metres: 500.0 };
         let mut input = scene_input(&trail, None);
         input.position = Some((near(100.0, 0.0).coord, 25.0));
-        input.destination = Some(near(0.0, 300.0).coord);
-        input.rule = Some(rule);
+        input.diameter = Some(diameter_600());
         let scene = Scene::build(&input);
 
         let ((x, y), r) = scene.position.unwrap();
         assert!((x - 10.0).abs() < 0.01 && y.abs() < 0.01, "{x} {y}");
         assert!((r - 2.5).abs() < 1e-4);
-        let (dx, dy) = scene.destination.unwrap();
-        assert!(dx.abs() < 0.01 && (dy + 30.0).abs() < 0.01);
-        let (ring_at, ring_r) = scene.ring.unwrap();
-        assert_eq!(ring_at, (dx, dy));
-        assert!((ring_r - 50.0).abs() < 1e-4);
+        // 10 m per pixel: the centre is 30 px up, the radius 30 px.
+        let ((cx, cy), ring_r) = scene.ring.unwrap();
+        assert!(cx.abs() < 0.05 && (cy + 30.0).abs() < 0.05, "{cx} {cy}");
+        assert!((ring_r - 30.0).abs() < 0.1, "{ring_r}");
+        // A west, B east, on the circle's horizontal diameter.
+        let ((ax, ay), (bx, by)) = scene.ends.unwrap();
+        assert!((ax + 30.0).abs() < 0.1 && (bx - 30.0).abs() < 0.1);
+        assert!((ay + 30.0).abs() < 0.1 && (by + 30.0).abs() < 0.1);
         assert_eq!(scene.trail.len(), 2);
         assert!(scene.stops.is_empty() && scene.line.is_empty());
-    }
-
-    #[test]
-    fn the_ring_of_a_stop_rule_sits_on_the_trigger_stop() {
-        let trigger = near(200.0, 0.0).coord;
-        let (at, metres) = alarm_ring(
-            IST,
-            AlarmRule::BeforeStop {
-                trigger,
-                metres: 150.0,
-            },
-        );
-        assert_eq!((at, metres), (trigger, 150.0));
-        assert_eq!(
-            alarm_ring(IST, AlarmRule::Radius { metres: 300.0 }),
-            (IST, 300.0)
-        );
-        assert_eq!(
-            alarm_ring(
-                IST,
-                AlarmRule::Eta {
-                    before: Duration::from_secs(120),
-                    min_metres: 400.0
-                }
-            ),
-            (IST, 400.0)
-        );
+        assert!(Scene::build(&scene_input(&trail, None)).ring.is_none());
     }
 
     #[test]
@@ -1467,8 +1431,9 @@ mod tests {
         let trail = Breadcrumb::default();
         let mut input = scene_input(&trail, None);
         input.position = Some((IST, 1.0e9));
-        input.destination = Some(IST);
-        input.rule = Some(AlarmRule::Radius { metres: 1.0e12 });
+        input.diameter =
+            Some(Diameter::new(near(0.0, 0.0).coord, near(0.0, 40_000.0).coord).unwrap());
+        input.viewport = Viewport::new(IST, 0.001);
         let scene = Scene::build(&input);
         assert_eq!(scene.position.unwrap().1, MAX_RADIUS_PX);
         assert_eq!(scene.ring.unwrap().1, MAX_RADIUS_PX);
@@ -1477,27 +1442,33 @@ mod tests {
     // -- the view --
 
     #[test]
-    fn the_follow_view_holds_you_the_pin_and_the_ring() {
+    fn the_follow_view_holds_you_and_the_whole_circle() {
         let size = (370.0, 340.0);
         let pos = near(-800.0, -600.0).coord;
-        let dest = near(900.0, 700.0).coord;
-        let ring = Some((dest, 300.0));
-        let vp = fit_view(Some(pos), Some(dest), ring, size).unwrap();
-        for c in [pos, dest, near(900.0 + 300.0, 700.0 + 300.0).coord] {
-            let (x, y) = vp.project(c);
+        let d = Diameter::new(near(600.0, 700.0).coord, near(1_200.0, 700.0).coord).unwrap();
+        let vp = fit_view(Some(pos), Some(&d), size).unwrap();
+        let c = d.center();
+        for p in [
+            pos,
+            d.a(),
+            d.b(),
+            d.from_local((0.0, d.radius_m())),
+            d.from_local((0.0, -d.radius_m())),
+            Coord::new(c.lat, d.b().lon),
+        ] {
+            let (x, y) = vp.project(p);
             assert!(
                 x.abs() <= size.0 / 2.0 && y.abs() <= size.1 / 2.0,
                 "{x} {y}"
             );
         }
-        // One lonely point is centred at a sensible zoom, nothing gives no view.
-        let alone = fit_view(Some(pos), None, None, size).unwrap();
+        // The circle alone is centred; one lonely point sits at a sensible zoom.
+        let ring_only = fit_view(None, Some(&d), size).unwrap();
+        assert!(ring_only.project(c).0.abs() < 1.0);
+        let alone = fit_view(Some(pos), None, size).unwrap();
         assert_eq!(alone.metres_per_px, MIN_FIT_MPP);
         assert!(alone.project(pos).0.abs() < 0.01);
-        assert!(fit_view(None, None, None, size).is_none());
-        // A zero or bad ring adds nothing.
-        let same = fit_view(Some(pos), None, Some((pos, f64::NAN)), size).unwrap();
-        assert_eq!(same, alone);
+        assert!(fit_view(None, None, size).is_none());
     }
 
     #[test]

@@ -46,9 +46,26 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// The trip in progress; `None` when there is none or the file is unreadable.
+/// A `trip.json` from before the crossing trigger (or otherwise unreadable),
+/// moved aside so it is not parsed again.
+pub const LEGACY_TRIP_FILE: &str = "trip.legacy.json";
+
+/// The trip in progress; `None` when there is none. A file that does not
+/// parse (a single-destination trip from an older build) is renamed to
+/// [`LEGACY_TRIP_FILE`] and reads as no trip.
 pub fn load_trip(dir: &Path) -> Option<ActiveTrip> {
-    storage::load_json(dir, TRIP_FILE)
+    let path = dir.join(TRIP_FILE);
+    let text = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str(&text) {
+        Ok(trip) => Some(trip),
+        Err(error) => {
+            log::warn!("trip.json is not a crossing trip ({error}); moving it aside");
+            if let Err(error) = std::fs::rename(&path, dir.join(LEGACY_TRIP_FILE)) {
+                log::warn!("could not move trip.json aside: {error}");
+            }
+            None
+        }
+    }
 }
 
 pub fn save_trip(dir: &Path, trip: &ActiveTrip) -> io::Result<()> {
@@ -83,7 +100,7 @@ pub fn end_trip(dir: &Path, outcome: Outcome, now_ms: i64) -> io::Result<Option<
 #[allow(clippy::unwrap_used)]
 pub(crate) mod tests {
     use super::*;
-    use rovsti_geo::{AlarmRule, Coord, Trip};
+    use rovsti_geo::{Coord, Endpoint};
 
     pub fn tmp(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("rovsti-stops-{name}-{}", std::process::id()));
@@ -93,8 +110,12 @@ pub(crate) mod tests {
     }
 
     pub fn trip(id: u64) -> ActiveTrip {
-        let trip = Trip::new(Coord::new(41.0, 29.0), AlarmRule::Radius { metres: 500.0 });
-        ActiveTrip::new(id, "Kadikoy", trip, 1_000)
+        // About 1 km apart, west to east.
+        let end = |label: &str, lon: f64| Endpoint {
+            label: label.into(),
+            coord: Coord::new(41.0, lon),
+        };
+        ActiveTrip::new(id, end("Home", 28.994), end("Work", 29.006), 1_000).unwrap()
     }
 
     #[test]
@@ -130,5 +151,25 @@ pub(crate) mod tests {
         assert!(load_trip(&dir).is_none());
         let history: History = storage::load_json(&dir, HISTORY_FILE).unwrap();
         assert_eq!(history.records.len(), 1);
+    }
+
+    #[test]
+    fn an_old_single_destination_trip_is_moved_aside() {
+        let dir = tmp("store-legacy");
+        let old = r#"{"id":1,"label":"Kadikoy","trip":{"destination":{"lat":41.0,"lon":29.0},
+            "rule":{"Radius":{"metres":500.0}},"state":"Tracking","last_distance_m":null},
+            "started_ms":0,"snoozes":0,"ring_at_ms":null,
+            "track":{"last":null,"travelled_m":0.0,"fixes":0},"notice":null}"#;
+        std::fs::write(dir.join(TRIP_FILE), old).unwrap();
+        assert!(load_trip(&dir).is_none());
+        assert!(!dir.join(TRIP_FILE).exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(LEGACY_TRIP_FILE)).unwrap(),
+            old
+        );
+        // Nothing left to end, and a new trip can be saved.
+        assert!(end_trip(&dir, Outcome::Cancelled, 5).unwrap().is_none());
+        save_trip(&dir, &trip(2)).unwrap();
+        assert_eq!(load_trip(&dir).unwrap().id, 2);
     }
 }

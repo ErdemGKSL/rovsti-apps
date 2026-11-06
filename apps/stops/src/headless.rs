@@ -177,14 +177,17 @@ fn answer(out: &rovsti_geo::FixOut) -> String {
 mod tests {
     use std::cell::Cell;
 
+    use std::time::Duration;
+
     use rovsti_geo::{
-        AlarmRule, Coord, EARTH_RADIUS_M, FixOut, History, NoticeState, TripState,
+        Coord, EARTH_RADIUS_M, FixOut, History, NoticeRule, NoticeState, Side, TripState,
         notice::DEFAULT_TEMPLATE,
     };
 
     use super::*;
     use crate::store::tests::{tmp, trip};
 
+    /// Midpoint of the fixture diameter (A west, B east, left = north).
     const DEST: Coord = Coord::new(41.0, 29.0);
 
     fn fix(metres_north: f64, at_ms: i64) -> FixIn {
@@ -210,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn a_fix_sequence_rings_exactly_once_and_persists_the_state() {
+    fn crossing_left_to_right_rings_exactly_once_and_persists_the_state() {
         let dir = tmp("hl-ring");
         store::save_trip(&dir, &trip(1)).unwrap();
 
@@ -218,20 +221,68 @@ mod tests {
         assert!(!far.ring);
         assert_eq!(far.state, TripState::Tracking);
         assert!(far.next_fix_ms > 0);
+        assert!(!far.inside);
 
         let near = run(&dir, fix(300.0, 2));
-        assert!(near.ring);
-        assert_eq!(near.state, TripState::Arrived);
-        assert!(near.title.starts_with("Arriving at"));
+        assert!(!near.ring);
+        assert!(near.inside);
+        assert_eq!(near.side, Some(Side::Left));
+
+        let crossed = run(&dir, fix(-300.0, 3));
+        assert!(crossed.ring);
+        assert_eq!(crossed.state, TripState::Arrived);
+        assert_eq!(crossed.side, Some(Side::Right));
+        assert!(crossed.title.starts_with("Crossed"));
         assert_eq!(
             store::load_trip(&dir).unwrap().trip.state(),
             TripState::Arrived
         );
 
-        let closer = run(&dir, fix(100.0, 3));
-        assert!(!closer.ring);
-        assert_eq!(closer.state, TripState::Arrived);
+        let back = run(&dir, fix(100.0, 4));
+        assert!(!back.ring);
+        assert_eq!(back.state, TripState::Arrived);
         assert_eq!(history(&dir).records.len(), 0);
+    }
+
+    #[test]
+    fn crossing_right_to_left_rings_too() {
+        let dir = tmp("hl-ring-back");
+        store::save_trip(&dir, &trip(1)).unwrap();
+        assert!(!run(&dir, fix(-300.0, 1)).ring);
+        let crossed = run(&dir, fix(300.0, 2));
+        assert!(crossed.ring);
+        assert_eq!(crossed.side, Some(Side::Left));
+        assert_eq!(crossed.state, TripState::Arrived);
+    }
+
+    #[test]
+    fn a_trip_state_survives_between_calls_so_a_sparse_jump_rings() {
+        let dir = tmp("hl-sparse");
+        store::save_trip(&dir, &trip(1)).unwrap();
+        run(&dir, fix(400.0, 1));
+        // Reloaded from disk each call; the side is remembered.
+        assert_eq!(
+            store::load_trip(&dir).unwrap().trip.side(),
+            Some(Side::Left)
+        );
+        assert!(run(&dir, fix(-400.0, 2)).ring);
+    }
+
+    #[test]
+    fn a_with_alarm_notice_goes_out_with_the_ring() {
+        let dir = tmp("hl-notice-ring");
+        with_notice(&dir, "chat", NoticeRule::WithAlarm);
+        let sent = std::cell::RefCell::new(Vec::new());
+        let ok = |_: &str, chat: &str, text: &str| {
+            sent.borrow_mut().push((chat.to_owned(), text.to_owned()));
+            Ok(())
+        };
+        let before: FixOut = serde_json::from_str(&fix_in(&dir, fix(300.0, 1), &ok)).unwrap();
+        assert!(!before.ring && sent.borrow().is_empty());
+        let ring: FixOut = serde_json::from_str(&fix_in(&dir, fix(-300.0, 2), &ok)).unwrap();
+        assert!(ring.ring && ring.notice_sent);
+        assert_eq!(sent.borrow().len(), 1);
+        assert!(sent.borrow()[0].1.contains("Work"));
     }
 
     #[test]
@@ -332,12 +383,18 @@ mod tests {
         assert_eq!(out.state, TripState::Tracking);
     }
 
-    fn with_notice(dir: &Path, chat: &str) {
+    fn before_circle() -> NoticeRule {
+        NoticeRule::BeforeCircle {
+            before: Duration::from_secs(600),
+        }
+    }
+
+    fn with_notice(dir: &Path, chat: &str, rule: NoticeRule) {
         let mut t = trip(8);
         t.notice = Some(NoticeState {
             chat: chat.into(),
             text_template: DEFAULT_TEMPLATE.into(),
-            rule: AlarmRule::Radius { metres: 1_000.0 },
+            rule,
             sent: false,
             attempts: 0,
         });
@@ -347,7 +404,7 @@ mod tests {
     #[test]
     fn a_notice_with_no_link_gives_up_and_never_retries() {
         let dir = tmp("hl-nolink");
-        with_notice(&dir, "chat@s.whatsapp.net");
+        with_notice(&dir, "chat@s.whatsapp.net", before_circle());
 
         // The real sender: no whatsapp-link.json in the directory.
         let first: FixOut =
@@ -357,7 +414,7 @@ mod tests {
         assert!(!notice.sent);
         assert_eq!(notice.attempts, 3);
 
-        // Later fixes inside the radius do not try again.
+        // Later fixes inside the circle do not try again.
         let calls = Cell::new(0);
         let counting = |_: &str, _: &str, _: &str| {
             calls.set(calls.get() + 1);
@@ -370,7 +427,7 @@ mod tests {
     #[test]
     fn a_retryable_failure_retries_then_stops_after_three_attempts() {
         let dir = tmp("hl-retry");
-        with_notice(&dir, "chat");
+        with_notice(&dir, "chat", before_circle());
         let calls = Cell::new(0);
         let flaky = |_: &str, _: &str, _: &str| {
             calls.set(calls.get() + 1);
@@ -385,7 +442,7 @@ mod tests {
     #[test]
     fn a_delivered_notice_is_sent_once() {
         let dir = tmp("hl-sent");
-        with_notice(&dir, "chat");
+        with_notice(&dir, "chat", before_circle());
         let sent = std::cell::RefCell::new(Vec::new());
         let ok = |_: &str, chat: &str, text: &str| {
             sent.borrow_mut().push((chat.to_owned(), text.to_owned()));
@@ -397,7 +454,7 @@ mod tests {
         let sent = sent.into_inner();
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].0, "chat");
-        assert!(sent[0].1.contains("Kadikoy"));
+        assert!(sent[0].1.contains("Work"));
         assert!(store::load_trip(&dir).unwrap().notice.unwrap().sent);
     }
 }

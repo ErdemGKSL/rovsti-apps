@@ -22,7 +22,7 @@ use rovsti_android::{
     trip::{AlarmAction, parse_trip_alarm},
 };
 use rovsti_core::wire::{DocumentOp, DocumentResult};
-use rovsti_geo::{ActiveTrip, Feed, History, Place, RuleChoice, SavedPlaces, StopsPrefs};
+use rovsti_geo::{ActiveTrip, Feed, History, Place, SavedPlaces, StopsPrefs};
 use rovsti_ui::{
     Icon, IconAssets,
     components::large_title,
@@ -84,10 +84,10 @@ pub(crate) struct StopsApp {
     /// The line chosen in the stop sheet.
     pub(crate) stop_pattern: Option<u32>,
 
-    /// The "Wake me" choice.
-    pub(crate) rule: RuleChoice,
-    /// Chosen, not started.
-    pub(crate) dest: Option<Destination>,
+    /// The two points chosen, not started.
+    pub(crate) ends: picker::Ends,
+    /// Which end the next picked point fills.
+    pub(crate) active_slot: picker::Slot,
     /// Text the chat when arriving, for the next trip.
     pub(crate) notice_on: bool,
     /// The trip in progress.
@@ -96,7 +96,7 @@ pub(crate) struct StopsApp {
     /// A start or stop is under way.
     pub(crate) busy: bool,
     /// A start waiting for the user to answer a permission prompt.
-    pub(crate) pending_start: Option<Destination>,
+    pub(crate) pending_start: Option<(Destination, Destination)>,
     pub(crate) preflight: Preflight,
     pub(crate) alarm: Option<AlarmView>,
     /// Brings the alarm back after a snooze.
@@ -201,7 +201,6 @@ impl StopsApp {
             this.update(cx, |this, cx| {
                 this.dir = Some(dir);
                 this.loaded = true;
-                this.rule = data.prefs.rule;
                 this.prefs = data.prefs;
                 this.saved = data.saved;
                 this.history = data.history;
@@ -233,8 +232,8 @@ impl StopsApp {
             map: map::MapState::default(),
             stop_hits: picker::StopHits::default(),
             stop_pattern: None,
-            rule: RuleChoice::default(),
-            dest: None,
+            ends: picker::Ends::default(),
+            active_slot: picker::Slot::default(),
             notice_on: true,
             trip: None,
             live: None,

@@ -15,8 +15,8 @@ use rovsti_android::{
     xiaomi,
 };
 use rovsti_geo::{
-    ActiveTrip, AlarmRule, Coord, EARTH_RADIUS_M, Feed, FixIn, History, NoticePrefs, Outcome,
-    SavedPlaces, StopsPrefs, Trip,
+    ActiveTrip, Diameter, DiameterError, Endpoint, Feed, FixIn, History, NoticePrefs, Outcome,
+    SavedPlaces, StopsPrefs,
 };
 use rovsti_ui::storage;
 use serde_json::json;
@@ -25,8 +25,10 @@ use crate::store::{self, now_ms};
 
 /// The speed of the simulated vehicle, metres per second.
 const SIM_SPEED_MPS: f64 = 50.0;
-/// How far from the destination a simulated trip begins, metres.
-const SIM_START_M: f64 = 2_500.0;
+/// How far left of the line a simulated trip begins, metres.
+const SIM_START_M: f64 = 2_000.0;
+/// How far right of the line it parks, metres.
+const SIM_END_M: f64 = 200.0;
 
 /// What the app keeps on disk, read once at launch.
 #[derive(Default)]
@@ -197,20 +199,20 @@ pub fn open_full_screen_settings() {
 // ---- start and stop ------------------------------------------------------------
 
 /// A trip's session as it is written to `trip.json`. `notice` is the
-/// arriving-soon message; it only applies when it names a chat.
+/// arriving-soon message; it only applies when it names a chat. Fails when A
+/// and B cannot form a diameter.
 pub fn build_trip(
     id: u64,
-    label: &str,
-    destination: Coord,
-    rule: AlarmRule,
+    a: Endpoint,
+    b: Endpoint,
     started_ms: i64,
     notice: Option<&NoticePrefs>,
-) -> ActiveTrip {
-    let mut trip = ActiveTrip::new(id, label, Trip::new(destination, rule), started_ms);
+) -> Result<ActiveTrip, DiameterError> {
+    let mut trip = ActiveTrip::new(id, a, b, started_ms)?;
     trip.notice = notice
         .filter(|n| !n.chat.is_empty())
-        .map(|n| n.to_notice_state(rule));
-    trip
+        .map(NoticePrefs::to_notice_state);
+    Ok(trip)
 }
 
 /// What the foreground service is told at start: the data directory, the
@@ -238,7 +240,7 @@ pub fn start_trip(dir: &Path, trip: &ActiveTrip) -> Result<(), String> {
         }
         store::save_trip(dir, trip).map_err(|e| format!("Could not save the trip: {e}"))?;
     }
-    let started = match trip::start(&start_spec(dir, &trip.label)) {
+    let started = match trip::start(&start_spec(dir, &trip.label())) {
         Ok(true) | Err(AndroidError::Unsupported) => Ok(()),
         Ok(false) => Err("Android did not start the tracking service.".to_owned()),
         Err(error) => Err(format!("Could not start tracking: {error}")),
@@ -265,7 +267,7 @@ pub fn resume_trip(dir: &Path) -> bool {
     let Some(trip) = store::load_trip(dir) else {
         return false;
     };
-    matches!(trip::start(&start_spec(dir, &trip.label)), Ok(true))
+    matches!(trip::start(&start_spec(dir, &trip.label())), Ok(true))
 }
 
 /// Stops the service and records the trip as cancelled.
@@ -336,15 +338,23 @@ pub fn simulate_requested() -> bool {
     !cfg!(target_os = "android") && std::env::var("ROVSTI_STOPS_SIMULATE").as_deref() == Ok("1")
 }
 
-/// A fix on the way to `destination`, `elapsed_s` seconds after the start:
-/// straight south-to-north at [`SIM_SPEED_MPS`], parked at the destination
-/// once there.
-pub fn sim_fix(destination: Coord, elapsed_s: f64, at_ms: i64) -> FixIn {
-    let away = (SIM_START_M - SIM_SPEED_MPS * elapsed_s.max(0.0)).max(0.0);
-    let moving = away > 0.0;
+/// A fix `elapsed_s` seconds after the start: from [`SIM_START_M`] left of the
+/// midpoint, straight across the diameter at [`SIM_SPEED_MPS`], parked
+/// [`SIM_END_M`] on the right side.
+pub fn sim_fix(d: &Diameter, elapsed_s: f64, at_ms: i64) -> FixIn {
+    let offset = (SIM_START_M - SIM_SPEED_MPS * elapsed_s.max(0.0)).max(-SIM_END_M);
+    let moving = offset > -SIM_END_M;
+    // Unit vector A -> B in local metres; "left" is that turned 90 degrees
+    // counter-clockwise.
+    let (ax, ay) = d.local(d.a());
+    let (bx, by) = d.local(d.b());
+    let (dx, dy) = (bx - ax, by - ay);
+    let len = dx.hypot(dy);
+    let (ux, uy) = (dx / len, dy / len);
+    let at = d.from_local((-uy * offset, ux * offset));
     FixIn {
-        lat: destination.lat - (away / EARTH_RADIUS_M).to_degrees(),
-        lon: destination.lon,
+        lat: at.lat,
+        lon: at.lon,
         accuracy_m: 8.0,
         speed_mps: moving.then_some(SIM_SPEED_MPS),
         at_ms,
@@ -360,7 +370,7 @@ pub fn simulate_tick(dir: &Path) -> Option<String> {
     };
     let at_ms = now_ms();
     let elapsed_s = (at_ms - trip.started_ms) as f64 / 1_000.0;
-    let fix = sim_fix(trip.trip.destination, elapsed_s, at_ms);
+    let fix = sim_fix(&trip.trip.diameter, elapsed_s, at_ms);
     let mut request = serde_json::to_value(fix).ok()?;
     request["dir"] = json!(dir.to_string_lossy());
     Some(crate::headless::handle("trip_fix", &request.to_string()))
@@ -371,9 +381,19 @@ pub fn simulate_tick(dir: &Path) -> Option<String> {
 mod tests {
     use super::*;
     use crate::store::tests::tmp;
-    use rovsti_geo::{NoticeWhen, TripState};
+    use rovsti_geo::{Coord, NoticeWhen, Side, TripState};
 
-    const DEST: Coord = Coord::new(41.0, 29.0);
+    fn end(label: &str, lon: f64) -> Endpoint {
+        Endpoint {
+            label: label.into(),
+            coord: Coord::new(41.0, lon),
+        }
+    }
+
+    /// About 1 km apart, west to east.
+    fn trip_of(id: u64, started_ms: i64, notice: Option<&NoticePrefs>) -> ActiveTrip {
+        build_trip(id, end("A", 28.994), end("B", 29.006), started_ms, notice).unwrap()
+    }
 
     fn pre(l: Option<Access>, n: Option<Access>) -> Preflight {
         Preflight {
@@ -386,14 +406,7 @@ mod tests {
     #[test]
     fn clearing_the_history_empties_the_file_and_keeps_the_trip() {
         let dir = tmp("backend-clear");
-        let trip = build_trip(
-            4,
-            "Home",
-            DEST,
-            AlarmRule::Radius { metres: 500.0 },
-            1,
-            None,
-        );
+        let trip = trip_of(4, 1, None);
         store::save_trip(&dir, &trip).unwrap();
         store::end_trip(&dir, Outcome::Arrived, 9).unwrap();
         store::save_trip(&dir, &trip).unwrap();
@@ -437,18 +450,18 @@ mod tests {
 
     #[test]
     fn the_notice_needs_a_chat() {
-        let rule = AlarmRule::Radius { metres: 500.0 };
         let mut prefs = NoticePrefs::default();
-        assert!(
-            build_trip(1, "A", DEST, rule, 0, Some(&prefs))
-                .notice
-                .is_none()
-        );
+        assert!(trip_of(1, 0, Some(&prefs)).notice.is_none());
         prefs.chat = "chat-1".into();
         prefs.when = NoticeWhen::WithAlarm;
-        let trip = build_trip(1, "A", DEST, rule, 0, Some(&prefs));
-        assert_eq!(trip.notice.unwrap().chat, "chat-1");
-        assert!(build_trip(1, "A", DEST, rule, 0, None).notice.is_none());
+        assert_eq!(trip_of(1, 0, Some(&prefs)).notice.unwrap().chat, "chat-1");
+        assert!(trip_of(1, 0, None).notice.is_none());
+    }
+
+    #[test]
+    fn a_degenerate_pair_builds_no_trip() {
+        let same = build_trip(1, end("A", 29.0), end("B", 29.0), 0, None);
+        assert_eq!(same.unwrap_err(), DiameterError::SamePoint);
     }
 
     #[test]
@@ -482,29 +495,30 @@ mod tests {
     }
 
     #[test]
-    fn the_simulation_closes_in_and_parks() {
-        let start = sim_fix(DEST, 0.0, 0);
-        let d0 = Coord::new(start.lat, start.lon).distance_m(DEST);
-        assert!((d0 - SIM_START_M).abs() < 5.0, "{d0}");
-        let mid = sim_fix(DEST, 10.0, 0);
-        let d1 = Coord::new(mid.lat, mid.lon).distance_m(DEST);
-        assert!((d1 - (SIM_START_M - 500.0)).abs() < 5.0, "{d1}");
+    fn the_simulation_crosses_the_diameter_and_parks() {
+        let d = Diameter::new(Coord::new(41.0, 28.994), Coord::new(41.0, 29.006)).unwrap();
+        let at = |f: &FixIn| Coord::new(f.lat, f.lon);
+        let start = sim_fix(&d, 0.0, 0);
+        assert!((d.offset_m(at(&start)) - SIM_START_M).abs() < 1.0);
+        assert!(d.center().distance_m(at(&start)) > 1_900.0);
+        let mid = sim_fix(&d, 10.0, 0);
+        assert!((d.offset_m(at(&mid)) - (SIM_START_M - 500.0)).abs() < 1.0);
         assert!(mid.speed_mps.is_some());
-        let end = sim_fix(DEST, 1_000.0, 0);
-        assert!(Coord::new(end.lat, end.lon).distance_m(DEST) < 1.0);
+        let end = sim_fix(&d, 1_000.0, 0);
+        assert!((d.offset_m(at(&end)) + SIM_END_M).abs() < 1.0);
+        assert!(d.contains(at(&end)));
         assert_eq!(end.speed_mps, None);
-        // A start time in the future never puts the vehicle past the start.
-        let early = sim_fix(DEST, -5.0, 0);
-        assert!(Coord::new(early.lat, early.lon).distance_m(DEST) <= SIM_START_M + 1.0);
+        // A start time in the future never puts the vehicle before the start.
+        let early = sim_fix(&d, -5.0, 0);
+        assert!((d.offset_m(at(&early)) - SIM_START_M).abs() < 1.0);
     }
 
     #[test]
     fn a_started_trip_is_on_disk_and_a_second_start_replaces_it() {
         let dir = tmp("backend-start");
-        let rule = AlarmRule::Radius { metres: 500.0 };
-        start_trip(&dir, &build_trip(1, "A", DEST, rule, 10, None)).unwrap();
+        start_trip(&dir, &trip_of(1, 10, None)).unwrap();
         assert_eq!(store::load_trip(&dir).unwrap().id, 1);
-        start_trip(&dir, &build_trip(2, "B", DEST, rule, 20, None)).unwrap();
+        start_trip(&dir, &trip_of(2, 20, None)).unwrap();
         assert_eq!(store::load_trip(&dir).unwrap().id, 2);
         let history = load(&dir).history;
         assert_eq!(history.records.len(), 1);
@@ -514,8 +528,7 @@ mod tests {
     #[test]
     fn stopping_records_a_cancelled_trip() {
         let dir = tmp("backend-stop");
-        let rule = AlarmRule::Radius { metres: 500.0 };
-        start_trip(&dir, &build_trip(5, "A", DEST, rule, 10, None)).unwrap();
+        start_trip(&dir, &trip_of(5, 10, None)).unwrap();
         stop_trip(&dir);
         let data = load(&dir);
         assert!(data.trip.is_none());
@@ -528,15 +541,24 @@ mod tests {
     #[test]
     fn a_simulated_trip_reaches_the_ring() {
         let dir = tmp("backend-sim");
-        let rule = AlarmRule::Radius { metres: 500.0 };
         assert!(simulate_tick(&dir).is_none());
+        // 60 s at 50 m/s: already parked 200 m past the line.
         let started = now_ms() - 60_000;
-        start_trip(&dir, &build_trip(9, "A", DEST, rule, started, None)).unwrap();
-        // 60 s at 50 m/s: already parked at the destination.
+        start_trip(&dir, &trip_of(9, started, None)).unwrap();
+        // The first fix of a real service is on the left; seed it.
+        let seed = sim_fix(&store::load_trip(&dir).unwrap().trip.diameter, 0.0, 0);
+        let mut request = serde_json::to_value(seed).unwrap();
+        request["dir"] = json!(dir.to_string_lossy());
+        let first: rovsti_geo::FixOut =
+            serde_json::from_str(&crate::headless::handle("trip_fix", &request.to_string()))
+                .unwrap();
+        assert!(!first.ring);
+        assert_eq!(first.side, Some(Side::Left));
         let reply = simulate_tick(&dir).unwrap();
         let out: rovsti_geo::FixOut = serde_json::from_str(&reply).unwrap();
         assert!(out.ring);
         assert_eq!(out.state, TripState::Arrived);
+        assert_eq!(out.side, Some(Side::Right));
     }
 
     #[test]

@@ -846,7 +846,7 @@ mod tests {
     fn a_record_row_has_date_duration_distance() {
         let r = TripRecord {
             label: "Kadikoy".into(),
-            destination: Coord::new(41.0, 29.0),
+            destination: Some(Coord::new(41.0, 29.0)),
             started_ms: 1_700_000_000_000,
             ended_ms: 1_700_000_000_000 + 18 * 60_000,
             travelled_m: 3_400.0,

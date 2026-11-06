@@ -13,8 +13,10 @@ use rovsti_wa_proto::{
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
+mod merge;
 mod rich;
 mod status;
+pub use merge::MergeReport;
 pub use rich::{
     ChatChange, ChatSettings, FetchedProfile, MAX_THUMBNAIL_BYTES, MessageChange, MessageExtras,
     ProfileChange, ReceiptCounts, apply_change, group_status, merge_edit,

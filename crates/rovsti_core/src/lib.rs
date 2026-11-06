@@ -24,6 +24,7 @@ pub mod mms_pdu;
 pub mod msg_backup;
 pub mod names;
 pub mod notify;
+pub mod number_format;
 pub mod otp;
 pub mod perf;
 pub mod phone_number;

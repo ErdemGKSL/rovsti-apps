@@ -312,7 +312,7 @@ pub enum StripTarget {
     WhatsApp(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum StripKey {
     /// An item of the local queue.
     Local(u64),
@@ -375,7 +375,6 @@ pub fn strip_items(
 
 /// Where an overview entry goes.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub enum EntryTarget {
     Sms(String),
     WhatsApp(String),
@@ -383,7 +382,6 @@ pub enum EntryTarget {
 
 /// One waiting (or failed) scheduled message in the overview.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct ScheduledEntry {
     pub key: StripKey,
     pub target: EntryTarget,
@@ -394,7 +392,6 @@ pub struct ScheduledEntry {
 
 /// Everything scheduled, both queues together: failed first, then soonest.
 /// Sent gateway items are history and left out.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn overview(local: &[ScheduledSms], remote: &[ScheduledText]) -> Vec<ScheduledEntry> {
     let mut entries: Vec<ScheduledEntry> = local
         .iter()
@@ -426,7 +423,6 @@ pub fn overview(local: &[ScheduledSms], remote: &[ScheduledText]) -> Vec<Schedul
 }
 
 /// The overview row's subtitle.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn overview_subtitle(entries: &[ScheduledEntry]) -> String {
     let failed = entries.iter().filter(|e| e.failed).count();
     let waiting = entries.len() - failed;
@@ -455,7 +451,6 @@ pub fn remote_failed_text(title: &str) -> String {
 }
 
 /// Shown when Send later is chosen with an empty composer.
-#[cfg_attr(not(test), allow(dead_code))]
 pub const TYPE_FIRST: &str = "Type the message first, then choose Send later";
 
 /// Whether a refused "Send later" should explain itself: only when the composer is blank
@@ -1197,6 +1192,24 @@ mod tests {
             entries[2].target,
             EntryTarget::WhatsApp("a@s.whatsapp.net".into())
         );
+    }
+
+    #[test]
+    fn overview_entry_keys_are_distinct_and_hashable() {
+        use std::hash::{DefaultHasher, Hash, Hasher};
+        let local = [
+            sms_item(1, 10, "+905321234567"),
+            sms_item(2, 20, "+905321234567"),
+        ];
+        let entries = overview(&local, &[]);
+        let hash = |k: &StripKey| {
+            let mut h = DefaultHasher::new();
+            k.hash(&mut h);
+            h.finish()
+        };
+        assert_eq!(entries.len(), 2);
+        assert_ne!(hash(&entries[0].key), hash(&entries[1].key));
+        assert_eq!(hash(&entries[0].key), hash(&StripKey::Local(1)));
     }
 
     #[test]

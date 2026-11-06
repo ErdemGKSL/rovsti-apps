@@ -263,6 +263,10 @@ struct MessagesApp {
     contacts_seen: usize,
     /// The archived chats are showing instead of the inbox.
     show_archived: bool,
+    /// The scheduled-messages overview is showing instead of the inbox.
+    show_scheduled: bool,
+    /// Everything waiting to be sent (both queues), as of the last list sync.
+    scheduled_entries: Vec<schedule_ui::ScheduledEntry>,
     /// The long-press menu of a WhatsApp row.
     row_menu: Option<RowMenu>,
     /// New message: the recipient being asked "SMS or WhatsApp".
@@ -320,6 +324,9 @@ struct ChatLayout {
     view_gen: u64,
     show_spam: bool,
     show_archived: bool,
+    show_scheduled: bool,
+    /// The scheduled entries: count, failed count, soonest time.
+    scheduled: (usize, usize, i64),
     /// Whether a non-blank query filters the list, and its field's edit count.
     searching: bool,
     search_edits: u64,
@@ -355,6 +362,12 @@ enum ChatItem {
     ArchivedBack,
     /// The "Archived" entry row.
     ArchivedFilter,
+    /// The "Scheduled" entry row.
+    ScheduledFilter,
+    /// Back from the scheduled overview to the inbox.
+    ScheduledBack,
+    /// One waiting scheduled message (index into `scheduled_entries`).
+    Scheduled(usize),
     /// WhatsApp Status updates.
     Status,
     /// A row of the inbox (or of the Spam filter while it shows).
@@ -486,6 +499,8 @@ impl MessagesApp {
             statuses,
             contacts_seen: 0,
             show_archived: false,
+            show_scheduled: false,
+            scheduled_entries: Vec::new(),
             row_menu: None,
             channel_pick: None,
             wa_rev: 0,
@@ -844,6 +859,7 @@ impl MessagesApp {
             self.statuses.update(cx, |feed, cx| feed.clear(cx));
         } else if connected && self.chats == ChatsState::Needed {
             self.load_chats(cx);
+            self.load_remote_scheduled(cx);
             self.reload_statuses(cx);
         }
         self.rebuild(cx);
@@ -2298,6 +2314,7 @@ impl MessagesApp {
             || self.search_open
             || self.show_archived
             || self.show_spam
+            || self.show_scheduled
             || !matches!(self.open, Open::None)
             || (self.tabs.selected() == WHATSAPP_TAB && self.whatsapp.read(cx).can_go_back())
             || self.tabs.selected() != CHATS_TAB
@@ -2336,9 +2353,13 @@ impl MessagesApp {
             self.close_page(cx);
         } else if self.search_open && self.tabs.selected() == CHATS_TAB {
             self.close_search(cx);
-        } else if (self.show_archived || self.show_spam) && self.tabs.selected() == CHATS_TAB {
-            // The Spam filter and the archived chats step back to the inbox.
+        } else if (self.show_archived || self.show_spam || self.show_scheduled)
+            && self.tabs.selected() == CHATS_TAB
+        {
+            // The Spam filter, the archived chats and the scheduled overview
+            // step back to the inbox.
             self.show_archived = false;
+            self.show_scheduled = false;
             self.show_spam = false;
             self.chat_list.scroll_to_top();
             cx.notify();
@@ -3217,6 +3238,18 @@ impl MessagesApp {
             (shown, list.unviewed())
         };
         let query = self.search_query(cx);
+        self.scheduled_entries = schedule_ui::overview(
+            self.backend.read(cx).queue().items(),
+            &self.remote_scheduled,
+        );
+        if self.scheduled_entries.is_empty() {
+            self.show_scheduled = false;
+        }
+        let scheduled = (
+            self.scheduled_entries.len(),
+            self.scheduled_entries.iter().filter(|e| e.failed).count(),
+            self.scheduled_entries.first().map_or(0, |e| e.at_ms),
+        );
         let wa_banner = {
             let whatsapp = self.whatsapp.read(cx);
             inbox::wa_banner(whatsapp.link().is_some(), whatsapp.instance_state())
@@ -3231,6 +3264,8 @@ impl MessagesApp {
             view_gen: self.view_gen,
             show_spam: self.show_spam,
             show_archived: self.show_archived,
+            show_scheduled: self.show_scheduled,
+            scheduled,
             searching: !query.is_empty(),
             search_edits: if self.search_open {
                 self.search_field.read(cx).edits
@@ -3264,6 +3299,9 @@ impl MessagesApp {
             items.push(ChatItem::SpamBack);
         } else if self.show_archived {
             items.push(ChatItem::ArchivedBack);
+        } else if self.show_scheduled {
+            items.push(ChatItem::ScheduledBack);
+            items.extend((0..self.scheduled_entries.len()).map(ChatItem::Scheduled));
         } else if query.is_empty() {
             if statuses.0 > 0 {
                 items.push(ChatItem::Status);
@@ -3271,13 +3309,18 @@ impl MessagesApp {
             if !self.view.archived.is_empty() {
                 items.push(ChatItem::ArchivedFilter);
             }
+            if !self.scheduled_entries.is_empty() {
+                items.push(ChatItem::ScheduledFilter);
+            }
             if !self.view.spam.is_empty() {
                 items.push(ChatItem::SpamFilter);
             }
         }
         let rows = self.shown_rows();
         let mut no_match_empty = false;
-        if !query.is_empty() {
+        if self.show_scheduled {
+            // The overview lists its own entries, not chats.
+        } else if !query.is_empty() {
             let matches = inbox::filter_rows(rows, &query);
             no_match_empty = matches.is_empty();
             items.extend(matches.into_iter().map(ChatItem::Row));
@@ -3289,6 +3332,7 @@ impl MessagesApp {
         }
         if !self.show_spam
             && !self.show_archived
+            && !self.show_scheduled
             && self.view.rows.is_empty()
             && self.view.spam.is_empty()
             && self.view.archived.is_empty()
@@ -3309,6 +3353,17 @@ impl MessagesApp {
                     key_of((7u8, self.view.archived.len(), self.view.archived_unread()))
                 }
                 ChatItem::ArchivedBack => key_of(8u8),
+                ChatItem::ScheduledFilter => key_of((
+                    14u8,
+                    scheduled.0,
+                    scheduled.1,
+                    schedule_ui::overview_subtitle(&self.scheduled_entries),
+                )),
+                ChatItem::ScheduledBack => key_of(15u8),
+                ChatItem::Scheduled(index) => {
+                    let entry = &self.scheduled_entries[index];
+                    key_of((16u8, &entry.key, entry.at_ms, entry.failed))
+                }
                 ChatItem::Status => key_of((9u8, statuses)),
                 ChatItem::Empty => key_of((3u8, state)),
                 ChatItem::Title => key_of(0u8),
@@ -3485,6 +3540,114 @@ impl MessagesApp {
                     cx.notify();
                 }))
                 .into_any_element(),
+            ChatItem::ScheduledBack => {
+                list_row(theme, None, "Inbox", Some("Scheduled".into()), None)
+                    .id("scheduled-back")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_scheduled = false;
+                        this.chat_list.scroll_to_top();
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            }
+            ChatItem::ScheduledFilter => {
+                let icon = div()
+                    .size(px(44.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        gpui::svg()
+                            .path(Icon::LucideCalendarClock.path())
+                            .size(px(22.0))
+                            .text_color(colors.secondary_label),
+                    )
+                    .into_any_element();
+                list_row(
+                    theme,
+                    Some(icon),
+                    "Scheduled",
+                    Some(schedule_ui::overview_subtitle(&self.scheduled_entries).into()),
+                    None,
+                )
+                .id("scheduled-filter")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.show_scheduled = true;
+                    this.chat_list.scroll_to_top();
+                    cx.notify();
+                }))
+                .into_any_element()
+            }
+            ChatItem::Scheduled(index) => {
+                let Some(entry) = self.scheduled_entries.get(index).cloned() else {
+                    return div().into_any_element();
+                };
+                let locale = self.backend.read(cx).locale();
+                let (title, sms_number, chat) = match &entry.target {
+                    schedule_ui::EntryTarget::Sms(to) => {
+                        let title = self
+                            .backend
+                            .read(cx)
+                            .contacts()
+                            .match_number(to)
+                            .map_or_else(|| to.clone(), |c| c.display_name.clone());
+                        (title, Some(to.clone()), None)
+                    }
+                    schedule_ui::EntryTarget::WhatsApp(chat) => {
+                        let title = self
+                            .title_of(&ThreadId::WhatsApp(chat.clone()))
+                            .unwrap_or_else(|| jid_user(chat).to_owned());
+                        (title, None, Some(chat.clone()))
+                    }
+                };
+                let preview = schedule_ui::preview(&entry.body);
+                let subtitle = if entry.failed {
+                    format!("Couldn't be sent · {preview}")
+                } else {
+                    let when = schedule_ui::when_label(entry.at_ms, now_ms(), locale.tz_offset_s);
+                    format!("{when} · {preview}")
+                };
+                let icon = div()
+                    .size(px(44.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        gpui::svg()
+                            .path(Icon::LucideCalendarClock.path())
+                            .size(px(22.0))
+                            .text_color(if entry.failed {
+                                colors.orange
+                            } else {
+                                colors.secondary_label
+                            }),
+                    )
+                    .into_any_element();
+                list_row(
+                    theme,
+                    Some(icon),
+                    title.clone(),
+                    Some(subtitle.into()),
+                    None,
+                )
+                .id(("scheduled-entry", index))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.show_scheduled = false;
+                    if let Some(number) = &sms_number {
+                        let recipient = Recipient {
+                            title: title.clone(),
+                            number: number.clone(),
+                            detail: None,
+                        };
+                        this.open_recipient_sms(&recipient, cx);
+                    } else if let Some(chat) = &chat {
+                        this.open_chat(chat.clone(), title.clone(), cx);
+                    }
+                }))
+                .into_any_element()
+            }
             ChatItem::ArchivedFilter => {
                 let unread = self.view.archived_unread();
                 let count = self.view.archived.len();

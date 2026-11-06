@@ -83,7 +83,7 @@ Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19),
 - [x] M21 `apps/messages/src/new_conversation.rs:65-70` | Low | Only one number per contact is offered in New message. Fixed: every number of a contact is offered, with its label.
 - [x] M22 `apps/messages/src/main.rs:1834-1838` | Low | The "SMS Access Is Off" empty state has no action (dead end).
 - [x] M23 `apps/messages/src/sms_conversation.rs:250-253` | Low | An `SmsChanged` during a load is dropped; a new message can be missing until the next change.
-- [>] M24 `apps/messages/src/conversation.rs` | Medium | WhatsApp composer: the keyboard Send key does not send (same as M9). Deferred (other agent owns the file).
+- [x] M24 `apps/messages/src/conversation.rs` | Medium | WhatsApp composer: the keyboard Send key does not send (same as M9). Fixed: the observer sends on the action key, as in SMS.
 
 ## Contacts and shared UI (C)
 

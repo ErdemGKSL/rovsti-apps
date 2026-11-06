@@ -221,6 +221,8 @@ pub struct Conversation {
     last_text: String,
     /// The composer's edit counter at the last observation.
     seen_edits: u64,
+    /// The composer's action-key count already acted on.
+    seen_actions: u64,
     /// The peer is typing until this time.
     typing_until: Option<i64>,
     /// `(available, last_seen_ms)` of the peer in a 1:1 chat.
@@ -283,11 +285,22 @@ impl Conversation {
             peer,
             active,
         } = setup;
-        let composer =
-            cx.new(|cx| TextField::with_input(TextInputPurpose::Text, TextInputAction::Send, cx));
-        // Typing re-renders the composer box.
-        cx.observe(&composer, |this, _, cx| this.on_composer_changed(cx))
-            .detach();
+        let composer = cx.new(|cx| {
+            let mut field =
+                TextField::with_input(TextInputPurpose::Text, TextInputAction::Send, cx);
+            field.set_keep_focus_on_action(true);
+            field
+        });
+        // Typing re-renders the composer box; the keyboard's Send key sends.
+        cx.observe(&composer, |this: &mut Self, composer, cx| {
+            let actions = composer.read(cx).actions();
+            if actions != this.seen_actions {
+                this.seen_actions = actions;
+                this.send(cx);
+            }
+            this.on_composer_changed(cx)
+        })
+        .detach();
         let subscriptions = vec![
             cx.subscribe(&backend, |this, _, event, cx| {
                 let BackendEvent::Document(result) = event else {
@@ -318,6 +331,7 @@ impl Conversation {
             title,
             is_group,
             composer,
+            seen_actions: 0,
             gateway,
             next_local: 1,
             loading: false,

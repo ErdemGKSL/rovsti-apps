@@ -194,3 +194,8 @@ cargo check -p rovsti_wa_client --target aarch64-linux-android
 cargo check -p rovsti_tiles --target aarch64-linux-android
 ```
 Disk: 7.5 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
+
+## Status (after S8)
+- Fixed: T1-T6.
+- Deferred: T7 (draw saved places on the map), listed as an open idea in `docs/roadmap.md`.
+- By design: T8.

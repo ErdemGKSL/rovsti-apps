@@ -61,7 +61,8 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   (`rovsti_ui::storage::data_dir`). Nothing leaves the device except WhatsApp traffic
   to the user's own gateway, map tile requests to the chosen tile server, and what the
   user chooses to share. Stops caches tiles in `tiles/<server key>/`, one directory per
-  server, capped at 128 MiB with least-recently-used eviction. An app keeps its
+  server, capped at 128 MiB with least-recently-used eviction. `rovsti_tiles::disk_usage` and
+  `clear_all` back the downloaded size and the Clear button in Settings > Map tiles. An app keeps its
   WhatsApp link (`whatsapp-link.json`: gateway URL, instance id, connect key) there.
 
 ## What each app needs from Android

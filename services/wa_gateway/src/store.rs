@@ -9,15 +9,17 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rovsti_wa_proto::{
     AppId, ChatSummary, InstanceState, InstanceStatus, KeyHash, KeyId, KeyInfo, MessageBody,
-    Reaction, ScheduledState, ScheduledText, WaMessage,
+    Reaction, ScheduledState, ScheduledText, WaMessage, is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 mod rich;
+mod status;
 pub use rich::{
     ChatChange, ChatSettings, FetchedProfile, MAX_THUMBNAIL_BYTES, MessageChange, MessageExtras,
     ProfileChange, ReceiptCounts, apply_change, group_status, merge_edit,
 };
+pub use status::{StatusTarget, StoredStatus};
 
 /// Active (not revoked) keys one instance may hold.
 pub const MAX_KEYS_PER_INSTANCE: u32 = 32;
@@ -244,6 +246,30 @@ const MIGRATIONS: &[&str] = &[
         status INTEGER NOT NULL,
         PRIMARY KEY (instance_id, chat, id, participant)
     );
+    ",
+    // v5: status updates (stories) live apart from the chats. Older
+    // gateways stored them as a `status@broadcast` chat: drop that.
+    "
+    CREATE TABLE statuses (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        author TEXT NOT NULL,
+        participant TEXT NOT NULL,
+        from_me INTEGER NOT NULL DEFAULT 0,
+        ts_ms INTEGER NOT NULL,
+        expires_ms INTEGER NOT NULL,
+        item_json TEXT NOT NULL,
+        raw_proto BLOB,
+        thumb BLOB,
+        viewed INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (instance_id, id)
+    );
+    CREATE INDEX statuses_by_expiry ON statuses(expires_ms);
+    DELETE FROM reactions WHERE chat = 'status@broadcast';
+    DELETE FROM receipts WHERE chat = 'status@broadcast';
+    DELETE FROM messages WHERE chat = 'status@broadcast';
+    DELETE FROM chat_settings WHERE jid = 'status@broadcast';
+    DELETE FROM chats WHERE jid = 'status@broadcast';
     ",
 ];
 
@@ -922,7 +948,8 @@ impl Store {
         self.run(move |conn| {
             let tx = conn.transaction()?;
             let mut written = 0u32;
-            for chat in &chats {
+            // Status updates are stored apart, never as a chat.
+            for chat in chats.iter().filter(|c| !is_status_chat(&c.jid)) {
                 tx.execute(
                     "INSERT INTO chats (instance_id, jid, name, is_group, unread, last_ms)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -1024,7 +1051,8 @@ impl Store {
         self.run(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT jid, name, is_group, unread FROM chats
-                 WHERE instance_id = ?1 ORDER BY last_ms DESC, jid",
+                 WHERE instance_id = ?1 AND jid != 'status@broadcast'
+                 ORDER BY last_ms DESC, jid",
             )?;
             let rows = stmt.query_map([instance.as_str()], |r| {
                 Ok((
@@ -1293,6 +1321,7 @@ mod tests {
             "chat_settings",
             "profiles",
             "receipts",
+            "statuses",
         ] {
             assert!(tables.iter().any(|n| n == t), "missing {t}: {tables:?}");
         }
@@ -1338,6 +1367,85 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version, MIGRATIONS.len() as u32);
+    }
+
+    #[tokio::test]
+    async fn v5_drops_the_status_chat_an_older_gateway_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            let tx = conn.transaction().unwrap();
+            for sql in &MIGRATIONS[..4] {
+                tx.execute_batch(sql).unwrap();
+            }
+            tx.execute_batch("PRAGMA user_version = 4").unwrap();
+            tx.execute_batch(
+                "INSERT INTO instances (id, created_ms, state) VALUES ('old', 1, 'connected');
+                 INSERT INTO chats (instance_id, jid, unread, last_ms)
+                     VALUES ('old', 'status@broadcast', 3, 9),
+                            ('old', '1@s.whatsapp.net', 1, 5);
+                 INSERT INTO messages (instance_id, chat, id, from_me, ts_ms, body_json)
+                     VALUES ('old', 'status@broadcast', 'S1', 0, 9, '{\"text\":\"story\"}'),
+                            ('old', '1@s.whatsapp.net', 'M1', 0, 5, '{\"text\":\"hi\"}');
+                 INSERT INTO reactions (instance_id, chat, id, sender, emoji)
+                     VALUES ('old', 'status@broadcast', 'S1', 'x', 'y');",
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let old = InstanceId::new("old");
+        let chats = store.chats(old.clone()).await.unwrap();
+        assert_eq!(chats.len(), 1);
+        assert_eq!(chats[0].jid, "1@s.whatsapp.net");
+        assert!(
+            store
+                .messages(old.clone(), "status@broadcast".into(), None, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .messages(old, "1@s.whatsapp.net".into(), None, 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn status_messages_never_become_chats() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 10, 4)
+            .await
+            .unwrap();
+        let fresh = store
+            .insert_message(id(1), text("status@broadcast", "S1", 5, false), None)
+            .await
+            .unwrap();
+        assert!(!fresh);
+        let written = store
+            .import_history(
+                id(1),
+                vec![HistoryChat {
+                    jid: "status@broadcast".into(),
+                    name: None,
+                    is_group: false,
+                    unread: 4,
+                    last_ms: 5,
+                    messages: vec![],
+                    settings: ChatSettings::default(),
+                }],
+            )
+            .await
+            .unwrap();
+        assert_eq!(written, 0);
+        assert!(store.chats(id(1)).await.unwrap().is_empty());
+        assert!(store.chats_rich(id(1)).await.unwrap().is_empty());
     }
 
     fn sched(id: &str, at: i64) -> ScheduledText {

@@ -47,6 +47,11 @@ impl MediaCache {
         Some(bytes)
     }
 
+    /// Forgets `key` (an expired status update). Missing files are fine.
+    pub fn remove(&self, key: &str) {
+        let _ = fs::remove_file(self.path(key));
+    }
+
     /// Stores `bytes` (atomically) and evicts the least recently used files
     /// until the cache fits. Media larger than the whole budget is not kept.
     pub fn put(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {

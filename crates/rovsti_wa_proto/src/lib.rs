@@ -19,6 +19,7 @@ pub mod media;
 pub mod meta;
 pub mod presence;
 pub mod push;
+pub mod status;
 pub mod timeline;
 pub mod url;
 
@@ -40,6 +41,10 @@ pub use meta::{
 };
 pub use presence::{PresenceBook, presence_label};
 pub use push::{Wake, parse_wake};
+pub use status::{
+    MarkStatusViewed, STATUS_BROADCAST, STATUS_TTL_MS, StatusAuthor, StatusItem, StatusKind,
+    StatusList, StatusMedia, StatusPlayer, group_statuses, is_status_chat,
+};
 pub use timeline::{
     Item, ItemState, Timeline, TypingThrottle, day_breaks, reaction_chips, read_requests, user_jid,
 };

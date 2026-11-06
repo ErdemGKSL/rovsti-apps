@@ -2,6 +2,7 @@
 
 use rovsti_wa_proto::{
     ChatMeta, DeliveryStatus, MessageBody, MessageMeta, RichChat, RichMessage, WaProfile,
+    is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -403,6 +404,10 @@ impl Store {
         message: rovsti_wa_proto::WaMessage,
         extras: MessageExtras,
     ) -> Result<bool, StoreError> {
+        // Status updates never become a chat or an unread count.
+        if is_status_chat(&message.chat) {
+            return Ok(false);
+        }
         self.run(move |conn| {
             let tx = conn.transaction()?;
             let fresh = insert_row(&tx, &instance, &message.chat, &message, &extras)?;
@@ -512,7 +517,8 @@ impl Store {
         self.run(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT jid, name, is_group, unread FROM chats
-                 WHERE instance_id = ?1 ORDER BY last_ms DESC, jid",
+                 WHERE instance_id = ?1 AND jid != 'status@broadcast'
+                 ORDER BY last_ms DESC, jid",
             )?;
             let rows = stmt
                 .query_map([instance.as_str()], |r| {

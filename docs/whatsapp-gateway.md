@@ -342,6 +342,54 @@ answer is 429 `rate_limited`. Stored answers never cost a token.
 `announce` (only admins may send) and each participant's `name` (push name or saved
 name) when the gateway knows it. Client: `groups()`, `group(jid)`.
 
+## Status updates (stories)
+
+WhatsApp delivers Status updates as messages to `status@broadcast`. The gateway keeps
+them out of everything chat-shaped: they never become a chat, a chat message, an unread
+count, a `message` event or an FCM push, and a history sync's `status@broadcast`
+conversation is not imported as a chat. They go to their own table (`statuses`, schema
+v5) with the author (by phone number when WhatsApp tells it), the JID the update was
+addressed from (named in read receipts), the kind (`text`, `image`, `video`, `other`),
+the text or caption, a text update's `background_argb`, `text_argb` and `font`, the media
+details (`mime`, `size`, `seconds`, `width`, `height`, `thumbnail`), the encoded message
+for downloading, the embedded thumbnail, `from_me` and a `viewed` flag. An update
+expires 24 hours after it was posted; a sweeper deletes expired ones (and their cached
+media) every 10 minutes. The v5 migration also deletes the `status@broadcast` chat,
+messages, reactions and receipts an older gateway stored.
+
+| Request | Meaning |
+| --- | --- |
+| `GET /v1/statuses` | `{mine: [...], authors: [{author, name, items: [...]}]}`: my own updates, then everyone else's grouped by author, people with unseen updates first, then newest first; each author's `items` oldest first. |
+| `GET /v1/statuses/{id}/media` | The photo or video, downloaded once, then served from the media cache. A text update is 400, an unknown or expired one 404. |
+| `GET /v1/statuses/{id}/thumbnail` | The small preview of a photo or video, or 404. |
+| `POST /v1/statuses/viewed` `{ids}` | 1 to 100 ids. For the ones not seen before (never my own) a read receipt goes to `status@broadcast` with the author as participant, one per author (whatsapp-rust's `mark_as_read(status@broadcast, Some(author), ids)`, which adds the author's number when the author is a LID, as WhatsApp Web does). Then they are stored as seen. 204. |
+
+New updates, a delete by the author, updates seen through `/v1/statuses/viewed` and
+the expiry sweep publish `{"type":"status_changed","author":"..."}` (`author` left out
+when several people changed); clients refetch `GET /v1/statuses`. Older clients skip it.
+Client: `statuses()`, `status_media(id)`, `status_thumbnail(id)`,
+`mark_status_viewed(&ids)`. The wire types and the viewer's pure model
+(`StatusPlayer`) are in `rovsti_wa_proto::status`.
+
+Posting a status is not offered: whatsapp-rust's `client.status().send_text(...)` needs
+the list of recipients (the contacts allowed to see it), which the gateway does not
+keep.
+
+### How Rovsti Messages uses it
+
+The Chats tab shows a "Status" row above the archived chats while anyone has a current
+update: up to three avatars with a ring (green while unseen), "N new updates" and the
+unseen count. It opens the Status page (`apps/messages/src/status_ui.rs`): "My status",
+then "Recent updates" and "Viewed updates", a virtualised list. Tapping a person opens a
+full-screen viewer that plays their updates oldest unseen first, then moves on to the next
+person: text updates on their background colour, photos (downloaded and decoded off the
+UI thread, at most six kept), videos as their thumbnail with the length (there is no
+video playback here). Progress bars run for 5 seconds per update; tap the right two
+thirds for the next, the left third for the previous, hold to pause, swipe down or press
+Back to close (Back then closes the page). An update counts as seen, and its receipt goes
+out, only while it is on screen in a window the user can see. Messages from an older
+gateway that still sends `status@broadcast` as a chat are dropped by the app as well.
+
 ## Scheduled texts
 
 The gateway can send a text later, so the phone may be off at that time.

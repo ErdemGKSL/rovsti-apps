@@ -29,8 +29,10 @@ use whatsapp_rust::waproto::buffa::Message as _;
 
 use super::calls::{CallBackend, WaCalls};
 use super::convert;
-use super::{app_state, groups, history, media, picture, reaction};
-use crate::driver::{DriverError, EventSink, MessageRef, PictureFetch, SendMedia, WaDriver};
+use super::{app_state, groups, history, media, picture, reaction, status};
+use crate::driver::{
+    DriverError, EventSink, MessageRef, PictureFetch, SendMedia, StatusReceipt, WaDriver,
+};
 use crate::now_ms;
 use crate::store::{FetchedProfile, InstanceId, MessageExtras};
 
@@ -353,12 +355,21 @@ impl WaRuntime {
             .on_message({
                 let sink = sink.clone();
                 move |ctx| {
+                    let sink = sink.clone();
+                    // Status updates are stored apart, never as a chat.
+                    let story = status::is_status(&ctx).then(|| status::live(&ctx));
                     // An encrypted edit needs the stored secret of the edited
                     // message; the rest converts without any lookup.
-                    let pending = app_state::encrypted_edit(&ctx);
+                    let pending = story
+                        .is_none()
+                        .then(|| app_state::encrypted_edit(&ctx))
+                        .flatten();
                     let converted = convert::message(&ctx);
-                    let sink = sink.clone();
                     async move {
+                        if let Some(update) = story {
+                            status::apply(&sink, update).await;
+                            return;
+                        }
                         let converted = match pending {
                             Some(edit) => edit.resolve(&sink).await,
                             None => converted,
@@ -758,10 +769,19 @@ async fn handle_event(
             let progress = lazy.progress();
             let lazy = (**lazy).clone();
             let now = now_ms();
-            let drained = tokio::task::spawn_blocking(move || history::drain(&lazy, now)).await;
+            let own_pn = client
+                .persistence_manager()
+                .get_device_snapshot()
+                .pn
+                .as_ref()
+                .map(|jid| jid.to_non_ad().to_string());
+            let drained =
+                tokio::task::spawn_blocking(move || history::drain(&lazy, now, own_pn.as_deref()))
+                    .await;
             match drained {
                 Ok(Ok(drained)) => {
                     sink.set_push_names(drained.push_names).await;
+                    sink.import_statuses(drained.statuses).await;
                     sink.import_history(drained.chats, progress).await;
                 }
                 Ok(Err(e)) => log::warn!("{instance}: history sync unreadable: {e}"),
@@ -1274,6 +1294,30 @@ impl WaDriver for WaRuntime {
                 id: found.id,
                 bytes,
             })
+        })
+    }
+
+    /// whatsapp-rust sends a status read to `status@broadcast` with the
+    /// author as `participant` (and adds the author's number when it is a
+    /// LID), like WhatsApp Web.
+    fn mark_status_viewed(
+        &self,
+        instance: &InstanceId,
+        batches: Vec<StatusReceipt>,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        let instance = instance.clone();
+        Box::pin(async move {
+            let (client, _) = self.client_of(&instance)?;
+            let chat = convert::parse_jid(rovsti_wa_proto::STATUS_BROADCAST)?;
+            for batch in batches {
+                let author = convert::parse_jid(&batch.participant)?;
+                let ids: Vec<&str> = batch.ids.iter().map(String::as_str).collect();
+                client
+                    .mark_as_read(&chat, Some(&author), &ids)
+                    .await
+                    .map_err(failed)?;
+            }
+            Ok(())
         })
     }
 

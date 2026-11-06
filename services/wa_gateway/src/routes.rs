@@ -78,6 +78,7 @@ pub fn router(state: AppState) -> Router {
         .route(r::GROUP, get(group))
         .merge(crate::wa::calls::routes())
         .merge(crate::rich_routes::routes())
+        .merge(crate::status_routes::routes())
         .with_state(state)
 }
 

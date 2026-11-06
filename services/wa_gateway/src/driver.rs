@@ -7,7 +7,7 @@ use futures::future::BoxFuture;
 use rovsti_wa_proto::{
     ChatAction, ChatState, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo, LinkRequest,
     MarkRead, MediaKind, MessageMeta, Reaction, RevokeMessage, SendReaction, SendText, Sent,
-    WaMessage, WaProfile, WaUser, event::ReceiptKind,
+    WaMessage, WaProfile, WaUser, event::ReceiptKind, is_status_chat,
 };
 
 use crate::hub::Hub;
@@ -15,6 +15,7 @@ use crate::now_ms;
 use crate::push::{PushKind, Pusher, should_push};
 use crate::store::{
     ChatChange, FetchedProfile, InstanceId, MessageChange, MessageExtras, ProfileChange, Store,
+    StoredStatus,
 };
 use crate::wa::calls::{CallBackend, CallTable};
 
@@ -237,6 +238,60 @@ impl EventSink {
         }
     }
 
+    /// Stores a status update and tells the apps. Status updates are never a
+    /// chat, an unread count or a push.
+    pub async fn emit_status(&self, status: StoredStatus) {
+        let author = status.item.author.clone();
+        match self
+            .store
+            .insert_status(self.instance.clone(), status, now_ms())
+            .await
+        {
+            Ok(true) => self.publish(GatewayEvent::StatusChanged {
+                author: Some(author),
+            }),
+            Ok(false) => {}
+            Err(e) => log::warn!("{}: saving a status update failed: {e}", self.instance),
+        }
+    }
+
+    /// Status updates from a history sync, announced with one event.
+    pub async fn import_statuses(&self, statuses: Vec<StoredStatus>) {
+        let mut fresh = false;
+        let now = now_ms();
+        for status in statuses {
+            match self
+                .store
+                .insert_status(self.instance.clone(), status, now)
+                .await
+            {
+                Ok(new) => fresh |= new,
+                Err(e) => {
+                    log::warn!("{}: saving a status update failed: {e}", self.instance);
+                    break;
+                }
+            }
+        }
+        if fresh {
+            self.publish(GatewayEvent::StatusChanged { author: None });
+        }
+    }
+
+    /// The author deleted a status update.
+    pub async fn revoke_status(&self, id: &str) {
+        match self
+            .store
+            .delete_status(self.instance.clone(), id.to_owned())
+            .await
+        {
+            Ok(Some(author)) => self.publish(GatewayEvent::StatusChanged {
+                author: Some(author),
+            }),
+            Ok(None) => {}
+            Err(e) => log::warn!("{}: deleting a status update failed: {e}", self.instance),
+        }
+    }
+
     /// Names a group chat once its subject is known (only if the chat exists).
     pub async fn rename_chat(&self, jid: &str, name: &str) {
         if let Err(e) = self
@@ -307,6 +362,11 @@ impl EventSink {
     /// `MessageMeta` event when its meta is not empty. A message that is
     /// already stored is not published again.
     pub async fn emit_full(&self, message: WaMessage, extras: MessageExtras) {
+        // Status updates go through `emit_status`; they are never a chat.
+        if is_status_chat(&message.chat) {
+            log::debug!("{}: a status update reached the chat path", self.instance);
+            return;
+        }
         let meta = extras.meta.clone();
         match self
             .store
@@ -713,6 +773,39 @@ pub trait WaDriver: Send + Sync + 'static {
     ) -> BoxFuture<'_, Result<PictureFetch, DriverError>> {
         Box::pin(async { Err(DriverError::NotConnected) })
     }
+
+    /// Read receipts for status updates, one batch per author: the receipt
+    /// goes to `status@broadcast` and names `participant` (the author as
+    /// WhatsApp addressed the update).
+    fn mark_status_viewed(
+        &self,
+        _instance: &InstanceId,
+        _batches: Vec<StatusReceipt>,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+}
+
+/// The status updates of one author that were seen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusReceipt {
+    pub participant: String,
+    pub ids: Vec<String>,
+}
+
+/// Groups seen updates into one receipt per author, in first-seen order.
+pub fn status_receipts(seen: impl IntoIterator<Item = (String, String)>) -> Vec<StatusReceipt> {
+    let mut out: Vec<StatusReceipt> = Vec::new();
+    for (participant, id) in seen {
+        match out.iter_mut().find(|r| r.participant == participant) {
+            Some(receipt) => receipt.ids.push(id),
+            None => out.push(StatusReceipt {
+                participant,
+                ids: vec![id],
+            }),
+        }
+    }
+    out
 }
 
 /// Refuses to start sessions, so the gateway can serve its API without
@@ -924,6 +1017,13 @@ mod fake {
         /// would report (incoming messages, edits, app-state changes).
         pub fn sink_of(&self, instance: &InstanceId) -> Option<EventSink> {
             self.sink(instance)
+        }
+
+        /// Delivers a status update as WhatsApp would.
+        pub async fn deliver_status(&self, instance: &InstanceId, status: StoredStatus) {
+            if let Some(sink) = self.sink(instance) {
+                sink.emit_status(status).await;
+            }
         }
 
         /// Delivers an incoming message with its extras.
@@ -1401,6 +1501,23 @@ mod fake {
                     });
             Box::pin(async move { result })
         }
+
+        fn mark_status_viewed(
+            &self,
+            instance: &InstanceId,
+            batches: Vec<StatusReceipt>,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let mut result = Ok(());
+            for batch in batches {
+                result = result.and_then(|()| {
+                    self.record(
+                        instance,
+                        format!("status-read {} {}", batch.participant, batch.ids.join(",")),
+                    )
+                });
+            }
+            Box::pin(async move { result })
+        }
     }
 }
 
@@ -1445,6 +1562,28 @@ mod tests {
             ]
         );
         assert!(tick_events("c", Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn status_receipts_batch_by_author() {
+        let got = status_receipts([
+            ("a@lid".to_owned(), "1".to_owned()),
+            ("b@lid".to_owned(), "2".to_owned()),
+            ("a@lid".to_owned(), "3".to_owned()),
+        ]);
+        assert_eq!(
+            got,
+            [
+                StatusReceipt {
+                    participant: "a@lid".into(),
+                    ids: vec!["1".into(), "3".into()],
+                },
+                StatusReceipt {
+                    participant: "b@lid".into(),
+                    ids: vec!["2".into()],
+                },
+            ]
+        );
     }
 
     #[test]

@@ -346,8 +346,8 @@ impl StopsApp {
                         })),
                 );
             }
-            buttons = buttons
-                .child(
+            if any_end {
+                buttons = buttons.child(
                     glass_pill(theme, "Swap")
                         .id("swap-ends")
                         .h(px(52.0))
@@ -355,8 +355,9 @@ impl StopsApp {
                             this.pick.swap();
                             cx.notify();
                         })),
-                )
-                .child(start);
+                );
+            }
+            buttons = buttons.child(start);
         }
         let mut bar = div()
             .px(px(16.0))

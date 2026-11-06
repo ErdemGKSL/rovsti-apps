@@ -68,13 +68,28 @@ impl StopsApp {
     /// title scrolls away with the places as before.
     pub(crate) fn saved_tab(&mut self, theme: Theme, cx: &mut Context<Self>) -> Page {
         if self.saved.places.is_empty() {
+            let colors = theme::colors(theme);
             return Page::Flow(
-                empty_state(
-                    theme,
-                    "No Saved Places",
-                    "Tap a pin on the map and choose Save, or save a stop or a shared place. Saved places appear here for one-tap use as A or B.",
-                )
-                .into_any_element(),
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .child(empty_state(
+                        theme,
+                        "No Saved Places",
+                        "Tap a pin on the map and choose Save, or save a stop or a shared place. Saved places appear here for one-tap use as A or B.",
+                    ))
+                    .child(
+                        glass_pill(theme, "Open the map")
+                            .id("saved-open-map")
+                            .px(px(20.0))
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.tabs.jump_to(0);
+                                cx.notify();
+                            })),
+                    )
+                    .into_any_element(),
             );
         }
         // An opened place is taller: its key changes so it is measured again.

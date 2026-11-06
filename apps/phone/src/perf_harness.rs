@@ -676,6 +676,54 @@ mod tests {
     }
 
     #[test]
+    fn a_filtered_list_maps_positions_to_the_right_rows() {
+        use rovsti_core::call_log_query::{Query, RecentsFilter};
+        let mut rig = recents_with_500_rows();
+        rig.with_app(|app, _, _| {
+            let all = app.recents.row_count();
+            let missed: Vec<_> = (0..all)
+                .filter_map(|i| app.recents.row(i).map(|r| r.number.clone()))
+                .collect();
+            assert!(app.recents.set_query(Query {
+                text: String::new(),
+                filter: RecentsFilter::Missed,
+            }));
+            let kept = app.recents.row_count();
+            assert!(kept < all, "the Missed chip narrows {all} rows to {kept}");
+            // Position 1 is the second visible row, whatever its place in the log.
+            let hit = crate::recents::row_at(10.0, crate::recents::ROW_H + 1.0, 0.0, 400.0, kept);
+            assert_eq!(hit, Some((1, crate::recents::Zone::Row)));
+            let second = app
+                .recents
+                .row(1)
+                .expect("second visible row")
+                .number
+                .clone();
+            assert!(missed.contains(&second));
+            assert!(app.recents.row(kept).is_none());
+            // Back to All: every row again.
+            assert!(app.recents.set_query(Query::default()));
+            assert_eq!(app.recents.row_count(), all);
+        });
+    }
+
+    #[test]
+    fn changing_the_filter_scrolls_to_the_top() {
+        use rovsti_core::call_log_query::{Query, RecentsFilter};
+        let mut rig = recents_with_500_rows();
+        rig.apply(Action::Scroll(9_000.0));
+        rig.draw();
+        assert!(rig.with_app(|app, _, _| app.recents.scrolled()) > 1.0);
+        rig.with_app(|app, _, _| {
+            app.recents.set_query(Query {
+                text: String::new(),
+                filter: RecentsFilter::Incoming,
+            });
+            assert!(app.recents.scrolled() < 0.5);
+        });
+    }
+
+    #[test]
     fn rows_have_the_fixed_heights_the_list_relies_on() {
         assert_eq!(crate::recents::ROW_H, 58.0);
         assert_eq!(crate::contacts::list_row_height(), 58.0);

@@ -347,6 +347,8 @@ impl PhoneApp {
         }
         let contacts_view = ContactsView::new(cx);
         let search_field = contacts_view.field.clone();
+        let recents_view = RecentsView::new(cx);
+        let recents_field = recents_view.field.clone();
         let blocked_ui = blocked_ui::BlockedUi::new(cx);
         let blocked_field = blocked_ui.field.clone();
         let replies_ed = replies_ui::ReplyEditor::new(cx);
@@ -439,6 +441,10 @@ impl PhoneApp {
             // Typing in the Contacts search field filters the list.
             cx.observe_in(&search_field, window, |this, _, window, cx| {
                 this.contacts_field_changed(window, cx);
+            }),
+            // Typing in the Recents search field filters the calls.
+            cx.observe_in(&recents_field, window, |this, _, window, cx| {
+                this.recents_field_changed(window, cx);
             }),
             // Opening the app again brings a live call back.
             cx.observe_window_activation(window, |this, window, cx| {
@@ -563,7 +569,7 @@ impl PhoneApp {
             wa_avatars,
             wa_fading: false,
             back_enabled: false,
-            recents: RecentsView::new(),
+            recents: recents_view,
             contacts: contacts_view,
             favorites: FavoritesView::new(),
             contact_sheet: None,
@@ -793,7 +799,7 @@ impl PhoneApp {
             }
         } else if self.settings.is_open() {
             self.settings_close(window, cx);
-        } else if self.contacts.typing {
+        } else if self.contacts.typing || self.recents.typing {
             // First Back puts the keyboard away; the next one is the OS's.
             window.blur();
         } else if self.tabs.selected() == CONTACTS_TAB
@@ -801,6 +807,10 @@ impl PhoneApp {
         {
             // A search is cleared before Back leaves Contacts.
             self.contacts.field.update(cx, |field, cx| field.clear(cx));
+        } else if self.tabs.selected() == RECENTS_TAB && self.recents.narrowed() {
+            // A search or filter is cleared before Back leaves Recents.
+            self.recents.field.update(cx, |field, cx| field.clear(cx));
+            self.recents_choose_filter(rovsti_core::call_log_query::RecentsFilter::All, cx);
         } else if self.tabs.selected() != KEYPAD_TAB {
             // From any other tab Back goes home, to the Keypad; there the OS decides.
             self.select_tab(KEYPAD_TAB, cx);

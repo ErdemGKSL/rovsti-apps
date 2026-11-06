@@ -23,27 +23,35 @@ use gpui::{
     Window, div, linear_color_stop, linear_gradient, prelude::*, px, svg, uniform_list,
 };
 use rovsti_core::{
+    call_log::RecentsRow,
+    call_log_query::{self, Query, RecentsFilter},
     recents::{self, Direction, RowView},
     sim::SimInfo,
 };
 use rovsti_ui::{
     Icon,
     components::glass_pill,
+    glass::{GlassSpec, glass},
     motion::{Entrance, press_scale},
     motion_tokens::scale,
     theme::{self, call_colors},
-    tokens::{Theme, metrics, mix, typography},
+    tokens::{Theme, metrics, mix, shadow, typography},
     touch::{Pointer, TAP_SLOP, TapGuard, pointer_surface, touch_surface},
 };
 
 use crate::{
     PhoneApp, RECENTS_TAB,
     backend::{self, Access, CallLog, Group, Load, Placement},
+    field::{SearchField, input_layer, on_backspace},
     flight::{Home, Look},
     notice::Notice,
     wa_peer::CallerPhoto,
 };
 
+/// Height of the search field under the title.
+const FIELD_H: f32 = 44.0;
+/// Height of the filter chip capsule.
+const CHIP_H: f32 = 36.0;
 /// Fixed row height (UX-DR5): scroll offsets are `index * ROW_H`.
 pub const ROW_H: f32 = 58.0;
 /// Width of the info target at the right edge of a row.
@@ -208,6 +216,20 @@ pub(crate) struct RecentsView {
     bounds: Rc<Cell<Bounds<Pixels>>>,
     state: State,
     rows: Arc<[RowVm]>,
+    /// The merged call-log rows `rows` was built from (what the query reads).
+    merged: Arc<[RecentsRow]>,
+    /// Search text and filter chip (the filter resets on launch).
+    query: Query,
+    /// Indices into `rows` that pass `query`, in order. The list, hit tests and
+    /// every row lookup go through it; rebuilt on a new snapshot or a query
+    /// change, never per frame.
+    visible: Vec<usize>,
+    /// The search field under the title.
+    pub(crate) field: gpui::Entity<SearchField>,
+    seen_edits: u64,
+    field_text: SharedString,
+    /// The field has focus (caret drawn).
+    pub(crate) typing: bool,
     log: Option<Arc<CallLog>>,
     /// The SIMs the rows were resolved against.
     sims: SimInfo,
@@ -256,12 +278,19 @@ pub(crate) struct RecentsView {
 }
 
 impl RecentsView {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(cx: &mut gpui::App) -> Self {
         Self {
             scroll: UniformListScrollHandle::new(),
             bounds: Rc::new(Cell::new(Bounds::default())),
             state: State::Loading,
             rows: Arc::from(Vec::new()),
+            merged: Arc::from(Vec::new()),
+            query: Query::default(),
+            visible: Vec::new(),
+            field: cx.new(SearchField::new),
+            seen_edits: 0,
+            field_text: SharedString::default(),
+            typing: false,
             log: None,
             sims: SimInfo::default(),
             format: rovsti_core::wire::NameFormat::default(),
@@ -297,10 +326,39 @@ impl RecentsView {
         moving
     }
 
-    /// Grouped rows in the list.
+    /// Rows in the list (after the search and the filter).
     #[cfg(test)]
     pub(crate) fn row_count(&self) -> usize {
-        self.rows.len()
+        self.visible.len()
+    }
+
+    /// The row shown at list position `index`.
+    pub(crate) fn row(&self, index: usize) -> Option<&RowVm> {
+        self.rows.get(*self.visible.get(index)?)
+    }
+
+    /// The query is not the default one (rows are narrowed).
+    pub(crate) fn narrowed(&self) -> bool {
+        self.query != Query::default()
+    }
+
+    /// Recomputes `visible` from the current rows and query.
+    fn reveal(&mut self) {
+        self.visible = call_log_query::apply(&self.merged, &self.query);
+    }
+
+    /// Applies a new query: recomputes the visible rows and puts the list back
+    /// at the top. False when nothing changed.
+    pub(crate) fn set_query(&mut self, query: Query) -> bool {
+        if query == self.query {
+            return false;
+        }
+        self.query = query;
+        self.reveal();
+        let handle = self.scroll.0.borrow().base_handle.clone();
+        handle.set_offset(gpui::point(px(0.0), px(0.0)));
+        self.scroll_to_top();
+        true
     }
 
     pub(crate) fn scroll_to_top(&self) {
@@ -449,6 +507,10 @@ impl PhoneApp {
         let r = &mut self.recents;
         r.inserted = 0;
         r.fresh = 0;
+        // Positions in a narrowed list do not match the log's: no live refresh.
+        if r.narrowed() {
+            return;
+        }
         if delta.fresh == 0 && delta.shift == 0 {
             return;
         }
@@ -553,6 +615,8 @@ impl PhoneApp {
     fn recents_failed(&mut self, state: State) {
         self.recents.state = state;
         self.recents.rows = Arc::from(Vec::new());
+        self.recents.merged = Arc::from(Vec::new());
+        self.recents.visible.clear();
         self.recents.log = None;
         self.recents.skeleton_on = false;
         self.recents.skeleton_task = None;
@@ -628,6 +692,8 @@ impl PhoneApp {
             started.elapsed()
         );
         self.recents.rows = rows.into();
+        self.recents.merged = merged.into();
+        self.recents.reveal();
         self.recents.built_at = Some(Instant::now());
         self.recents.log = Some(log);
         self.recents.last_pressed = None;
@@ -732,11 +798,12 @@ impl PhoneApp {
             f32::from(position.y - bounds.origin.y),
             self.recents.scrolled(),
             f32::from(bounds.size.width),
-            self.recents.rows.len(),
+            self.recents.visible.len(),
         )
         .filter(|(index, zone)| {
-            let row = &self.recents.rows[*index];
-            row.callable || *zone == Zone::Info && !row.number.is_empty()
+            self.recents
+                .row(*index)
+                .is_some_and(|row| row.callable || *zone == Zone::Info && !row.number.is_empty())
         })
     }
 
@@ -843,7 +910,7 @@ impl PhoneApp {
 
     /// Story 6.3: a tap on a row calls its number through the one call path.
     fn recents_call(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(row) = self.recents.rows.get(index) else {
+        let Some(row) = self.recents.row(index) else {
             return;
         };
         if !row.callable {
@@ -926,7 +993,7 @@ impl PhoneApp {
         &self,
         index: usize,
     ) -> Option<(SharedString, SharedString, bool, f32)> {
-        let row = self.recents.rows.get(index)?;
+        let row = self.recents.row(index)?;
         let bounds = self.recents.bounds.get();
         let top = f32::from(bounds.origin.y) + index as f32 * ROW_H - self.recents.scrolled();
         Some((row.number.clone(), row.title.clone(), row.named, top))
@@ -937,11 +1004,11 @@ impl PhoneApp {
         &self,
         index: usize,
     ) -> Option<Arc<[rovsti_core::call_log::EntryRef]>> {
-        Some(Arc::clone(&self.recents.rows.get(index)?.refs))
+        Some(Arc::clone(&self.recents.row(index)?.refs))
     }
 
     fn recents_info(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(row) = self.recents.rows.get(index) else {
+        let Some(row) = self.recents.row(index).cloned() else {
             return;
         };
         // A known person opens their Contact sheet (story 8.8); anyone else
@@ -958,7 +1025,7 @@ impl PhoneApp {
         self.recents.number_history = self.history_for(&[row.number.as_ref()], cx);
         self.recents.number_history_edit = false;
         self.recents.number_blocked = false;
-        self.recents.number = Some(row.clone());
+        self.recents.number = Some(row);
         self.setup_note = None;
         self.sheet_kind = crate::SheetKind::Number;
         self.sheet.open();
@@ -1018,7 +1085,36 @@ impl PhoneApp {
                     cx,
                 )
             }
-            State::Ready => self.recents_list(cx),
+            State::Ready => {
+                let results = if r.visible.is_empty() {
+                    let hint = if r.query.text.trim().is_empty() {
+                        "Calls of this kind show up here."
+                    } else {
+                        "Try a name, a number or another filter."
+                    };
+                    state_view(
+                        theme,
+                        Icon::LucideSearch,
+                        false,
+                        call_log_query::empty_text(&r.query),
+                        hint,
+                        None,
+                        cx,
+                    )
+                } else {
+                    self.recents_list(cx)
+                };
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .child(self.recents_field(theme, cx))
+                    .child(self.recents_chips(theme, cx))
+                    .child(results)
+                    .into_any_element()
+            }
             State::Denied => {
                 let permanent =
                     self.backend.read(cx).permissions().phone == Access::PermanentlyDenied;
@@ -1061,7 +1157,7 @@ impl PhoneApp {
         let r = &self.recents;
         let list = uniform_list(
             "recents",
-            r.rows.len() + TAIL_ROWS,
+            r.visible.len() + TAIL_ROWS,
             cx.processor(move |this, range: Range<usize>, window, cx| {
                 let theme = rovsti_ui::current_theme(window);
                 this.want_recent_photos(range.clone(), cx);
@@ -1089,10 +1185,265 @@ impl PhoneApp {
             .into_any_element()
     }
 
+    /// The search text or focus changed: re-filter the list.
+    pub(crate) fn recents_field_changed(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let (edits, text, focused) = {
+            let field = self.recents.field.read(cx);
+            (
+                field.edits,
+                field.text().to_owned(),
+                field.focus_handle().is_focused(window),
+            )
+        };
+        let mut changed = false;
+        if edits != self.recents.seen_edits {
+            self.recents.seen_edits = edits;
+            self.recents.field_text = text.clone().into();
+            let query = Query {
+                text,
+                filter: self.recents.query.filter,
+            };
+            self.recents.set_query(query);
+            changed = true;
+        }
+        if focused != self.recents.typing {
+            self.recents.typing = focused;
+            changed = true;
+        }
+        if changed {
+            cx.notify();
+        }
+    }
+
+    /// A filter chip was chosen.
+    pub(crate) fn recents_choose_filter(&mut self, filter: RecentsFilter, cx: &mut Context<Self>) {
+        let query = Query {
+            text: self.recents.query.text.clone(),
+            filter,
+        };
+        if self.recents.set_query(query) {
+            cx.notify();
+        }
+    }
+
+    /// The glass search field under the title (44 px), like the Contacts one.
+    fn recents_field(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = theme::colors(theme);
+        let field = self.recents.field.clone();
+        let focus = field.read(cx).focus_handle();
+        let text = self.recents.field_text.clone();
+        let typing = self.recents.typing;
+        let press = self.presses.value("rc-field").clamp(0.0, 1.0);
+        let clear_press = self.presses.value("rc-clear").clamp(0.0, 1.0);
+        let focus_for_tap = focus.clone();
+        let clear_field = field.clone();
+        let spec = GlassSpec::control(theme).lerp(GlassSpec::lens(theme), press * 0.5);
+        let text_box = div()
+            .relative()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .overflow_hidden()
+            .text_size(typography::BODY.size)
+            .child(input_layer(field.clone(), cx))
+            .child(if text.is_empty() && !typing {
+                div()
+                    .text_color(colors.tertiary_label)
+                    .child("Search calls")
+                    .into_any_element()
+            } else {
+                div()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
+                    .text_color(colors.label)
+                    .child(text.clone())
+                    .into_any_element()
+            })
+            .children(typing.then(|| {
+                div()
+                    .flex_none()
+                    .ml(px(1.0))
+                    .w(px(2.0))
+                    .h(px(20.0))
+                    .rounded_full()
+                    .bg(colors.accent)
+            }));
+        div()
+            .id("rc-field")
+            .role(Role::TextInput)
+            .aria_label("Search calls")
+            .track_focus(&focus)
+            .on_key_down(on_backspace(field))
+            .relative()
+            .flex_none()
+            .h(px(FIELD_H))
+            .mx(metrics::ROW_INSET)
+            .mb(px(8.0))
+            .on_mouse_down(MouseButton::Left, {
+                let focus = focus_for_tap;
+                cx.listener(move |this, _, window, cx| {
+                    this.presses.down("rc-field");
+                    window.focus(&focus, cx);
+                    window.show_soft_keyboard();
+                    this.recents_field_changed(window, cx);
+                })
+            })
+            .child(
+                glass(spec)
+                    .size_full()
+                    .rounded_full()
+                    .shadow(shadow::glass(theme.is_dark()))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .pl(px(14.0))
+                    .pr(px(4.0))
+                    .child(
+                        svg()
+                            .path(Icon::LucideSearch.path())
+                            .size(px(18.0))
+                            .flex_none()
+                            .text_color(if typing {
+                                colors.accent
+                            } else {
+                                colors.secondary_label
+                            }),
+                    )
+                    .child(text_box)
+                    .children((!text.is_empty()).then(|| {
+                        div()
+                            .id("rc-clear")
+                            .role(Role::Button)
+                            .aria_label("Clear search")
+                            .relative()
+                            .flex_none()
+                            .size(px(36.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                div()
+                                    .size(px(22.0 * press_scale(clear_press, scale::PRESS_CARD)))
+                                    .rounded_full()
+                                    .bg(gpui::Hsla {
+                                        a: 0.55 + 0.35 * clear_press,
+                                        ..colors.fill
+                                    })
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        svg()
+                                            .path(Icon::LucideX.path())
+                                            .size(px(14.0))
+                                            .text_color(colors.secondary_label),
+                                    ),
+                            )
+                            .on_mouse_down(MouseButton::Left, {
+                                let field = clear_field;
+                                cx.listener(move |this, _, window, cx| {
+                                    this.presses.down("rc-clear");
+                                    // Empties the field and keeps focus.
+                                    field.update(cx, |f, cx| f.clear(cx));
+                                    this.recents_field_changed(window, cx);
+                                })
+                            })
+                            .child(touch_surface(Self::touch_listener(
+                                cx,
+                                Some("rc-clear".into()),
+                            )))
+                    })),
+            )
+            .child(touch_surface(Self::touch_listener(
+                cx,
+                Some("rc-field".into()),
+            )))
+    }
+
+    /// The filter chips: a glass capsule split in equal segments, the chosen
+    /// one filled (the segmented-control recipe).
+    fn recents_chips(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = theme::colors(theme);
+        let selected = self.recents.query.filter;
+        let spec = GlassSpec::control(theme);
+        let thumb = mix(
+            colors.background,
+            colors.label,
+            if theme.is_dark() { 0.22 } else { 0.0 },
+        );
+        div()
+            .relative()
+            .flex_none()
+            .h(px(CHIP_H))
+            .mx(metrics::ROW_INSET)
+            .mb(px(8.0))
+            .child(
+                glass(spec)
+                    .size_full()
+                    .rounded_full()
+                    .shadow(shadow::glass(theme.is_dark()))
+                    .p(px(2.0))
+                    .flex()
+                    .children(RecentsFilter::ALL.iter().map(|&filter| {
+                        let id: SharedString = format!("rc-chip-{}", filter.label()).into();
+                        let on = filter == selected;
+                        let mut chip = div()
+                            .id(id.clone())
+                            .role(Role::Tab)
+                            .aria_selected(on)
+                            .aria_label(filter.label())
+                            .relative()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_size(px(12.0))
+                            .font_weight(if on {
+                                gpui::FontWeight::SEMIBOLD
+                            } else {
+                                gpui::FontWeight::MEDIUM
+                            })
+                            .text_color(if on {
+                                colors.label
+                            } else {
+                                colors.secondary_label
+                            })
+                            .child(filter.label());
+                        if on {
+                            chip = chip.bg(thumb).shadow(vec![gpui::BoxShadow {
+                                color: gpui::black().opacity(0.16),
+                                offset: gpui::point(px(0.0), px(1.0)),
+                                blur_radius: px(3.0),
+                                spread_radius: px(0.0),
+                                inset: false,
+                            }]);
+                        }
+                        chip.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                this.recents_choose_filter(filter, cx);
+                            }),
+                        )
+                        .child(touch_surface(Self::touch_listener(cx, Some(id))))
+                    })),
+            )
+    }
+
     /// Starts loading the pictures of the WhatsApp rows in `range`.
     fn want_recent_photos(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
         let rows = Arc::clone(&self.recents.rows);
-        for vm in range.filter_map(|i| rows.get(i)) {
+        for i in range {
+            let Some(vm) = self.recents.visible.get(i).and_then(|&row| rows.get(row)) else {
+                continue;
+            };
             if !vm.photo.is_empty() {
                 self.want_caller_photo(&vm.photo, cx);
             }
@@ -1106,9 +1457,9 @@ impl PhoneApp {
         let r = &self.recents;
         let pressed = r.last_pressed;
         let progress = r.fresh_in.progress();
-        let live = progress < 1.0 && (r.fresh > 0 || r.inserted > 0);
+        let live = progress < 1.0 && (r.fresh > 0 || r.inserted > 0) && !r.narrowed();
         range
-            .map(|i| match r.rows.get(i) {
+            .map(|i| match r.row(i) {
                 Some(vm) => {
                     let (row_press, info_press) = match pressed {
                         Some((p, Zone::Row)) if p == i => {
@@ -2075,11 +2426,12 @@ pub(crate) fn state_view(
     theme: Theme,
     icon: Icon,
     warn: bool,
-    title: &'static str,
-    body: &'static str,
+    title: impl Into<SharedString>,
+    body: impl Into<SharedString>,
     pill: Option<(&'static str, &'static str, f32)>,
     cx: &mut Context<PhoneApp>,
 ) -> AnyElement {
+    let (title, body) = (title.into(), body.into());
     let colors = theme::colors(theme);
     let tint = if warn {
         call_colors(theme).warning

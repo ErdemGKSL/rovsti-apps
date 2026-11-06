@@ -127,5 +127,7 @@ list in `docs/phone-acceptance.md`.
       before, through the gateway (done without a device)
 - [x] Pick A and B on the map: tap to drop, drag to adjust, snap to stops, my location (done
       without a device)
+- [x] Save and manage places from map pins, links and stops (name, rename, reorder, delete with
+      undo); reuse trips from History (done without a device)
 - [ ] Check map picking one-handed on a phone
 - [ ] Check the trip, alarm and Doze on a phone: written without a device

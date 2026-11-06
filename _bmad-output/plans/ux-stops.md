@@ -144,3 +144,11 @@ cargo check -p rovsti_wa_client --target aarch64-linux-android
 cargo check -p rovsti_tiles --target aarch64-linux-android
 ```
 Disk: 8.7 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
+
+## Status (after S8)
+- Fixed: G1 (save from pin menu), G2 (name field in confirm sheet), G3 (saved names shown when
+  re-picked), G4 (name field for stops), G5 (saved tab: rename, delete with undo, reorder,
+  detail line), G6 (History reuse, clear undo), G7 (Trip-tab Clear undo), G8 (picker placeholder).
+- G10: no gap found.
+- Deferred: G9 (share/copy a place out of the app). No Stops share seam exists, and adding one
+  is a new feature. Open idea, not planned.

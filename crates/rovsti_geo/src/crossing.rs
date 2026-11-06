@@ -8,11 +8,12 @@
 //! capped at [`MAX_DIAMETER_M`] for that reason.
 
 use std::fmt;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::coord::{Coord, EARTH_RADIUS_M};
-use crate::trip::{Fix, MAX_ACCURACY_M};
+use crate::trip::{Fix, MAX_ACCURACY_M, MAX_SPEED_MPS, MIN_SPEED_MPS, TripState};
 
 /// Half-width of the band around line AB where the side is unknown (the
 /// effective band is `max(DEAD_BAND_M, fix accuracy)`).
@@ -347,6 +348,140 @@ impl CrossingWatch {
         let (was, from_at) = prev?;
         (was != now && d.segment_crosses(from_at, fix.at))
             .then_some(Crossing { from: was, to: now })
+    }
+}
+
+/// Result of feeding one fix to a [`CrossingTrip`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CrossingUpdate {
+    pub state: TripState,
+    /// True exactly once: on the update that took the trip Tracking -> Arrived.
+    pub ring: bool,
+    /// The crossing detected by this fix, if any.
+    pub crossing: Option<Crossing>,
+    /// The last confident side, if known.
+    pub side: Option<Side>,
+    /// Distance from the fix to the diameter segment AB, metres.
+    pub line_m: f64,
+    /// Distance from the fix to the circle's edge, metres (0 inside).
+    pub circle_m: f64,
+    pub inside: bool,
+    /// When the location service should deliver the next fix.
+    pub next_fix_in: Duration,
+    /// `line_m` / speed, when the fix carries a usable speed.
+    pub eta: Option<Duration>,
+}
+
+/// The arrival alarm: rings once when the diameter of the circle is crossed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CrossingTrip {
+    pub diameter: Diameter,
+    state: TripState,
+    watch: CrossingWatch,
+    last_line_m: Option<f64>,
+}
+
+impl CrossingTrip {
+    pub fn new(diameter: Diameter) -> Self {
+        Self {
+            diameter,
+            state: TripState::Tracking,
+            watch: CrossingWatch::default(),
+            last_line_m: None,
+        }
+    }
+
+    pub fn state(&self) -> TripState {
+        self.state
+    }
+
+    pub fn side(&self) -> Option<Side> {
+        self.watch.side()
+    }
+
+    pub fn last_line_m(&self) -> Option<f64> {
+        self.last_line_m
+    }
+
+    pub fn dismiss(&mut self) {
+        self.state = TripState::Dismissed;
+    }
+
+    pub fn update(&mut self, fix: Fix) -> CrossingUpdate {
+        let d = &self.diameter;
+        let line_m = d.distance_to_segment_m(fix.at);
+        let circle_m = d.distance_to_circle_m(fix.at);
+        let inside = d.contains(fix.at);
+        let usable = !fix.accuracy_m.is_nan() && fix.accuracy_m <= MAX_ACCURACY_M;
+        if usable {
+            self.last_line_m = Some(line_m);
+        }
+
+        let crossing = self.watch.observe(d, &fix);
+        let ring = self.state == TripState::Tracking && crossing.is_some();
+        if ring {
+            self.state = TripState::Arrived;
+        }
+
+        let eta = fix
+            .speed_mps
+            .filter(|speed| *speed >= MIN_SPEED_MPS)
+            .map(|speed| Duration::from_secs_f64(line_m / speed));
+        CrossingUpdate {
+            state: self.state,
+            ring,
+            crossing,
+            side: self.watch.side(),
+            line_m,
+            circle_m,
+            inside,
+            next_fix_in: self.next_fix_in(line_m, &fix),
+            eta,
+        }
+    }
+
+    /// Far away -> sleep long; close -> poll every few seconds. Assumes the
+    /// worst-case speed so the diameter cannot be skipped between fixes.
+    fn next_fix_in(&self, line_m: f64, fix: &Fix) -> Duration {
+        if self.state != TripState::Tracking {
+            return Duration::from_secs(60);
+        }
+        let acc = if fix.accuracy_m.is_finite() {
+            fix.accuracy_m.max(0.0)
+        } else {
+            0.0
+        };
+        let slack = (line_m - acc - DEAD_BAND_M.max(acc)).max(0.0);
+        Duration::from_secs_f64((slack / MAX_SPEED_MPS / 2.0).clamp(3.0, 300.0))
+    }
+}
+
+/// When to send the "arriving" notice.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum NoticeRule {
+    /// Together with the alarm, when the diameter is crossed.
+    WithAlarm,
+    /// Before the circle: when the time to reach its edge drops below
+    /// `before`, or at once when already inside it.
+    BeforeCircle { before: Duration },
+}
+
+impl NoticeRule {
+    pub fn is_met(&self, update: &CrossingUpdate, fix: &Fix) -> bool {
+        match *self {
+            Self::WithAlarm => update.ring,
+            Self::BeforeCircle { before } => {
+                if update.inside {
+                    return true;
+                }
+                match fix.speed_mps {
+                    Some(speed) if speed >= MIN_SPEED_MPS => {
+                        update.circle_m / speed <= before.as_secs_f64()
+                    }
+                    _ => false,
+                }
+            }
+        }
     }
 }
 
@@ -705,5 +840,142 @@ mod tests {
         let wb: CrossingWatch = serde_json::from_str(&wj).expect("parse");
         assert_eq!(wb.side(), w.side());
         assert_eq!(wb.side(), Some(Side::Left));
+    }
+
+    fn trip() -> CrossingTrip {
+        CrossingTrip::new(east(ISTANBUL, 2_000.0))
+    }
+
+    fn step(t: &mut CrossingTrip, p: (f64, f64), acc: f64) -> CrossingUpdate {
+        let at = t.diameter.from_local(p);
+        t.update(fix(at, acc))
+    }
+
+    #[test]
+    fn trip_rings_once_each_direction() {
+        for (from, to) in [(300.0, -300.0), (-300.0, 300.0)] {
+            let mut t = trip();
+            assert!(!step(&mut t, (0.0, from), 5.0).ring);
+            let u = step(&mut t, (0.0, to), 5.0);
+            assert!(u.ring);
+            assert_eq!(u.state, TripState::Arrived);
+            assert_eq!(u.crossing.map(|c| c.from), u.side.map(Side::other));
+            // Crossing back never rings again.
+            let u = step(&mut t, (0.0, from), 5.0);
+            assert!(!u.ring);
+            assert_eq!(t.state(), TripState::Arrived);
+            assert_eq!(u.next_fix_in, Duration::from_secs(60));
+        }
+        let mut t = trip();
+        step(&mut t, (0.0, 300.0), 5.0);
+        let u = step(&mut t, (0.0, -300.0), 5.0);
+        assert_eq!(
+            u.crossing.map(|c| (c.from, c.to)),
+            Some((Side::Left, Side::Right))
+        );
+    }
+
+    #[test]
+    fn trip_pass_outside_circle_never_rings() {
+        let mut t = trip();
+        step(&mut t, (1_500.0, 300.0), 5.0);
+        let u = step(&mut t, (1_500.0, -300.0), 5.0);
+        assert!(!u.ring && !u.inside);
+        assert_eq!(t.state(), TripState::Tracking);
+        assert_eq!(t.side(), Some(Side::Right));
+        assert!((u.circle_m - 529.2).abs() < 1.0, "{}", u.circle_m);
+    }
+
+    #[test]
+    fn trip_dismissed_and_inaccurate_stay_quiet() {
+        let mut t = trip();
+        step(&mut t, (0.0, 300.0), 5.0);
+        let u = step(&mut t, (0.0, -300.0), 1_000.0);
+        assert!(!u.ring);
+        assert_eq!(t.last_line_m().map(|m| m.round()), Some(300.0));
+        t.dismiss();
+        let u = step(&mut t, (0.0, -300.0), 5.0);
+        assert!(!u.ring);
+        assert_eq!(u.state, TripState::Dismissed);
+        assert_eq!(t.state(), TripState::Dismissed);
+    }
+
+    #[test]
+    fn trip_next_fix_and_eta() {
+        let mut t = trip();
+        let far = step(&mut t, (80_000.0, 0.0), 5.0);
+        assert_eq!(far.next_fix_in, Duration::from_secs(300));
+        let near = step(&mut t, (0.0, 100.0), 5.0);
+        assert_eq!(near.next_fix_in, Duration::from_secs(3));
+        assert_eq!(near.eta, None);
+        let at = t.diameter.from_local((0.0, 600.0));
+        let u = t.update(Fix {
+            at,
+            accuracy_m: 5.0,
+            speed_mps: Some(10.0),
+        });
+        assert_eq!(u.eta.map(|e| e.as_secs()), Some(60));
+        let slow = t.update(Fix {
+            at,
+            accuracy_m: 5.0,
+            speed_mps: Some(1.0),
+        });
+        assert_eq!(slow.eta, None);
+    }
+
+    #[test]
+    fn notice_rules() {
+        let mut t = trip();
+        let d = t.diameter;
+        let f = |p: (f64, f64), speed| Fix {
+            at: d.from_local(p),
+            accuracy_m: 5.0,
+            speed_mps: speed,
+        };
+        let before = NoticeRule::BeforeCircle {
+            before: Duration::from_secs(120),
+        };
+
+        let f1 = f((0.0, 300.0), None);
+        let u1 = t.update(f1);
+        assert!(!NoticeRule::WithAlarm.is_met(&u1, &f1));
+        assert!(before.is_met(&u1, &f1), "inside fallback");
+        let f2 = f((0.0, -300.0), None);
+        let u2 = t.update(f2);
+        assert!(NoticeRule::WithAlarm.is_met(&u2, &f2));
+
+        // Outside, 500 m from the edge.
+        let mut t = trip();
+        for (speed, want) in [
+            (Some(5.0), true),
+            (Some(2.0), false),
+            (None, false),
+            (Some(0.5), false),
+        ] {
+            let fo = f((1_500.0, 0.0), speed);
+            let uo = t.update(fo);
+            assert_eq!(before.is_met(&uo, &fo), want, "{speed:?}");
+            assert!(!NoticeRule::WithAlarm.is_met(&uo, &fo));
+        }
+    }
+
+    #[test]
+    fn trip_serde_round_trip() {
+        let mut t = trip();
+        step(&mut t, (0.0, 300.0), 5.0);
+        let json = serde_json::to_string(&t).expect("json");
+        let mut back: CrossingTrip = serde_json::from_str(&json).expect("parse");
+        assert_eq!(back.state(), TripState::Tracking);
+        assert_eq!(back.side(), Some(Side::Left));
+        assert!(step(&mut back, (0.0, -300.0), 5.0).ring);
+
+        let rule = NoticeRule::BeforeCircle {
+            before: Duration::from_secs(90),
+        };
+        let rj = serde_json::to_string(&rule).expect("json");
+        assert_eq!(
+            serde_json::from_str::<NoticeRule>(&rj).expect("parse"),
+            rule
+        );
     }
 }

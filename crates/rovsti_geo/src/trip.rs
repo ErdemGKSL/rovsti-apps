@@ -91,9 +91,9 @@ pub struct TripUpdate {
 /// Fixes worse than this are ignored: a 2 km cell-tower fix must never ring.
 pub(crate) const MAX_ACCURACY_M: f64 = 150.0;
 /// Below this speed the ETA is meaningless (waiting at a stop, traffic jam).
-const MIN_SPEED_MPS: f64 = 1.5;
+pub(crate) const MIN_SPEED_MPS: f64 = 1.5;
 /// Assumed top speed for scheduling fixes: a fast intercity train.
-const MAX_SPEED_MPS: f64 = 60.0;
+pub(crate) const MAX_SPEED_MPS: f64 = 60.0;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Trip {

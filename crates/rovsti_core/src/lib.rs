@@ -43,6 +43,7 @@ pub mod t9;
 pub mod thread;
 pub mod vcard;
 pub mod wire;
+pub mod zoom;
 
 pub use contact::{Contact, ContactId};
 pub use phone_number::{PhoneNumber, PhoneNumberError};

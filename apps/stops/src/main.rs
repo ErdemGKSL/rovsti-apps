@@ -136,6 +136,8 @@ pub(crate) struct StopsApp {
     pub(crate) back_enabled: bool,
     /// The saved stop whose actions are open.
     pub(crate) expanded: Option<u64>,
+    /// The saved stop whose Delete was tapped once and now asks to be confirmed.
+    pub(crate) confirm_delete: Option<u64>,
     /// The virtualised lists: the Saved tab, History, the chat picker and the
     /// destination search.
     pub(crate) saved_list: lists::KeyedList,
@@ -313,6 +315,7 @@ impl StopsApp {
             field,
             back_enabled: false,
             expanded: None,
+            confirm_delete: None,
             saved_list: lists::KeyedList::default(),
             history_list: lists::KeyedList::default(),
             notice_list: lists::KeyedList::default(),
@@ -522,6 +525,7 @@ impl StopsApp {
             }
         } else if self.expanded.is_some() {
             self.expanded = None;
+            self.confirm_delete = None;
             cx.notify();
         } else if self.tabs.select(0) {
             self.confirm_clear = false;
@@ -739,6 +743,7 @@ impl Render for StopsApp {
                         this.tabs.press();
                         if this.tabs.select(index) {
                             this.expanded = None;
+                            this.confirm_delete = None;
                             // Leaving disarms a half-done destructive tap and
                             // closes the pin menu nobody can see any more.
                             this.confirm_clear = false;

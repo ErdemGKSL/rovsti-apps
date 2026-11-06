@@ -4,6 +4,7 @@
 //! and falls back to the clipboard when there is no sheet (desktop, or no app
 //! answered).
 
+use crate::pick::dest_from_endpoint;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, list, px,
@@ -28,6 +29,31 @@ pub fn stop_detail(stop: &SavedStop, here: Option<Coord>) -> String {
             distance_text(h.distance_m(stop.center()))
         ),
         None => gate,
+    }
+}
+
+/// What a tap on Delete does for stop `id` given the stop awaiting confirmation.
+#[derive(Debug, PartialEq, Eq)]
+pub struct DeleteStep {
+    /// The stop awaiting confirmation after this tap.
+    pub confirm: Option<u64>,
+    /// Delete now (this was the second tap on the same stop).
+    pub delete: bool,
+}
+
+/// The first tap arms `id`, the second tap on the same stop deletes it, and a
+/// tap on another stop's Delete arms that one instead.
+pub fn delete_step(armed: Option<u64>, id: u64) -> DeleteStep {
+    if armed == Some(id) {
+        DeleteStep {
+            confirm: None,
+            delete: true,
+        }
+    } else {
+        DeleteStep {
+            confirm: Some(id),
+            delete: false,
+        }
     }
 }
 
@@ -121,6 +147,7 @@ impl StopsApp {
         )
         .id(("saved-stop", id as usize))
         .on_click(cx.listener(move |this, _, _, cx| {
+            this.confirm_delete = None;
             this.expanded = if this.expanded == Some(id) {
                 None
             } else {
@@ -131,6 +158,12 @@ impl StopsApp {
         let mut item = div().flex().flex_col().child(row);
         if open {
             let pill_row = || div().flex().gap(px(10.0)).px(px(12.0)).pb(px(10.0));
+            let armed = self.confirm_delete == Some(id);
+            let delete_label = if armed {
+                format!("Delete {}?", stop.name)
+            } else {
+                "Delete".to_string()
+            };
             let up: AnyElement = if i > 0 {
                 glass_pill(theme, "Up")
                     .id(("stop-up", id as usize))
@@ -158,6 +191,26 @@ impl StopsApp {
             item = item.child(
                 pill_row()
                     .child(
+                        glass_pill(theme, "Show on map")
+                            .id(("stop-show", id as usize))
+                            .flex_1()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.show_stop_on_map(id, cx);
+                            })),
+                    )
+                    .child(
+                        glass_pill(theme, "Start")
+                            .id(("stop-start", id as usize))
+                            .flex_1()
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.start_saved_stop(id, cx);
+                            })),
+                    ),
+            );
+            item = item.child(
+                pill_row()
+                    .child(
                         glass_pill(theme, "Rename")
                             .id(("stop-rename", id as usize))
                             .flex_1()
@@ -168,7 +221,7 @@ impl StopsApp {
                     .child(up)
                     .child(down)
                     .child(
-                        glass_pill(theme, "Delete")
+                        glass_pill(theme, delete_label)
                             .id(("stop-delete", id as usize))
                             .flex_1()
                             .text_color(colors.red)
@@ -177,6 +230,19 @@ impl StopsApp {
                             })),
                     ),
             );
+            if armed {
+                item = item.child(
+                    pill_row().child(
+                        glass_pill(theme, "Cancel")
+                            .id(("stop-delete-cancel", id as usize))
+                            .flex_1()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.confirm_delete = None;
+                                cx.notify();
+                            })),
+                    ),
+                );
+            }
         }
         lists::grouped(theme, lists::Place::of(i, count), item).into_any_element()
     }
@@ -217,7 +283,41 @@ impl StopsApp {
         .detach();
     }
 
+    /// Puts both points of the stop on the map and frames the circle.
+    fn show_stop_on_map(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(stop) = self.saved.get(id) else {
+            return;
+        };
+        let (a, b) = (dest_from_endpoint(&stop.a), dest_from_endpoint(&stop.b));
+        self.pick.set_pair(a, b);
+        self.map.follow = true;
+        self.expanded = None;
+        self.confirm_delete = None;
+        self.tabs.jump_to(0);
+        cx.notify();
+    }
+
+    /// Runs a trip for the stop straight away, unless one is running.
+    fn start_saved_stop(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self.trip.is_some() {
+            self.show_pill("Not while a trip is running", None, cx);
+            return;
+        }
+        let Some(stop) = self.saved.get(id) else {
+            return;
+        };
+        let (a, b) = (dest_from_endpoint(&stop.a), dest_from_endpoint(&stop.b));
+        self.request_start(a, b, cx);
+    }
+
+    /// Two taps: the first asks, the second deletes.
     fn delete_stop(&mut self, id: u64, cx: &mut Context<Self>) {
+        let step = delete_step(self.confirm_delete, id);
+        self.confirm_delete = step.confirm;
+        if !step.delete {
+            cx.notify();
+            return;
+        }
         let Some(index) = self.saved.stops.iter().position(|st| st.id == id) else {
             return;
         };
@@ -266,6 +366,23 @@ mod tests {
             text.starts_with("Gate 420 m, 10.") && text.ends_with(" km away"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn delete_needs_two_taps_on_the_same_stop() {
+        let first = delete_step(None, 3);
+        assert_eq!(
+            first,
+            DeleteStep {
+                confirm: Some(3),
+                delete: false
+            }
+        );
+        assert!(delete_step(first.confirm, 3).delete);
+        assert_eq!(delete_step(first.confirm, 3).confirm, None);
+        // Another stop's Delete re-arms instead of deleting.
+        let other = delete_step(Some(3), 4);
+        assert_eq!((other.confirm, other.delete), (Some(4), false));
     }
 
     #[test]

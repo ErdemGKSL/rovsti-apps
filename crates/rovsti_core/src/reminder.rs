@@ -55,7 +55,8 @@ fn at_hour(day: i64, hour: i64, tz_offset_s: i32) -> i64 {
     (day * DAY_S + hour * HOUR_S - i64::from(tz_offset_s)) * 1000
 }
 
-fn clock(ms: i64, tz_offset_s: i32) -> String {
+/// `HH:MM` local time of `ms`.
+pub fn clock(ms: i64, tz_offset_s: i32) -> String {
     let s = local_s(ms, tz_offset_s).rem_euclid(DAY_S);
     format!("{:02}:{:02}", s / HOUR_S, s % HOUR_S / 60)
 }

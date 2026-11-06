@@ -42,6 +42,7 @@ mod photo_edit;
 mod photo_viewer;
 mod photos;
 mod recents;
+mod remind_ui;
 mod replies_ui;
 mod route;
 mod sample;
@@ -125,6 +126,8 @@ enum SheetKind {
     CallDetails,
     /// "Quick reply": canned texts for one number (`person_ui::quick_reply_sheet`).
     QuickReplyPick,
+    /// "Remind me": the call-back time chooser (`remind_ui::remind_pick_sheet`).
+    RemindPick,
 }
 
 /// The line under the number field.
@@ -160,6 +163,7 @@ struct PhoneApp {
     /// The open "Copy as" / "Share as" chooser.
     copy_as: Option<actions_ui::CopyAs>,
     quick_reply: Option<person_ui::QuickReply>,
+    remind_pick: Option<remind_ui::RemindPick>,
     /// The open in-call note card (`incall_note`).
     incall_note: Option<incall_note::InCallNote>,
     backend: Entity<Backend>,
@@ -546,6 +550,7 @@ impl PhoneApp {
             t9: keypad::T9Match::default(),
             copy_as: None,
             quick_reply: None,
+            remind_pick: None,
             incall_note: None,
             _subscriptions: subscriptions,
             incall: InCall::new(cx),
@@ -1469,6 +1474,7 @@ impl PhoneApp {
             SheetKind::T9Results => self.t9_results_sheet(theme, window, cx),
             SheetKind::CopyAs => self.copy_as_sheet(theme, window, cx),
             SheetKind::QuickReplyPick => self.quick_reply_sheet(theme, window, cx),
+            SheetKind::RemindPick => self.remind_pick_sheet(theme, window, cx),
             SheetKind::CallDetails => self.details_sheet(theme, window, cx),
             SheetKind::ImportPreview => {
                 if !self.sheet.is_visible() {

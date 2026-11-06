@@ -72,6 +72,10 @@ pub(crate) enum PillAction {
     RestoreNote(Box<rovsti_core::call_notes::CallNote>),
     /// Ask for the microphone, or open App info when Android won't ask again.
     GrantMic,
+    /// Undo of setting a reminder: disarm the one with this id.
+    CancelReminder(i64),
+    /// Undo of Cancel reminder: arm it again.
+    RestoreReminder(Box<rovsti_core::reminder::Reminder>),
 }
 
 /// The menu's Delete label for a row that stands for `count` calls.
@@ -104,7 +108,9 @@ pub(crate) const RM_SELECT: &str = "rm-select";
 
 /// Every row-menu item id, in the order the menu lists them (Add only for unnamed numbers).
 #[cfg(test)]
-const MENU_IDS: [&str; 8] = [
+const MENU_IDS: [&str; 10] = [
+    crate::remind_ui::RM_REMIND,
+    crate::remind_ui::RM_UNREMIND,
     "rm-copy",
     "rm-add",
     RM_SELECT,
@@ -326,6 +332,8 @@ impl PhoneApp {
             PillAction::GrantCallLog => self.recents_grant(cx),
             PillAction::RestoreNote(note) => self.details_restore_note(*note, cx),
             PillAction::GrantMic => self.grant_mic(cx),
+            PillAction::CancelReminder(id) => self.remind_undo(id, cx),
+            PillAction::RestoreReminder(r) => self.remind_restore(*r, cx),
         }
     }
 
@@ -528,6 +536,14 @@ impl PhoneApp {
                         cx,
                     );
                 }
+            }
+            crate::remind_ui::RM_REMIND if crate::remind_ui::can_remind(&target.number) => {
+                self.row_menu_close(window, cx);
+                self.open_remind_pick(target.number.clone(), target.who.clone(), target.missed, cx);
+            }
+            crate::remind_ui::RM_UNREMIND if has_number => {
+                self.row_menu_close(window, cx);
+                self.remind_cancel(&target.number, cx);
             }
             "rm-reply" if has_number && target.missed => {
                 self.row_menu_close(window, cx);
@@ -814,17 +830,47 @@ impl PhoneApp {
                 cx,
             )
         });
-        let mut rows = vec![self.menu_item(
+        let mut remind = crate::remind_ui::can_remind(&target.number).then(|| {
+            let (id, title) = crate::remind_ui::remind_item(
+                self.backend.read(cx).reminders(),
+                &target.number,
+                self.tz_offset_s(cx),
+            );
+            let icon = if id == crate::remind_ui::RM_UNREMIND {
+                Icon::LucideBellOff
+            } else {
+                Icon::LucideBell
+            };
+            self.menu_item(
+                theme,
+                Item {
+                    id,
+                    icon,
+                    title: title.into(),
+                    note: None,
+                    enabled: true,
+                },
+                cx,
+            )
+        });
+        let mut rows = Vec::new();
+        if target.missed {
+            rows.extend(remind.take());
+        }
+        rows.push(self.menu_item(
             theme,
             item("rm-copy", Icon::LucideCopy, "Copy number", None, has_number),
             cx,
-        )];
+        ));
         rows.extend(add);
         rows.push(self.menu_item(
             theme,
             item(RM_SELECT, Icon::LucideCircleCheck, "Select", None, true),
             cx,
         ));
+        if !target.missed {
+            rows.extend(remind);
+        }
         if target.missed && has_number {
             rows.push(self.menu_item(
                 theme,

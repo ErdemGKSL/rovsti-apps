@@ -2035,6 +2035,37 @@ impl PhoneApp {
                 )
                 .into_any_element(),
             ));
+            if crate::remind_ui::can_remind(&row.number) {
+                let caption = crate::remind_ui::remind_caption(
+                    self.backend.read(cx).reminders(),
+                    &row.number,
+                    self.tz_offset_s(cx),
+                );
+                children.push(reveal(
+                    5,
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(sheet_pill(
+                            self,
+                            crate::remind_ui::NUMBER_REMIND,
+                            Icon::LucideBell,
+                            "Remind me",
+                            colors.fill,
+                            colors.label,
+                            cx,
+                        ))
+                        .children(caption.map(|c| {
+                            div()
+                                .text_size(typography::CAPTION2.size)
+                                .text_color(colors.secondary_label)
+                                .flex()
+                                .justify_center()
+                                .child(c)
+                        }))
+                        .into_any_element(),
+                ));
+            }
             children.push(reveal(
                 5,
                 sheet_pill(
@@ -2133,6 +2164,11 @@ impl PhoneApp {
             "sheet-nwa" => {
                 self.close_sheet(cx);
                 self.place_whatsapp(&row.number, cx);
+            }
+            crate::remind_ui::NUMBER_REMIND => {
+                if crate::remind_ui::can_remind(&row.number) {
+                    self.open_remind_pick(row.number.clone(), row.title.clone(), false, cx);
+                }
             }
             "sheet-n-qr" => {
                 if !row.number.is_empty() {

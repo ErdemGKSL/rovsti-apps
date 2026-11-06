@@ -45,6 +45,8 @@ pub mod kind {
     pub const MSG_REPLY: &str = "msg_reply";
     /// An alarm for a scheduled SMS fired; Rust calls `sms::pull_fired`.
     pub const SCHEDULED_FIRED: &str = "scheduled_fired";
+    /// A call-back reminder fired (`{id}`); Rust re-reads the armed list.
+    pub const REMINDER_FIRED: &str = "reminder_fired";
     /// A notification was tapped (`{tag}`): open that conversation.
     pub const OPEN_THREAD: &str = "open_thread";
     /// A sibling app asked this one to call or chat on WhatsApp

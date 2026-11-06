@@ -339,6 +339,8 @@ pub struct Backend {
     blocked_calls: Load<Vec<CallLogEntry>>,
     blocked_calls_wanted: bool,
     blocked_pull: u64,
+    /// The armed call-back reminders (read at start and when one fires).
+    reminders: Vec<rovsti_core::reminder::Reminder>,
     /// Android refused `silenceRinger()`: the control stays a blank slot (AD-29).
     silence_refused: bool,
     /// A system-driven request for the UI that nobody has taken yet (`ui_request`).
@@ -423,6 +425,7 @@ impl Backend {
                 block_pull: 0,
                 blocked_calls: Load::Loading,
                 blocked_calls_wanted: false,
+                reminders: armed_reminders(),
                 blocked_pull: 0,
                 silence_refused: false,
                 ui_request: None,
@@ -616,6 +619,21 @@ impl Backend {
                 }
             })
             .detach();
+        cx.notify();
+    }
+
+    /// The armed call-back reminders.
+    pub fn reminders(&self) -> &[rovsti_core::reminder::Reminder] {
+        &self.reminders
+    }
+
+    /// Replaces the in-memory reminder list (after arming or cancelling one).
+    pub fn set_reminders(
+        &mut self,
+        list: Vec<rovsti_core::reminder::Reminder>,
+        cx: &mut Context<Self>,
+    ) {
+        self.reminders = list;
         cx.notify();
     }
 
@@ -1043,6 +1061,10 @@ impl Backend {
                 if self.blocked_calls_wanted {
                     self.refresh_blocked_calls(cx);
                 }
+            }
+            kind::REMINDER_FIRED => {
+                self.reminders = armed_reminders();
+                cx.notify();
             }
             kind::KEYGUARD_DISMISSED => {
                 self.keyguard_gen += 1;

@@ -57,7 +57,6 @@ impl Destination {
 
     /// This point under the name the user gave a saved place within reach.
     /// Coordinate and line stay; a missing GTFS stop is filled from the place.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn named_from(mut self, saved: &SavedPlaces) -> Self {
         if let Some(place) = saved.near(self.coord) {
             self.label = place.name.clone();
@@ -348,6 +347,14 @@ impl StopsApp {
         slot: Option<Slot>,
         cx: &mut Context<Self>,
     ) {
+        if matches!(self.sheet_mode, SheetMode::Stop(_)) {
+            // The line previewed on the stop sheet leaves the map again.
+            self.map.pattern = self
+                .pick
+                .ends
+                .get(self.pick.sheet_slot())
+                .and_then(|d| d.pattern);
+        }
         let name = pick::save_prefill(&dest);
         self.field.update(cx, |f, cx| f.set(&name, cx));
         self.sheet_mode = SheetMode::SavePoint { dest, slot };

@@ -66,13 +66,11 @@ impl Hint {
 }
 
 /// What the save-place field starts with: the point's name, else nothing.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn save_prefill(dest: &Destination) -> String {
     dest.label.trim().to_owned()
 }
 
 /// The toast after trying to save a place.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn save_result_text(result: &Result<u64, PlaceError>, saved: &SavedPlaces) -> String {
     let name = |id: &u64| saved.get(*id).map(|p| p.name.clone()).unwrap_or_default();
     match result {
@@ -155,7 +153,6 @@ impl Picking {
     }
 
     /// Renames each end within [`DUPLICATE_RADIUS_M`] of `coord`.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn relabel_near(&mut self, coord: Coord, label: &str) {
         for end in [&mut self.ends.a, &mut self.ends.b].into_iter().flatten() {
             if end.coord.distance_m(coord) <= DUPLICATE_RADIUS_M {

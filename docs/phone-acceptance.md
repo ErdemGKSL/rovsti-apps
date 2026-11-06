@@ -255,3 +255,34 @@ in `apps/phone/platforms/android/app/` (`docs/android.md`). Allow the microphone
 | W22 | Miss a WhatsApp call, then open Recents. | The row is red and the tab bar badge counts it. | | |
 | W23 | Close and reopen the app. | The WhatsApp rows are still there. | | |
 | W24 | After W17, open Phone (tap the missed-call notification or the icon) and go to Recents. | The call from W17 is a red WhatsApp row and the tab bar badge counts it. | | |
+
+## Utilities round 1: photo viewer, search, Copy as, CSV, pause and wait
+
+Needs a contact with a photo, a contact without one, and a call log with missed, incoming,
+outgoing and WhatsApp calls. Save needs Android 10 or newer (no storage permission).
+
+| # | Step | Expected | Pass / Fail | Notes |
+|---|---|---|---|---|
+| **Photo viewer** | | | | |
+| U1 | Open the sheet of a contact with a photo and tap the avatar. | The photo opens full screen on a dark backdrop. A contact without a photo does not open the viewer. | | |
+| U2 | Pinch out, pinch in, then double-tap twice. | Pinch zooms around the fingers and stops at the limits; double-tap zooms in at the tap and the next one back to fit. | | |
+| U3 | Zoom in and drag; fling and let go. | The photo pans and never leaves a gap at an edge; it settles with a short glide. | | |
+| U4 | At fit size, drag down, then tap the close button. | Drag down dismisses the viewer (it springs back if short); the close button also closes it. | | |
+| **Save and share** | | | | |
+| U5 | In the viewer tap Save. | Pill "Saved to gallery"; the picture is in Gallery under Pictures/Rovsti. | | |
+| U6 | Tap Share. | The system share sheet opens with the picture; sharing to another app shows the image. | | |
+| **Search and filters** | | | | |
+| U7 | Recents: type part of a name, then part of a number. | The list narrows to matching people and numbers; clearing the field restores the list. | | |
+| U8 | Tap Missed, Incoming, Outgoing, WhatsApp, All in turn. | Each chip shows only that kind of call; with no match an empty state is shown. | | |
+| **Copy as and Share as** | | | | |
+| U9 | Open the Copy as chooser for a number (long-press a number action). | It lists display, International (E.164), national, tel: link and vCard; only forms that make sense for the number appear. | | |
+| U10 | Choose International (E.164). | Pill "Copied International (E.164)"; pasting gives +country number with no spaces. | | |
+| U11 | Choose Share as vCard. | The share sheet opens with a contact card that includes the name. | | |
+| **CSV export** | | | | |
+| U12 | Settings, Backup, Export call log (CSV), pick a place. | Pill confirms; the file opens as a table with time, number, name, type and duration. | | |
+| U13 | Cancel the file picker. | No pill error and nothing is written. | | |
+| **Pause and wait** | | | | |
+| U14 | On the keypad type 5551234, then hold * for half a second. | The * becomes a comma, a haptic tick fires and the pill "Pause added" shows. | | |
+| U15 | Type 1, hold #. | The # becomes a semicolon and the pill "Wait added" shows. | | |
+| U16 | Hold * as the very first key. | It stays a *. | | |
+| U17 | Dial 5551234,1 and place the call. | The call starts and, after the pause, the dialer sends 1 as a tone; a ; asks to confirm before sending. | | |

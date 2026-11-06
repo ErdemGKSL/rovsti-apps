@@ -31,12 +31,12 @@ GPUI facts checked at the pinned checkout (`~/.cargo/git/checkouts/gpui-fusion-*
 
 | # | Utility | Status |
 |---|---------|--------|
-| U1 | Photo viewer: tap the sheet avatar to open full screen, pinch and double-tap zoom, pan, swipe down to close | planned R1 (S1, S4, S5) |
-| U2 | Save photo to gallery (MediaStore, Pictures/Rovsti) and share photo (share sheet) from the viewer | planned R1 (S4, S5) |
-| U3 | Recents search (name, number digits) and filter chips: All, Missed, Incoming, Outgoing, WhatsApp | planned R1 (S3, S6) |
-| U4 | Copy as / Share as: display, E.164, national, `tel:` link, vCard (with name) | planned R1 (S2, S7) |
-| U5 | Export call log as CSV (system "save as"), from Settings > Backup | planned R1 (S3, S7) |
-| U6 | Keypad: long-press `*` inserts `,` (pause), long-press `#` inserts `;` (wait) | planned R1 (S8) |
+| U1 | Photo viewer: tap the sheet avatar to open full screen, pinch and double-tap zoom, pan, swipe down to close | done R1 |
+| U2 | Save photo to gallery (MediaStore, Pictures/Rovsti) and share photo (share sheet) from the viewer | done R1 |
+| U3 | Recents search (name, number digits) and filter chips: All, Missed, Incoming, Outgoing, WhatsApp | done R1 |
+| U4 | Copy as / Share as: display, E.164, national, `tel:` link, vCard (with name) | done R1 |
+| U5 | Export call log as CSV (system "save as"), from Settings > Backup | done R1 |
+| U6 | Keypad: long-press `*` inserts `,` (pause), long-press `#` inserts `;` (wait) | done R1 |
 | U7 | Call statistics: total talk time and call count per contact, per day and per week, shown in the Number/Contact sheet and a Settings "Call statistics" page | backlog R2 |
 | U8 | Per-call notes: add/edit/delete a note on a history line and from the in-call screen (local `call_notes.json`, confirm on delete) | backlog R2 |
 | U9 | Share contact as QR (vCard in a QR code, `qrcode` workspace dep) in the Contact sheet, with save/share of the QR image | backlog R2 |

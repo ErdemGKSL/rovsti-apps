@@ -270,6 +270,28 @@ Rust (`backend::contact_photo`, background executor only) reads and decodes the 
 decode while painting. A photo edited in Contacts shows after the cached file is older than
 10 minutes and the LRU entry was evicted or the app restarted.
 
+## Gallery save and image share (MediaShare.kt)
+
+`MediaShare.kt` (`crates/rovsti_android/kotlin/dev/rovsti/bridge/`) backs
+`rovsti_android::media::save_image_to_gallery` and `share_image`; both return
+`Error::Unsupported` on desktop. Save inserts into `MediaStore.Images` under
+`Pictures/Rovsti` with `IS_PENDING`, so no storage permission is needed (minSdk 34). Share
+copies the image into `cacheDir/share/` (the newest 20 are kept) and hands the share sheet a
+`content://` URI served by `RovstiShareProvider`.
+
+The host manifest must declare the provider (the Phone app already does):
+
+```xml
+<provider
+    android:name="dev.rovsti.bridge.RovstiShareProvider"
+    android:authorities="${applicationId}.rovstishare"
+    android:exported="false"
+    android:grantUriPermissions="true" />
+```
+
+The provider is read-only (`mode "r"`), serves only files in `cache/share` and rejects names
+with separators or traversal (`MediaShare.isSafeName`).
+
 ## Contacts bridge additions
 
 `RovstiBridge.setContactGroupMembers(groupId, json)` (`ContactsEdit.setGroupMembers`) applies

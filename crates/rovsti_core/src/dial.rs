@@ -190,6 +190,31 @@ pub fn long_press_zero(field: &mut String) -> bool {
     }
 }
 
+/// Replaces the just-typed trailing `from` with `to`. Never touches the first
+/// character, so a lone `*` or `#` (a USSD or MMI code start) stays as typed.
+fn replace_trailing(field: &mut String, from: char, to: char) -> bool {
+    if field.len() > 1 && field.ends_with(from) {
+        field.pop();
+        field.push(to);
+        true
+    } else {
+        false
+    }
+}
+
+/// Long-press on `*` turns the `*` that the press just typed into `,` (a
+/// two-second pause). Only the last character, only once (afterwards the
+/// field ends in `,`), and never the first character.
+pub fn long_press_star(field: &mut String) -> bool {
+    replace_trailing(field, '*', ',')
+}
+
+/// Long-press on `#` turns the `#` that the press just typed into `;` (wait
+/// for confirmation). Same rules as [`long_press_star`].
+pub fn long_press_hash(field: &mut String) -> bool {
+    replace_trailing(field, '#', ';')
+}
+
 /// Number-field font size in px for a field of `len` characters:
 /// 36 up to 10, 32 from 11, 28 from 14, 24 from 18.
 pub fn font_step(len: usize) -> f32 {
@@ -444,6 +469,49 @@ mod tests {
         assert_eq!(f, "10+");
         let mut f = String::new();
         assert!(!long_press_zero(&mut f));
+    }
+
+    #[test]
+    fn long_press_star_and_hash_replace_the_typed_char_once() {
+        let mut f = String::from("123");
+        assert_eq!(push(&mut f, '*'), Push::Accepted);
+        assert!(long_press_star(&mut f));
+        assert_eq!(f, "123,");
+        assert!(!long_press_star(&mut f), "exactly once");
+        assert_eq!(f, "123,");
+        assert_eq!(push(&mut f, '#'), Push::Accepted);
+        assert!(long_press_hash(&mut f));
+        assert_eq!(f, "123,;");
+        assert!(!long_press_hash(&mut f), "exactly once");
+    }
+
+    #[test]
+    fn long_press_star_and_hash_never_touch_the_first_char_or_others() {
+        let mut f = String::from("*");
+        assert!(!long_press_star(&mut f));
+        assert_eq!(f, "*");
+        let mut f = String::from("#");
+        assert!(!long_press_hash(&mut f));
+        assert_eq!(f, "#");
+        let mut f = String::from("*12#");
+        assert!(!long_press_star(&mut f), "last char is #");
+        assert!(long_press_hash(&mut f));
+        assert_eq!(f, "*12;");
+        let mut f = String::from("1#5");
+        assert!(!long_press_hash(&mut f));
+        assert!(!long_press_star(&mut String::new()));
+    }
+
+    #[test]
+    fn pause_and_wait_survive_validation() {
+        let mut f = String::from("5551234");
+        push(&mut f, '*');
+        long_press_star(&mut f);
+        push(&mut f, '1');
+        push(&mut f, '#');
+        long_press_hash(&mut f);
+        assert_eq!(f, "5551234,1;");
+        assert_eq!(validate(&f), Ok(f.as_str()));
     }
 
     #[test]

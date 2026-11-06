@@ -355,6 +355,10 @@ pub const KEYS: [Key; 12] = [
 #[derive(Clone, Copy)]
 pub(crate) enum HoldAction {
     Plus,
+    /// `*` held: becomes `,` (pause).
+    Pause,
+    /// `#` held: becomes `;` (wait).
+    Wait,
     /// A digit 1..=9 was held on an empty field: voicemail or speed dial.
     Digit(u8),
     /// Delete is held: erase the next character from the right (after this
@@ -513,6 +517,22 @@ impl PhoneApp {
                     self.digit_pop.set_target(1.0);
                 }
             }
+            HoldAction::Pause => {
+                if dial::long_press_star(&mut self.dialed) {
+                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+                    self.digit_pop.snap(1.18);
+                    self.digit_pop.set_target(1.0);
+                    self.show_notice_pill("Pause added", None, false, cx);
+                }
+            }
+            HoldAction::Wait => {
+                if dial::long_press_hash(&mut self.dialed) {
+                    rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+                    self.digit_pop.snap(1.18);
+                    self.digit_pop.set_target(1.0);
+                    self.show_notice_pill("Wait added", None, false, cx);
+                }
+            }
             HoldAction::Digit(d) => self.speed_dial_hold(d, window, cx),
             HoldAction::Erase(step) => self.erase_step(step, window, cx),
             HoldAction::Diagnostics => {
@@ -559,6 +579,10 @@ impl PhoneApp {
                 rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
                 if key == '0' {
                     self.arm_hold(LONG_ZERO, HoldAction::Plus, window, cx);
+                } else if key == '*' {
+                    self.arm_hold(LONG_ZERO, HoldAction::Pause, window, cx);
+                } else if key == '#' {
+                    self.arm_hold(LONG_ZERO, HoldAction::Wait, window, cx);
                 } else if let Some(d) = key
                     .to_digit(10)
                     .and_then(|d| u8::try_from(d).ok())

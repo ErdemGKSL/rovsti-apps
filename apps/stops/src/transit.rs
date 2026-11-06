@@ -280,17 +280,33 @@ impl StopsApp {
                     .on_click(cx.listener(|this, _, _, cx| this.pick_feed(cx)))
                     .into_any_element(),
                 );
+                let armed = self.confirm_remove_feed;
+                let mut remove = list_row(
+                    theme,
+                    None,
+                    if armed {
+                        "Tap again to remove"
+                    } else {
+                        "Remove transit data"
+                    },
+                    None,
+                    Some("Remove".into()),
+                )
+                .id("feed-remove");
+                if armed {
+                    remove = remove.text_color(theme::colors(theme).red);
+                }
                 rows.push(
-                    list_row(
-                        theme,
-                        None,
-                        "Remove transit data",
-                        None,
-                        Some("Remove".into()),
-                    )
-                    .id("feed-remove")
-                    .on_click(cx.listener(|this, _, _, cx| this.remove_feed(cx)))
-                    .into_any_element(),
+                    remove
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if this.confirm_remove_feed {
+                                this.remove_feed(cx);
+                            } else {
+                                this.confirm_remove_feed = true;
+                                cx.notify();
+                            }
+                        }))
+                        .into_any_element(),
                 );
             }
             (None, ImportState::Idle) => rows.push(
@@ -388,6 +404,7 @@ impl StopsApp {
                 this.transit.state = ImportState::Idle;
                 match outcome {
                     Ok((feed, report)) => {
+                        this.confirm_remove_feed = false;
                         this.transit.error = None;
                         this.transit.skipped_rows = report.skipped_rows;
                         this.set_feed(Some(Arc::new(feed)));
@@ -410,6 +427,7 @@ impl StopsApp {
         cx.background_executor()
             .spawn(async move { remove_file(&dir) })
             .detach();
+        self.confirm_remove_feed = false;
         self.transit = Transit::default();
         self.set_feed(None);
         self.show_pill("Transit data removed.", None, cx);

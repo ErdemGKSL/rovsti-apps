@@ -361,6 +361,7 @@ impl StopsApp {
     pub(crate) fn open_settings(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         self.settings_page = page;
         self.confirm_clear = false;
+        self.confirm_remove_feed = false;
         self.page.restart();
         self.history_list.scroll_to_top();
         self.notice_list.scroll_to_top();
@@ -1041,10 +1042,21 @@ impl StopsApp {
     }
 
     fn reset_tiles(&mut self, cx: &mut Context<Self>) {
+        let old = self.prefs.tile_url.clone();
         let source = TileSource::default_source();
         self.use_tile_source(source, cx);
         self.sync_tile_field(cx);
-        self.show_pill("Map server reset to default", None, cx);
+        let action = old
+            .is_some()
+            .then_some(crate::PillAction::RestoreTileUrl(old));
+        self.show_pill("Map server reset to default", action, cx);
+    }
+
+    /// Undo of "reset": puts the custom tile server back.
+    pub(crate) fn restore_tile_url(&mut self, old: Option<String>, cx: &mut Context<Self>) {
+        self.prefs.tile_url = old;
+        self.use_tile_source(self.prefs.tile_source(), cx);
+        self.sync_tile_field(cx);
     }
 
     /// Saves `source` as the setting and switches the map to it.
@@ -1105,7 +1117,22 @@ impl StopsApp {
     }
 
     fn turn_notice_off(&mut self, cx: &mut Context<Self>) {
-        self.prefs.notice = None;
+        let old = self.prefs.notice.take();
+        self.save_prefs(cx);
+        self.sync_template_field(cx);
+        if let Some(old) = old {
+            self.show_pill(
+                "Arriving-soon message off",
+                Some(crate::PillAction::RestoreNotice(old)),
+                cx,
+            );
+        }
+        cx.notify();
+    }
+
+    /// Undo of "turn off": brings the message setup back.
+    pub(crate) fn restore_notice(&mut self, old: rovsti_geo::NoticePrefs, cx: &mut Context<Self>) {
+        self.prefs.notice = Some(old);
         self.save_prefs(cx);
         self.sync_template_field(cx);
         cx.notify();

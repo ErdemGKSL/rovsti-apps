@@ -80,6 +80,8 @@ pub(crate) enum PillAction {
     RestoreHistory(History),
     RestoreEnds(picker::Ends),
     RestartTrip(Destination, Destination),
+    RestoreTileUrl(Option<String>),
+    RestoreNotice(rovsti_geo::NoticePrefs),
 }
 
 pub(crate) struct StopsApp {
@@ -158,6 +160,8 @@ pub(crate) struct StopsApp {
     pub(crate) chats: ChatList,
     /// Clear history was tapped once.
     pub(crate) confirm_clear: bool,
+    /// The first tap on "Remove transit data" has armed the second.
+    pub(crate) confirm_remove_feed: bool,
 }
 
 impl StopsApp {
@@ -308,6 +312,7 @@ impl StopsApp {
             tile_testing: false,
             chats: ChatList::default(),
             confirm_clear: false,
+            confirm_remove_feed: false,
         };
         app.refresh_preflight_later(cx);
         app.load_last_location(cx);
@@ -523,6 +528,8 @@ impl StopsApp {
             PillAction::UndoDelete(place, index) => self.undo_delete(place, index, cx),
             PillAction::RestoreHistory(history) => self.restore_history(history, cx),
             PillAction::RestartTrip(a, b) => self.request_start(a, b, cx),
+            PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
+            PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);
                 self.map.follow = true;

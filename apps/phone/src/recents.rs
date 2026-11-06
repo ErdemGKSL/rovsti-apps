@@ -90,6 +90,12 @@ pub(crate) fn row_at(
     Some((index as usize, zone))
 }
 
+/// Whether tapping a row calls back over WhatsApp: the row came from a
+/// WhatsApp call and the account is linked (otherwise the carrier is used).
+pub(crate) fn call_back_on_whatsapp(row_whatsapp: bool, connected: bool) -> bool {
+    row_whatsapp && connected
+}
+
 /// One row, ready to draw.
 #[derive(Clone)]
 pub(crate) struct RowVm {
@@ -705,7 +711,7 @@ impl PhoneApp {
                     self.presses.touch_down(press_id(index, zone));
                     self.recents.suppress_click = false;
                     if zone == Zone::Row {
-                        // Holding a row opens the same sheet as its info button.
+                        // Holding a row opens its quick-action menu (copy, message, block).
                         self.recents.long_task =
                             Some(cx.spawn_in(window, async move |this, cx| {
                                 cx.background_executor()
@@ -792,6 +798,10 @@ impl PhoneApp {
             return;
         }
         let number = row.number.clone();
+        if call_back_on_whatsapp(row.whatsapp, self.whatsapp.read(cx).is_connected()) {
+            self.place_whatsapp(&number, cx);
+            return;
+        }
         let home = Home {
             tab: crate::RECENTS_TAB,
             index,
@@ -862,11 +872,11 @@ impl PhoneApp {
     pub(crate) fn recents_row_facts(
         &self,
         index: usize,
-    ) -> Option<(SharedString, SharedString, f32)> {
+    ) -> Option<(SharedString, SharedString, bool, f32)> {
         let row = self.recents.rows.get(index)?;
         let bounds = self.recents.bounds.get();
         let top = f32::from(bounds.origin.y) + index as f32 * ROW_H - self.recents.scrolled();
-        Some((row.number.clone(), row.title.clone(), top))
+        Some((row.number.clone(), row.title.clone(), row.named, top))
     }
 
     fn recents_info(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -1896,6 +1906,14 @@ pub(crate) fn state_view(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whatsapp_rows_call_back_over_whatsapp_only_when_connected() {
+        assert!(call_back_on_whatsapp(true, true));
+        assert!(!call_back_on_whatsapp(true, false));
+        assert!(!call_back_on_whatsapp(false, true));
+        assert!(!call_back_on_whatsapp(false, false));
+    }
 
     #[test]
     fn rows_are_found_by_arithmetic() {

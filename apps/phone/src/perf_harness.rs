@@ -390,10 +390,12 @@ pub fn measure_scenario(name: &str) -> Run {
 mod tests {
     use super::*;
 
-    const KEYPAD_ALLOCS_P50: f32 = 1_800.0;
+    /// 1_800 before the status line gained its Add to contacts and Message buttons (two
+    /// hit-testable text buttons, about 50 allocations a frame while a number is typed).
+    const KEYPAD_ALLOCS_P50: f32 = 1_900.0;
     /// 1_900 before the tab bar began to occlude the page under it (so a tap on the bar no
     /// longer reaches the rows below): its one extra hitbox costs about four allocations a frame.
-    const KEYPAD_ALLOCS_P95: f32 = 1_950.0;
+    const KEYPAD_ALLOCS_P95: f32 = 2_050.0;
     const SCENARIOS: [&str; 5] = ["tab", "recents", "keypad", "incall", "incoming"];
 
     /// P-13 (story 15.4): the control grid and End sit at the same pixels in every

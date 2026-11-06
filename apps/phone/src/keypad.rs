@@ -28,7 +28,7 @@ use rovsti_ui::{
 
 use crate::{
     PhoneApp, Status,
-    backend::{Load, Placement},
+    backend::{self, Load, Placement},
     contacts::person_avatar,
     flight::ButtonFrom,
     fx::{A_CALL, A_FIELD, A_KEY, A_LAST},
@@ -65,6 +65,13 @@ pub(crate) struct DialMatch {
     index: usize,
     found: Option<Found>,
     task: Option<gpui::Task<()>>,
+}
+
+/// Whether the status line offers "Add to contacts" and "Message": a valid
+/// number is typed, its lookup has settled with no match, and no status text
+/// is in the way.
+pub(crate) fn offer_add(dialed: &str, settled: bool, found: bool, status_none: bool) -> bool {
+    settled && !found && status_none && dial::validate(dialed).is_ok()
 }
 
 /// Most T9 suggestions shown above the field.
@@ -318,6 +325,18 @@ impl PhoneApp {
             "call" => self.call_press(window, cx),
             "paste" => self.paste_press(window, cx),
             "wa-call" => self.whatsapp_press(window, cx),
+            "kp-add" => {
+                let outcome = backend::add_contact(&self.dialed);
+                if outcome != backend::Outcome::Done {
+                    self.set_status(outcome.why_not("Couldn't open the Contacts app"));
+                }
+            }
+            "kp-msg" => {
+                let outcome = backend::send_sms_to(&self.dialed);
+                if outcome != backend::Outcome::Done {
+                    self.set_status(outcome.why_not("Couldn't open Messages"));
+                }
+            }
             "grant" => {
                 let raw = self.dialed.clone();
                 self.backend
@@ -588,6 +607,16 @@ impl PhoneApp {
 
     /// Whether the WhatsApp chip is offered: WhatsApp is connected, a number
     /// that validates is typed, and no status line is in the way.
+    /// Whether the status line shows "Add to contacts" and "Message".
+    fn add_offered(&self) -> bool {
+        offer_add(
+            &self.dialed,
+            self.dial_match.query == self.dialed && self.dial_match.task.is_none(),
+            self.dial_match.found.is_some(),
+            self.status.is_none(),
+        )
+    }
+
     fn whatsapp_chip_shown(&self, cx: &Context<Self>) -> bool {
         self.status.is_none()
             && self.whatsapp.read(cx).is_connected()
@@ -605,7 +634,12 @@ impl PhoneApp {
         self.place_whatsapp(&raw, cx);
     }
 
-    fn whatsapp_chip(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    fn whatsapp_chip(
+        &self,
+        theme: Theme,
+        inline: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let press = self.presses.value("wa-call").clamp(0.0, 1.0);
         let pill = rovsti_ui::components::glass_pill(theme, "WhatsApp")
             .text_color(call_colors(theme).answer)
@@ -614,9 +648,8 @@ impl PhoneApp {
             .id("wa-call")
             .role(Role::Button)
             .aria_label("Call over WhatsApp")
-            .absolute()
-            .top_full()
-            .mt(px(4.0))
+            .relative()
+            .when(!inline, |el| el.absolute().top_full().mt(px(4.0)))
             .child(pill)
             .on_mouse_down(
                 MouseButton::Left,
@@ -1210,9 +1243,46 @@ impl PhoneApp {
                             .text_color(colors.label)
                             .child(found.name.clone()),
                     ),
+                None if self.add_offered() => {
+                    let wa = self.whatsapp_chip_shown(cx);
+                    area.child(self.status_button(theme, "kp-add", "Add to contacts", cx))
+                        .child(self.status_button(theme, "kp-msg", "Message", cx))
+                        .when(wa, |el| el.child(self.whatsapp_chip(theme, true, cx)))
+                }
                 None => area,
             },
         }
+    }
+
+    /// A text button in the status line; acts on finger-up (the mouse press
+    /// that follows it), with raw touch feedback while held.
+    fn status_button(
+        &self,
+        theme: Theme,
+        id: &'static str,
+        label: &'static str,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let colors = theme::colors(theme);
+        let press = self.presses.value(id);
+        div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(label)
+            .relative()
+            .h(px(36.0))
+            .flex()
+            .items_center()
+            .px(px(8.0))
+            .font_weight(typography::HEADLINE.weight)
+            .text_color(colors.accent)
+            .opacity(1.0 - 0.5 * press.clamp(0.0, 1.0))
+            .child(label)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| this.mouse_down(id, window, cx)),
+            )
+            .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
     }
 
     pub(crate) fn keypad(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1258,8 +1328,8 @@ impl PhoneApp {
                     .when(self.dialed.is_empty(), |el| {
                         el.child(self.paste_pill(theme, cx))
                     })
-                    .when(self.whatsapp_chip_shown(cx), |el| {
-                        el.child(self.whatsapp_chip(theme, cx))
+                    .when(self.whatsapp_chip_shown(cx) && !self.add_offered(), |el| {
+                        el.child(self.whatsapp_chip(theme, false, cx))
                     }),
             )
             .child(self.status_line(theme, cx))
@@ -1366,6 +1436,15 @@ mod tests {
 
     fn idxs(hits: &[T9Hit]) -> Vec<u32> {
         hits.iter().map(|h| h.contact_idx).collect()
+    }
+
+    #[test]
+    fn add_is_offered_only_for_a_settled_unknown_valid_number() {
+        assert!(offer_add("05321234567", true, false, true));
+        assert!(!offer_add("05321234567", false, false, true));
+        assert!(!offer_add("05321234567", true, true, true));
+        assert!(!offer_add("05321234567", true, false, false));
+        assert!(!offer_add("", true, false, true));
     }
 
     #[test]

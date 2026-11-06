@@ -79,6 +79,8 @@ pub(crate) struct MenuTarget {
     pub index: usize,
     pub number: SharedString,
     pub who: SharedString,
+    /// The number belongs to a saved contact.
+    pub named: bool,
     pub blocked: bool,
     /// Why Block is disabled (shown as the row's subtitle).
     pub block_note: Option<&'static str>,
@@ -358,7 +360,7 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some((number, who, top)) = self.recents_row_facts(index) else {
+        let Some((number, who, named, top)) = self.recents_row_facts(index) else {
             return;
         };
         let backend = self.backend.read(cx);
@@ -377,6 +379,7 @@ impl PhoneApp {
             index,
             number,
             who,
+            named,
             blocked,
             block_note,
             top,
@@ -408,6 +411,18 @@ impl PhoneApp {
                 cx.write_to_clipboard(ClipboardItem::new_string(target.number.to_string()));
                 self.row_menu_close(window, cx);
                 self.show_notice_pill("Number copied", None, false, cx);
+            }
+            "rm-add" if has_number && !target.named => {
+                self.row_menu_close(window, cx);
+                let outcome = backend::add_contact(&target.number);
+                if outcome != backend::Outcome::Done {
+                    self.show_notice_pill(
+                        outcome.why_not("Couldn't open the Contacts app"),
+                        None,
+                        false,
+                        cx,
+                    );
+                }
             }
             "rm-msg" if has_number => {
                 self.row_menu_close(window, cx);
@@ -540,12 +555,26 @@ impl PhoneApp {
             note,
             enabled,
         };
-        let rows = [
+        let add = (!target.named).then(|| {
             self.menu_item(
                 theme,
-                item("rm-copy", Icon::LucideCopy, "Copy number", None, has_number),
+                item(
+                    "rm-add",
+                    Icon::LucideUserPlus,
+                    "Add to contacts",
+                    None,
+                    has_number,
+                ),
                 cx,
-            ),
+            )
+        });
+        let mut rows = vec![self.menu_item(
+            theme,
+            item("rm-copy", Icon::LucideCopy, "Copy number", None, has_number),
+            cx,
+        )];
+        rows.extend(add);
+        rows.extend([
             self.menu_item(
                 theme,
                 item(
@@ -583,7 +612,7 @@ impl PhoneApp {
                 ),
                 cx,
             ),
-        ];
+        ]);
         let height = rows.len() as f32 * MENU_ROW + 2.0 * MENU_PAD;
         let viewport = window.viewport_size();
         let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
@@ -722,6 +751,7 @@ mod tests {
             index: 1,
             number: "0555".into(),
             who: "Ayse".into(),
+            named: true,
             blocked: false,
             block_note: None,
             top: 100.0,

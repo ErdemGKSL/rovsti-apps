@@ -119,10 +119,18 @@ Device checks are in [messages-acceptance.md](messages-acceptance.md).
 `management: manual`, `project-dir: platforms/android`, activity `dev.rovsti.stops.MainActivity`,
 `min_sdk` 34 and `target_sdk` 36. The shared Kotlin bridge is a Gradle source directory
 (`crates/rovsti_android/kotlin`), not a copy. Permissions: `ACCESS_FINE_LOCATION`,
-`ACCESS_COARSE_LOCATION`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS`,
+`ACCESS_COARSE_LOCATION`, `ACCESS_BACKGROUND_LOCATION`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS`,
 `USE_FULL_SCREEN_INTENT`, `VIBRATE`, `WAKE_LOCK`, `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`,
 `USE_EXACT_ALARM` (Stops is an alarm app; no `SCHEDULE_EXACT_ALARM`), `RECEIVE_BOOT_COMPLETED`,
 `ACCESS_NETWORK_STATE` and `INTERNET` (gateway, arriving-soon message only).
+
+`ACCESS_BACKGROUND_LOCATION` is there because of the Android 11+ while-in-use rule: a foreground
+service of type `location` started while the app is in the background (after a process death, a
+`START_FLAG_REDELIVERY` restart or the watchdog) only gets location when the app holds it. Stops has
+`minSdk` 34, so the rule always applies. It is recommended, not required (AD-SA7 in
+[architecture.md](architecture.md)): the Trip tab asks for it after foreground location. When Android
+still refuses a background restart, `TripService` posts a notification on the channel `trip_problem`
+("Trip paused", `IMPORTANCE_HIGH`) and Stops resumes with `backend::resume_trip` (AD-SA8).
 
 | Component | Does |
 | --- | --- |

@@ -28,6 +28,9 @@ For the arrival alarm to ring on time and over the lock screen, grant all of the
 
 - Autostart, so the boot receiver and the exact alarms (snooze, watchdog, ring guard) can start the app.
 - Battery saver set to "No restrictions", so `TripService` keeps location updates with the screen off.
+- Location set to "Allow all the time" (`ACCESS_BACKGROUND_LOCATION`), because MIUI and HyperOS kill
+  processes often and the restarted `TripService` needs it to keep location; without it Stops posts
+  the `trip_problem` "tap to resume" notification instead of tracking.
 - Other permissions: "Show on lock screen" and "Display pop-up windows while running in background",
   so `AlarmActivity` can open over the lock screen.
 - Full-screen notifications (Android 14+): the Stops UI shows a row when `canUseFullScreenIntent()` is false.

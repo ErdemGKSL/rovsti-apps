@@ -73,7 +73,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS`); `INTERNET` for the gateway (WhatsApp only); Photo Picker for contact photos (no permission); handoff to Phone and Messages (`dev.rovsti.permission.HANDOFF`, signature); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
 | Stops | none | foreground service of type `location` (`TripService`) feeding fixes to `rovsti_geo::ActiveTrip` through the headless call, `AlarmActivity` (native Views over the lock screen, full-screen intent), `TripAlarm`/`AlarmSound` (alarm-usage audio focus, `STREAM_ALARM` volume raise and restore, `CATEGORY_ALARM` channel), `USE_EXACT_ALARM` for snooze and the watchdog (`setAlarmClock`, `setExactAndAllowWhileIdle` as fallback), boot receiver that ends a stale trip; `INTERNET` for the gateway (the arriving-soon message only); `geo:` and maps-link `VIEW` filters and `SEND text/plain` |
 
-### Stops: decisions (AD-ST1 to AD-ST8, AD-SA1 to AD-SA6, AD-SX1 to AD-SX8)
+### Stops: decisions (AD-ST1 to AD-ST8, AD-SA1 to AD-SA9, AD-SX1 to AD-SX8)
 
 - **AD-ST1 Pure first.** The trip session, destination parsing, saved places, history and
   statistics, prefs, the arriving-soon template, GTFS parsing and the map projection are
@@ -125,6 +125,21 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   as well as a wired or Bluetooth headset. No preferred device, no communication device, no
   `STREAM_MUSIC`. The channel `trip_alarm_v2` is `IMPORTANCE_HIGH` with alarm sound attributes, so
   the Do Not Disturb alarm exception applies.
+- **AD-SA7 Background location is recommended, never blocking.** `ACCESS_BACKGROUND_LOCATION`
+  ("Allow all the time") is asked from a Trip-tab row ("Keep tracking in the background") only after
+  foreground location is granted, because Android 11+ refuses a location foreground service that is
+  started from the background without it. `Preflight.background_location` carries the state; a trip
+  starts without it.
+- **AD-SA8 A refused background restart keeps the trip.** When Android refuses to start the location
+  service from the background (a restart with `START_FLAG_REDELIVERY`, a retry, the watchdog),
+  `TripService` keeps `TripPrefs` and `trip.json`, posts a "tap to resume" notification on the channel
+  `trip_problem` and emits `{"state":"error","error":"restart"}` on `trip_status`. Stops resumes the
+  service when its window is activated, through `backend::resume_trip`, which restarts it only if
+  `trip.json` holds a trip and no service runs.
+- **AD-SA9 The watchdog prefers a live service.** `TripService.onWatchdog` reaches a live instance
+  directly (re-arm, then ask for a fix on the service's worker) and calls `startForegroundService`
+  only when no instance exists or it is shutting down, so a watchdog tick never needs a foreground
+  start from the background while the service is alive.
 - **AD-ST4 Map: vector tiles under a vector radar.** No region is bundled with the app (it bloats
   the APK and goes stale). Stops downloads Shortbread 1.0 vector tiles (MVT, zoom 0-14, overzoomed
   beyond 14) from a VersaTiles-compatible server that the user sets (default

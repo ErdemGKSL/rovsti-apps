@@ -164,6 +164,10 @@ enum PillAction {
     Settings(SettingsUndo),
     /// Asks for the default SMS app role.
     RequestSmsRole,
+    /// Reverses a WhatsApp chat action (archive, mute).
+    Chat(String, ChatActionKind),
+    /// Sets an SMS thread's mute back (thread id, muted).
+    SmsMute(i64, bool),
 }
 
 /// The page pushed over the tabs.
@@ -865,7 +869,7 @@ impl MessagesApp {
         }
         // Opening a chat marked unread by hand takes the mark away everywhere.
         if meta.marked_unread {
-            self.chat_action(&jid, ChatActionKind::MarkRead { read: true }, cx);
+            self.chat_action(&jid, ChatActionKind::MarkRead { read: true }, true, cx);
         }
         if let Some(text) = self.drafts.take(&ThreadId::WhatsApp(jid.clone())) {
             conversation.update(cx, |c, cx| c.set_draft(&text, cx));
@@ -1115,6 +1119,16 @@ impl MessagesApp {
         cx.notify();
     }
 
+    /// Mutes or unmutes an SMS thread and offers Undo.
+    fn set_sms_mute(&mut self, id: i64, mute: bool, cx: &mut Context<Self>) {
+        let tag = notifications::thread_tag(&ThreadId::Sms(id));
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| p.set_muted(&tag, mute))
+        });
+        let text = if mute { "Muted" } else { "Unmuted" };
+        self.show_pill_action(text, "Undo", PillAction::SmsMute(id, !mute), cx);
+    }
+
     /// One SMS item of the row menu.
     fn sms_row_action(&mut self, action: sms_actions::SmsAction, cx: &mut Context<Self>) {
         use sms_actions::SmsAction;
@@ -1144,12 +1158,7 @@ impl MessagesApp {
             }
             SmsAction::Mute | SmsAction::Unmute => {
                 self.row_menu = None;
-                let mute = action == SmsAction::Mute;
-                let tag = notifications::thread_tag(&ThreadId::Sms(id));
-                self.backend.update(cx, |backend, cx| {
-                    backend.update_prefs(cx, |p| p.set_muted(&tag, mute))
-                });
-                self.show_pill(if mute { "Muted" } else { "Unmuted" });
+                self.set_sms_mute(id, action == SmsAction::Mute, cx);
             }
             SmsAction::NotSpam => {
                 self.row_menu = None;
@@ -1433,6 +1442,8 @@ impl MessagesApp {
                 self.show_pill("Back in Spam");
             }
             PillAction::Settings(undo) => self.undo_settings(undo, cx),
+            PillAction::Chat(jid, undo) => self.chat_action(&jid, undo, true, cx),
+            PillAction::SmsMute(id, mute) => self.set_sms_mute(id, mute, cx),
             PillAction::Reblock(raw) => self.reblock(raw, cx),
             PillAction::RequestSmsRole => self
                 .backend
@@ -1569,7 +1580,13 @@ impl MessagesApp {
 
     /// Archive, pin, mute or mark a chat: shown at once, then sent to the
     /// gateway (its `chat_meta` event confirms it on every device).
-    fn chat_action(&mut self, jid: &str, action: ChatActionKind, cx: &mut Context<Self>) {
+    fn chat_action(
+        &mut self,
+        jid: &str,
+        action: ChatActionKind,
+        quiet: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.row_menu = None;
         if matches!(action, ChatActionKind::Archive { archived: true })
             && matches!(&self.open, Open::WhatsApp(open, _) if open == jid)
@@ -1588,11 +1605,20 @@ impl MessagesApp {
             .find(|t| t.id == id)
             .map_or(0, |t| t.unread);
         let info = self.wa_info_mut().entry(jid.to_owned()).or_default();
+        let before = info.meta.clone();
         inbox::apply_action(&mut info.meta, &mut unread, &action);
         for thread in self.wa_threads_mut().iter_mut().filter(|t| t.id == id) {
             thread.unread = unread;
         }
         self.rebuild(cx);
+        if let Some(text) = inbox::action_notice(&action) {
+            match inbox::undo_of(&action, &before).filter(|_| !quiet) {
+                Some(undo) => {
+                    self.show_pill_action(text, "Undo", PillAction::Chat(jid.to_owned(), undo), cx)
+                }
+                None => self.show_pill(text),
+            }
+        }
         let request = ChatAction {
             chat: jid.to_owned(),
             action,
@@ -1670,7 +1696,7 @@ impl MessagesApp {
         let action = |id: &'static str, icon: Icon, label: String, kind: ChatActionKind| {
             let jid = jid.clone();
             menu_item(theme, id, icon, label.into(), colors.label).on_click(
-                cx.listener(move |this, _, _, cx| this.chat_action(&jid, kind.clone(), cx)),
+                cx.listener(move |this, _, _, cx| this.chat_action(&jid, kind.clone(), false, cx)),
             )
         };
         let mut items: Vec<AnyElement> = Vec::new();
@@ -1804,7 +1830,7 @@ impl MessagesApp {
         let action = |id: &'static str, icon: Icon, label: String, kind: ChatActionKind| {
             let jid = jid.clone();
             menu_item(theme, id, icon, label.into(), colors.label).on_click(
-                cx.listener(move |this, _, _, cx| this.chat_action(&jid, kind.clone(), cx)),
+                cx.listener(move |this, _, _, cx| this.chat_action(&jid, kind.clone(), false, cx)),
             )
         };
         {

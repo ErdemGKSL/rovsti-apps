@@ -197,6 +197,12 @@ pub fn snap_destination(
     }
 }
 
+/// Index of the GTFS stop `id` in the feed, for the pin menu's "Lines" row.
+pub fn stop_index(feed: Option<&Feed>, id: &str) -> Option<u32> {
+    let index = feed?.stops.iter().position(|s| s.id == id)?;
+    u32::try_from(index).ok()
+}
+
 /// The corners of the box around `centre` that holds a circle of `metres`.
 fn extent(centre: Coord, metres: f64) -> [Coord; 2] {
     let dlat = (metres / EARTH_RADIUS_M).to_degrees();
@@ -274,19 +280,16 @@ pub fn fallback_centre(history: &History, saved: &SavedPlaces) -> Option<Coord> 
 }
 
 /// Width and height of the small menu over a tapped pin.
-#[cfg_attr(not(test), expect(dead_code, reason = "wired in S6"))]
 pub const PIN_MENU_W: f32 = 180.0;
-#[cfg_attr(not(test), expect(dead_code, reason = "wired in S6"))]
 pub const PIN_MENU_H: f32 = 132.0;
-#[cfg_attr(not(test), expect(dead_code, reason = "wired in S6"))]
+/// Height of one row of the pin menu.
+const PIN_MENU_ROW_H: f32 = 36.0;
 const PIN_MENU_MARGIN: f32 = 8.0;
 /// Gap between the pin and its menu, and the pin's own height above its point.
-#[cfg_attr(not(test), expect(dead_code, reason = "wired in S6"))]
 const PIN_MENU_GAP: f32 = 14.0;
 
 /// The pin menu box `(x, y, w, h)` in map-local pixels from the top-left: above
 /// `pin`, below it where there is no room, kept inside `size` with a margin.
-#[cfg_attr(not(test), expect(dead_code, reason = "wired in S6"))]
 pub fn pin_menu_rect(pin: (f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) {
     let (w, h) = (PIN_MENU_W, PIN_MENU_H);
     let above = pin.1 - PIN_MENU_GAP - h;
@@ -303,7 +306,6 @@ pub fn pin_menu_rect(pin: (f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) 
 }
 
 /// Whether `at` is inside `rect` `(x, y, w, h)`.
-#[cfg_attr(not(test), expect(dead_code, reason = "wired in S6"))]
 pub fn over_rect(rect: (f32, f32, f32, f32), at: (f32, f32)) -> bool {
     at.0 >= rect.0 && at.0 <= rect.0 + rect.2 && at.1 >= rect.1 && at.1 <= rect.1 + rect.3
 }
@@ -1355,6 +1357,7 @@ enum MapInput {
 /// mouse clicks, and keeps the page from scrolling under a finger on the map.
 fn input_surface(
     bounds_out: Rc<Cell<Bounds<Pixels>>>,
+    menu_rect: Option<(f32, f32, f32, f32)>,
     on_input: impl Fn(MapInput, &mut App) + 'static,
 ) -> impl IntoElement {
     let on_input = Rc::new(on_input);
@@ -1363,14 +1366,13 @@ fn input_surface(
         move |bounds, (), window, _| {
             bounds_out.set(bounds);
             let size = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+            // The controls and the pin menu are not the map's.
             let on_controls = move |p: Point<Pixels>| {
-                over_controls(
-                    size,
-                    (
-                        f32::from(p.x - bounds.origin.x),
-                        f32::from(p.y - bounds.origin.y),
-                    ),
-                )
+                let local = (
+                    f32::from(p.x - bounds.origin.x),
+                    f32::from(p.y - bounds.origin.y),
+                );
+                over_controls(size, local) || menu_rect.is_some_and(|r| over_rect(r, local))
             };
             let touch = Rc::clone(&on_input);
             window.on_mouse_event(move |event: &TouchEvent, phase, window, cx| {
@@ -1555,7 +1557,9 @@ impl StopsApp {
 
         let entity = cx.entity();
         let input = entity.clone();
-        let surface = input_surface(self.map.bounds.clone(), move |event, cx| {
+        let menu = self.pin_menu(theme, &scene, size, cx);
+        let menu_rect = menu.as_ref().map(|(rect, _)| *rect);
+        let surface = input_surface(self.map.bounds.clone(), menu_rect, move |event, cx| {
             input.update(cx, |this, cx| this.map_input(event, cx));
         });
         let pinch = entity;
@@ -1646,12 +1650,94 @@ impl StopsApp {
                         .children(labels)
                         .children(pin_labels)
                         .child(surface)
+                        .children(menu.map(|(_, card)| card))
                         .child(scale)
                         .child(attribution)
                         .child(controls),
                 )
                 .into_any_element(),
         )
+    }
+
+    /// The small card over a tapped pin and its box in map-local pixels: Move,
+    /// Remove, Lines for a stop, and the coordinates as a details line.
+    fn pin_menu(
+        &mut self,
+        theme: Theme,
+        scene: &Scene,
+        size: (f32, f32),
+        cx: &mut Context<Self>,
+    ) -> Option<((f32, f32, f32, f32), AnyElement)> {
+        let slot = self.pick.menu()?;
+        let dest = self.pick.ends.get(slot)?;
+        let pin = scene.pins.iter().find(|p| p.slot == slot)?;
+        let rect = pin_menu_rect((size.0 / 2.0 + pin.at.0, size.1 / 2.0 + pin.at.1), size);
+        let stop = dest
+            .gtfs_stop
+            .as_deref()
+            .and_then(|id| stop_index(self.gtfs.as_deref(), id));
+        let details = pick::details_text(dest);
+        let colors = theme::colors(theme);
+        let row = |id: &'static str, label: &'static str, color: Hsla| {
+            div()
+                .id(id)
+                .h(px(PIN_MENU_ROW_H))
+                .w_full()
+                .px(px(14.0))
+                .flex()
+                .items_center()
+                .text_size(typography::BODY.size)
+                .text_color(color)
+                .child(label)
+        };
+        let mut card = flat_glass(theme, None)
+            .absolute()
+            .left(px(rect.0))
+            .top(px(rect.1))
+            .w(px(rect.2))
+            .h(px(rect.3))
+            .rounded(radius::CARD)
+            .py(px(4.0))
+            .flex()
+            .flex_col()
+            .child(row("pin-move", "Move", colors.label).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.pick.begin_move(slot);
+                    cx.notify();
+                },
+            )))
+            .child(
+                row("pin-remove", "Remove", colors.red).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.pick.remove(slot);
+                        this.map.follow = true;
+                        cx.notify();
+                    },
+                )),
+            );
+        if let Some(stop) = stop {
+            card = card.child(
+                row("pin-lines", "Lines", colors.label).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.pick.close_menu();
+                        this.open_stop(stop, cx);
+                    },
+                )),
+            );
+        }
+        let card = card
+            .child(div().flex_1())
+            .child(
+                div()
+                    .px(px(14.0))
+                    .pb(px(6.0))
+                    .truncate()
+                    .text_size(typography::CAPTION.size)
+                    .text_color(colors.secondary_label)
+                    .child(details),
+            )
+            .into_any_element();
+        Some((rect, card))
     }
 
     fn map_zoom(&mut self, factor: f64, cx: &mut Context<Self>) {
@@ -2565,6 +2651,25 @@ mod tests {
             assert!(inside(r), "{pin:?} -> {r:?}");
             assert_eq!((r.2, r.3), (PIN_MENU_W, PIN_MENU_H));
         }
+    }
+
+    #[test]
+    fn a_stop_pin_finds_its_feed_index_for_the_lines_row() {
+        let feed = Feed::new(
+            vec![named_stop("S1", "One", 0.0), named_stop("S2", "Two", 50.0)],
+            vec![],
+            vec![],
+            0,
+        );
+        assert_eq!(stop_index(Some(&feed), "S2"), Some(1));
+        assert_eq!(stop_index(Some(&feed), "nope"), None);
+        assert_eq!(stop_index(None, "S1"), None);
+    }
+
+    #[test]
+    fn the_menu_rows_fit_the_menu_box() {
+        // Move, Remove, Lines and the details line.
+        const { assert!(3.0 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
     }
 
     #[test]

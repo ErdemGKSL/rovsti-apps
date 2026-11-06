@@ -384,9 +384,12 @@ impl StopsApp {
         }
     }
 
-    /// System Back: the alarm snoozes, a sheet closes.
+    /// System Back: an open pin menu closes, else the alarm snoozes, a sheet closes.
     fn on_back(&mut self, cx: &mut Context<Self>) {
-        if self.alarm.is_some() {
+        if self.pick.menu().is_some() {
+            self.pick.close_menu();
+            cx.notify();
+        } else if self.alarm.is_some() {
             self.alarm_action(AlarmAction::Snooze, cx);
         } else if self.sheet.is_open() {
             self.close_sheet(cx);

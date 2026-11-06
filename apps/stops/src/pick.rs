@@ -12,6 +12,7 @@ use crate::{
 };
 
 /// How much of the pair is chosen.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Idle,
@@ -77,7 +78,7 @@ pub struct Picking {
 
 // Methods the map glue does not call yet are listed with their step.
 impl Picking {
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S6/S7"))]
+    #[cfg(test)]
     pub fn stage(&self) -> Stage {
         match (&self.ends.a, &self.ends.b) {
             (None, None) => Stage::Idle,
@@ -143,8 +144,6 @@ impl Picking {
     pub fn clear(&mut self) {
         *self = Self::default();
     }
-
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S6/S7"))]
     pub fn remove(&mut self, slot: Slot) {
         match slot {
             Slot::A => self.ends.a = None,
@@ -157,7 +156,6 @@ impl Picking {
     }
 
     /// Arms `slot`: the next tap on the map relocates it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S6/S7"))]
     pub fn begin_move(&mut self, slot: Slot) {
         self.moving = Some(slot);
         self.menu = None;
@@ -167,18 +165,13 @@ impl Picking {
         self.menu = Some(slot);
         self.moving = None;
     }
-
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S6/S7"))]
     pub fn close_menu(&mut self) {
         self.menu = None;
     }
-
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S6/S7"))]
     pub fn menu(&self) -> Option<Slot> {
         self.menu
     }
-
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S6/S7"))]
+    #[cfg(test)]
     pub fn moving(&self) -> Option<Slot> {
         self.moving
     }
@@ -263,14 +256,13 @@ pub fn point_label(slot: Slot, dest: Option<&Destination>) -> String {
 }
 
 /// "A-B 850 m" once both points are set.
-#[cfg_attr(not(test), expect(dead_code, reason = "wired in S6/S7"))]
+#[cfg(test)]
 pub fn pair_text(ends: &Ends) -> Option<String> {
     let (a, b) = (ends.a.as_ref()?, ends.b.as_ref()?);
     Some(distance_line(a.coord.distance_m(b.coord)))
 }
 
 /// The coordinates, for an optional details line only.
-#[cfg_attr(not(test), expect(dead_code, reason = "wired in S6/S7"))]
 pub fn details_text(dest: &Destination) -> String {
     coord_text(dest.coord)
 }

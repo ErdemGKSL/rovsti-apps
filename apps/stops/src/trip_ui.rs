@@ -579,6 +579,7 @@ impl StopsApp {
         if self.busy {
             return;
         }
+        self.pick.close_menu();
         self.busy = true;
         cx.notify();
         cx.spawn(async move |this, cx| {

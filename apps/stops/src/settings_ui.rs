@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, list, px,
@@ -82,6 +83,8 @@ enum NoticeItem {
     /// The template field, its hint and the preview.
     Message {
         refused: bool,
+        /// The saved template differs from the default: the restore row shows.
+        custom: bool,
     },
     When,
     Off,
@@ -103,7 +106,9 @@ impl NoticeItem {
                 },
             ),
             Self::Chat(i) => lists::key(4, i as u64),
-            Self::Message { refused } => lists::key(5, u64::from(refused)),
+            Self::Message { refused, custom } => {
+                lists::key(5, u64::from(refused) | (u64::from(custom) << 1))
+            }
             Self::When => lists::key(6, 0),
             Self::Off => lists::key(7, 0),
         }
@@ -839,8 +844,13 @@ impl StopsApp {
             // A refused template adds an error line under the field.
             let text = self.template_field.read(cx).text();
             let refused = rovsti_geo::notice::validate(text).is_err();
+            let custom = self
+                .prefs
+                .notice
+                .as_ref()
+                .is_some_and(|n| n.template != DEFAULT_TEMPLATE);
             items.extend([
-                NoticeItem::Message { refused },
+                NoticeItem::Message { refused, custom },
                 NoticeItem::When,
                 NoticeItem::Off,
             ]);
@@ -958,6 +968,7 @@ impl StopsApp {
                     .as_ref()
                     .map(|n| n.template.clone())
                     .unwrap_or_default();
+                let custom = template != DEFAULT_TEMPLATE;
                 let text = self.template_field.read(cx).text().to_owned();
                 let check = rovsti_geo::notice::validate(&text);
                 let shown = if check.is_ok() { text } else { template };
@@ -994,6 +1005,15 @@ impl StopsApp {
                             .text_color(colors.label)
                             .child(notice_preview(&shown)),
                     )
+                    .when(custom, |d| {
+                        d.child(
+                            list_row(theme, None, "Use the default text", None, None)
+                                .id("notice-default")
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.use_default_template(cx)),
+                                ),
+                        )
+                    })
                     .into_any_element()
             }
             NoticeItem::When => {
@@ -1298,6 +1318,24 @@ impl StopsApp {
         cx.notify();
     }
 
+    /// Sets the template back to the default, with undo.
+    fn use_default_template(&mut self, cx: &mut Context<Self>) {
+        let old = self.prefs.notice.clone();
+        if let Some(prefs) = self.prefs.notice.as_mut() {
+            prefs.template = DEFAULT_TEMPLATE.to_owned();
+        }
+        self.save_prefs(cx);
+        self.sync_template_field(cx);
+        if let Some(old) = old {
+            self.show_pill(
+                "Default text restored",
+                Some(crate::PillAction::RestoreNotice(old)),
+                cx,
+            );
+        }
+        cx.notify();
+    }
+
     /// Undo of "turn off": brings the message setup back.
     pub(crate) fn restore_notice(&mut self, old: rovsti_geo::NoticePrefs, cx: &mut Context<Self>) {
         self.prefs.notice = Some(old);
@@ -1382,10 +1420,11 @@ mod tests {
             loading,
             NoticeItem::Status.key(&ChatList::Failed("x".into()))
         );
-        assert_ne!(
-            NoticeItem::Message { refused: false }.key(&ChatList::Idle),
-            NoticeItem::Message { refused: true }.key(&ChatList::Idle)
-        );
+        let message =
+            |refused, custom| NoticeItem::Message { refused, custom }.key(&ChatList::Idle);
+        assert_ne!(message(false, false), message(true, false));
+        assert_ne!(message(false, false), message(false, true));
+        assert_ne!(message(true, false), message(false, true));
         assert_ne!(
             NoticeItem::Chat(0).key(&ChatList::Idle),
             NoticeItem::Chat(1).key(&ChatList::Idle)

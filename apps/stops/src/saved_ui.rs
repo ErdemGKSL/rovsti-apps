@@ -16,7 +16,7 @@ use rovsti_ui::{
 };
 
 use crate::{
-    Page, StopsApp, lists,
+    Page, StopsApp, lists, pick,
     picker::{Destination, Slot},
     trip_ui::distance_text,
 };
@@ -144,6 +144,10 @@ impl StopsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.expanded = None;
                                 this.use_as(Slot::A, dest_a.clone(), false, cx);
+                                if this.trip.is_some() {
+                                    let text = pick::queued_text(Slot::A, &dest_a);
+                                    this.show_pill(text, None, cx);
+                                }
                                 this.tabs.jump_to(0);
                             })),
                     )
@@ -155,6 +159,10 @@ impl StopsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.expanded = None;
                                 this.use_as(Slot::B, dest_b.clone(), false, cx);
+                                if this.trip.is_some() {
+                                    let text = pick::queued_text(Slot::B, &dest_b);
+                                    this.show_pill(text, None, cx);
+                                }
                                 this.tabs.jump_to(0);
                             })),
                     )

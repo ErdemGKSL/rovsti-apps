@@ -165,4 +165,6 @@ app already uses.
 
 ## Status
 
-Planned at the base above; nothing implemented yet.
+Steps 1 to 8 implemented (H1 to H9). Step 8 added `CustomPick` (tested) and the -/+ day and
+time rows with a Schedule pill in the Send later sheet; the typed field remains. Device
+checks are rows 55 to 63 of `docs/messages-acceptance.md`.

@@ -77,3 +77,12 @@ APK: build with `gpuiforge build android` in `apps/messages`. Put `google-servic
 | 52 | In New message pick a contact with two numbers. | Both numbers are listed with their labels. | | |
 | 53 | With WhatsApp linked, pick a contact in New message. | A menu offers SMS or WhatsApp; WhatsApp opens the chat, or says the person is not on WhatsApp. | | |
 | 54 | In Settings delete a rule, remove an allowed sender, unblock a number, unmute a conversation. | Each shows an Undo pill; Undo puts the rule back at the same position, re-allows, re-blocks or re-mutes. | | |
+| 55 | In a WhatsApp chat tap a received document, video or audio (long press an image and choose Save). | The file is saved through the system Save as dialog and a pill says Saved. | | |
+| 56 | Long press a blocked sender's row and choose Unblock. | The number is unblocked and an Undo pill re-blocks it. Block is not offered for a blocked number. | | |
+| 57 | While Messages is not the default SMS app, long press a row and choose Delete. | A pill offers Make default and opens the role dialog; no confirmation opens first. | | |
+| 58 | Open a WhatsApp chat and use the menu next to the bell. | Pin, Archive, Mute and Mark unread work; a 1:1 chat also offers Call and Add to contacts (Open contact for a saved person). | | |
+| 59 | Long press a message in SMS and WhatsApp and choose Share; in an SMS page open a saved contact from the menu. | The system share sheet opens with the text; Open contact opens the contact editor. | | |
+| 60 | Schedule four or more messages in one chat, tap Show more, then Cancel one while the composer is empty. | All items are listed, and the cancelled text returns to the composer (a typed text is never replaced). A pill says Scheduled message cancelled. | | |
+| 61 | Leave a chat with a half-written message. | The inbox row reads Draft: followed by the first line. | | |
+| 62 | Mute a few chats and open Settings. | Muted entries show contact or chat names, not raw numbers. | | |
+| 63 | Long press Send, use the - and + rows for the day and the time, tap Schedule. | The time moves in 15-minute steps (wrapping at midnight), the day up to 30 days ahead; the message is scheduled for the shown time. A past time is refused. The typed field still works. | | |

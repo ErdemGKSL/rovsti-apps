@@ -2354,6 +2354,22 @@ impl MessagesApp {
         }
     }
 
+    pub(crate) fn schedule_pick(&mut self, cx: &mut Context<Self>) {
+        if !self.schedule.is_open() {
+            return;
+        }
+        let offset = self.backend.read(cx).locale().tz_offset_s;
+        let now = now_ms();
+        let pick = self.schedule.pick(now, offset);
+        if pick.is_schedulable(now, offset) {
+            self.schedule_at(pick.at_ms(now, offset), cx);
+        } else {
+            self.schedule
+                .set_error("Pick a time at least a minute from now");
+            cx.notify();
+        }
+    }
+
     /// Schedules the sheet's text for `at_ms`: SMS into the local queue and an
     /// alarm, WhatsApp to the gateway.
     pub(crate) fn schedule_at(&mut self, at_ms: i64, cx: &mut Context<Self>) {

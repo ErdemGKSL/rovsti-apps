@@ -73,6 +73,10 @@ list in `docs/phone-acceptance.md`.
       blocklist), scheduled send for SMS (alarm) and WhatsApp (gateway), with a
       Scheduled strip per conversation (done without a device)
 - [x] Manage conversations: delete, not spam, block, copy, search, drafts (done without a device)
+- [x] Second UX pass: save received WhatsApp files, unblock and make-default from the SMS
+      row menu, WhatsApp chat menu, share, scheduled strip with Show more and restore on
+      cancel, Draft line in the inbox, names in Settings > Muted, custom send time picker
+      (done without a device)
 - [x] Encrypted local backup and export to a user-chosen file, and import with a
       preview (done without a device)
 

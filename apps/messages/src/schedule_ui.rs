@@ -180,6 +180,83 @@ pub fn when_label(at_ms: i64, now_ms: i64, tz_offset_s: i32) -> String {
     }
 }
 
+/// A send time picked with the sheet's -/+ rows: a day offset from today and a
+/// time of day in 15-minute steps, in the phone's zone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CustomPick {
+    /// 0 is today, at most [`CustomPick::MAX_DAY`].
+    pub day: u16,
+    /// Minutes since local midnight, always a multiple of 15.
+    pub minutes: u16,
+}
+
+impl CustomPick {
+    pub const MAX_DAY: u16 = 30;
+    const STEP: i32 = 15;
+    const DAY_MINUTES: i32 = 24 * 60;
+
+    /// The next quarter hour at least 15 minutes from `now_ms`.
+    pub fn initial(now_ms: i64, tz_offset_s: i32) -> Self {
+        let local_s = now_ms.div_euclid(1000) + i64::from(tz_offset_s);
+        let now_min = local_s.rem_euclid(DAY_S) / 60;
+        let step = i64::from(Self::STEP);
+        let target = (now_min + step + step - 1).div_euclid(step) * step;
+        let total = i64::from(Self::DAY_MINUTES);
+        Self {
+            day: u16::from(target >= total),
+            minutes: u16::try_from(target.rem_euclid(total)).unwrap_or(0),
+        }
+    }
+
+    /// Moves by whole days, clamped to today..=[`Self::MAX_DAY`] days ahead.
+    pub fn step_day(self, delta: i32) -> Self {
+        let day = (i32::from(self.day) + delta).clamp(0, i32::from(Self::MAX_DAY));
+        Self {
+            day: u16::try_from(day).unwrap_or(0),
+            ..self
+        }
+    }
+
+    /// Moves by quarter hours (`delta` counts steps) and wraps within the day.
+    pub fn step_minutes(self, delta: i32) -> Self {
+        let minutes = (i32::from(self.minutes) + delta * Self::STEP).rem_euclid(Self::DAY_MINUTES);
+        Self {
+            minutes: u16::try_from(minutes).unwrap_or(0),
+            ..self
+        }
+    }
+
+    /// The Unix time (ms) of this pick.
+    pub fn at_ms(self, now_ms: i64, tz_offset_s: i32) -> i64 {
+        let tz = i64::from(tz_offset_s);
+        let today = (now_ms.div_euclid(1000) + tz).div_euclid(DAY_S);
+        let local_s = (today + i64::from(self.day)) * DAY_S + i64::from(self.minutes) * 60;
+        (local_s - tz) * 1000
+    }
+
+    /// "Today 18:00", "Tomorrow 09:00" or "12 Nov 09:00".
+    pub fn label(self, now_ms: i64, tz_offset_s: i32) -> String {
+        when_label(self.at_ms(now_ms, tz_offset_s), now_ms, tz_offset_s)
+    }
+
+    /// The day row's text ("Today", "Tomorrow", "12 Nov").
+    pub fn day_label(self, now_ms: i64, tz_offset_s: i32) -> String {
+        let full = self.label(now_ms, tz_offset_s);
+        full.rsplit_once(' ')
+            .map_or(full.clone(), |(d, _)| d.to_owned())
+    }
+
+    /// The time row's text ("18:30").
+    pub fn time_label(self, now_ms: i64, tz_offset_s: i32) -> String {
+        clock(self.at_ms(now_ms, tz_offset_s), tz_offset_s)
+    }
+
+    /// Whether the pick is far enough ahead to schedule.
+    pub fn is_schedulable(self, now_ms: i64, tz_offset_s: i32) -> bool {
+        self.at_ms(now_ms, tz_offset_s) >= now_ms + MIN_LEAD_MS
+    }
+}
+
 // ---- pure: the strip ----------------------------------------------------------
 
 /// Which conversation a strip belongs to.
@@ -297,6 +374,8 @@ pub struct ScheduleSheet {
     draft: Option<Draft>,
     custom: Entity<TextField>,
     error: Option<SharedString>,
+    /// The -/+ pick; `None` until touched, then [`CustomPick::initial`] is shown.
+    pick: Option<CustomPick>,
 }
 
 impl ScheduleSheet {
@@ -310,12 +389,14 @@ impl ScheduleSheet {
             draft: None,
             custom,
             error: None,
+            pick: None,
         }
     }
 
     pub fn open(&mut self, draft: Draft, cx: &mut Context<MessagesApp>) {
         self.draft = Some(draft);
         self.error = None;
+        self.pick = None;
         self.custom.update(cx, |field, cx| field.clear(cx));
         self.sheet.open();
     }
@@ -334,6 +415,21 @@ impl ScheduleSheet {
 
     pub fn custom_text(&self, cx: &gpui::App) -> String {
         self.custom.read(cx).text().to_owned()
+    }
+
+    /// The pick shown now: the touched one, else the next free quarter hour.
+    pub fn pick(&self, now_ms: i64, tz_offset_s: i32) -> CustomPick {
+        self.pick
+            .unwrap_or_else(|| CustomPick::initial(now_ms, tz_offset_s))
+    }
+
+    pub fn step_pick(&mut self, now_ms: i64, tz_offset_s: i32, days: i32, quarters: i32) {
+        self.error = None;
+        self.pick = Some(
+            self.pick(now_ms, tz_offset_s)
+                .step_day(days)
+                .step_minutes(quarters),
+        );
     }
 
     pub fn set_error(&mut self, error: impl Into<SharedString>) {
@@ -392,6 +488,53 @@ impl ScheduleSheet {
                 .on_click(cx.listener(move |this, _, _, cx| this.schedule_at(at_ms, cx))),
             );
         }
+        let pick = self.pick(now_ms, tz_offset_s);
+        let stepper = |id: &'static str, label: String, days: i32, quarters: i32| {
+            let button = |sign: &'static str, dir: i32, tag: &'static str| {
+                glass_pill(theme, sign)
+                    .id((tag, usize::from(id == "day")))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let offset = this.backend.read(cx).locale().tz_offset_s;
+                        this.schedule.step_pick(
+                            crate::now_ms(),
+                            offset,
+                            days * dir,
+                            quarters * dir,
+                        );
+                        cx.notify();
+                    }))
+            };
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(button("\u{2212}", -1, "sched-minus"))
+                .child(
+                    div()
+                        .text_size(typography::BODY.size)
+                        .text_color(colors.label)
+                        .child(label),
+                )
+                .child(button("+", 1, "sched-plus"))
+        };
+        body = body.child(
+            div()
+                .px(px(16.0))
+                .pt(px(10.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(stepper("day", pick.day_label(now_ms, tz_offset_s), 1, 0))
+                .child(stepper("time", pick.time_label(now_ms, tz_offset_s), 0, 1))
+                .child(
+                    glass_pill(
+                        theme,
+                        format!("Schedule {}", pick.label(now_ms, tz_offset_s)),
+                    )
+                    .id("sched-pick-go")
+                    .on_click(cx.listener(|this, _, _, cx| this.schedule_pick(cx))),
+                ),
+        );
         let custom = div()
             .px(px(16.0))
             .pt(px(10.0))
@@ -731,5 +874,80 @@ mod tests {
         let long = "x".repeat(100);
         assert_eq!(preview(&long).chars().count(), 61);
         assert!(preview(&long).ends_with('…'));
+    }
+
+    /// A UTC midnight, then `h:m` after it.
+    fn at_utc(h: i64, m: i64) -> i64 {
+        20_000 * 86_400_000 + (h * 60 + m) * 60_000 // 2024-10-04
+    }
+
+    #[test]
+    fn pick_starts_on_the_next_free_quarter_hour() {
+        let p = CustomPick::initial(at_utc(10, 7), 0);
+        assert_eq!((p.day, p.minutes), (0, 10 * 60 + 30));
+        // Exactly on a quarter still leaves 15 minutes.
+        assert_eq!(CustomPick::initial(at_utc(10, 0), 0).minutes, 10 * 60 + 15);
+        // Late evening rolls to tomorrow.
+        let p = CustomPick::initial(at_utc(23, 50), 0);
+        assert_eq!((p.day, p.minutes), (1, 15));
+        // The zone shifts the local day.
+        let p = CustomPick::initial(at_utc(22, 0), 3 * 3600);
+        assert_eq!((p.day, p.minutes), (0, 60 + 15));
+    }
+
+    #[test]
+    fn pick_steps_wrap_and_clamp() {
+        let p = CustomPick {
+            day: 0,
+            minutes: 23 * 60 + 45,
+        };
+        assert_eq!(p.step_minutes(1), CustomPick { day: 0, minutes: 0 });
+        assert_eq!(p.step_minutes(-1).minutes, 23 * 60 + 30);
+        assert_eq!(
+            CustomPick { day: 0, minutes: 0 }.step_minutes(-1).minutes,
+            23 * 60 + 45
+        );
+        assert_eq!(CustomPick { day: 0, minutes: 0 }.step_day(-1).day, 0);
+        let far = CustomPick {
+            day: CustomPick::MAX_DAY,
+            minutes: 0,
+        };
+        assert_eq!(far.step_day(1).day, CustomPick::MAX_DAY);
+        assert_eq!(far.step_day(-1).day, CustomPick::MAX_DAY - 1);
+    }
+
+    #[test]
+    fn pick_matches_the_typed_form() {
+        let tz = 3 * 3600;
+        let now = at_utc(6, 0); // 09:00 local
+        let pick = CustomPick {
+            day: 0,
+            minutes: 18 * 60 + 30,
+        };
+        assert_eq!(
+            pick.at_ms(now, tz),
+            parse_custom("18:30", now, tz).expect("time")
+        );
+        let next = pick.step_day(1);
+        assert_eq!(
+            next.at_ms(now, tz),
+            parse_custom("2024-10-05 18:30", now, tz).expect("time")
+        );
+        assert_eq!(pick.label(now, tz), "Today 18:30");
+        assert_eq!(next.label(now, tz), "Tomorrow 18:30");
+        assert_eq!(next.day_label(now, tz), "Tomorrow");
+        assert_eq!(next.time_label(now, tz), "18:30");
+    }
+
+    #[test]
+    fn pick_in_the_past_is_not_schedulable() {
+        let now = at_utc(10, 7);
+        let early = CustomPick {
+            day: 0,
+            minutes: 60,
+        };
+        assert!(!early.is_schedulable(now, 0));
+        assert!(early.step_day(1).is_schedulable(now, 0));
+        assert!(CustomPick::initial(now, 0).is_schedulable(now, 0));
     }
 }

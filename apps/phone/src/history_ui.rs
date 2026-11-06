@@ -10,7 +10,10 @@ use gpui::{
     AnyElement, Context, HapticFeedback, Hsla, InteractiveElement, IntoElement, MouseButton,
     ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_core::{call_log::ids_for_numbers, recents::extra_ids_for_numbers};
+use rovsti_core::{
+    call_log::{EntryRef, blocked_ids_for_numbers, ids_for_numbers},
+    recents::extra_ids_for_numbers,
+};
 use rovsti_ui::{
     motion::press_scale,
     motion_tokens::scale,
@@ -28,6 +31,8 @@ pub(crate) enum DeleteScope {
     Numbers {
         numbers: Arc<[SharedString]>,
         who: SharedString,
+        /// The Number sheet came from Blocked calls: only blocked calls go.
+        blocked: bool,
     },
     /// The whole call log (opened from Settings > Data).
     All,
@@ -41,6 +46,12 @@ const NO: &str = "sheet-del-no";
 /// Title and body of the confirm sheet; `count` is how many calls go.
 pub(crate) fn confirm_text(scope: &DeleteScope, count: usize) -> (String, String) {
     match scope {
+        DeleteScope::Numbers {
+            who, blocked: true, ..
+        } => (
+            format!("Delete blocked calls from {who}?"),
+            format!("{count} blocked calls will be removed from this phone's call log."),
+        ),
         DeleteScope::Numbers { who, .. } => (
             format!("Delete calls with {who}?"),
             format!("{count} calls will be removed from this phone's call log."),
@@ -56,10 +67,20 @@ pub(crate) fn confirm_text(scope: &DeleteScope, count: usize) -> (String, String
 impl PhoneApp {
     /// Call-log ids and WhatsApp call ids `scope` covers right now.
     fn scope_ids(&self, scope: &DeleteScope, cx: &gpui::App) -> (Vec<i64>, Vec<String>) {
-        let DeleteScope::Numbers { numbers, .. } = scope else {
+        let DeleteScope::Numbers {
+            numbers, blocked, ..
+        } = scope
+        else {
             return (Vec::new(), Vec::new());
         };
         let numbers: Vec<&str> = numbers.iter().map(|n| n.as_ref()).collect();
+        if *blocked {
+            let ids = match self.backend.read(cx).blocked_calls() {
+                backend::Load::Ready(log) => blocked_ids_for_numbers(&log, &numbers),
+                _ => Vec::new(),
+            };
+            return (ids, Vec::new());
+        }
         let ids = match self.backend.read(cx).call_log() {
             backend::Load::Ready(log) => ids_for_numbers(&log.source, &numbers),
             _ => Vec::new(),
@@ -91,7 +112,12 @@ impl PhoneApp {
         match scope {
             Some(scope @ DeleteScope::Numbers { .. }) => {
                 let (ids, wa_ids) = self.scope_ids(&scope, cx);
-                self.delete_call_ids(ids, wa_ids, window, cx);
+                if matches!(scope, DeleteScope::Numbers { blocked: true, .. }) {
+                    let refs: Vec<EntryRef> = ids.into_iter().map(EntryRef::Log).collect();
+                    self.delete_blocked_refs(&refs, window, cx);
+                } else {
+                    self.delete_call_ids(ids, wa_ids, window, cx);
+                }
             }
             Some(DeleteScope::All) => self.delete_all_history(window, cx),
             None => {}
@@ -246,6 +272,7 @@ impl PhoneApp {
                 .map(|row| DeleteScope::Numbers {
                     numbers: Arc::from([row.number.clone()]),
                     who: row.title.clone(),
+                    blocked: self.recents.number_blocked,
                 })
         } else {
             self.contact_sheet
@@ -258,6 +285,7 @@ impl PhoneApp {
                         .map(|n| SharedString::from(n.raw.clone()))
                         .collect(),
                     who: sheet.contact.name.clone(),
+                    blocked: false,
                 })
         };
         if let Some(scope) = scope {
@@ -274,6 +302,7 @@ mod tests {
         DeleteScope::Numbers {
             numbers: Arc::from([SharedString::from("0555")]),
             who: who.to_owned().into(),
+            blocked: false,
         }
     }
 
@@ -282,6 +311,21 @@ mod tests {
         let (t, b) = confirm_text(&numbers("Ayşe"), 3);
         assert_eq!(t, "Delete calls with Ayşe?");
         assert_eq!(b, "3 calls will be removed from this phone's call log.");
+    }
+
+    #[test]
+    fn confirm_text_blocked() {
+        let scope = DeleteScope::Numbers {
+            numbers: Arc::from([SharedString::from("0555")]),
+            who: "Ayşe".into(),
+            blocked: true,
+        };
+        let (t, b) = confirm_text(&scope, 2);
+        assert_eq!(t, "Delete blocked calls from Ayşe?");
+        assert_eq!(
+            b,
+            "2 blocked calls will be removed from this phone's call log."
+        );
     }
 
     #[test]

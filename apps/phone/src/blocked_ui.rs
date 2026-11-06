@@ -455,7 +455,9 @@ impl PhoneApp {
         if row.raw.trim().is_empty() || self.sheet.is_visible() {
             return;
         }
-        self.recents.number_history = self.history_for(&[row.raw.as_str()], cx);
+        self.recents.number_history = self.blocked_history_for(&[row.raw.as_str()], cx);
+        self.recents.number_history_edit = false;
+        self.recents.number_blocked = true;
         self.recents.number = Some(crate::recents::RowVm::for_number(
             row.raw.clone(),
             row.title.clone(),

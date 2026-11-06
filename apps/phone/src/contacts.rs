@@ -1082,6 +1082,8 @@ impl PhoneApp {
         let number = row.numbers[0].raw.clone();
         let named = row.name.as_ref() != number.as_str();
         self.recents.number_history = self.history_for(&[number.as_str()], cx);
+        self.recents.number_history_edit = false;
+        self.recents.number_blocked = false;
         self.recents.number = Some(crate::recents::RowVm::for_number(
             number.into(),
             row.name.clone(),

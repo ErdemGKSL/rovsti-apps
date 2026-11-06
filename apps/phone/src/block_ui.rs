@@ -515,6 +515,21 @@ impl PhoneApp {
         self.delete_call_ids(ids, wa_ids, window, cx);
     }
 
+    /// Deletes the blocked call-log rows `refs` stand for (Undo restores them).
+    pub(crate) fn delete_blocked_refs(
+        &mut self,
+        refs: &[EntryRef],
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (ids, _) = split_refs(refs);
+        let entries = match self.backend.read(cx).blocked_calls() {
+            backend::Load::Ready(blocked) => entries_by_id(&blocked, &ids),
+            _ => Vec::new(),
+        };
+        self.delete_call_entries(entries, Vec::new(), window, cx);
+    }
+
     /// Deletes call-log rows `ids` and WhatsApp calls `wa_ids`. Done shows "Deleted n" with Undo.
     pub(crate) fn delete_call_ids(
         &mut self,

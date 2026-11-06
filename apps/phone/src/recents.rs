@@ -230,6 +230,8 @@ pub(crate) struct RecentsView {
     pub(crate) number_history: Arc<[HistoryVm]>,
     /// The Number sheet's "Recent calls" shows a delete button on each line.
     pub(crate) number_history_edit: bool,
+    /// The Number sheet was opened from Blocked calls: it lists and deletes blocked calls.
+    pub(crate) number_blocked: bool,
     long_task: Option<Task<()>>,
     /// Unseen missed calls (the Recents tab's spoken label).
     missed: u32,
@@ -274,6 +276,7 @@ impl RecentsView {
             number: None,
             number_history: Arc::from(Vec::new()),
             number_history_edit: false,
+            number_blocked: false,
             long_task: None,
             missed: 0,
             missed_counted: false,
@@ -521,7 +524,11 @@ impl PhoneApp {
             && self.sheet_kind == crate::SheetKind::Number
             && let Some(number) = self.recents.number.as_ref().map(|r| r.number.clone())
         {
-            self.recents.number_history = self.history_for(&[number.as_ref()], cx);
+            self.recents.number_history = if self.recents.number_blocked {
+                self.blocked_history_for(&[number.as_ref()], cx)
+            } else {
+                self.history_for(&[number.as_ref()], cx)
+            };
             if self.recents.number_history.is_empty() {
                 self.recents.number_history_edit = false;
             }
@@ -948,6 +955,7 @@ impl PhoneApp {
         }
         self.recents.number_history = self.history_for(&[row.number.as_ref()], cx);
         self.recents.number_history_edit = false;
+        self.recents.number_blocked = false;
         self.recents.number = Some(row.clone());
         self.setup_note = None;
         self.sheet_kind = crate::SheetKind::Number;
@@ -1330,7 +1338,11 @@ impl PhoneApp {
         if let Some(i) = history_index(id, NUMBER_HISTORY_DELETE) {
             if let Some(vm) = self.recents.number_history.get(i) {
                 let entry = vm.entry.clone();
-                self.delete_row_calls(Arc::from([entry]), window, cx);
+                if self.recents.number_blocked {
+                    self.delete_blocked_refs(&[entry], window, cx);
+                } else {
+                    self.delete_row_calls(Arc::from([entry]), window, cx);
+                }
             }
             return;
         }
@@ -1490,6 +1502,22 @@ const HISTORY_LIMIT: usize = 10;
 const HISTORY_ROW_H: f32 = 44.0;
 
 impl PhoneApp {
+    /// The newest blocked calls with any of `numbers`. Empty until they are pulled.
+    pub(crate) fn blocked_history_for(&self, numbers: &[&str], cx: &gpui::App) -> Arc<[HistoryVm]> {
+        let Load::Ready(blocked) = self.backend.read(cx).blocked_calls() else {
+            return Arc::from(Vec::new());
+        };
+        let locale = match self.backend.read(cx).call_log() {
+            Load::Ready(log) => log.locale,
+            _ => recents::LocaleTime::default(),
+        };
+        let now = backend::now_ms();
+        recents::blocked_history(&blocked, numbers, HISTORY_LIMIT)
+            .iter()
+            .map(|line| HistoryVm::new(line, now, locale))
+            .collect()
+    }
+
     /// The newest calls (cellular and WhatsApp) with any of `numbers`. Empty
     /// until the call log is ready.
     pub(crate) fn history_for(&self, numbers: &[&str], cx: &gpui::App) -> Arc<[HistoryVm]> {

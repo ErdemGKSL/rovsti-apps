@@ -179,6 +179,14 @@ pub(crate) struct SimBadge {
     argb: i32,
 }
 
+/// Chip label size; 11.5 px so six chips (with "WhatsApp") fit 360 dp.
+const CHIP_TEXT: f32 = 11.5;
+
+/// Whether the visible list reads call notes (a search text or the Notes chip).
+fn notes_affect_list(query: &Query) -> bool {
+    !query.text.trim().is_empty() || query.filter == RecentsFilter::WithNotes
+}
+
 impl RowVm {
     /// A row for a number that has no call-log row of its own (the Blocked
     /// calls view opens the number sheet with it).
@@ -722,7 +730,7 @@ impl PhoneApp {
         }
         self.recents.notes = self.notes.snapshot();
         self.recents.notes_rev = self.notes.rev();
-        if self.recents.query.text.trim().is_empty() {
+        if !notes_affect_list(&self.recents.query) {
             return;
         }
         self.recents.reveal();
@@ -1851,7 +1859,7 @@ impl PhoneApp {
                             .justify_center()
                             .overflow_hidden()
                             .whitespace_nowrap()
-                            .text_size(px(12.0))
+                            .text_size(px(CHIP_TEXT))
                             .font_weight(if on {
                                 gpui::FontWeight::SEMIBOLD
                             } else {
@@ -3309,5 +3317,21 @@ mod tests {
         let hits = note_only_hits(&merged, &visible, &query, &notes);
         assert_eq!(hits.len(), 1, "the name match shows no note");
         assert_eq!(hits[&0].as_ref(), "Note: Bring the invoice");
+    }
+
+    #[test]
+    fn notes_chip_id_and_note_rebuild_rule() {
+        assert_eq!(RecentsFilter::ALL.len(), 6);
+        assert_eq!(
+            format!("rc-chip-{}", RecentsFilter::WithNotes.label()),
+            "rc-chip-Notes"
+        );
+        let mut q = Query::default();
+        assert!(!notes_affect_list(&q));
+        q.filter = RecentsFilter::WithNotes;
+        assert!(notes_affect_list(&q));
+        q.filter = RecentsFilter::All;
+        q.text = "ann".into();
+        assert!(notes_affect_list(&q));
     }
 }

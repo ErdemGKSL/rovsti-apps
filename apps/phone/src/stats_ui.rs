@@ -34,6 +34,8 @@ pub(crate) const SEGMENT_PREFIX: &str = "set-st-seg-";
 pub(crate) const PERSON_PREFIX: &str = "set-st-p-";
 /// The "Export CSV" pill of the page.
 pub(crate) const CSV_ID: &str = "set-st-csv";
+/// The Share pill beside Export CSV.
+pub(crate) const SHARE_ID: &str = "set-st-share";
 
 /// A non-zero value never draws thinner than this share of the chart height.
 const BAR_MIN: f32 = 0.04;
@@ -284,6 +286,8 @@ impl PhoneApp {
     ) {
         if id == CSV_ID {
             self.stats_export_csv(window, cx);
+        } else if id == SHARE_ID {
+            self.stats_share_range(window, cx);
         } else if let Some(i) = id
             .strip_prefix(SEGMENT_PREFIX)
             .and_then(|i| i.parse::<usize>().ok())
@@ -301,6 +305,32 @@ impl PhoneApp {
             self.open_number_sheet_for(person.number, person.title, person.named, cx);
         }
         cx.notify();
+    }
+
+    /// Shares the summary text of the chosen range.
+    fn stats_share_range(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        let Some((calls, tz, _, _)) = self.stat_calls(cx) else {
+            self.show_notice_pill("Call history isn't loaded yet", None, false, cx);
+            return;
+        };
+        let range = self.stats.range;
+        let people =
+            call_stats::top_people(&calls, range.since_ms(backend::now_ms(), tz), usize::MAX);
+        let text = call_stats::range_share_text(&people, range);
+        if text.is_empty() {
+            self.show_notice_pill(export_pill_text(0), None, false, cx);
+            return;
+        }
+        rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
+        let outcome = backend::share_text(&text);
+        if outcome != backend::Outcome::Done {
+            self.show_notice_pill(
+                outcome.why_not("Couldn't open the share sheet"),
+                None,
+                false,
+                cx,
+            );
+        }
     }
 
     /// Builds the per-person CSV of the chosen range and opens "save as".
@@ -682,40 +712,68 @@ impl PhoneApp {
                         .child(touch_surface(PhoneApp::touch_listener(cx, Some(id))))
                 })),
         )
-        .child(self.csv_pill(theme, cx))
+        .child(
+            div()
+                .flex()
+                .mx(px(16.0))
+                .gap(px(8.0))
+                .child(self.csv_pill(theme, cx))
+                .child(self.share_pill(theme, cx)),
+        )
         .into_any_element()
     }
 
     fn csv_pill(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        self.action_pill(theme, CSV_ID, "Export CSV", false, cx)
+    }
+
+    fn share_pill(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        self.action_pill(theme, SHARE_ID, "Share", true, cx)
+    }
+
+    fn action_pill(
+        &self,
+        theme: Theme,
+        id: &'static str,
+        label: &'static str,
+        icon: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = theme::colors(theme);
-        let press = self.presses.value(CSV_ID).clamp(0.0, 1.0);
-        div()
-            .id(CSV_ID)
+        let press = self.presses.value(id).clamp(0.0, 1.0);
+        let mut pill = div()
+            .id(id)
             .role(Role::Button)
-            .aria_label("Export CSV")
+            .aria_label(label)
             .relative()
-            .mx(px(16.0))
+            .flex_1()
             .h(px(44.0))
             .rounded_full()
             .bg(mix(colors.fill, gpui::white(), 0.16 * press))
             .flex()
             .items_center()
             .justify_center()
+            .gap(px(8.0))
             .text_size(typography::SUBHEADLINE.size)
             .font_weight(typography::HEADLINE.weight)
-            .text_color(colors.label)
-            .child("Export CSV")
+            .text_color(colors.label);
+        if icon {
+            pill = pill.child(
+                svg()
+                    .path(Icon::LucideShare2.path())
+                    .size(px(18.0))
+                    .text_color(colors.label),
+            );
+        }
+        pill.child(label)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
-                    this.presses.down(CSV_ID);
-                    this.settings_tap(CSV_ID, window, cx);
+                cx.listener(move |this, _, window, cx| {
+                    this.presses.down(id);
+                    this.settings_tap(id, window, cx);
                 }),
             )
-            .child(touch_surface(PhoneApp::touch_listener(
-                cx,
-                Some(CSV_ID.into()),
-            )))
+            .child(touch_surface(PhoneApp::touch_listener(cx, Some(id.into()))))
             .into_any_element()
     }
 }
@@ -815,6 +873,9 @@ mod tests {
         assert!(PERSON_PREFIX.starts_with(Sub::Stats.prefix()));
         assert!(CSV_ID.starts_with(Sub::Stats.prefix()));
         assert!(!CSV_ID.starts_with(SEGMENT_PREFIX) && !CSV_ID.starts_with(PERSON_PREFIX));
+        assert!(SHARE_ID.starts_with(Sub::Stats.prefix()));
+        assert!(!SHARE_ID.starts_with(SEGMENT_PREFIX) && !SHARE_ID.starts_with(PERSON_PREFIX));
+        assert_ne!(SHARE_ID, CSV_ID);
         assert!(!NUMBER_SHARE.starts_with("set-"));
         assert!(crate::details_ui::is_contact_id(CONTACT_SHARE));
         assert!(!crate::details_ui::is_contact_id(NUMBER_SHARE));

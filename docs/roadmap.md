@@ -105,7 +105,8 @@ list in `docs/phone-acceptance.md`.
 
 - [x] Foreground location service → `CrossingTrip::update`, using `next_fix_in` for battery
       (done without a device)
-- [x] Full-screen alarm with sound, vibration and snooze, which survives Doze
+- [x] Full-screen alarm with sound, vibration and snooze, which survives Doze; a failed arrival
+      message is shown on the live card and the alarm; the alarm shows when no snoozes are left
       (done without a device)
 - [x] Diameter-crossing trigger: pick two points A and B (shared `geo:` URIs and maps links, saved
       places, recent trips, GTFS stops). The circle has AB as its diameter; the line AB splits it
@@ -134,6 +135,6 @@ list in `docs/phone-acceptance.md`.
       for the arriving-soon message; the chat list refreshes (done without a device)
 - [x] Delete single History trips, with undo (done without a device)
 - [x] Saved places drawn on the map; a tap on one picks it exactly (done without a device)
-- [ ] Idea (open, U5): move a saved place to a new location
+- [x] Move a saved place on the map, with undo (done without a device)
 - [ ] Check map picking one-handed on a phone
 - [ ] Check the trip, alarm and Doze on a phone: written without a device

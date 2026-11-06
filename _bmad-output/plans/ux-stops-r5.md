@@ -234,3 +234,12 @@ cargo check -p rovsti_tiles --target aarch64-linux-android
 Disk: 9.3 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
 Other people push to main in parallel. Keep one focused commit per step, with the prefix
 "Rovsti stops:".
+
+## Status
+
+- Fixed: V1 (move a saved place, with undo), V2 (failed arrival message shown on the live card and
+  the alarm), V3 (alarm shows when no snoozes are left), V4 (Swap hidden with no point), V5 (Saved
+  empty state links to the map).
+- By design, no change: V6 (pin menu of a saved place has Rename only), V7 (arrival-text toggle
+  resets per trip), V8 (statistics rows not tappable), V9 (`rovsti_tiles` has no new gap).
+- `docs/architecture.md` lists neither Saved actions nor `FixOut` fields in full, so it is unchanged.

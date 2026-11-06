@@ -61,6 +61,8 @@ pub(crate) enum PillAction {
     RestoreReply(usize, SharedString),
     /// Undo of a Recents Delete: re-insert the call-log rows and WhatsApp records.
     RestoreCalls(Arc<[CallLogEntry]>, Arc<[WaCallRecord]>),
+    /// Undo of a backup import: put the prefs from just before it back.
+    RestorePrefs(Box<rovsti_core::settings::ImportPreview>),
     /// Open the system prompt for call log access.
     GrantCallLog,
 }
@@ -282,6 +284,12 @@ impl PhoneApp {
             PillAction::RestoreReply(slot, text) => self.replies_restore(slot, &text, window, cx),
             PillAction::RestoreCalls(entries, records) => {
                 self.restore_row_calls(entries, records, cx)
+            }
+            PillAction::RestorePrefs(preview) => {
+                self.backend
+                    .update(cx, |b, cx| b.apply_import(*preview, cx));
+                self.sync_settings_rows(cx, false);
+                self.show_notice_pill("Import undone", None, false, cx);
             }
             PillAction::GrantCallLog => self.recents_grant(cx),
         }

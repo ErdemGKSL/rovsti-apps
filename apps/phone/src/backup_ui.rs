@@ -7,6 +7,8 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 use rovsti_core::{settings::ImportPreview, wire::DocumentOp};
+
+use crate::block_ui::PillAction;
 use rovsti_ui::{
     motion::press_scale,
     motion_tokens::scale,
@@ -112,9 +114,15 @@ impl PhoneApp {
 
     fn import_confirm(&mut self, cx: &mut Context<Self>) {
         if let Some(preview) = self.backup.preview.take() {
+            let undo = ImportPreview::restoring(self.backend.read(cx).prefs());
             self.backend.update(cx, |b, cx| b.apply_import(preview, cx));
             self.sync_settings_rows(cx, false);
-            self.show_notice_pill("Backup imported", None, false, cx);
+            self.show_pill_action(
+                "Backup imported",
+                "Undo",
+                PillAction::RestorePrefs(Box::new(undo)),
+                cx,
+            );
         }
         self.close_sheet(cx);
     }

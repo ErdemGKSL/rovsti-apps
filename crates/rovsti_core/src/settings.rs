@@ -764,6 +764,19 @@ mod tests {
     }
 
     #[test]
+    fn undoing_an_import_returns_to_the_pre_import_prefs() {
+        let mut p = current();
+        p.quick_replies = vec!["Mine".into()];
+        let before = p.clone();
+        let undo = ImportPreview::restoring(&p);
+        let import = ImportPreview::from(&backup(), &p).expect("preview");
+        import.apply_to(&mut p);
+        assert_ne!(p.quick_replies, before.quick_replies);
+        undo.apply_to(&mut p);
+        assert_eq!(p, before);
+    }
+
+    #[test]
     fn restoring_default_prefs_applies_cleanly() {
         let snapshot = PrefsV2::default();
         let restore = ImportPreview::restoring(&snapshot);

@@ -44,6 +44,7 @@ mod backend;
 mod headless;
 #[cfg(test)]
 mod kotlin_contract;
+mod lists;
 mod map;
 mod pick;
 mod picker;
@@ -65,6 +66,13 @@ const TAB_ICONS: [Icon; 3] = [
     Icon::LucideBookmark,
     Icon::LucideSettings,
 ];
+
+/// What a tab or page renders: a block inside the scrolling page, or a
+/// virtualised list that scrolls itself and brings its own title.
+pub(crate) enum Page {
+    Flow(AnyElement),
+    List(Box<gpui::List>),
+}
 
 /// What the Undo button on the notice pill does.
 pub(crate) enum PillAction {
@@ -120,6 +128,14 @@ pub(crate) struct StopsApp {
     pub(crate) back_enabled: bool,
     /// The saved place whose actions are open.
     pub(crate) expanded: Option<u64>,
+    /// The virtualised lists: the Saved tab, History, the chat picker and the
+    /// destination search.
+    pub(crate) saved_list: lists::KeyedList,
+    pub(crate) history_list: lists::KeyedList,
+    pub(crate) notice_list: lists::KeyedList,
+    pub(crate) pick_list: lists::KeyedList,
+    /// The destination search's rows, rebuilt with the sheet.
+    pub(crate) pick_items: Vec<picker::PickItem>,
 
     pill: NoticePill,
     pill_action: Option<(u64, PillAction)>,
@@ -266,6 +282,11 @@ impl StopsApp {
             save_place: false,
             back_enabled: false,
             expanded: None,
+            saved_list: lists::KeyedList::default(),
+            history_list: lists::KeyedList::default(),
+            notice_list: lists::KeyedList::default(),
+            pick_list: lists::KeyedList::default(),
+            pick_items: Vec::new(),
             pill: NoticePill::new(),
             pill_action: None,
             whatsapp,
@@ -521,7 +542,7 @@ impl Render for StopsApp {
         let touch_entity = entity.clone();
 
         let body = match tab {
-            0 => self.trip_tab(theme, cx),
+            0 => Page::Flow(self.trip_tab(theme, cx)),
             1 => self.saved_tab(theme, cx),
             _ => self.settings_tab(theme, window, cx),
         };
@@ -531,6 +552,32 @@ impl Render for StopsApp {
         // The keyboard covers the bottom of the screen: leave room to scroll.
         let insets = window.insets();
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
+        let bottom = content_bottom_inset() + keyboard;
+        let progress = self.page.progress();
+        let offset = px(self.page.offset(24.0));
+        let page = match body {
+            Page::Flow(body) => div()
+                .id("page")
+                .size_full()
+                .overflow_y_scroll()
+                .pb(bottom)
+                .opacity(progress)
+                .child(
+                    div()
+                        .relative()
+                        .top(offset)
+                        .children(titled.then(|| large_title(theme, TABS[tab], None)))
+                        .child(body),
+                ),
+            // Only the rows on screen are built; the list scrolls itself.
+            Page::List(list) => div().id("page").size_full().opacity(progress).child(
+                div()
+                    .relative()
+                    .top(offset)
+                    .size_full()
+                    .child((*list).size_full().pb(bottom)),
+            ),
+        };
 
         div()
             .size_full()
@@ -546,21 +593,7 @@ impl Render for StopsApp {
                 theme,
                 rovsti_ui::theme::colors(theme).orange,
             ))
-            .child(
-                div()
-                    .id("page")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .pb(content_bottom_inset() + keyboard)
-                    .opacity(self.page.progress())
-                    .child(
-                        div()
-                            .relative()
-                            .top(px(self.page.offset(24.0)))
-                            .children(titled.then(|| large_title(theme, TABS[tab], None)))
-                            .child(body),
-                    ),
-            )
+            .child(page)
             .children(self.render_pill(theme, cx))
             .child(self.tabs.render(
                 theme,
@@ -570,6 +603,7 @@ impl Render for StopsApp {
                         if this.tabs.select(index) {
                             this.expanded = None;
                             this.page.restart();
+                            this.saved_list.scroll_to_top();
                             if index == 2 {
                                 this.refresh_preflight(cx);
                             }

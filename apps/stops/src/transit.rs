@@ -422,6 +422,7 @@ impl StopsApp {
         self.stop_hits = Default::default();
         self.stop_pattern = None;
         self.map.pattern = None;
+        self.map.forget_scene();
         for dest in [&mut self.pick.ends.a, &mut self.pick.ends.b]
             .into_iter()
             .flatten()

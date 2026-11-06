@@ -10,11 +10,17 @@
 //! view, how a polyline is thinned, how touches become gestures, what a scene
 //! looks like in pixels. The painting and the element glue are thin.
 
-use std::{cell::Cell, collections::VecDeque, rc::Rc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    collections::VecDeque,
+    rc::Rc,
+    sync::Arc,
+    time::Duration,
+};
 
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, Context, Corners, Edges, Hsla, InteractiveElement,
-    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Path,
     PathBuilder, Pixels, Point, StatefulInteractiveElement, Styled, Task, TouchEvent, TouchPhase,
     Window, canvas, div, point, px, quad,
 };
@@ -22,8 +28,8 @@ use rovsti_android::location;
 use rovsti_geo::{
     Coord, Diameter, EARTH_RADIUS_M, Feed, History, SavedPlaces, Side, Stop,
     tiles::{
-        ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileGeometry, TileLayer,
-        build_layer, line_width, tiles_for_view,
+        ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileCover, TileGeometry,
+        TileLayer, build_layer, line_width, tiles_for_view,
     },
     view::Viewport,
 };
@@ -341,6 +347,8 @@ fn dist(a: (f32, f32), b: (f32, f32)) -> f32 {
 pub struct Breadcrumb {
     trip: Option<u64>,
     points: VecDeque<Coord>,
+    /// Bumped on every change, so the map knows when to rebuild its scene.
+    revision: u64,
 }
 
 impl Breadcrumb {
@@ -350,6 +358,7 @@ impl Breadcrumb {
         if self.trip != trip {
             self.points.clear();
             self.trip = trip;
+            self.revision += 1;
         }
         // `NaN` is not usable either.
         if accuracy_m.is_nan() || accuracy_m > TRAIL_MAX_ACCURACY_M {
@@ -366,11 +375,18 @@ impl Breadcrumb {
             self.points.pop_front();
         }
         self.points.push_back(at);
+        self.revision += 1;
     }
 
     pub fn clear(&mut self) {
         self.points.clear();
         self.trip = None;
+        self.revision += 1;
+    }
+
+    /// Changes whenever the trail does.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Coord> + '_ {
@@ -872,18 +888,18 @@ fn add_circle(path: &mut PathBuilder, (x, y): (f32, f32), r: f32, close: bool) {
     }
 }
 
-fn fill_circle(window: &mut Window, at: (f32, f32), r: f32, color: Hsla) {
+fn fill_circle(out: &mut Paths, at: (f32, f32), r: f32, color: Hsla) {
     if r < 0.25 {
         return;
     }
     let mut path = PathBuilder::fill();
     add_circle(&mut path, at, r, true);
     if let Ok(path) = path.build() {
-        window.paint_path(path, color);
+        out.push((path, color));
     }
 }
 
-fn stroke_line(window: &mut Window, points: &[(f32, f32)], width: f32, color: Hsla) {
+fn stroke_line(out: &mut Paths, points: &[(f32, f32)], width: f32, color: Hsla) {
     let Some((first, rest)) = points.split_first() else {
         return;
     };
@@ -896,11 +912,11 @@ fn stroke_line(window: &mut Window, points: &[(f32, f32)], width: f32, color: Hs
         path.line_to(point(px(p.0), px(p.1)));
     }
     if let Ok(path) = path.build() {
-        window.paint_path(path, color);
+        out.push((path, color));
     }
 }
 
-fn fill_polygon(window: &mut Window, points: &[(f32, f32)], color: Hsla) {
+fn fill_polygon(out: &mut Paths, points: &[(f32, f32)], color: Hsla) {
     if points.len() < 3 {
         return;
     }
@@ -908,7 +924,7 @@ fn fill_polygon(window: &mut Window, points: &[(f32, f32)], color: Hsla) {
     let mut path = PathBuilder::fill();
     path.add_polygon(&pts, true);
     if let Ok(path) = path.build() {
-        window.paint_path(path, color);
+        out.push((path, color));
     }
 }
 
@@ -931,7 +947,7 @@ fn bboxes_meet(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> bool {
 /// overlaps finer ones). Polygons whose boxes meet therefore never share a
 /// path; the rest are batched, at most `PATH_POINT_CAP` points per path.
 fn fill_polygons(
-    window: &mut Window,
+    out: &mut Paths,
     polygons: &[Vec<Vec<(f32, f32)>>],
     to_window: &impl Fn((f32, f32)) -> (f32, f32),
     color: Hsla,
@@ -942,18 +958,18 @@ fn fill_polygons(
     let flush = |path: &mut PathBuilder,
                  points: &mut usize,
                  boxes: &mut Vec<(f32, f32, f32, f32)>,
-                 window: &mut Window| {
+                 out: &mut Paths| {
         let full = std::mem::replace(path, PathBuilder::fill());
         *points = 0;
         boxes.clear();
         if let Ok(path) = full.build() {
-            window.paint_path(path, color);
+            out.push((path, color));
         }
     };
     for polygon in polygons {
         let bbox = polygon_bbox(polygon);
         if !boxes.is_empty() && boxes.iter().any(|&b| bboxes_meet(b, bbox)) {
-            flush(&mut path, &mut points, &mut boxes, window);
+            flush(&mut path, &mut points, &mut boxes, out);
         }
         for ring in polygon.iter().filter(|r| r.len() >= 3) {
             let pts: Vec<_> = ring
@@ -968,17 +984,17 @@ fn fill_polygons(
         }
         boxes.push(bbox);
         if points >= PATH_POINT_CAP {
-            flush(&mut path, &mut points, &mut boxes, window);
+            flush(&mut path, &mut points, &mut boxes, out);
         }
     }
     if !boxes.is_empty() {
-        flush(&mut path, &mut points, &mut boxes, window);
+        flush(&mut path, &mut points, &mut boxes, out);
     }
 }
 
 /// Strokes `lines` as one path per `PATH_POINT_CAP` points.
 fn stroke_lines(
-    window: &mut Window,
+    out: &mut Paths,
     lines: &[Vec<(f32, f32)>],
     to_window: &impl Fn((f32, f32)) -> (f32, f32),
     width: f32,
@@ -1000,7 +1016,7 @@ fn stroke_lines(
             let full = std::mem::replace(&mut path, PathBuilder::stroke(px(width)));
             points = 0;
             if let Ok(path) = full.build() {
-                window.paint_path(path, color);
+                out.push((path, color));
             }
         }
     }
@@ -1014,17 +1030,12 @@ fn paint_class(
     display_zoom: f64,
     to_window: &impl Fn((f32, f32)) -> (f32, f32),
     pal: &Palette,
-    window: &mut Window,
+    out: &mut Paths,
 ) {
     let paint = pal.style.paint(class);
     match class.shape() {
         Shape::Fill => {
-            fill_polygons(
-                window,
-                &geometry.polygons,
-                to_window,
-                style_color(paint.color),
-            );
+            fill_polygons(out, &geometry.polygons, to_window, style_color(paint.color));
             if let Some(casing) = paint.casing {
                 let rings: Vec<Vec<(f32, f32)>> = geometry
                     .polygons
@@ -1032,23 +1043,17 @@ fn paint_class(
                     .flatten()
                     .map(|r| r.iter().copied().chain(r.first().copied()).collect())
                     .collect();
-                stroke_lines(window, &rings, to_window, 1.0, style_color(casing));
+                stroke_lines(out, &rings, to_window, 1.0, style_color(casing));
             }
         }
         Shape::Line => {
             let width = line_width(paint.width14, display_zoom);
             if let Some(casing) = paint.casing {
                 let wide = width + CASING_EXTRA_PX;
-                stroke_lines(
-                    window,
-                    &geometry.lines,
-                    to_window,
-                    wide,
-                    style_color(casing),
-                );
+                stroke_lines(out, &geometry.lines, to_window, wide, style_color(casing));
             }
             stroke_lines(
-                window,
+                out,
                 &geometry.lines,
                 to_window,
                 width,
@@ -1063,7 +1068,7 @@ fn paint_tiles(
     layer: &TileLayer,
     to_window: &impl Fn((f32, f32)) -> (f32, f32),
     pal: &Palette,
-    window: &mut Window,
+    out: &mut Paths,
 ) {
     if layer.backgrounds.is_empty() {
         return;
@@ -1080,10 +1085,10 @@ fn paint_tiles(
         quads.add_polygon(&pts, true);
     }
     if let Ok(path) = quads.build() {
-        window.paint_path(path, style_color(pal.style.background()));
+        out.push((path, style_color(pal.style.background())));
     }
     for (class, geometry) in &layer.groups {
-        paint_class(*class, geometry, layer.display_zoom, to_window, pal, window);
+        paint_class(*class, geometry, layer.display_zoom, to_window, pal, out);
     }
 }
 
@@ -1092,36 +1097,61 @@ fn paint_diameter(
     d: &DiameterScene,
     to_window: &impl Fn((f32, f32)) -> (f32, f32),
     pal: &Palette,
-    window: &mut Window,
+    out: &mut Paths,
 ) {
     let all = |points: &[(f32, f32)]| -> Vec<(f32, f32)> {
         points.iter().map(|&p| to_window(p)).collect()
     };
-    fill_polygon(window, &all(&d.left), pal.left_wash);
-    fill_polygon(window, &all(&d.right), pal.right_wash);
+    fill_polygon(out, &all(&d.left), pal.left_wash);
+    fill_polygon(out, &all(&d.right), pal.right_wash);
     if d.radius_px >= 2.0 {
         let mut ring = PathBuilder::stroke(px(2.0)).dash_array(&[px(8.0), px(6.0)]);
         add_circle(&mut ring, to_window(d.centre), d.radius_px, false);
         if let Ok(path) = ring.build() {
-            window.paint_path(path, pal.ring);
+            out.push((path, pal.ring));
         }
     }
     let (a, b) = (to_window(d.a), to_window(d.b));
-    stroke_line(window, &[a, b], 4.5, pal.ring);
+    stroke_line(out, &[a, b], 4.5, pal.ring);
     for end in [a, b] {
-        fill_circle(window, end, 8.0, pal.halo);
-        fill_circle(window, end, 5.5, pal.ring);
+        fill_circle(out, end, 8.0, pal.halo);
+        fill_circle(out, end, 5.5, pal.ring);
     }
 }
 
-/// Paints `scene` into `bounds`. Scene points are from the view centre.
-fn paint_scene(
-    scene: &Scene,
+/// Painted paths with their colours, around the view centre at (0, 0).
+type Paths = Vec<(Path<Pixels>, Hsla)>;
+
+/// `path` moved by `by`: tessellated once, painted wherever the map is now.
+fn shifted(path: &Path<Pixels>, by: Point<Pixels>) -> Path<Pixels> {
+    let mut path = path.clone();
+    path.bounds.origin += by;
+    for vertex in &mut path.vertices {
+        vertex.xy_position += by;
+    }
+    path
+}
+
+/// The tessellated scene and what it was built from. Tessellating tens of
+/// thousands of tile vertices is the costly part of drawing the map, so it
+/// only runs again when the scene, the theme or the dragged pin change, not
+/// on every frame of a sheet, pill or tab animation over a still map.
+#[derive(Default)]
+pub struct PaintCache {
+    key: Option<(u64, Theme, Option<Slot>)>,
+    paths: Paths,
+}
+
+/// Paints the plate and the cached paths of scene `serial` into `bounds`.
+fn paint_map(
+    cache: &mut PaintCache,
+    (serial, scene): (u64, &Scene),
     dragging: Option<Slot>,
+    theme: Theme,
     bounds: Bounds<Pixels>,
-    pal: &Palette,
     window: &mut Window,
 ) {
+    let pal = Palette::new(theme);
     window.paint_quad(quad(
         bounds,
         Corners::all(radius::CARD),
@@ -1130,17 +1160,28 @@ fn paint_scene(
         pal.border,
         BorderStyle::default(),
     ));
+    let key = (serial, theme, dragging);
+    if cache.key != Some(key) {
+        cache.paths = scene_paths(scene, dragging, &pal);
+        cache.key = Some(key);
+    }
     let centre = bounds.center();
-    let to_window = |p: (f32, f32)| (f32::from(centre.x) + p.0, f32::from(centre.y) + p.1);
-    let to_window_all = |points: &[(f32, f32)]| -> Vec<(f32, f32)> {
-        points.iter().map(|&p| to_window(p)).collect()
-    };
+    for (path, color) in &cache.paths {
+        window.paint_path(shifted(path, centre), *color);
+    }
+}
+
+/// Tessellates `scene` into paths around the view centre.
+fn scene_paths(scene: &Scene, dragging: Option<Slot>, pal: &Palette) -> Paths {
+    let mut paths = Paths::new();
+    let out = &mut paths;
+    let to_window = |p: (f32, f32)| p;
 
     // The map tiles under everything else; where they are missing the plate shows.
-    paint_tiles(&scene.tiles, &to_window, pal, window);
+    paint_tiles(&scene.tiles, &to_window, pal, out);
 
     // The chosen line, then the stops on it.
-    stroke_line(window, &to_window_all(&scene.line), 3.5, pal.line);
+    stroke_line(out, &scene.line, 3.5, pal.line);
 
     if !scene.stops.is_empty() {
         let mut dots = PathBuilder::fill();
@@ -1148,40 +1189,41 @@ fn paint_scene(
             add_circle(&mut dots, to_window(p), 3.5, true);
         }
         if let Ok(path) = dots.build() {
-            window.paint_path(path, pal.stop);
+            out.push((path, pal.stop));
         }
     }
 
     if let Some(d) = &scene.diameter {
-        paint_diameter(d, &to_window, pal, window);
+        paint_diameter(d, &to_window, pal, out);
     }
     if let Some((a, b)) = scene.segment {
-        stroke_line(window, &[to_window(a), to_window(b)], 3.5, pal.ring);
+        stroke_line(out, &[to_window(a), to_window(b)], 3.5, pal.ring);
     }
 
-    stroke_line(window, &to_window_all(&scene.trail), 3.0, pal.trail);
+    stroke_line(out, &scene.trail, 3.0, pal.trail);
 
     if let Some((at, accuracy)) = scene.position {
         let at = to_window(at);
-        fill_circle(window, at, accuracy, pal.accuracy);
-        fill_circle(window, at, 9.0, pal.halo);
-        fill_circle(window, at, 6.5, pal.you);
+        fill_circle(out, at, accuracy, pal.accuracy);
+        fill_circle(out, at, 9.0, pal.halo);
+        fill_circle(out, at, 6.5, pal.you);
     }
 
     for pin in &scene.pins {
         let at = to_window(pin.at);
         let r = pin_radius(dragging == Some(pin.slot));
         let color = pin_color(pal, pin.slot);
-        fill_circle(window, at, r + PIN_RIM_PX, pal.halo);
-        fill_circle(window, at, r, color);
+        fill_circle(out, at, r + PIN_RIM_PX, pal.halo);
+        fill_circle(out, at, r, color);
         if pin.snapped {
             let mut ring = PathBuilder::stroke(px(2.0));
             add_circle(&mut ring, at, r + PIN_RIM_PX + 3.5, false);
             if let Ok(path) = ring.build() {
-                window.paint_path(path, color);
+                out.push((path, color));
             }
         }
     }
+    paths
 }
 
 /// Radius of a pin disc; the pin in the finger is drawn larger.
@@ -1280,6 +1322,36 @@ pub struct MapState {
     tap_timer: Option<Task<()>>,
     /// The my-location button was pressed and its fix has not arrived yet.
     locate_pending: bool,
+    /// The last scene and what it was built from: a render with the same
+    /// inputs (a sheet sliding over the map, the pill, a keystroke) reuses it.
+    scene: Option<CachedScene>,
+    /// Bumped for every scene built, to key the tessellated paths.
+    scene_serial: u64,
+    /// The tessellated paths of the scene, shared with the paint closure.
+    paint: Rc<RefCell<PaintCache>>,
+}
+
+/// What a scene is built from: equal inputs give an equal scene.
+#[derive(Clone, Debug, PartialEq)]
+struct SceneKey {
+    viewport: Viewport,
+    size: (f32, f32),
+    position: Option<(Coord, f64)>,
+    diameter: Option<Diameter>,
+    pins: [Option<(Coord, bool)>; 2],
+    trail: u64,
+    /// The feed's address; a new feed also forgets the scene.
+    feed: usize,
+    pattern: Option<u32>,
+    cover: TileCover,
+    /// [`crate::tiles::MapTiles::revision`].
+    tiles: u64,
+}
+
+struct CachedScene {
+    key: SceneKey,
+    serial: u64,
+    scene: Rc<Scene>,
 }
 
 /// How old a device fix may be and still centre the idle map.
@@ -1303,6 +1375,9 @@ impl Default for MapState {
             bounds: Rc::default(),
             tap_timer: None,
             locate_pending: false,
+            scene: None,
+            scene_serial: 0,
+            paint: Rc::default(),
         }
     }
 }
@@ -1355,6 +1430,29 @@ impl MapState {
         self.follow = true;
         self.trail.clear();
         self.pattern = None;
+    }
+
+    /// Drops the cached scene (the feed it points into is gone).
+    pub fn forget_scene(&mut self) {
+        self.scene = None;
+    }
+
+    /// The scene built for `key` with its serial, when nothing changed since.
+    fn cached_scene(&self, key: &SceneKey) -> Option<(u64, Rc<Scene>)> {
+        let cached = self.scene.as_ref().filter(|c| c.key == *key)?;
+        Some((cached.serial, Rc::clone(&cached.scene)))
+    }
+
+    /// Keeps `scene`, built for `key`, and returns it with its new serial.
+    fn store_scene(&mut self, key: SceneKey, scene: Scene) -> (u64, Rc<Scene>) {
+        self.scene_serial += 1;
+        let scene = Rc::new(scene);
+        self.scene = Some(CachedScene {
+            key,
+            serial: self.scene_serial,
+            scene: Rc::clone(&scene),
+        });
+        (self.scene_serial, scene)
     }
 }
 
@@ -1519,7 +1617,10 @@ impl StopsApp {
                 fit_view(position.map(|p| p.0), diameter.as_ref(), size)
                     .unwrap_or(self.map.viewport)
             } else {
-                let fallback = fallback_centre(&self.history, &self.saved);
+                // The fallback is only looked up when nothing else places the view.
+                let fallback = (self.pick.ends.is_empty() && position.is_none())
+                    .then(|| fallback_centre(&self.history, &self.saved))
+                    .flatten();
                 idle_view(&self.pick.ends, position.map(|p| p.0), fallback, size)
             };
         }
@@ -1538,24 +1639,45 @@ impl StopsApp {
         self.map.gestures.set_handles(&handles);
         let cover = tiles_for_view(&viewport, size, VIEW_TILE_CAP);
         self.map_tiles.request_view(&cover, cx);
-        let loaded = self.map_tiles.gather(&cover);
-        let loaded: Vec<&TileGeometry> = loaded.iter().map(|t| &**t).collect();
-        let scene = Scene::build(&SceneInput {
+        let pins = [Slot::A, Slot::B].map(|slot| {
+            self.pick
+                .ends
+                .get(slot)
+                .map(|d| (d.coord, d.gtfs_stop.is_some()))
+        });
+        let key = SceneKey {
             viewport,
             size,
             position,
             diameter,
-            pins: [Slot::A, Slot::B].map(|slot| {
-                self.pick
-                    .ends
-                    .get(slot)
-                    .map(|d| (d.coord, d.gtfs_stop.is_some()))
-            }),
-            trail: &self.map.trail,
-            feed: self.gtfs.as_deref(),
+            pins,
+            trail: self.map.trail.revision(),
+            feed: self.gtfs.as_ref().map_or(0, |f| Arc::as_ptr(f) as usize),
             pattern: self.map.pattern,
-            tiles: &loaded,
-        });
+            cover,
+            tiles: self.map_tiles.revision(),
+        };
+        // Projecting and clipping the tiles, the stops in view and the line is
+        // only redone when one of the inputs changed.
+        let (serial, scene) = match self.map.cached_scene(&key) {
+            Some(cached) => cached,
+            None => {
+                let loaded = self.map_tiles.gather(&key.cover);
+                let loaded: Vec<&TileGeometry> = loaded.iter().map(|t| &**t).collect();
+                let scene = Scene::build(&SceneInput {
+                    viewport,
+                    size,
+                    position,
+                    diameter,
+                    pins,
+                    trail: &self.map.trail,
+                    feed: self.gtfs.as_deref(),
+                    pattern: self.map.pattern,
+                    tiles: &loaded,
+                });
+                self.map.store_scene(key, scene)
+            }
+        };
         let palette = Palette::new(theme);
         let colors = theme::colors(theme);
         let (bar_px, bar_label) = scale_bar(viewport.metres_per_px);
@@ -1574,6 +1696,7 @@ impl StopsApp {
             .unwrap_or_default();
         let dragging = self.pick.dragging();
         let pin_labels = pin_labels(theme, &scene, dragging, &self.pick.ends, size);
+        let paint = Rc::clone(&self.map.paint);
         let idle = self.trip.is_none();
 
         let entity = cx.entity();
@@ -1663,7 +1786,14 @@ impl StopsApp {
                             canvas(
                                 |_, _, _| (),
                                 move |bounds, (), window, _| {
-                                    paint_scene(&scene, dragging, bounds, &palette, window);
+                                    paint_map(
+                                        &mut paint.borrow_mut(),
+                                        (serial, &scene),
+                                        dragging,
+                                        theme,
+                                        bounds,
+                                        window,
+                                    );
                                 },
                             )
                             .size_full(),
@@ -2110,6 +2240,93 @@ mod tests {
     }
 
     // -- polyline thinning --
+
+    // -- caching --
+
+    fn scene_key(viewport: Viewport) -> SceneKey {
+        SceneKey {
+            viewport,
+            size: (400.0, 300.0),
+            position: None,
+            diameter: None,
+            pins: [None, None],
+            trail: 0,
+            feed: 0,
+            pattern: None,
+            cover: tiles_for_view(&viewport, (400.0, 300.0), VIEW_TILE_CAP),
+            tiles: 0,
+        }
+    }
+
+    #[test]
+    fn the_same_inputs_reuse_the_scene_and_a_change_rebuilds_it() {
+        let mut m = MapState::default();
+        let key = scene_key(Viewport::new(IST, 10.0));
+        assert!(m.cached_scene(&key).is_none());
+        let (serial, first) = m.store_scene(key.clone(), Scene::default());
+        let (again, cached) = m.cached_scene(&key).unwrap();
+        assert_eq!(again, serial);
+        assert!(Rc::ptr_eq(&first, &cached));
+        // A pan, a loaded tile or a new trail point is a different key.
+        let mut panned = key.clone();
+        panned.viewport.pan(5.0, 0.0);
+        assert!(m.cached_scene(&panned).is_none());
+        let loaded = SceneKey {
+            tiles: 1,
+            ..key.clone()
+        };
+        assert!(m.cached_scene(&loaded).is_none());
+        let (next, _) = m.store_scene(loaded, Scene::default());
+        assert_ne!(next, serial);
+        m.forget_scene();
+        assert!(m.cached_scene(&key).is_none());
+    }
+
+    #[test]
+    fn the_trail_revision_moves_with_the_trail() {
+        let mut trail = Breadcrumb::default();
+        let r0 = trail.revision();
+        trail.record(Some(1), IST, 5.0);
+        let r1 = trail.revision();
+        assert_ne!(r0, r1);
+        // A fix that barely moved adds nothing and keeps the revision.
+        trail.record(Some(1), IST, 5.0);
+        assert_eq!(trail.revision(), r1);
+        trail.clear();
+        assert_ne!(trail.revision(), r1);
+    }
+
+    #[test]
+    fn a_shifted_path_moves_every_vertex() {
+        let mut builder = PathBuilder::fill();
+        add_circle(&mut builder, (0.0, 0.0), 10.0, true);
+        let path = builder.build().unwrap();
+        let by = point(px(100.0), px(50.0));
+        let moved = shifted(&path, by);
+        assert_eq!(moved.vertices.len(), path.vertices.len());
+        for (a, b) in path.vertices.iter().zip(&moved.vertices) {
+            assert_eq!(b.xy_position, a.xy_position + by);
+        }
+        assert_eq!(moved.bounds.origin, path.bounds.origin + by);
+    }
+
+    #[test]
+    fn the_scene_tessellates_around_the_centre() {
+        let scene = Scene {
+            position: Some(((0.0, 0.0), 20.0)),
+            pins: vec![PinScene {
+                slot: Slot::A,
+                at: (30.0, -10.0),
+                snapped: true,
+            }],
+            ..Scene::default()
+        };
+        let paths = scene_paths(&scene, None, &Palette::new(Theme::Light));
+        // Accuracy, halo and dot; the pin's rim, disc and snapped ring.
+        assert_eq!(paths.len(), 6);
+        let first = &paths[0].0.bounds;
+        assert!(first.origin.x < px(0.0) && first.origin.y < px(0.0));
+    }
 
     #[test]
     fn thinning_drops_crowded_vertices_and_keeps_the_ends() {

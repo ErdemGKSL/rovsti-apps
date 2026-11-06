@@ -3,17 +3,17 @@
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, div, px,
+    StatefulInteractiveElement, Styled, div, list, px,
 };
 use rovsti_geo::{Place, SavedPlaces};
 use rovsti_ui::{
-    components::{empty_state, glass_pill, list_row, section},
+    components::{empty_state, glass_pill, large_title, list_row},
     theme,
     tokens::Theme,
 };
 
 use crate::{
-    StopsApp,
+    Page, StopsApp, lists,
     picker::{Destination, Slot},
 };
 
@@ -27,45 +27,71 @@ pub fn restore(saved: &mut SavedPlaces, place: Place, index: usize) {
 }
 
 impl StopsApp {
-    pub(crate) fn saved_tab(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    /// The Saved tab: a virtualised list whose first item is the title, so the
+    /// title scrolls away with the places as before.
+    pub(crate) fn saved_tab(&mut self, theme: Theme, cx: &mut Context<Self>) -> Page {
         if self.saved.places.is_empty() {
-            return empty_state(
-                theme,
-                "No Saved Stops",
-                "Turn on Save this place when you pick a point, and it appears here for one-tap use as A or B.",
-            )
-            .into_any_element();
-        }
-        let colors = theme::colors(theme);
-        let mut rows: Vec<AnyElement> = Vec::new();
-        for place in self.saved.places.clone() {
-            let id = place.id;
-            let open = self.expanded == Some(id);
-            rows.push(
-                list_row(
+            return Page::Flow(
+                empty_state(
                     theme,
-                    None,
-                    place.name.clone(),
-                    None,
-                    Some(if open { "Close" } else { "" }.into()),
+                    "No Saved Stops",
+                    "Turn on Save this place when you pick a point, and it appears here for one-tap use as A or B.",
                 )
-                .id(("place", id as usize))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.expanded = if this.expanded == Some(id) {
-                        None
-                    } else {
-                        Some(id)
-                    };
-                    cx.notify();
-                }))
                 .into_any_element(),
             );
-            if !open {
-                continue;
-            }
-            let dest_a = Destination::from_place(&place);
+        }
+        // An opened place is taller: its key changes so it is measured again.
+        let keys = std::iter::once(lists::key(0, 0))
+            .chain(
+                self.saved
+                    .places
+                    .iter()
+                    .map(|p| lists::key(1 + u8::from(self.expanded == Some(p.id)), p.id)),
+            )
+            .collect();
+        let state = self.saved_list.sync(keys);
+        Page::List(Box::new(list(
+            state,
+            cx.processor(move |this, ix: usize, window, cx| {
+                let theme = rovsti_ui::current_theme(window);
+                match ix.checked_sub(1) {
+                    None => large_title(theme, "Saved", None).into_any_element(),
+                    Some(i) => this.saved_item(theme, i, cx),
+                }
+            }),
+        )))
+    }
+
+    /// Saved place `i` with its actions when it is open.
+    fn saved_item(&mut self, theme: Theme, i: usize, cx: &mut Context<Self>) -> AnyElement {
+        let count = self.saved.places.len();
+        let Some(place) = self.saved.places.get(i) else {
+            return div().into_any_element();
+        };
+        let colors = theme::colors(theme);
+        let id = place.id;
+        let open = self.expanded == Some(id);
+        let row = list_row(
+            theme,
+            None,
+            place.name.clone(),
+            None,
+            Some(if open { "Close" } else { "" }.into()),
+        )
+        .id(("place", id as usize))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.expanded = if this.expanded == Some(id) {
+                None
+            } else {
+                Some(id)
+            };
+            cx.notify();
+        }));
+        let mut item = div().flex().flex_col().child(row);
+        if open {
+            let dest_a = Destination::from_place(place);
             let dest_b = dest_a.clone();
-            rows.push(
+            item = item.child(
                 div()
                     .flex()
                     .gap(px(10.0))
@@ -109,11 +135,10 @@ impl StopsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.delete_place(id, cx);
                             })),
-                    )
-                    .into_any_element(),
+                    ),
             );
         }
-        section(theme, None, rows).into_any_element()
+        lists::grouped(theme, lists::Place::of(i, count), item).into_any_element()
     }
 
     fn delete_place(&mut self, id: u64, cx: &mut Context<Self>) {

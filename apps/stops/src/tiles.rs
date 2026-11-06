@@ -32,6 +32,8 @@ pub fn cache_root(data_dir: &Path) -> PathBuf {
 pub struct TileMemory {
     tiles: HashMap<TileId, Arc<TileGeometry>>,
     lru: LruIndex<TileId>,
+    /// Bumped whenever a tile comes or goes, so the map knows when to rebuild.
+    revision: u64,
 }
 
 impl TileMemory {
@@ -42,6 +44,11 @@ impl TileMemory {
     #[cfg(test)]
     fn len(&self) -> usize {
         self.tiles.len()
+    }
+
+    /// Changes whenever the set of tiles in memory does.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// The tile, marked as recently used.
@@ -59,11 +66,13 @@ impl TileMemory {
         for gone in self.lru.evict_to(cap) {
             self.tiles.remove(&gone);
         }
+        self.revision += 1;
     }
 
     pub fn clear(&mut self) {
         self.tiles.clear();
         self.lru = LruIndex::new();
+        self.revision += 1;
     }
 }
 
@@ -141,6 +150,12 @@ impl MapTiles {
             .ok();
         })
         .detach();
+    }
+
+    /// Changes whenever the tiles in memory do: what [`Self::gather`] returns
+    /// for a cover only changes with it.
+    pub fn revision(&self) -> u64 {
+        self.memory.revision()
     }
 
     /// Wants the tiles on screen now, ahead of any prefetch.
@@ -251,6 +266,20 @@ mod tests {
         let mut t = TileGeometry::empty(TileId::new(z, x, 0).unwrap());
         t.vertices = vertices;
         Arc::new(t)
+    }
+
+    #[test]
+    fn the_revision_moves_when_tiles_come_or_go() {
+        let mut m = TileMemory::default();
+        let r0 = m.revision();
+        m.insert(tile(5, 1, 40), 100);
+        let r1 = m.revision();
+        assert_ne!(r0, r1);
+        // Reading does not change what is in memory.
+        assert!(m.get(TileId::new(5, 1, 0).unwrap()).is_some());
+        assert_eq!(m.revision(), r1);
+        m.clear();
+        assert_ne!(m.revision(), r1);
     }
 
     #[test]

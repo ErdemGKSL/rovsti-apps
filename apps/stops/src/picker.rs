@@ -5,10 +5,10 @@
 //! becomes a destination to confirm, or a sentence that says why not.
 
 use gpui::{
-    AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    AnyElement, Context, InteractiveElement, IntoElement, ListSizingBehavior, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, Window, div, list, px,
 };
-use rovsti_geo::{Coord, Diameter, DiameterError, Place, dest::parse_location};
+use rovsti_geo::{Coord, Diameter, DiameterError, Feed, Place, dest::parse_location};
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
     field::field_box,
@@ -17,8 +17,8 @@ use rovsti_ui::{
 };
 
 use crate::{
-    StopsApp, pick,
-    transit::{self, MAX_LINES},
+    StopsApp, lists, pick,
+    transit::{self, LineChoice, MAX_LINES},
     trip_ui,
 };
 
@@ -193,18 +193,98 @@ pub enum SheetMode {
     Stop(u32),
 }
 
-/// The stop search for one query, so typing searches once and not once per
-/// frame of the sheet's animation.
+/// The stop search for one query, and the lines of the stop the sheet shows,
+/// so typing searches once and not once per frame of the sheet's animation.
+/// Reset with the feed.
 #[derive(Default)]
 pub struct StopHits {
     query: String,
-    hits: Vec<u32>,
+    /// Matching stops with the number of lines through each.
+    hits: Vec<(u32, usize)>,
+    /// The stop sheet's stop and its lines.
+    lines: Option<(u32, Vec<LineChoice>)>,
+}
+
+/// Space the sheet keeps around its body: the gap above the panel (56), the
+/// margin under it (10), the grabber (30) and the body's bottom padding (12).
+/// Mirrors `rovsti_ui::sheet`.
+const SHEET_CHROME: f32 = 108.0;
+
+/// One row of the destination search, built once per render of the sheet;
+/// the list builds elements only for the rows on screen.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PickItem {
+    /// The pasted link or coordinates, ready to confirm.
+    Offer(Destination),
+    /// Why the pasted link is no destination.
+    Refusal(&'static str),
+    Header(&'static str),
+    /// A stop of the feed with the number of lines through it.
+    Stop {
+        index: u32,
+        lines: usize,
+        at: lists::Place,
+    },
+    Saved {
+        id: u64,
+        dest: Destination,
+        at: lists::Place,
+    },
+    Pair {
+        i: usize,
+        a: Destination,
+        b: Destination,
+        at: lists::Place,
+    },
+    Recent {
+        i: usize,
+        dest: Destination,
+        at: lists::Place,
+    },
+    /// How to get a destination in at all.
+    Hint,
+}
+
+impl PickItem {
+    /// The list key: it changes whenever the item's height may.
+    fn key(&self) -> u64 {
+        match self {
+            Self::Offer(_) => lists::key(0, 0),
+            Self::Refusal(why) => lists::key(1, why.len() as u64),
+            Self::Header(text) => lists::key(2, text.len() as u64),
+            Self::Stop { index, .. } => lists::key(3, u64::from(*index)),
+            Self::Saved { id, .. } => lists::key(4, *id),
+            Self::Pair { i, .. } => lists::key(5, *i as u64),
+            Self::Recent { i, .. } => lists::key(6, *i as u64),
+            Self::Hint => lists::key(7, 0),
+        }
+    }
+}
+
+/// `rows` as items under `header`, each knowing its place in the group.
+fn group<T>(
+    items: &mut Vec<PickItem>,
+    header: &'static str,
+    rows: Vec<T>,
+    item: impl Fn(usize, T, lists::Place) -> PickItem,
+) {
+    if rows.is_empty() {
+        return;
+    }
+    items.push(PickItem::Header(header));
+    let len = rows.len();
+    items.extend(
+        rows.into_iter()
+            .enumerate()
+            .map(|(i, row)| item(i, row, lists::Place::of(i, len))),
+    );
 }
 
 impl StopsApp {
     /// Opens the picker from the Trip tab.
     pub(crate) fn open_picker(&mut self, cx: &mut Context<Self>) {
         self.field.update(cx, |f, cx| f.clear(cx));
+        self.pick_list.scroll_to_top();
         self.sheet_mode = SheetMode::Pick;
         self.save_place = false;
         self.sheet.open();
@@ -385,10 +465,24 @@ impl StopsApp {
             .into_any_element()
     }
 
+    /// The destination search: the title and the field stay put, the results
+    /// below are a virtualised list that scrolls inside the sheet.
     fn pick_body(&mut self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let query = self.field.read(cx).text().trim().to_owned();
-        let mut body = div().flex().flex_col().gap(px(8.0));
-        body = body
+        self.pick_items = self.pick_rows(&query);
+        let keys = self.pick_items.iter().map(PickItem::key).collect();
+        let state = self.pick_list.sync(keys);
+
+        let insets = window.insets();
+        let keyboard = f32::from((insets.ime.bottom - insets.consumed.bottom).max(px(0.0)));
+        let body_max =
+            (f32::from(window.viewport_size().height) - SHEET_CHROME - keyboard).max(160.0);
+        let header = div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .pb(px(8.0))
             .child(Self::sheet_title(
                 theme,
                 self.pick.sheet_slot().picker_title(),
@@ -401,148 +495,195 @@ impl StopsApp {
                 window,
                 cx,
             )));
-
-        if !query.is_empty() {
-            match offer(&query) {
-                Offer::Confirm(dest) => {
-                    let row = list_row(
-                        theme,
-                        None,
-                        dest.title(),
-                        Some(pick::details_text(&dest).into()),
-                        None,
-                    )
-                    .id("offer-row")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.confirm_destination(dest.clone(), cx);
-                    }));
-                    body = body.child(section(theme, None, [row.into_any_element()]));
+        // The list is as tall as its rows up to what the sheet can hold; past
+        // that it scrolls, building only the rows on screen.
+        let results = list(
+            state,
+            cx.processor(|this, ix: usize, window, cx| {
+                let theme = rovsti_ui::current_theme(window);
+                match this.pick_items.get(ix).cloned() {
+                    Some(item) => this.pick_item(theme, item, cx),
+                    None => div().into_any_element(),
                 }
+            }),
+        )
+        .with_sizing_behavior(ListSizingBehavior::Infer)
+        .w_full()
+        .min_h_0()
+        .flex_shrink_1();
+        div()
+            .flex()
+            .flex_col()
+            .max_h(px(body_max))
+            .child(header)
+            .child(results)
+            .into_any_element()
+    }
+
+    /// The rows for `query`: the pasted point, stops, saved places and, with
+    /// no query, the recent trips and points.
+    fn pick_rows(&mut self, query: &str) -> Vec<PickItem> {
+        let mut items = Vec::new();
+        if !query.is_empty() {
+            match offer(query) {
+                Offer::Confirm(dest) => items.push(PickItem::Offer(dest)),
                 // Typing a name searches Saved below: only a link or a pair of
                 // numbers that failed is worth an explanation.
-                Offer::Refused(why) if looks_like_link(&query) => {
-                    body = body.child(Self::footnote(theme, why));
+                Offer::Refused(why) if looks_like_link(query) => {
+                    items.push(PickItem::Refusal(why));
                 }
                 Offer::Refused(_) => {}
             }
         }
-
-        if let Some(rows) = self.stop_rows(theme, &query, cx) {
-            body = body.child(section(theme, Some("Stops".into()), rows));
-        }
-
+        let stops = self.stop_search(query).to_vec();
+        group(&mut items, "Stops", stops, |_, (index, lines), at| {
+            PickItem::Stop { index, lines, at }
+        });
         let saved: Vec<_> = self
             .saved
-            .search(&query)
+            .search(query)
             .into_iter()
             .map(|p| (p.id, Destination::from_place(p)))
             .collect();
-        if !saved.is_empty() {
-            let rows = saved.into_iter().map(|(id, dest)| {
-                list_row(theme, None, pick::row_label(&dest.label), None, None)
-                    .id(("pick-saved", id as usize))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.choose_destination(dest.clone(), cx);
-                    }))
-                    .into_any_element()
-            });
-            body = body.child(section(theme, Some("Saved".into()), rows));
-        }
+        group(&mut items, "Saved", saved, |_, (id, dest), at| {
+            PickItem::Saved { id, dest, at }
+        });
         if query.is_empty() {
             let pairs = self.history.recent_pairs(3);
-            if !pairs.is_empty() {
-                let rows = pairs.into_iter().enumerate().map(|(i, (a, b))| {
-                    let title = format!(
-                        "{} – {}",
-                        pick::row_label(&a.label),
-                        pick::row_label(&b.label)
-                    );
-                    let (a, b) = (
-                        Destination::new(a.label, a.coord),
-                        Destination::new(b.label, b.coord),
-                    );
-                    list_row(theme, None, title, None, None)
-                        .id(("pick-pair", i))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.choose_pair(a.clone(), b.clone(), cx);
-                        }))
-                        .into_any_element()
-                });
-                body = body.child(section(theme, Some("Recent trips".into()), rows));
-            }
+            group(&mut items, "Recent trips", pairs, |i, (a, b), at| {
+                PickItem::Pair {
+                    i,
+                    a: Destination::new(a.label, a.coord),
+                    b: Destination::new(b.label, b.coord),
+                    at,
+                }
+            });
             let recent = self.history.recent_points(5);
-            if !recent.is_empty() {
-                let rows = recent.into_iter().enumerate().map(|(i, point)| {
-                    let dest = Destination::new(point.label, point.coord);
-                    list_row(theme, None, pick::row_label(&dest.label), None, None)
-                        .id(("pick-recent", i))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.choose_destination(dest.clone(), cx);
-                        }))
-                        .into_any_element()
-                });
-                body = body.child(section(theme, Some("Recent".into()), rows));
+            group(&mut items, "Recent", recent, |i, point, at| {
+                PickItem::Recent {
+                    i,
+                    dest: Destination::new(point.label, point.coord),
+                    at,
+                }
+            });
+            if self.saved.places.is_empty() && self.history.records.is_empty() {
+                items.push(PickItem::Hint);
             }
         }
-        if self.saved.places.is_empty() && self.history.records.is_empty() && query.is_empty() {
-            body = body.child(Self::footnote(
-                theme,
-                "Share a location from any maps app to Rovsti Stops, or paste its link here.",
-            ));
-        }
-        body.into_any_element()
+        items
     }
 
-    /// Rows for the stops whose name matches `query`, nearest the last
-    /// position first. `None` without a feed, a query or a match.
-    fn stop_rows(
-        &mut self,
-        theme: Theme,
-        query: &str,
-        cx: &mut Context<Self>,
-    ) -> Option<Vec<AnyElement>> {
-        let feed = self.gtfs.clone()?;
-        if query.is_empty() {
-            return None;
-        }
-        if self.stop_hits.query != query {
-            let near = self.map.position.map(|p| p.0);
-            self.stop_hits = StopHits {
-                query: query.to_owned(),
-                hits: feed.search(query, near, MAX_STOP_HITS),
-            };
-        }
-        if self.stop_hits.hits.is_empty() {
-            return None;
-        }
-        let near = self.map.position.map(|p| p.0);
-        let rows = self
-            .stop_hits
-            .hits
-            .iter()
-            .filter_map(|&index| {
-                let stop = feed.stops.get(index as usize)?;
-                let lines = transit::lines_through(&feed, index, MAX_LINES).len();
+    /// One row of the destination search.
+    fn pick_item(&mut self, theme: Theme, item: PickItem, cx: &mut Context<Self>) -> AnyElement {
+        match item {
+            PickItem::Offer(dest) => {
+                let row = list_row(
+                    theme,
+                    None,
+                    dest.title(),
+                    Some(pick::details_text(&dest).into()),
+                    None,
+                )
+                .id("offer-row")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.confirm_destination(dest.clone(), cx);
+                }));
+                lists::grouped(theme, lists::Place::ALONE, row).into_any_element()
+            }
+            PickItem::Refusal(why) => Self::footnote(theme, why),
+            PickItem::Header(text) => lists::section_header(theme, text, 8.0),
+            PickItem::Stop { index, lines, at } => {
+                let Some(stop) = self
+                    .gtfs
+                    .as_ref()
+                    .and_then(|feed| feed.stops.get(index as usize))
+                else {
+                    return div().into_any_element();
+                };
                 let mut detail = match lines {
                     0 => "No lines".to_owned(),
                     1 => "1 line".to_owned(),
                     n => format!("{n} lines"),
                 };
-                if let Some(here) = near {
+                if let Some((here, _)) = self.map.position {
                     detail = format!(
                         "{}, {detail}",
                         trip_ui::distance_text(here.distance_m(stop.coord))
                     );
                 }
-                Some(
-                    list_row(theme, None, stop.name.clone(), Some(detail.into()), None)
-                        .id(("pick-stop", index as usize))
-                        .on_click(cx.listener(move |this, _, _, cx| this.open_stop(index, cx)))
-                        .into_any_element(),
-                )
-            })
-            .collect();
-        Some(rows)
+                let row = list_row(theme, None, stop.name.clone(), Some(detail.into()), None)
+                    .id(("pick-stop", index as usize))
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_stop(index, cx)));
+                lists::grouped(theme, at, row).into_any_element()
+            }
+            PickItem::Saved { id, dest, at } => {
+                let row = list_row(theme, None, pick::row_label(&dest.label), None, None)
+                    .id(("pick-saved", id as usize))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.choose_destination(dest.clone(), cx);
+                    }));
+                lists::grouped(theme, at, row).into_any_element()
+            }
+            PickItem::Pair { i, a, b, at } => {
+                let title = format!(
+                    "{} – {}",
+                    pick::row_label(&a.label),
+                    pick::row_label(&b.label)
+                );
+                let row = list_row(theme, None, title, None, None)
+                    .id(("pick-pair", i))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.choose_pair(a.clone(), b.clone(), cx);
+                    }));
+                lists::grouped(theme, at, row).into_any_element()
+            }
+            PickItem::Recent { i, dest, at } => {
+                let row = list_row(theme, None, pick::row_label(&dest.label), None, None)
+                    .id(("pick-recent", i))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.choose_destination(dest.clone(), cx);
+                    }));
+                lists::grouped(theme, at, row).into_any_element()
+            }
+            PickItem::Hint => Self::footnote(
+                theme,
+                "Share a location from any maps app to Rovsti Stops, or paste its link here.",
+            ),
+        }
+    }
+
+    /// The stops whose name matches `query`, nearest the last position first,
+    /// with their line counts. Searched once per query. Empty without a feed
+    /// or a query.
+    fn stop_search(&mut self, query: &str) -> &[(u32, usize)] {
+        let Some(feed) = self.gtfs.clone() else {
+            return &[];
+        };
+        if query.is_empty() {
+            return &[];
+        }
+        if self.stop_hits.query != query {
+            let near = self.map.position.map(|p| p.0);
+            self.stop_hits.query = query.to_owned();
+            self.stop_hits.hits = feed
+                .search(query, near, MAX_STOP_HITS)
+                .into_iter()
+                .map(|index| (index, transit::lines_through(&feed, index, MAX_LINES).len()))
+                .collect();
+        }
+        &self.stop_hits.hits
+    }
+
+    /// The lines through `stop`, worked out once per stop the sheet opens on.
+    fn stop_lines(&mut self, feed: &Feed, stop: u32) -> Vec<LineChoice> {
+        match &self.stop_hits.lines {
+            Some((at, lines)) if *at == stop => lines.clone(),
+            _ => {
+                let lines = transit::lines_through(feed, stop, MAX_LINES);
+                self.stop_hits.lines = Some((stop, lines.clone()));
+                lines
+            }
+        }
     }
 
     /// A stop of the feed: a line to draw, Use as A / Use as B, Save.
@@ -569,7 +710,7 @@ impl StopsApp {
             .child(Self::footnote(theme, pick::details_text(&here)));
 
         let chosen = self.stop_pattern;
-        let lines = transit::lines_through(&feed, stop, MAX_LINES);
+        let lines = self.stop_lines(&feed, stop);
         match chosen.and_then(|p| lines.iter().find(|l| l.pattern == p)) {
             Some(line) => {
                 let title = line_title(&line.name, &line.headsign);
@@ -945,6 +1086,53 @@ mod tests {
         ends.swap();
         let swapped = ends.diameter().unwrap().unwrap();
         assert_eq!(swapped, d.swapped());
+    }
+
+    #[test]
+    fn a_group_gets_a_header_and_rounded_ends() {
+        let mut items = Vec::new();
+        group(&mut items, "Saved", Vec::<u64>::new(), |_, id, at| {
+            PickItem::Saved {
+                id,
+                dest: dest("x", 29.0),
+                at,
+            }
+        });
+        assert!(items.is_empty(), "no rows, no header");
+        group(&mut items, "Saved", vec![1, 2, 3], |_, id, at| {
+            PickItem::Saved {
+                id,
+                dest: dest("x", 29.0),
+                at,
+            }
+        });
+        assert_eq!(items.len(), 4);
+        assert_eq!(items[0], PickItem::Header("Saved"));
+        let places: Vec<_> = items[1..]
+            .iter()
+            .map(|item| match item {
+                PickItem::Saved { at, .. } => (at.first, at.last),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(places, [(true, false), (false, false), (false, true)]);
+        // Rows of different kinds never share a key.
+        let keys: std::collections::HashSet<_> = items.iter().map(PickItem::key).collect();
+        assert_eq!(keys.len(), 4);
+        assert_ne!(
+            PickItem::Stop {
+                index: 1,
+                lines: 0,
+                at: lists::Place::ALONE
+            }
+            .key(),
+            PickItem::Saved {
+                id: 1,
+                dest: dest("x", 29.0),
+                at: lists::Place::ALONE
+            }
+            .key()
+        );
     }
 
     #[test]

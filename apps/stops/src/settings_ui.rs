@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    StatefulInteractiveElement, Styled, Window, div, list, px,
 };
 use rovsti_android::{Error as AndroidError, trip, trip::AlarmAction, xiaomi};
 use rovsti_geo::{
@@ -30,13 +30,11 @@ use rovsti_ui::{
 use rovsti_wa_proto::ChatSummary;
 
 use crate::{
-    StopsApp, backend,
+    Page, StopsApp, backend, lists,
     store::now_ms,
     transit::{date_text, note},
 };
 
-/// Records drawn in the History list (the file keeps up to 500).
-const SHOWN_RECORDS: usize = 100;
 /// Chats offered in the picker.
 const MAX_CHATS: usize = 60;
 /// The stop and ETA the template preview uses.
@@ -70,6 +68,46 @@ pub enum ChatList {
     Loading,
     Ready(Vec<ChatRow>),
     Failed(String),
+}
+
+/// One item of the arriving-soon page's list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NoticeItem {
+    Header,
+    Intro,
+    SendTo,
+    /// Loading, failed or no chats: one row in place of the chats.
+    Status,
+    Chat(usize),
+    /// The template field, its hint and the preview.
+    Message {
+        refused: bool,
+    },
+    When,
+    Off,
+}
+
+impl NoticeItem {
+    /// The list key: it changes whenever the item's height may.
+    fn key(self, chats: &ChatList) -> u64 {
+        match self {
+            Self::Header => lists::key(0, 0),
+            Self::Intro => lists::key(1, 0),
+            Self::SendTo => lists::key(2, 0),
+            Self::Status => lists::key(
+                3,
+                match chats {
+                    ChatList::Idle | ChatList::Loading => 0,
+                    ChatList::Ready(_) => 1,
+                    ChatList::Failed(_) => 2,
+                },
+            ),
+            Self::Chat(i) => lists::key(4, i as u64),
+            Self::Message { refused } => lists::key(5, u64::from(refused)),
+            Self::When => lists::key(6, 0),
+            Self::Off => lists::key(7, 0),
+        }
+    }
 }
 
 // ---- pure --------------------------------------------------------------------------
@@ -272,24 +310,18 @@ impl StopsApp {
         theme: Theme,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Page {
         match self.settings_page {
-            SettingsPage::Main => self.settings_main(theme, cx),
-            SettingsPage::History => {
-                let body = self.history_body(theme, cx);
-                self.settings_subpage(theme, "History", body, cx)
-            }
-            SettingsPage::Notice => {
-                let body = self.notice_body(theme, window, cx);
-                self.settings_subpage(theme, "Arriving soon", body, cx)
-            }
+            SettingsPage::Main => Page::Flow(self.settings_main(theme, cx)),
+            SettingsPage::History => self.history_page(theme, cx),
+            SettingsPage::Notice => self.notice_page(theme, cx),
             SettingsPage::WhatsApp => {
                 let body = self.whatsapp.clone().into_any_element();
-                self.settings_subpage(theme, "WhatsApp", body, cx)
+                Page::Flow(self.settings_subpage(theme, "WhatsApp", body, cx))
             }
             SettingsPage::MapTiles => {
                 let body = self.tiles_body(theme, window, cx);
-                self.settings_subpage(theme, "Map tiles", body, cx)
+                Page::Flow(self.settings_subpage(theme, "Map tiles", body, cx))
             }
         }
     }
@@ -303,6 +335,14 @@ impl StopsApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
+            .child(Self::subpage_header(theme, title, cx))
+            .child(body)
+            .into_any_element()
+    }
+
+    /// The back button and the title of a Settings page.
+    fn subpage_header(theme: Theme, title: &'static str, cx: &mut Context<Self>) -> AnyElement {
+        div()
             .child(
                 div().px(px(8.0)).pt(px(48.0)).child(
                     glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
@@ -315,7 +355,6 @@ impl StopsApp {
                 ),
             )
             .child(large_title(theme, title, None))
-            .child(body)
             .into_any_element()
     }
 
@@ -324,6 +363,8 @@ impl StopsApp {
         self.settings_page = page;
         self.confirm_clear = false;
         self.page.restart();
+        self.history_list.scroll_to_top();
+        self.notice_list.scroll_to_top();
         match page {
             SettingsPage::Notice => {
                 self.sync_template_field(cx);
@@ -542,68 +583,88 @@ impl StopsApp {
 
     // ---- History ---------------------------------------------------------------------
 
-    fn history_body(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    /// History: statistics, then every recorded trip (the file keeps up to
+    /// 500) in a virtualised list, so only the rows on screen are built.
+    fn history_page(&mut self, theme: Theme, cx: &mut Context<Self>) -> Page {
         if self.history.records.is_empty() {
-            return empty_state(
+            let body = empty_state(
                 theme,
                 "No Trips Yet",
                 "Finished and cancelled trips are listed here, with some statistics.",
             )
             .into_any_element();
+            return Page::Flow(self.settings_subpage(theme, "History", body, cx));
         }
-        let now = now_ms();
-        let colors = theme::colors(theme);
-        let stats = stats_rows(&self.history.stats(now));
-        let stats = stats.into_iter().map(|(label, value)| {
-            list_row(theme, None, label, None, Some(value.into())).into_any_element()
-        });
+        let records = self.history.records.len();
+        // The statistics change height with the records behind them.
+        let keys = [
+            lists::key(0, 0),
+            lists::key(1, records as u64),
+            lists::key(2, 0),
+        ]
+        .into_iter()
+        .chain(self.history.records.iter().map(|r| lists::key(3, r.id)))
+        .chain([lists::key(4, 0)])
+        .collect();
+        let state = self.history_list.sync(keys);
+        Page::List(Box::new(list(
+            state,
+            cx.processor(move |this, ix: usize, window, cx| {
+                let theme = rovsti_ui::current_theme(window);
+                this.history_item(theme, ix, cx)
+            }),
+        )))
+    }
 
-        let rows = self
-            .history
-            .records
-            .iter()
-            .take(SHOWN_RECORDS)
-            .map(|r| {
-                list_row(
+    /// Item `ix` of the History list: header, statistics, "Trips", the
+    /// records, Clear.
+    fn history_item(&mut self, theme: Theme, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        const RECORDS_FROM: usize = 3;
+        let count = self.history.records.len();
+        match ix {
+            0 => Self::subpage_header(theme, "History", cx),
+            1 => {
+                let stats = stats_rows(&self.history.stats(now_ms()));
+                let rows = stats.into_iter().map(|(label, value)| {
+                    list_row(theme, None, label, None, Some(value.into())).into_any_element()
+                });
+                section(theme, Some("Statistics".into()), rows).into_any_element()
+            }
+            2 => lists::section_header(theme, "Trips", 20.0),
+            ix if ix - RECORDS_FROM < count => {
+                let i = ix - RECORDS_FROM;
+                let r = &self.history.records[i];
+                let row = list_row(
                     theme,
                     None,
                     "Trip",
-                    Some(record_subtitle(r, now).into()),
+                    Some(record_subtitle(r, now_ms()).into()),
                     Some(outcome_text(r.outcome).into()),
-                )
-                .into_any_element()
-            })
-            .collect::<Vec<_>>();
-
-        let (clear_label, clear_color) = if self.confirm_clear {
-            ("Tap again to clear the history", colors.red)
-        } else {
-            ("Clear history", colors.red)
-        };
-        let mut page = div()
-            .flex()
-            .flex_col()
-            .gap(px(20.0))
-            .child(section(theme, Some("Statistics".into()), stats))
-            .child(section(theme, Some("Trips".into()), rows));
-        if self.history.records.len() > SHOWN_RECORDS {
-            page = page.child(note(
-                theme,
-                format!("The latest {SHOWN_RECORDS} trips are listed."),
-                false,
-            ));
+                );
+                lists::grouped(theme, lists::Place::of(i, count), row).into_any_element()
+            }
+            _ => {
+                let colors = theme::colors(theme);
+                let clear_label = if self.confirm_clear {
+                    "Tap again to clear the history"
+                } else {
+                    "Clear history"
+                };
+                div()
+                    .pt(px(20.0))
+                    .flex()
+                    .justify_center()
+                    .child(
+                        glass_pill(theme, clear_label)
+                            .id("history-clear")
+                            .px(px(24.0))
+                            .h(px(48.0))
+                            .text_color(colors.red)
+                            .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx))),
+                    )
+                    .into_any_element()
+            }
         }
-        page.child(
-            div().flex().justify_center().child(
-                glass_pill(theme, clear_label)
-                    .id("history-clear")
-                    .px(px(24.0))
-                    .h(px(48.0))
-                    .text_color(clear_color)
-                    .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx))),
-            ),
-        )
-        .into_any_element()
     }
 
     /// Two taps: the first asks, the second clears.
@@ -625,155 +686,213 @@ impl StopsApp {
 
     // ---- Arriving-soon message ---------------------------------------------------------
 
-    fn notice_body(&mut self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    /// The arriving-soon page: the chat picker is a virtualised list, followed
+    /// by the message, when to send it, and Turn off.
+    fn notice_page(&mut self, theme: Theme, cx: &mut Context<Self>) -> Page {
         if !self.whatsapp.read(cx).is_connected() {
-            return div()
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .child(section(
-                    theme,
-                    None,
-                    [list_row(
-                        theme,
-                        None,
-                        "Link WhatsApp in Settings > WhatsApp to use this",
-                        Some("Stops texts a chat shortly before you arrive.".into()),
-                        Some("Open".into()),
-                    )
-                    .id("notice-link")
-                    .on_click(
-                        cx.listener(|this, _, _, cx| {
-                            this.open_settings(SettingsPage::WhatsApp, cx)
-                        }),
-                    )
-                    .into_any_element()],
-                ))
-                .into_any_element();
+            let body = self.notice_unlinked(theme, cx);
+            return Page::Flow(self.settings_subpage(theme, "Arriving soon", body, cx));
         }
-        let colors = theme::colors(theme);
-        let chosen = self.prefs.notice.clone().filter(|n| !n.chat.is_empty());
-
-        // Where to send it.
-        let mut chat_rows: Vec<AnyElement> = Vec::new();
+        let chosen = self
+            .prefs
+            .notice
+            .as_ref()
+            .is_some_and(|n| !n.chat.is_empty());
+        let mut items = vec![NoticeItem::Header, NoticeItem::Intro, NoticeItem::SendTo];
         match &self.chats {
-            ChatList::Idle | ChatList::Loading => chat_rows
-                .push(list_row(theme, None, "Loading chats...", None, None).into_any_element()),
-            ChatList::Failed(reason) => chat_rows.push(
-                list_row(
-                    theme,
-                    None,
-                    "Could not load your chats",
-                    Some(reason.clone().into()),
-                    Some("Retry".into()),
-                )
-                .id("chats-retry")
-                .on_click(cx.listener(|this, _, _, cx| this.load_chats(true, cx)))
-                .into_any_element(),
-            ),
-            ChatList::Ready(rows) if rows.is_empty() => chat_rows.push(
-                list_row(
-                    theme,
-                    None,
-                    "No chats yet",
-                    Some("Chats appear after history sync.".into()),
-                    None,
-                )
-                .into_any_element(),
-            ),
-            ChatList::Ready(rows) => {
-                for (i, row) in rows.iter().enumerate() {
-                    let selected = chosen.as_ref().is_some_and(|n| n.chat == row.jid);
-                    let picked = row.clone();
-                    chat_rows.push(
-                        list_row(
-                            theme,
-                            None,
-                            row.title.clone(),
-                            row.group.then(|| "Group".into()),
-                            selected.then(|| "Selected".into()),
-                        )
-                        .id(("notice-chat", i))
-                        .on_click(cx.listener(move |this, _, _, cx| this.choose_chat(&picked, cx)))
-                        .into_any_element(),
-                    );
-                }
+            ChatList::Ready(rows) if !rows.is_empty() => {
+                items.extend((0..rows.len()).map(NoticeItem::Chat));
             }
+            _ => items.push(NoticeItem::Status),
         }
+        if chosen {
+            // A refused template adds an error line under the field.
+            let text = self.template_field.read(cx).text();
+            let refused = rovsti_geo::notice::validate(text).is_err();
+            items.extend([
+                NoticeItem::Message { refused },
+                NoticeItem::When,
+                NoticeItem::Off,
+            ]);
+        }
+        let keys = items.iter().map(|item| item.key(&self.chats)).collect();
+        let state = self.notice_list.sync(keys);
+        Page::List(Box::new(list(
+            state,
+            cx.processor(move |this, ix: usize, window, cx| {
+                let theme = rovsti_ui::current_theme(window);
+                match items.get(ix) {
+                    Some(&item) => this.notice_item(theme, item, window, cx),
+                    None => div().into_any_element(),
+                }
+            }),
+        )))
+    }
 
-        let mut page = div()
+    /// WhatsApp is not linked: one row that leads to its page.
+    fn notice_unlinked(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        div()
             .flex()
             .flex_col()
-            .gap(px(20.0))
-            .child(note(
+            .gap(px(8.0))
+            .child(section(
+                theme,
+                None,
+                [list_row(
+                    theme,
+                    None,
+                    "Link WhatsApp in Settings > WhatsApp to use this",
+                    Some("Stops texts a chat shortly before you arrive.".into()),
+                    Some("Open".into()),
+                )
+                .id("notice-link")
+                .on_click(
+                    cx.listener(|this, _, _, cx| this.open_settings(SettingsPage::WhatsApp, cx)),
+                )
+                .into_any_element()],
+            ))
+            .into_any_element()
+    }
+
+    /// One item of the arriving-soon list.
+    fn notice_item(
+        &mut self,
+        theme: Theme,
+        item: NoticeItem,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        match item {
+            NoticeItem::Header => Self::subpage_header(theme, "Arriving soon", cx),
+            NoticeItem::Intro => note(
                 theme,
                 "Sends one WhatsApp message through your gateway when you are close. Nothing else leaves the phone.",
                 false,
-            ))
-            .child(section(theme, Some("Send to".into()), chat_rows));
-
-        if let Some(prefs) = chosen {
-            let text = self.template_field.read(cx).text().to_owned();
-            let check = rovsti_geo::notice::validate(&text);
-            let shown = if check.is_ok() {
-                text
-            } else {
-                prefs.template.clone()
-            };
-            let mut message = div()
-                .flex()
-                .flex_col()
-                .gap(px(6.0))
-                .child(div().px(px(16.0)).child(field_box(
-                    theme,
-                    "notice-template",
-                    &self.template_field,
-                    DEFAULT_TEMPLATE,
-                    window,
-                    cx,
-                )));
-            message = match check {
-                Err(error) => message.child(note(
-                    theme,
-                    format!("{error}. The last good text is kept."),
-                    true,
-                )),
-                Ok(()) => message.child(note(
-                    theme,
-                    "Use {stop} for the stop and {min} for the minutes left.",
-                    false,
-                )),
-            };
-            message = message.child(
-                div()
-                    .mx(px(20.0))
-                    .p(px(12.0))
-                    .rounded(px(14.0))
-                    .bg(colors.secondary_background)
-                    .text_color(colors.label)
-                    .child(notice_preview(&shown)),
-            );
-
-            let when = NoticeWhen::ALL
-                .into_iter()
-                .enumerate()
-                .map(|(i, option)| {
-                    list_row(
+            ),
+            NoticeItem::SendTo => lists::section_header(theme, "Send to", 20.0),
+            NoticeItem::Status => {
+                let row = match &self.chats {
+                    ChatList::Failed(reason) => list_row(
                         theme,
                         None,
-                        option.label(),
-                        None,
-                        (prefs.when == option).then(|| "Selected".into()),
+                        "Could not load your chats",
+                        Some(reason.clone().into()),
+                        Some("Retry".into()),
                     )
-                    .id(("notice-when", i))
-                    .on_click(cx.listener(move |this, _, _, cx| this.set_notice_when(option, cx)))
+                    .id("chats-retry")
+                    .on_click(cx.listener(|this, _, _, cx| this.load_chats(true, cx)))
+                    .into_any_element(),
+                    ChatList::Ready(_) => list_row(
+                        theme,
+                        None,
+                        "No chats yet",
+                        Some("Chats appear after history sync.".into()),
+                        None,
+                    )
+                    .into_any_element(),
+                    ChatList::Idle | ChatList::Loading => {
+                        list_row(theme, None, "Loading chats...", None, None).into_any_element()
+                    }
+                };
+                lists::grouped(theme, lists::Place::ALONE, row).into_any_element()
+            }
+            NoticeItem::Chat(i) => {
+                let ChatList::Ready(rows) = &self.chats else {
+                    return div().into_any_element();
+                };
+                let Some(chat) = rows.get(i) else {
+                    return div().into_any_element();
+                };
+                let selected = self
+                    .prefs
+                    .notice
+                    .as_ref()
+                    .is_some_and(|n| !n.chat.is_empty() && n.chat == chat.jid);
+                let picked = chat.clone();
+                let row = list_row(
+                    theme,
+                    None,
+                    chat.title.clone(),
+                    chat.group.then(|| "Group".into()),
+                    selected.then(|| "Selected".into()),
+                )
+                .id(("notice-chat", i))
+                .on_click(cx.listener(move |this, _, _, cx| this.choose_chat(&picked, cx)));
+                lists::grouped(theme, lists::Place::of(i, rows.len()), row).into_any_element()
+            }
+            NoticeItem::Message { .. } => {
+                let template = self
+                    .prefs
+                    .notice
+                    .as_ref()
+                    .map(|n| n.template.clone())
+                    .unwrap_or_default();
+                let text = self.template_field.read(cx).text().to_owned();
+                let check = rovsti_geo::notice::validate(&text);
+                let shown = if check.is_ok() { text } else { template };
+                let hint = match check {
+                    Err(error) => {
+                        note(theme, format!("{error}. The last good text is kept."), true)
+                    }
+                    Ok(()) => note(
+                        theme,
+                        "Use {stop} for the stop and {min} for the minutes left.",
+                        false,
+                    ),
+                };
+                div()
+                    .pt(px(20.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
+                    .child(div().px(px(16.0)).child(field_box(
+                        theme,
+                        "notice-template",
+                        &self.template_field,
+                        DEFAULT_TEMPLATE,
+                        window,
+                        cx,
+                    )))
+                    .child(hint)
+                    .child(
+                        div()
+                            .mx(px(20.0))
+                            .p(px(12.0))
+                            .rounded(px(14.0))
+                            .bg(colors.secondary_background)
+                            .text_color(colors.label)
+                            .child(notice_preview(&shown)),
+                    )
                     .into_any_element()
-                })
-                .collect::<Vec<_>>();
-
-            page = page
-                .child(div().flex().flex_col().child(message))
-                .child(section(theme, Some("When".into()), when))
+            }
+            NoticeItem::When => {
+                let current = self.prefs.notice.as_ref().map(|n| n.when);
+                let when: Vec<AnyElement> = NoticeWhen::ALL
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, option)| {
+                        list_row(
+                            theme,
+                            None,
+                            option.label(),
+                            None,
+                            (current == Some(option)).then(|| "Selected".into()),
+                        )
+                        .id(("notice-when", i))
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.set_notice_when(option, cx)),
+                        )
+                        .into_any_element()
+                    })
+                    .collect();
+                div()
+                    .pt(px(20.0))
+                    .child(section(theme, Some("When".into()), when))
+                    .into_any_element()
+            }
+            NoticeItem::Off => div()
+                .pt(px(20.0))
                 .child(section(
                     theme,
                     None,
@@ -782,9 +901,9 @@ impl StopsApp {
                         .text_color(colors.red)
                         .on_click(cx.listener(|this, _, _, cx| this.turn_notice_off(cx)))
                         .into_any_element()],
-                ));
+                ))
+                .into_any_element(),
         }
-        page.into_any_element()
     }
 
     // ---- Map tiles -----------------------------------------------------------------------
@@ -996,6 +1115,24 @@ mod tests {
             unread: 0,
             is_group: group,
         }
+    }
+
+    #[test]
+    fn notice_items_change_key_when_their_height_may() {
+        let loading = NoticeItem::Status.key(&ChatList::Loading);
+        assert_eq!(loading, NoticeItem::Status.key(&ChatList::Idle));
+        assert_ne!(
+            loading,
+            NoticeItem::Status.key(&ChatList::Failed("x".into()))
+        );
+        assert_ne!(
+            NoticeItem::Message { refused: false }.key(&ChatList::Idle),
+            NoticeItem::Message { refused: true }.key(&ChatList::Idle)
+        );
+        assert_ne!(
+            NoticeItem::Chat(0).key(&ChatList::Idle),
+            NoticeItem::Chat(1).key(&ChatList::Idle)
+        );
     }
 
     #[test]

@@ -245,6 +245,12 @@ pub(crate) struct FavoritesView {
     long_task: Option<Task<()>>,
     /// A long press already opened the sheet: swallow the tap that follows.
     suppress_click: bool,
+    /// The tile a long press lifted (scaled up); a move from here reorders.
+    lifted: Option<usize>,
+    /// Reorder in progress: where the finger is now (window coordinates).
+    drag: Option<Point<Pixels>>,
+    /// The `favorites_order` the tiles were built from; a change rebuilds them.
+    order_seen: Vec<String>,
 }
 
 impl FavoritesView {
@@ -260,7 +266,16 @@ impl FavoritesView {
             last_pressed: None,
             long_task: None,
             suppress_click: false,
+            lifted: None,
+            drag: None,
+            order_seen: Vec::new(),
         }
+    }
+
+    /// Drops a lift or drag (finger up, cancel, or the grid went away).
+    fn settle(&mut self) {
+        self.lifted = None;
+        self.drag = None;
     }
 
     /// Where tile `index`'s avatar is painted now (window coordinates), if the
@@ -366,6 +381,8 @@ pub(crate) struct ContactSheet {
     history: Arc<[crate::recents::HistoryVm]>,
     note: Option<SharedString>,
     note_task: Option<Task<()>>,
+    /// Opened from this Favorites tile: shows Move earlier / Move later.
+    fav_index: Option<usize>,
 }
 
 impl ContactSheet {
@@ -376,6 +393,23 @@ impl ContactSheet {
     pub(crate) fn chooser(&self) -> bool {
         self.chooser
     }
+}
+
+/// Width of one Favorites tile in a grid `width` wide with `cols` columns.
+fn tile_width(width: f32, cols: usize) -> f32 {
+    let inset = f32::from(metrics::ROW_INSET);
+    (width - inset * 2.0 - TILE_GAP * (cols as f32 - 1.0)) / cols as f32
+}
+
+/// The lifted tile's scale; reduced motion keeps it at 1.
+fn lift_scale(reduced: bool) -> f32 {
+    if reduced { 1.0 } else { 1.06 }
+}
+
+/// A drag or Move button asked for `from` -> `to` among `len` tiles: the move
+/// to make, or `None` for the same slot or an index outside the grid.
+pub(crate) fn reorder_target(from: usize, to: usize, len: usize) -> Option<(usize, usize)> {
+    (from != to && from < len && to < len).then_some((from, to))
 }
 
 /// Where a pointer landed in the Favorites grid.
@@ -406,9 +440,13 @@ impl PhoneApp {
     /// Pulls the backend's contacts and favorites into the views; rebuilds
     /// view-models only when a snapshot actually changed.
     pub(crate) fn sync_contacts(&mut self, cx: &mut Context<Self>) {
-        let (contacts, favorites) = {
+        let (contacts, favorites, order) = {
             let backend = self.backend.read(cx);
-            (backend.contacts(), backend.favorites())
+            (
+                backend.contacts(),
+                backend.favorites(),
+                backend.prefs().favorites_order.clone(),
+            )
         };
         let state = State::of(&contacts);
         match &contacts {
@@ -457,15 +495,56 @@ impl PhoneApp {
                 .source
                 .as_ref()
                 .is_some_and(|known| Arc::ptr_eq(known, list));
-            if !same {
-                self.favorites.tiles = rows_of(list.iter(), "", self.name_style(cx));
+            if !same || order != self.favorites.order_seen {
+                self.favorites.tiles = self.favorite_tiles(list, &order, self.name_style(cx));
                 self.favorites.source = Some(Arc::clone(list));
+                self.favorites.order_seen = order;
                 self.favorites.last_pressed = None;
             }
         } else {
             self.favorites.source = None;
             self.favorites.tiles = Arc::from(Vec::new());
+            self.favorites.settle();
         }
+    }
+
+    /// The Favorites tiles in the owner's order (new stars follow, by name).
+    fn favorite_tiles(
+        &self,
+        list: &[WireContact],
+        order: &[String],
+        style: NameStyle,
+    ) -> Arc<[ContactRow]> {
+        rows_of(contacts_view::order_favorites(list, order), "", style)
+    }
+
+    /// Moves the favorite at `from` to slot `to`: one prefs write, a selection
+    /// haptic, and the tiles re-synced. Returns whether anything moved.
+    pub(crate) fn favorites_move(
+        &mut self,
+        from: usize,
+        to: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some((from, to)) = reorder_target(from, to, self.favorites.tiles.len()) else {
+            return false;
+        };
+        let Load::Ready(list) = self.backend.read(cx).favorites() else {
+            return false;
+        };
+        let order = self.backend.read(cx).prefs().favorites_order.clone();
+        let keys = {
+            let shown = contacts_view::order_favorites(&list, &order);
+            contacts_view::reordered_keys(&shown, from, to)
+        };
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| p.favorites_order = keys)
+        });
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.sync_contacts(cx);
+        cx.notify();
+        true
     }
 
     /// The contacts snapshot changed under an open sheet (the star was
@@ -737,14 +816,15 @@ impl PhoneApp {
                         cx.background_executor().timer(LONG_PRESS).await;
                         this.update_in(cx, |this, window, cx| {
                             this.favorites.long_task = None;
-                            if this.favorites.touch.is_some()
-                                && let Some(row) = this.favorites.tiles.get(index).cloned()
+                            if this.favorites.touch.is_some() && index < this.favorites.tiles.len()
                             {
+                                // Lift the tile: a move now reorders, a lift opens the sheet.
                                 this.favorites.suppress_click = true;
                                 this.favorites.tap.spoil();
-                                this.favorites.touch = None;
+                                this.favorites.lifted = Some(index);
+                                this.presses.release_all();
                                 rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
-                                this.open_contact_sheet(row, false, window, cx);
+                                cx.notify();
                             }
                         })
                         .ok();
@@ -759,7 +839,12 @@ impl PhoneApp {
                 if let Some(start) = self.favorites.touch {
                     let d =
                         (f32::from(position.x - start.x)).hypot(f32::from(position.y - start.y));
-                    if d > TAP_SLOP {
+                    if self.favorites.lifted.is_some() {
+                        if self.favorites.drag.is_some() || d > TAP_SLOP {
+                            self.favorites.drag = Some(position);
+                            cx.notify();
+                        }
+                    } else if d > TAP_SLOP {
                         self.favorites.touch = None;
                         self.favorites.long_task = None;
                         self.presses.release_all();
@@ -767,13 +852,31 @@ impl PhoneApp {
                     }
                 }
             }
-            Pointer::Touch(_) => {
+            Pointer::Touch(phase) => {
                 self.favorites
                     .tap
                     .finish(f32::from(position.x), f32::from(position.y));
+                let lifted = self.favorites.lifted;
+                let dragged = self.favorites.drag.is_some();
+                self.favorites.settle();
                 self.favorites.touch = None;
                 self.favorites.long_task = None;
                 self.presses.release_all();
+                if let Some(from) = lifted
+                    && phase == TouchPhase::Ended
+                {
+                    if dragged {
+                        // The slot under the finger; one write, once.
+                        if let Some(to) = hit(self) {
+                            self.favorites_move(from, to, window, cx);
+                        }
+                    } else if let Some(row) = self.favorites.tiles.get(from).cloned() {
+                        self.open_contact_sheet(row, false, window, cx);
+                        if let Some(sheet) = &mut self.contact_sheet {
+                            sheet.fav_index = Some(from);
+                        }
+                    }
+                }
                 cx.notify();
             }
             Pointer::Click => {
@@ -857,6 +960,7 @@ impl PhoneApp {
             history,
             note: None,
             note_task: None,
+            fav_index: None,
         });
         self.setup_note = None;
         self.sheet_kind = SheetKind::Contact;
@@ -936,7 +1040,8 @@ impl PhoneApp {
         }));
         // Favorites tiles are not sorted: restyle them now.
         if let Load::Ready(list) = self.backend.read(cx).favorites() {
-            self.favorites.tiles = rows_of(list.iter(), "", style);
+            let order = self.backend.read(cx).prefs().favorites_order.clone();
+            self.favorites.tiles = self.favorite_tiles(&list, &order, style);
         }
         cx.notify();
     }
@@ -1060,6 +1165,23 @@ impl PhoneApp {
                     .ok();
                 })
                 .detach();
+            }
+            "sheet-cfav-up" | "sheet-cfav-down" => {
+                let up = id == "sheet-cfav-up";
+                let from = sheet.fav_index.filter(|_| sheet.starred);
+                if let Some(from) = from {
+                    let to = if up {
+                        from.checked_sub(1)
+                    } else {
+                        Some(from + 1)
+                    };
+                    if let Some(to) = to
+                        && self.favorites_move(from, to, window, cx)
+                        && let Some(sheet) = &mut self.contact_sheet
+                    {
+                        sheet.fav_index = Some(to);
+                    }
+                }
             }
             "sheet-cedit" => {
                 let outcome = backend::edit_contact(contact_id);
@@ -1542,12 +1664,36 @@ impl PhoneApp {
                         .take(range.len() * cols),
                     cx,
                 );
-                this.favorite_rows(theme, width, range, cx)
+                this.favorite_rows(theme, width, range, window.prefers_reduced_motion(), cx)
             }),
         )
         .track_scroll(&f.scroll)
         .size_full();
         let entity = cx.entity();
+        let bounds = f.bounds.get();
+        let overlay = f.lifted.zip(f.drag).and_then(|(i, at)| {
+            let tile = f.tiles.get(i)?;
+            let theme = rovsti_ui::current_theme(window);
+            let tile_w = tile_width(width, cols);
+            let photo = self.row_photo(tile, cx);
+            let scale = lift_scale(window.prefers_reduced_motion());
+            let el = favorite_tile(
+                theme,
+                i,
+                tile,
+                tile_w,
+                0.0,
+                scale,
+                photo.as_ref().map(|(image, opacity)| (image, *opacity)),
+            );
+            Some(
+                div()
+                    .absolute()
+                    .left(px(f32::from(at.x - bounds.origin.x) - tile_w / 2.0))
+                    .top(px(f32::from(at.y - bounds.origin.y) - TILE_H / 2.0))
+                    .child(el),
+            )
+        });
         div()
             .relative()
             .flex_1()
@@ -1562,6 +1708,7 @@ impl PhoneApp {
                     });
                 },
             ))
+            .children(overlay)
             .into_any_element()
     }
 
@@ -1570,12 +1717,12 @@ impl PhoneApp {
         theme: Theme,
         width: f32,
         range: Range<usize>,
+        reduced: bool,
         cx: &gpui::App,
     ) -> Vec<AnyElement> {
         let f = &self.favorites;
         let cols = contacts_view::favorite_columns(width);
-        let inset = f32::from(metrics::ROW_INSET);
-        let tile_w = (width - inset * 2.0 - TILE_GAP * (cols as f32 - 1.0)) / cols as f32;
+        let tile_w = tile_width(width, cols);
         range
             .map(|r| {
                 let start = r * cols;
@@ -1599,14 +1746,21 @@ impl PhoneApp {
                         };
                         let tile = &f.tiles[i];
                         let photo = self.row_photo(tile, cx);
-                        favorite_tile(
+                        // The lifted tile grows in place; once dragged, it is a ghost.
+                        let (lift, ghost) = match f.lifted {
+                            Some(l) if l == i => (lift_scale(reduced), f.drag.is_some()),
+                            _ => (1.0, false),
+                        };
+                        let el = favorite_tile(
                             theme,
                             i,
                             tile,
                             tile_w,
                             press,
+                            lift,
                             photo.as_ref().map(|(image, opacity)| (image, *opacity)),
-                        )
+                        );
+                        div().when(ghost, |d| d.opacity(0.35)).child(el)
                     }))
                     .into_any_element()
             })
@@ -1812,6 +1966,16 @@ impl PhoneApp {
                 ),
             ));
         }
+        if !sheet.chooser
+            && sheet.starred
+            && let Some(at) = sheet.fav_index
+        {
+            let len = self.favorites.tiles.len();
+            children.push(reveal(
+                2,
+                fav_move_pills(self, theme, at > 0, at + 1 < len, cx),
+            ));
+        }
         children.push(reveal(3, numbers.into_any_element()));
         if !sheet.chooser
             && let Some(section) = crate::recents::history_section(theme, &sheet.history)
@@ -1844,6 +2008,83 @@ impl PhoneApp {
                 .into_any_element(),
         )
     }
+}
+
+/// "Move earlier" / "Move later" for a contact opened from a Favorites tile;
+/// each dims at its end of the grid and then does nothing.
+fn fav_move_pills(
+    app: &PhoneApp,
+    theme: Theme,
+    can_up: bool,
+    can_down: bool,
+    cx: &mut Context<PhoneApp>,
+) -> AnyElement {
+    let colors = theme::colors(theme);
+    let pill = |id: &'static str,
+                icon: Icon,
+                label: &'static str,
+                enabled: bool,
+                cx: &mut Context<PhoneApp>| {
+        let press = if enabled {
+            app.presses.value(id).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let k = press_scale(press, scale::PRESS);
+        div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(label)
+            .flex_1()
+            .h(px(44.0 * k))
+            .rounded_full()
+            .bg(mix(colors.fill, gpui::white(), 0.16 * press))
+            .opacity(if enabled { 1.0 } else { 0.4 })
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(8.0))
+            .text_size(typography::SUBHEADLINE.size)
+            .font_weight(typography::HEADLINE.weight)
+            .text_color(colors.label)
+            .child(
+                svg()
+                    .path(icon.path())
+                    .size(px(18.0))
+                    .text_color(colors.label),
+            )
+            .child(label)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    if enabled {
+                        this.presses.down(id);
+                        this.contact_sheet_act(id, window, cx);
+                    }
+                }),
+            )
+            .when(enabled, |d| {
+                d.child(touch_surface(PhoneApp::touch_listener(cx, Some(id.into()))))
+            })
+    };
+    div()
+        .flex()
+        .gap(px(8.0))
+        .child(pill(
+            "sheet-cfav-up",
+            Icon::LucideChevronUp,
+            "Move earlier",
+            can_up,
+            cx,
+        ))
+        .child(pill(
+            "sheet-cfav-down",
+            Icon::LucideChevronDown,
+            "Move later",
+            can_down,
+            cx,
+        ))
+        .into_any_element()
 }
 
 /// One number in the Contact sheet: label, number, "Default", and a round
@@ -2209,11 +2450,12 @@ fn favorite_tile(
     vm: &ContactRow,
     width: f32,
     press: f32,
+    lift: f32,
     photo: Option<(&Arc<RenderImage>, f32)>,
 ) -> AnyElement {
     let colors = theme::colors(theme);
     let held = press.clamp(0.0, 1.0);
-    let k = press_scale(held, scale::PRESS_CARD);
+    let k = press_scale(held, scale::PRESS_CARD) * lift;
     let (top, _) = theme::hue_pair(theme, vm.hue);
     div()
         .id(("fav", index))
@@ -2293,6 +2535,22 @@ fn favorite_tile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reorder_target_rejects_same_slot_and_out_of_range() {
+        assert_eq!(reorder_target(0, 2, 4), Some((0, 2)));
+        assert_eq!(reorder_target(3, 0, 4), Some((3, 0)));
+        assert_eq!(reorder_target(1, 1, 4), None);
+        assert_eq!(reorder_target(0, 4, 4), None);
+        assert_eq!(reorder_target(4, 0, 4), None);
+        assert_eq!(reorder_target(0, 1, 0), None);
+    }
+
+    #[test]
+    fn lift_is_flat_with_reduced_motion() {
+        assert_eq!(lift_scale(true), 1.0);
+        assert!(lift_scale(false) > 1.0);
+    }
 
     #[test]
     fn tiles_are_found_by_arithmetic() {

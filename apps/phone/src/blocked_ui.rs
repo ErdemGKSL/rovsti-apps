@@ -670,7 +670,18 @@ impl PhoneApp {
             let backend = self.backend.read(cx);
             blocklist::parse_many(&typed, &emergency, &backend.blocked_numbers_set())
         };
-        if many.to_block.len() > 1 {
+        let listed = many.to_block.len() + many.already_blocked + many.skipped_emergency;
+        if listed > 1 && many.to_block.is_empty() {
+            // Several numbers, none of them new: the whole text is not one number.
+            self.blocked.error = Some(if many.already_blocked > 0 {
+                "Already blocked"
+            } else {
+                "Emergency numbers can't be blocked"
+            });
+            rovsti_ui::haptics::perform(window, HapticFeedback::Reject);
+            return;
+        }
+        if listed > 1 {
             self.blocked.field.update(cx, |f, cx| f.clear(cx));
             window.blur();
             self.blocked_block_many(many, window, cx);

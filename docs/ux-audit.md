@@ -115,6 +115,9 @@ Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19),
 - [x] S1 `apps/contacts/src/main.rs`, `groups.rs`, `picker.rs`, `editor.rs`, `whatsapp.rs`, `transfer.rs` | Medium | The Undo for Delete Contact vanished after almost any tap while the delete still went through; now it survives navigation (round 3).
 - [x] S2 `apps/contacts/src/confirm.rs` | Low | The Undo button stayed on screen after the delete committed; now it goes away with the commit (round 3).
 - [x] S3 `apps/contacts/src/transfer.rs`, `backend.rs` | Low | Export wrote an empty file for an empty book and included a contact waiting for Undo; now it says there is nothing to export and leaves the pending one out (round 3).
+- [x] T1 `crates/rovsti_core/src/contact_edit.rs`, `apps/contacts/src/main.rs`, `editor.rs` | Medium | A search with no results dead-ended; now it offers Create Contact with the number, email or name filled in (round 4).
+- [ ] T2 `apps/contacts/src/editor.rs` | Info | A custom Android label on a number or email is dropped when its kind is cycled (not planned).
+- [ ] T3 `apps/contacts/src/main.rs` | Info | Other apps' insert/view intents are not answered; default number, vCard share, Undo for Delete Group and a custom favorites order stay out of scope (not planned).
 
 ## Stops (S)
 

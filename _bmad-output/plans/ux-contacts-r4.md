@@ -28,7 +28,7 @@ Run after every step:
 If `df` shows under 6 GB free, run `rm -rf target/debug/incremental` first.
 Commit each step on its own ("Rovsti contacts: ...").
 
-### X1. rovsti_core: a draft from a search query (+ tests) (T1)
+### X1. rovsti_core: a draft from a search query (+ tests) (T1) (done, bfd4a61)
 
 In `crates/rovsti_core/src/contact_edit.rs`:
 
@@ -63,7 +63,7 @@ Tests in `contact_edit.rs` `mod tests`:
 
 Acceptance: `cargo test -p rovsti_core contact_edit` passes; checks green.
 
-### X2. "Create Contact" from a search with no results (T1)
+### X2. "Create Contact" from a search with no results (T1) (done, 8207326)
 
 `apps/contacts/src/editor.rs`:
 - Refactor `open_new_editor` into
@@ -89,7 +89,7 @@ Acceptance: on desktop (`cargo run -p contacts` with the sample book) searching 
 shows "No Results" plus "Create Contact"; tapping it opens "New Contact" with the number filled
 in; searching "Jane Doe" fills First "Jane", Last "Doe". All checks green.
 
-### X3. Docs and plan status
+### X3. Docs and plan status (done, this commit)
 
 - `docs/roadmap.md` (Rovsti Contacts): add a ticked line "UX completeness pass, round 4: a
   search with no results offers Create Contact with the number, email or name filled in (done

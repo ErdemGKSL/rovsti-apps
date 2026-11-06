@@ -12,6 +12,7 @@ mod conversation;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod headless;
 mod inbox;
+mod keyed_list;
 mod new_conversation;
 mod notifications;
 mod prefs;
@@ -19,12 +20,12 @@ mod schedule_ui;
 mod settings_ui;
 mod sms_conversation;
 
-use std::time::Duration;
+use std::{borrow::Cow, time::Duration};
 
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClipboardItem, Context, Entity, InteractiveElement,
-    IntoElement, ParentElement, Render, StatefulInteractiveElement, Styled, Subscription, Window,
-    WindowBounds, WindowOptions, div, px, size,
+    IntoElement, ListAlignment, ParentElement, Render, SharedString, StatefulInteractiveElement,
+    Styled, Subscription, Window, WindowBounds, WindowOptions, div, list, px, size,
 };
 use rovsti_core::{
     Message, MessageDirection, PhoneNumber, ThreadId,
@@ -47,6 +48,7 @@ use rovsti_ui::{
 use backend::{Access, Backend, BackendEvent, now_ms};
 use conversation::{Conversation, ConversationEvent};
 use inbox::{InboxView, RowView};
+use keyed_list::{KeyedList, key_of};
 use new_conversation::{NewConversation, NewConversationEvent, Recipient};
 use notifications::{Arrival, Digests, Reply, SmsReceived, Switches};
 use rovsti_wa_client::ClientError;
@@ -97,17 +99,68 @@ struct MessagesApp {
     /// GPUI asked the host for the Back key (a sheet is open).
     back_enabled: bool,
     /// The gateway's chats as inbox threads (SMS comes from the backend).
+    /// Change it through [`Self::wa_threads_mut`], which marks the inbox stale.
     wa_threads: Vec<InboxThread>,
+    /// Bumped on every change of `wa_threads`.
+    wa_rev: u64,
+    /// Bumped on every backend notification (threads, contacts, rules, clock).
+    backend_epoch: u64,
+    /// What `view` was merged from; the merge runs again only when it changes.
+    inbox_key: Option<InboxKey>,
     /// The merged inbox, rebuilt whenever a source changes.
     view: InboxView,
+    /// Bumped on every rebuild of `view`.
+    view_gen: u64,
+    /// The Chats tab: a virtualised list of the title, banners and rows.
+    chat_list: KeyedList,
+    /// What each item of `chat_list` is, rebuilt only when `chat_layout` changes.
+    chat_items: Vec<ChatItem>,
+    chat_layout: Option<ChatLayout>,
     /// The Spam filter's rows are showing instead of the inbox.
     show_spam: bool,
     /// The OTP code that was just copied.
-    copied: Option<String>,
+    copied: Option<SharedString>,
     open: Open,
     /// The chat list is being fetched, or was fetched for this link.
     chats: ChatsState,
     _subscriptions: Vec<Subscription>,
+}
+
+/// The inputs of one inbox merge. Time labels only change with the day.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct InboxKey {
+    backend: u64,
+    wa: u64,
+    /// The local day of "now", in the backend's offset.
+    day: i64,
+    /// The desktop preview chat stands in for an unlinked WhatsApp.
+    wa_preview: bool,
+}
+
+/// What decides the Chats list's items besides the rows themselves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ChatLayout {
+    view_gen: u64,
+    show_spam: bool,
+    role_held: bool,
+    state: Access,
+}
+
+/// One item of the Chats list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChatItem {
+    Title,
+    /// "Read-only: not your default SMS app".
+    RoleBanner,
+    /// Back from the Spam filter to the inbox.
+    SpamBack,
+    /// The Spam filter's entry row.
+    SpamFilter,
+    /// A row of the inbox (or of the Spam filter while it shows).
+    Row(usize),
+    Empty,
+    /// Room for the floating tab bar under the last row.
+    Tail,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -134,6 +187,7 @@ impl MessagesApp {
                 cx.notify();
             }),
             cx.observe(&backend, |this, _, cx| {
+                this.backend_epoch += 1;
                 this.rebuild(cx);
                 cx.notify();
             }),
@@ -174,7 +228,14 @@ impl MessagesApp {
             remote_scheduled: Vec::new(),
             back_enabled: false,
             wa_threads: Vec::new(),
+            wa_rev: 0,
+            backend_epoch: 0,
+            inbox_key: None,
             view: InboxView::default(),
+            view_gen: 0,
+            chat_list: KeyedList::new(ListAlignment::Top, 0),
+            chat_items: Vec::new(),
+            chat_layout: None,
             show_spam: false,
             copied: None,
             open: Open::None,
@@ -187,35 +248,59 @@ impl MessagesApp {
 
     /// The WhatsApp threads the inbox merges. On desktop with nothing linked
     /// the preview chat stands in, so the merged person shows.
-    fn wa_for_view(&self, cx: &App) -> Vec<InboxThread> {
-        if self.wa_threads.is_empty()
-            && self.backend.read(cx).is_preview()
-            && self.whatsapp.read(cx).link().is_none()
-        {
-            return backend::preview::whatsapp_threads(now_ms());
+    fn wa_for_view(&self, cx: &App) -> Cow<'_, [InboxThread]> {
+        if self.wa_preview(cx) {
+            return Cow::Owned(backend::preview::whatsapp_threads(now_ms()));
         }
-        self.wa_threads.clone()
+        Cow::Borrowed(&self.wa_threads)
     }
 
-    /// Merges SMS and WhatsApp into the rows again and keeps an open
-    /// conversation's channel switch and clock in step.
+    fn wa_preview(&self, cx: &App) -> bool {
+        self.wa_threads.is_empty()
+            && self.backend.read(cx).is_preview()
+            && self.whatsapp.read(cx).link().is_none()
+    }
+
+    /// The WhatsApp threads, for a change: the inbox merges again next rebuild.
+    fn wa_threads_mut(&mut self) -> &mut Vec<InboxThread> {
+        self.wa_rev += 1;
+        &mut self.wa_threads
+    }
+
+    /// Merges SMS and WhatsApp into the rows again (only when a source
+    /// changed) and keeps an open conversation's channel switch and clock in
+    /// step.
     fn rebuild(&mut self, cx: &mut Context<Self>) {
-        let wa = self.wa_for_view(cx);
-        let locale = {
-            let backend = self.backend.read(cx);
-            self.view = inbox::build(
-                backend.threads(),
-                &wa,
-                &inbox::Inputs {
-                    contacts: backend.contacts(),
-                    rules: backend.spam_rules(),
-                    blocked: backend.blocked(),
-                    locale: backend.locale(),
-                    now_ms: now_ms(),
-                },
-            );
-            backend.locale()
+        let now = now_ms();
+        let locale = self.backend.read(cx).locale();
+        let key = InboxKey {
+            backend: self.backend_epoch,
+            wa: self.wa_rev,
+            day: (now.div_euclid(1000) + i64::from(locale.tz_offset_s)).div_euclid(86_400),
+            wa_preview: self.wa_preview(cx),
         };
+        if self.inbox_key != Some(key) {
+            let view = {
+                let wa = self.wa_for_view(cx);
+                let backend = self.backend.read(cx);
+                inbox::build(
+                    backend.threads(),
+                    &wa,
+                    &inbox::Inputs {
+                        contacts: backend.contacts(),
+                        rules: backend.spam_rules(),
+                        blocked: backend.blocked(),
+                        locale,
+                        now_ms: now,
+                    },
+                )
+            };
+            if view != self.view {
+                self.view = view;
+                self.view_gen += 1;
+            }
+            self.inbox_key = Some(key);
+        }
         if self.view.spam.is_empty() {
             self.show_spam = false;
         }
@@ -259,7 +344,7 @@ impl MessagesApp {
                 GatewayEvent::Message(message) => {
                     let viewing =
                         matches!(&self.open, Open::WhatsApp(jid, _) if *jid == message.chat);
-                    inbox::fold_message(&mut self.wa_threads, &message, viewing);
+                    inbox::fold_message(self.wa_threads_mut(), &message, viewing);
                     self.notify_whatsapp(&message, cx);
                 }
                 GatewayEvent::Scheduled(item) => {
@@ -273,7 +358,7 @@ impl MessagesApp {
         }
         if !connected && self.whatsapp.read(cx).link().is_none() {
             // Unlinked: WhatsApp chats leave the inbox.
-            self.wa_threads.clear();
+            self.wa_threads_mut().clear();
             if matches!(self.open, Open::WhatsApp(..)) {
                 self.open = Open::None;
             }
@@ -299,7 +384,8 @@ impl MessagesApp {
                 this.chats = ChatsState::Loaded;
                 match result {
                     Ok(chats) => {
-                        this.wa_threads = inbox::chat_threads(&chats, &this.wa_threads);
+                        let threads = inbox::chat_threads(&chats, &this.wa_threads);
+                        *this.wa_threads_mut() = threads;
                         this.rebuild(cx);
                     }
                     Err(ClientError::Unauthorized) => {}
@@ -358,7 +444,7 @@ impl MessagesApp {
         let id = ThreadId::WhatsApp(jid.clone());
         self.dismiss_notification(&id, cx);
         self.load_remote_scheduled(cx);
-        for thread in self.wa_threads.iter_mut().filter(|t| t.id == id) {
+        for thread in self.wa_threads_mut().iter_mut().filter(|t| t.id == id) {
             thread.unread = 0;
         }
         self.open = Open::WhatsApp(jid, conversation);
@@ -410,7 +496,7 @@ impl MessagesApp {
             .iter()
             .chain(&self.view.spam)
             .find(|row| row.threads.contains(thread))
-            .map(|row| row.title.clone())
+            .map(|row| row.title.to_string())
     }
 
     fn open_new(&mut self, cx: &mut Context<Self>) {
@@ -997,7 +1083,7 @@ impl MessagesApp {
     // ---- the inbox -----------------------------------------------------------
 
     /// Copies a one-time code (hidden from the paste preview) and says so.
-    fn copy_code(&mut self, code: String, cx: &mut Context<Self>) {
+    fn copy_code(&mut self, code: SharedString, cx: &mut Context<Self>) {
         let text = code.clone();
         let task = cx
             .background_executor()
@@ -1010,7 +1096,7 @@ impl MessagesApp {
                         Ok(true) => this.copied = Some(code.clone()),
                         // Desktop preview: the window's own clipboard.
                         Err(rovsti_android::Error::Unsupported) => {
-                            cx.write_to_clipboard(ClipboardItem::new_string(code.clone()));
+                            cx.write_to_clipboard(ClipboardItem::new_string(code.to_string()));
                             this.copied = Some(code.clone());
                         }
                         Ok(false) | Err(_) => log::warn!("copying the code failed"),
@@ -1052,7 +1138,7 @@ impl MessagesApp {
             copied,
             Box::new(cx.listener(move |this, _, _, cx| {
                 if let Some(thread) = thread.clone() {
-                    this.open_thread(thread, title.clone(), cx);
+                    this.open_thread(thread, title.to_string(), cx);
                 }
             })),
             Box::new(cx.listener(move |this, _, _, cx| {
@@ -1095,81 +1181,164 @@ impl MessagesApp {
             .into_any_element()
     }
 
-    fn chats(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let colors = theme::colors(theme);
+    /// The rows the Chats list shows now: the Spam filter's or the inbox's.
+    fn shown_rows(&self) -> &[RowView] {
+        if self.show_spam {
+            &self.view.spam
+        } else {
+            &self.view.rows
+        }
+    }
+
+    /// Brings the Chats list's items in step with the inbox. Runs every frame
+    /// but only does work when the inbox, the Spam toggle, the role or the
+    /// load state changed; unchanged rows keep their measured heights.
+    fn sync_chat_list(&mut self, cx: &App) {
         let (role_held, state) = {
             let backend = self.backend.read(cx);
             (backend.sms_role_held(), backend.threads_state())
         };
-        let mut out: Vec<AnyElement> = Vec::new();
+        let layout = ChatLayout {
+            view_gen: self.view_gen,
+            show_spam: self.show_spam,
+            role_held,
+            state,
+        };
+        if self.chat_layout == Some(layout) {
+            return;
+        }
+        self.chat_layout = Some(layout);
+        let mut items = vec![ChatItem::Title];
         if !role_held {
-            out.push(self.role_banner(theme, cx));
+            items.push(ChatItem::RoleBanner);
         }
         if self.show_spam {
-            out.push(
-                list_row(
-                    theme,
-                    None,
-                    "Inbox",
-                    Some("Spam is never deleted or announced.".into()),
-                    None,
-                )
-                .id("spam-back")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.show_spam = false;
-                    cx.notify();
-                }))
-                .into_any_element(),
-            );
-            for (index, row) in self.view.spam.iter().enumerate() {
-                out.push(self.inbox_row(theme, 1000 + index, row, cx));
+            items.push(ChatItem::SpamBack);
+        } else if !self.view.spam.is_empty() {
+            items.push(ChatItem::SpamFilter);
+        }
+        let rows = self.shown_rows();
+        items.extend((0..rows.len()).map(ChatItem::Row));
+        if !self.show_spam && self.view.rows.is_empty() && self.view.spam.is_empty() {
+            items.push(ChatItem::Empty);
+        }
+        items.push(ChatItem::Tail);
+        let keys = items
+            .iter()
+            .map(|item| match *item {
+                ChatItem::Row(index) => key_of((1u8, self.show_spam, &rows[index])),
+                ChatItem::SpamFilter => {
+                    key_of((2u8, self.view.spam.len(), self.view.spam_unread()))
+                }
+                ChatItem::Empty => key_of((3u8, state)),
+                ChatItem::Title => key_of(0u8),
+                ChatItem::RoleBanner => key_of(4u8),
+                ChatItem::SpamBack => key_of(5u8),
+                ChatItem::Tail => key_of(6u8),
+            })
+            .collect();
+        self.chat_list.sync(keys);
+        self.chat_items = items;
+    }
+
+    /// The Chats tab as a virtualised list: only the items on screen are built.
+    fn chats_list(&self, cx: &mut Context<Self>) -> AnyElement {
+        list(
+            self.chat_list.state().clone(),
+            cx.processor(|this, index: usize, window, cx| {
+                div()
+                    .w_full()
+                    .child(this.chat_item(index, window, cx))
+                    .into_any_element()
+            }),
+        )
+        .size_full()
+        .into_any_element()
+    }
+
+    /// One item of the Chats list.
+    fn chat_item(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = current_theme(window);
+        let colors = theme::colors(theme);
+        let Some(&item) = self.chat_items.get(index) else {
+            return div().into_any_element();
+        };
+        match item {
+            ChatItem::Title => {
+                let compose = glass_icon_button(theme, Icon::LucidePencil, 0.0, false)
+                    .id("new-message")
+                    .on_click(cx.listener(|this, _, _, cx| this.open_new(cx)))
+                    .into_any_element();
+                large_title(theme, TABS[CHATS_TAB], Some(compose)).into_any_element()
             }
-        } else {
-            if !self.view.spam.is_empty() {
+            ChatItem::RoleBanner => self.role_banner(theme, cx),
+            ChatItem::SpamBack => list_row(
+                theme,
+                None,
+                "Inbox",
+                Some("Spam is never deleted or announced.".into()),
+                None,
+            )
+            .id("spam-back")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.show_spam = false;
+                this.chat_list.scroll_to_top();
+                cx.notify();
+            }))
+            .into_any_element(),
+            ChatItem::SpamFilter => {
                 let unread = self.view.spam_unread();
                 let count = self.view.spam.len();
-                out.push(
-                    list_row(
-                        theme,
-                        Some(avatar(theme, "!", 44.0, colors.orange).into_any_element()),
-                        "Spam",
-                        Some(
-                            format!("{count} conversation{}", if count == 1 { "" } else { "s" })
-                                .into(),
-                        ),
-                        (unread > 0).then(|| unread.to_string().into()),
-                    )
-                    .id("spam-filter")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.show_spam = true;
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-                );
+                list_row(
+                    theme,
+                    Some(avatar(theme, "!", 44.0, colors.orange).into_any_element()),
+                    "Spam",
+                    Some(
+                        format!("{count} conversation{}", if count == 1 { "" } else { "s" })
+                            .into(),
+                    ),
+                    (unread > 0).then(|| unread.to_string().into()),
+                )
+                .id("spam-filter")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.show_spam = true;
+                    this.chat_list.scroll_to_top();
+                    cx.notify();
+                }))
+                .into_any_element()
             }
-            for (index, row) in self.view.rows.iter().enumerate() {
-                out.push(self.inbox_row(theme, index, row, cx));
+            ChatItem::Row(row) => {
+                let Some(view) = self.shown_rows().get(row) else {
+                    return div().into_any_element();
+                };
+                // Spam rows keep ids apart from the inbox's.
+                let id = if self.show_spam { 1000 + row } else { row };
+                self.inbox_row(theme, id, view, cx)
             }
-            if self.view.rows.is_empty() && self.view.spam.is_empty() {
-                out.push(match state {
-                    Access::Denied => empty_state(
-                        theme,
-                        "SMS Access Is Off",
-                        "Allow SMS access for Rovsti Messages in the system settings to see your messages.",
-                    )
-                    .into_any_element(),
-                    Access::Loading => empty_state(theme, "Loading", "Reading your messages…")
-                        .into_any_element(),
-                    _ => empty_state(
-                        theme,
-                        "No Conversations",
-                        "Start one with the pencil above. Link WhatsApp from the WhatsApp tab.",
-                    )
-                    .into_any_element(),
-                });
-            }
+            ChatItem::Empty => match self.backend.read(cx).threads_state() {
+                Access::Denied => empty_state(
+                    theme,
+                    "SMS Access Is Off",
+                    "Allow SMS access for Rovsti Messages in the system settings to see your messages.",
+                )
+                .into_any_element(),
+                Access::Loading => {
+                    empty_state(theme, "Loading", "Reading your messages…").into_any_element()
+                }
+                _ => empty_state(
+                    theme,
+                    "No Conversations",
+                    "Start one with the pencil above. Link WhatsApp from the WhatsApp tab.",
+                )
+                .into_any_element(),
+            },
+            ChatItem::Tail => div().h(content_bottom_inset()).into_any_element(),
         }
-        div().children(out).into_any_element()
     }
 }
 
@@ -1214,18 +1383,42 @@ impl Render for MessagesApp {
         let entity = cx.entity();
         let touch_entity = entity.clone();
 
-        let body = match tab {
-            0 => self.chats(theme, cx),
-            1 => self.whatsapp.clone().into_any_element(),
-            _ => self.settings.clone().into_any_element(),
-        };
-
-        let compose = (tab == 0).then(|| {
-            glass_icon_button(theme, Icon::LucidePencil, 0.0, false)
-                .id("new-message")
-                .on_click(cx.listener(|this, _, _, cx| this.open_new(cx)))
+        let page = if tab == CHATS_TAB {
+            // The inbox grows with the user's data: a virtualised list that
+            // carries the large title as its first item.
+            self.sync_chat_list(cx);
+            div()
+                .size_full()
+                .opacity(self.page.progress())
+                .child(
+                    div()
+                        .size_full()
+                        .relative()
+                        .top(px(self.page.offset(24.0)))
+                        .child(self.chats_list(cx)),
+                )
                 .into_any_element()
-        });
+        } else {
+            let body = if tab == WHATSAPP_TAB {
+                self.whatsapp.clone().into_any_element()
+            } else {
+                self.settings.clone().into_any_element()
+            };
+            div()
+                .id("page")
+                .size_full()
+                .overflow_y_scroll()
+                .pb(content_bottom_inset())
+                .opacity(self.page.progress())
+                .child(
+                    div()
+                        .relative()
+                        .top(px(self.page.offset(24.0)))
+                        .child(large_title(theme, TABS[tab], None))
+                        .child(body),
+                )
+                .into_any_element()
+        };
 
         div()
             .size_full()
@@ -1241,21 +1434,7 @@ impl Render for MessagesApp {
                 theme,
                 theme.colors().accent,
             ))
-            .child(
-                div()
-                    .id("page")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .pb(content_bottom_inset())
-                    .opacity(self.page.progress())
-                    .child(
-                        div()
-                            .relative()
-                            .top(px(self.page.offset(24.0)))
-                            .child(large_title(theme, TABS[tab], compose))
-                            .child(body),
-                    ),
-            )
+            .child(page)
             .child(self.tabs.render(
                 theme,
                 move |index, _, cx| {

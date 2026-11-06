@@ -5,6 +5,8 @@
 //! filtering) and draws one row. The mapping is pure and tested here, the
 //! drawing is a thin GPUI shell.
 
+use std::collections::HashMap;
+
 use gpui::{
     AnyElement, App, ClickEvent, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, px,
@@ -29,7 +31,7 @@ use rovsti_wa_proto::{ChatSummary, WaMessage, to_rovsti};
 use crate::conversation::civil_from_days;
 
 /// Which channel a badge names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Badge {
     Sms,
     WhatsApp,
@@ -51,20 +53,21 @@ impl Badge {
     }
 }
 
-/// One inbox row as shown.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// One inbox row as shown. Text is held as `SharedString`, so drawing a row
+/// only bumps reference counts; rows are built once per inbox change.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RowView {
-    pub title: String,
-    pub snippet: String,
+    pub title: SharedString,
+    pub snippet: SharedString,
     /// One badge per channel of the person, newest thread's first.
     pub badges: Vec<Badge>,
     pub unread: u32,
     /// The code to copy, when the newest message is an unread one-time code.
-    pub otp: Option<String>,
-    pub time: String,
+    pub otp: Option<SharedString>,
+    pub time: SharedString,
     /// The person's threads, newest first; a tap opens the first.
     pub threads: Vec<ThreadId>,
-    pub initials: String,
+    pub initials: SharedString,
     /// Avatar colour follows the newest thread's channel.
     pub channel: Channel,
 }
@@ -99,11 +102,34 @@ pub struct Inputs<'a> {
     pub now_ms: i64,
 }
 
+/// SMS thread rows by thread id, built once per merge so that looking up a
+/// row's source is O(1) instead of a scan per row.
+struct SmsIndex<'a>(HashMap<i64, &'a SmsThreadRow>);
+
+impl<'a> SmsIndex<'a> {
+    fn new(sms: &'a [SmsThreadRow]) -> Self {
+        let mut map = HashMap::with_capacity(sms.len());
+        for thread in sms {
+            // The first row wins, as a scan would find it.
+            map.entry(thread.thread_id).or_insert(thread);
+        }
+        Self(map)
+    }
+
+    fn get(&self, id: &ThreadId) -> Option<&'a SmsThreadRow> {
+        match id {
+            ThreadId::Sms(thread_id) => self.0.get(thread_id).copied(),
+            ThreadId::WhatsApp(_) => None,
+        }
+    }
+}
+
 pub fn build(sms: &[SmsThreadRow], wa: &[InboxThread], inputs: &Inputs<'_>) -> InboxView {
+    let index = SmsIndex::new(sms);
     let mut view = InboxView::default();
     for row in merge(sms, wa, inputs.contacts) {
-        let spam = is_spam(&row, sms, inputs);
-        let shown = row_view(&row, sms, inputs);
+        let spam = is_spam(&row, &index, inputs);
+        let shown = row_view(&row, &index, inputs);
         if spam {
             view.spam.push(shown);
         } else {
@@ -113,17 +139,10 @@ pub fn build(sms: &[SmsThreadRow], wa: &[InboxThread], inputs: &Inputs<'_>) -> I
     view
 }
 
-fn sms_row<'a>(sms: &'a [SmsThreadRow], id: &ThreadId) -> Option<&'a SmsThreadRow> {
-    match id {
-        ThreadId::Sms(thread_id) => sms.iter().find(|t| t.thread_id == *thread_id),
-        ThreadId::WhatsApp(_) => None,
-    }
-}
-
 /// Only a one-to-one conversation that lives purely in SMS can be spam:
 /// anyone also on WhatsApp, a contact or a group never is. The verdict is on
 /// the newest message, like the notification path (`rovsti_core::spam`).
-fn is_spam(row: &InboxRow, sms: &[SmsThreadRow], inputs: &Inputs<'_>) -> bool {
+fn is_spam(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> bool {
     if row.channels != [Channel::Sms] {
         return false;
     }
@@ -131,7 +150,7 @@ fn is_spam(row: &InboxRow, sms: &[SmsThreadRow], inputs: &Inputs<'_>) -> bool {
     if newest.is_group {
         return false;
     }
-    let Some(source) = sms_row(sms, &newest.id) else {
+    let Some(source) = sms.get(&newest.id) else {
         return false;
     };
     let sender = source.addresses.first().map_or("", String::as_str);
@@ -149,10 +168,10 @@ fn is_spam(row: &InboxRow, sms: &[SmsThreadRow], inputs: &Inputs<'_>) -> bool {
 /// The title of a row. Rows of people take the contact or number from the
 /// merge; a sender the number parser rejects (`GARANTI`) shows its address
 /// instead of the merge's `#id`.
-pub fn row_title(row: &InboxRow, sms: &[SmsThreadRow]) -> String {
+fn row_title(row: &InboxRow, sms: &SmsIndex<'_>) -> String {
     if let PersonKey::Group(ThreadId::Sms(_)) = row.key
         && row.threads.first().is_some_and(|t| t.title.is_none())
-        && let Some(source) = sms_row(sms, &row.threads[0].id)
+        && let Some(source) = sms.get(&row.threads[0].id)
     {
         let addresses: Vec<&str> = source
             .addresses
@@ -224,22 +243,22 @@ pub fn badges(row: &InboxRow) -> Vec<Badge> {
     row.channels.iter().copied().map(Badge::of).collect()
 }
 
-fn row_view(row: &InboxRow, sms: &[SmsThreadRow], inputs: &Inputs<'_>) -> RowView {
+fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView {
     let title = row_title(row, sms);
     let newest = &row.threads[0];
     // A code is worth a chip while it is new: an old, read one is just text.
     let otp = (newest.id.channel() == Channel::Sms && row.unread > 0)
         .then(|| otp::detect(&newest.last.body))
         .flatten()
-        .map(|o| o.code);
+        .map(|o| SharedString::from(o.code));
     RowView {
-        initials: initials(&title),
-        title,
-        snippet: row.last.body.clone(),
+        initials: initials(&title).into(),
+        title: title.into(),
+        snippet: row.last.body.as_str().into(),
         badges: badges(row),
         unread: row.unread,
         otp,
-        time: row_time(row.last.timestamp_ms, inputs.now_ms, inputs.locale),
+        time: row_time(row.last.timestamp_ms, inputs.now_ms, inputs.locale).into(),
         threads: row.threads.iter().map(|t| t.id.clone()).collect(),
         channel: newest.id.channel(),
     }
@@ -332,7 +351,8 @@ type Handler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 /// One inbox row: avatar, title and time, badges and snippet, unread dot, and
 /// under it the OTP chip when there is one. The chip is a sibling of the
-/// tappable row, so copying a code never opens the conversation.
+/// tappable row, so copying a code never opens the conversation. Only rows
+/// on screen are built (the inbox is a virtualised `list`).
 pub fn row_element(
     theme: Theme,
     index: usize,
@@ -394,7 +414,7 @@ pub fn row_element(
                                 .text_size(typography::HEADLINE.size)
                                 .font_weight(typography::HEADLINE.weight)
                                 .text_color(colors.label)
-                                .child(SharedString::from(view.title.clone())),
+                                .child(view.title.clone()),
                         )
                         .child(
                             div()
@@ -405,7 +425,7 @@ pub fn row_element(
                                 } else {
                                     colors.tertiary_label
                                 })
-                                .child(SharedString::from(view.time.clone())),
+                                .child(view.time.clone()),
                         ),
                 )
                 .child(
@@ -422,7 +442,7 @@ pub fn row_element(
                                 .text_size(typography::SUBHEADLINE.size)
                                 .font_weight(weight)
                                 .text_color(colors.secondary_label)
-                                .child(SharedString::from(view.snippet.clone())),
+                                .child(view.snippet.clone()),
                         )
                         .children(unread.then(|| {
                             div()

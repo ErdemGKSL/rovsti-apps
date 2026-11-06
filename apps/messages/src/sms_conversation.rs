@@ -6,9 +6,9 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use gpui::{
-    AnyElement, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
-    Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, TextInputAction,
-    TextInputPurpose, Window, div, img, prelude::*, px,
+    AnyElement, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ListAlignment,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TextInputAction,
+    TextInputPurpose, Window, div, img, list, prelude::*, px,
 };
 use rovsti_core::{
     ThreadId,
@@ -29,6 +29,7 @@ use crate::{
     backend::{Backend, BackendEvent, now_ms, sim_for},
     conversation::{clock, composer_bar, day_label, header_bar},
     inbox::Badge,
+    keyed_list::{KeyedList, key_of},
     schedule_ui::{self, StripItem, StripKey},
 };
 
@@ -58,6 +59,15 @@ pub enum SmsConversationEvent {
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
 
+/// One item of the timeline list after its "Load earlier" slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Entry {
+    /// A day starts at the timeline item at this index.
+    Day(usize),
+    /// The timeline item at this index.
+    Message(usize),
+}
+
 pub struct SmsConversation {
     backend: Entity<Backend>,
     /// A negative id is a draft: a new conversation with no provider thread yet.
@@ -66,7 +76,17 @@ pub struct SmsConversation {
     recipients: Vec<String>,
     timeline: SmsTimeline,
     composer: Entity<TextField>,
-    scroll: ScrollHandle,
+    /// The virtualised, bottom-aligned timeline: item 0 is the "Load earlier"
+    /// slot, then one item per [`Entry`].
+    list: KeyedList,
+    /// Day breaks and messages in timeline order, rebuilt when `rows_dirty`.
+    entries: Vec<Entry>,
+    /// The timeline changed since `entries`.
+    rows_dirty: bool,
+    /// The clock offset `entries` cut days with.
+    rows_offset: i32,
+    /// "Now" and the offset for the frame being drawn (rows are built after `render`).
+    frame_now: i64,
     loading: bool,
     error: Option<SharedString>,
     /// A line above the composer ("Couldn't attach that file").
@@ -111,7 +131,11 @@ impl SmsConversation {
             recipients,
             timeline,
             composer,
-            scroll: ScrollHandle::new(),
+            list: KeyedList::new(ListAlignment::Bottom, 1),
+            entries: Vec::new(),
+            rows_dirty: true,
+            rows_offset: 0,
+            frame_now: 0,
             loading: false,
             error: None,
             notice: None,
@@ -195,6 +219,7 @@ impl SmsConversation {
     /// `sms_status` for this thread's sends; other threads' are ignored by the timeline.
     fn on_status(&mut self, status: &SmsStatus, cx: &mut Context<Self>) {
         if self.timeline.apply_status(status) {
+            self.rows_dirty = true;
             cx.notify();
         }
     }
@@ -240,8 +265,9 @@ impl SmsConversation {
                         this.error = None;
                         let first = this.timeline.items().is_empty();
                         this.timeline.apply_page(page);
+                        this.sync_rows();
                         if before_ms.is_none() {
-                            this.scroll.scroll_to_bottom();
+                            this.list.scroll_to_end();
                         }
                         if first || before_ms.is_none() {
                             this.backend
@@ -320,7 +346,8 @@ impl SmsConversation {
         };
         self.timeline
             .push_pending(local_id, shown, sub_id, now_ms());
-        self.scroll.scroll_to_bottom();
+        self.sync_rows();
+        self.list.scroll_to_end();
         let to = self.recipients.clone();
         match attachment {
             Some(path) => {
@@ -345,6 +372,7 @@ impl SmsConversation {
     }
 
     fn retry(&mut self, local_id: u64, cx: &mut Context<Self>) {
+        self.rows_dirty = true;
         let Some(req) = self.timeline.retry(local_id) else {
             return;
         };
@@ -364,6 +392,128 @@ impl SmsConversation {
         self.notice = None;
         self.backend
             .update(cx, |backend, cx| backend.pick_attachment(cx));
+    }
+
+    /// Rebuilds the day breaks and message entries for `offset` and tells the
+    /// list which items changed. Runs only after a change, never per frame.
+    fn sync_rows_at(&mut self, offset: i32) {
+        self.rows_dirty = false;
+        self.rows_offset = offset;
+        let items = self.timeline.items();
+        let starts = day_starts(items, offset);
+        let mut entries = Vec::with_capacity(items.len() + starts.len());
+        let mut next_start = starts.iter().peekable();
+        for index in 0..items.len() {
+            if next_start.next_if(|&&at| at == index).is_some() {
+                entries.push(Entry::Day(index));
+            }
+            entries.push(Entry::Message(index));
+        }
+        let day = |ms: i64| (ms.div_euclid(1000) + i64::from(offset)).div_euclid(86_400);
+        // The "Load earlier" slot keeps one key: it is measured while on screen.
+        let keys = std::iter::once(key_of(0u8))
+            .chain(entries.iter().map(|entry| match *entry {
+                Entry::Day(index) => key_of((1u8, day(items[index].at_ms))),
+                Entry::Message(index) => message_key(&items[index]),
+            }))
+            .collect();
+        self.list.sync(keys);
+        self.entries = entries;
+    }
+
+    fn sync_rows(&mut self) {
+        self.sync_rows_at(self.rows_offset);
+    }
+
+    /// One item of the timeline list: the "Load earlier" slot, a day break or
+    /// a bubble. Only items on screen are built.
+    fn list_item(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = current_theme(window);
+        let colors = theme::colors(theme);
+        let now = self.frame_now;
+        let offset = self.rows_offset;
+        let items = self.timeline.items();
+        let content = match index.checked_sub(1).map(|i| self.entries.get(i).copied()) {
+            None => self.top_slot(theme, cx),
+            Some(Some(Entry::Day(at))) => match items.get(at) {
+                Some(item) => div()
+                    .flex()
+                    .justify_center()
+                    .py(px(6.0))
+                    .text_size(typography::CAPTION.size)
+                    .text_color(colors.secondary_label)
+                    .child(day_label(item.at_ms, now, offset))
+                    .into_any_element(),
+                None => div().into_any_element(),
+            },
+            Some(Some(Entry::Message(at))) => match items.get(at) {
+                Some(item) => self.bubble(theme, item, now, offset, at, cx),
+                None => div().into_any_element(),
+            },
+            Some(None) => div().into_any_element(),
+        };
+        // The padding stands in for the old column gap.
+        div()
+            .w_full()
+            .px(px(12.0))
+            .pb(px(4.0))
+            .child(content)
+            .into_any_element()
+    }
+
+    /// "Load earlier", a load error, or "No messages yet".
+    fn top_slot(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let colors = theme::colors(theme);
+        let older = self.timeline.has_older().then(|| {
+            div()
+                .id("sms-older")
+                .flex()
+                .justify_center()
+                .py(px(8.0))
+                .text_size(typography::FOOTNOTE.size)
+                .text_color(colors.accent)
+                .child(if self.loading {
+                    "Loading…"
+                } else {
+                    "Load earlier"
+                })
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(oldest) = this.timeline.oldest_ms() {
+                        // +1 re-reads rows that share the oldest stamp; the
+                        // timeline dedups them by key.
+                        this.load(Some(oldest.saturating_add(1)), cx);
+                    }
+                }))
+        });
+        let error = self.error.clone().map(|error| {
+            div()
+                .py(px(8.0))
+                .text_size(typography::FOOTNOTE.size)
+                .text_color(colors.red)
+                .child(error)
+        });
+        let empty = (self.entries.is_empty() && !self.loading && self.error.is_none()).then(|| {
+            div()
+                .py(px(48.0))
+                .flex()
+                .justify_center()
+                .text_size(typography::SUBHEADLINE.size)
+                .text_color(colors.secondary_label)
+                .child("No messages yet")
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .children(older)
+            .children(error)
+            .children(empty)
+            .into_any_element()
     }
 
     fn bubble(
@@ -480,62 +630,17 @@ impl Render for SmsConversation {
         };
         let offset = locale.tz_offset_s;
 
-        let items = self.timeline.items();
-        let day_starts = day_starts(items, offset);
-        let mut rows: Vec<AnyElement> = Vec::new();
-        for (index, item) in items.iter().enumerate() {
-            if day_starts.contains(&index) {
-                rows.push(
-                    div()
-                        .flex()
-                        .justify_center()
-                        .py(px(6.0))
-                        .text_size(typography::CAPTION.size)
-                        .text_color(colors.secondary_label)
-                        .child(day_label(item.at_ms, now, offset))
-                        .into_any_element(),
-                );
-            }
-            rows.push(self.bubble(theme, item, now, offset, index, cx));
+        self.frame_now = now;
+        if self.rows_dirty || self.rows_offset != offset {
+            self.sync_rows_at(offset);
         }
-
-        let older = self.timeline.has_older().then(|| {
-            div()
-                .id("sms-older")
-                .flex()
-                .justify_center()
-                .py(px(8.0))
-                .text_size(typography::FOOTNOTE.size)
-                .text_color(colors.accent)
-                .child(if self.loading {
-                    "Loading…"
-                } else {
-                    "Load earlier"
-                })
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(oldest) = this.timeline.oldest_ms() {
-                        // +1 re-reads rows that share the oldest stamp; the
-                        // timeline dedups them by key.
-                        this.load(Some(oldest.saturating_add(1)), cx);
-                    }
-                }))
-        });
-        let error = self.error.clone().map(|error| {
-            div()
-                .py(px(8.0))
-                .text_size(typography::FOOTNOTE.size)
-                .text_color(colors.red)
-                .child(error)
-        });
-        let empty = (rows.is_empty() && !self.loading && self.error.is_none()).then(|| {
-            div()
-                .py(px(48.0))
-                .flex()
-                .justify_center()
-                .text_size(typography::SUBHEADLINE.size)
-                .text_color(colors.secondary_label)
-                .child("No messages yet")
-        });
+        let timeline = list(
+            self.list.state().clone(),
+            cx.processor(|this, index: usize, window, cx| this.list_item(index, window, cx)),
+        )
+        .flex_1()
+        .min_h_0()
+        .w_full();
 
         let back = glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
             .id("sms-back")
@@ -676,25 +781,7 @@ impl Render for SmsConversation {
             .flex()
             .flex_col()
             .child(header)
-            .child(
-                div()
-                    .id("sms-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .px(px(12.0))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .children(older)
-                            .children(error)
-                            .children(empty)
-                            .children(rows),
-                    ),
-            )
+            .child(timeline)
             .children(strip)
             .children(has_info.then_some(info))
             .child(bottom)
@@ -702,6 +789,24 @@ impl Render for SmsConversation {
 }
 
 // ---- pure helpers -----------------------------------------------------------
+
+/// The key of a bubble: everything that changes what it shows or how tall it is.
+fn message_key(item: &SmsItem) -> u64 {
+    let parts: Vec<(&str, Option<&str>, bool)> = item
+        .parts
+        .iter()
+        .map(|p| (p.content_type.as_str(), p.path.as_deref(), p.text.is_some()))
+        .collect();
+    key_of((
+        2u8,
+        item.key,
+        item.outgoing,
+        &item.body,
+        parts,
+        item.at_ms,
+        item.state,
+    ))
+}
 
 /// The SIM chip shows only when there is a choice to make.
 pub fn sim_chip_visible(sims: &SmsSimsPayload) -> bool {

@@ -118,7 +118,7 @@ pub fn decode<T: DeserializeOwned + Default>(raw: rovsti_android::Result<String>
 }
 
 /// The state of the thread list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Access {
     Loading,
     Ready,

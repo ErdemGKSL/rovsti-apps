@@ -11,9 +11,9 @@ use std::{
 use gpui::TextInputAction;
 use gpui::TextInputPurpose;
 use gpui::{
-    Context, Entity, EventEmitter, Image, ImageFormat, InteractiveElement, IntoElement,
-    ParentElement, Render, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Window,
-    div, img, prelude::*, px,
+    AnyElement, Context, Entity, EventEmitter, Image, ImageFormat, InteractiveElement, IntoElement,
+    ListAlignment, ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window,
+    div, img, list, prelude::*, px,
 };
 use rovsti_core::{ThreadId, recents::LocaleTime, wire::DocumentOp};
 use rovsti_ui::{
@@ -30,6 +30,7 @@ pub(crate) use rovsti_wa_proto::presence::{civil_from_days, clock, day_label, pr
 
 use crate::{
     backend::{Backend, BackendEvent},
+    keyed_list::{KeyedList, key_of},
     schedule_ui::{self, StripItem, StripKey},
 };
 use rovsti_wa_proto::{
@@ -92,6 +93,15 @@ struct Prepared {
     mime: String,
 }
 
+/// One item of the timeline list after its "Load earlier" slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Entry {
+    /// The local day (its midnight, in ms) that starts here.
+    Day(i64),
+    /// The timeline item at this index.
+    Message(usize),
+}
+
 pub struct Conversation {
     chat: String,
     title: SharedString,
@@ -105,7 +115,15 @@ pub struct Conversation {
     marked: HashSet<String>,
     /// The last failed load, shown above the messages.
     error: Option<SharedString>,
-    scroll: ScrollHandle,
+    /// The virtualised, bottom-aligned timeline: item 0 is the "Load earlier"
+    /// slot, then one item per [`Entry`].
+    list: KeyedList,
+    /// Day breaks and messages in timeline order, rebuilt when `rows_dirty`.
+    entries: Vec<Entry>,
+    /// The timeline, its media or the reaction strip changed since `entries`.
+    rows_dirty: bool,
+    /// "Now" for the frame being drawn (the list builds rows after `render`).
+    frame_now: i64,
     /// Decoded images by message id, oldest first (at most [`MEDIA_CACHE`]).
     media_cache: Vec<(String, Arc<Image>)>,
     media_loading: HashSet<String>,
@@ -115,6 +133,8 @@ pub struct Conversation {
     throttle: TypingThrottle,
     /// Composer text at the last observation, to tell edits from re-renders.
     last_text: String,
+    /// The composer's edit counter at the last observation.
+    seen_edits: u64,
     /// The peer is typing until this time.
     typing_until: Option<i64>,
     /// `(available, last_seen_ms)` of the peer in a 1:1 chat.
@@ -176,13 +196,17 @@ impl Conversation {
             loading: false,
             marked: HashSet::new(),
             error: None,
-            scroll: ScrollHandle::new(),
+            list: KeyedList::new(ListAlignment::Bottom, 1),
+            entries: Vec::new(),
+            rows_dirty: true,
+            frame_now: 0,
             media_cache: Vec::new(),
             media_loading: HashSet::new(),
             media_failed: HashSet::new(),
             strip: None,
             throttle: TypingThrottle::new(),
             last_text: String::new(),
+            seen_edits: 0,
             typing_until: None,
             presence: None,
             locale,
@@ -234,6 +258,7 @@ impl Conversation {
     pub fn set_locale(&mut self, locale: LocaleTime, cx: &mut Context<Self>) {
         if self.locale != locale {
             self.locale = locale;
+            self.rows_dirty = true;
             cx.notify();
         }
     }
@@ -278,6 +303,13 @@ impl Conversation {
 
     /// Composer text changed: tells the peer we type (throttled) or paused.
     fn on_composer_changed(&mut self, cx: &mut Context<Self>) {
+        // Focus and caret changes notify too: only an edit reads the text.
+        let edits = self.composer.read(cx).edits;
+        if edits == self.seen_edits {
+            cx.notify();
+            return;
+        }
+        self.seen_edits = edits;
         let text = self.composer.read(cx).text().to_owned();
         if text != self.last_text {
             let empty = text.trim().is_empty();
@@ -304,6 +336,7 @@ impl Conversation {
     ) {
         self.strip = None;
         self.timeline.set_own_reaction(&message_id, &emoji);
+        self.rows_dirty = true;
         let request = SendReaction {
             chat: self.chat.clone(),
             message_id,
@@ -340,6 +373,7 @@ impl Conversation {
     fn cache_image(&mut self, id: String, image: Arc<Image>) {
         self.media_cache.retain(|(cached, _)| *cached != id);
         self.media_cache.push((id, image));
+        self.rows_dirty = true;
         if self.media_cache.len() > MEDIA_CACHE {
             self.media_cache.remove(0);
         }
@@ -352,11 +386,13 @@ impl Conversation {
         }
         let Some(format) = image_format(&mime) else {
             self.media_failed.insert(id);
+            self.rows_dirty = true;
             cx.notify();
             return;
         };
         self.media_failed.remove(&id);
         self.media_loading.insert(id.clone());
+        self.rows_dirty = true;
         let gateway = self.gateway.clone();
         let wanted = id.clone();
         let task = cx
@@ -366,6 +402,7 @@ impl Conversation {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.media_loading.remove(&id);
+                this.rows_dirty = true;
                 match result {
                     Ok(bytes) => {
                         this.cache_image(id, Arc::new(Image::from_bytes(format, bytes)));
@@ -403,8 +440,9 @@ impl Conversation {
                     Ok(page) => {
                         this.error = None;
                         this.timeline.apply_page(page, PAGE);
+                        this.sync_rows();
                         if before_ms.is_none() {
-                            this.scroll.scroll_to_bottom();
+                            this.list.scroll_to_end();
                         }
                         this.mark_unread(cx);
                     }
@@ -491,7 +529,9 @@ impl Conversation {
             _ => {}
         }
         if self.timeline.apply_event(event) {
-            self.scroll.scroll_to_bottom();
+            // A reader at the bottom follows the new message (the list is
+            // bottom-aligned); one reading older messages keeps their place.
+            self.rows_dirty = true;
             self.mark_unread(cx);
             cx.notify();
         }
@@ -593,7 +633,8 @@ impl Conversation {
             now_ms(),
         );
         self.pending_paths.insert(local_id, attached.path.clone());
-        self.scroll.scroll_to_bottom();
+        self.sync_rows();
+        self.list.scroll_to_end();
         self.dispatch_media(
             local_id,
             attached.path,
@@ -670,6 +711,7 @@ impl Conversation {
 
     fn media_sent(&mut self, local_id: u64, sent: &Sent, shown: Option<Arc<Image>>) {
         self.timeline.confirm(local_id, sent);
+        self.rows_dirty = true;
         // The cache copy of the picked file has done its job.
         if let Some(path) = self.pending_paths.remove(&local_id)
             && let Err(error) = std::fs::remove_file(&path)
@@ -685,6 +727,7 @@ impl Conversation {
 
     fn media_failed_send(&mut self, local_id: u64, error: MediaError, cx: &mut Context<Self>) {
         self.timeline.fail(local_id);
+        self.rows_dirty = true;
         self.notice = Some(match error {
             MediaError::Gone => "The file is gone; attach it again".into(),
             MediaError::TooLarge => format!(
@@ -712,12 +755,14 @@ impl Conversation {
         let local_id = self.next_local;
         self.next_local += 1;
         self.timeline.push_pending(local_id, text.clone(), now_ms());
-        self.scroll.scroll_to_bottom();
+        self.sync_rows();
+        self.list.scroll_to_end();
         self.dispatch(local_id, text, cx);
         cx.notify();
     }
 
     fn retry(&mut self, local_id: u64, cx: &mut Context<Self>) {
+        self.rows_dirty = true;
         match self.timeline.restart_body(local_id) {
             Some(MessageBody::Text(text)) => self.dispatch(local_id, text, cx),
             Some(MessageBody::Media { caption, mime, .. }) => {
@@ -750,6 +795,7 @@ impl Conversation {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
+                this.rows_dirty = true;
                 match result {
                     Ok(sent) => this.timeline.confirm(local_id, &sent),
                     Err(error) => {
@@ -762,6 +808,158 @@ impl Conversation {
             .ok();
         })
         .detach();
+    }
+
+    /// Rebuilds the day breaks and message entries and tells the list which
+    /// items changed. Runs only after a change, never per frame.
+    fn sync_rows(&mut self) {
+        self.rows_dirty = false;
+        let items = self.timeline.items();
+        let breaks = day_breaks(items, self.locale.tz_offset_s);
+        let mut entries = Vec::with_capacity(items.len() + breaks.len());
+        let mut next_break = breaks.iter().peekable();
+        for index in 0..items.len() {
+            if let Some(&(_, day_ms)) = next_break.next_if(|(at, _)| *at == index) {
+                entries.push(Entry::Day(day_ms));
+            }
+            entries.push(Entry::Message(index));
+        }
+        // The "Load earlier" slot keeps one key: it is measured while on screen.
+        let keys = std::iter::once(key_of(0u8))
+            .chain(entries.iter().map(|entry| match *entry {
+                Entry::Day(day_ms) => key_of((1u8, day_ms)),
+                Entry::Message(index) => self.message_key(&items[index]),
+            }))
+            .collect();
+        self.list.sync(keys);
+        self.entries = entries;
+    }
+
+    /// The key of a bubble: everything that changes what it shows or how tall it is.
+    fn message_key(&self, item: &Item) -> u64 {
+        let message = &item.message;
+        let state = match item.state {
+            ItemState::Sent => (0u8, 0),
+            ItemState::Delivered => (1, 0),
+            ItemState::Read => (2, 0),
+            ItemState::Pending { local_id } => (3, local_id),
+            ItemState::Failed { local_id } => (4, local_id),
+        };
+        let body = match &message.body {
+            MessageBody::Text(text) => (0u8, Some(text.as_str()), 0),
+            MessageBody::Media { caption, size, .. } => (1, caption.as_deref(), *size),
+            MessageBody::Unsupported => (2, None, 0),
+        };
+        let media = (
+            self.cached_image(&message.id).is_some(),
+            self.media_loading.contains(&message.id),
+            self.media_failed.contains(&message.id),
+        );
+        let reactions: Vec<(&str, bool)> = message
+            .reactions
+            .iter()
+            .map(|r| (r.emoji.as_str(), r.from_me))
+            .collect();
+        let strip = self.strip.as_deref() == Some(message.id.as_str());
+        key_of((
+            2u8,
+            &message.id,
+            message.sender.as_deref(),
+            state,
+            body,
+            media,
+            reactions,
+            strip,
+        ))
+    }
+
+    /// One item of the timeline list: the "Load earlier" slot, a day break or
+    /// a bubble. Only items on screen are built.
+    fn list_item(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = current_theme(window);
+        let colors = theme::colors(theme);
+        let now = self.frame_now;
+        let offset = self.locale.tz_offset_s;
+        let content = match index.checked_sub(1).map(|i| self.entries.get(i).copied()) {
+            None => self.top_slot(theme, cx),
+            Some(Some(Entry::Day(day_ms))) => div()
+                .flex()
+                .justify_center()
+                .py(px(6.0))
+                .text_size(typography::CAPTION.size)
+                .text_color(colors.secondary_label)
+                .child(day_label(day_ms, now, offset))
+                .into_any_element(),
+            Some(Some(Entry::Message(at))) => match self.timeline.items().get(at) {
+                Some(item) => self.bubble(theme, item, now, cx),
+                None => div().into_any_element(),
+            },
+            Some(None) => div().into_any_element(),
+        };
+        // The padding stands in for the old column gap.
+        div()
+            .w_full()
+            .px(px(12.0))
+            .pb(px(4.0))
+            .child(content)
+            .into_any_element()
+    }
+
+    /// "Load earlier", a load error, or "No messages yet".
+    fn top_slot(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let colors = theme::colors(theme);
+        let older = self.timeline.has_older().then(|| {
+            let label = if self.loading {
+                "Loading…"
+            } else {
+                "Load earlier"
+            };
+            div()
+                .id("conv-older")
+                .flex()
+                .justify_center()
+                .py(px(8.0))
+                .text_size(typography::FOOTNOTE.size)
+                .text_color(colors.accent)
+                .child(label)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(oldest) = this.timeline.oldest_ms() {
+                        // The gateway's bound is exclusive and WhatsApp stamps whole
+                        // seconds: +1 re-reads messages that share the oldest
+                        // stamp (the timeline dedups by id) instead of skipping them.
+                        this.load(Some(oldest.saturating_add(1)), cx);
+                    }
+                }))
+        });
+        let status = self.error.clone().map(|error| {
+            div()
+                .py(px(8.0))
+                .text_size(typography::FOOTNOTE.size)
+                .text_color(colors.red)
+                .child(error)
+        });
+        let empty = (self.entries.is_empty() && !self.loading && self.error.is_none()).then(|| {
+            div()
+                .py(px(48.0))
+                .flex()
+                .justify_center()
+                .text_size(typography::SUBHEADLINE.size)
+                .text_color(colors.secondary_label)
+                .child("No messages yet")
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .children(older)
+            .children(status)
+            .children(empty)
+            .into_any_element()
     }
 
     fn bubble(
@@ -836,11 +1034,13 @@ impl Conversation {
             let id = message.id.clone();
             bubble = bubble.on_click(cx.listener(move |this, _, _, cx| {
                 if this.strip.take().is_some() {
+                    this.rows_dirty = true;
                     cx.notify();
                 }
             }));
             bubble = bubble.on_long_press(cx.listener(move |this, _, _, cx| {
                 this.strip = Some(id.clone());
+                this.rows_dirty = true;
                 cx.notify();
             }));
         }
@@ -1038,70 +1238,21 @@ impl Conversation {
 impl Render for Conversation {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = current_theme(window);
-        let colors = theme::colors(theme);
         let now = now_ms();
+        self.frame_now = now;
         let insets = window.insets();
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
-
         let offset = self.locale.tz_offset_s;
-        let breaks = day_breaks(self.timeline.items(), offset);
-        let mut rows: Vec<gpui::AnyElement> = Vec::new();
-        let mut next_break = breaks.iter().peekable();
-        for (index, item) in self.timeline.items().iter().enumerate() {
-            if let Some(&(_, day_ms)) = next_break.next_if(|(at, _)| *at == index) {
-                rows.push(
-                    div()
-                        .flex()
-                        .justify_center()
-                        .py(px(6.0))
-                        .text_size(typography::CAPTION.size)
-                        .text_color(colors.secondary_label)
-                        .child(day_label(day_ms, now, offset))
-                        .into_any_element(),
-                );
-            }
-            rows.push(self.bubble(theme, item, now, cx));
+        if self.rows_dirty {
+            self.sync_rows();
         }
-
-        let older = self.timeline.has_older().then(|| {
-            let label = if self.loading {
-                "Loading…"
-            } else {
-                "Load earlier"
-            };
-            div()
-                .id("conv-older")
-                .flex()
-                .justify_center()
-                .py(px(8.0))
-                .text_size(typography::FOOTNOTE.size)
-                .text_color(colors.accent)
-                .child(label)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(oldest) = this.timeline.oldest_ms() {
-                        // The gateway's bound is exclusive and WhatsApp stamps whole
-                        // seconds: +1 re-reads messages that share the oldest
-                        // stamp (the timeline dedups by id) instead of skipping them.
-                        this.load(Some(oldest.saturating_add(1)), cx);
-                    }
-                }))
-        });
-        let status = self.error.clone().map(|error| {
-            div()
-                .py(px(8.0))
-                .text_size(typography::FOOTNOTE.size)
-                .text_color(colors.red)
-                .child(error)
-        });
-        let empty = (rows.is_empty() && !self.loading && self.error.is_none()).then(|| {
-            div()
-                .py(px(48.0))
-                .flex()
-                .justify_center()
-                .text_size(typography::SUBHEADLINE.size)
-                .text_color(colors.secondary_label)
-                .child("No messages yet")
-        });
+        let timeline = list(
+            self.list.state().clone(),
+            cx.processor(|this, index: usize, window, cx| this.list_item(index, window, cx)),
+        )
+        .flex_1()
+        .min_h_0()
+        .w_full();
 
         let back = glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
             .id("conv-back")
@@ -1207,25 +1358,7 @@ impl Render for Conversation {
             .flex()
             .flex_col()
             .child(header)
-            .child(
-                div()
-                    .id("conv-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .px(px(12.0))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .children(older)
-                            .children(status)
-                            .children(empty)
-                            .children(rows),
-                    ),
-            )
+            .child(timeline)
             .children(strip)
             .children(info)
             .child(composer)

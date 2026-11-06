@@ -1,10 +1,13 @@
 //! The new-message entry: type a number, or a name to search the contacts.
-//! The matching is pure (`options`); the view only draws the list.
+//! The matching is pure (`options`); the view only draws the list, a
+//! virtualised `uniform_list` of fixed-height rows.
+
+use std::{ops::Range, rc::Rc, sync::Arc};
 
 use gpui::{
-    Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, TextInputAction, TextInputPurpose, Window,
-    div, prelude::*, px,
+    AnyElement, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ParentElement,
+    Render, ScrollStrategy, SharedString, StatefulInteractiveElement, Styled, TextInputAction,
+    TextInputPurpose, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 use rovsti_core::{PhoneNumber, search::ContactIndex};
 use rovsti_ui::{
@@ -18,8 +21,12 @@ use rovsti_ui::{
 
 use crate::{backend::Backend, conversation::header_bar, inbox::initials};
 
-/// Rows shown for an empty or broad query.
-const LIMIT: usize = 40;
+/// Rows shown for an empty or broad query. The list is virtualised, so this
+/// only bounds the work of one search.
+const LIMIT: usize = 500;
+
+/// Fixed row height of the virtualised option list.
+const ROW_H: f32 = 60.0;
 
 /// Fewest digits that make a typed number worth offering.
 const MIN_DIGITS: usize = 3;
@@ -81,11 +88,34 @@ pub fn options(query: &str, contacts: &ContactIndex) -> Vec<Recipient> {
     found
 }
 
+/// One option row, ready to draw: its text is built once per query.
+struct OptionRow {
+    recipient: Recipient,
+    title: SharedString,
+    detail: Option<SharedString>,
+    initials: SharedString,
+}
+
+impl OptionRow {
+    fn new(recipient: Recipient) -> Self {
+        Self {
+            title: recipient.title.as_str().into(),
+            detail: recipient.detail.as_deref().map(SharedString::from),
+            initials: initials(&recipient.title).into(),
+            recipient,
+        }
+    }
+}
+
 pub struct NewConversation {
     backend: Entity<Backend>,
     field: Entity<TextField>,
     seen_edits: u64,
-    options: Vec<Recipient>,
+    /// The options for the current query, ready to draw.
+    rows: Rc<[OptionRow]>,
+    /// The address book the rows were searched in.
+    contacts: Option<Arc<ContactIndex>>,
+    scroll: UniformListScrollHandle,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -101,14 +131,26 @@ impl NewConversation {
                     this.rebuild(cx);
                 }
             }),
-            // The address book may arrive after the screen opens.
-            cx.observe(&backend, |this, _, cx| this.rebuild(cx)),
+            // The address book may arrive after the screen opens; other backend
+            // changes leave the options alone.
+            cx.observe(&backend, |this, backend, cx| {
+                let contacts = backend.read(cx).contacts();
+                if !this
+                    .contacts
+                    .as_ref()
+                    .is_some_and(|seen| Arc::ptr_eq(seen, contacts))
+                {
+                    this.rebuild(cx);
+                }
+            }),
         ];
         let mut this = Self {
             backend,
             field,
             seen_edits: 0,
-            options: Vec::new(),
+            rows: Rc::from(Vec::new()),
+            contacts: None,
+            scroll: UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         };
         this.rebuild(cx);
@@ -117,11 +159,68 @@ impl NewConversation {
 
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         let query = self.field.read(cx).text().to_owned();
-        let next = options(&query, self.backend.read(cx).contacts());
-        if next != self.options {
-            self.options = next;
+        let contacts = self.backend.read(cx).contacts().clone();
+        let next = options(&query, &contacts);
+        self.contacts = Some(contacts);
+        if !next.iter().eq(self.rows.iter().map(|row| &row.recipient)) {
+            self.rows = next.into_iter().map(OptionRow::new).collect();
+            self.scroll.scroll_to_item(0, ScrollStrategy::Top);
             cx.notify();
         }
+    }
+
+    /// The rows for `range` of the virtualised list.
+    fn option_rows(
+        &self,
+        range: Range<usize>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let theme = current_theme(window);
+        let colors = theme::colors(theme);
+        range
+            .filter_map(|index| {
+                let row = self.rows.get(index)?;
+                let chosen = row.recipient.clone();
+                let text = div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(typography::HEADLINE.size)
+                            .font_weight(typography::HEADLINE.weight)
+                            .text_color(colors.label)
+                            .child(row.title.clone()),
+                    )
+                    .children(row.detail.clone().map(|detail| {
+                        div()
+                            .truncate()
+                            .text_size(typography::SUBHEADLINE.size)
+                            .text_color(colors.secondary_label)
+                            .child(detail)
+                    }));
+                Some(
+                    div()
+                        .id(("new-option", index))
+                        .h(px(ROW_H))
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
+                        .px(px(16.0))
+                        .border_b(px(0.5))
+                        .border_color(colors.separator)
+                        .child(avatar(theme, row.initials.clone(), 44.0, colors.accent))
+                        .child(text)
+                        .on_click(cx.listener(move |_, _, _, cx| {
+                            cx.emit(NewConversationEvent::Open(chosen.clone()));
+                        }))
+                        .into_any_element(),
+                )
+            })
+            .collect()
     }
 }
 
@@ -136,50 +235,32 @@ impl Render for NewConversation {
             .into_any_element();
         let header = header_bar(theme, back, "New message".into(), None, None);
 
-        let rows = self.options.iter().enumerate().map(|(index, option)| {
-            let chosen = option.clone();
-            let mut text = div().flex_1().min_w_0().flex().flex_col().child(
-                div()
-                    .truncate()
-                    .text_size(typography::HEADLINE.size)
-                    .font_weight(typography::HEADLINE.weight)
-                    .text_color(colors.label)
-                    .child(SharedString::from(option.title.clone())),
-            );
-            if let Some(detail) = &option.detail {
-                text = text.child(
-                    div()
-                        .truncate()
-                        .text_size(typography::SUBHEADLINE.size)
-                        .text_color(colors.secondary_label)
-                        .child(SharedString::from(detail.clone())),
-                );
-            }
+        let body = if self.rows.is_empty() {
             div()
-                .id(("new-option", index))
-                .flex()
-                .items_center()
-                .gap(px(12.0))
-                .px(px(16.0))
-                .py(px(8.0))
-                .border_b(px(0.5))
-                .border_color(colors.separator)
-                .child(avatar(theme, initials(&option.title), 44.0, colors.accent))
-                .child(text)
-                .on_click(cx.listener(move |_, _, _, cx| {
-                    cx.emit(NewConversationEvent::Open(chosen.clone()));
-                }))
-        });
-
-        let empty = self.options.is_empty().then(|| {
-            div()
+                .flex_1()
+                .min_h_0()
                 .py(px(32.0))
                 .flex()
                 .justify_center()
                 .text_size(typography::SUBHEADLINE.size)
                 .text_color(colors.secondary_label)
                 .child("No matching contacts. Type a full number to message it.")
-        });
+                .into_any_element()
+        } else {
+            // Contacts grow with the address book: only the rows on screen are built.
+            uniform_list(
+                "new-options",
+                self.rows.len(),
+                cx.processor(|this, range: Range<usize>, window, cx| {
+                    this.option_rows(range, window, cx)
+                }),
+            )
+            .track_scroll(&self.scroll)
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .into_any_element()
+        };
 
         div()
             .size_full()
@@ -194,15 +275,7 @@ impl Render for NewConversation {
                 window,
                 cx,
             )))
-            .child(
-                div()
-                    .id("new-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .children(empty)
-                    .children(rows),
-            )
+            .child(body)
     }
 }
 

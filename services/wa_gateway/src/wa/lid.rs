@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::driver::EventSink;
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::wacore::types::message::MessageSource;
 
@@ -74,6 +75,55 @@ pub fn source_jids(source: &MessageSource) -> Vec<&Jid> {
     let mut jids = vec![&source.chat, &source.sender];
     jids.extend(source.sender_alt.iter().chain(source.recipient_alt.iter()));
     jids
+}
+
+/// Merges every stored LID chat whose phone number is known into its
+/// phone-number chat. Idempotent, so it is safe to run at every connect.
+/// Returns how many chats were merged.
+pub async fn sweep(resolver: &Resolver, sink: &EventSink) -> usize {
+    sweep_with(sink, |jid| async move { resolver.lookup(&jid).await }).await
+}
+
+/// [`sweep`] with the LID lookup supplied by the caller.
+pub async fn sweep_with<F, Fut>(sink: &EventSink, lookup: F) -> usize
+where
+    F: Fn(Jid) -> Fut,
+    Fut: std::future::Future<Output = Option<String>>,
+{
+    let chats = match sink.lid_chats().await {
+        Ok(chats) => chats,
+        Err(e) => {
+            log::warn!(
+                "{}: lid-merge: listing LID chats failed: {e}",
+                sink.instance()
+            );
+            return 0;
+        }
+    };
+    let total = chats.len();
+    let mut merged = 0;
+    for chat in chats {
+        let Ok(jid) = chat.parse::<Jid>() else {
+            continue;
+        };
+        let Some(pn) = lookup(jid).await else {
+            continue;
+        };
+        if sink
+            .merge_chat(&chat, &Jid::pn(&pn).to_string())
+            .await
+            .is_some()
+        {
+            merged += 1;
+        }
+    }
+    if total > 0 {
+        log::info!(
+            "{}: lid-merge: startup sweep merged {merged} of {total} LID chats",
+            sink.instance()
+        );
+    }
+    merged
 }
 
 /// Resolves LIDs against the live client's mapping store, remembering hits.

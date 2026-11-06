@@ -348,6 +348,41 @@ impl EventSink {
         }
     }
 
+    /// The stored chats addressed by a LID.
+    pub async fn lid_chats(&self) -> Result<Vec<String>, crate::store::StoreError> {
+        self.store.lid_chats(self.instance.clone()).await
+    }
+
+    /// Merges the stored chat `from` (a LID) into `into` (its phone number)
+    /// and tells the apps. `None` when there was nothing to merge or the
+    /// store failed.
+    pub async fn merge_chat(&self, from: &str, into: &str) -> Option<crate::store::MergeReport> {
+        match self
+            .store
+            .merge_chat(self.instance.clone(), from.to_owned(), into.to_owned())
+            .await
+        {
+            Ok(report) if report.merged => {
+                log::info!(
+                    "{}: lid-merge: {from} -> {into}: {} moved, {} deduped",
+                    self.instance,
+                    report.moved,
+                    report.deduped
+                );
+                self.publish(GatewayEvent::ChatMerged {
+                    from: from.to_owned(),
+                    into: into.to_owned(),
+                });
+                Some(report)
+            }
+            Ok(_) => None,
+            Err(e) => {
+                log::warn!("{}: merging {from} into {into} failed: {e}", self.instance);
+                None
+            }
+        }
+    }
+
     /// Publishes without persisting (receipts, presence, typing, ...).
     pub fn publish(&self, event: GatewayEvent) {
         self.hub.publish(&self.instance, now_ms(), event);
@@ -942,6 +977,7 @@ mod fake {
         counter: AtomicU64,
         profiles: Mutex<HashMap<String, FetchedProfile>>,
         pictures: Mutex<HashMap<String, (String, Vec<u8>)>>,
+        lids: Mutex<crate::wa::lid::LidMap>,
     }
 
     impl std::fmt::Debug for FakeDriver {
@@ -1014,6 +1050,25 @@ mod fake {
                     pictures.remove(jid);
                 }
             }
+        }
+
+        /// The LID -> phone-number mappings the fake "client" knows.
+        pub fn set_lid_map(&self, map: crate::wa::lid::LidMap) {
+            *lock(&self.lids) = map;
+        }
+
+        /// Runs the LID-merge sweep against the scripted mappings, as the
+        /// real driver does on connect. Returns the chats merged.
+        pub async fn sweep_lids(&self, instance: &InstanceId) -> usize {
+            let Some(sink) = self.sink(instance) else {
+                return 0;
+            };
+            let map = lock(&self.lids).clone();
+            crate::wa::lid::sweep_with(&sink, |jid| {
+                let pn = map.get(&jid.user).map(str::to_owned);
+                async move { pn }
+            })
+            .await
         }
 
         /// The event sink of a running instance, to script what WhatsApp

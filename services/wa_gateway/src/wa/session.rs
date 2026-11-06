@@ -343,6 +343,12 @@ impl WaRuntime {
                             push_name,
                         ))
                         .await;
+                        // The one-time migration: fold LID chats whose phone
+                        // number is known into their phone-number chat.
+                        let resolver = Resolver::new(client);
+                        tokio::spawn(async move {
+                            lid::sweep(&resolver, &sink).await;
+                        });
                     }
                 }
             })
@@ -387,6 +393,23 @@ impl WaRuntime {
                             None => convert::message(&ctx, &map),
                         };
                         app_state::apply_converted(&sink, converted).await;
+                        // A chat that was stored under its LID before the
+                        // mapping was known now has a phone number.
+                        let source = &ctx.info.source;
+                        if source.chat.is_lid() {
+                            let resolved = lid::resolve(
+                                &source.chat,
+                                source.sender_alt.as_ref().or(source.recipient_alt.as_ref()),
+                                &map,
+                            );
+                            if resolved.is_pn() {
+                                sink.merge_chat(
+                                    &source.chat.to_non_ad().to_string(),
+                                    &resolved.to_string(),
+                                )
+                                .await;
+                            }
+                        }
                     }
                 }
             })
@@ -396,6 +419,8 @@ impl WaRuntime {
                     EventKind::Presence,
                     EventKind::ChatPresence,
                     EventKind::HistorySync,
+                    EventKind::DeviceListUpdate,
+                    EventKind::ContactNumberChanged,
                     EventKind::GroupUpdate,
                     EventKind::Disconnected,
                     EventKind::StreamReplaced,
@@ -836,10 +861,16 @@ async fn handle_event(
                     sink.set_push_names(drained.push_names).await;
                     sink.import_statuses(drained.statuses).await;
                     sink.import_history(drained.chats, progress).await;
+                    lid::sweep(resolver, sink).await;
                 }
                 Ok(Err(e)) => log::warn!("{instance}: history sync unreadable: {e}"),
                 Err(e) => log::warn!("{instance}: history sync task failed: {e}"),
             }
+        }
+        // The library learns LID <-> phone-number pairs from these; there is
+        // no dedicated event, so look at the stored LID chats again.
+        Event::DeviceListUpdate(_) | Event::ContactNumberChanged(_) => {
+            lid::sweep(resolver, sink).await;
         }
         Event::Disconnected(d) => {
             log::info!("{instance}: disconnected: {}", d.reason);

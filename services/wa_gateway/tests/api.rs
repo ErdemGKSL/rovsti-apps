@@ -1863,3 +1863,59 @@ async fn media_options_reach_the_driver_and_the_meta() {
     .await;
     assert!(is_code(&refused.unwrap_err(), ErrorCode::BadRequest));
 }
+
+#[tokio::test]
+async fn lid_sweep_merges_the_lid_chat_into_the_pn_chat_once() {
+    use wa_gateway::wa::lid::LidMap;
+
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let id = instance(&created);
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let pn = "905321234567@s.whatsapp.net";
+    let lid = "96413459456093@lid";
+    server
+        .driver
+        .deliver(
+            &id,
+            incoming("A1", lid, Some(lid)),
+            MessageExtras::default(),
+        )
+        .await;
+    server
+        .driver
+        .deliver(&id, incoming("B1", pn, Some(pn)), MessageExtras::default())
+        .await;
+    let g = gateway.clone();
+    assert_eq!(blocking(move || g.chats()).await.unwrap().len(), 2);
+
+    server
+        .driver
+        .set_lid_map(LidMap::from_entries([("96413459456093", "905321234567")]));
+    assert_eq!(server.driver.sweep_lids(&id).await, 1);
+
+    let g = gateway.clone();
+    let chats = blocking(move || g.chats()).await.unwrap();
+    assert_eq!(chats.len(), 1);
+    assert_eq!(chats[0].jid, pn);
+    let g = gateway.clone();
+    let messages = blocking(move || g.messages(pn, None, 10)).await.unwrap();
+    assert_eq!(messages.len(), 2);
+
+    loop {
+        match events.next_event().await.event {
+            GatewayEvent::ChatMerged { from, into } => {
+                assert_eq!((from.as_str(), into.as_str()), (lid, pn));
+                break;
+            }
+            _ => continue,
+        }
+    }
+
+    // Idempotent: nothing left to merge.
+    assert_eq!(server.driver.sweep_lids(&id).await, 0);
+    let chats = blocking(move || gateway.chats()).await.unwrap();
+    assert_eq!(chats.len(), 1);
+}

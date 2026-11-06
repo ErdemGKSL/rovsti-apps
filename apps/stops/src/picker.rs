@@ -26,13 +26,15 @@ use crate::{
 const MAX_STOP_HITS: usize = 20;
 
 /// Where a trip is headed.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Destination {
     pub label: String,
     pub coord: Coord,
     /// The transit stop this is, when it came from an imported feed.
+    #[serde(default)]
     pub gtfs_stop: Option<String>,
     /// The line it was chosen on in the stop sheet, drawn on the map.
+    #[serde(default)]
     pub pattern: Option<u32>,
 }
 
@@ -113,7 +115,7 @@ impl Slot {
 }
 
 /// The two points chosen so far.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Ends {
     pub a: Option<Destination>,
     pub b: Option<Destination>,
@@ -245,6 +247,8 @@ pub enum PickItem {
     Saved {
         id: u64,
         dest: Destination,
+        /// What the place is and how far it is.
+        detail: String,
         at: lists::Place,
     },
     Pair {
@@ -334,6 +338,14 @@ impl StopsApp {
             return;
         };
         let name = place.name.clone();
+        if matches!(self.sheet_mode, SheetMode::Stop(_)) {
+            // The line previewed on the stop sheet leaves the map again.
+            self.map.pattern = self
+                .pick
+                .ends
+                .get(self.pick.sheet_slot())
+                .and_then(|d| d.pattern);
+        }
         self.field.update(cx, |f, cx| f.set(&name, cx));
         self.sheet_mode = SheetMode::Rename(id);
         self.sheet.open();
@@ -621,30 +633,44 @@ impl StopsApp {
         group(&mut items, "Stops", stops, |_, (index, lines), at| {
             PickItem::Stop { index, lines, at }
         });
+        let here = self.map.position.map(|p| p.0);
         let saved: Vec<_> = self
             .saved
             .search(query)
             .into_iter()
-            .map(|p| (p.id, Destination::from_place(p)))
+            .map(|p| {
+                (
+                    p.id,
+                    Destination::from_place(p),
+                    crate::saved_ui::place_detail(p, here),
+                )
+            })
             .collect();
-        group(&mut items, "Saved", saved, |_, (id, dest), at| {
-            PickItem::Saved { id, dest, at }
+        group(&mut items, "Saved", saved, |_, (id, dest, detail), at| {
+            PickItem::Saved {
+                id,
+                dest,
+                detail,
+                at,
+            }
         });
         if query.is_empty() {
             let pairs = self.history.recent_pairs(3);
+            let saved = &self.saved;
             group(&mut items, "Recent trips", pairs, |i, (a, b), at| {
                 PickItem::Pair {
                     i,
-                    a: Destination::new(a.label, a.coord),
-                    b: Destination::new(b.label, b.coord),
+                    a: pick::dest_from_endpoint(&a, saved),
+                    b: pick::dest_from_endpoint(&b, saved),
                     at,
                 }
             });
             let recent = self.history.recent_points(5);
+            let saved = &self.saved;
             group(&mut items, "Recent", recent, |i, point, at| {
                 PickItem::Recent {
                     i,
-                    dest: Destination::new(point.label, point.coord),
+                    dest: pick::dest_from_endpoint(&point, saved),
                     at,
                 }
             });
@@ -698,12 +724,23 @@ impl StopsApp {
                     .on_click(cx.listener(move |this, _, _, cx| this.open_stop(index, cx)));
                 lists::grouped(theme, at, row).into_any_element()
             }
-            PickItem::Saved { id, dest, at } => {
-                let row = list_row(theme, None, pick::row_label(&dest.label), None, None)
-                    .id(("pick-saved", id as usize))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.choose_destination(dest.clone(), cx);
-                    }));
+            PickItem::Saved {
+                id,
+                dest,
+                detail,
+                at,
+            } => {
+                let row = list_row(
+                    theme,
+                    None,
+                    pick::row_label(&dest.label),
+                    Some(detail.into()),
+                    None,
+                )
+                .id(("pick-saved", id as usize))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.choose_destination(dest.clone(), cx);
+                }));
                 lists::grouped(theme, at, row).into_any_element()
             }
             PickItem::Pair { i, a, b, at } => {
@@ -843,6 +880,23 @@ impl StopsApp {
         };
         let b_dest = a_dest.clone();
         let save_dest = here;
+        let already = self.saved.near(coord).map(|p| (p.id, p.name.clone()));
+        let save_row = match already {
+            Some((id, name)) => list_row(
+                theme,
+                None,
+                format!("Saved as {name}"),
+                None,
+                Some("Rename".into()),
+            )
+            .id("stop-rename")
+            .on_click(cx.listener(move |this, _, _, cx| this.open_rename(id, cx))),
+            None => list_row(theme, None, "Save this stop", None, None)
+                .id("stop-save")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.open_save_point(save_dest.clone(), None, cx);
+                })),
+        };
         body = body.child(section(
             theme,
             Some("This stop".into()),
@@ -859,12 +913,7 @@ impl StopsApp {
                         this.use_as(Slot::B, b_dest.clone(), false, cx);
                     }))
                     .into_any_element(),
-                list_row(theme, None, "Save this stop", None, None)
-                    .id("stop-save")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.open_save_point(save_dest.clone(), None, cx);
-                    }))
-                    .into_any_element(),
+                save_row.into_any_element(),
             ],
         ));
         body.child(
@@ -887,22 +936,35 @@ impl StopsApp {
     ) -> AnyElement {
         let colors = theme::colors(theme);
         let prefill = dest.clone();
-        let save_row = list_row(
-            theme,
-            None,
-            "Save this place",
-            None,
-            Some(if self.save_place { "On" } else { "Off" }.into()),
-        )
-        .id("save-toggle")
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.save_place = !this.save_place;
-            if this.save_place {
-                let name = pick::save_prefill(&prefill);
-                this.field.update(cx, |f, cx| f.set(&name, cx));
-            }
-            cx.notify();
-        }));
+        let already = self.saved.near(dest.coord).map(|p| (p.id, p.name.clone()));
+        let is_saved = already.is_some();
+        let save_row = match already {
+            Some((id, name)) => list_row(
+                theme,
+                None,
+                format!("Saved as {name}"),
+                None,
+                Some("Rename".into()),
+            )
+            .id("save-rename")
+            .on_click(cx.listener(move |this, _, _, cx| this.open_rename(id, cx))),
+            None => list_row(
+                theme,
+                None,
+                "Save this place",
+                None,
+                Some(if self.save_place { "On" } else { "Off" }.into()),
+            )
+            .id("save-toggle")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.save_place = !this.save_place;
+                if this.save_place {
+                    let name = pick::save_prefill(&prefill);
+                    this.field.update(cx, |f, cx| f.set(&name, cx));
+                }
+                cx.notify();
+            })),
+        };
         let as_a = dest.clone();
         let as_b = dest.clone();
         let default = self.pick.confirm_slot();
@@ -921,7 +983,7 @@ impl StopsApp {
             .child(Self::sheet_title(theme, dest.title()))
             .child(Self::footnote(theme, pick::details_text(dest)))
             .child(section(theme, None, [save_row.into_any_element()]))
-            .children(self.save_place.then(|| {
+            .children((self.save_place && !is_saved).then(|| {
                 div().px(px(16.0)).child(field_box(
                     theme,
                     "confirm-save-field",
@@ -949,7 +1011,7 @@ impl StopsApp {
                             .id("confirm-use-a")
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                let save = this.save_place;
+                                let save = this.save_place && !is_saved;
                                 this.use_as(Slot::A, as_a.clone(), save, cx);
                             })),
                     )
@@ -958,7 +1020,7 @@ impl StopsApp {
                             .id("confirm-use-b")
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                let save = this.save_place;
+                                let save = this.save_place && !is_saved;
                                 this.use_as(Slot::B, as_b.clone(), save, cx);
                             })),
                     ),
@@ -1270,6 +1332,7 @@ mod tests {
             PickItem::Saved {
                 id,
                 dest: dest("x", 29.0),
+                detail: String::new(),
                 at,
             }
         });
@@ -1278,6 +1341,7 @@ mod tests {
             PickItem::Saved {
                 id,
                 dest: dest("x", 29.0),
+                detail: String::new(),
                 at,
             }
         });
@@ -1304,6 +1368,7 @@ mod tests {
             PickItem::Saved {
                 id: 1,
                 dest: dest("x", 29.0),
+                detail: String::new(),
                 at: lists::Place::ALONE
             }
             .key()

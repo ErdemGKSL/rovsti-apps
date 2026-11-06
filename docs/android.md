@@ -132,6 +132,8 @@ service of type `location` started while the app is in the background (after a p
 still refuses a background restart, `TripService` posts a notification on the channel `trip_problem`
 ("Trip paused", `IMPORTANCE_HIGH`) and Stops resumes with `backend::resume_trip` (AD-SA8).
 
+Stops also uses the shared `telecom::share_text` (Saved > a place > Share); without a share sheet it copies the text to the clipboard.
+
 | Component | Does |
 | --- | --- |
 | `TripService` (`foregroundServiceType="location"`) | location updates; each fix goes to `Headless.call("trip_fix", ...)`, the answer sets the next interval, the ongoing notification and the ring |

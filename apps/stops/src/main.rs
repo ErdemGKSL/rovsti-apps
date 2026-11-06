@@ -79,6 +79,9 @@ pub(crate) enum PillAction {
     UndoDelete(Place, usize),
     RestoreHistory(History),
     RestoreEnds(picker::Ends),
+    RestartTrip(Destination, Destination),
+    RestoreTileUrl(Option<String>),
+    RestoreNotice(rovsti_geo::NoticePrefs),
 }
 
 pub(crate) struct StopsApp {
@@ -90,6 +93,8 @@ pub(crate) struct StopsApp {
     pub(crate) dir: Option<PathBuf>,
     /// The files have been read.
     pub(crate) loaded: bool,
+    /// The A/B last written to `draft.json`.
+    draft_saved: picker::Ends,
     pub(crate) prefs: StopsPrefs,
     pub(crate) saved: SavedPlaces,
     pub(crate) history: History,
@@ -155,6 +160,8 @@ pub(crate) struct StopsApp {
     pub(crate) chats: ChatList,
     /// Clear history was tapped once.
     pub(crate) confirm_clear: bool,
+    /// The first tap on "Remove transit data" has armed the second.
+    pub(crate) confirm_remove_feed: bool,
 }
 
 impl StopsApp {
@@ -240,7 +247,13 @@ impl StopsApp {
                 this.saved = data.saved;
                 this.history = data.history;
                 this.set_feed(data.gtfs);
+                let no_trip = data.trip.is_none();
                 this.set_saved_trip(data.trip, cx);
+                if no_trip && this.pick.ends.is_empty() {
+                    this.pick.restore(data.draft.clone());
+                    this.map.follow = true;
+                }
+                this.draft_saved = data.draft;
                 this.resume_service(cx);
                 this.start_simulation(cx);
                 cx.notify();
@@ -259,6 +272,7 @@ impl StopsApp {
             page: Entrance::default(),
             dir: None,
             loaded: false,
+            draft_saved: picker::Ends::default(),
             prefs: StopsPrefs::default(),
             saved: SavedPlaces::default(),
             history: History::default(),
@@ -298,6 +312,7 @@ impl StopsApp {
             tile_testing: false,
             chats: ChatList::default(),
             confirm_clear: false,
+            confirm_remove_feed: false,
         };
         app.refresh_preflight_later(cx);
         app.load_last_location(cx);
@@ -470,6 +485,21 @@ impl StopsApp {
             .detach();
     }
 
+    /// Writes the picked A/B when it changed and no pin is being dragged.
+    fn persist_draft(&mut self, cx: &mut Context<Self>) {
+        if !self.loaded || !self.pick.draft_due(&self.draft_saved) {
+            return;
+        }
+        let Some(dir) = self.dir.clone() else {
+            return;
+        };
+        self.draft_saved = self.pick.ends.clone();
+        let ends = self.draft_saved.clone();
+        cx.background_executor()
+            .spawn(async move { backend::save_draft(&dir, &ends) })
+            .detach();
+    }
+
     // ---- notice pill ---------------------------------------------------------------
 
     pub(crate) fn show_pill(
@@ -497,6 +527,9 @@ impl StopsApp {
         match action {
             PillAction::UndoDelete(place, index) => self.undo_delete(place, index, cx),
             PillAction::RestoreHistory(history) => self.restore_history(history, cx),
+            PillAction::RestartTrip(a, b) => self.request_start(a, b, cx),
+            PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
+            PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);
                 self.map.follow = true;
@@ -534,6 +567,7 @@ impl StopsApp {
 
 impl Render for StopsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.persist_draft(cx);
         let theme = current_theme(window);
         self.pill.set_reduced(window.prefers_reduced_motion());
         let mut motion = std::mem::take(&mut self.motion);

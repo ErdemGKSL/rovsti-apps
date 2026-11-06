@@ -1,10 +1,13 @@
 //! The Saved tab: places kept for one-tap trips. Tapping a row opens its
-//! actions (Use as A, Use as B, Rename, Up, Down, Delete); a delete can be undone from the pill.
+//! actions (Use as A, Use as B, Share, Rename, Up, Down, Delete); a delete can be undone from the
+//! pill. Share opens the system share sheet (`telecom::share_text`) and falls back to the
+//! clipboard when there is no sheet (desktop, or no app answered).
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, list, px,
 };
+use rovsti_android::Error as AndroidError;
 use rovsti_geo::{Coord, Place, SavedPlaces};
 use rovsti_ui::{
     components::{empty_state, glass_pill, large_title, list_row},
@@ -40,6 +43,26 @@ pub fn restore(saved: &mut SavedPlaces, place: Place, index: usize) {
     saved.places.insert(at, place);
 }
 
+/// What to do after the share call returned.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ShareOutcome {
+    /// The system sheet is the feedback.
+    Shared,
+    /// No sheet: copy the text and say so on the pill.
+    Copy(String),
+    /// The call failed: only the pill.
+    Failed(String),
+}
+
+/// Maps the result of `telecom::share_text` to the follow-up for place `name`.
+pub fn share_outcome(result: &Result<bool, AndroidError>, name: &str) -> ShareOutcome {
+    match result {
+        Ok(true) => ShareOutcome::Shared,
+        Ok(false) | Err(AndroidError::Unsupported) => ShareOutcome::Copy(format!("Copied {name}")),
+        Err(_) => ShareOutcome::Failed(format!("Could not share {name}")),
+    }
+}
+
 impl StopsApp {
     /// The Saved tab: a virtualised list whose first item is the title, so the
     /// title scrolls away with the places as before.
@@ -48,7 +71,7 @@ impl StopsApp {
             return Page::Flow(
                 empty_state(
                     theme,
-                    "No Saved Stops",
+                    "No Saved Places",
                     "Tap a pin on the map and choose Save, or save a stop or a shared place. Saved places appear here for one-tap use as A or B.",
                 )
                 .into_any_element(),
@@ -134,6 +157,15 @@ impl StopsApp {
                                 this.use_as(Slot::B, dest_b.clone(), false, cx);
                                 this.tabs.jump_to(0);
                             })),
+                    )
+                    .child(
+                        glass_pill(theme, "Share")
+                            .id(("place-share", id as usize))
+                            .flex_1()
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.share_place(id, cx);
+                            })),
                     ),
             );
             let pill_row = || div().flex().gap(px(10.0)).px(px(12.0)).pb(px(10.0));
@@ -194,6 +226,32 @@ impl StopsApp {
         }
     }
 
+    /// Opens the share sheet with the place's text; copies it when there is none.
+    fn share_place(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(place) = self.saved.places.iter().find(|p| p.id == id) else {
+            return;
+        };
+        let name = place.name.clone();
+        let text = rovsti_geo::share_text(&place.name, place.coord);
+        cx.spawn(async move |this, cx| {
+            let sent = text.clone();
+            let result = cx
+                .background_executor()
+                .spawn(async move { rovsti_android::telecom::share_text(&sent) })
+                .await;
+            this.update(cx, |this, cx| match share_outcome(&result, &name) {
+                ShareOutcome::Shared => {}
+                ShareOutcome::Copy(pill) => {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                    this.show_pill(pill, None, cx);
+                }
+                ShareOutcome::Failed(pill) => this.show_pill(pill, None, cx),
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn delete_place(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(index) = self.saved.places.iter().position(|p| p.id == id) else {
             return;
@@ -234,6 +292,14 @@ mod tests {
         p.gtfs_stop = Some("S1".into());
         assert_eq!(place_detail(&p, None), "Transit stop");
         assert!(place_detail(&p, Some(Coord::new(41.1, 29.0))).starts_with("Transit stop, 11."));
+    }
+
+    #[test]
+    fn share_outcomes() {
+        assert_eq!(share_outcome(&Ok(true), "Home"), ShareOutcome::Shared);
+        let copy = ShareOutcome::Copy("Copied Home".into());
+        assert_eq!(share_outcome(&Ok(false), "Home"), copy);
+        assert_eq!(share_outcome(&Err(AndroidError::Unsupported), "Home"), copy);
     }
 
     fn saved() -> SavedPlaces {

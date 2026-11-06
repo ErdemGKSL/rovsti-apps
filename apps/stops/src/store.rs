@@ -25,6 +25,8 @@ pub const HISTORY_FILE: &str = "history.json";
 pub const SAVED_FILE: &str = "saved.json";
 /// Stops preferences.
 pub const PREFS_FILE: &str = "stops-prefs.json";
+/// The A and B being picked, kept so a restart does not lose them.
+pub const DRAFT_FILE: &str = "draft.json";
 /// The imported GTFS feed.
 pub const GTFS_FILE: &str = "gtfs.json";
 

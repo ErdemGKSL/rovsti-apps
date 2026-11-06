@@ -1,11 +1,15 @@
 //! Map tiles: slippy-map maths and the tile server setting. Pure, no I/O.
 
+pub mod clip;
+pub mod geometry;
 pub mod mvt;
 pub mod shortbread;
 pub mod slippy;
 pub mod source;
 pub mod style;
 
+pub use clip::{Rect, clip_polygon, clip_polyline, simplify};
+pub use geometry::{ClassGeometry, TileGeometry, TileLayer, TileTransform, build_layer, stand_in};
 pub use mvt::{
     GeomType, MAX_TILE_BYTES, MvtError, MvtFeature, MvtLayer, MvtTile, MvtValue, decode,
     decode_any, ring_area2,

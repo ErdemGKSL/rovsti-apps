@@ -5,6 +5,7 @@
 //! an instance, and chats and live messages come from the gateway through
 //! `rovsti_wa_client`. SMS stays on the phone.
 
+mod access;
 mod backend;
 mod backup_ui;
 mod conversation;

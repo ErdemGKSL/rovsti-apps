@@ -303,6 +303,18 @@ impl Timeline {
         item.message.reactions != before
     }
 
+    /// Our own reaction's emoji on a message, if any.
+    pub fn own_reaction(&self, id: &str) -> Option<&str> {
+        self.items
+            .iter()
+            .find(|i| i.message.id == id)?
+            .message
+            .reactions
+            .iter()
+            .find(|r| r.from_me)
+            .map(|r| r.emoji.as_str())
+    }
+
     /// Timestamp of the oldest confirmed message, for `before_ms` paging.
     pub fn oldest_ms(&self) -> Option<i64> {
         self.items
@@ -871,6 +883,18 @@ mod tests {
         assert!(t.set_own_reaction("a", ""));
         assert!(t.items()[0].message.reactions.is_empty());
         assert!(!t.set_own_reaction("missing", "👍"));
+    }
+
+    #[test]
+    fn own_reaction_reads_back() {
+        let mut t = Timeline::new(CHAT);
+        t.apply_page(vec![msg("a", 10, false)], 50);
+        assert_eq!(t.own_reaction("a"), None);
+        t.set_own_reaction("a", "👍");
+        assert_eq!(t.own_reaction("a"), Some("👍"));
+        t.set_own_reaction("a", "");
+        assert_eq!(t.own_reaction("a"), None);
+        assert_eq!(t.own_reaction("missing"), None);
     }
 
     #[test]

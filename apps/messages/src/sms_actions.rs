@@ -34,6 +34,9 @@ pub struct SmsActionContext {
 pub fn actions(ctx: &SmsActionContext) -> Vec<SmsAction> {
     let mut out = Vec::new();
     if ctx.on_page {
+        if ctx.in_spam && ctx.single_sender {
+            out.push(SmsAction::NotSpam);
+        }
         if ctx.single_sender {
             out.push(SmsAction::Call);
             out.push(if ctx.known_contact {
@@ -223,6 +226,29 @@ mod tests {
             ..page
         };
         assert_eq!(actions(&group), vec![Delete]);
+    }
+
+    #[test]
+    fn page_offers_not_spam_for_a_spam_thread() {
+        let page = SmsActionContext {
+            on_page: true,
+            in_spam: true,
+            ..row()
+        };
+        assert_eq!(
+            actions(&page),
+            vec![NotSpam, Call, AddContact, Block, Delete]
+        );
+        let group = SmsActionContext {
+            single_sender: false,
+            ..page
+        };
+        assert_eq!(actions(&group), vec![Delete]);
+        let clean = SmsActionContext {
+            in_spam: false,
+            ..page
+        };
+        assert!(!actions(&clean).contains(&NotSpam));
     }
 
     #[test]

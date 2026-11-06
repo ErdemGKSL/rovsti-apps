@@ -65,6 +65,56 @@ pub fn next_schedule_id(existing: &[ScheduledSms], now_ms: i64) -> u64 {
         .fold(clock, u64::max)
 }
 
+/// The pill after scheduled sends failed: what to say and, when an SMS can be
+/// reopened in the composer, its `(to, body)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct FailedNotice {
+    pub text: String,
+    pub reopen: Option<(String, String)>,
+}
+
+/// `None` when nothing failed. WhatsApp items never reopen (the gateway owns them).
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn failed_notice(failed: &[ScheduledSms]) -> Option<FailedNotice> {
+    let sms = |item: &ScheduledSms| match &item.target {
+        ScheduleTarget::Sms { to, .. } => Some((to.clone(), item.body.clone())),
+        ScheduleTarget::WhatsApp { .. } => None,
+    };
+    match failed {
+        [] => None,
+        [one] => {
+            let to = match &one.target {
+                ScheduleTarget::Sms { to, .. } => to.as_str(),
+                ScheduleTarget::WhatsApp { chat } => chat.split('@').next().unwrap_or(chat),
+            };
+            Some(FailedNotice {
+                text: format!("Scheduled message to {to} couldn't be sent"),
+                reopen: sms(one),
+            })
+        }
+        many => Some(FailedNotice {
+            text: format!("{} scheduled messages couldn't be sent", many.len()),
+            reopen: many
+                .iter()
+                .filter(|i| sms(i).is_some())
+                .max_by_key(|i| i.at_ms)
+                .and_then(sms),
+        }),
+    }
+}
+
+/// Shown in the Send later sheet when Android may deliver an SMS late.
+#[cfg_attr(not(test), allow(dead_code))]
+pub const LATE_NOTE: &str =
+    "Android may send it a few minutes late. Tap to allow exact alarms in App info.";
+
+/// The note only applies to SMS while exact alarms are known to be denied.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn late_note(is_sms: bool, exact_allowed: Option<bool>) -> Option<&'static str> {
+    (is_sms && exact_allowed == Some(false)).then_some(LATE_NOTE)
+}
+
 /// The payload `sms::arm_scheduled` takes (`{id, at_ms, to, body, sub_id}`);
 /// `None` for a WhatsApp item, which the gateway owns.
 pub fn arm_json(item: &ScheduledSms) -> Option<String> {
@@ -672,6 +722,52 @@ mod tests {
             body: format!("m{n}"),
             failed: false,
         }
+    }
+
+    fn sched(id: u64, at_ms: i64, target: ScheduleTarget) -> ScheduledSms {
+        ScheduledSms {
+            id,
+            at_ms,
+            target,
+            body: format!("b{id}"),
+            created_ms: 0,
+        }
+    }
+
+    fn sms_to(to: &str) -> ScheduleTarget {
+        ScheduleTarget::Sms {
+            to: to.into(),
+            sub_id: None,
+        }
+    }
+
+    #[test]
+    fn failed_notice_names_one_and_counts_many() {
+        assert_eq!(failed_notice(&[]), None);
+        let one = failed_notice(&[sched(1, 5, sms_to("+90532"))]).expect("notice");
+        assert_eq!(one.text, "Scheduled message to +90532 couldn't be sent");
+        assert_eq!(one.reopen, Some(("+90532".into(), "b1".into())));
+        let wa = ScheduleTarget::WhatsApp {
+            chat: "90532@s.whatsapp.net".into(),
+        };
+        let only_wa = failed_notice(&[sched(2, 5, wa.clone())]).expect("notice");
+        assert_eq!(only_wa.reopen, None);
+        let many = failed_notice(&[
+            sched(1, 5, sms_to("+1")),
+            sched(2, 9, sms_to("+2")),
+            sched(3, 12, wa),
+        ])
+        .expect("notice");
+        assert_eq!(many.text, "3 scheduled messages couldn't be sent");
+        assert_eq!(many.reopen, Some(("+2".into(), "b2".into())));
+    }
+
+    #[test]
+    fn late_note_only_for_sms_without_exact_alarms() {
+        assert_eq!(late_note(true, Some(false)), Some(LATE_NOTE));
+        assert_eq!(late_note(true, Some(true)), None);
+        assert_eq!(late_note(true, None), None);
+        assert_eq!(late_note(false, Some(false)), None);
     }
 
     #[test]

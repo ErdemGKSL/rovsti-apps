@@ -137,6 +137,12 @@ impl InboxView {
         self.archived.iter().map(|r| r.unread).sum()
     }
 
+    /// True when `thread` sits in the Spam filter.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn in_spam(&self, thread: &ThreadId) -> bool {
+        self.spam.iter().any(|r| r.threads.contains(thread))
+    }
+
     /// Every row, wherever it is shown.
     pub fn all_rows(&self) -> impl Iterator<Item = &RowView> {
         self.rows.iter().chain(&self.spam).chain(&self.archived)
@@ -593,6 +599,30 @@ pub fn badges(row: &InboxRow) -> Vec<Badge> {
     row.channels.iter().copied().map(Badge::of).collect()
 }
 
+/// A WhatsApp chat is muted on the gateway or by the local tag.
+pub fn wa_muted(meta: Option<&ChatMeta>, local: bool, now_ms: i64) -> bool {
+    local || meta.is_some_and(|m| m.is_muted(now_ms))
+}
+
+/// What the bell inside a WhatsApp chat does next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub enum BellToggle {
+    Mute,
+    Unmute { gateway: bool, local: bool },
+}
+
+/// Mute when nothing mutes the chat; else unmute whichever mutes it.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn wa_bell(meta: Option<&ChatMeta>, local: bool, now_ms: i64) -> BellToggle {
+    let gateway = meta.is_some_and(|m| m.is_muted(now_ms));
+    if gateway || local {
+        BellToggle::Unmute { gateway, local }
+    } else {
+        BellToggle::Mute
+    }
+}
+
 fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView {
     let title = row_title(row, sms);
     let newest = &row.threads[0];
@@ -627,6 +657,11 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
         .map(|s| SharedString::from(s.to_owned()));
     let sms_muted =
         sms_thread.is_some_and(|id| inputs.muted.contains(&thread_tag(&ThreadId::Sms(id))));
+    let wa_local = wa_chat.is_some_and(|jid| {
+        inputs
+            .muted
+            .contains(&thread_tag(&ThreadId::WhatsApp(jid.to_owned())))
+    });
     let photo_uri = match &row.key {
         PersonKey::Contact(_) => contact_photo(row, sms, inputs.contacts),
         _ => None,
@@ -650,7 +685,7 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
         },
         wa_chat: wa_chat.map(|jid| SharedString::from(jid.to_owned())),
         pinned: meta.is_some_and(|m| m.pinned),
-        muted: sms_muted || meta.is_some_and(|m| m.is_muted(inputs.now_ms)),
+        muted: sms_muted || wa_muted(meta, wa_local, inputs.now_ms),
         marked_unread: meta.is_some_and(|m| m.marked_unread),
         tick,
         sms_thread,
@@ -1395,6 +1430,85 @@ mod tests {
             &BlockSet::default(),
         );
         assert_eq!(plain.rows[0].otp, None);
+    }
+
+    #[test]
+    fn local_wa_mute_shows_the_bell() {
+        let jid = "905321111111@s.whatsapp.net";
+        let threads = [wa(jid, "A", MIN, 0)];
+        let index = ContactIndex::new(vec![]);
+        let run = |muted: &BTreeSet<String>| {
+            build(
+                &[],
+                &threads,
+                &Inputs {
+                    contacts: &index,
+                    wa: &HashMap::new(),
+                    rules: &rules(),
+                    blocked: &BlockSet::default(),
+                    muted,
+                    locale: LocaleTime::default(),
+                    now_ms: NOW,
+                },
+            )
+        };
+        assert!(!run(&BTreeSet::new()).rows[0].muted);
+        let tag = thread_tag(&ThreadId::WhatsApp(jid.to_owned()));
+        assert!(run(&[tag].into()).rows[0].muted);
+    }
+
+    #[test]
+    fn bell_unmutes_both_and_mutes_on_the_gateway() {
+        let forever = ChatMeta {
+            muted_until_ms: Some(MUTED_FOREVER),
+            ..ChatMeta::default()
+        };
+        let expired = ChatMeta {
+            muted_until_ms: Some(NOW - 1),
+            ..ChatMeta::default()
+        };
+        assert_eq!(wa_bell(None, false, NOW), BellToggle::Mute);
+        assert_eq!(wa_bell(Some(&expired), false, NOW), BellToggle::Mute);
+        assert_eq!(
+            wa_bell(Some(&forever), false, NOW),
+            BellToggle::Unmute {
+                gateway: true,
+                local: false
+            }
+        );
+        assert_eq!(
+            wa_bell(Some(&forever), true, NOW),
+            BellToggle::Unmute {
+                gateway: true,
+                local: true
+            }
+        );
+        assert_eq!(
+            wa_bell(Some(&expired), true, NOW),
+            BellToggle::Unmute {
+                gateway: false,
+                local: true
+            }
+        );
+        assert!(wa_muted(None, true, NOW));
+        assert!(!wa_muted(Some(&expired), false, NOW));
+    }
+
+    #[test]
+    fn in_spam_finds_spam_threads_only() {
+        let view = build_with(
+            &[
+                sms(1, &["+447700900123"], "Win now http://bit.ly/x", MIN, 1),
+                sms(2, &["+905559876543"], "hello", 2 * MIN, 0),
+            ],
+            &[],
+            vec![],
+            &rules(),
+            &BlockSet::default(),
+        );
+        assert!(view.in_spam(&ThreadId::Sms(1)));
+        assert!(!view.in_spam(&ThreadId::Sms(2)));
+        assert!(!view.in_spam(&ThreadId::Sms(9)));
     }
 
     #[test]

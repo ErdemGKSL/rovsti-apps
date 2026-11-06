@@ -2992,6 +2992,85 @@ fn vcard_phone(vcard: &str) -> Option<String> {
     })
 }
 
+/// What a location or contact card offers besides reading it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(not(test), allow(dead_code))]
+pub enum CardAction {
+    OpenMap { url: String },
+    Call(String),
+    Message { name: String, number: String },
+    AddContact(String),
+    Copy(String),
+}
+
+/// Percent-encodes everything but ASCII alphanumerics and `-._~`.
+#[cfg_attr(not(test), allow(dead_code))]
+fn encode_query(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// `geo:41.008200,28.978400?q=41.008200,28.978400(Name)` for a maps app.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn geo_url(location: &Location) -> String {
+    let point = format!("{:.6},{:.6}", location.latitude, location.longitude);
+    let mut url = format!("geo:{point}?q={point}");
+    if let Some(name) = location.name.as_deref().map(str::trim)
+        && !name.is_empty()
+    {
+        url.push('(');
+        url.push_str(&encode_query(name));
+        url.push(')');
+    }
+    url
+}
+
+/// The actions under a location or contact card; none for deleted messages.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn card_actions(meta: Option<&MessageMeta>) -> Vec<CardAction> {
+    let Some(meta) = meta.filter(|m| !m.revoked) else {
+        return Vec::new();
+    };
+    if let Some(location) = &meta.location {
+        let mut lines: Vec<String> = [&location.name, &location.address]
+            .into_iter()
+            .flatten()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        lines.push(coordinates(location));
+        return vec![
+            CardAction::OpenMap {
+                url: geo_url(location),
+            },
+            CardAction::Copy(lines.join("\n")),
+        ];
+    }
+    if let Some(contact) = &meta.contact {
+        return match vcard_phone(&contact.vcard) {
+            Some(number) => vec![
+                CardAction::Call(number.clone()),
+                CardAction::Message {
+                    name: contact.display_name.clone(),
+                    number: number.clone(),
+                },
+                CardAction::AddContact(number.clone()),
+                CardAction::Copy(number),
+            ],
+            None => vec![CardAction::Copy(contact.display_name.clone())],
+        };
+    }
+    Vec::new()
+}
+
 /// `41.00820, 28.97840`.
 fn coordinates(location: &Location) -> String {
     format!("{:.5}, {:.5}", location.latitude, location.longitude)
@@ -3250,6 +3329,83 @@ mod tests {
             },
             state,
         }
+    }
+
+    #[test]
+    fn geo_urls_encode_the_name() {
+        let mut loc = Location {
+            latitude: 41.0082,
+            longitude: 28.9784,
+            name: Some("Ayasofya Müzesi".into()),
+            ..Location::default()
+        };
+        assert_eq!(
+            geo_url(&loc),
+            "geo:41.008200,28.978400?q=41.008200,28.978400(Ayasofya%20M%C3%BCzesi)"
+        );
+        loc.name = Some("  ".into());
+        assert_eq!(
+            geo_url(&loc),
+            "geo:41.008200,28.978400?q=41.008200,28.978400"
+        );
+        loc.name = None;
+        assert!(!geo_url(&loc).contains('('));
+    }
+
+    #[test]
+    fn cards_offer_map_call_message_and_copy() {
+        let place = MessageMeta {
+            location: Some(Location {
+                latitude: 41.0082,
+                longitude: 28.9784,
+                name: Some("Cafe".into()),
+                address: Some(" ".into()),
+                ..Location::default()
+            }),
+            ..MessageMeta::default()
+        };
+        let acts = card_actions(Some(&place));
+        assert_eq!(acts.len(), 2);
+        assert!(
+            matches!(&acts[0], CardAction::OpenMap { url } if url.starts_with("geo:41.008200"))
+        );
+        assert_eq!(acts[1], CardAction::Copy("Cafe\n41.00820, 28.97840".into()));
+
+        let card = |vcard: &str| MessageMeta {
+            contact: Some(SharedContact {
+                display_name: "Ada".into(),
+                vcard: vcard.into(),
+            }),
+            ..MessageMeta::default()
+        };
+        assert_eq!(
+            card_actions(Some(&card("BEGIN:VCARD\nTEL:+90 532\nEND:VCARD"))),
+            vec![
+                CardAction::Call("+90 532".into()),
+                CardAction::Message {
+                    name: "Ada".into(),
+                    number: "+90 532".into()
+                },
+                CardAction::AddContact("+90 532".into()),
+                CardAction::Copy("+90 532".into()),
+            ]
+        );
+        assert_eq!(
+            card_actions(Some(&card("BEGIN:VCARD\nEND:VCARD"))),
+            vec![CardAction::Copy("Ada".into())]
+        );
+    }
+
+    #[test]
+    fn revoked_and_plain_messages_have_no_card_actions() {
+        assert!(card_actions(None).is_empty());
+        assert!(card_actions(Some(&MessageMeta::default())).is_empty());
+        let revoked = MessageMeta {
+            revoked: true,
+            location: Some(Location::default()),
+            ..MessageMeta::default()
+        };
+        assert!(card_actions(Some(&revoked)).is_empty());
     }
 
     #[test]

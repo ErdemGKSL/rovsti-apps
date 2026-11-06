@@ -590,7 +590,7 @@ impl PhoneApp {
             .items_center()
             .gap(px(8.0))
             .child(self.number_display(theme))
-            .child(self.dial_pad(theme, 72.0, 24.0, false, cx))
+            .child(self.dial_pad(theme, 72.0, 24.0, 12.0, false, cx))
             .child(
                 div()
                     .relative()

@@ -2151,7 +2151,7 @@ impl PhoneApp {
                     .text_color(colors.label)
                     .child(line),
             )
-            .child(self.dial_pad(theme, IN_KEY, 16.0, true, cx))
+            .child(self.dial_pad(theme, IN_KEY, 16.0, 12.0, true, cx))
             .child(self.text_button(theme, "ic-hide", "Hide", cx))
             .into_any_element()
     }

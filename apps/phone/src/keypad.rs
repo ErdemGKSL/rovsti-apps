@@ -34,8 +34,21 @@ use crate::{
     fx::{A_CALL, A_FIELD, A_KEY, A_LAST},
 };
 
-pub const KEY_SIZE: f32 = 78.0;
+/// Height of the title block above the keypad: top bar, large title, gap.
+pub const HEADER_H: f32 = 56.0 + 41.0 + 8.0;
 const LONG_ZERO: u64 = 400;
+/// The layout input before the first frame (a 412x915 phone).
+pub fn default_input() -> rovsti_core::keypad_layout::KeypadInput {
+    rovsti_core::keypad_layout::KeypadInput {
+        viewport_w: 412.0,
+        viewport_h: 915.0,
+        insets: Default::default(),
+        text_len: 0,
+        header_h: HEADER_H,
+        tab_bar_h: f32::from(rovsti_ui::tokens::metrics::TAB_BAR_HEIGHT) * 1.1,
+        tab_bar_margin: f32::from(rovsti_ui::tokens::metrics::TAB_BAR_MARGIN),
+    }
+}
 /// Holding a digit key for speed dial or voicemail.
 const LONG_DIGIT: u64 = 500;
 const LONG_DELETE: u64 = 500;
@@ -580,10 +593,28 @@ impl PhoneApp {
 
     /// The number field's font size now: 36 stepping down with length, and
     /// never wider than the screen.
-    pub(crate) fn field_font(&self, window: &Window) -> f32 {
-        let width = f32::from(window.viewport_size().width) - 48.0;
-        let fit = width / (self.dialed.len().max(1) as f32 * 0.6);
-        dial::font_step(self.dialed.len()).min(fit)
+    /// The pure layout's input for this frame.
+    pub(crate) fn keypad_input(&self, window: &Window) -> rovsti_core::keypad_layout::KeypadInput {
+        let size = window.viewport_size();
+        let e = window.insets().effective();
+        rovsti_core::keypad_layout::KeypadInput {
+            viewport_w: f32::from(size.width),
+            viewport_h: f32::from(size.height),
+            insets: rovsti_core::keypad_layout::Insets {
+                top: f32::from(e.top),
+                right: f32::from(e.right),
+                bottom: f32::from(e.bottom),
+                left: f32::from(e.left),
+            },
+            text_len: self.dialed.chars().count(),
+            header_h: HEADER_H,
+            tab_bar_h: f32::from(rovsti_ui::tokens::metrics::TAB_BAR_HEIGHT) * 1.1,
+            tab_bar_margin: f32::from(rovsti_ui::tokens::metrics::TAB_BAR_MARGIN),
+        }
+    }
+
+    pub(crate) fn field_font(&self) -> f32 {
+        self.kp_layout.number_fit.font
     }
 
     fn delete_press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1302,22 +1333,26 @@ impl PhoneApp {
         let at_rest = press == 0.0;
         let spec =
             GlassSpec::control(theme).lerp(GlassSpec::lens(theme), press.clamp(0.0, 1.0) * 0.9);
-        let glyph = if size < KEY_SIZE { 30.0 } else { 32.0 };
+        let style = rovsti_core::keypad_layout::key_style(size);
+        let glyph = style.glyph;
         let caption = div()
-            .h(px(if size < KEY_SIZE { 11.0 } else { 12.0 }))
+            .h(px(style.caption_h))
             .text_size(typography::CAPTION2.size)
             .font_weight(typography::CAPTION2.weight)
             .text_color(colors.secondary_label)
-            .when(!in_call && key.hold_label.is_some(), |el| {
-                el.flex().items_center().justify_center().child(
-                    svg()
-                        .path(Icon::LucideVoicemail.path())
-                        .size(px(12.0))
-                        .flex_none()
-                        .text_color(colors.secondary_label),
-                )
-            })
-            .child(key.letters);
+            .when(
+                style.letters && !in_call && key.hold_label.is_some(),
+                |el| {
+                    el.flex().items_center().justify_center().child(
+                        svg()
+                            .path(Icon::LucideVoicemail.path())
+                            .size(px(12.0))
+                            .flex_none()
+                            .text_color(colors.secondary_label),
+                    )
+                },
+            )
+            .when(style.letters, |el| el.child(key.letters));
         let badge = self.key_badge(key, in_call);
         div()
             .id(id)
@@ -1407,16 +1442,16 @@ impl PhoneApp {
     /// (one copy of the backdrop, one blur, one composite; AD-21 4), instead
     /// of twelve; a key that is pressed or springing back is left out of it
     /// and paints its own glass with the press glow. `gap` is the space
-    /// between keys in a row; rows sit 12 px apart.
+    /// between keys in a row; rows sit `row_gap` apart.
     pub(crate) fn dial_pad(
         &self,
         theme: Theme,
         size: f32,
         gap: f32,
+        row_gap: f32,
         in_call: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        const ROW_GAP: f32 = 12.0;
         let mut skip = 0u32;
         for (index, key) in KEYS.iter().enumerate() {
             let id = if in_call { key.in_id } else { key.id };
@@ -1427,7 +1462,7 @@ impl PhoneApp {
         let grid = move |origin: gpui::Point<gpui::Pixels>| GlassGrid {
             origin,
             cell: gpui::size(px(size), px(size)),
-            pitch: gpui::size(px(size + gap), px(size + ROW_GAP)),
+            pitch: gpui::size(px(size + gap), px(size + row_gap)),
             cols: 3,
             rows: 4,
         };
@@ -1444,9 +1479,9 @@ impl PhoneApp {
             .flex()
             .flex_col()
             .flex_none()
-            .gap(px(ROW_GAP))
+            .gap(px(row_gap))
             .w(px(size * 3.0 + gap * 2.0))
-            .h(px(size * 4.0 + ROW_GAP * 3.0))
+            .h(px(size * 4.0 + row_gap * 3.0))
             .on_paint_before_children(move |bounds, _style, window, _cx| {
                 paint_glass_grid(
                     &grid(bounds.origin),
@@ -1682,6 +1717,8 @@ impl PhoneApp {
 
     pub(crate) fn keypad(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let answer = call_colors(theme).answer;
+        let layout = &self.kp_layout;
+        let key = layout.key;
 
         // While the circle waits for the call screen it stays pressed; once it
         // flies, the copy drawn over everything replaces it.
@@ -1691,110 +1728,129 @@ impl PhoneApp {
         } else {
             self.presses.value("call")
         };
-        let call_side = KEY_SIZE * press_scale(call_press, scale::PRESS_CARD);
+        let call_side = key * press_scale(call_press, scale::PRESS_CARD);
+        let call_icon = (key * 0.38).clamp(20.0, 30.0);
         let call_bg = mix(answer, gpui::white(), 0.18 * call_press.clamp(0.0, 1.0));
         let delete_press = self.presses.value("delete");
         let shown = self.delete_shown.value.clamp(0.0, 1.0);
 
-        div()
+        // Every section is a clipped box at a rect from the pure layout, so
+        // content can never spill into a neighbour.
+        let section = |r: rovsti_core::keypad_layout::Rect| {
+            div()
+                .absolute()
+                .left(px(r.x))
+                .top(px(r.y))
+                .w(px(r.w))
+                .h(px(r.h))
+                .overflow_hidden()
+        };
+
+        let number = section(layout.number).flex().justify_center().child(
+            div()
+                .relative()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(self.number_display(theme))
+                .when(self.dialed.is_empty(), |el| {
+                    el.child(self.paste_pill(theme, cx))
+                }),
+        );
+        let matches = section(layout.matches)
             .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(12.0))
-            .pt(px(24.0))
-            .child(
-                div()
-                    .relative()
-                    .w_full()
-                    .flex()
-                    .justify_center()
-                    .child(self.number_display(theme))
-                    .children(self.t9_strip(theme, cx).map(|strip| {
-                        // Floats over the title area so the keys never move.
-                        div()
-                            .absolute()
-                            .bottom_full()
-                            .pb(px(T9_GAP))
-                            .w_full()
-                            .flex()
-                            .justify_center()
-                            .child(strip)
-                    }))
-                    .when(self.dialed.is_empty(), |el| {
-                        el.child(self.paste_pill(theme, cx))
-                    })
-                    .when(self.whatsapp_chip_shown(cx) && !self.add_offered(), |el| {
-                        el.child(self.whatsapp_chip(theme, false, cx))
-                    }),
-            )
+            .justify_center()
+            .children(self.t9_strip(theme, cx));
+        let actions = section(layout.actions)
+            .flex()
+            .justify_center()
             .child(self.status_line(theme, cx))
-            .child(self.dial_pad(theme, KEY_SIZE, 24.0, false, cx))
+            .when(self.whatsapp_chip_shown(cx) && !self.add_offered(), |el| {
+                el.child(self.whatsapp_chip(theme, false, cx))
+            });
+        let pad = section(layout.grid).child(self.dial_pad(
+            theme,
+            key,
+            layout.col_gap,
+            layout.row_gap,
+            false,
+            cx,
+        ));
+        let call_row = section(layout.call_row)
+            .flex()
+            .items_center()
+            .justify_center()
+            .gap(px(layout.col_gap))
+            .child(div().size(px(key)).flex_none())
             .child(
                 div()
+                    .id("call")
+                    .role(Role::Button)
+                    .aria_label("Call")
+                    .relative()
+                    .size(px(key))
                     .flex()
                     .items_center()
-                    .gap(px(24.0))
-                    .child(div().size(px(KEY_SIZE)))
-                    .child(
-                        div()
-                            .id("call")
-                            .role(Role::Button)
-                            .aria_label("Call")
-                            .relative()
-                            .size(px(KEY_SIZE))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, window, cx| this.call_tap(window, cx)),
-                            )
-                            .child(touch_surface(Self::touch_listener(cx, Some("call".into()))))
-                            .child(self.marks.probe(A_CALL))
-                            .child(
-                                div()
-                                    .size(px(call_side))
-                                    .opacity(1.0 - f32::from(u8::from(flying)))
-                                    .rounded_full()
-                                    .bg(call_bg)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(
-                                        svg()
-                                            .path(Icon::LucidePhone.path())
-                                            .size(px(30.0))
-                                            .text_color(gpui::white()),
-                                    ),
-                            ),
+                    .justify_center()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| this.call_tap(window, cx)),
                     )
+                    .child(touch_surface(Self::touch_listener(cx, Some("call".into()))))
+                    .child(self.marks.probe(A_CALL))
                     .child(
                         div()
-                            .id("backspace")
-                            .role(Role::Button)
-                            .aria_label("Delete")
-                            .size(px(KEY_SIZE))
+                            .size(px(call_side))
+                            .opacity(1.0 - f32::from(u8::from(flying)))
+                            .rounded_full()
+                            .bg(call_bg)
                             .flex()
                             .items_center()
                             .justify_center()
-                            .opacity(shown * (1.0 - 0.5 * delete_press.clamp(0.0, 1.0)))
-                            .left(px((1.0 - shown) * 12.0))
-                            .text_size(typography::HEADLINE.size)
-                            .text_color(theme::colors(theme).secondary_label)
-                            .child("Delete")
-                            .when(!self.dialed.is_empty(), |el| {
-                                el.on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _, window, cx| {
-                                        this.mouse_down("delete", window, cx)
-                                    }),
-                                )
-                                .child(touch_surface(
-                                    Self::touch_listener(cx, Some("delete".into())),
-                                ))
-                            }),
+                            .child(
+                                svg()
+                                    .path(Icon::LucidePhone.path())
+                                    .size(px(call_icon))
+                                    .text_color(gpui::white()),
+                            ),
                     ),
             )
+            .child(
+                div()
+                    .id("backspace")
+                    .role(Role::Button)
+                    .aria_label("Delete")
+                    .size(px(key))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .opacity(shown * (1.0 - 0.5 * delete_press.clamp(0.0, 1.0)))
+                    .left(px((1.0 - shown) * 12.0))
+                    .text_size(typography::HEADLINE.size)
+                    .text_color(theme::colors(theme).secondary_label)
+                    .child("Delete")
+                    .when(!self.dialed.is_empty(), |el| {
+                        el.on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, window, cx| {
+                                this.mouse_down("delete", window, cx)
+                            }),
+                        )
+                        .child(touch_surface(Self::touch_listener(
+                            cx,
+                            Some("delete".into()),
+                        )))
+                    }),
+            );
+
+        div()
+            .size_full()
+            .relative()
+            .child(number)
+            .child(matches)
+            .child(actions)
+            .child(pad)
+            .child(call_row)
     }
 }
 

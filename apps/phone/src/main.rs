@@ -8,8 +8,8 @@
 use futures::{StreamExt, channel::mpsc};
 use gpui::{
     AnyElement, App, Bounds, Context, Entity, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    TouchPhase, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
+    ParentElement, Render, SharedString, Styled, Subscription, TouchPhase, Window, WindowBounds,
+    WindowOptions, div, prelude::*, px, size,
 };
 mod actions_ui;
 mod addcall;
@@ -71,7 +71,7 @@ use rovsti_ui::{
     notice_pill::{NoticePill, PillEvent},
     sheet::Sheet,
     spring::Spring,
-    tab_bar::{Tab, TabBar, TabBarView, content_bottom_inset},
+    tab_bar::{Tab, TabBar, TabBarView},
     theme,
     tokens::{Theme, metrics},
 };
@@ -139,6 +139,7 @@ struct PhoneApp {
     /// `dialed` split into the settled digits and the newest one, as text
     /// ready to draw; rebuilt only when `dialed` changes.
     shown_digits: (String, SharedString, SharedString),
+    kp_layout: rovsti_core::keypad_layout::KeypadLayout,
     status: Option<Status>,
     /// Whose number is typed (story 10.1); shown in the status line.
     dial_match: keypad::DialMatch,
@@ -493,6 +494,7 @@ impl PhoneApp {
             speed_map: Default::default(),
             speed_badges: Default::default(),
             speed_aria: Default::default(),
+            kp_layout: rovsti_core::keypad_layout::keypad_layout(&keypad::default_input()),
             shown_digits: (
                 String::new(),
                 SharedString::default(),
@@ -1295,8 +1297,6 @@ impl PhoneApp {
         div()
             .id("page")
             .size_full()
-            .overflow_y_scroll()
-            .pb(content_bottom_inset())
             .opacity(self.page.progress() * self.page_fade.value())
             .child(
                 div()
@@ -1426,7 +1426,8 @@ impl Render for PhoneApp {
         self.sheet.set_viewport(window.viewport_size());
         self.update_back(window);
         self.reduced = window.prefers_reduced_motion();
-        self.font.set_target(self.field_font(window));
+        self.kp_layout = rovsti_core::keypad_layout::keypad_layout(&self.keypad_input(window));
+        self.font.set_target(self.field_font());
 
         let tabs = &self.tabs;
         self.tab_view

@@ -40,7 +40,7 @@ Checks after every step:
 (if `df` shows under 6 GB free, `rm -rf target/debug/incremental` first).
 Commit each step on its own with a focused message ("Rovsti Contacts: ...").
 
-### U1. rovsti_core pure logic (+ tests)
+### U1. rovsti_core pure logic (+ tests) (done, `1c4220c`)
 
 Changes in `crates/rovsti_core/src/contact_card.rs`:
 - `favorites` keeps every starred contact (drop the `!c.numbers.is_empty()` filter) and its
@@ -71,7 +71,7 @@ Tests:
 - `members_summary`: every wording branch, including the plural and singular of `skipped`.
 - `MembersPayload` decodes `{"added":1}` with the missing fields set to 0.
 
-### U2. Android seams: group members, email compose, export of every contact
+### U2. Android seams: group members, email compose, export of every contact (done, `12a27a8`)
 
 Additions to `crates/rovsti_android/src/contacts_edit.rs`:
 - `pub fn set_group_members(group_id: i64, change_json: &str) -> Result<String>` calls
@@ -108,7 +108,7 @@ Update the doc comments of `contacts_edit::full` and `apps/contacts/src/backend.
 to say "every contact". `start()` does not call `resolveActivity`, so the manifest needs no new
 `<queries>`. Add a one-line note to `docs/android.md` for the new bridge methods.
 
-### U3. Contact picker and "Add or remove contacts" on a group page (G1, G9)
+### U3. Contact picker and "Add or remove contacts" on a group page (G1, G9) (done, `9d0f2f1`)
 
 New `apps/contacts/src/picker.rs`, a full-page multi-select:
 - **State:** `pub(crate) enum PickFor { Group(i64), Favorites }` and
@@ -149,7 +149,7 @@ Tests (in `picker.rs`, pure helpers only):
 - `fn selected_words(n: usize) -> String`: "None selected", "1 selected", "3 selected".
 - The initial members are filtered to ids that exist in the book.
 
-### U4. Favorites "+" and star feedback (G2 UI, G5)
+### U4. Favorites "+" and star feedback (G2 UI, G5) (done, `cf25757`)
 
 - The Favorites `large_title` trailing is a `LucidePlus` `glass_icon_button` with id
   `favorites-add`, shown when `Book::Ready`. It opens `Picker { for_: Favorites, initial: ids of starred contacts }`.
@@ -167,7 +167,7 @@ Tests (in `picker.rs`, pure helpers only):
 - Number-less starred contacts now show in Favorites through U1. Check that the Favorites row
   subtitle and avatar still draw with no number (it is the same `Row` as the Contacts tab).
 
-### U5. The card acts on each field (G4, G6)
+### U5. The card acts on each field (G4, G6) (done, `c16bdf0`)
 
 In `apps/contacts/src/detail.rs` and `main.rs`:
 
@@ -196,7 +196,7 @@ In `apps/contacts/src/detail.rs` and `main.rs`:
 - **Pure helper** (tests in `detail.rs`): `fn first_email(draft: Option<&ContactDraft>) -> Option<String>`,
   which skips blank values.
 
-### U6. Settings "New contacts go to" and stale texts (G7, G8)
+### U6. Settings "New contacts go to" and stale texts (G7, G8) (done, `b042ff8`)
 
 - **Settings:** a "New contacts" section appears when `self.accounts.len() > 1`. It has one
   `tap_row` "Save to" whose trailing text is `account_label(default_account(..))`. A tap calls
@@ -209,7 +209,7 @@ In `apps/contacts/src/detail.rs` and `main.rs`:
 - Update the module doc of `groups.rs` ("A contact joins a group in its edit form or from the
   group's page").
 
-### U7. Docs and plan status
+### U7. Docs and plan status (done, this commit)
 
 - `docs/roadmap.md` (Rovsti Contacts):
   - Tick a "UX completeness pass" line that lists the group picker, Favorites +, the card

@@ -129,7 +129,12 @@ list in `docs/phone-acceptance.md`.
       WhatsApp mark in the list for contacts with a chat (done without a device)
 - [x] Chat and call on WhatsApp from the card, through Rovsti Messages and Phone
       (done without a device)
+- [x] UX completeness pass: add and remove group members from the group page with a
+      contact picker, Favorites "+" with the same picker, per-field actions on the card
+      (call, message, copy, share, email), export of every contact (also those without a
+      number), and the "Save to" setting for new contacts (done without a device)
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
+- [ ] Check the group member write and the mailto handoff on a phone
 
 ## Rovsti Stops
 

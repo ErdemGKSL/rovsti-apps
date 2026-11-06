@@ -694,6 +694,33 @@ mod tests {
         );
     }
 
+    /// The Add call sheet's Contacts list draws the whole 600-contact book (no
+    /// cap any more) but builds only the rows in its 392 px window.
+    #[test]
+    fn the_add_call_contacts_build_only_the_rows_in_view() {
+        let mut rig = Rig::new();
+        rig.settle();
+        rig.with_app(|app, window, cx| {
+            app.backend.update(cx, |b, cx| {
+                b.preview_scene("single", cx);
+                b.perf_big_book(cx);
+            });
+            app.open_add_call(window, cx);
+        });
+        rig.settle();
+        rig.with_app(|app, window, cx| app.add_call_tap("sheet-ac-seg2", window, cx));
+        rig.settle();
+        let rows = rig.with_app(|app, _, _| app.contacts.rows.len());
+        assert!(rows >= 600, "the book grouped into {rows} rows");
+        crate::addcall::ROWS_BUILT.with(|c| c.set(0));
+        rig.draw();
+        let built = crate::addcall::ROWS_BUILT.with(std::cell::Cell::get);
+        assert!(
+            (1..=12).contains(&built),
+            "{built} of {rows} rows built for one frame"
+        );
+    }
+
     #[test]
     fn the_photo_cache_stays_at_64_and_decoding_is_off_the_caller() {
         let mut rig = Rig::new();

@@ -817,6 +817,13 @@ impl Backend {
         cx.notify();
     }
 
+    /// Tests: a 600-contact book, for the list virtualisation checks.
+    #[cfg(test)]
+    pub fn perf_big_book(&mut self, cx: &mut Context<Self>) {
+        self.contacts = Load::Ready(Arc::new(ContactIndex::new(sample::long_contacts(600))));
+        cx.notify();
+    }
+
     /// Perf runs: a fake outgoing call that connects after 1.6 s. Never
     /// reaches Telecom.
     #[cfg(any(feature = "perf", test))]

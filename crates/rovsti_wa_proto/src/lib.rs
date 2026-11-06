@@ -16,6 +16,7 @@ pub mod limit;
 pub mod log;
 pub mod lookup;
 pub mod media;
+pub mod meta;
 pub mod presence;
 pub mod push;
 pub mod timeline;
@@ -32,6 +33,11 @@ pub use key::{ConnectKey, KeyError, KeyHash, KeyId};
 pub use log::{EventLog, Since};
 pub use lookup::{LookupCache, LookupUsers, MAX_LOOKUP, WaTarget, WaUser, chat_users, wa_target};
 pub use media::{MAX_SEND_BYTES, MediaTooLarge, check_size, classify};
+pub use meta::{
+    ChatAction, ChatActionKind, ChatMeta, DeleteForMe, DeliveryStatus, EditMessage, Location,
+    MAX_PROFILES, MUTED_FOREVER, MediaMeta, MediaOptions, MessageMeta, ProfilesRequest, Quoted,
+    RevokeMessage, RichChat, RichMessage, SharedContact, StarMessage, WaProfile,
+};
 pub use presence::{PresenceBook, presence_label};
 pub use push::{Wake, parse_wake};
 pub use timeline::{

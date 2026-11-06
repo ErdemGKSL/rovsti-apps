@@ -6,8 +6,9 @@
 //! window below them.
 
 use gpui::{
-    AnyElement, ClipboardItem, Context, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    AnyElement, ClipboardItem, Context, InteractiveElement, IntoElement, ListAlignment, ListState,
+    MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window,
+    div, list, px,
 };
 use rovsti_android::diagnostics::{EVENTS, GROUPS, HEADER};
 use rovsti_ui::{
@@ -62,6 +63,38 @@ pub(crate) struct Diagnostics {
     running: Option<&'static str>,
     /// "Copied" until the Notice pill takes over (14.3).
     pub(crate) copied: bool,
+    log: Log,
+}
+
+/// The result lines in the log window, flattened once per change (not per
+/// frame) and drawn through a virtual `list`: only the lines in view are
+/// laid out, however many the probes printed.
+struct Log {
+    lines: Vec<SharedString>,
+    state: ListState,
+}
+
+impl Default for Log {
+    fn default() -> Self {
+        Self {
+            lines: Vec::new(),
+            state: ListState::new(0, ListAlignment::Top, px(LOG_H)),
+        }
+    }
+}
+
+impl Diagnostics {
+    /// Rebuilds the log after `done` or `backup_lines` changed.
+    fn log_changed(&mut self) {
+        self.log.lines.clear();
+        self.log.lines.extend(
+            self.done
+                .iter()
+                .flat_map(|d| d.lines.iter().cloned())
+                .chain(self.backup_lines.iter().cloned()),
+        );
+        self.log.state.reset(self.log.lines.len());
+    }
 }
 
 /// `pass`, `fail`, `unknown` line counts.
@@ -141,6 +174,7 @@ impl PhoneApp {
                 .backup_lines
                 .push("info: choose a place to save the test file".into());
         }
+        self.diag.log_changed();
         cx.notify();
     }
 
@@ -162,6 +196,7 @@ impl PhoneApp {
             lines,
         });
         self.diag.running = None;
+        self.diag.log_changed();
         cx.notify();
     }
 
@@ -214,6 +249,7 @@ impl PhoneApp {
             }
             _ => {}
         }
+        self.diag.log_changed();
     }
 
     pub(crate) fn diag_run(&mut self, probe: &'static str, cx: &mut Context<Self>) {
@@ -245,6 +281,7 @@ impl PhoneApp {
                     lines,
                 });
                 this.diag.running = None;
+                this.diag.log_changed();
                 cx.notify();
             })
             .ok();
@@ -380,13 +417,6 @@ impl PhoneApp {
     /// The page body (inside the sheet).
     pub(crate) fn diag_body(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
-        let log: Vec<SharedString> = self
-            .diag
-            .done
-            .iter()
-            .flat_map(|d| d.lines.iter().cloned())
-            .chain(self.diag.backup_lines.iter().cloned())
-            .collect();
         let copy_id = SharedString::new_static("sheet-diag-copy");
         let press = self.presses.value(&copy_id);
         div()
@@ -433,16 +463,22 @@ impl PhoneApp {
                         a: 0.35,
                         ..colors.fill
                     })
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
                     .text_size(px(11.0))
                     .text_color(colors.secondary_label)
-                    .children(if log.is_empty() {
-                        vec![SharedString::new_static("No probe has run yet.")]
+                    .child(if self.diag.log.lines.is_empty() {
+                        div().child("No probe has run yet.").into_any_element()
                     } else {
-                        log
+                        list(
+                            self.diag.log.state.clone(),
+                            cx.processor(|this, ix: usize, _window, _cx| {
+                                div()
+                                    .pb(px(2.0))
+                                    .children(this.diag.log.lines.get(ix).cloned())
+                                    .into_any_element()
+                            }),
+                        )
+                        .size_full()
+                        .into_any_element()
                     }),
             )
             .child(

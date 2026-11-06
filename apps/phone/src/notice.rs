@@ -190,23 +190,32 @@ impl PhoneApp {
         self.pill_in.set_target(f32::from(u8::from(wanted)));
         if wanted && self.pill_task.is_none() {
             self.refresh_pill_text(cx);
+            let first = crate::incall::ms_to_next_second(self.incall.connect_time_ms());
             self.pill_task = Some(cx.spawn(async move |this, cx| {
+                // Wakes just after each whole second of the call, so every wake
+                // changes the text (a free-running 1 s timer drifts against the
+                // call clock: some wakes change nothing, some seconds are skipped).
+                let mut wait = first;
                 loop {
                     cx.background_executor()
-                        .timer(std::time::Duration::from_secs(1))
+                        .timer(std::time::Duration::from_millis(wait))
                         .await;
-                    let alive = this
+                    let next = this
                         .update(cx, |this, cx| {
                             if !this.pill_wanted() {
                                 this.pill_task = None;
-                                return false;
+                                return None;
                             }
                             this.refresh_pill_text(cx);
-                            true
+                            Some(crate::incall::ms_to_next_second(
+                                this.incall.connect_time_ms(),
+                            ))
                         })
-                        .unwrap_or(false);
-                    if !alive {
-                        break;
+                        .ok()
+                        .flatten();
+                    match next {
+                        Some(ms) => wait = ms,
+                        None => break,
                     }
                 }
             }));

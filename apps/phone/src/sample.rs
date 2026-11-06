@@ -151,7 +151,7 @@ fn base_contacts() -> Vec<WireContact> {
 }
 
 /// `count` generated contacts in name order (scroll and search checks).
-fn long_contacts(count: usize) -> Vec<WireContact> {
+pub(crate) fn long_contacts(count: usize) -> Vec<WireContact> {
     const FIRST: [&str; 12] = [
         "Ada", "Burak", "Cem", "Deniz", "Ece", "Fatma", "Gül", "Hasan", "Işık", "Jale", "Kerem",
         "Leyla",

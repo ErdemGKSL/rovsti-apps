@@ -17,4 +17,4 @@ pub mod tls;
 pub use audio::{CallAudio, call_audio};
 pub use error::ClientError;
 pub use events::{ClientEvent, EventStream, subscribe};
-pub use http::Gateway;
+pub use http::{Gateway, Picture};

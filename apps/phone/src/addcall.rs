@@ -7,12 +7,13 @@
 //! one call path (`Backend::place_call`, FR-11); the first call is held by the
 //! network and the Hold-away moment (S19) plays when Android reports it.
 
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, ops::Range, rc::Rc};
 
 use gpui::{
     AnyElement, AppContext as _, Bounds, Context, Entity, FontWeight, HapticFeedback, Hsla,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Role, ScrollHandle,
-    SharedString, StatefulInteractiveElement, Styled, TouchPhase, Window, div, px, svg,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Role, SharedString,
+    StatefulInteractiveElement, Styled, TouchPhase, UniformListScrollHandle, Window, div, px, svg,
+    uniform_list,
 };
 use rovsti_core::{
     contacts_view::{self, CallTarget},
@@ -43,9 +44,34 @@ const ROW_H: f32 = 58.0;
 const TILE_H: f32 = 104.0;
 /// The scrolling list's window.
 const LIST_H: f32 = 392.0;
-/// The most contact rows drawn (a search narrows a longer book).
-const MAX_ROWS: usize = 60;
 const SEGMENTS: [&str; 3] = ["Keypad", "Favorites", "Contacts"];
+
+#[cfg(test)]
+thread_local! {
+    /// Rows the sheet's lists built, for the virtualisation test.
+    pub(crate) static ROWS_BUILT: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Which list the sheet's scrolling window shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ListKind {
+    /// Favorites tiles, two to a row of [`TILE_H`].
+    Favorites,
+    /// The Contacts rows (section headers as blank rows), [`ROW_H`] each.
+    Contacts,
+    /// The chosen contact's numbers, [`ROW_H`] each.
+    Numbers,
+}
+
+impl ListKind {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Favorites => "sheet-ac-favorites",
+            Self::Contacts => "sheet-ac-contacts",
+            Self::Numbers => "sheet-ac-numbers",
+        }
+    }
+}
 
 pub(crate) struct AddCall {
     /// 0 Keypad, 1 Favorites, 2 Contacts; kept for the session, Favorites on first use.
@@ -58,7 +84,9 @@ pub(crate) struct AddCall {
     pub pill_name: SharedString,
     /// The contact whose numbers are shown inline.
     chooser: Option<ContactRow>,
-    scroll: ScrollHandle,
+    /// One handle for whichever list shows (a segment switch or the number
+    /// chooser starts it at the top).
+    scroll: UniformListScrollHandle,
     bounds: Rc<Cell<Bounds<Pixels>>>,
     tap: TapGuard,
     /// The keyguard dismissal this sheet waits for (the backend's generation at the tap).
@@ -74,7 +102,7 @@ impl AddCall {
             line: cx.new(|_| ElapsedLine::new("", 15.0, 0).weight(typography::HEADLINE.weight)),
             pill_name: SharedString::default(),
             chooser: None,
-            scroll: ScrollHandle::new(),
+            scroll: UniformListScrollHandle::new(),
             bounds: Rc::new(Cell::new(Bounds::default())),
             tap: TapGuard::default(),
             awaiting_keyguard: None,
@@ -83,6 +111,16 @@ impl AddCall {
 
     pub(crate) fn tick(&mut self, dt: std::time::Duration) -> bool {
         self.seg_t.tick(dt)
+    }
+
+    /// How far the shown list is scrolled down, in px (zero or more).
+    fn scrolled(&self) -> f32 {
+        -f32::from(self.scroll.0.borrow().base_handle.offset().y).min(0.0)
+    }
+
+    fn scroll_to_top(&self) {
+        let handle = self.scroll.0.borrow().base_handle.clone();
+        handle.set_offset(Point::default());
     }
 
     /// The segments that open over a locked keyguard: only the Keypad.
@@ -222,7 +260,7 @@ impl PhoneApp {
             }
             CallTarget::Choose => {
                 self.add.chooser = Some(row);
-                self.add.scroll.set_offset(Point::default());
+                self.add.scroll_to_top();
             }
             CallTarget::Nothing => {}
         }
@@ -240,7 +278,7 @@ impl PhoneApp {
                     self.add.chooser = None;
                     self.add.failed = None;
                     self.add.seg_t.set_target(segment as f32);
-                    self.add.scroll.set_offset(Point::default());
+                    self.add.scroll_to_top();
                 } else if !self.add.segment_allowed(segment, locked) {
                     self.show_notice_pill("Unlock the phone to use this", None, false, cx);
                 }
@@ -262,7 +300,7 @@ impl PhoneApp {
         if !self.add_call_open() {
             return;
         }
-        let scroll = f32::from(self.add.scroll.offset().y).abs();
+        let scroll = self.add.scrolled();
         match pointer {
             Pointer::Touch(TouchPhase::Started) => {
                 self.add
@@ -593,25 +631,26 @@ impl PhoneApp {
             .into_any_element()
     }
 
-    /// A scrolling window with the sheet's pointer surface on top.
-    fn add_call_list(
-        &self,
-        children: Vec<AnyElement>,
-        total: f32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// A scrolling window with the sheet's pointer surface on top. Only the
+    /// rows in view are built (`uniform_list`), so a long book costs the same
+    /// frame as a short one.
+    fn add_call_list(&self, list: ListKind, count: usize, cx: &mut Context<Self>) -> AnyElement {
         let entity = cx.entity();
         div()
             .relative()
             .w_full()
             .h(px(LIST_H))
             .child(
-                div()
-                    .id("sheet-ac-list")
-                    .size_full()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.add.scroll)
-                    .child(div().h(px(total)).children(children)),
+                uniform_list(
+                    list.id(),
+                    count,
+                    cx.processor(move |this, range: Range<usize>, window, _cx| {
+                        let theme = rovsti_ui::current_theme(window);
+                        this.add_call_rows(theme, list, range)
+                    }),
+                )
+                .track_scroll(&self.add.scroll)
+                .size_full(),
             )
             .child(pointer_surface(
                 Rc::clone(&self.add.bounds),
@@ -800,28 +839,99 @@ impl PhoneApp {
         if let Some(contact) = &self.add.chooser {
             return self.add_call_numbers(theme, contact, cx);
         }
-        let tiles: Vec<AnyElement> = f
-            .tiles
-            .chunks(2)
-            .map(|pair| {
-                div()
-                    .h(px(TILE_H))
-                    .w_full()
-                    .flex()
-                    .children(pair.iter().map(|tile| {
+        self.add_call_list(ListKind::Favorites, f.tiles.len().div_ceil(2), cx)
+    }
+
+    /// The rows of `list` in `range` (only the ones in view are asked for).
+    fn add_call_rows(&self, theme: Theme, list: ListKind, range: Range<usize>) -> Vec<AnyElement> {
+        #[cfg(test)]
+        ROWS_BUILT.with(|built| built.set(built.get() + range.len()));
+        match list {
+            ListKind::Favorites => {
+                let tiles = &self.favorites.tiles;
+                range
+                    .map(|row| {
+                        let pair = tiles
+                            .get(row * 2..(row * 2 + 2).min(tiles.len()))
+                            .unwrap_or_default();
                         div()
-                            .flex_1()
-                            .h_full()
+                            .h(px(TILE_H))
+                            .w_full()
+                            .flex()
+                            .children(pair.iter().map(|tile| {
+                                div()
+                                    .flex_1()
+                                    .h_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(self.avatar_row(theme, tile, None, true))
+                            }))
+                            .into_any_element()
+                    })
+                    .collect()
+            }
+            ListKind::Contacts => {
+                let rows = &self.contacts.rows;
+                range
+                    .map(|i| {
+                        let row = div().h(px(ROW_H)).w_full().flex().items_center();
+                        match rows.get(i) {
+                            Some(r) if !r.header => row.child(
+                                self.avatar_row(theme, r, r.subtitle.clone(), false)
+                                    .w_full(),
+                            ),
+                            _ => row,
+                        }
+                        .into_any_element()
+                    })
+                    .collect()
+            }
+            ListKind::Numbers => {
+                let colors = theme::colors(theme);
+                let numbers = self
+                    .add
+                    .chooser
+                    .as_ref()
+                    .map_or(&[][..], |c| &c.numbers[..]);
+                range
+                    .filter_map(|i| numbers.get(i))
+                    .map(|n| {
+                        div()
+                            .h(px(ROW_H))
+                            .w_full()
                             .flex()
                             .items_center()
-                            .justify_center()
-                            .child(self.avatar_row(theme, tile, None, true))
-                    }))
-                    .into_any_element()
-            })
-            .collect();
-        let total = f.tiles.len().div_ceil(2) as f32 * TILE_H;
-        self.add_call_list(tiles, total, cx)
+                            .justify_between()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .child(
+                                        div()
+                                            .text_size(typography::HEADLINE.size)
+                                            .font_weight(typography::HEADLINE.weight)
+                                            .text_color(colors.label)
+                                            .child(SharedString::from(n.display.clone())),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(typography::FOOTNOTE.size)
+                                            .text_color(colors.secondary_label)
+                                            .child(SharedString::from(n.label.clone())),
+                                    ),
+                            )
+                            .child(
+                                svg()
+                                    .path(Icon::LucidePhone.path())
+                                    .size(px(20.0))
+                                    .text_color(call_colors(theme).answer),
+                            )
+                            .into_any_element()
+                    })
+                    .collect()
+            }
+        }
     }
 
     /// The Contacts segment: search, then the list; a contact with several numbers
@@ -844,30 +954,10 @@ impl PhoneApp {
         if let Some(contact) = &self.add.chooser {
             return self.add_call_numbers(theme, contact, cx);
         }
-        let rows: Vec<&ContactRow> = c.rows.iter().filter(|r| !r.header).take(MAX_ROWS).collect();
-        let list = if rows.is_empty() {
+        let list = if c.rows.iter().all(|r| r.header) {
             self.add_call_message(theme, "No matches", "Try another name or number.")
         } else {
-            let total = c.rows.len().min(MAX_ROWS) as f32 * ROW_H;
-            let elements = c
-                .rows
-                .iter()
-                .take(MAX_ROWS)
-                .map(|r| {
-                    div()
-                        .h(px(ROW_H))
-                        .flex()
-                        .items_center()
-                        .child(if r.header {
-                            div()
-                        } else {
-                            self.avatar_row(theme, r, r.subtitle.clone(), false)
-                                .w_full()
-                        })
-                        .into_any_element()
-                })
-                .collect();
-            self.add_call_list(elements, total, cx)
+            self.add_call_list(ListKind::Contacts, c.rows.len(), cx)
         };
         div()
             .flex()
@@ -887,43 +977,6 @@ impl PhoneApp {
     ) -> AnyElement {
         let colors = theme::colors(theme);
         let press = self.presses.value("sheet-ac-back").clamp(0.0, 1.0);
-        let rows: Vec<AnyElement> = contact
-            .numbers
-            .iter()
-            .map(|n| {
-                div()
-                    .h(px(ROW_H))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .text_size(typography::HEADLINE.size)
-                                    .font_weight(typography::HEADLINE.weight)
-                                    .text_color(colors.label)
-                                    .child(SharedString::from(n.display.clone())),
-                            )
-                            .child(
-                                div()
-                                    .text_size(typography::FOOTNOTE.size)
-                                    .text_color(colors.secondary_label)
-                                    .child(SharedString::from(n.label.clone())),
-                            ),
-                    )
-                    .child(
-                        svg()
-                            .path(Icon::LucidePhone.path())
-                            .size(px(20.0))
-                            .text_color(call_colors(theme).answer),
-                    )
-                    .into_any_element()
-            })
-            .collect();
-        let total = contact.numbers.len() as f32 * ROW_H;
         div()
             .flex()
             .flex_col()
@@ -963,7 +1016,7 @@ impl PhoneApp {
                             .child(contact.name.clone()),
                     ),
             )
-            .child(self.add_call_list(rows, total, cx))
+            .child(self.add_call_list(ListKind::Numbers, contact.numbers.len(), cx))
             .into_any_element()
     }
 }

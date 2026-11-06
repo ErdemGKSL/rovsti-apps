@@ -1279,6 +1279,7 @@ impl Render for PhoneApp {
         self.sync_settings_frame(window, cx);
         self.sync_dial_match(cx);
         self.sync_t9_match(cx);
+        self.sync_t9_rows(cx);
         let mut motion = std::mem::take(&mut self.motion);
         motion.frame_timed(window, |dt, real| self.tick(dt, real));
         self.flights_ready(cx);

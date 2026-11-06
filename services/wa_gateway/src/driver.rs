@@ -5,14 +5,17 @@ use std::sync::Arc;
 
 use futures::future::BoxFuture;
 use rovsti_wa_proto::{
-    ChatState, GatewayEvent, GroupInfo, LinkRequest, MarkRead, MediaKind, Reaction, SendReaction,
-    SendText, Sent, WaMessage, WaUser,
+    ChatAction, ChatState, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo, LinkRequest,
+    MarkRead, MediaKind, Reaction, RevokeMessage, SendReaction, SendText, Sent, WaMessage,
+    WaProfile, WaUser,
 };
 
 use crate::hub::Hub;
 use crate::now_ms;
 use crate::push::{PushKind, Pusher, should_push};
-use crate::store::{InstanceId, Store};
+use crate::store::{
+    ChatChange, FetchedProfile, InstanceId, MessageChange, MessageExtras, ProfileChange, Store,
+};
 use crate::wa::calls::{CallBackend, CallTable};
 
 /// A file to send as a media message.
@@ -23,6 +26,48 @@ pub struct SendMedia {
     pub mime: String,
     pub caption: Option<String>,
     pub data: Vec<u8>,
+    /// Reply to this message.
+    pub quoted_id: Option<String>,
+    /// File name shown for a document.
+    pub file_name: Option<String>,
+    /// Duration of audio or video, in seconds.
+    pub seconds: Option<u32>,
+    /// Send audio as a voice note.
+    pub voice_note: bool,
+}
+
+/// A stored message an action targets.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MessageRef {
+    pub chat: String,
+    pub id: String,
+    pub from_me: bool,
+    /// The author in a group chat.
+    pub sender: Option<String>,
+    pub timestamp_ms: i64,
+}
+
+impl From<&WaMessage> for MessageRef {
+    fn from(m: &WaMessage) -> Self {
+        Self {
+            chat: m.chat.clone(),
+            id: m.id.clone(),
+            from_me: m.from_me,
+            sender: m.sender.clone(),
+            timestamp_ms: m.timestamp_ms,
+        }
+    }
+}
+
+/// What asking for a profile picture found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PictureFetch {
+    /// No picture, or it is hidden from this account.
+    None,
+    /// The picture is still `known_id`; nothing was downloaded.
+    Unchanged,
+    /// A picture other than `known_id`, downloaded.
+    New { id: String, bytes: Vec<u8> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -105,25 +150,12 @@ impl EventSink {
                 }
             }
             GatewayEvent::Message(message) => {
-                match self
-                    .store
-                    .insert_message(self.instance.clone(), message.clone(), raw_proto)
-                    .await
-                {
-                    Ok(true) => {
-                        if should_push(message, now_ms()) {
-                            self.pusher.notify(
-                                &self.instance,
-                                PushKind::Message {
-                                    chat: message.chat.clone(),
-                                    count: 1,
-                                },
-                            );
-                        }
-                    }
-                    Ok(false) => return,
-                    Err(e) => log::warn!("{}: saving message failed: {e}", self.instance),
-                }
+                let extras = MessageExtras {
+                    raw_proto,
+                    ..Default::default()
+                };
+                self.emit_full(message.clone(), extras).await;
+                return;
             }
             _ => {}
         }
@@ -229,6 +261,190 @@ impl EventSink {
         self.emit_with_raw(GatewayEvent::Message(message), raw_proto)
             .await;
     }
+
+    /// Stores a message with its extras and publishes it, followed by a
+    /// `MessageMeta` event when its meta is not empty. A message that is
+    /// already stored is not published again.
+    pub async fn emit_full(&self, message: WaMessage, extras: MessageExtras) {
+        let meta = extras.meta.clone();
+        match self
+            .store
+            .insert_message_full(self.instance.clone(), message.clone(), extras)
+            .await
+        {
+            Ok(true) => {
+                if should_push(&message, now_ms()) {
+                    self.pusher.notify(
+                        &self.instance,
+                        PushKind::Message {
+                            chat: message.chat.clone(),
+                            count: 1,
+                        },
+                    );
+                }
+            }
+            Ok(false) => return,
+            Err(e) => log::warn!("{}: saving message failed: {e}", self.instance),
+        }
+        let (chat, id) = (message.chat.clone(), message.id.clone());
+        let announce = worth_announcing(&chat, &meta);
+        self.publish(GatewayEvent::Message(message));
+        if announce {
+            self.publish(GatewayEvent::MessageMeta {
+                chat,
+                id,
+                body: None,
+                meta: Box::new(meta),
+            });
+        }
+    }
+
+    /// Applies an edit, delete for everyone or star to a stored message and
+    /// publishes the new meta. Unknown messages and no-ops publish nothing.
+    pub async fn change_message(&self, chat: &str, id: &str, change: MessageChange) {
+        match self
+            .store
+            .change_message(
+                self.instance.clone(),
+                chat.to_owned(),
+                id.to_owned(),
+                change,
+            )
+            .await
+        {
+            Ok(Some((body, meta))) => self.publish(GatewayEvent::MessageMeta {
+                chat: chat.to_owned(),
+                id: id.to_owned(),
+                body,
+                meta: Box::new(meta),
+            }),
+            Ok(None) => {}
+            Err(e) => log::warn!("{}: updating a message failed: {e}", self.instance),
+        }
+    }
+
+    /// Stores the ticks of my messages (the `Receipt` event tells the apps).
+    pub async fn set_status(&self, chat: &str, ids: Vec<String>, status: DeliveryStatus) {
+        if let Err(e) = self
+            .store
+            .set_status(self.instance.clone(), chat.to_owned(), ids, status)
+            .await
+        {
+            log::warn!("{}: saving receipts failed: {e}", self.instance);
+        }
+    }
+
+    /// Deletes a message on this account's devices and tells the apps.
+    pub async fn delete_message(&self, chat: &str, id: &str) {
+        match self
+            .store
+            .delete_message(self.instance.clone(), chat.to_owned(), id.to_owned())
+            .await
+        {
+            Ok(true) => self.publish(GatewayEvent::MessageDeleted {
+                chat: chat.to_owned(),
+                id: id.to_owned(),
+            }),
+            Ok(false) => {}
+            Err(e) => log::warn!("{}: deleting a message failed: {e}", self.instance),
+        }
+    }
+
+    /// Changes a chat setting and publishes the chat's new meta.
+    pub async fn change_chat(&self, jid: &str, change: ChatChange) {
+        match self
+            .store
+            .change_chat(self.instance.clone(), jid.to_owned(), change)
+            .await
+        {
+            Ok(Some(meta)) => self.publish(GatewayEvent::ChatMeta {
+                jid: jid.to_owned(),
+                meta,
+            }),
+            Ok(None) => {}
+            Err(e) => log::warn!("{}: saving chat settings failed: {e}", self.instance),
+        }
+    }
+
+    /// Deletes (or, with `keep_chat`, clears) a chat and tells the apps.
+    pub async fn delete_chat(&self, jid: &str, keep_chat: bool) {
+        match self
+            .store
+            .delete_chat(self.instance.clone(), jid.to_owned(), keep_chat)
+            .await
+        {
+            Ok(true) => {
+                let jid = jid.to_owned();
+                self.publish(if keep_chat {
+                    GatewayEvent::ChatCleared { jid }
+                } else {
+                    GatewayEvent::ChatDeleted { jid }
+                });
+            }
+            Ok(false) => {}
+            Err(e) => log::warn!("{}: deleting a chat failed: {e}", self.instance),
+        }
+    }
+
+    /// Records what changed about a person or group and publishes the
+    /// profile when an app would show the difference.
+    pub async fn change_profile(&self, jid: &str, change: ProfileChange) -> Option<WaProfile> {
+        match self
+            .store
+            .change_profile(self.instance.clone(), jid.to_owned(), change, now_ms())
+            .await
+        {
+            Ok(Some(profile)) => {
+                self.publish(GatewayEvent::Profile(profile.clone()));
+                Some(profile)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                log::warn!("{}: saving a profile failed: {e}", self.instance);
+                None
+            }
+        }
+    }
+
+    /// Push names from a history sync (not announced one by one).
+    pub async fn set_push_names(&self, names: Vec<(String, String)>) {
+        if names.is_empty() {
+            return;
+        }
+        if let Err(e) = self
+            .store
+            .set_push_names(self.instance.clone(), names)
+            .await
+        {
+            log::warn!("{}: saving push names failed: {e}", self.instance);
+        }
+    }
+
+    /// The secret of a stored message, for decrypting an edit of it.
+    pub async fn message_secret(&self, chat: &str, id: &str) -> Option<Vec<u8>> {
+        self.store
+            .message_secret(self.instance.clone(), chat.to_owned(), id.to_owned())
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("{}: reading a message secret failed: {e}", self.instance);
+                None
+            })
+    }
+}
+
+/// Whether a new message's meta deserves its own `MessageMeta` event after
+/// the `Message` event. The first tick of my own messages is implied, and in
+/// a one-to-one chat the sender's push name is the chat's (`ChatMeta`), so
+/// those alone do not double the event traffic.
+pub fn worth_announcing(chat: &str, meta: &rovsti_wa_proto::MessageMeta) -> bool {
+    let mut rest = meta.clone();
+    if rest.status == Some(DeliveryStatus::Sent) {
+        rest.status = None;
+    }
+    if !chat.ends_with("@g.us") {
+        rest.sender_name = None;
+    }
+    !rest.is_empty()
 }
 
 /// Everything the gateway asks of WhatsApp. Grows in steps 4 to 6 (reactions,
@@ -326,6 +542,82 @@ pub trait WaDriver: Send + Sync + 'static {
     /// What the voice-call table asks of WhatsApp for `instance`.
     fn call_backend(&self, _instance: &InstanceId) -> Result<Arc<dyn CallBackend>, DriverError> {
         Err(DriverError::NotConnected)
+    }
+
+    /// Replaces the text (or caption) of a message I sent.
+    fn edit_message(
+        &self,
+        _instance: &InstanceId,
+        _req: EditMessage,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Deletes a message for everyone: mine, or (`req.sender` set) someone
+    /// else's in a group I administer.
+    fn revoke_message(
+        &self,
+        _instance: &InstanceId,
+        _req: RevokeMessage,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Deletes a message on this account's devices only.
+    fn delete_for_me(
+        &self,
+        _instance: &InstanceId,
+        _target: MessageRef,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    fn star_message(
+        &self,
+        _instance: &InstanceId,
+        _target: MessageRef,
+        _starred: bool,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Archive, pin, mute or mark a chat (synced to the other devices).
+    fn chat_action(
+        &self,
+        _instance: &InstanceId,
+        _req: ChatAction,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// Sends played receipts for voice and video notes.
+    fn mark_played(
+        &self,
+        _instance: &InstanceId,
+        _req: MarkRead,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// About text, picture id and business details of users and groups.
+    fn profiles(
+        &self,
+        _instance: &InstanceId,
+        _jids: Vec<String>,
+    ) -> BoxFuture<'_, Result<Vec<FetchedProfile>, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+
+    /// The profile picture of a user or group: the small preview or the full
+    /// image. Nothing is downloaded when it is still `known_id`.
+    fn fetch_picture(
+        &self,
+        _instance: &InstanceId,
+        _jid: String,
+        _preview: bool,
+        _known_id: Option<String>,
+    ) -> BoxFuture<'_, Result<PictureFetch, DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
     }
 }
 
@@ -442,7 +734,9 @@ mod fake {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use rovsti_wa_proto::{InstanceState, InstanceStatus, MessageBody};
+    use rovsti_wa_proto::{
+        InstanceState, InstanceStatus, MediaMeta, MessageBody, MessageMeta, Quoted,
+    };
 
     use super::*;
     use crate::wa::calls::fake::{FakeCalls, offer};
@@ -459,6 +753,8 @@ mod fake {
         send_error: Mutex<Option<DriverError>>,
         calls: Arc<FakeCalls>,
         counter: AtomicU64,
+        profiles: Mutex<HashMap<String, FetchedProfile>>,
+        pictures: Mutex<HashMap<String, (String, Vec<u8>)>>,
     }
 
     impl std::fmt::Debug for FakeDriver {
@@ -512,6 +808,47 @@ mod fake {
             }
         }
 
+        /// What `profiles` answers for `profile.jid`.
+        pub fn set_profile(&self, profile: FetchedProfile) {
+            lock(&self.profiles).insert(profile.jid.clone(), profile);
+        }
+
+        /// The picture `fetch_picture` finds for `jid` (`None` removes it).
+        pub fn set_picture(&self, jid: &str, picture: Option<(&str, &[u8])>) {
+            let mut pictures = lock(&self.pictures);
+            match picture {
+                Some((id, bytes)) => {
+                    pictures.insert(jid.to_owned(), (id.to_owned(), bytes.to_vec()));
+                }
+                None => {
+                    pictures.remove(jid);
+                }
+            }
+        }
+
+        /// The event sink of a running instance, to script what WhatsApp
+        /// would report (incoming messages, edits, app-state changes).
+        pub fn sink_of(&self, instance: &InstanceId) -> Option<EventSink> {
+            self.sink(instance)
+        }
+
+        /// Delivers an incoming message with its extras.
+        pub async fn deliver(
+            &self,
+            instance: &InstanceId,
+            message: WaMessage,
+            extras: MessageExtras,
+        ) {
+            if let Some(sink) = self.sink(instance) {
+                sink.emit_full(message, extras).await;
+            }
+        }
+
+        fn next_id(&self) -> String {
+            let n = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
+            format!("FAKE{n:06}")
+        }
+
         fn record(&self, instance: &InstanceId, op: String) -> Result<(), DriverError> {
             self.sink(instance).ok_or(DriverError::NotConnected)?;
             self.ops.lock().unwrap_or_else(|e| e.into_inner()).push(op);
@@ -529,6 +866,17 @@ mod fake {
 
     fn own_jid(instance: &InstanceId) -> String {
         format!("fake{instance}@s.whatsapp.net")
+    }
+
+    fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+        m.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn quoted(id: Option<&str>) -> Option<Quoted> {
+        id.filter(|id| !id.is_empty()).map(|id| Quoted {
+            id: id.to_owned(),
+            ..Default::default()
+        })
     }
 
     impl WaDriver for FakeDriver {
@@ -622,10 +970,14 @@ mod fake {
                     return Err(error);
                 }
                 let sink = self.sink(&instance).ok_or(DriverError::NotConnected)?;
-                let n = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
                 let timestamp_ms = now_ms();
-                let message_id = format!("FAKE{n:06}");
-                sink.emit_message(
+                let message_id = self.next_id();
+                let meta = MessageMeta {
+                    quoted: quoted(req.quoted_id.as_deref()),
+                    status: Some(DeliveryStatus::Sent),
+                    ..Default::default()
+                };
+                sink.emit_full(
                     WaMessage {
                         id: message_id.clone(),
                         chat: req.chat,
@@ -635,7 +987,10 @@ mod fake {
                         body: MessageBody::Text(req.text),
                         reactions: vec![],
                     },
-                    None,
+                    MessageExtras {
+                        meta,
+                        ..Default::default()
+                    },
                 )
                 .await;
                 Ok(Sent {
@@ -691,11 +1046,22 @@ mod fake {
             let instance = instance.clone();
             Box::pin(async move {
                 let sink = self.sink(&instance).ok_or(DriverError::NotConnected)?;
-                let n = self.counter.fetch_add(1, Ordering::Relaxed) + 1;
                 let timestamp_ms = now_ms();
-                let message_id = format!("FAKE{n:06}");
+                let message_id = self.next_id();
                 let size = req.data.len() as u64;
-                sink.emit_message(
+                let media = MediaMeta {
+                    file_name: req.file_name.clone(),
+                    seconds: req.seconds,
+                    voice_note: req.voice_note,
+                    ..Default::default()
+                };
+                let meta = MessageMeta {
+                    quoted: quoted(req.quoted_id.as_deref()),
+                    status: Some(DeliveryStatus::Sent),
+                    media: Some(media).filter(|m| *m != MediaMeta::default()),
+                    ..Default::default()
+                };
+                sink.emit_full(
                     WaMessage {
                         id: message_id.clone(),
                         chat: req.chat,
@@ -710,7 +1076,11 @@ mod fake {
                         },
                         reactions: vec![],
                     },
-                    Some(req.data),
+                    MessageExtras {
+                        meta,
+                        raw_proto: Some(req.data),
+                        ..Default::default()
+                    },
                 )
                 .await;
                 Ok(Sent {
@@ -818,5 +1188,153 @@ mod fake {
             self.sink(instance).ok_or(DriverError::NotConnected)?;
             Ok(Arc::clone(&self.calls) as Arc<dyn CallBackend>)
         }
+
+        fn edit_message(
+            &self,
+            instance: &InstanceId,
+            req: EditMessage,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(
+                instance,
+                format!("edit {} {} {:?}", req.chat, req.message_id, req.text),
+            );
+            Box::pin(async move { result })
+        }
+
+        fn revoke_message(
+            &self,
+            instance: &InstanceId,
+            req: RevokeMessage,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let by = req.sender.as_deref().unwrap_or("me");
+            let result = self.record(
+                instance,
+                format!("revoke {} {} {by}", req.chat, req.message_id),
+            );
+            Box::pin(async move { result })
+        }
+
+        fn delete_for_me(
+            &self,
+            instance: &InstanceId,
+            target: MessageRef,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(instance, format!("delete {} {}", target.chat, target.id));
+            Box::pin(async move { result })
+        }
+
+        fn star_message(
+            &self,
+            instance: &InstanceId,
+            target: MessageRef,
+            starred: bool,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(
+                instance,
+                format!("star {} {} {starred}", target.chat, target.id),
+            );
+            Box::pin(async move { result })
+        }
+
+        fn chat_action(
+            &self,
+            instance: &InstanceId,
+            req: ChatAction,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(instance, format!("chat {} {:?}", req.chat, req.action));
+            Box::pin(async move { result })
+        }
+
+        fn mark_played(
+            &self,
+            instance: &InstanceId,
+            req: MarkRead,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let result = self.record(
+                instance,
+                format!("played {} {}", req.chat, req.ids.join(",")),
+            );
+            Box::pin(async move { result })
+        }
+
+        fn profiles(
+            &self,
+            instance: &InstanceId,
+            jids: Vec<String>,
+        ) -> BoxFuture<'_, Result<Vec<FetchedProfile>, DriverError>> {
+            let result = self
+                .record(instance, format!("profiles {}", jids.len()))
+                .map(|()| {
+                    let known = lock(&self.profiles);
+                    jids.into_iter()
+                        .map(|jid| {
+                            known.get(&jid).cloned().unwrap_or(FetchedProfile {
+                                jid,
+                                ..Default::default()
+                            })
+                        })
+                        .collect()
+                });
+            Box::pin(async move { result })
+        }
+
+        fn fetch_picture(
+            &self,
+            instance: &InstanceId,
+            jid: String,
+            preview: bool,
+            known_id: Option<String>,
+        ) -> BoxFuture<'_, Result<PictureFetch, DriverError>> {
+            let size = if preview { "preview" } else { "full" };
+            let result =
+                self.record(instance, format!("picture {jid} {size}"))
+                    .map(|()| match lock(&self.pictures).get(&jid) {
+                        None => PictureFetch::None,
+                        Some((id, _)) if Some(id) == known_id.as_ref() => PictureFetch::Unchanged,
+                        Some((id, bytes)) => {
+                            // The full picture is the preview bytes twice, so tests
+                            // can tell them apart.
+                            let bytes = if preview {
+                                bytes.clone()
+                            } else {
+                                [bytes.as_slice(), bytes.as_slice()].concat()
+                            };
+                            PictureFetch::New {
+                                id: id.clone(),
+                                bytes,
+                            }
+                        }
+                    });
+            Box::pin(async move { result })
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rovsti_wa_proto::{MessageMeta, Quoted};
+
+    #[test]
+    fn only_meta_worth_a_second_event_is_announced() {
+        let dm = "1@s.whatsapp.net";
+        let group = "1-2@g.us";
+        let sent = MessageMeta {
+            status: Some(DeliveryStatus::Sent),
+            ..Default::default()
+        };
+        assert!(!worth_announcing(dm, &MessageMeta::default()));
+        assert!(!worth_announcing(dm, &sent));
+        let named = MessageMeta {
+            sender_name: Some("Ada".into()),
+            ..Default::default()
+        };
+        assert!(!worth_announcing(dm, &named));
+        assert!(worth_announcing(group, &named));
+        let reply = MessageMeta {
+            quoted: Some(Quoted::default()),
+            ..sent
+        };
+        assert!(worth_announcing(dm, &reply));
     }
 }

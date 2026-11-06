@@ -10,6 +10,7 @@ pub mod error;
 pub mod hub;
 pub mod media_cache;
 pub mod push;
+pub mod rich_routes;
 pub mod routes;
 pub mod schedule;
 pub mod store;
@@ -45,10 +46,18 @@ const LOOKUP_CACHE_ENTRIES: usize = 4096;
 const LOOKUP_BURST: u32 = 60;
 const LOOKUP_REFILL_PER_SEC: f64 = 1.0;
 
+/// Profile and picture queries one instance may send WhatsApp in a burst,
+/// and how fast the allowance comes back (per second). An inbox opening
+/// asks for one picture per chat, so the burst is larger than for lookups.
+const PROFILE_BURST: u32 = 120;
+const PROFILE_REFILL_PER_SEC: f64 = 2.0;
+
 /// What the lookup route remembers about one instance.
 struct Lookups {
     cache: LookupCache,
     bucket: TokenBucket,
+    /// Profile and picture queries.
+    profiles: TokenBucket,
 }
 
 impl Lookups {
@@ -56,6 +65,7 @@ impl Lookups {
         Self {
             cache: LookupCache::new(LOOKUP_CACHE_ENTRIES, LOOKUP_TTL_MS),
             bucket: TokenBucket::new(LOOKUP_BURST, LOOKUP_REFILL_PER_SEC),
+            profiles: TokenBucket::new(PROFILE_BURST, PROFILE_REFILL_PER_SEC),
         }
     }
 }
@@ -191,6 +201,20 @@ impl AppState {
         for user in users {
             entry.cache.put(user.clone(), now);
         }
+    }
+
+    /// Charges `n` profile or picture queries to the instance; false (and
+    /// nothing charged) when it is over its allowance.
+    pub fn charge_profiles(&self, instance: &InstanceId, n: usize) -> bool {
+        if n == 0 {
+            return true;
+        }
+        let now = u64::try_from(now_ms()).unwrap_or(0);
+        let mut all = self.0.lookups.lock().unwrap_or_else(|e| e.into_inner());
+        let entry = all.entry(instance.clone()).or_insert_with(Lookups::new);
+        entry
+            .profiles
+            .try_take_n(u32::try_from(n).unwrap_or(u32::MAX), now)
     }
 
     /// Forgets the lookups of a deleted instance.

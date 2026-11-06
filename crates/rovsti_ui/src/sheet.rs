@@ -74,6 +74,9 @@ pub struct Sheet {
     /// Reduced motion: the 120 ms fade that replaces the rise.
     reduced: bool,
     fade: Fade,
+    /// The highest row index [`Sheet::rise`] was asked for since `open()`: the
+    /// content clock stops once that row has settled, not a fixed second later.
+    max_rise: std::cell::Cell<usize>,
 }
 
 impl Default for Sheet {
@@ -96,6 +99,7 @@ impl Sheet {
             since_open: 1.0,
             reduced: false,
             fade: Fade::default(),
+            max_rise: std::cell::Cell::new(0),
         }
     }
 
@@ -115,6 +119,7 @@ impl Sheet {
         self.dragging = false;
         self.drag.snap(0.0);
         self.since_open = 0.0;
+        self.max_rise.set(0);
         if self.reduced {
             self.fade.restart();
         }
@@ -165,7 +170,17 @@ impl Sheet {
         if self.reduced {
             return (self.fade.value(), 0.0);
         }
+        if self.since_open < 1.0 && index > self.max_rise.get() {
+            self.max_rise.set(index);
+        }
         rise_at(self.since_open, index)
+    }
+
+    /// Seconds after `open()` by which the avatar and every row asked for so
+    /// far have settled in.
+    fn content_settled_at(&self) -> f32 {
+        let rows = ROW_FIRST + ROW_STAGGER * self.max_rise.get() as f32 + SETTLE;
+        rows.max(AVATAR_DELAY + SETTLE)
     }
 
     /// Scale of the sheet's avatar: 0.8 to 1.0, starting 60 ms in, with a
@@ -183,6 +198,12 @@ impl Sheet {
         let mut moving = self.open.tick(dt);
         if self.wants_open && self.since_open < 1.0 {
             self.since_open += dt.as_secs_f32();
+            // Once the content in view has settled, jump the clock to its end
+            // (where every row reads fully risen) so frames stop now instead
+            // of running on for the rest of the second.
+            if self.since_open >= self.content_settled_at() {
+                self.since_open = 1.0;
+            }
             moving = true;
         }
         if !self.dragging {
@@ -500,6 +521,31 @@ mod tests {
         assert!(a > b && b > 0.0);
         assert_eq!(rise_at(ROW_FIRST + ROW_STAGGER, 1).0, 0.0);
         assert_eq!(rise_at(1.0, 5), (1.0, 0.0));
+    }
+
+    #[test]
+    fn frames_stop_once_the_rows_in_view_have_settled() {
+        let mut sheet = Sheet::new();
+        sheet.open();
+        let dt = Duration::from_secs_f32(1.0 / 120.0);
+        let mut frames = 0;
+        // Like a render: ask for rows 0..=3 every frame, then tick.
+        loop {
+            for i in 0..=3 {
+                sheet.rise(i);
+            }
+            frames += 1;
+            if !sheet.tick(dt) || frames > 600 {
+                break;
+            }
+        }
+        // The open spring and rows 0..=3 (settled 0.38 s in) are all done well
+        // before the old fixed second of content frames.
+        assert!(frames < 100, "{frames} frames");
+        for i in 0..=3 {
+            assert_eq!(sheet.rise(i), (1.0, 0.0), "row {i}");
+        }
+        assert!((sheet.avatar_scale() - 1.0).abs() < 1e-3);
     }
 
     #[test]

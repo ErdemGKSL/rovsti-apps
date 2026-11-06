@@ -55,6 +55,17 @@ fn is_voice_note(mime: &str) -> bool {
     mime.contains("opus") || mime.starts_with("audio/ogg")
 }
 
+/// Optional details of an outgoing media message.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Details<'a> {
+    /// Shown for documents (WhatsApp shows "Untitled" without it).
+    pub file_name: Option<&'a str>,
+    /// Duration of audio and video.
+    pub seconds: Option<u32>,
+    /// Mark audio as a voice note whatever its MIME type.
+    pub voice_note: bool,
+}
+
 /// The message that sends `up` to a chat.
 pub fn build_message(
     kind: MediaKind,
@@ -62,6 +73,40 @@ pub fn build_message(
     mime: &str,
     caption: Option<&str>,
 ) -> wa::Message {
+    build_message_with(kind, up, mime, caption, &Details::default())
+}
+
+/// [`build_message`] with file name, duration and voice-note flag.
+pub fn build_message_with(
+    kind: MediaKind,
+    up: &Uploaded,
+    mime: &str,
+    caption: Option<&str>,
+    details: &Details<'_>,
+) -> wa::Message {
+    let mut message = build_plain(kind, up, mime, caption);
+    if let Some(m) = message.audio_message.as_option_mut() {
+        m.seconds = details.seconds;
+        if details.voice_note {
+            m.ptt = Some(true);
+        }
+    }
+    if let Some(m) = message.video_message.as_option_mut() {
+        m.seconds = details.seconds;
+    }
+    if let Some(m) = message.document_message.as_option_mut() {
+        let name = details
+            .file_name
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_owned);
+        m.title = name.clone();
+        m.file_name = name;
+    }
+    message
+}
+
+fn build_plain(kind: MediaKind, up: &Uploaded, mime: &str, caption: Option<&str>) -> wa::Message {
     let url = Some(up.url.clone());
     let mimetype = Some(mime.to_owned());
     let file_sha256 = Some(up.file_sha256.to_vec());
@@ -268,6 +313,30 @@ mod tests {
         assert_eq!(a.ptt, Some(true));
         let song = build_message(MediaKind::Audio, &uploaded(), "audio/mpeg", None);
         assert_eq!(song.audio_message.as_option().unwrap().ptt, Some(false));
+    }
+
+    #[test]
+    fn details_name_documents_and_time_audio() {
+        let details = Details {
+            file_name: Some(" report.pdf "),
+            seconds: Some(12),
+            voice_note: true,
+        };
+        let doc = build_message_with(
+            MediaKind::Document,
+            &uploaded(),
+            "application/pdf",
+            None,
+            &details,
+        );
+        let d = doc.document_message.as_option().unwrap();
+        assert_eq!(d.file_name.as_deref(), Some("report.pdf"));
+        assert_eq!(d.title.as_deref(), Some("report.pdf"));
+        let voice = build_message_with(MediaKind::Audio, &uploaded(), "audio/mp4", None, &details);
+        let a = voice.audio_message.as_option().unwrap();
+        assert_eq!((a.seconds, a.ptt), (Some(12), Some(true)));
+        let video = build_message_with(MediaKind::Video, &uploaded(), "video/mp4", None, &details);
+        assert_eq!(video.video_message.as_option().unwrap().seconds, Some(12));
     }
 
     #[test]

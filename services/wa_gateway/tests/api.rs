@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use futures::channel::mpsc::UnboundedReceiver;
 use futures::{SinkExt, StreamExt};
+use rovsti_wa_client::Picture;
 use rovsti_wa_client::{ClientError, ClientEvent, EventStream, Gateway, call_audio, subscribe};
 use rovsti_wa_proto::{
     AppId, CallPhase, ChatState, ConnectKey, CreateInstance, CreatedInstance, EndReason, ErrorCode,
@@ -15,12 +16,22 @@ use rovsti_wa_proto::{
     MediaKind, MessageBody, Participant, ScheduleText, ScheduledState, ScheduledText, SendReaction,
     SendText, TypingState,
 };
+use rovsti_wa_proto::{
+    ChatAction, ChatActionKind, DeleteForMe, DeliveryStatus, EditMessage, MediaOptions,
+    MessageMeta, RevokeMessage, StarMessage, WaMessage,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use wa_gateway::config::Config;
 use wa_gateway::driver::DriverError;
 use wa_gateway::driver::FakeDriver;
-use wa_gateway::store::{InstanceId, Store};
+use wa_gateway::store::{
+    ChatChange, FetchedProfile, InstanceId, MessageExtras, ProfileChange, Store,
+};
 use wa_gateway::{AppState, serve};
+
+fn instance(created: &CreatedInstance) -> InstanceId {
+    InstanceId::new(created.instance_id.clone())
+}
 
 struct Server {
     url: GatewayUrl,
@@ -664,18 +675,38 @@ async fn reactions_reach_the_driver_and_update_the_message() {
 #[tokio::test]
 async fn groups_are_listed() {
     let server = start(4).await;
-    let (gateway, _created) = create(&server).await;
-    let group = GroupInfo {
+    let (gateway, created) = create(&server).await;
+    let mut group = GroupInfo {
         jid: "120363-1@g.us".into(),
         subject: "Aile".into(),
         participants: vec![Participant {
             jid: "905321234567@s.whatsapp.net".into(),
             admin: true,
+            name: None,
         }],
+        description: Some("family".into()),
+        announce: false,
     };
     server.driver.set_groups(vec![group.clone()]);
     let g = gateway.clone();
-    assert_eq!(blocking(move || g.groups()).await.unwrap(), vec![group]);
+    assert_eq!(
+        blocking(move || g.groups()).await.unwrap(),
+        vec![group.clone()]
+    );
+
+    // Once the gateway knows a member's push name, the member is named.
+    let sink = server.driver.sink_of(&instance(&created)).unwrap();
+    sink.change_profile(
+        "905321234567@s.whatsapp.net",
+        ProfileChange::PushName("Ayse".into()),
+    )
+    .await;
+    group.participants[0].name = Some("Ayse".into());
+    let g = gateway.clone();
+    assert_eq!(
+        blocking(move || g.group("120363-1@g.us")).await.unwrap(),
+        group
+    );
 }
 
 fn wa_jid(n: u32) -> String {
@@ -1298,4 +1329,537 @@ async fn deleting_the_instance_removes_its_scheduled_texts() {
             .unwrap()
             .is_empty()
     );
+}
+
+// ---- Rich WhatsApp features ----
+
+const DM: &str = "905321234567@s.whatsapp.net";
+
+async fn send(gateway: &Gateway, text: &str, quoted_id: Option<&str>) -> String {
+    let (g, text, quoted_id) = (
+        gateway.clone(),
+        text.to_owned(),
+        quoted_id.map(str::to_owned),
+    );
+    blocking(move || {
+        g.send_text(&SendText {
+            chat: DM.into(),
+            text,
+            quoted_id,
+        })
+    })
+    .await
+    .unwrap()
+    .message_id
+}
+
+/// The next event that is not a `Message` (those are checked elsewhere).
+async fn next_non_message(events: &mut Events) -> GatewayEvent {
+    loop {
+        match events.next_event().await.event {
+            GatewayEvent::Message(_) => {}
+            other => return other,
+        }
+    }
+}
+
+fn incoming(id: &str, chat: &str, sender: Option<&str>) -> WaMessage {
+    WaMessage {
+        id: id.into(),
+        chat: chat.into(),
+        sender: sender.map(str::to_owned),
+        from_me: false,
+        timestamp_ms: 1_700_000_000_000,
+        body: MessageBody::Text("hi".into()),
+        reactions: vec![],
+    }
+}
+
+#[tokio::test]
+async fn replies_edits_and_deletes_reach_meta_and_events() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let first = send(&gateway, "first", None).await;
+    // Plain sends announce nothing beyond the message.
+    let reply = send(&gateway, "second", Some(&first)).await;
+    match next_non_message(&mut events).await {
+        GatewayEvent::MessageMeta { id, meta, .. } => {
+            assert_eq!(id, reply);
+            assert_eq!(meta.quoted.unwrap().id, first);
+        }
+        other => panic!("expected MessageMeta, got {other:?}"),
+    }
+
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta(DM, None, 10))
+        .await
+        .unwrap();
+    assert_eq!(page.len(), 2);
+    assert_eq!(page[0].meta.quoted.as_ref().unwrap().id, first);
+    assert_eq!(page[1].meta.status, Some(DeliveryStatus::Sent));
+    // The plain list still reads.
+    let g = gateway.clone();
+    assert_eq!(
+        blocking(move || g.messages(DM, None, 10))
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+
+    // Edit.
+    let (g, id) = (gateway.clone(), first.clone());
+    blocking(move || {
+        g.edit_message(&EditMessage {
+            chat: DM.into(),
+            message_id: id,
+            text: "first!".into(),
+        })
+    })
+    .await
+    .unwrap();
+    match next_non_message(&mut events).await {
+        GatewayEvent::MessageMeta { id, body, meta, .. } => {
+            assert_eq!(id, first);
+            assert_eq!(body, Some(MessageBody::Text("first!".into())));
+            assert!(meta.edited_ms.is_some());
+        }
+        other => panic!("expected MessageMeta, got {other:?}"),
+    }
+    assert!(
+        server
+            .driver
+            .ops()
+            .contains(&format!("edit {DM} {first} \"first!\""))
+    );
+
+    // Delete for everyone.
+    let (g, id) = (gateway.clone(), reply.clone());
+    blocking(move || {
+        g.revoke_message(&RevokeMessage {
+            chat: DM.into(),
+            message_id: id,
+            sender: None,
+        })
+    })
+    .await
+    .unwrap();
+    match next_non_message(&mut events).await {
+        GatewayEvent::MessageMeta { id, body, meta, .. } => {
+            assert_eq!(id, reply);
+            assert_eq!(body, Some(MessageBody::Unsupported));
+            assert!(meta.revoked && meta.quoted.is_none());
+        }
+        other => panic!("expected MessageMeta, got {other:?}"),
+    }
+
+    // Star, then delete for me.
+    let (g, id) = (gateway.clone(), first.clone());
+    blocking(move || {
+        g.star_message(&StarMessage {
+            chat: DM.into(),
+            message_id: id,
+            starred: true,
+        })
+    })
+    .await
+    .unwrap();
+    match next_non_message(&mut events).await {
+        GatewayEvent::MessageMeta { meta, .. } => assert!(meta.starred),
+        other => panic!("expected MessageMeta, got {other:?}"),
+    }
+    let (g, id) = (gateway.clone(), first.clone());
+    blocking(move || {
+        g.delete_for_me(&DeleteForMe {
+            chat: DM.into(),
+            message_id: id,
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        next_non_message(&mut events).await,
+        GatewayEvent::MessageDeleted {
+            chat: DM.into(),
+            id: first.clone()
+        }
+    );
+    let g = gateway.clone();
+    let left = blocking(move || g.messages_with_meta(DM, None, 10))
+        .await
+        .unwrap();
+    assert_eq!(left.len(), 1);
+    assert!(left[0].meta.revoked);
+}
+
+#[tokio::test]
+async fn edits_and_deletes_are_checked() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mine = send(&gateway, "mine", None).await;
+    server
+        .driver
+        .deliver(
+            &instance(&created),
+            incoming("THEIRS", DM, None),
+            MessageExtras::default(),
+        )
+        .await;
+
+    let g = gateway.clone();
+    let results = blocking(move || {
+        let edit = |id: &str, text: &str| {
+            g.edit_message(&EditMessage {
+                chat: DM.into(),
+                message_id: id.into(),
+                text: text.into(),
+            })
+        };
+        (
+            edit("THEIRS", "x"),
+            edit(&mine, " "),
+            edit("NOPE", "x"),
+            g.revoke_message(&RevokeMessage {
+                chat: DM.into(),
+                message_id: "THEIRS".into(),
+                sender: None,
+            }),
+            g.revoke_message(&RevokeMessage {
+                chat: DM.into(),
+                message_id: "THEIRS".into(),
+                sender: Some(DM.into()),
+            }),
+        )
+    })
+    .await;
+    assert!(is_code(&results.0.unwrap_err(), ErrorCode::BadRequest));
+    assert!(is_code(&results.1.unwrap_err(), ErrorCode::BadRequest));
+    assert!(is_code(&results.2.unwrap_err(), ErrorCode::NotFound));
+    assert!(is_code(&results.3.unwrap_err(), ErrorCode::BadRequest));
+    // An admin delete needs a group.
+    assert!(is_code(&results.4.unwrap_err(), ErrorCode::BadRequest));
+    assert!(!server.driver.ops().iter().any(|op| op.starts_with("edit")));
+}
+
+#[tokio::test]
+async fn incoming_extras_thumbnails_and_push_names() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+    let group = "120363-1@g.us";
+    let author = "4915123456789@s.whatsapp.net";
+    let mut photo = incoming("P1", group, Some(author));
+    photo.body = MessageBody::Media {
+        kind: MediaKind::Image,
+        caption: None,
+        mime: "image/jpeg".into(),
+        size: 10,
+    };
+    let meta = MessageMeta {
+        sender_name: Some("Hans".into()),
+        media: Some(rovsti_wa_proto::MediaMeta {
+            thumbnail: true,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    server
+        .driver
+        .deliver(
+            &instance(&created),
+            photo,
+            MessageExtras {
+                meta: meta.clone(),
+                thumbnail: Some(vec![0xFF, 0xD8, 0xFF, 1]),
+                ..Default::default()
+            },
+        )
+        .await;
+    match next_non_message(&mut events).await {
+        GatewayEvent::MessageMeta { id, meta: m, .. } => {
+            assert_eq!(id, "P1");
+            assert_eq!(*m, meta);
+        }
+        other => panic!("expected MessageMeta, got {other:?}"),
+    }
+
+    let g = gateway.clone();
+    assert_eq!(
+        blocking(move || g.thumbnail("P1")).await.unwrap(),
+        vec![0xFF, 0xD8, 0xFF, 1]
+    );
+    let g = gateway.clone();
+    assert!(is_code(
+        &blocking(move || g.thumbnail("NOPE")).await.unwrap_err(),
+        ErrorCode::NotFound
+    ));
+
+    let g = gateway.clone();
+    let chats = blocking(move || g.chats_with_meta()).await.unwrap();
+    assert_eq!(
+        chats[0].last_meta.as_ref().unwrap().sender_name.as_deref(),
+        Some("Hans")
+    );
+    // The plain chat list still reads.
+    let g = gateway.clone();
+    assert_eq!(blocking(move || g.chats()).await.unwrap().len(), 1);
+
+    // The author's push name is known before WhatsApp is asked.
+    server.driver.set_profile(FetchedProfile {
+        jid: author.into(),
+        about: Some("Moin".into()),
+        picture_id: Some("pic1".into()),
+        ..Default::default()
+    });
+    let g = gateway.clone();
+    let profiles = blocking(move || g.profiles(&[author.to_owned(), group.to_owned()]))
+        .await
+        .unwrap();
+    assert_eq!(profiles.len(), 2);
+    assert_eq!(profiles[0].push_name.as_deref(), Some("Hans"));
+    assert_eq!(profiles[0].about.as_deref(), Some("Moin"));
+    assert_eq!(profiles[0].picture_id.as_deref(), Some("pic1"));
+    assert!(profiles[0].fetched_ms > 0);
+    assert_eq!(profiles[1].jid, group);
+    assert_eq!(server.driver.ops(), ["profiles 2"]);
+
+    // Fresh profiles are served from the store; refresh asks again.
+    let g = gateway.clone();
+    blocking(move || g.profiles(&[author.to_owned()]))
+        .await
+        .unwrap();
+    assert_eq!(server.driver.ops().len(), 1);
+    let g = gateway.clone();
+    blocking(move || g.refresh_profiles(&[author.to_owned()]))
+        .await
+        .unwrap();
+    assert_eq!(server.driver.ops().len(), 2);
+
+    let g = gateway.clone();
+    let bad = blocking(move || g.profiles(&["status@broadcast".to_owned()])).await;
+    assert!(is_code(&bad.unwrap_err(), ErrorCode::BadRequest));
+}
+
+#[tokio::test]
+async fn pictures_are_cached_by_id_and_revalidated() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+    server.driver.set_picture(DM, Some(("p1", b"small")));
+
+    let g = gateway.clone();
+    let first = blocking(move || g.picture(DM, false, None)).await.unwrap();
+    assert_eq!(
+        first,
+        Picture::Image {
+            id: "p1".into(),
+            bytes: b"small".to_vec()
+        }
+    );
+    match next_non_message(&mut events).await {
+        GatewayEvent::Profile(p) => assert_eq!(p.picture_id.as_deref(), Some("p1")),
+        other => panic!("expected Profile, got {other:?}"),
+    }
+    // Known and fresh: no WhatsApp query, and the client's copy is current.
+    let g = gateway.clone();
+    assert_eq!(
+        blocking(move || g.picture(DM, false, Some("p1")))
+            .await
+            .unwrap(),
+        Picture::Unchanged
+    );
+    let g = gateway.clone();
+    assert_eq!(
+        blocking(move || g.picture(DM, false, None)).await.unwrap(),
+        first
+    );
+    assert_eq!(server.driver.ops(), [format!("picture {DM} preview")]);
+    // The full picture is a different file of the same id.
+    let g = gateway.clone();
+    match blocking(move || g.picture(DM, true, None)).await.unwrap() {
+        Picture::Image { id, bytes } => {
+            assert_eq!(id, "p1");
+            assert_eq!(bytes, b"smallsmall");
+        }
+        other => panic!("expected the full picture, got {other:?}"),
+    }
+
+    // WhatsApp says the picture changed: the next request fetches the new one.
+    let sink = server.driver.sink_of(&instance(&created)).unwrap();
+    server.driver.set_picture(DM, Some(("p2", b"new")));
+    sink.change_profile(DM, ProfileChange::Picture(Some("p2".into())))
+        .await;
+    let g = gateway.clone();
+    assert_eq!(
+        blocking(move || g.picture(DM, false, Some("p1")))
+            .await
+            .unwrap(),
+        Picture::Image {
+            id: "p2".into(),
+            bytes: b"new".to_vec()
+        }
+    );
+
+    // A removed picture is a 404, which the client reports as `None`.
+    server.driver.set_picture(DM, None);
+    sink.change_profile(DM, ProfileChange::Stale).await;
+    let g = gateway.clone();
+    assert_eq!(
+        blocking(move || g.picture(DM, false, None)).await.unwrap(),
+        Picture::None
+    );
+    let g = gateway.clone();
+    let chats = blocking(move || g.chats_with_meta()).await.unwrap();
+    assert!(chats.is_empty(), "pictures do not create chats");
+    let g = gateway.clone();
+    let bad = blocking(move || g.picture("nonsense", false, None)).await;
+    assert!(is_code(&bad.unwrap_err(), ErrorCode::BadRequest));
+}
+
+#[tokio::test]
+async fn chat_actions_and_app_state_from_other_devices() {
+    let server = start(4).await;
+    let (gateway, created) = create(&server).await;
+    send(&gateway, "x", None).await;
+    let mut events = watch(&server, &created, None);
+    assert_eq!(events.next().await, ClientEvent::Connected);
+
+    let g = gateway.clone();
+    blocking(move || {
+        g.chat_action(&ChatAction {
+            chat: DM.into(),
+            action: ChatActionKind::Pin { pinned: true },
+        })
+    })
+    .await
+    .unwrap();
+    match next_non_message(&mut events).await {
+        GatewayEvent::ChatMeta { jid, meta } => {
+            assert_eq!(jid, DM);
+            assert!(meta.pinned);
+        }
+        other => panic!("expected ChatMeta, got {other:?}"),
+    }
+    let g = gateway.clone();
+    blocking(move || {
+        g.chat_action(&ChatAction {
+            chat: DM.into(),
+            action: ChatActionKind::Mute { until_ms: None },
+        })
+    })
+    .await
+    .unwrap();
+    next_non_message(&mut events).await;
+
+    // Archived on the phone.
+    let sink = server.driver.sink_of(&instance(&created)).unwrap();
+    sink.change_chat(DM, ChatChange::Archived(true)).await;
+    match next_non_message(&mut events).await {
+        GatewayEvent::ChatMeta { meta, .. } => assert!(meta.archived && meta.pinned),
+        other => panic!("expected ChatMeta, got {other:?}"),
+    }
+    let g = gateway.clone();
+    let chats = blocking(move || g.chats_with_meta()).await.unwrap();
+    let meta = &chats[0].meta;
+    assert!(meta.pinned && meta.archived && meta.is_muted(0));
+    assert_eq!(meta.muted_until_ms, Some(rovsti_wa_proto::MUTED_FOREVER));
+
+    let g = gateway.clone();
+    let past = blocking(move || {
+        g.chat_action(&ChatAction {
+            chat: DM.into(),
+            action: ChatActionKind::Mute { until_ms: Some(1) },
+        })
+    })
+    .await;
+    assert!(is_code(&past.unwrap_err(), ErrorCode::BadRequest));
+
+    // Played receipts reach WhatsApp.
+    let g = gateway.clone();
+    blocking(move || {
+        g.mark_played(&MarkRead {
+            chat: DM.into(),
+            sender: None,
+            ids: vec!["V1".into()],
+        })
+    })
+    .await
+    .unwrap();
+    let ops = server.driver.ops();
+    assert!(ops.contains(&format!("played {DM} V1")), "{ops:?}");
+    assert!(
+        ops.iter()
+            .any(|op| op.starts_with(&format!("chat {DM} Pin")))
+    );
+
+    // A chat deleted elsewhere goes away.
+    sink.delete_chat(DM, false).await;
+    assert_eq!(
+        next_non_message(&mut events).await,
+        GatewayEvent::ChatDeleted { jid: DM.into() }
+    );
+    let g = gateway.clone();
+    assert!(blocking(move || g.chats()).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn media_options_reach_the_driver_and_the_meta() {
+    let server = start(4).await;
+    let (gateway, _created) = create(&server).await;
+    let first = send(&gateway, "see the file", None).await;
+    let options = MediaOptions {
+        quoted_id: Some(first.clone()),
+        file_name: Some("rapor.pdf".into()),
+        seconds: None,
+        voice_note: false,
+    };
+    let g = gateway.clone();
+    let sent = blocking(move || {
+        g.send_media_with(
+            DM,
+            MediaKind::Document,
+            "application/pdf",
+            None,
+            &options,
+            vec![1, 2, 3],
+        )
+    })
+    .await
+    .unwrap();
+    let g = gateway.clone();
+    let page = blocking(move || g.messages_with_meta(DM, None, 10))
+        .await
+        .unwrap();
+    let doc = page
+        .iter()
+        .find(|m| m.message.id == sent.message_id)
+        .unwrap();
+    assert_eq!(doc.meta.quoted.as_ref().unwrap().id, first);
+    assert_eq!(
+        doc.meta.media.as_ref().unwrap().file_name.as_deref(),
+        Some("rapor.pdf")
+    );
+
+    let bad = MediaOptions {
+        file_name: Some("../etc/passwd".into()),
+        ..Default::default()
+    };
+    let g = gateway.clone();
+    let refused = blocking(move || {
+        g.send_media_with(
+            DM,
+            MediaKind::Document,
+            "application/pdf",
+            None,
+            &bad,
+            vec![1],
+        )
+    })
+    .await;
+    assert!(is_code(&refused.unwrap_err(), ErrorCode::BadRequest));
 }

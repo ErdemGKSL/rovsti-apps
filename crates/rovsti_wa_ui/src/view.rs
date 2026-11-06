@@ -1063,21 +1063,21 @@ impl WhatsAppSettings {
 impl Render for WhatsAppSettings {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = current_theme(window);
-        let screen = self.model.screen.clone();
-        match screen {
+        // Borrowed, not cloned: a key list or QR payload is not copied every frame.
+        match &self.model.screen {
             Screen::Choose => self.choose(theme, cx),
             Screen::EnterUrl => self.enter_url(theme, window, cx),
-            Screen::LinkNew { method } => self.link_new(theme, method, window, cx),
+            Screen::LinkNew { method } => self.link_new(theme, *method, window, cx),
             Screen::ShowQr { .. } => self.show_qr(theme, cx),
-            Screen::ShowCode { code } => self.show_code(theme, &code, cx),
+            Screen::ShowCode { code } => self.show_code(theme, code, cx),
             Screen::PasteKey => self.paste_key_screen(theme, window, cx),
             Screen::Connecting => Self::waiting(theme),
-            Screen::Connected { status } => self.connected(theme, &status, cx),
-            Screen::ShareKey { key } => self.share_key(theme, &key, cx),
-            Screen::Keys { keys } => self.keys_screen(theme, &keys, cx),
+            Screen::Connected { status } => self.connected(theme, status, cx),
+            Screen::ShareKey { key } => self.share_key(theme, key, cx),
+            Screen::Keys { keys } => self.keys_screen(theme, keys, cx),
             Screen::LoggedOut => self.logged_out(theme, window, cx),
             Screen::ConfirmDelete => Self::confirm_delete(theme, cx),
-            Screen::Failed { message, .. } => Self::failed(theme, &message, cx),
+            Screen::Failed { message, .. } => Self::failed(theme, message, cx),
         }
     }
 }

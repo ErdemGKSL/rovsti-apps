@@ -165,8 +165,6 @@ impl StatusFeed {
 
 // ---- names and labels -------------------------------------------------------
 
-/// What to call an author: the address-book name, WhatsApp's name for them,
-/// the push name their update carried, then the number.
 /// The chat to open from someone's status: only another person's phone JID
 /// (own updates and LIDs have no chat to open).
 pub fn message_target(author: &str, from_me: bool) -> Option<String> {
@@ -175,6 +173,8 @@ pub fn message_target(author: &str, from_me: bool) -> Option<String> {
         .then(|| author.to_owned())
 }
 
+/// What to call an author: the address-book name, WhatsApp's name for them,
+/// the push name their update carried, then the number.
 fn author_title(author: &StatusAuthor, backend: &Backend, avatars: &WaAvatars) -> String {
     let contact = backend
         .contacts()

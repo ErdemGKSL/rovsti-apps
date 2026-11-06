@@ -72,6 +72,7 @@ list in `docs/phone-acceptance.md`.
 - [x] OTP detection and copy, spam filter (on-device rules, allow list, system
       blocklist), scheduled send for SMS (alarm) and WhatsApp (gateway), with a
       Scheduled strip per conversation (done without a device)
+- [x] Manage conversations: delete, not spam, block, copy, search, drafts (done without a device)
 - [x] Encrypted local backup and export to a user-chosen file, and import with a
       preview (done without a device)
 

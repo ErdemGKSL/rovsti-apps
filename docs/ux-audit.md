@@ -13,7 +13,7 @@ Files owned by the concurrent WhatsApp ticks/receipts work (`services/wa_gateway
 `crates/rovsti_wa_proto`, `crates/rovsti_wa_client`, `apps/messages/src/conversation.rs`,
 `apps/messages/src/inbox.rs`) are not edited here.
 
-Result: 96 findings. 92 fixed (PC9 and PC13 only partly), 3 skipped (PP13, M21, C19), 1 deferred
+Result: 96 findings. 93 fixed (PC9 and PC13 only partly), 2 skipped (PP13, C19), 1 deferred
 (M24). Nothing here has been tried on a device yet.
 
 ## Phone: call screens (PC)
@@ -80,7 +80,7 @@ Result: 96 findings. 92 fixed (PC9 and PC13 only partly), 3 skipped (PP13, M21, 
 - [x] M18 `apps/messages/src/main.rs:634-662` | Low | `open_sms`/`open_new` do not clear the row menu; the first Back closes an invisible menu.
 - [x] M19 `apps/messages/src/settings_ui.rs:856-910` | Low | Backup passphrases are shown in clear text.
 - [x] M20 `apps/messages/src/backup_ui.rs:244` | Low | The backup file name uses the UTC date (yesterday's date 00:00-03:00 in Turkey).
-- [-] M21 `apps/messages/src/new_conversation.rs:65-70` | Low | Only one number per contact is offered in New message. Skipped: a multi-number picker is a feature, not a small fix.
+- [x] M21 `apps/messages/src/new_conversation.rs:65-70` | Low | Only one number per contact is offered in New message. Fixed: every number of a contact is offered, with its label.
 - [x] M22 `apps/messages/src/main.rs:1834-1838` | Low | The "SMS Access Is Off" empty state has no action (dead end).
 - [x] M23 `apps/messages/src/sms_conversation.rs:250-253` | Low | An `SmsChanged` during a load is dropped; a new message can be missing until the next change.
 - [>] M24 `apps/messages/src/conversation.rs` | Medium | WhatsApp composer: the keyboard Send key does not send (same as M9). Deferred (other agent owns the file).

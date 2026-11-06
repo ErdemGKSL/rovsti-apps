@@ -66,3 +66,14 @@ APK: build with `gpuiforge build android` in `apps/messages`. Put `google-servic
 | 42 | In a WhatsApp chat tap the attach button, pick a 5 MB photo, type a caption, press Send. Then attach a PDF and send it. | A chip with the name and "Photo" shows above the composer; the photo shows in the bubble at once; both arrive on the other phone (the caption with the photo). |  | |
 | 43 | Try to attach a 20 MB file. | It is refused ("Couldn't attach that file" from the picker's 8 MB cap, or "That file is over 16 MB"); nothing is sent. | | |
 | 44 | Attach a file, switch the gateway off, press Send, switch it on, tap the bubble. | "Not sent · Tap to retry"; the retry sends the file. | | |
+| **M. Managing conversations** | | | | |
+| 45 | Long press an SMS row, choose Delete, confirm. | The row asks first; after Delete the conversation is gone and a pill says so. Cancel keeps it. | | |
+| 46 | Long press a spam row, choose Not spam; tap Undo. | The row leaves Spam with a pill; Undo puts the sender back in Spam. | | |
+| 47 | Long press a row, choose Block; tap Undo. | The number is blocked (also in Phone) and Undo unblocks it. Emergency numbers are refused. | | |
+| 48 | Long press a message bubble, choose Copy, or Copy code on an OTP. | The text is on the clipboard and a pill says Copied; the same Copy pill shows in WhatsApp chats. | | |
+| 49 | Open the menu in an SMS page: Call, Add to contacts. | The dialer or the contact editor opens with the number. | | |
+| 50 | Type a draft, press Back, open the conversation again. | The draft is still there and the inbox row shows Draft. | | |
+| 51 | Tap search in Chats and type part of a name or text. | Only matching conversations show; no match shows No Results; Back clears the search. | | |
+| 52 | In New message pick a contact with two numbers. | Both numbers are listed with their labels. | | |
+| 53 | With WhatsApp linked, pick a contact in New message. | A menu offers SMS or WhatsApp; WhatsApp opens the chat, or says the person is not on WhatsApp. | | |
+| 54 | In Settings delete a rule, remove an allowed sender, unblock a number, unmute a conversation. | Each shows an Undo pill; Undo puts the rule back at the same position, re-allows, re-blocks or re-mutes. | | |

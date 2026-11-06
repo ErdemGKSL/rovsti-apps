@@ -67,7 +67,7 @@ use rovsti_wa_proto::{
 };
 use rovsti_wa_ui::{AppId, WaAvatars, WhatsAppSettings, display_name};
 use schedule_ui::{Dest, Draft, ScheduleSheet, StripKey, StripTarget};
-use settings_ui::{SettingsEvent, SettingsView};
+use settings_ui::{SettingsEvent, SettingsUndo, SettingsView};
 use sms_conversation::{SmsConversation, SmsConversationEvent};
 use status_ui::{StatusFeed, StatusPage, StatusPageEvent};
 
@@ -142,6 +142,8 @@ enum PillAction {
     Unallow(String),
     /// Unblocks a number.
     Unblock(String),
+    /// Restores something deleted in Settings.
+    Settings(SettingsUndo),
 }
 
 /// The page pushed over the tabs.
@@ -343,6 +345,14 @@ impl MessagesApp {
                         this.page.restart();
                     }
                     cx.notify();
+                }
+                SettingsEvent::Undoable { text, undo } => {
+                    this.show_pill_action(
+                        text.clone(),
+                        "Undo",
+                        PillAction::Settings(undo.clone()),
+                        cx,
+                    );
                 }
             }),
         ];
@@ -1267,6 +1277,7 @@ impl MessagesApp {
                 });
                 self.show_pill("Back in Spam");
             }
+            PillAction::Settings(undo) => self.undo_settings(undo, cx),
             PillAction::Unblock(raw) => {
                 let task = cx
                     .background_executor()
@@ -1281,6 +1292,56 @@ impl MessagesApp {
                                 this.show_pill("Unblocked");
                             }
                             _ => this.show_pill("Couldn't unblock that number"),
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+        }
+        cx.notify();
+    }
+
+    /// Puts back what a Settings delete removed.
+    fn undo_settings(&mut self, undo: SettingsUndo, cx: &mut Context<Self>) {
+        match undo {
+            SettingsUndo::Rule(index, rule) => {
+                self.backend.update(cx, |backend, cx| {
+                    backend.update_prefs(cx, |p| {
+                        p.spam.insert_rule(index, rule);
+                    })
+                });
+                self.show_pill("Rule restored");
+            }
+            SettingsUndo::Allow(sender) => {
+                self.backend.update(cx, |backend, cx| {
+                    backend.update_prefs(cx, |p| {
+                        p.allow_sender(&sender);
+                    })
+                });
+                self.show_pill("Sender allowed again");
+            }
+            SettingsUndo::Mute(tag) => {
+                self.backend.update(cx, |backend, cx| {
+                    backend.update_prefs(cx, |p| p.set_muted(&tag, true))
+                });
+                self.show_pill("Muted again");
+            }
+            SettingsUndo::Block(raw) => {
+                let task = cx
+                    .background_executor()
+                    .spawn(async move { rovsti_android::blocklist::block(&raw) });
+                cx.spawn(async move |this, cx| {
+                    let result = task.await;
+                    this.update(cx, |this, cx| {
+                        match result {
+                            Ok(true) => {
+                                this.backend
+                                    .update(cx, |backend, cx| backend.pull_blocked(cx));
+                                this.show_pill("Blocked again");
+                            }
+                            _ => this.show_pill("Couldn't block that number"),
                         }
                         cx.notify();
                     })

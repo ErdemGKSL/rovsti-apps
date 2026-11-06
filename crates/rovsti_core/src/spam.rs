@@ -136,6 +136,17 @@ impl SpamRules {
         Ok(())
     }
 
+    /// Puts a rule back at `index` (clamped to the end), e.g. to undo a delete.
+    /// `false` when the list is full.
+    pub fn insert_rule(&mut self, index: usize, rule: SpamRule) -> bool {
+        if self.rules.len() >= MAX_RULES {
+            return false;
+        }
+        let index = index.min(self.rules.len());
+        self.rules.insert(index, rule);
+        true
+    }
+
     pub fn remove_rule(&mut self, index: usize) -> bool {
         if index < self.rules.len() {
             self.rules.remove(index);
@@ -494,6 +505,26 @@ mod tests {
         assert!(r.remove_rule(0));
         assert!(!r.remove_rule(MAX_RULES));
         assert_eq!(add_rule(&mut r, kw("one more")), Ok(()));
+    }
+
+    #[test]
+    fn insert_rule_restores_position_and_clamps() {
+        let mut r = SpamRules::default();
+        r.add_rule(kw("a")).expect("add");
+        r.add_rule(kw("b")).expect("add");
+        r.add_rule(kw("c")).expect("add");
+        let removed = r.rules[1].clone();
+        assert!(r.remove_rule(1));
+        assert!(r.insert_rule(1, removed.clone()));
+        assert_eq!(r.rules[1], removed);
+        assert_eq!(r.rules.len(), 3);
+        assert!(r.insert_rule(99, kw("z")));
+        assert_eq!(r.rules.last(), Some(&kw("z")));
+        while r.rules.len() < MAX_RULES {
+            r.add_rule(kw(&format!("k{}", r.rules.len())))
+                .expect("room");
+        }
+        assert!(!r.insert_rule(0, kw("full")));
     }
 
     #[test]

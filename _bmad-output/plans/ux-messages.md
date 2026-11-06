@@ -104,3 +104,8 @@ Copy helpers:
 ### S8. Undo for Settings deletes; docs (fixes G10)
 - `settings_ui.rs`: `SettingsView` emits `SettingsEvent::Undoable { text: SharedString, undo: SettingsUndo }` (`SettingsUndo::{Rule(usize, SpamRule), Allow(String), Block(String), Mute(String)}`) after a rule delete, allow removal, unblock, unmute; `main.rs` subscribes and shows `show_pill_action(text, "Undo", PillAction::Settings(undo))`; firing re-inserts the rule at its index (add `SpamRules::insert_rule(&mut self, index: usize, rule: SpamRule)` next to `remove_rule` in `crates/rovsti_core/src/spam.rs`, clamped index, with a test), re-allows, re-blocks, re-mutes.
 - Docs: `docs/messages-acceptance.md` new section "M. Managing conversations" (rows: delete with confirm, Not spam + Undo, Block + Undo, copy text/code, Call/Add contact from the page, draft survives Back, search, new WhatsApp chat from New message, two numbers per contact, Settings Undo); `docs/ux-audit.md` M21 marked fixed; `docs/roadmap.md` Messages: one ticked line "Manage conversations: delete, not spam, block, copy, search, drafts (done without a device)". Status section at the end of this file.
+
+## Status
+
+- S1 to S8 implemented without a device. S8: Settings deletes (rule, allowed sender, unblock, unmute) emit an Undo pill; `SpamRules::insert_rule` restores a rule at its position (tested). Docs: acceptance section M, audit M21 fixed, roadmap line added.
+- Verification is cargo only; nothing here has been tried on a device.

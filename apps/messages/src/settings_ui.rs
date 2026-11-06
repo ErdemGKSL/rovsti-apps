@@ -52,6 +52,20 @@ const MIME: &str = "application/octet-stream";
 pub enum SettingsEvent {
     /// The row that points at the WhatsApp tab was tapped.
     OpenWhatsApp,
+    /// Something was removed; the pill offers to put it back.
+    Undoable {
+        text: SharedString,
+        undo: SettingsUndo,
+    },
+}
+
+/// What "Undo" restores after a Settings delete.
+#[derive(Clone, Debug)]
+pub enum SettingsUndo {
+    Rule(usize, SpamRule),
+    Allow(String),
+    Block(String),
+    Mute(String),
 }
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
@@ -647,6 +661,10 @@ impl SettingsView {
                     this.backend.update(cx, |backend, cx| {
                         backend.update_prefs(cx, |p| p.set_muted(&owned, false));
                     });
+                    cx.emit(SettingsEvent::Undoable {
+                        text: "Unmuted".into(),
+                        undo: SettingsUndo::Mute(owned.clone()),
+                    });
                 }))
                 .into_any_element(),
             );
@@ -678,6 +696,7 @@ impl SettingsView {
             .into_any_element(),
         ];
         for (index, rule) in rules.rules.iter().enumerate() {
+            let rule_copy = rule.clone();
             rows.push(
                 list_row(
                     theme,
@@ -688,11 +707,16 @@ impl SettingsView {
                 )
                 .id(("set-rule", index))
                 .on_click(cx.listener(move |this, _, _, cx| {
+                    let mut removed = false;
                     this.backend.update(cx, |backend, cx| {
-                        backend.update_prefs(cx, |p| {
-                            p.spam.remove_rule(index);
-                        });
+                        backend.update_prefs(cx, |p| removed = p.spam.remove_rule(index));
                     });
+                    if removed {
+                        cx.emit(SettingsEvent::Undoable {
+                            text: "Rule deleted".into(),
+                            undo: SettingsUndo::Rule(index, rule_copy.clone()),
+                        });
+                    }
                 }))
                 .into_any_element(),
             );
@@ -750,6 +774,7 @@ impl SettingsView {
                 ),
         ));
         for (index, sender) in rules.allow.iter().enumerate() {
+            let sender_copy = sender.clone();
             rows.push(
                 list_row(
                     theme,
@@ -760,11 +785,16 @@ impl SettingsView {
                 )
                 .id(("set-allow", index))
                 .on_click(cx.listener(move |this, _, _, cx| {
+                    let mut removed = false;
                     this.backend.update(cx, |backend, cx| {
-                        backend.update_prefs(cx, |p| {
-                            p.remove_allowed(index);
-                        });
+                        backend.update_prefs(cx, |p| removed = p.remove_allowed(index));
                     });
+                    if removed {
+                        cx.emit(SettingsEvent::Undoable {
+                            text: "Removed from always allowed".into(),
+                            undo: SettingsUndo::Allow(sender_copy.clone()),
+                        });
+                    }
                 }))
                 .into_any_element(),
             );
@@ -787,6 +817,10 @@ impl SettingsView {
                 .id(("set-blocked", index))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.change_block(number.clone(), false, cx);
+                    cx.emit(SettingsEvent::Undoable {
+                        text: "Unblocked".into(),
+                        undo: SettingsUndo::Block(number.clone()),
+                    });
                 }))
                 .into_any_element(),
             );

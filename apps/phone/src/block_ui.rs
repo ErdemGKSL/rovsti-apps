@@ -12,7 +12,12 @@ use gpui::{
     MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement, Styled, Window,
     div, px, svg,
 };
-use rovsti_core::blocklist::BlockRefusal;
+use rovsti_core::{
+    blocklist::BlockRefusal,
+    call_log::{EntryRef, deleted_text, entries_by_id},
+    recents::split_refs,
+    wire::CallLogEntry,
+};
 use rovsti_ui::{
     Icon,
     glass::{GlassSpec, glass},
@@ -23,6 +28,8 @@ use rovsti_ui::{
     tokens::{Theme, shadow, typography},
     touch::touch_surface,
 };
+use rovsti_wa_proto::WaCallRecord;
+use std::sync::Arc;
 
 use crate::{PhoneApp, backend, recents::ROW_H};
 
@@ -50,6 +57,19 @@ pub(crate) enum PillAction {
     RestoreSpeedDial(u8, rovsti_core::settings::SpeedDialEntry),
     /// Undo of a quick-reply Clear: put the old text back in its slot.
     RestoreReply(usize, SharedString),
+    /// Undo of a Recents Delete: re-insert the call-log rows and WhatsApp records.
+    RestoreCalls(Arc<[CallLogEntry]>, Arc<[WaCallRecord]>),
+    /// Open the system prompt for call log access.
+    GrantCallLog,
+}
+
+/// The menu's Delete label for a row that stands for `count` calls.
+pub(crate) fn delete_label(count: u32) -> String {
+    if count > 1 {
+        format!("Delete {count} calls")
+    } else {
+        "Delete from Recents".to_owned()
+    }
 }
 
 /// The number as a person reads it (grouped when it parses).
@@ -72,7 +92,7 @@ pub(crate) fn refusal_note(refusal: BlockRefusal) -> &'static str {
 struct Item {
     id: &'static str,
     icon: Icon,
-    title: &'static str,
+    title: SharedString,
     note: Option<&'static str>,
     enabled: bool,
 }
@@ -91,6 +111,9 @@ pub(crate) struct MenuTarget {
     /// The row's edges in window coordinates when the menu opened.
     pub top: f32,
     pub bottom: f32,
+    /// The calls the row stands for.
+    pub refs: Arc<[EntryRef]>,
+    pub count: u32,
 }
 
 /// What S27 asks one row to draw.
@@ -251,6 +274,10 @@ impl PhoneApp {
                 cx.notify();
             }
             PillAction::RestoreReply(slot, text) => self.replies_restore(slot, &text, window, cx),
+            PillAction::RestoreCalls(entries, records) => {
+                self.restore_row_calls(entries, records, cx)
+            }
+            PillAction::GrantCallLog => self.recents_grant(cx),
         }
     }
 
@@ -373,6 +400,9 @@ impl PhoneApp {
         let Some((number, who, named, top)) = self.recents_row_facts(index) else {
             return;
         };
+        let refs = self
+            .recents_row_refs(index)
+            .unwrap_or_else(|| Arc::from(Vec::new()));
         let backend = self.backend.read(cx);
         let blocked = backend.is_blocked(&number);
         let block_note = if blocked {
@@ -394,6 +424,8 @@ impl PhoneApp {
             block_note,
             top,
             bottom: top + ROW_H,
+            count: refs.len() as u32,
+            refs,
         });
         self.presses.release_all();
         self.update_back(window);
@@ -457,9 +489,100 @@ impl PhoneApp {
                     self.start_block(target.number, target.who, Some(target.index), window, cx);
                 }
             }
+            "rm-delete" if target.count > 0 => {
+                self.row_menu_close(window, cx);
+                self.delete_row_calls(target.refs, window, cx);
+            }
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Deletes the calls `refs` stand for. Done shows "Deleted n" with Undo.
+    pub(crate) fn delete_row_calls(
+        &mut self,
+        refs: Arc<[EntryRef]>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (ids, wa_ids) = split_refs(&refs);
+        let entries = match self.backend.read(cx).call_log() {
+            backend::Load::Ready(log) => entries_by_id(&log.source, &ids),
+            _ => Vec::new(),
+        };
+        let total = entries.len() + wa_ids.len();
+        if total == 0 {
+            return;
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        let records = self
+            .wa_call
+            .update(cx, |ui, cx| ui.forget_calls(&wa_ids, cx));
+        let task =
+            (!ids.is_empty()).then(|| self.backend.update(cx, |b, cx| b.delete_calls(ids, cx)));
+        cx.spawn(async move |this, cx| {
+            let outcome = match task {
+                Some(task) => task.await,
+                None => backend::WriteOutcome::Done(0),
+            };
+            this.update(cx, |this, cx| {
+                match outcome {
+                    backend::WriteOutcome::Done(_) => this.show_pill_action(
+                        deleted_text(total),
+                        "Undo",
+                        PillAction::RestoreCalls(entries.into(), records.into()),
+                        cx,
+                    ),
+                    other => {
+                        this.wa_call
+                            .update(cx, |ui, cx| ui.restore_calls(records, cx));
+                        if other == backend::WriteOutcome::Permission {
+                            this.show_pill_action(
+                                "Allow call log access",
+                                "Allow",
+                                PillAction::GrantCallLog,
+                                cx,
+                            );
+                        } else {
+                            this.show_notice_pill("Not allowed on this phone", None, false, cx);
+                        }
+                    }
+                }
+                this.sync_recents(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Undo of a Recents Delete.
+    fn restore_row_calls(
+        &mut self,
+        entries: Arc<[CallLogEntry]>,
+        records: Arc<[WaCallRecord]>,
+        cx: &mut Context<Self>,
+    ) {
+        let task = (!entries.is_empty()).then(|| {
+            self.backend
+                .update(cx, |b, cx| b.restore_calls(entries.to_vec(), cx))
+        });
+        cx.spawn(async move |this, cx| {
+            let outcome = match task {
+                Some(task) => task.await,
+                None => backend::WriteOutcome::Done(0),
+            };
+            this.update(cx, |this, cx| {
+                if matches!(outcome, backend::WriteOutcome::Done(_)) {
+                    this.wa_call
+                        .update(cx, |ui, cx| ui.restore_calls(records.to_vec(), cx));
+                } else {
+                    this.show_notice_pill("Couldn't restore", None, false, cx);
+                }
+                this.sync_recents(cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Once per frame: when S27 is over the list is allowed to re-lay.
@@ -480,17 +603,20 @@ impl PhoneApp {
         } = item;
         let colors = theme::colors(theme);
         let press = self.presses.value(id).clamp(0.0, 1.0);
-        let ink = if enabled {
-            colors.label
-        } else {
+        let danger = id == "rm-delete";
+        let ink = if !enabled {
             colors.tertiary_label
+        } else if danger {
+            call_colors(theme).danger
+        } else {
+            colors.label
         };
         let mut row = div()
             .id(id)
             .role(Role::Button)
             .aria_label(match note {
                 Some(note) => format!("{title}. {note}"),
-                None => title.to_owned(),
+                None => title.to_string(),
             })
             .aria_disabled(!enabled)
             .relative()
@@ -558,10 +684,10 @@ impl PhoneApp {
         let p = self.row_menu.progress();
         let colors = theme::colors(theme);
         let has_number = !target.number.trim().is_empty();
-        let item = |id, icon, title, note, enabled| Item {
+        let item = |id, icon, title: &'static str, note, enabled| Item {
             id,
             icon,
-            title,
+            title: title.into(),
             note,
             enabled,
         };
@@ -620,6 +746,17 @@ impl PhoneApp {
                     target.block_note,
                     target.block_note.is_none(),
                 ),
+                cx,
+            ),
+            self.menu_item(
+                theme,
+                Item {
+                    id: "rm-delete",
+                    icon: Icon::LucideTrash2,
+                    title: delete_label(target.count).into(),
+                    note: None,
+                    enabled: target.count > 0,
+                },
                 cx,
             ),
         ]);
@@ -743,6 +880,12 @@ mod tests {
     }
 
     #[test]
+    fn delete_label_counts_calls() {
+        assert_eq!(delete_label(1), "Delete from Recents");
+        assert_eq!(delete_label(3), "Delete 3 calls");
+    }
+
+    #[test]
     fn refusals_read_as_the_spec_says() {
         assert_eq!(
             refusal_note(BlockRefusal::NoNumber),
@@ -766,6 +909,8 @@ mod tests {
             block_note: None,
             top: 100.0,
             bottom: 158.0,
+            refs: Arc::from(Vec::new()),
+            count: 0,
         });
         assert!(menu.is_open());
         for _ in 0..60 {

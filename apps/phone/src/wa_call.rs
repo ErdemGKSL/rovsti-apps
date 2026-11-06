@@ -691,7 +691,6 @@ impl WaCallUi {
 
     /// Deletes the WhatsApp calls with these ids from the history. Returns the
     /// removed records (for undo).
-    #[allow(dead_code)] // wired to the Recents delete UI in the next step
     pub fn forget_calls(&mut self, ids: &[String], cx: &mut Context<Self>) -> Vec<WaCallRecord> {
         let removed = self.history.forget(ids);
         self.history_changed(cx);
@@ -699,7 +698,6 @@ impl WaCallUi {
     }
 
     /// Undo of [`Self::forget_calls`].
-    #[allow(dead_code)] // as above
     pub fn restore_calls(&mut self, records: Vec<WaCallRecord>, cx: &mut Context<Self>) {
         self.history.restore(records);
         self.history_changed(cx);

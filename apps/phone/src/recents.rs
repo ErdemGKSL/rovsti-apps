@@ -115,6 +115,8 @@ pub(crate) struct RowVm {
     whatsapp: bool,
     /// A WhatsApp row's picture: the contact's photo, then WhatsApp's.
     photo: CallerPhoto,
+    /// The call-log and WhatsApp entries this row stands for (Delete acts on them).
+    refs: Arc<[rovsti_core::call_log::EntryRef]>,
     /// The SIM the newest call used, resolved once per call-log swap (never per frame).
     /// `None` with one SIM or when the log's key matches no account (the slot stays empty).
     sim: Option<SimBadge>,
@@ -147,6 +149,7 @@ impl RowVm {
             named,
             whatsapp: false,
             photo: CallerPhoto::default(),
+            refs: Arc::from(Vec::new()),
         }
     }
 
@@ -180,6 +183,7 @@ impl RowVm {
             named: v.named,
             whatsapp: v.whatsapp,
             photo: CallerPhoto::default(),
+            refs: Arc::from(Vec::new()),
         }
     }
 }
@@ -553,7 +557,8 @@ impl PhoneApp {
         let last_first = format == rovsti_core::wire::NameFormat::LastFirst;
         let rows: Vec<RowVm> = views
             .into_iter()
-            .map(|mut v| {
+            .zip(merged.iter())
+            .map(|(mut v, merged_row)| {
                 // Last, First: the title of a known person follows the setting (story 16.9).
                 if last_first
                     && v.named
@@ -570,6 +575,7 @@ impl PhoneApp {
                 };
                 let mut row = RowVm::build(v, &sims);
                 row.photo = photo;
+                row.refs = merged_row.refs.as_slice().into();
                 row
             })
             .collect();
@@ -884,6 +890,14 @@ impl PhoneApp {
         Some((row.number.clone(), row.title.clone(), row.named, top))
     }
 
+    /// The entries Recents row `index` stands for.
+    pub(crate) fn recents_row_refs(
+        &self,
+        index: usize,
+    ) -> Option<Arc<[rovsti_core::call_log::EntryRef]>> {
+        Some(Arc::clone(&self.recents.rows.get(index)?.refs))
+    }
+
     fn recents_info(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(row) = self.recents.rows.get(index) else {
             return;
@@ -920,7 +934,7 @@ impl PhoneApp {
     }
 
     /// "Grant access" on the permission state.
-    fn recents_grant(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn recents_grant(&mut self, cx: &mut Context<Self>) {
         let access = self.backend.read(cx).permissions().phone;
         let outcome = if access == Access::PermanentlyDenied {
             backend::Outcome::Declined

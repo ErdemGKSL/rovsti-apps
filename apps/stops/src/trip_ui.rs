@@ -77,7 +77,6 @@ pub struct Live {
 }
 
 /// The arrival-message line, if any. Sent wins over failed, failed over planned.
-#[allow(dead_code)] // wired up by a later step
 pub fn notice_line(sent: bool, failed: bool, planned: bool) -> Option<&'static str> {
     if sent {
         Some("Arrival message sent")
@@ -88,6 +87,11 @@ pub fn notice_line(sent: bool, failed: bool, planned: bool) -> Option<&'static s
     } else {
         None
     }
+}
+
+/// True once, when the failed flag flips from false to true.
+pub fn pill_on_failure(was_failed: bool, now_failed: bool) -> bool {
+    !was_failed && now_failed
 }
 
 /// The snooze button label; `None` when no snoozes are left.
@@ -436,10 +440,14 @@ impl StopsApp {
         if let Some(ms) = live.as_ref().and_then(|l| l.next_fix_ms) {
             details.push(format!("Next check in {}", wait_text(ms)));
         }
-        if live.as_ref().is_some_and(|l| l.notice_sent) {
-            details.push("Arrival message sent".to_owned());
-        } else if trip.notice.is_some() {
-            details.push("Will text when arriving".to_owned());
+        let failed = live
+            .as_ref()
+            .is_some_and(|l| l.notice_failed && !l.notice_sent);
+        let (sent, gave_up) = live
+            .as_ref()
+            .map_or((false, false), |l| (l.notice_sent, l.notice_failed));
+        if let Some(line) = notice_line(sent, gave_up, trip.notice.is_some()) {
+            details.push(line.to_owned());
         }
         let busy = self.busy;
         div()
@@ -485,9 +493,14 @@ impl StopsApp {
                             .child(rule),
                     )
                     .children(details.into_iter().map(|d| {
+                        let color = if failed && d.starts_with("Arrival message not sent") {
+                            colors.red
+                        } else {
+                            colors.tertiary_label
+                        };
                         div()
                             .text_size(typography::FOOTNOTE.size)
-                            .text_color(colors.tertiary_label)
+                            .text_color(color)
                             .child(d)
                     }))
                     .child(
@@ -513,6 +526,10 @@ impl StopsApp {
         let snooze = format!("Snooze {} min", self.prefs.snooze_min.clamp(1, 15));
         let distance = alarm.distance_m.map(distance_text);
         let crossed_to = crossed_to_text(alarm.side);
+        let notice_failed = self
+            .live
+            .as_ref()
+            .is_some_and(|l| l.notice_failed && !l.notice_sent);
         Some(
             div()
                 .id("alarm-screen")
@@ -556,6 +573,13 @@ impl StopsApp {
                                 .font_weight(typography::TITLE.weight)
                                 .text_color(colors.label)
                                 .child(d)
+                        }))
+                        .children(notice_failed.then(|| {
+                            div()
+                                .text_size(typography::TITLE2.size)
+                                .text_color(colors.red)
+                                .text_center()
+                                .child("Arrival message not sent")
                         }))
                         .child(
                             div()
@@ -856,7 +880,11 @@ impl StopsApp {
                 if self.loaded && self.trip.is_none() {
                     return;
                 }
+                let was_failed = self.live.as_ref().is_some_and(|l| l.notice_failed);
                 self.live = Some(Live::from_out(&out));
+                if pill_on_failure(was_failed, out.notice_failed) {
+                    self.show_pill("Arrival message not sent. Text them yourself.", None, cx);
+                }
                 if let Some(at) = out.at {
                     self.map_fix(at);
                 }
@@ -994,6 +1022,14 @@ mod tests {
             notice_sent: false,
             notice_failed: false,
         }
+    }
+
+    #[test]
+    fn pill_shows_only_on_the_flip() {
+        assert!(pill_on_failure(false, true));
+        assert!(!pill_on_failure(true, true));
+        assert!(!pill_on_failure(false, false));
+        assert!(!pill_on_failure(true, false));
     }
 
     #[test]

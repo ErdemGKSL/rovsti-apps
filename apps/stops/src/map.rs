@@ -2,8 +2,8 @@
 //! map tiles where they are loaded (the radar look shows where they are not).
 //!
 //! It shows where you are with the accuracy of the fix, the circle on AB,
-//! the breadcrumb of this trip, the A and B pins and, after a transit
-//! import, the stops in view and the chosen line. A finger drags to pan, two
+//! the breadcrumb of this trip, the A and B pins, your saved places as
+//! orange rings and, after a transit import, the stops in view and the chosen line. A finger drags to pan, two
 //! fingers (or a double tap) zoom, a tap picks the stop under it.
 //!
 //! Everything that decides something is pure and tested: which stops are in
@@ -699,6 +699,8 @@ pub struct Scene {
     pub segment: Option<((f32, f32), (f32, f32))>,
     pub trail: Vec<(f32, f32)>,
     pub stops: Vec<(f32, f32)>,
+    /// The saved places in view (plus a margin), drawn as rings.
+    pub saved: Vec<(f32, f32)>,
     pub line: Vec<(f32, f32)>,
     /// Map tiles under everything else; empty where none are loaded.
     pub tiles: TileLayer,
@@ -771,8 +773,19 @@ pub struct SceneInput<'a> {
     pub trail: &'a Breadcrumb,
     pub feed: Option<&'a Feed>,
     pub pattern: Option<u32>,
+    /// The positions of the saved places.
+    pub saved: &'a [Coord],
     /// Loaded map tiles under the scene.
     pub tiles: &'a [&'a TileGeometry],
+}
+
+/// How far outside the view a saved place is still projected, in px.
+const SAVED_MARGIN_PX: f32 = 24.0;
+
+/// Whether a point (pixels from the view centre) lies within the view of
+/// `size` grown by `margin` on every side.
+fn in_view(p: (f32, f32), size: (f32, f32), margin: f32) -> bool {
+    p.0.abs() <= size.0 / 2.0 + margin && p.1.abs() <= size.1 / 2.0 + margin
 }
 
 /// Vertices of tile geometry kept per frame; the rest is dropped by priority.
@@ -828,6 +841,12 @@ impl Scene {
             }
             None => (Vec::new(), Vec::new()),
         };
+        let saved: Vec<(f32, f32)> = input
+            .saved
+            .iter()
+            .map(|&c| vp.project(c))
+            .filter(|&p| in_view(p, input.size, SAVED_MARGIN_PX))
+            .collect();
         Self {
             position: input
                 .position
@@ -837,6 +856,7 @@ impl Scene {
             segment,
             trail: thin_polyline(&trail, TRAIL_MIN_PX),
             stops,
+            saved,
             line: thin_polyline(&line, LINE_MIN_PX),
             tiles: build_layer(input.tiles, vp, input.size, TILE_MAX_VERTICES),
         }
@@ -861,6 +881,7 @@ pub struct Palette {
     left_wash: Hsla,
     right_wash: Hsla,
     halo: Hsla,
+    saved: Hsla,
     /// The map tile colours: light is "colorful", dark is "eclipse".
     style: MapStyle,
 }
@@ -897,6 +918,7 @@ impl Palette {
             left_wash: with_alpha(c.accent, 0.18),
             right_wash: with_alpha(c.green, 0.18),
             halo: gpui::white(),
+            saved: c.orange,
             style: match theme {
                 Theme::Light => MapStyle::Colorful,
                 Theme::Dark => MapStyle::Eclipse,
@@ -1226,6 +1248,20 @@ fn scene_paths(scene: &Scene, dragging: Option<Slot>, pal: &Palette) -> Paths {
         }
     }
 
+    // Saved places: hollow rings, so they read as neither a stop dot nor the line.
+    if !scene.saved.is_empty() {
+        for &p in &scene.saved {
+            fill_circle(out, to_window(p), 6.5, pal.halo);
+        }
+        let mut rings = PathBuilder::stroke(px(2.5));
+        for &p in &scene.saved {
+            add_circle(&mut rings, to_window(p), 5.0, false);
+        }
+        if let Ok(path) = rings.build() {
+            out.push((path, pal.saved));
+        }
+    }
+
     if let Some(d) = &scene.diameter {
         paint_diameter(d, &to_window, pal, out);
     }
@@ -1373,6 +1409,8 @@ struct SceneKey {
     diameter: Option<Diameter>,
     pins: [Option<(Coord, bool)>; 2],
     trail: u64,
+    /// [`saved_key`] of the saved places.
+    saved: u64,
     /// The feed's address; a new feed also forgets the scene.
     feed: usize,
     pattern: Option<u32>,
@@ -1678,6 +1716,7 @@ impl StopsApp {
                 .get(slot)
                 .map(|d| (d.coord, d.gtfs_stop.is_some()))
         });
+        let saved_coords: Vec<Coord> = self.saved.places.iter().map(|p| p.coord).collect();
         let key = SceneKey {
             viewport,
             size,
@@ -1685,6 +1724,7 @@ impl StopsApp {
             diameter,
             pins,
             trail: self.map.trail.revision(),
+            saved: saved_key(&self.saved),
             feed: self.gtfs.as_ref().map_or(0, |f| Arc::as_ptr(f) as usize),
             pattern: self.map.pattern,
             cover,
@@ -1706,6 +1746,7 @@ impl StopsApp {
                     trail: &self.map.trail,
                     feed: self.gtfs.as_deref(),
                     pattern: self.map.pattern,
+                    saved: &saved_coords,
                     tiles: &loaded,
                 });
                 self.map.store_scene(key, scene)
@@ -2369,6 +2410,7 @@ mod tests {
             diameter: None,
             pins: [None, None],
             trail: 0,
+            saved: 0,
             feed: 0,
             pattern: None,
             cover: tiles_for_view(&viewport, (400.0, 300.0), VIEW_TILE_CAP),
@@ -2791,8 +2833,23 @@ mod tests {
             trail,
             feed,
             pattern: None,
+            saved: &[],
             tiles: &[],
         }
+    }
+
+    #[test]
+    fn saved_places_in_view_are_projected() {
+        let trail = Breadcrumb::default();
+        let near_place = near(100.0, 50.0).coord;
+        let far_place = near(50_000.0, 0.0).coord;
+        let places = [near_place, far_place];
+        let mut input = scene_input(&trail, None);
+        input.saved = &places;
+        let scene = Scene::build(&input);
+        assert_eq!(scene.saved, vec![input.viewport.project(near_place)]);
+        assert!(in_view((212.0, 0.0), (400.0, 300.0), 24.0));
+        assert!(!in_view((225.0, 0.0), (400.0, 300.0), 24.0));
     }
 
     /// A 600 m east-west diameter centred 300 m north of IST.

@@ -62,6 +62,7 @@ object MessageNotifications {
     const val CHANNEL = "messages"
     const val KEY_REPLY = "reply_text"
     const val EXTRA_TAG = "open_thread_tag"
+    private const val SILENT_GROUP = "rovsti_silent"
 
     /** Posts or updates the notification. False when notifications are off or the spec is unusable. */
     fun show(context: Context, specJson: String): Boolean {
@@ -104,7 +105,9 @@ object MessageNotifications {
             .setAutoCancel(true)
             .setOnlyAlertOnce(spec.silent)
             .setContentIntent(openIntent(context, spec.tag))
-        if (spec.silent) builder.setSilent(true)
+        // `Notification.Builder` has no setSilent (only NotificationCompat does). This is what it does: a child
+        // of a group whose alerts belong to the summary makes no sound and does not pop up.
+        if (spec.silent) builder.setGroup(SILENT_GROUP).setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY)
         if (spec.reply) {
             val input = RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build()
             builder.addAction(

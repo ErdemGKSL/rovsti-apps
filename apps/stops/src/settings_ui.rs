@@ -333,6 +333,16 @@ pub fn chat_status_text(
     }
 }
 
+/// What a chat reload does, as (fetch, show loading): it never overlaps a
+/// running fetch, and it keeps a populated list on screen while refreshing.
+pub fn reload_plan(list: &ChatList) -> (bool, bool) {
+    match list {
+        ChatList::Loading => (false, false),
+        ChatList::Ready(rows) if !rows.is_empty() => (true, false),
+        _ => (true, true),
+    }
+}
+
 /// The message as it would read for a four-minute ETA to "Kadikoy".
 pub fn notice_preview(template: &str) -> String {
     rovsti_geo::notice::render(template, PREVIEW_STOP, Some(PREVIEW_ETA))
@@ -487,7 +497,7 @@ impl StopsApp {
             SettingsPage::Notice => {
                 self.sync_template_field(cx);
                 self.chat_query.update(cx, |f, cx| f.set("", cx));
-                self.load_chats(false, cx);
+                self.load_chats(true, cx);
             }
             SettingsPage::MapTiles => {
                 self.sync_tile_field(cx);
@@ -1458,16 +1468,17 @@ impl StopsApp {
     }
 
     /// Reads the chat list from the gateway on the background executor.
-    fn load_chats(&mut self, force: bool, cx: &mut Context<Self>) {
+    fn load_chats(&mut self, _force: bool, cx: &mut Context<Self>) {
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             return;
         };
-        match &self.chats {
-            ChatList::Loading => return,
-            ChatList::Ready(_) if !force => return,
-            _ => {}
+        let (fetch, show_loading) = reload_plan(&self.chats);
+        if !fetch {
+            return;
         }
-        self.chats = ChatList::Loading;
+        if show_loading {
+            self.chats = ChatList::Loading;
+        }
         cx.notify();
         let task = cx
             .background_executor()
@@ -1475,10 +1486,13 @@ impl StopsApp {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
-                this.chats = match result {
-                    Ok(chats) => ChatList::Ready(chat_rows(&chats)),
-                    Err(error) => ChatList::Failed(error.to_string()),
-                };
+                match result {
+                    Ok(chats) => this.chats = ChatList::Ready(chat_rows(&chats)),
+                    Err(_) if matches!(&this.chats, ChatList::Ready(rows) if !rows.is_empty()) => {
+                        this.show_pill("Could not refresh your chats", None, cx);
+                    }
+                    Err(error) => this.chats = ChatList::Failed(error.to_string()),
+                }
                 cx.notify();
             })
             .ok();
@@ -1492,6 +1506,20 @@ impl StopsApp {
 mod tests {
     use super::*;
     use rovsti_geo::Coord;
+
+    #[test]
+    fn reload_plan_keeps_rows_and_skips_overlap() {
+        assert_eq!(reload_plan(&ChatList::Loading), (false, false));
+        assert_eq!(reload_plan(&ChatList::Idle), (true, true));
+        assert_eq!(reload_plan(&ChatList::Failed("x".into())), (true, true));
+        assert_eq!(reload_plan(&ChatList::Ready(vec![])), (true, true));
+        let row = ChatRow {
+            jid: "a@s.whatsapp.net".into(),
+            title: "A".into(),
+            group: false,
+        };
+        assert_eq!(reload_plan(&ChatList::Ready(vec![row])), (true, false));
+    }
 
     #[test]
     fn tile_cache_texts_cover_states() {

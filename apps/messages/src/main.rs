@@ -97,6 +97,8 @@ struct RowMenu {
     jid: Option<String>,
     title: SharedString,
     meta: ChatMeta,
+    /// The chat carries the local mute tag (`wa:<jid>`).
+    local_muted: bool,
     unread: u32,
     /// The mute lengths show instead of the main actions.
     mute_choices: bool,
@@ -384,6 +386,9 @@ impl MessagesApp {
                     }
                     cx.notify();
                 }
+                SettingsEvent::UnmuteWhatsApp(jid) => {
+                    this.chat_action(jid, ChatActionKind::Unmute, false, cx);
+                }
                 SettingsEvent::Undoable { text, undo } => {
                     this.show_pill_action(
                         text.clone(),
@@ -554,8 +559,12 @@ impl MessagesApp {
                 .chain(&view.archived)
                 .filter_map(|r| Some((r.wa_chat.as_ref()?.to_string(), r.title.to_string())))
                 .collect();
-            self.settings
-                .update(cx, |settings, cx| settings.set_wa_titles(titles, cx));
+            let gateway_muted =
+                inbox::gateway_muted_jids(&self.wa_info, &self.backend.read(cx).prefs().muted, now);
+            self.settings.update(cx, |settings, cx| {
+                settings.set_wa_titles(titles, cx);
+                settings.set_wa_muted(gateway_muted, cx);
+            });
             if view != self.view {
                 self.view = view;
                 self.view_gen += 1;
@@ -1099,6 +1108,12 @@ impl MessagesApp {
         title: SharedString,
         cx: &mut Context<Self>,
     ) {
+        let local_muted = jid.as_ref().is_some_and(|jid| {
+            self.backend
+                .read(cx)
+                .prefs()
+                .is_muted(&notifications::thread_tag(&ThreadId::WhatsApp(jid.clone())))
+        });
         let (unread, meta) = jid.as_ref().map_or_else(
             || (0, ChatMeta::default()),
             |jid| {
@@ -1144,6 +1159,7 @@ impl MessagesApp {
             jid,
             title,
             meta,
+            local_muted,
             unread,
             mute_choices: false,
             sms,
@@ -1334,6 +1350,7 @@ impl MessagesApp {
             jid: None,
             title,
             meta: ChatMeta::default(),
+            local_muted: false,
             unread: 0,
             mute_choices: false,
             sms: Some(SmsRowMenu {
@@ -1660,6 +1677,14 @@ impl MessagesApp {
         cx: &mut Context<Self>,
     ) {
         self.row_menu = None;
+        if matches!(action, ChatActionKind::Unmute) {
+            let tag = notifications::thread_tag(&ThreadId::WhatsApp(jid.to_owned()));
+            self.backend.update(cx, |backend, cx| {
+                if backend.prefs().is_muted(&tag) {
+                    backend.update_prefs(cx, |prefs| prefs.set_muted(&tag, false));
+                }
+            });
+        }
         if matches!(action, ChatActionKind::Archive { archived: true })
             && matches!(&self.open, Open::WhatsApp(open, _) if open == jid)
         {
@@ -1934,7 +1959,7 @@ impl MessagesApp {
                 )
                 .into_any_element(),
             );
-            if meta.is_muted(now) {
+            if inbox::wa_muted(Some(meta), menu.local_muted, now) {
                 items.push(
                     action(
                         "menu-unmute",
@@ -2350,6 +2375,30 @@ impl MessagesApp {
             return;
         };
         let tag = notifications::thread_tag(&thread);
+        if let ThreadId::WhatsApp(jid) = &thread {
+            let local = self.backend.read(cx).prefs().is_muted(&tag);
+            let meta = self.wa_info.get(jid).map(|info| info.meta.clone());
+            match inbox::wa_bell(meta.as_ref(), local, now_ms()) {
+                inbox::BellToggle::Mute => {
+                    self.chat_action(jid, ChatActionKind::Mute { until_ms: None }, false, cx)
+                }
+                inbox::BellToggle::Unmute { gateway, local } => {
+                    if gateway {
+                        self.chat_action(jid, ChatActionKind::Unmute, false, cx);
+                    } else {
+                        if local {
+                            self.backend.update(cx, |backend, cx| {
+                                backend.update_prefs(cx, |prefs| prefs.set_muted(&tag, false));
+                            });
+                        }
+                        self.show_pill("Unmuted");
+                    }
+                }
+            }
+            self.sync_open_page(cx);
+            cx.notify();
+            return;
+        }
         self.backend.update(cx, |backend, cx| {
             backend.update_prefs(cx, |prefs| {
                 let muted = !prefs.is_muted(&tag);
@@ -2362,9 +2411,17 @@ impl MessagesApp {
     fn sync_open_page(&mut self, cx: &mut Context<Self>) {
         let (muted, queue) = {
             let backend = self.backend.read(cx);
-            let muted = self
-                .open_thread_id(cx)
-                .is_some_and(|t| backend.prefs().is_muted(&notifications::thread_tag(&t)));
+            let muted = self.open_thread_id(cx).is_some_and(|t| {
+                let local = backend.prefs().is_muted(&notifications::thread_tag(&t));
+                match &t {
+                    ThreadId::WhatsApp(jid) => inbox::wa_muted(
+                        self.wa_info.get(jid).map(|info| &info.meta),
+                        local,
+                        now_ms(),
+                    ),
+                    ThreadId::Sms(_) => local,
+                }
+            });
             (muted, backend.queue().items().to_vec())
         };
         match &self.open {

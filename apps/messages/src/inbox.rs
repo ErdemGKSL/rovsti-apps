@@ -606,14 +606,12 @@ pub fn wa_muted(meta: Option<&ChatMeta>, local: bool, now_ms: i64) -> bool {
 
 /// What the bell inside a WhatsApp chat does next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub enum BellToggle {
     Mute,
     Unmute { gateway: bool, local: bool },
 }
 
 /// Mute when nothing mutes the chat; else unmute whichever mutes it.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn wa_bell(meta: Option<&ChatMeta>, local: bool, now_ms: i64) -> BellToggle {
     let gateway = meta.is_some_and(|m| m.is_muted(now_ms));
     if gateway || local {
@@ -621,6 +619,24 @@ pub fn wa_bell(meta: Option<&ChatMeta>, local: bool, now_ms: i64) -> BellToggle 
     } else {
         BellToggle::Mute
     }
+}
+
+/// JIDs muted only on the gateway (no local tag), sorted, for Settings > Muted.
+pub fn gateway_muted_jids(
+    wa: &HashMap<String, WaChatInfo>,
+    local_tags: &BTreeSet<String>,
+    now_ms: i64,
+) -> Vec<String> {
+    let mut jids: Vec<String> = wa
+        .iter()
+        .filter(|(jid, info)| {
+            info.meta.is_muted(now_ms)
+                && !local_tags.contains(&thread_tag(&ThreadId::WhatsApp((*jid).clone())))
+        })
+        .map(|(jid, _)| jid.clone())
+        .collect();
+    jids.sort();
+    jids
 }
 
 fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView {
@@ -1492,6 +1508,32 @@ mod tests {
         );
         assert!(wa_muted(None, true, NOW));
         assert!(!wa_muted(Some(&expired), false, NOW));
+    }
+
+    #[test]
+    fn gateway_muted_jids_skip_local_tags() {
+        let mute = |until: i64| WaChatInfo {
+            meta: ChatMeta {
+                muted_until_ms: Some(until),
+                ..ChatMeta::default()
+            },
+            ..WaChatInfo::default()
+        };
+        let wa: HashMap<String, WaChatInfo> = [
+            ("b@s.whatsapp.net".to_owned(), mute(MUTED_FOREVER)),
+            ("a@s.whatsapp.net".to_owned(), mute(MUTED_FOREVER)),
+            ("c@s.whatsapp.net".to_owned(), mute(NOW - 1)),
+            ("d@s.whatsapp.net".to_owned(), mute(MUTED_FOREVER)),
+        ]
+        .into();
+        let local: BTreeSet<String> = [thread_tag(&ThreadId::WhatsApp(
+            "d@s.whatsapp.net".to_owned(),
+        ))]
+        .into();
+        assert_eq!(
+            gateway_muted_jids(&wa, &local, NOW),
+            ["a@s.whatsapp.net", "b@s.whatsapp.net"]
+        );
     }
 
     #[test]

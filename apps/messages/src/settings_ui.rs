@@ -57,6 +57,8 @@ const MIME: &str = "application/octet-stream";
 pub enum SettingsEvent {
     /// The row that points at the WhatsApp tab was tapped.
     OpenWhatsApp,
+    /// A WhatsApp chat muted on the gateway was tapped in Muted: unmute it there.
+    UnmuteWhatsApp(String),
     /// Something was removed; the pill offers to put it back.
     Undoable {
         text: SharedString,
@@ -192,6 +194,8 @@ pub struct SettingsView {
     reset_confirm: bool,
     /// WhatsApp chat titles by JID, for the names in Muted.
     wa_titles: HashMap<String, String>,
+    /// WhatsApp JIDs muted on the gateway only (not by a local tag).
+    wa_muted: Vec<String>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -200,6 +204,14 @@ impl SettingsView {
     pub fn set_wa_titles(&mut self, titles: HashMap<String, String>, cx: &mut Context<Self>) {
         if self.wa_titles != titles {
             self.wa_titles = titles;
+            cx.notify();
+        }
+    }
+
+    /// WhatsApp chats muted on the gateway only, so Muted lists them too.
+    pub fn set_wa_muted(&mut self, jids: Vec<String>, cx: &mut Context<Self>) {
+        if self.wa_muted != jids {
+            self.wa_muted = jids;
             cx.notify();
         }
     }
@@ -247,6 +259,7 @@ impl SettingsView {
             restore: None,
             reset_confirm: false,
             wa_titles: HashMap::new(),
+            wa_muted: Vec::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -809,6 +822,29 @@ impl SettingsView {
                         text: "Unmuted".into(),
                         undo: SettingsUndo::Mute(owned.clone()),
                     });
+                }))
+                .into_any_element(),
+            );
+        }
+        for (index, jid) in self.wa_muted.iter().enumerate() {
+            let owned = jid.clone();
+            let title = self
+                .wa_titles
+                .get(jid)
+                .filter(|n| !n.trim().is_empty())
+                .cloned()
+                .unwrap_or_else(|| format!("WhatsApp {}", jid_user(jid)));
+            rows.push(
+                list_row(
+                    theme,
+                    None,
+                    format!("Muted: {title}"),
+                    Some("Tap to unmute".into()),
+                    None,
+                )
+                .id(("set-muted-wa", index))
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(SettingsEvent::UnmuteWhatsApp(owned.clone()));
                 }))
                 .into_any_element(),
             );

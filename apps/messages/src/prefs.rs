@@ -114,8 +114,6 @@ impl MessagesPrefs {
         }
     }
 
-    /// Adds a sender to the allow list (never spam). `false` when it was empty
-    /// or already there.
     /// Moves the per-thread state of tag `from_tag` to `into_tag` (a merged
     /// chat). Returns `true` when anything changed.
     pub fn rekey_thread(&mut self, from_tag: &str, into_tag: &str) -> bool {
@@ -130,6 +128,8 @@ impl MessagesPrefs {
         changed
     }
 
+    /// Adds a sender to the allow list (never spam). `false` when it was empty
+    /// or already there.
     pub fn allow_sender(&mut self, sender: &str) -> bool {
         let sender = sender.trim();
         if sender.is_empty()

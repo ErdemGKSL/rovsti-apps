@@ -95,7 +95,6 @@ pub fn pill_on_failure(was_failed: bool, now_failed: bool) -> bool {
 }
 
 /// The snooze button label; `None` when no snoozes are left.
-#[allow(dead_code)] // wired up by a later step
 pub fn snooze_label(minutes: u8, left: u8) -> Option<String> {
     (left > 0).then(|| format!("Snooze {} min", minutes.clamp(1, 15)))
 }
@@ -547,7 +546,8 @@ impl StopsApp {
     ) -> Option<AnyElement> {
         let alarm = self.alarm.clone()?;
         let colors = theme::colors(theme);
-        let snooze = format!("Snooze {} min", self.prefs.snooze_min.clamp(1, 15));
+        let left = self.trip.as_ref().map_or(1, ActiveTrip::snoozes_left);
+        let snooze = snooze_label(self.prefs.snooze_min, left);
         let distance = alarm.distance_m.map(distance_text);
         let crossed_to = crossed_to_text(alarm.side);
         let notice_failed = self
@@ -622,15 +622,27 @@ impl StopsApp {
                                             this.alarm_action(AlarmAction::Dismiss, cx);
                                         })),
                                 )
-                                .child(
-                                    glass_pill(theme, snooze)
-                                        .id("alarm-snooze")
-                                        .w_full()
-                                        .h(px(64.0))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.alarm_action(AlarmAction::Snooze, cx);
-                                        })),
-                                ),
+                                .children(match snooze {
+                                    Some(label) => Some(
+                                        glass_pill(theme, label)
+                                            .id("alarm-snooze")
+                                            .w_full()
+                                            .h(px(64.0))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.alarm_action(AlarmAction::Snooze, cx);
+                                            }))
+                                            .into_any_element(),
+                                    ),
+                                    None => Some(
+                                        div()
+                                            .w_full()
+                                            .text_center()
+                                            .text_size(typography::FOOTNOTE.size)
+                                            .text_color(colors.secondary_label)
+                                            .child("No snoozes left")
+                                            .into_any_element(),
+                                    ),
+                                }),
                         ),
                 )
                 .into_any_element(),
@@ -983,6 +995,23 @@ impl StopsApp {
     /// Hides the alarm until `at_ms`, then rings again if the trip is still on.
     fn on_snoozed(&mut self, at_ms: i64, cx: &mut Context<Self>) {
         self.alarm = None;
+        if let Some(dir) = self.dir.clone() {
+            // Only the snooze count changes; the rest of the trip stays as is.
+            cx.spawn(async move |this, cx| {
+                let (trip, _) = cx
+                    .background_executor()
+                    .spawn(async move { backend::reload_trip(&dir) })
+                    .await;
+                this.update(cx, |this, cx| {
+                    if let (Some(t), Some(new)) = (this.trip.as_mut(), trip) {
+                        t.snoozes = new.snoozes;
+                        cx.notify();
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        }
         let now = now_ms();
         self.show_pill(snooze_text(at_ms, now), None, cx);
         let wait = Duration::from_millis((at_ms - now).max(0) as u64);

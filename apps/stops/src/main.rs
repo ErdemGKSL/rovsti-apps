@@ -472,7 +472,10 @@ impl StopsApp {
             self.relocating = None;
             cx.notify();
         } else if self.alarm.is_some() {
-            self.alarm_action(AlarmAction::Snooze, cx);
+            // With no snoozes left Back does nothing; the alarm stays.
+            if self.trip.as_ref().is_none_or(|t| t.snoozes_left() > 0) {
+                self.alarm_action(AlarmAction::Snooze, cx);
+            }
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
         } else if self.tabs.selected() == 2

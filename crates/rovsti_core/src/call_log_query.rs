@@ -1,6 +1,7 @@
 //! Recents search, filters and CSV export. Pure logic, no platform types.
 
 use crate::call_log::{CallType, RecentsRow, civil_from_days, format_duration};
+use crate::call_notes::Notes;
 use crate::recents::ExtraCall;
 use crate::search::fold;
 use crate::wire::{CallLogEntry, CallLogKind};
@@ -112,6 +113,7 @@ pub fn empty_text(query: &Query) -> String {
 }
 
 const HEADER: &str = "date,time,direction,name,number,duration_s,duration,channel";
+const NOTE_HEADER: &str = ",note";
 
 /// Escapes one text cell: injection guard first, then RFC 4180 quoting.
 fn cell(raw: &str) -> String {
@@ -157,6 +159,25 @@ fn local_date(ms: i64, tz_offset_s: i32) -> (String, String) {
 
 /// CSV of the call log and the WhatsApp calls, newest first, local time.
 pub fn to_csv(entries: &[CallLogEntry], extras: &[ExtraCall], tz_offset_s: i32) -> String {
+    csv(entries, extras, tz_offset_s, None)
+}
+
+/// Like `to_csv`, with a trailing `note` column filled from `notes`.
+pub fn to_csv_with_notes(
+    entries: &[CallLogEntry],
+    extras: &[ExtraCall],
+    tz_offset_s: i32,
+    notes: &Notes,
+) -> String {
+    csv(entries, extras, tz_offset_s, Some(notes))
+}
+
+fn csv(
+    entries: &[CallLogEntry],
+    extras: &[ExtraCall],
+    tz_offset_s: i32,
+    notes: Option<&Notes>,
+) -> String {
     struct Line<'a> {
         ms: i64,
         direction: &'static str,
@@ -188,11 +209,14 @@ pub fn to_csv(entries: &[CallLogEntry], extras: &[ExtraCall], tz_offset_s: i32) 
     lines.sort_by_key(|l| std::cmp::Reverse(l.ms));
 
     let mut out = String::from(HEADER);
+    if notes.is_some() {
+        out.push_str(NOTE_HEADER);
+    }
     out.push_str("\r\n");
     for l in lines {
         let (date, time) = local_date(l.ms, tz_offset_s);
         out.push_str(&format!(
-            "{date},{time},{},{},{},{},{},{}\r\n",
+            "{date},{time},{},{},{},{},{},{}",
             l.direction,
             cell(l.name),
             cell(l.number),
@@ -200,6 +224,14 @@ pub fn to_csv(entries: &[CallLogEntry], extras: &[ExtraCall], tz_offset_s: i32) 
             format_duration(l.duration_s),
             l.channel
         ));
+        if let Some(notes) = notes {
+            let note = notes
+                .find(l.number, l.ms)
+                .map_or("", |i| notes.notes[i].text.as_str());
+            out.push(',');
+            out.push_str(&cell(note));
+        }
+        out.push_str("\r\n");
     }
     out
 }
@@ -404,5 +436,22 @@ mod tests {
     fn grouped_rows_work_with_filters() {
         let rows = group(&[entry(1, "+905551234567", CallLogKind::Missed, 5)]);
         assert_eq!(apply(&rows, &q("", RecentsFilter::Missed)), vec![0]);
+    }
+
+    #[test]
+    fn csv_with_notes_adds_guarded_column() {
+        let a = entry(1, "+905551234567", CallLogKind::Outgoing, 1_700_000_000_000);
+        let b = entry(2, "+905559999999", CallLogKind::Incoming, 1_700_000_100_000);
+        let c = entry(3, "+905550000000", CallLogKind::Incoming, 1_700_000_200_000);
+        let mut notes = Notes::default();
+        notes.set("05551234567", 1_700_000_010_000, "=cmd, \"x\"", 0);
+        notes.set("+905559999999", 1_700_000_100_000, "plain", 0);
+        let csv = to_csv_with_notes(&[a.clone(), b, c], &[], 0, &notes);
+        let lines: Vec<&str> = csv.split("\r\n").collect();
+        assert_eq!(lines[0], format!("{HEADER},note"));
+        assert!(lines[1].ends_with(",phone,"));
+        assert!(lines[2].ends_with(",phone,plain"));
+        assert!(lines[3].ends_with(",phone,\"'=cmd, \"\"x\"\"\""));
+        assert_eq!(to_csv(&[a], &[], 0).lines().next(), Some(HEADER));
     }
 }

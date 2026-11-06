@@ -102,6 +102,18 @@ struct RowMenu {
     sms: Option<SmsRowMenu>,
     /// "Delete conversation" asked: the confirmation shows instead.
     delete_confirm: bool,
+    /// The phone number of a 1:1 WhatsApp chat page's menu (Call, Add to contacts).
+    page_number: Option<String>,
+    /// Android contact id of `page_number`, when it is in the address book.
+    contact_id: Option<i64>,
+}
+
+/// The phone number behind a 1:1 WhatsApp chat JID. Groups, channels and hidden-number (LID)
+/// chats have none.
+fn wa_page_number(jid: &str) -> Option<String> {
+    let user = jid.strip_suffix("@s.whatsapp.net")?;
+    let user = user.split(':').next().unwrap_or(user);
+    (!user.is_empty() && user.bytes().all(|b| b.is_ascii_digit())).then(|| format!("+{user}"))
 }
 
 /// The SMS part of a row menu.
@@ -821,6 +833,7 @@ impl MessagesApp {
             ConversationEvent::Schedule(text) => this.ask_schedule_whatsapp(text.clone(), cx),
             ConversationEvent::CancelScheduled(key) => this.cancel_scheduled(key.clone(), cx),
             ConversationEvent::ToggleMute => this.toggle_open_mute(cx),
+            ConversationEvent::Menu => this.open_wa_page_menu(cx),
             ConversationEvent::Copy(text) => this.copy_text(text.clone().into(), false, cx),
             ConversationEvent::Notice(text) => {
                 this.show_pill(text.clone());
@@ -1075,6 +1088,8 @@ impl MessagesApp {
             mute_choices: false,
             sms,
             delete_confirm: false,
+            page_number: None,
+            contact_id: None,
         });
         cx.notify();
     }
@@ -1166,6 +1181,63 @@ impl MessagesApp {
         cx.notify();
     }
 
+    /// The open WhatsApp page's more button: the chat menu plus Call and contact for 1:1 chats.
+    fn open_wa_page_menu(&mut self, cx: &mut Context<Self>) {
+        let Open::WhatsApp(jid, conversation) = &self.open else {
+            return;
+        };
+        let jid = jid.clone();
+        let title = conversation.read(cx).title();
+        self.open_row_menu(Some(jid.clone()), None, title, cx);
+        let number = wa_page_number(&jid);
+        let contact_id = number.as_deref().and_then(|n| {
+            self.backend
+                .read(cx)
+                .contacts()
+                .match_number(n)
+                .map(|c| c.id)
+        });
+        if let Some(menu) = &mut self.row_menu {
+            menu.page_number = number;
+            menu.contact_id = contact_id;
+        }
+        cx.notify();
+    }
+
+    /// Call or Add/Open contact from a WhatsApp page menu.
+    fn wa_page_contact_action(&mut self, action: sms_actions::SmsAction, cx: &mut Context<Self>) {
+        let Some(menu) = self.row_menu.take() else {
+            return;
+        };
+        let Some(number) = menu.page_number else {
+            return;
+        };
+        match (action, menu.contact_id) {
+            (sms_actions::SmsAction::AddContact, Some(contact_id)) => {
+                let task = cx
+                    .background_executor()
+                    .spawn(async move { rovsti_android::telecom::edit_contact(contact_id) });
+                cx.spawn(async move |this, cx| {
+                    let result = task.await;
+                    this.update(cx, |this, cx| {
+                        match result {
+                            Ok(true) => {}
+                            Err(rovsti_android::Error::Unsupported) => {
+                                this.show_pill("Contacts need an Android phone.");
+                            }
+                            Ok(false) | Err(_) => this.show_pill("Couldn't open that contact."),
+                        }
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            _ => self.telecom_action(action, number, cx),
+        }
+        cx.notify();
+    }
+
     /// The open SMS page's more button: its menu (Call, Add to contacts, Block, Delete).
     fn open_page_menu(&mut self, cx: &mut Context<Self>) {
         let Open::Sms(conversation) = &self.open else {
@@ -1210,6 +1282,8 @@ impl MessagesApp {
                 blocked,
             }),
             delete_confirm: false,
+            page_number: None,
+            contact_id: None,
         });
         cx.notify();
     }
@@ -1476,6 +1550,11 @@ impl MessagesApp {
     /// gateway (its `chat_meta` event confirms it on every device).
     fn chat_action(&mut self, jid: &str, action: ChatActionKind, cx: &mut Context<Self>) {
         self.row_menu = None;
+        if matches!(action, ChatActionKind::Archive { archived: true })
+            && matches!(&self.open, Open::WhatsApp(open, _) if open == jid)
+        {
+            self.close_page(cx);
+        }
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             self.show_pill("WhatsApp is not connected");
             cx.notify();
@@ -1779,6 +1858,33 @@ impl MessagesApp {
                 )
                 .into_any_element(),
             );
+            if menu.page_number.is_some() {
+                items.push(
+                    menu_item(
+                        theme,
+                        "menu-wa-call",
+                        Icon::LucidePhone,
+                        "Call".into(),
+                        colors.label,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.wa_page_contact_action(sms_actions::SmsAction::Call, cx);
+                    }))
+                    .into_any_element(),
+                );
+                let (icon, label) = if menu.contact_id.is_some() {
+                    (Icon::LucideUser, "Open contact")
+                } else {
+                    (Icon::LucideUserPlus, "Add to contacts")
+                };
+                items.push(
+                    menu_item(theme, "menu-wa-contact", icon, label.into(), colors.label)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.wa_page_contact_action(sms_actions::SmsAction::AddContact, cx);
+                        }))
+                        .into_any_element(),
+                );
+            }
         }
     }
 
@@ -3206,6 +3312,21 @@ mod tests {
             contact_id: None,
             blocked: false,
         }
+    }
+
+    #[test]
+    fn wa_page_number_only_for_plain_one_to_one_jids() {
+        assert_eq!(
+            wa_page_number("905321234567@s.whatsapp.net").as_deref(),
+            Some("+905321234567")
+        );
+        assert_eq!(
+            wa_page_number("905321234567:12@s.whatsapp.net").as_deref(),
+            Some("+905321234567")
+        );
+        assert_eq!(wa_page_number("123-456@g.us"), None);
+        assert_eq!(wa_page_number("998877@lid"), None);
+        assert_eq!(wa_page_number("@s.whatsapp.net"), None);
     }
 
     #[test]

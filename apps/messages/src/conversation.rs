@@ -96,6 +96,8 @@ pub enum ConversationEvent {
     CancelScheduled(StripKey),
     /// The header's bell: mute or unmute this chat's notifications.
     ToggleMute,
+    /// The header's more button: the chat's menu.
+    Menu,
     /// The Copy pill of a message: the page puts the text on the clipboard.
     Copy(String),
     /// A short message for the page's pill (save results).
@@ -377,6 +379,11 @@ impl Conversation {
             self.muted = muted;
             cx.notify();
         }
+    }
+
+    /// The chat title shown in the header.
+    pub fn title(&self) -> SharedString {
+        self.title.clone()
     }
 
     /// Unsent composer text worth keeping (nothing while editing a message).
@@ -2390,6 +2397,10 @@ impl Render for Conversation {
                 }))
                 .into_any_element()
         });
+        let more = glass_icon_button(theme, Icon::LucideEllipsis, 0.0, false)
+            .id("conv-more")
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::Menu)))
+            .into_any_element();
         let mute = glass_icon_button(theme, Icon::LucideBellOff, 0.0, self.muted)
             .id("conv-mute")
             .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::ToggleMute)))
@@ -2399,6 +2410,7 @@ impl Render for Conversation {
             .items_center()
             .gap(px(8.0))
             .children(switch)
+            .child(more)
             .child(mute)
             .into_any_element();
         let avatar = self.header_avatar(theme, cx);

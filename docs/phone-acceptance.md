@@ -385,3 +385,16 @@ that accepts photo writes (the system Contacts app does).
 - On a connected or held call with a number, tap "Note" under the status line, type, press Done: the pill says "Note saved" and the capsule shows a check.
 - A call that lasts longer than the 2 minute match window after ringing still gets its note in the call log, because the note is keyed by the time the call rang or was placed, which is the log's `DATE`.
 - Hold the caller's name or number for about half a second: "Number copied". A private caller shows "No number to copy".
+
+## Round 6 utilities (U44-U50)
+
+| ID | Steps | Expected | Result | Notes |
+|---|---|---|---|---|
+| R6-U44 | Open Call details of a missed call, tap "Remind me", pick a time. Open it again. | A reminder is set with a pill; the button now reads "Cancel reminder"; tapping it cancels with an Undo pill. Hidden for private numbers. | | |
+| R6-U45a | Recents, select three rows, tap Block, confirm. | Confirm says "Block 3 numbers?"; Yes leaves select mode and shows "Blocked 3 numbers" with Undo; Undo unblocks them. Cancel changes nothing. | | |
+| R6-U45b | Select rows, tap Share. | Share sheet lists one "Name: number" line per number (private and repeated rows left out). Select mode stays on. | | |
+| R6-U46 | Settings, Call statistics, tap a bar (a day, or a week on the 8-week range). | A sheet titled with the day or week lists that bucket's calls and a summary; tapping a call opens its Number sheet. Bars without calls do nothing. | | |
+| R6-U48 | Receive or view a call from an unsaved foreign number (for example +49). | "Germany" shows under the number in Recents, the Number sheet, Call details and the Incoming screen. A home-country number and a saved contact show no country. | | |
+| R6-U49 | Copy "PIN 4821#" in Messages, join a call, open the in-call keypad. Tap "Paste 4821#", then try again and tap Stop mid-way. | Tones play and the digit line fills; the pill says "Sent 5 tones". Stop halts the tones and shows "Stopped sending tones". The button is absent on WhatsApp calls and with no digits on the clipboard. | | |
+| R6-U50 | Hold the digit line on the in-call keypad. | "Copied tones" and the clipboard holds the digits. Nothing happens when empty. | | |
+| R6-fb | Run U44-U50 on a desktop preview. | Android-only actions show "Not available on this platform". | | |

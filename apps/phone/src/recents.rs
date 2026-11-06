@@ -1212,7 +1212,7 @@ impl PhoneApp {
                     self.open_confirm_delete(scope, cx);
                 }
             }
-            SEL_SHARE => self.recents_select_share(cx),
+            SEL_SHARE => self.recents_select_share(window, cx),
             SEL_BLOCK => self.recents_select_block_ask(window, cx),
             _ => {}
         }
@@ -1229,7 +1229,7 @@ impl PhoneApp {
     }
 
     /// Share: one line per chosen number through the share sheet. Select mode stays on.
-    fn recents_select_share(&mut self, cx: &mut Context<Self>) {
+    fn recents_select_share(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let r = &self.recents;
         let Some(sel) = r.select.as_ref() else {
             return;
@@ -1249,6 +1249,7 @@ impl PhoneApp {
             );
             return;
         }
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
         let outcome = backend::share_text(&text);
         if outcome != backend::Outcome::Done {
             self.show_notice_pill(

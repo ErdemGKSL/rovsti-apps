@@ -82,12 +82,12 @@ New gaps found in this audit:
 | U42 | Notes page Export CSV | done R5 |
 | U43 | Settings > Data "Delete older calls", confirm and Undo | done R5 |
 | U47 | Keypad long-press Call: SIM choice / WhatsApp | done (pre-existing `SimChooser`, `wa-call` chip) |
-| U48 | Country of an unknown international number (Recents row, Number sheet, Call details, Incoming) | R6 (S1, S3, S7) |
-| U49 | In-call keypad "Paste": send a copied PIN/extension as tones, with Stop | R6 (S1, S6) |
-| U45 | Recents select mode: "Block" and "Share" for the chosen rows (confirm + Undo for Block) | R6 (S2, S4) |
-| U46 | Stats page: tap a bar to list that day's (or week's) calls | R6 (S2, S5) |
-| U44 | Call details: "Remind me" / "Cancel reminder" on a missed call | R6 (S3) |
-| U50 | In-call keypad: long-press the digit line to copy the typed tones | R6 (S6) |
+| U48 | Country of an unknown international number (Recents row, Number sheet, Call details, Incoming) | done R6 |
+| U49 | In-call keypad "Paste": send a copied PIN/extension as tones, with Stop | done R6 |
+| U45 | Recents select mode: "Block" and "Share" for the chosen rows (confirm + Undo for Block) | done R6 |
+| U46 | Stats page: tap a bar to list that day's (or week's) calls | done R6 |
+| U44 | Call details: "Remind me" / "Cancel reminder" on a missed call | done R6 |
+| U50 | In-call keypad: long-press the digit line to copy the typed tones | done R6 |
 | U51 | Remember tones per number: after a paste on a number, offer "Send 4821#" next time it connects | backlog R7 |
 | U52 | Stats page "Records" card: longest call, busiest day, most called this range | backlog R7 |
 | U53 | Keypad field menu gains "Share" and "Copy as +E.164" for the typed number | backlog R7 |

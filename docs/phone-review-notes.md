@@ -58,3 +58,21 @@ desktop wording through `Outcome::why_not`.
 
 Tests: pure texts and parsers have in-module tests in `rovsti_core`; `export_calls_pill` per kind
 and the new control ids are covered in `apps/phone`.
+
+## Utilities feedback audit (R6)
+
+Audit of U44-U50 for a pill on success and failure, haptics, confirm and Undo on destructive actions,
+the desktop `Unsupported` wording and screen-reader labels.
+
+| Utility | Gap | Fix |
+|---|---|---|
+| U45 Share selected | Opened the share sheet without a haptic. | Selection tick before the sheet opens; failure keeps `why_not("Couldn't open the share sheet")`. |
+| U45 Block selected | None. Confirm sheet with the count, Confirm haptic on Yes, "Blocked n numbers" pill with Undo (`UnblockAll`), "Already blocked" / "No numbers to block or share" when nothing is new, "Not available on this platform" on desktop. Tool buttons carry aria labels and `aria_disabled`. | No change. |
+| U49 Paste tones | Start and Stop gave no haptic, and Stop gave no pill. | Selection tick on both; Stop shows "Stopped sending tones". Completion keeps the Confirm haptic and "Sent n tones" pill. |
+| U50 Copy tones | The digit line had no role or label for screen readers. | `ic-digits` is a button labelled "Typed tones, hold to copy". LongPress haptic and "Copied tones" pill were already there. |
+| U44 Remind me | None. Selection tick, RemindPick sheet, "Cancel reminder" pill with Undo. Hidden when the number cannot get a reminder. | No change. |
+| U46 Stats bar tap | None. Bars with calls are buttons (aria label names the bucket), Selection tick, empty bars inert. | No change. |
+| U48 Country caption | Read-only text, no feedback needed. | No change. |
+
+Tests: pure logic (`calling_code`, `tone_plan`, `Selection::numbers`, `calls_in`, `bucket_title`) has
+in-module tests in `rovsti_core`; control ids and labels are covered in `apps/phone`.

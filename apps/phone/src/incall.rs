@@ -1749,8 +1749,10 @@ impl PhoneApp {
                     && zone.enabled(Slot::Keypad)
                     && paste_shown(live, true, self.incall.paste_label.as_deref()) =>
             {
+                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
                 if self.incall.pasting {
                     self.stop_paste(cx);
+                    self.show_notice_pill("Stopped sending tones", None, false, cx);
                 } else {
                     self.start_paste(call_id, window, cx);
                 }
@@ -2428,6 +2430,8 @@ impl PhoneApp {
             .child(
                 div()
                     .id("ic-digits")
+                    .role(Role::Button)
+                    .aria_label("Typed tones, hold to copy")
                     .relative()
                     .h(px(36.0))
                     .text_size(px(28.0))

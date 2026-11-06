@@ -61,6 +61,21 @@ FCM delivery on HyperOS all need hardware. Only checks and unit tests ran here.
      the four companion slots. It is also a second client racing the phone's
      client to answer.
 
+## LIDs are not phone numbers (2026-11)
+
+WhatsApp keys some chats by LID (`...@lid`). The digits look like a number but are not
+one: showing `+96413459456093` was a bug that also split one person into two chats.
+Rules:
+
+- The gateway maps LID to phone-number JID wherever it can and merges stored LID chats
+  into the phone-number chat (`chat_merged` event). Details in
+  `docs/whatsapp-gateway.md`, "LID resolution and chat merge".
+- Apps never format a LID as a phone number and merge by number only for real
+  `@s.whatsapp.net` JIDs (`rovsti_wa_proto::is_pn_jid`).
+- A chat that is still LID-only shows the contact name, else the WhatsApp push name,
+  else "WhatsApp user" (`WHATSAPP_USER_LABEL`), never a `+`.
+- On `chat_merged`, apps move drafts, pins and mutes to the surviving id.
+
 ## Conflicts to resolve before planning
 
 - `CLAUDE.md` and the README say "everything is local and serverless, do not

@@ -261,6 +261,9 @@ Live, new event types carry the same data; older clients skip them:
 - `chat_meta {jid, meta}`: archive, pin, mute or unread mark changed here or on
   another device (WhatsApp app-state sync).
 - `chat_deleted {jid}`, `chat_cleared {jid}`: done on another device.
+- `chat_merged {from, into}`: the LID chat `from` was merged into the phone-number chat
+  `into`. Clients move local state (drafts, pins, mutes, the open conversation) from
+  `from` to `into` and refetch chats. Older clients skip the unknown event.
 - `profile {jid, push_name, contact_name, about, picture_id, ...}`: a push name,
   about text, saved name or picture changed. A new `picture_id` means a cached
   picture is stale.
@@ -282,6 +285,31 @@ History syncs bring each message's
 ticks, star and reactions, each chat's archive, pin and mute state, and push names.
 Chats WhatsApp keys by LID are stored under the phone-number JID when WhatsApp
 tells it, so they match address-book contacts.
+
+### LID resolution and chat merge
+
+A LID (`96413459456093@lid`) is WhatsApp's private id for a person. It is not a phone
+number, even when it is all digits. Every chat, sender, author and participant id the
+gateway produces goes through `wa/lid.rs`: a LID with a known mapping becomes
+`<number>@s.whatsapp.net`, the device suffix (`:5`) is dropped, groups, broadcasts and
+phone-number JIDs are untouched, and a LID without a mapping stays a LID. The mapping
+comes from whatsapp-rust's `Client::get_lid_pn_entry` (cache, then its store), with the
+message's `sender_alt`/`recipient_alt` as a fallback. The mapping wins over the alt.
+
+whatsapp-rust has no "mapping learned" event, so mappings are looked up lazily and the
+stored LID chats are swept on every connect (this is also the one-time startup
+migration, and it is idempotent), after each history sync, on `DeviceListUpdate` and
+`ContactNumberChanged`, and when a message arrives for a LID the resolver had not seen.
+The sweep logs `lid-merge: startup sweep merged N of M LID chats`.
+
+Merging (`Store::merge_chat(from, into)`, one transaction) moves the LID chat's messages,
+reactions and receipts to the phone-number chat (deduplicated by message id, the existing
+row wins), rewrites sender and participant ids, sums the unread counters, keeps the newer
+`last_ms` and the name, carries settings (pin, archive, mute), profile names and scheduled
+texts over, and deletes the LID chat. A second call is a no-op. Sends keep working with
+either id: the store key is the resolved id, the wire target is what the app sent.
+
+Event `chat_merged {from, into}` (see below) tells clients to move local state.
 
 `rovsti_wa_proto::Timeline::apply_rich_page` and `Timeline::meta(id)` keep the meta
 next to the timeline and apply `message_meta`, `message_deleted` and `chat_cleared`.

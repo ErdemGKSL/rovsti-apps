@@ -1,4 +1,5 @@
-//! The map: a vector "radar" drawn with `canvas` and `PathBuilder` (no tiles).
+//! The map: a vector "radar" drawn with `canvas` and `PathBuilder`, over vector
+//! map tiles where they are loaded (the radar look shows where they are not).
 //!
 //! It shows where you are with the accuracy of the fix, the circle on AB,
 //! the breadcrumb of this trip, the A and B pins and, after a transit
@@ -17,7 +18,14 @@ use gpui::{
     StatefulInteractiveElement, Styled, Task, TouchEvent, TouchPhase, Window, canvas, div, point,
     px, quad,
 };
-use rovsti_geo::{Coord, Diameter, EARTH_RADIUS_M, Feed, Side, Stop, view::Viewport};
+use rovsti_geo::{
+    Coord, Diameter, EARTH_RADIUS_M, Feed, Side, Stop,
+    tiles::{
+        ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileGeometry, TileLayer,
+        build_layer, line_width, tiles_for_view,
+    },
+    view::Viewport,
+};
 use rovsti_ui::{
     components::flat_glass,
     theme,
@@ -438,6 +446,8 @@ pub struct Scene {
     pub trail: Vec<(f32, f32)>,
     pub stops: Vec<(f32, f32)>,
     pub line: Vec<(f32, f32)>,
+    /// Map tiles under everything else; empty where none are loaded.
+    pub tiles: TileLayer,
 }
 
 /// The circle with AB as its diameter, in pixels from the view centre.
@@ -496,7 +506,18 @@ pub struct SceneInput<'a> {
     pub trail: &'a Breadcrumb,
     pub feed: Option<&'a Feed>,
     pub pattern: Option<u32>,
+    /// Loaded map tiles under the scene.
+    pub tiles: &'a [&'a TileGeometry],
 }
+
+/// Vertices of tile geometry kept per frame; the rest is dropped by priority.
+const TILE_MAX_VERTICES: usize = 60_000;
+/// Tiles asked for per view.
+const VIEW_TILE_CAP: usize = 24;
+/// Points in one painted path; the GPU index buffer holds 16 bits.
+const PATH_POINT_CAP: usize = 8_000;
+/// How much wider than the line its casing is, in px.
+const CASING_EXTRA_PX: f32 = 1.5;
 
 impl Scene {
     pub fn build(input: &SceneInput<'_>) -> Self {
@@ -534,6 +555,7 @@ impl Scene {
             trail: thin_polyline(&trail, TRAIL_MIN_PX),
             stops,
             line: thin_polyline(&line, LINE_MIN_PX),
+            tiles: build_layer(input.tiles, vp, input.size, TILE_MAX_VERTICES),
         }
     }
 }
@@ -556,6 +578,8 @@ pub struct Palette {
     left_wash: Hsla,
     right_wash: Hsla,
     halo: Hsla,
+    /// The map tile colours: light is "colorful", dark is "eclipse".
+    style: MapStyle,
 }
 
 /// The colour of a half of the circle; the live card's side chip uses it too.
@@ -590,8 +614,17 @@ impl Palette {
             left_wash: with_alpha(c.accent, 0.18),
             right_wash: with_alpha(c.green, 0.18),
             halo: gpui::white(),
+            style: match theme {
+                Theme::Light => MapStyle::Colorful,
+                Theme::Dark => MapStyle::Eclipse,
+            },
         }
     }
+}
+
+/// A style-table colour as a gpui colour.
+fn style_color(c: Rgba8) -> Hsla {
+    gpui::rgba(c.to_u32()).into()
 }
 
 /// Adds a circle to `path` as two half arcs.
@@ -645,6 +678,149 @@ fn fill_polygon(window: &mut Window, points: &[(f32, f32)], color: Hsla) {
     }
 }
 
+/// Fills `polygons` (each a list of rings: outline first, then holes) in
+/// `color`, even-odd, in paths of at most `PATH_POINT_CAP` points.
+fn fill_polygons(
+    window: &mut Window,
+    polygons: &[Vec<Vec<(f32, f32)>>],
+    to_window: &impl Fn((f32, f32)) -> (f32, f32),
+    color: Hsla,
+) {
+    let mut path = PathBuilder::fill();
+    let mut points = 0;
+    for (i, polygon) in polygons.iter().enumerate() {
+        for ring in polygon.iter().filter(|r| r.len() >= 3) {
+            let pts: Vec<_> = ring
+                .iter()
+                .map(|&p| {
+                    let (x, y) = to_window(p);
+                    point(px(x), px(y))
+                })
+                .collect();
+            path.add_polygon(&pts, true);
+            points += pts.len();
+        }
+        if points >= PATH_POINT_CAP || i + 1 == polygons.len() {
+            let full = std::mem::replace(&mut path, PathBuilder::fill());
+            points = 0;
+            if let Ok(path) = full.build() {
+                window.paint_path(path, color);
+            }
+        }
+    }
+}
+
+/// Strokes `lines` as one path per `PATH_POINT_CAP` points.
+fn stroke_lines(
+    window: &mut Window,
+    lines: &[Vec<(f32, f32)>],
+    to_window: &impl Fn((f32, f32)) -> (f32, f32),
+    width: f32,
+    color: Hsla,
+) {
+    let mut path = PathBuilder::stroke(px(width));
+    let mut points = 0;
+    for (i, line) in lines.iter().enumerate() {
+        if let Some((first, rest)) = line.split_first().filter(|(_, r)| !r.is_empty()) {
+            let (x, y) = to_window(*first);
+            path.move_to(point(px(x), px(y)));
+            for &p in rest {
+                let (x, y) = to_window(p);
+                path.line_to(point(px(x), px(y)));
+            }
+            points += line.len();
+        }
+        if points >= PATH_POINT_CAP || i + 1 == lines.len() {
+            let full = std::mem::replace(&mut path, PathBuilder::stroke(px(width)));
+            points = 0;
+            if let Ok(path) = full.build() {
+                window.paint_path(path, color);
+            }
+        }
+    }
+}
+
+/// One class of the tile layer: fills (with an outline when the style has
+/// one) or lines (casing first, then the line).
+fn paint_class(
+    class: DrawClass,
+    geometry: &ClassGeometry,
+    display_zoom: f64,
+    to_window: &impl Fn((f32, f32)) -> (f32, f32),
+    pal: &Palette,
+    window: &mut Window,
+) {
+    let paint = pal.style.paint(class);
+    match class.shape() {
+        Shape::Fill => {
+            fill_polygons(
+                window,
+                &geometry.polygons,
+                to_window,
+                style_color(paint.color),
+            );
+            if let Some(casing) = paint.casing {
+                let rings: Vec<Vec<(f32, f32)>> = geometry
+                    .polygons
+                    .iter()
+                    .flatten()
+                    .map(|r| r.iter().copied().chain(r.first().copied()).collect())
+                    .collect();
+                stroke_lines(window, &rings, to_window, 1.0, style_color(casing));
+            }
+        }
+        Shape::Line => {
+            let width = line_width(paint.width14, display_zoom);
+            if let Some(casing) = paint.casing {
+                let wide = width + CASING_EXTRA_PX;
+                stroke_lines(
+                    window,
+                    &geometry.lines,
+                    to_window,
+                    wide,
+                    style_color(casing),
+                );
+            }
+            stroke_lines(
+                window,
+                &geometry.lines,
+                to_window,
+                width,
+                style_color(paint.color),
+            );
+        }
+    }
+}
+
+/// The map tiles: backgrounds, then each class from the bottom up.
+fn paint_tiles(
+    layer: &TileLayer,
+    to_window: &impl Fn((f32, f32)) -> (f32, f32),
+    pal: &Palette,
+    window: &mut Window,
+) {
+    if layer.backgrounds.is_empty() {
+        return;
+    }
+    let mut quads = PathBuilder::fill();
+    for quad in &layer.backgrounds {
+        let pts: Vec<_> = quad
+            .iter()
+            .map(|&p| {
+                let (x, y) = to_window(p);
+                point(px(x), px(y))
+            })
+            .collect();
+        quads.add_polygon(&pts, true);
+    }
+    if let Ok(path) = quads.build() {
+        window.paint_path(path, style_color(pal.style.background()));
+    }
+    for (class, geometry) in &layer.groups {
+        paint_class(*class, geometry, layer.display_zoom, to_window, pal, window);
+    }
+}
+
 /// The half-discs, the circle, the diameter and its two ends.
 fn paint_diameter(
     d: &DiameterScene,
@@ -688,7 +864,10 @@ fn paint_scene(scene: &Scene, bounds: Bounds<Pixels>, pal: &Palette, window: &mu
         points.iter().map(|&p| to_window(p)).collect()
     };
 
-    // The chosen line under everything else, then the stops on it.
+    // The map tiles under everything else; where they are missing the plate shows.
+    paint_tiles(&scene.tiles, &to_window, pal, window);
+
+    // The chosen line, then the stops on it.
     stroke_line(window, &to_window_all(&scene.line), 3.5, pal.line);
 
     if !scene.stops.is_empty() {
@@ -927,6 +1106,10 @@ impl StopsApp {
             }
         }
         let viewport = self.map.viewport;
+        let cover = tiles_for_view(&viewport, size, VIEW_TILE_CAP);
+        self.map_tiles.request_view(&cover, cx);
+        let loaded = self.map_tiles.gather(&cover);
+        let loaded: Vec<&TileGeometry> = loaded.iter().map(|t| &**t).collect();
         let scene = Scene::build(&SceneInput {
             viewport,
             size,
@@ -935,6 +1118,7 @@ impl StopsApp {
             trail: &self.map.trail,
             feed: self.gtfs.as_deref(),
             pattern: self.map.pattern,
+            tiles: &loaded,
         });
         let palette = Palette::new(theme);
         let colors = theme::colors(theme);
@@ -1007,6 +1191,13 @@ impl StopsApp {
                     .rounded_full()
                     .bg(colors.secondary_label),
             );
+        let attribution = div()
+            .absolute()
+            .right(px(10.0))
+            .bottom(px(8.0))
+            .text_size(typography::CAPTION.size)
+            .text_color(colors.secondary_label)
+            .child(ATTRIBUTION);
         Some(
             div()
                 .px(px(16.0))
@@ -1035,6 +1226,7 @@ impl StopsApp {
                         .children(labels)
                         .child(surface)
                         .child(scale)
+                        .child(attribution)
                         .child(controls),
                 )
                 .into_any_element(),
@@ -1452,6 +1644,7 @@ mod tests {
             trail,
             feed,
             pattern: None,
+            tiles: &[],
         }
     }
 
@@ -1631,5 +1824,96 @@ mod tests {
         for mpp in [0.5, 1.7, 33.0, 400.0, 2_000.0] {
             assert!(scale_bar(mpp).0 <= 110.0, "{mpp}");
         }
+    }
+
+    // -- map tiles --
+
+    const FIXTURE: &[u8] =
+        include_bytes!("../../../crates/rovsti_geo/src/tiles/testdata/osm-14-9520-6130.mvt");
+
+    fn fixture_tile() -> TileGeometry {
+        TileGeometry::from_bytes(
+            rovsti_geo::tiles::TileId::new(14, 9520, 6130).unwrap(),
+            FIXTURE,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn the_map_style_follows_the_theme() {
+        assert_eq!(Palette::new(Theme::Light).style, MapStyle::Colorful);
+        assert_eq!(Palette::new(Theme::Dark).style, MapStyle::Eclipse);
+    }
+
+    #[test]
+    fn style_colours_keep_their_alpha() {
+        let c = Rgba8 {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 0.5,
+        };
+        let h = style_color(c);
+        assert!(
+            (h.a - 0.5).abs() < 0.01 && (h.l - 1.0).abs() < 0.01,
+            "{h:?}"
+        );
+    }
+
+    #[test]
+    fn no_tiles_leave_the_scene_as_it_was() {
+        let trail = Breadcrumb::default();
+        let scene = Scene::build(&scene_input(&trail, None));
+        assert!(scene.tiles.backgrounds.is_empty() && scene.tiles.groups.is_empty());
+    }
+
+    #[test]
+    fn tile_features_land_where_the_tile_transform_puts_them() {
+        let tile = fixture_tile();
+        let centre = rovsti_geo::tiles::frac_to_coord(14, 9520.5, 6130.5);
+        let vp = Viewport::new(centre, 3.6);
+        let trail = Breadcrumb::default();
+        let tiles = [&tile];
+        let mut input = scene_input(&trail, None);
+        input.viewport = vp;
+        input.tiles = &tiles;
+        let layer = Scene::build(&input).tiles;
+
+        // The tile is bigger than the view: its background is the view plus the margin.
+        assert_eq!(layer.backgrounds.len(), 1);
+        let bg = layer.backgrounds[0];
+        assert!(
+            (bg[0].0 + 208.0).abs() < 0.5 && (bg[0].1 + 158.0).abs() < 0.5,
+            "{bg:?}"
+        );
+        assert!(
+            (bg[2].0 - 208.0).abs() < 0.5 && (bg[2].1 - 158.0).abs() < 0.5,
+            "{bg:?}"
+        );
+
+        // A vertex of the tile that is inside the view is in the layer, same class,
+        // at the transformed position.
+        let tf = rovsti_geo::tiles::TileTransform::new(tile.id, tile.extent, &vp);
+        let wanted = tile.groups.iter().find_map(|(class, g)| {
+            let rings = g.lines.iter().chain(g.polygons.iter().flatten());
+            rings
+                .flatten()
+                .map(|&p| tf.apply(p))
+                .find_map(|p| (p.0.abs() < 150.0 && p.1.abs() < 100.0).then_some((*class, p)))
+        });
+        let (class, p) = wanted.expect("a vertex inside the view");
+        let (_, g) = layer
+            .groups
+            .iter()
+            .find(|(c, _)| *c == class)
+            .expect("class kept");
+        let rings = g.lines.iter().chain(g.polygons.iter().flatten());
+        assert!(
+            rings
+                .flatten()
+                .any(|q| (q.0 - p.0).abs() < 0.01 && (q.1 - p.1).abs() < 0.01),
+            "{p:?} not in {class:?}"
+        );
+        assert!(layer.vertices() <= TILE_MAX_VERTICES);
     }
 }

@@ -43,6 +43,7 @@ mod picker;
 mod saved_ui;
 mod settings_ui;
 mod store;
+mod tiles;
 mod transit;
 mod trip_ui;
 
@@ -79,6 +80,8 @@ pub(crate) struct StopsApp {
     pub(crate) gtfs: Option<Arc<Feed>>,
     pub(crate) transit: transit::Transit,
     pub(crate) map: map::MapState,
+    /// Map tiles: the server, its disk cache and the downloads.
+    pub(crate) map_tiles: tiles::MapTiles,
     /// The stop search result for the text in the picker field.
     pub(crate) stop_hits: picker::StopHits,
     /// The line chosen in the stop sheet.
@@ -199,9 +202,11 @@ impl StopsApp {
                 .spawn(async move { backend::load(&read_from) })
                 .await;
             this.update(cx, |this, cx| {
-                this.dir = Some(dir);
+                this.dir = Some(dir.clone());
                 this.loaded = true;
                 this.prefs = data.prefs;
+                let source = this.prefs.tile_source();
+                this.map_tiles.attach(&dir, source, cx);
                 this.saved = data.saved;
                 this.history = data.history;
                 this.set_feed(data.gtfs);
@@ -230,6 +235,7 @@ impl StopsApp {
             gtfs: None,
             transit: transit::Transit::default(),
             map: map::MapState::default(),
+            map_tiles: tiles::MapTiles::default(),
             stop_hits: picker::StopHits::default(),
             stop_pattern: None,
             ends: picker::Ends::default(),

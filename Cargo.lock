@@ -6171,6 +6171,7 @@ dependencies = [
  "rovsti_android",
  "rovsti_core",
  "rovsti_geo",
+ "rovsti_tiles",
  "rovsti_ui",
  "rovsti_wa_client",
  "rovsti_wa_proto",

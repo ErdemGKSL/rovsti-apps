@@ -218,7 +218,7 @@ impl TileTransform {
 }
 
 /// What to draw this frame, in Scene space (px from the view centre).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct TileLayer {
     /// Each tile's rect clipped to the widget, as a quad.
     pub backgrounds: Vec<[(f32, f32); 4]>,

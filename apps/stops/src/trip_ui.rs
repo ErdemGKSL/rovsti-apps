@@ -12,7 +12,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, px, svg,
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
-use rovsti_geo::{ActiveTrip, Diameter, FixOut, Side, TripState};
+use rovsti_geo::{ActiveTrip, Diameter, FixOut, Side, TripState, tiles::tiles_for_circle};
 use rovsti_ui::{
     Icon,
     components::{backdrop, empty_state, flat_glass, glass_pill, list_row, section},
@@ -624,6 +624,11 @@ impl StopsApp {
                 this.busy = false;
                 match result {
                     Ok(()) => {
+                        let d = session.trip.diameter;
+                        this.map_tiles.prefetch(
+                            tiles_for_circle(d.center(), d.radius_m(), 500.0, 8, 600),
+                            cx,
+                        );
                         this.trip = Some(session);
                         this.live = None;
                         this.map.pattern = line;

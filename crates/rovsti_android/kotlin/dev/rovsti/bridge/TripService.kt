@@ -21,6 +21,7 @@ import org.json.JSONException
 import org.json.JSONObject
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 
 /** Shortest and longest interval the service asks the location provider for. */
 internal const val TRIP_MIN_INTERVAL_MS = 1_000L
@@ -45,6 +46,20 @@ internal fun tripWatchdogMs(intervalMs: Long): Long {
     val interval = tripIntervalMs(intervalMs)
     return interval + (interval / 4).coerceIn(5_000L, 30_000L)
 }
+
+/**
+ * Pure: true when the system or the watchdog started the service, not the user. Such a start (a null
+ * intent after a process death, a redelivery, a retry or the watchdog) must prefer the saved spec and
+ * must never clear it.
+ */
+internal fun tripStartIsBackground(action: String?, flags: Int, hasSpecExtra: Boolean): Boolean =
+    action == TripService.ACTION_WATCHDOG ||
+        (flags and Service.START_FLAG_REDELIVERY) != 0 ||
+        (flags and Service.START_FLAG_RETRY) != 0 ||
+        !hasSpecExtra
+
+/** Pure: the status Rust's UI maps to the "Android closed Stops" message. */
+internal fun tripRestartErrorJson(): String = """{"state":"error","error":"restart"}"""
 
 /** `AlarmManager.canScheduleExactAlarms`, which only exists (and is only needed) from Android 12. */
 internal fun AlarmManager.exactAllowed(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || canScheduleExactAlarms()
@@ -159,7 +174,8 @@ class TripService : Service() {
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private lateinit var locations: LocationManager
     private lateinit var alarms: AlarmManager
-    private var spec: TripSpec? = null
+    @Volatile private var spec: TripSpec? = null
+    private var foreground = false
     private var requested: Pair<Long, String>? = null
     private val listener = LocationListener { location -> worker.execute { onFix(location) } }
 
@@ -170,6 +186,7 @@ class TripService : Service() {
         locations = getSystemService(LocationManager::class.java)
         alarms = getSystemService(AlarmManager::class.java)
         running = true
+        instance = this
         TripAlarm.recover(this)
     }
 
@@ -179,11 +196,13 @@ class TripService : Service() {
             return START_NOT_STICKY
         }
         // A restart by the system or the watchdog carries no spec: use the one saved at the last start.
-        val incoming = TripSpec.parse(intent?.getStringExtra(EXTRA_SPEC)) ?: spec ?: TripPrefs.load(this)
+        val extra = TripSpec.parse(intent?.getStringExtra(EXTRA_SPEC))
+        val background = tripStartIsBackground(intent?.action, flags, intent?.getStringExtra(EXTRA_SPEC) != null)
+        val incoming = if (background) spec ?: TripPrefs.load(this) ?: extra else extra ?: spec ?: TripPrefs.load(this)
         if (incoming == null) {
             // startForegroundService promises a startForeground call; keep it, then leave.
             try {
-                promote(TripSpec("", "Trip", "", TRIP_MAX_INTERVAL_MS, false))
+                if (!foreground) promote(TripSpec("", "Trip", "", TRIP_MAX_INTERVAL_MS, false))
             } catch (_: RuntimeException) {
             }
             shutdown(emitStopped = false)
@@ -192,10 +211,23 @@ class TripService : Service() {
         spec = incoming
         TripPrefs.save(this, incoming)
         try {
-            promote(incoming)
+            if (!foreground) {
+                promote(incoming)
+            } else {
+                getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification(incoming.title, incoming.text))
+            }
         } catch (e: RuntimeException) {
             // Not allowed to start a foreground service now, or no location permission.
             android.util.Log.w("Rovsti", "trip service could not go foreground", e)
+            if (background) {
+                // Keep the saved trip: only the user's Stop or Rust's `ended` clears it.
+                emitStatus(tripRestartErrorJson())
+                postRestartNotice()
+                removeUpdates()
+                cancelWatchdog()
+                stopSelf()
+                return START_NOT_STICKY
+            }
             emitStatus(JSONObject().put("state", "error").put("error", "foreground").toString())
             shutdown(emitStopped = false)
             return START_NOT_STICKY
@@ -212,6 +244,8 @@ class TripService : Service() {
 
     override fun onDestroy() {
         running = false
+        foreground = false
+        if (instance === this) instance = null
         removeUpdates()
         cancelWatchdog()
         worker.shutdownNow()
@@ -225,6 +259,29 @@ class TripService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
+        foreground = true
+        getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID + 1)
+    }
+
+    /** Tells the user tracking stopped because Android refused a background start; one tap reopens Stops. */
+    private fun postRestartNotice() {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        manager.createNotificationChannel(NotificationChannel("trip_problem", "Trip paused", NotificationManager.IMPORTANCE_HIGH))
+        val launch = packageManager.getLaunchIntentForPackage(packageName) ?: Intent()
+        val open = PendingIntent.getActivity(
+            this, 0, launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        manager.notify(
+            NOTIFICATION_ID + 1,
+            Notification.Builder(this, "trip_problem")
+                .setSmallIcon(NotificationIcon.small(this))
+                .setContentTitle("Stops paused your trip")
+                .setContentText("Tap to resume tracking.")
+                .setCategory(Notification.CATEGORY_ERROR)
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build(),
+        )
     }
 
     /** (Re)registers for updates; false when location permission is missing. Cheap when nothing changed. */
@@ -311,7 +368,7 @@ class TripService : Service() {
                 if (location != null) {
                     onFix(location)
                 } else {
-                    askOtherProvider(second)
+                    askOtherProvider(second, current)
                 }
             }
         } catch (_: SecurityException) {
@@ -324,10 +381,15 @@ class TripService : Service() {
         }
     }
 
-    private fun askOtherProvider(provider: String) {
+    private fun askOtherProvider(provider: String, current: TripSpec) {
         try {
             locations.getCurrentLocation(provider, null, worker) { location ->
-                if (location != null) onFix(location) else emitStatus(JSONObject().put("state", "searching").toString())
+                if (location != null) {
+                    onFix(location)
+                } else {
+                    emitStatus(JSONObject().put("state", "searching").toString())
+                    armWatchdog(tripWatchdogMs(current.nextFixMs))
+                }
             }
         } catch (_: RuntimeException) {
             emitStatus(JSONObject().put("state", "searching").toString())
@@ -341,6 +403,7 @@ class TripService : Service() {
         cancelWatchdog()
         TripPrefs.clear(this)
         stopForeground(STOP_FOREGROUND_REMOVE)
+        foreground = false
         stopSelf()
     }
 
@@ -406,6 +469,31 @@ class TripService : Service() {
         @Volatile var running = false
             private set
 
+        @Volatile private var instance: TripService? = null
+
+        /**
+         * The watchdog alarm fired. With a live service, re-arm and ask for a fix in place (no foreground
+         * start needed); otherwise start the service so it restores the saved trip.
+         */
+        fun onWatchdog(context: Context) {
+            val live = instance
+            val current = live?.spec
+            if (live != null && current != null) {
+                live.armWatchdog(tripWatchdogMs(current.nextFixMs))
+                try {
+                    live.worker.execute { live.askForFix(current) }
+                    return
+                } catch (_: RejectedExecutionException) {
+                    // The service is shutting down: fall through and start it again.
+                }
+            }
+            try {
+                context.startForegroundService(Intent(context, TripService::class.java).setAction(ACTION_WATCHDOG))
+            } catch (e: RuntimeException) {
+                android.util.Log.w("Rovsti", "trip watchdog could not wake the service", e)
+            }
+        }
+
         /** Starts the service with [specJson]; false when it is malformed or Android refuses. */
         fun start(context: Context, specJson: String): Boolean {
             if (TripSpec.parse(specJson) == null) return false
@@ -430,12 +518,6 @@ class TripService : Service() {
 class TripWatchdogReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != TripService.ACTION_WATCHDOG) return
-        try {
-            context.startForegroundService(
-                Intent(context, TripService::class.java).setAction(TripService.ACTION_WATCHDOG),
-            )
-        } catch (e: RuntimeException) {
-            android.util.Log.w("Rovsti", "trip watchdog could not wake the service", e)
-        }
+        TripService.onWatchdog(context)
     }
 }

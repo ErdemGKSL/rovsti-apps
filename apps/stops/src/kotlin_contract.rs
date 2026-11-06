@@ -22,6 +22,26 @@ fn service_is_a_location_foreground_service() {
 }
 
 #[test]
+fn background_starts_never_clear_the_trip_and_tell_the_user() {
+    for token in [
+        "START_FLAG_REDELIVERY",
+        "\"trip_problem\"",
+        "\"restart\"",
+        "postRestartNotice(",
+        "if (!foreground)",
+        "TripService.onWatchdog(",
+    ] {
+        assert!(TRIP_SERVICE.contains(token), "TripService.kt lacks {token}");
+    }
+    assert_eq!(
+        crate::trip_ui::parse_status(r#"{"state":"error","error":"restart"}"#),
+        Some(crate::trip_ui::Status::Error(
+            "Android closed Stops and tracking paused. It resumes when Stops is open; allow location all the time to avoid this."
+        ))
+    );
+}
+
+#[test]
 fn updates_are_requested_on_both_api_paths() {
     // LocationRequest (Android 12+) and the legacy overload.
     assert_eq!(TRIP_SERVICE.matches("requestLocationUpdates(").count(), 2);

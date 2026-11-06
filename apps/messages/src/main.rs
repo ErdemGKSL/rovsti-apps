@@ -111,17 +111,27 @@ struct SmsRowMenu {
     unread: bool,
     muted: bool,
     in_spam: bool,
+    /// The menu is the open conversation page's, not an inbox row's.
+    on_page: bool,
+    known_contact: bool,
 }
 
 /// The SMS actions a row menu lists.
 fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
-    sms_actions::actions(&sms_actions::SmsActionContext {
+    let mut actions = sms_actions::actions(&sms_actions::SmsActionContext {
         unread: sms.unread,
         muted: sms.muted,
         in_spam: sms.in_spam,
         single_sender: sms.sender.is_some(),
+        known_contact: sms.known_contact,
+        on_page: sms.on_page,
         ..sms_actions::SmsActionContext::default()
-    })
+    });
+    // A new conversation has no provider thread to delete yet.
+    if sms.thread_id < 0 {
+        actions.retain(|a| *a != sms_actions::SmsAction::Delete);
+    }
+    actions
 }
 
 /// What the pill's trailing "Undo" does.
@@ -773,6 +783,7 @@ impl MessagesApp {
             ConversationEvent::Schedule(text) => this.ask_schedule_whatsapp(text.clone(), cx),
             ConversationEvent::CancelScheduled(key) => this.cancel_scheduled(key.clone(), cx),
             ConversationEvent::ToggleMute => this.toggle_open_mute(cx),
+            ConversationEvent::Copy(text) => this.copy_text(text.clone().into(), false, cx),
         })
         .detach();
         // Opening reads the chat.
@@ -811,6 +822,10 @@ impl MessagesApp {
             }
             SmsConversationEvent::CancelScheduled(key) => this.cancel_scheduled(key.clone(), cx),
             SmsConversationEvent::ToggleMute => this.toggle_open_mute(cx),
+            SmsConversationEvent::Copy { text, sensitive } => {
+                this.copy_text(text.clone().into(), *sensitive, cx);
+            }
+            SmsConversationEvent::Menu => this.open_page_menu(cx),
         })
         .detach();
         if thread_id >= 0 {
@@ -927,6 +942,8 @@ impl MessagesApp {
                     .prefs()
                     .is_muted(&notifications::thread_tag(&ThreadId::Sms(thread_id))),
                 in_spam: self.show_spam,
+                on_page: false,
+                known_contact: false,
             }
         });
         self.row_menu = Some(RowMenu {
@@ -980,12 +997,94 @@ impl MessagesApp {
                     self.block_sender(sender, title, cx);
                 }
             }
-            // Not offered by the row menu.
             SmsAction::Call | SmsAction::AddContact => {
                 self.row_menu = None;
+                if let Some(sender) = sms.sender {
+                    self.telecom_action(action, sender, cx);
+                }
             }
         }
         cx.notify();
+    }
+
+    /// The open SMS page's more button: its menu (Call, Add to contacts, Block, Delete).
+    fn open_page_menu(&mut self, cx: &mut Context<Self>) {
+        let Open::Sms(conversation) = &self.open else {
+            return;
+        };
+        let (thread_id, title, recipients) = {
+            let c = conversation.read(cx);
+            let ThreadId::Sms(id) = c.thread() else {
+                return;
+            };
+            (id, c.title(), c.recipients().to_vec())
+        };
+        let sender = sms_actions::sender_of(&recipients).map(str::to_owned);
+        let (known_contact, muted) = {
+            let backend = self.backend.read(cx);
+            (
+                sender
+                    .as_deref()
+                    .is_some_and(|s| backend.contacts().match_number(s).is_some()),
+                backend
+                    .prefs()
+                    .is_muted(&notifications::thread_tag(&ThreadId::Sms(thread_id))),
+            )
+        };
+        self.row_menu = Some(RowMenu {
+            jid: None,
+            title,
+            meta: ChatMeta::default(),
+            unread: 0,
+            mute_choices: false,
+            sms: Some(SmsRowMenu {
+                thread_id,
+                sender,
+                unread: false,
+                muted,
+                in_spam: false,
+                on_page: true,
+                known_contact,
+            }),
+            delete_confirm: false,
+        });
+        cx.notify();
+    }
+
+    /// Call or Add to contacts from the page menu, asked of Android off the UI thread.
+    fn telecom_action(
+        &mut self,
+        action: sms_actions::SmsAction,
+        number: String,
+        cx: &mut Context<Self>,
+    ) {
+        let call = action == sms_actions::SmsAction::Call;
+        let task = cx.background_executor().spawn(async move {
+            if call {
+                rovsti_android::telecom::place_call(&number)
+            } else {
+                rovsti_android::telecom::add_contact(&number)
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(true) => {}
+                    Err(rovsti_android::Error::Unsupported) => {
+                        this.show_pill("That needs an Android phone.");
+                    }
+                    Ok(false) | Err(_) => this.show_pill(if call {
+                        "Couldn't place that call"
+                    } else {
+                        "Couldn't open Contacts"
+                    }),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Not spam: the sender joins the allow list, so its row moves to the inbox.
@@ -1261,6 +1360,9 @@ impl MessagesApp {
                         sms_actions::SmsAction::MarkRead => Icon::LucideMailOpen,
                         sms_actions::SmsAction::Mute => Icon::LucideBellOff,
                         sms_actions::SmsAction::Unmute => Icon::LucideBell,
+                        sms_actions::SmsAction::Call => Icon::LucidePhone,
+                        sms_actions::SmsAction::AddContact => Icon::LucideUserPlus,
+                        sms_actions::SmsAction::Block => Icon::LucideBan,
                         _ => Icon::LucideTrash2,
                     };
                     items.push(
@@ -1414,6 +1516,10 @@ impl MessagesApp {
             && conversation.update(cx, |c, cx| c.go_back(cx))
         {
             // The conversation closed one of its own layers (menu, reply, edit).
+        } else if let Open::Sms(conversation) = &self.open
+            && conversation.update(cx, |c, cx| c.go_back(cx))
+        {
+            // The SMS page cleared its selected bubble.
         } else if let Open::Status(page) = &self.open
             && page.update(cx, |page, cx| page.go_back(cx))
         {
@@ -2015,7 +2121,7 @@ impl MessagesApp {
             }
         }));
         out.extend(self.schedule.render(theme, window, now_ms(), offset, cx));
-        if matches!(self.open, Open::None) {
+        if matches!(self.open, Open::None | Open::Sms(_)) {
             out.extend(self.row_menu_overlay(theme, cx));
         }
         out
@@ -2025,23 +2131,35 @@ impl MessagesApp {
 
     /// Copies a one-time code (hidden from the paste preview) and says so.
     fn copy_code(&mut self, code: SharedString, cx: &mut Context<Self>) {
+        self.copy_text(code, true, cx);
+    }
+
+    /// Copies text to the clipboard (`sensitive` hides it from the paste preview)
+    /// and says "Copied". A sensitive copy also marks the inbox's code chip.
+    fn copy_text(&mut self, code: SharedString, sensitive: bool, cx: &mut Context<Self>) {
         let text = code.clone();
         let task = cx
             .background_executor()
-            .spawn(async move { rovsti_android::notify::copy_to_clipboard(&text, true) });
+            .spawn(async move { rovsti_android::notify::copy_to_clipboard(&text, sensitive) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let copied = this
                 .update(cx, |this, cx| {
                     match result {
-                        Ok(true) => this.copied = Some(code.clone()),
+                        Ok(true) => this.copied = sensitive.then(|| code.clone()),
                         // Desktop preview: the window's own clipboard.
                         Err(rovsti_android::Error::Unsupported) => {
                             cx.write_to_clipboard(ClipboardItem::new_string(code.to_string()));
-                            this.copied = Some(code.clone());
+                            this.copied = sensitive.then(|| code.clone());
                         }
-                        Ok(false) | Err(_) => log::warn!("copying the code failed"),
+                        Ok(false) | Err(_) => {
+                            log::warn!("copying failed");
+                            this.show_pill("Couldn't copy that");
+                            cx.notify();
+                            return None;
+                        }
                     }
+                    this.show_pill("Copied");
                     cx.notify();
                     this.copied.clone()
                 })
@@ -2695,6 +2813,8 @@ mod tests {
             unread,
             muted,
             in_spam,
+            on_page: false,
+            known_contact: false,
         }
     }
 
@@ -2708,5 +2828,24 @@ mod tests {
             row_sms_actions(&menu(false, true, true)),
             vec![Unmute, NotSpam, Block, Delete]
         );
+    }
+
+    #[test]
+    fn page_menu_hides_add_contact_for_a_known_number() {
+        let page = |known_contact| SmsRowMenu {
+            on_page: true,
+            known_contact,
+            ..menu(false, false, false)
+        };
+        assert_eq!(
+            row_sms_actions(&page(false)),
+            vec![Call, AddContact, Block, Delete]
+        );
+        assert_eq!(row_sms_actions(&page(true)), vec![Call, Block, Delete]);
+        let draft = SmsRowMenu {
+            thread_id: -1,
+            ..page(false)
+        };
+        assert_eq!(row_sms_actions(&draft), vec![Call, AddContact, Block]);
     }
 }

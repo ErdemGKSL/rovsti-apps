@@ -55,6 +55,13 @@ pub enum SmsConversationEvent {
     CancelScheduled(StripKey),
     /// The header's bell: mute or unmute this thread's notifications.
     ToggleMute,
+    /// A copy pill under a selected bubble. `sensitive` hides it from the paste preview.
+    Copy {
+        text: String,
+        sensitive: bool,
+    },
+    /// The header's more button: the conversation menu.
+    Menu,
 }
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
@@ -108,6 +115,8 @@ pub struct SmsConversation {
     /// Waiting scheduled sends of this thread, set by the page.
     scheduled: Vec<StripItem>,
     muted: bool,
+    /// The bubble (by `message_key`) whose copy pills are showing.
+    selected: Option<u64>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -166,6 +175,7 @@ impl SmsConversation {
             switch: None,
             scheduled: Vec::new(),
             muted: false,
+            selected: None,
             _subscriptions: subscriptions,
         };
         this.fill_from_thread(cx);
@@ -184,6 +194,10 @@ impl SmsConversation {
         }
     }
 
+    pub fn title(&self) -> SharedString {
+        self.title.clone()
+    }
+
     pub fn recipients(&self) -> &[String] {
         &self.recipients
     }
@@ -200,6 +214,17 @@ impl SmsConversation {
             self.muted = muted;
             cx.notify();
         }
+    }
+
+    /// System Back inside the page: clears the selected bubble; `false` when
+    /// nothing was selected.
+    pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.selected.take().is_none() {
+            return false;
+        }
+        self.rows_dirty = true;
+        cx.notify();
+        true
     }
 
     /// The text was scheduled: the composer is done with it.
@@ -500,6 +525,14 @@ impl SmsConversation {
         cx.notify();
     }
 
+    /// A copy pill was tapped: the page copies it and the selection closes.
+    fn copy(&mut self, text: String, sensitive: bool, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.rows_dirty = true;
+        cx.emit(SmsConversationEvent::Copy { text, sensitive });
+        cx.notify();
+    }
+
     fn pick_attachment(&mut self, cx: &mut Context<Self>) {
         self.awaiting_attachment = true;
         self.notice = None;
@@ -527,7 +560,10 @@ impl SmsConversation {
         let keys = std::iter::once(key_of(0u8))
             .chain(entries.iter().map(|entry| match *entry {
                 Entry::Day(index) => key_of((1u8, day(items[index].at_ms))),
-                Entry::Message(index) => message_key(&items[index]),
+                Entry::Message(index) => {
+                    let base = message_key(&items[index]);
+                    key_of((base, self.selected == Some(base)))
+                }
             }))
             .collect();
         self.list.sync(keys);
@@ -715,13 +751,53 @@ impl SmsConversation {
                 .text_color(meta_color)
                 .child(meta),
         );
+        let key = message_key(item);
         if let Some(local_id) = retry {
             bubble = bubble.on_click(cx.listener(move |this, _, _, cx| this.retry(local_id, cx)));
+        } else if selectable(item) {
+            bubble = bubble
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if this.selected.take().is_some() {
+                        this.rows_dirty = true;
+                        cx.notify();
+                    }
+                }))
+                .on_long_press(cx.listener(move |this, _, _, cx| {
+                    this.selected = Some(key);
+                    this.rows_dirty = true;
+                    cx.notify();
+                }));
+        }
+        let mut column = div()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .when(own, |c| c.items_end())
+            .child(bubble);
+        if self.selected == Some(key) && selectable(item) {
+            let mut pills = div().flex().flex_wrap().gap(px(6.0)).px(px(4.0));
+            if let Some(text) = copy_text(item) {
+                pills = pills.child(glass_pill(theme, "Copy").id(("sms-copy", index)).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        this.copy(text.clone(), false, cx);
+                    }),
+                ));
+            }
+            if let Some(code) = copy_code(item) {
+                pills = pills.child(
+                    glass_pill(theme, "Copy code")
+                        .id(("sms-copy-code", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.copy(code.clone(), true, cx);
+                        })),
+                );
+            }
+            column = column.child(pills);
         }
         div()
             .flex()
             .when(own, |row| row.justify_end())
-            .child(bubble)
+            .child(column)
             .into_any_element()
     }
 }
@@ -767,6 +843,10 @@ impl Render for SmsConversation {
                 }))
                 .into_any_element()
         });
+        let more = glass_icon_button(theme, Icon::LucideEllipsis, 0.0, false)
+            .id("sms-more")
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(SmsConversationEvent::Menu)))
+            .into_any_element();
         let mute = glass_icon_button(theme, Icon::LucideBellOff, 0.0, self.muted)
             .id("sms-mute")
             .on_click(cx.listener(|_, _, _, cx| cx.emit(SmsConversationEvent::ToggleMute)))
@@ -777,6 +857,7 @@ impl Render for SmsConversation {
             .gap(px(8.0))
             .children(switch)
             .child(mute)
+            .child(more)
             .into_any_element();
         let header = header_bar(
             theme,
@@ -1052,15 +1133,20 @@ pub fn attachment_label(path: &str) -> String {
     }
 }
 
+/// Only sent or received messages with text can be selected for copying, not
+/// ones still sending or failed.
+fn selectable(item: &SmsItem) -> bool {
+    !matches!(item.state, DeliveryState::Pending | DeliveryState::Failed)
+        && copy_text(item).is_some()
+}
+
 /// The text of a message to copy; `None` when it has none (a picture alone).
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn copy_text(item: &SmsItem) -> Option<String> {
     let text = item.body.trim();
     (!text.is_empty()).then(|| text.to_owned())
 }
 
 /// The one-time code of an incoming message, to copy.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn copy_code(item: &SmsItem) -> Option<String> {
     if item.outgoing {
         return None;
@@ -1117,6 +1203,20 @@ mod tests {
         m.outgoing = false;
         m.body = "see you soon".into();
         assert_eq!(copy_code(&m), None);
+    }
+
+    #[test]
+    fn only_settled_messages_with_text_are_selectable() {
+        let mut m = item(false, DeliveryState::None, T);
+        m.body = "hello".into();
+        assert!(selectable(&m));
+        m.state = DeliveryState::Pending;
+        assert!(!selectable(&m));
+        m.state = DeliveryState::Failed;
+        assert!(!selectable(&m));
+        m.state = DeliveryState::None;
+        m.body = "  ".into();
+        assert!(!selectable(&m));
     }
 
     #[test]

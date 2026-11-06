@@ -47,7 +47,6 @@ use rovsti_wa_proto::{
 
 /// The text "Copy" puts on the clipboard: the text or a media caption. Nothing
 /// for a deleted message, media without a caption, or a location/contact card.
-#[cfg_attr(not(test), allow(dead_code))]
 fn copy_text_of(body: &MessageBody, meta: Option<&MessageMeta>) -> Option<String> {
     if let Some(meta) = meta
         && (meta.revoked || meta.location.is_some() || meta.contact.is_some())
@@ -96,6 +95,8 @@ pub enum ConversationEvent {
     CancelScheduled(StripKey),
     /// The header's bell: mute or unmute this chat's notifications.
     ToggleMute,
+    /// The Copy pill of a message: the page puts the text on the clipboard.
+    Copy(String),
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
@@ -2027,6 +2028,18 @@ impl Conversation {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.set_starred(&target, !starred, cx);
                 })),
+            );
+        }
+        if let Some(text) = copy_text_of(&message.body, meta) {
+            row = row.child(
+                pill("copy", Icon::LucideCopy, "Copy", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::Copy(text.clone()));
+                        cx.notify();
+                    },
+                )),
             );
         }
         if can_edit(item, meta, now) {

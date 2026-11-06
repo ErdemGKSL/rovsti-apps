@@ -163,6 +163,14 @@ impl Backend {
         }
     }
 
+    /// A copy of the loaded block set (empty until it has loaded).
+    pub fn blocked_numbers_set(&self) -> BlockSet {
+        match &self.blocklist {
+            Load::Ready(state) => state.set.clone(),
+            _ => BlockSet::default(),
+        }
+    }
+
     /// Why `raw` cannot be blocked, if it cannot: the pure rules first
     /// (emergency, empty, dial codes), then the platform.
     pub fn block_refusal(&self, raw: &str) -> Option<BlockRefusal> {

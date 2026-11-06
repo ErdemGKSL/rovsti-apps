@@ -35,6 +35,38 @@ use crate::{
     fx::{A_CALL, A_FIELD, A_KEY, A_LAST},
 };
 
+/// What Call does with the field as it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Redial {
+    /// A number is typed: place the call.
+    Call,
+    /// The field is empty: fill it with the last dialed number first.
+    Fill(String),
+    /// The field is empty and there is nothing to redial.
+    Nothing,
+}
+
+/// The Call key's choice. It never places a call from an empty field.
+pub(crate) fn redial_decision(dialed: &str, target: Option<&str>) -> Redial {
+    if !dialed.is_empty() {
+        return Redial::Call;
+    }
+    match target.map(str::trim).filter(|t| !t.is_empty()) {
+        Some(t) => Redial::Fill(t.to_owned()),
+        None => Redial::Nothing,
+    }
+}
+
+/// Row id of the "Which number?" sheet's `index`-th number.
+pub(crate) fn paste_choice_id(index: usize) -> String {
+    format!("sheet-pc-{index}")
+}
+
+/// The number index a "Which number?" row id stands for.
+pub(crate) fn paste_choice_index(id: &str) -> Option<usize> {
+    id.strip_prefix("sheet-pc-")?.parse().ok()
+}
+
 /// Height of the title block above the keypad: top bar, large title, gap.
 pub const HEADER_H: f32 = 56.0 + 41.0 + 8.0;
 const LONG_ZERO: u64 = 400;
@@ -884,18 +916,140 @@ impl PhoneApp {
             .read_from_clipboard()
             .and_then(|item| item.text())
             .unwrap_or_default();
-        let pasted = dial::normalise_paste(&text);
-        if pasted.is_empty() {
-            self.set_status("Nothing to paste");
-            self.invalid(window);
-            return;
+        match dial::paste_plan(&text) {
+            dial::PastePlan::Nothing => {
+                // Text with no number in it still pastes as typed characters.
+                let pasted = dial::normalise_paste(&text);
+                if pasted.is_empty() {
+                    self.set_status("Nothing to paste");
+                    self.invalid(window);
+                } else {
+                    self.fill_field(&pasted, window);
+                }
+            }
+            dial::PastePlan::One(number) => {
+                let pasted = dial::normalise_paste(&number);
+                self.fill_field(if pasted.is_empty() { &number } else { &pasted }, window);
+            }
+            dial::PastePlan::Choose(list) => self.open_paste_choose(list, window, cx),
         }
-        self.dialed = pasted.chars().take(dial::MAX_LEN).collect();
+    }
+
+    /// Puts `text` in the field with the digit pop and the delete key shown.
+    fn fill_field(&mut self, text: &str, window: &mut Window) {
+        self.dialed = text.chars().take(dial::MAX_LEN).collect();
         self.status = None;
         self.digit_pop.snap(1.1);
         self.digit_pop.set_target(1.0);
         self.delete_shown.set_target(1.0);
         rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+    }
+
+    fn open_paste_choose(
+        &mut self,
+        list: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sheet.is_visible() {
+            return;
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.paste_choice = Some(list);
+        self.sheet_kind = crate::SheetKind::PasteChoose;
+        self.sheet.open();
+        self.presses.release_all();
+        cx.notify();
+    }
+
+    /// A tap on a "Which number?" row.
+    pub(crate) fn paste_choose_act(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(number) = paste_choice_index(id)
+            .and_then(|i| self.paste_choice.as_ref().and_then(|l| l.get(i)).cloned())
+        else {
+            return;
+        };
+        self.paste_choice = None;
+        self.close_sheet(cx);
+        let pasted = dial::normalise_paste(&number);
+        self.fill_field(if pasted.is_empty() { &number } else { &pasted }, window);
+        self.show_notice_pill("Pasted", None, false, cx);
+    }
+
+    /// The "Which number?" sheet.
+    pub(crate) fn paste_choose_sheet(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.sheet.is_visible() {
+            return None;
+        }
+        let list = self.paste_choice.as_ref()?;
+        let colors = theme::colors(theme);
+        let rows: Vec<AnyElement> = list
+            .iter()
+            .enumerate()
+            .map(|(i, number)| {
+                let id: SharedString = paste_choice_id(i).into();
+                let text: SharedString = crate::block_ui::shown_number(number).into();
+                let press = self.presses.value(&id).clamp(0.0, 1.0);
+                let act = id.clone();
+                div()
+                    .id(id.clone())
+                    .role(Role::Button)
+                    .aria_label(text.clone())
+                    .relative()
+                    .w_full()
+                    .min_h(px(56.0))
+                    .px(px(20.0))
+                    .py(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(14.0))
+                    .bg(gpui::Hsla {
+                        a: 0.9 * press,
+                        ..colors.fill
+                    })
+                    .child(
+                        svg()
+                            .path(Icon::LucidePhone.path())
+                            .size(px(22.0 * press_scale(press, scale::PRESS_CARD)))
+                            .flex_none()
+                            .text_color(colors.label),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(typography::SUBHEADLINE.size)
+                            .text_color(colors.label)
+                            .child(text),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            this.presses.down(act.clone());
+                            this.paste_choose_act(&act, window, cx);
+                        }),
+                    )
+                    .child(touch_surface(Self::touch_listener(cx, Some(id))))
+                    .into_any_element()
+            })
+            .collect();
+        let body = div()
+            .flex()
+            .flex_col()
+            .pb(px(16.0))
+            .children(rows)
+            .into_any_element();
+        self.modal_sheet(theme, window, "Which number?", body, cx)
     }
 
     fn call_press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -911,6 +1065,24 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if account.is_none() && self.dialed.is_empty() {
+            let target = match self.backend.read(cx).call_log() {
+                Load::Ready(log) => dial::redial_target(&log.source),
+                _ => None,
+            };
+            match redial_decision(&self.dialed, target.as_deref()) {
+                Redial::Fill(number) => {
+                    self.fill_field(&number, window);
+                    self.set_status("Tap Call again to redial");
+                }
+                Redial::Nothing => {
+                    self.set_status("No recent calls to redial");
+                    self.invalid(window);
+                }
+                Redial::Call => {}
+            }
+            return;
+        }
         let raw = self.dialed.clone();
         if dial::validate(&raw).is_err() {
             self.invalid(window);
@@ -2248,6 +2420,28 @@ pub(crate) fn elided_head(dialed: &str, keep: Option<usize>) -> (String, String)
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn redial_decision_never_calls_from_an_empty_field() {
+        use super::{Redial, redial_decision};
+        assert_eq!(redial_decision("0555", Some("0532")), Redial::Call);
+        assert_eq!(redial_decision("0555", None), Redial::Call);
+        assert_eq!(
+            redial_decision("", Some(" 0532 ")),
+            Redial::Fill("0532".into())
+        );
+        assert_eq!(redial_decision("", None), Redial::Nothing);
+        assert_eq!(redial_decision("", Some("  ")), Redial::Nothing);
+    }
+
+    #[test]
+    fn paste_choice_ids_round_trip() {
+        use super::{paste_choice_id, paste_choice_index};
+        assert_eq!(paste_choice_id(2), "sheet-pc-2");
+        assert_eq!(paste_choice_index("sheet-pc-2"), Some(2));
+        assert_eq!(paste_choice_index("sheet-qr-2"), None);
+        assert_eq!(paste_choice_index("sheet-pc-x"), None);
+    }
+
     use super::*;
 
     #[test]

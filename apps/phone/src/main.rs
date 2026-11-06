@@ -133,6 +133,8 @@ enum SheetKind {
     QuickReplyPick,
     /// "Remind me": the call-back time chooser (`remind_ui::remind_pick_sheet`).
     RemindPick,
+    /// "Which number?": several numbers on the clipboard (`keypad::paste_choose_sheet`).
+    PasteChoose,
 }
 
 /// The line under the number field.
@@ -170,6 +172,8 @@ struct PhoneApp {
     /// The keypad field's long-press menu (`keypad::field_menu_overlay`).
     field_menu: Option<Vec<rovsti_core::dial::FieldAction>>,
     quick_reply: Option<person_ui::QuickReply>,
+    /// The numbers behind the open "Which number?" sheet.
+    paste_choice: Option<Vec<String>>,
     remind_pick: Option<remind_ui::RemindPick>,
     /// The open in-call note card (`incall_note`).
     incall_note: Option<incall_note::InCallNote>,
@@ -565,6 +569,7 @@ impl PhoneApp {
             copy_as: None,
             field_menu: None,
             quick_reply: None,
+            paste_choice: None,
             remind_pick: None,
             incall_note: None,
             _subscriptions: subscriptions,
@@ -1493,6 +1498,7 @@ impl PhoneApp {
             SheetKind::CopyAs => self.copy_as_sheet(theme, window, cx),
             SheetKind::QuickReplyPick => self.quick_reply_sheet(theme, window, cx),
             SheetKind::RemindPick => self.remind_pick_sheet(theme, window, cx),
+            SheetKind::PasteChoose => self.paste_choose_sheet(theme, window, cx),
             SheetKind::CallDetails => self.details_sheet(theme, window, cx),
             SheetKind::ImportPreview => {
                 if !self.sheet.is_visible() {

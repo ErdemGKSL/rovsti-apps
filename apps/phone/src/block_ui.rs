@@ -82,6 +82,8 @@ pub(crate) enum PillAction {
     RestoreSpeedDialAll(std::collections::BTreeMap<u8, rovsti_core::settings::SpeedDialEntry>),
     /// Undo of Blocked > Unblock all: block every one of these numbers again.
     BlockAll(Arc<[SharedString]>),
+    /// Undo of a bulk block from the Blocked page: unblock every one of these numbers.
+    UnblockAll(Arc<[SharedString]>),
 }
 
 /// The menu's Delete label for a row that stands for `count` calls.
@@ -346,6 +348,7 @@ impl PhoneApp {
             }
             PillAction::RestoreSpeedDialAll(old) => self.speed_dial_restore_all(old, cx),
             PillAction::BlockAll(raws) => self.blocked_block_all(raws, window, cx),
+            PillAction::UnblockAll(raws) => self.blocked_unblock_bulk(raws, window, cx),
         }
     }
 
@@ -1040,6 +1043,16 @@ mod tests {
             PillAction::BlockAll(a),
             PillAction::BlockAll(Arc::from(Vec::new()))
         );
+    }
+
+    #[test]
+    fn unblock_all_action_compares_by_numbers() {
+        let a: Arc<[SharedString]> = Arc::from(vec![SharedString::from("0301")]);
+        assert_eq!(
+            PillAction::UnblockAll(a.clone()),
+            PillAction::UnblockAll(a.clone())
+        );
+        assert_ne!(PillAction::UnblockAll(a.clone()), PillAction::BlockAll(a));
     }
 
     #[test]

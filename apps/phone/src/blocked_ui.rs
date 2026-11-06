@@ -665,7 +665,18 @@ impl PhoneApp {
             return;
         }
         let typed = self.blocked.field.read(cx).text().to_owned();
-        match blocklist::parse_input(&typed, &EmergencyList::default()) {
+        let emergency = EmergencyList::default();
+        let many = {
+            let backend = self.backend.read(cx);
+            blocklist::parse_many(&typed, &emergency, &backend.blocked_numbers_set())
+        };
+        if many.to_block.len() > 1 {
+            self.blocked.field.update(cx, |f, cx| f.clear(cx));
+            window.blur();
+            self.blocked_block_many(many, window, cx);
+            return;
+        }
+        match blocklist::parse_input(&typed, &emergency) {
             Err(error) => {
                 self.blocked.error = Some(error_text(error));
                 rovsti_ui::haptics::perform(window, HapticFeedback::Reject);
@@ -681,6 +692,77 @@ impl PhoneApp {
                 self.start_block(number.into(), who, None, window, cx);
             }
         }
+    }
+
+    /// Blocks several pasted numbers in the background, then offers Undo.
+    fn blocked_block_many(
+        &mut self,
+        many: blocklist::BulkParse,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        let raws: Vec<SharedString> = many.to_block.iter().cloned().map(Into::into).collect();
+        let tasks: Vec<_> = raws
+            .iter()
+            .map(|raw| self.backend.update(cx, |b, cx| b.block(raw, cx)))
+            .collect();
+        cx.spawn(async move |this, cx| {
+            let mut done: Vec<SharedString> = Vec::new();
+            for (raw, task) in raws.into_iter().zip(tasks) {
+                if task.await {
+                    done.push(raw);
+                }
+            }
+            this.update(cx, |this, cx| {
+                if done.is_empty() {
+                    this.show_notice_pill("Couldn't block the numbers", None, false, cx);
+                } else {
+                    let shown = blocklist::BulkParse {
+                        to_block: done.iter().map(ToString::to_string).collect(),
+                        ..many
+                    };
+                    let text = blocklist::bulk_text(&shown);
+                    let done: Arc<[SharedString]> = done.into();
+                    this.show_pill_action(text, "Undo", PillAction::UnblockAll(done), cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Undo of a bulk block: unblocks every one of the numbers.
+    pub(crate) fn blocked_unblock_bulk(
+        &mut self,
+        raws: Arc<[SharedString]>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        let tasks: Vec<_> = raws
+            .iter()
+            .map(|raw| self.backend.update(cx, |b, cx| b.unblock(raw, cx)))
+            .collect();
+        cx.spawn(async move |this, cx| {
+            let mut n = 0;
+            for task in tasks {
+                if task.await {
+                    n += 1;
+                }
+            }
+            this.update(cx, |this, cx| {
+                let text = if n == 0 {
+                    "Couldn't unblock the numbers".to_owned()
+                } else {
+                    blocklist::unblocked_all_text(n)
+                };
+                this.show_notice_pill(text, None, false, cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// The row's Unblock pill: the row fades for 120 ms, the list re-lays, the
@@ -1416,6 +1498,20 @@ mod tests {
                 "{id}"
             );
         }
+    }
+
+    #[test]
+    fn bulk_block_and_undo_labels() {
+        let b = blocklist::BulkParse {
+            to_block: vec!["+905551112233".into(), "+905324445566".into()],
+            skipped_emergency: 1,
+            already_blocked: 1,
+        };
+        assert_eq!(
+            blocklist::bulk_text(&b),
+            "Blocked 2 numbers, 1 already blocked"
+        );
+        assert_eq!(blocklist::unblocked_all_text(2), "Unblocked 2 numbers");
     }
 
     #[test]

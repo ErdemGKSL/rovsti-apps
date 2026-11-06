@@ -1,6 +1,6 @@
 # util-wa-lid-merge: plan (round 1)
 
-Status: S1-S7 implemented and green; S8 (deploy) pending.
+Status: S1-S7 done, round-2 S1 done, deploy pending.
 
 baseSha: da0377a7e8b465db31fa3da7474980d83a932757
 

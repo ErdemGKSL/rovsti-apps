@@ -26,7 +26,7 @@ use rovsti_ui::{
 };
 use rovsti_wa_client::Gateway;
 use rovsti_wa_proto::{
-    StatusAuthor, StatusItem, StatusKind, StatusList, StatusPlayer, jid_user,
+    StatusAuthor, StatusItem, StatusKind, StatusList, StatusPlayer, is_pn_jid, jid_user,
     status::STATUS_SHOW_MS, status::Step,
 };
 use rovsti_wa_ui::{WaAvatars, decode_image, display_name, photo_avatar};
@@ -173,12 +173,17 @@ pub fn message_target(author: &str, from_me: bool) -> Option<String> {
         .then(|| author.to_owned())
 }
 
+/// The number to look an author up by in the address book: only real phone
+/// JIDs have one (a LID's digits are not a phone number).
+fn author_number(author: &str) -> Option<String> {
+    is_pn_jid(author).then(|| format!("+{}", jid_user(author)))
+}
+
 /// What to call an author: the address-book name, WhatsApp's name for them,
 /// the push name their update carried, then the number.
 fn author_title(author: &StatusAuthor, backend: &Backend, avatars: &WaAvatars) -> String {
-    let contact = backend
-        .contacts()
-        .match_number(&format!("+{}", jid_user(&author.author)))
+    let contact = author_number(&author.author)
+        .and_then(|n| backend.contacts().match_number(&n))
         .map(|c| c.display_name.clone());
     let wa_name = avatars
         .name(&author.author)
@@ -1150,6 +1155,21 @@ impl Render for StatusPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn author_number_only_for_phone_jids() {
+        assert_eq!(
+            author_number("905551234567@s.whatsapp.net").as_deref(),
+            Some("+905551234567")
+        );
+        assert_eq!(
+            author_number("905551234567:3@s.whatsapp.net").as_deref(),
+            Some("+905551234567")
+        );
+        assert_eq!(author_number("96413459456093@lid"), None);
+        assert_eq!(author_number("123-456@g.us"), None);
+        assert!(!display_name(None, None, "96413459456093@lid").contains('+'));
+    }
 
     #[test]
     fn ages_read_like_whatsapp() {

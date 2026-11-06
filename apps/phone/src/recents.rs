@@ -216,6 +216,8 @@ pub(crate) struct RecentsView {
     last_pressed: Option<(usize, Zone)>,
     /// The row the Number sheet shows.
     pub(crate) number: Option<RowVm>,
+    /// The calls with that number, built when the sheet opened.
+    pub(crate) number_history: Arc<[HistoryVm]>,
     long_task: Option<Task<()>>,
     /// Unseen missed calls (the Recents tab's spoken label).
     missed: u32,
@@ -258,6 +260,7 @@ impl RecentsView {
             touch: None,
             last_pressed: None,
             number: None,
+            number_history: Arc::from(Vec::new()),
             long_task: None,
             missed: 0,
             missed_counted: false,
@@ -880,6 +883,7 @@ impl PhoneApp {
         if !self.can_open_sheet() {
             return;
         }
+        self.recents.number_history = self.history_for(&[row.number.as_ref()], cx);
         self.recents.number = Some(row.clone());
         self.setup_note = None;
         self.sheet_kind = crate::SheetKind::Number;
@@ -1196,9 +1200,12 @@ impl PhoneApp {
                 .into_any_element(),
             ));
         }
+        if let Some(section) = history_section(theme, &self.recents.number_history) {
+            children.push(reveal(4, section));
+        }
         if !row.named && !row.number.is_empty() {
             children.push(reveal(
-                4,
+                5,
                 sheet_pill(
                     self,
                     "sheet-nadd",
@@ -1343,6 +1350,130 @@ fn live_row(
         .opacity(alpha)
         .child(row)
         .into_any_element()
+}
+
+/// One call in the "Recent calls" list of a sheet, ready to draw.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HistoryVm {
+    title: SharedString,
+    detail: SharedString,
+    icon: Icon,
+    missed: bool,
+    whatsapp: bool,
+}
+
+impl HistoryVm {
+    /// Built once when a sheet opens, never per frame.
+    fn new(line: &recents::HistoryLine, now_ms: i64, locale: recents::LocaleTime) -> Self {
+        let (title, detail) = recents::history_text(line, now_ms, locale);
+        let direction = Direction::of(line.call_type);
+        Self {
+            title: title.into(),
+            detail: detail.into(),
+            icon: direction_icon(direction),
+            missed: direction == Direction::Missed,
+            whatsapp: line.whatsapp,
+        }
+    }
+
+    fn aria(&self) -> SharedString {
+        format!("{}, {}", self.title, self.detail).into()
+    }
+}
+
+/// Most calls a sheet lists.
+const HISTORY_LIMIT: usize = 10;
+/// Fixed height of one history line.
+const HISTORY_ROW_H: f32 = 44.0;
+
+impl PhoneApp {
+    /// The newest calls (cellular and WhatsApp) with any of `numbers`. Empty
+    /// until the call log is ready.
+    pub(crate) fn history_for(&self, numbers: &[&str], cx: &gpui::App) -> Arc<[HistoryVm]> {
+        let Load::Ready(log) = self.backend.read(cx).call_log() else {
+            return Arc::from(Vec::new());
+        };
+        let extras = self.wa_call.read(cx).recents_extras();
+        let now = backend::now_ms();
+        recents::history(&log.source, &extras, numbers, HISTORY_LIMIT)
+            .iter()
+            .map(|line| HistoryVm::new(line, now, log.locale))
+            .collect()
+    }
+}
+
+/// The "Recent calls" block of a sheet; `None` when there are no calls.
+pub(crate) fn history_section(theme: Theme, lines: &[HistoryVm]) -> Option<AnyElement> {
+    if lines.is_empty() {
+        return None;
+    }
+    let colors = theme::colors(theme);
+    let danger = call_colors(theme).danger;
+    let rows = lines.iter().enumerate().map(|(i, line)| {
+        let ink = if line.missed { danger } else { colors.label };
+        div()
+            .id(SharedString::from(format!("sheet-hist-{i}")))
+            .aria_label(line.aria())
+            .h(px(HISTORY_ROW_H))
+            .w_full()
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .px(px(16.0))
+            .child(if line.whatsapp {
+                whatsapp_badge(theme)
+            } else {
+                svg()
+                    .path(line.icon.path())
+                    .size(px(16.0))
+                    .flex_none()
+                    .text_color(ink)
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(typography::BODY.size)
+                    .text_color(ink)
+                    .child(line.title.clone()),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.secondary_label)
+                    .child(line.detail.clone()),
+            )
+    });
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .pt(px(6.0))
+            .child(
+                div()
+                    .px(px(16.0))
+                    .pb(px(4.0))
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.secondary_label)
+                    .child("Recent calls"),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .rounded(px(22.0))
+                    .overflow_hidden()
+                    .bg(gpui::Hsla {
+                        a: 0.5,
+                        ..colors.fill
+                    })
+                    .children(rows),
+            )
+            .into_any_element(),
+    )
 }
 
 /// The icon in a row's subtitle.
@@ -1787,5 +1918,39 @@ mod tests {
         assert_eq!(row_at(100.0, 3.0 * ROW_H, 0.0, 400.0, 3), None);
         assert_eq!(row_at(500.0, 10.0, 0.0, 400.0, 3), None);
         assert_eq!(row_at(100.0, 10.0, 0.0, 400.0, 0), None);
+    }
+
+    fn line(
+        call_type: rovsti_core::call_log::CallType,
+        whatsapp: bool,
+        duration_s: u64,
+    ) -> recents::HistoryLine {
+        recents::HistoryLine {
+            call_type,
+            whatsapp,
+            date_ms: 0,
+            duration_s,
+        }
+    }
+
+    #[test]
+    fn history_vm_marks_missed_and_keeps_the_duration_out_of_missed_calls() {
+        use rovsti_core::call_log::CallType;
+        let now = 3_600_000;
+        let missed = HistoryVm::new(&line(CallType::Missed, true, 0), now, Default::default());
+        assert!(missed.missed && missed.whatsapp);
+        assert_eq!(missed.icon, Icon::LucidePhoneMissed);
+        assert!(!missed.detail.contains('\u{b7}'));
+        assert_eq!(
+            missed.aria().as_ref(),
+            format!("{}, {}", missed.title, missed.detail)
+        );
+        let answered = HistoryVm::new(
+            &line(CallType::Incoming, false, 65),
+            now,
+            Default::default(),
+        );
+        assert!(!answered.missed && !answered.whatsapp);
+        assert!(answered.detail.ends_with("1:05"), "{}", answered.detail);
     }
 }

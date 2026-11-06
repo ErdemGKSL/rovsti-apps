@@ -26,7 +26,7 @@ pub enum Direction {
 }
 
 impl Direction {
-    fn of(call_type: CallType) -> Self {
+    pub fn of(call_type: CallType) -> Self {
         match call_type {
             CallType::Incoming => Self::Incoming,
             CallType::Outgoing => Self::Outgoing,

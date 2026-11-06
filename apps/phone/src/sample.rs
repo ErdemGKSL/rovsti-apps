@@ -238,6 +238,14 @@ pub fn call_log(now_ms: i64) -> Vec<CallLogEntry> {
             Some("Burak Demir"),
         ),
         entry(
+            11,
+            "+90 212 555 00 11",
+            CallLogKind::Incoming,
+            4 * HOUR,
+            77,
+            Some("Elif Kaya"),
+        ),
+        entry(
             5,
             "0544 987 65 43",
             CallLogKind::Outgoing,
@@ -254,6 +262,14 @@ pub fn call_log(now_ms: i64) -> Vec<CallLogEntry> {
             Some("Mehmet Öz"),
         ),
         entry(
+            9,
+            "+90 555 111 22 33",
+            CallLogKind::Outgoing,
+            30 * HOUR,
+            95,
+            Some("Ayşe Yılmaz"),
+        ),
+        entry(
             3,
             "0850 123 45 67",
             CallLogKind::Incoming,
@@ -262,6 +278,14 @@ pub fn call_log(now_ms: i64) -> Vec<CallLogEntry> {
             None,
         ),
         entry(2, "", CallLogKind::Missed, 74 * HOUR, 0, None),
+        entry(
+            10,
+            "+90 555 111 22 33",
+            CallLogKind::Incoming,
+            100 * HOUR,
+            3725,
+            Some("Ayşe Yılmaz"),
+        ),
         entry(
             1,
             "+1 415 555 0132",

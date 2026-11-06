@@ -441,6 +441,7 @@ impl PhoneApp {
         if row.raw.trim().is_empty() || self.sheet.is_visible() {
             return;
         }
+        self.recents.number_history = self.history_for(&[row.raw.as_str()], cx);
         self.recents.number = Some(crate::recents::RowVm::for_number(
             row.raw.clone(),
             row.title.clone(),

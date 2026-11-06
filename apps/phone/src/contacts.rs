@@ -362,6 +362,8 @@ pub(crate) struct ContactSheet {
     chooser: bool,
     /// A quick action waiting for the owner to pick a number (chooser mode).
     pending: Option<StripAction>,
+    /// The calls with the contact's numbers, built when the sheet opened.
+    history: Arc<[crate::recents::HistoryVm]>,
     note: Option<SharedString>,
     note_task: Option<Task<()>>,
 }
@@ -435,7 +437,7 @@ impl PhoneApp {
                     self.contacts.index = Some(Arc::clone(index));
                     self.photos.forget_misses();
                     self.apply_contacts_query(true, cx);
-                    self.refresh_open_sheet();
+                    self.refresh_open_sheet(cx);
                 }
             }
             _ => {
@@ -468,12 +470,24 @@ impl PhoneApp {
 
     /// The contacts snapshot changed under an open sheet (the star was
     /// written, or the contact was edited elsewhere): show the new numbers.
-    fn refresh_open_sheet(&mut self) {
-        let Some(sheet) = &mut self.contact_sheet else {
+    fn refresh_open_sheet(&mut self, cx: &gpui::App) {
+        let Some(sheet) = &self.contact_sheet else {
             return;
         };
-        if let Some(fresh) = self.contacts.all.iter().find(|r| r.id == sheet.contact.id) {
-            sheet.contact = fresh.clone();
+        let fresh = self
+            .contacts
+            .all
+            .iter()
+            .find(|r| r.id == sheet.contact.id)
+            .cloned();
+        let contact = fresh.as_ref().unwrap_or(&sheet.contact);
+        let numbers: Vec<&str> = contact.numbers.iter().map(|n| n.raw.as_str()).collect();
+        let history = self.history_for(&numbers, cx);
+        if let Some(sheet) = &mut self.contact_sheet {
+            if let Some(fresh) = fresh {
+                sheet.contact = fresh;
+            }
+            sheet.history = history;
         }
     }
 
@@ -830,12 +844,17 @@ impl PhoneApp {
         }
         window.blur();
         let starred = contact.starred;
+        let history = {
+            let numbers: Vec<&str> = contact.numbers.iter().map(|n| n.raw.as_str()).collect();
+            self.history_for(&numbers, cx)
+        };
         self.contact_sheet = Some(ContactSheet {
             star_fx: StarFx::default(),
             contact,
             starred,
             chooser,
             pending: None,
+            history,
             note: None,
             note_task: None,
         });
@@ -909,7 +928,7 @@ impl PhoneApp {
                     this.apply_contacts_query(true, cx);
                     // Favorites and the open sheet take the new format at once.
                     this.sync_contacts(cx);
-                    this.refresh_open_sheet();
+                    this.refresh_open_sheet(cx);
                     cx.notify();
                 }
             })
@@ -1794,9 +1813,14 @@ impl PhoneApp {
             ));
         }
         children.push(reveal(3, numbers.into_any_element()));
+        if !sheet.chooser
+            && let Some(section) = crate::recents::history_section(theme, &sheet.history)
+        {
+            children.push(reveal(4, section));
+        }
         if !sheet.chooser {
             children.push(reveal(
-                4,
+                5,
                 crate::recents::sheet_pill(
                     self,
                     "sheet-cedit",

@@ -1409,6 +1409,28 @@ impl Conversation {
         }
     }
 
+    /// The Delete pill on a failed send: the bubble, its cached file and its
+    /// pending reply go. Nothing left the phone, so nothing is asked.
+    fn discard_failed(&mut self, local_id: u64, cx: &mut Context<Self>) {
+        self.strip = None;
+        self.rows_dirty = true;
+        if self.timeline.discard(local_id).is_none() {
+            cx.notify();
+            return;
+        }
+        if let Some(path) = self.pending_paths.remove(&local_id)
+            && let Err(error) = std::fs::remove_file(&path)
+        {
+            log::debug!("removing the discarded attachment copy failed: {error}");
+        }
+        self.pending_quotes.remove(&local_id);
+        let pending = format!("pending-{local_id}");
+        self.local_quotes.remove(&pending);
+        self.media_cache.retain(|(cached, _)| *cached != pending);
+        cx.emit(ConversationEvent::Notice("Message deleted".into()));
+        cx.notify();
+    }
+
     fn retry(&mut self, local_id: u64, cx: &mut Context<Self>) {
         self.rows_dirty = true;
         match self.timeline.restart_body(local_id) {
@@ -1833,7 +1855,14 @@ impl Conversation {
             ItemState::Pending { .. } | ItemState::Failed { .. }
         );
         if let ItemState::Failed { local_id } = item.state {
-            bubble = bubble.on_click(cx.listener(move |this, _, _, cx| this.retry(local_id, cx)));
+            let id = message.id.clone();
+            bubble = bubble
+                .on_click(cx.listener(move |this, _, _, cx| this.retry(local_id, cx)))
+                .on_long_press(cx.listener(move |this, _, _, cx| {
+                    this.strip = Some(id.clone());
+                    this.rows_dirty = true;
+                    cx.notify();
+                }));
         } else if confirmed {
             let id = message.id.clone();
             bubble = bubble.on_click(cx.listener(move |this, _, _, cx| {
@@ -1859,7 +1888,11 @@ impl Conversation {
         if !chips.is_empty() && !revoked {
             column = column.child(self.chips(theme, message, &chips, cx));
         }
-        if confirmed && self.strip.as_deref() == Some(message.id.as_str()) {
+        if self.strip.as_deref() == Some(message.id.as_str())
+            && matches!(item.state, ItemState::Failed { .. })
+        {
+            column = column.child(self.actions(theme, item, meta, now, cx));
+        } else if confirmed && self.strip.as_deref() == Some(message.id.as_str()) {
             if !revoked {
                 column = column.child(self.quick_strip(theme, message, cx));
             }
@@ -2178,6 +2211,31 @@ impl Conversation {
                 )
         };
         let mut row = div().flex().flex_wrap().gap(px(6.0)).px(px(4.0));
+        if let ItemState::Failed { local_id } = item.state {
+            row = row.child(
+                pill("retry", Icon::LucideRefreshCw, "Retry", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.retry(local_id, cx);
+                    },
+                )),
+            );
+            if let Some(text) = copy_text_of(&message.body, meta) {
+                row = row.child(pill("copy", Icon::LucideCopy, "Copy", false).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::Copy(text.clone()));
+                        cx.notify();
+                    }),
+                ));
+            }
+            row = row
+                .child(pill("delete", Icon::LucideTrash2, "Delete", true).on_click(
+                    cx.listener(move |this, _, _, cx| this.discard_failed(local_id, cx)),
+                ));
+            return row.into_any_element();
+        }
         if !revoked {
             let target = id.clone();
             row = row.child(

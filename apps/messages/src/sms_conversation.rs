@@ -64,6 +64,8 @@ pub enum SmsConversationEvent {
     Share(String),
     /// The header's more button: the conversation menu.
     Menu,
+    /// A short confirmation for the page's pill, such as "Message deleted".
+    Notice(&'static str),
 }
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
@@ -559,6 +561,17 @@ impl SmsConversation {
         cx.notify();
     }
 
+    /// The Delete pill on a failed send: nothing left the phone, so it simply goes.
+    fn discard_failed(&mut self, local_id: u64, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.rows_dirty = true;
+        if self.timeline.discard(local_id).is_some() {
+            self.mms_sends.remove(&local_id);
+            cx.emit(SmsConversationEvent::Notice("Message deleted"));
+        }
+        cx.notify();
+    }
+
     /// A copy pill was tapped: the page copies it and the selection closes.
     fn copy(&mut self, text: String, sensitive: bool, cx: &mut Context<Self>) {
         self.selected = None;
@@ -734,10 +747,7 @@ impl SmsConversation {
         } else {
             quiet
         };
-        let retry = match item.key {
-            SmsKey::Local(id) if failed => Some(id),
-            _ => None,
-        };
+        let retry = failed_local(item);
         let meta: SharedString = if retry.is_some() {
             "Not sent · Tap to retry".into()
         } else {
@@ -795,7 +805,13 @@ impl SmsConversation {
         );
         let key = message_key(item);
         if let Some(local_id) = retry {
-            bubble = bubble.on_click(cx.listener(move |this, _, _, cx| this.retry(local_id, cx)));
+            bubble = bubble
+                .on_click(cx.listener(move |this, _, _, cx| this.retry(local_id, cx)))
+                .on_long_press(cx.listener(move |this, _, _, cx| {
+                    this.selected = Some(key);
+                    this.rows_dirty = true;
+                    cx.notify();
+                }));
         } else if selectable(item) {
             bubble = bubble
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -816,7 +832,35 @@ impl SmsConversation {
             .gap(px(2.0))
             .when(own, |c| c.items_end())
             .child(bubble);
-        if self.selected == Some(key) && selectable(item) {
+        if self.selected == Some(key)
+            && let Some(local_id) = retry
+        {
+            let mut pills = div().flex().flex_wrap().gap(px(6.0)).px(px(4.0));
+            pills = pills.child(
+                glass_pill(theme, "Retry")
+                    .id(("sms-retry", index))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.selected = None;
+                        this.retry(local_id, cx);
+                    })),
+            );
+            if let Some(text) = copy_text(item) {
+                pills = pills.child(glass_pill(theme, "Copy").id(("sms-copy", index)).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        this.copy(text.clone(), false, cx);
+                    }),
+                ));
+            }
+            pills = pills.child(
+                glass_pill(theme, "Delete")
+                    .id(("sms-delete", index))
+                    .text_color(colors.red)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.discard_failed(local_id, cx);
+                    })),
+            );
+            column = column.child(pills);
+        } else if self.selected == Some(key) && selectable(item) {
             let mut pills = div().flex().flex_wrap().gap(px(6.0)).px(px(4.0));
             if let Some(text) = copy_text(item) {
                 let shared = text.clone();
@@ -1196,7 +1240,6 @@ fn selectable(item: &SmsItem) -> bool {
 
 /// The local id of a failed send of ours, which can be retried, copied or
 /// deleted. `None` for everything else.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn failed_local(item: &SmsItem) -> Option<u64> {
     match item.key {
         SmsKey::Local(id) if item.state == DeliveryState::Failed => Some(id),

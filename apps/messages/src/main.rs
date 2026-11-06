@@ -900,6 +900,10 @@ impl MessagesApp {
             }
             SmsConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             SmsConversationEvent::Menu => this.open_page_menu(cx),
+            SmsConversationEvent::Notice(text) => {
+                this.show_pill(*text);
+                cx.notify();
+            }
         })
         .detach();
         if thread_id >= 0 {

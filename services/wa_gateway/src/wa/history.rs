@@ -8,6 +8,7 @@ use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::waproto::whatsapp::web_message_info::Status as WebStatus;
 
 use super::convert::{self, Converted, Origin};
+use super::lid::{self, LidMap};
 use super::status;
 use crate::store::{ChatSettings, HistoryChat, HistoryMessage, StoredStatus};
 
@@ -34,22 +35,22 @@ fn delivery(status: Option<WebStatus>) -> Option<DeliveryStatus> {
 }
 
 /// The author of `key` in `chat`, for groups.
-fn author(chat: &str, participant: Option<&str>) -> Option<String> {
+fn author(chat: &str, participant: Option<&str>, map: &LidMap) -> Option<String> {
     participant
         .filter(|p| !p.is_empty())
         .and_then(|p| p.parse::<Jid>().ok())
-        .and_then(|jid| convert::group_sender(chat, &jid))
+        .and_then(|jid| convert::group_sender(chat, &lid::resolve(&jid, None, map)))
 }
 
 /// The reactions a history entry carries.
-fn reactions(chat: &str, info: &wa::WebMessageInfo) -> Vec<Reaction> {
+fn reactions(chat: &str, info: &wa::WebMessageInfo, map: &LidMap) -> Vec<Reaction> {
     info.reactions
         .iter()
         .filter_map(|r| {
             let emoji = r.text.clone().filter(|t| !t.is_empty())?;
             let key = r.key.as_option();
             Some(Reaction {
-                sender: author(chat, key.and_then(|k| k.participant.as_deref())),
+                sender: author(chat, key.and_then(|k| k.participant.as_deref()), map),
                 from_me: key.and_then(|k| k.from_me).unwrap_or(false),
                 emoji,
             })
@@ -58,7 +59,7 @@ fn reactions(chat: &str, info: &wa::WebMessageInfo) -> Vec<Reaction> {
 }
 
 /// One history message. `None` when it has no id or content the apps show.
-fn history_message(chat: &str, info: &wa::WebMessageInfo) -> Option<HistoryMessage> {
+fn history_message(chat: &str, info: &wa::WebMessageInfo, map: &LidMap) -> Option<HistoryMessage> {
     let key = info.key.as_option()?;
     let id = key.id.as_deref().filter(|id| !id.is_empty())?;
     let content = info.message.as_option()?;
@@ -66,6 +67,7 @@ fn history_message(chat: &str, info: &wa::WebMessageInfo) -> Option<HistoryMessa
     let sender = author(
         chat,
         info.participant.as_deref().or(key.participant.as_deref()),
+        map,
     );
     let origin = Origin {
         id,
@@ -89,7 +91,7 @@ fn history_message(chat: &str, info: &wa::WebMessageInfo) -> Option<HistoryMessa
                 extras.secret = info.message_secret.clone().filter(|s| !s.is_empty());
             }
             Some(HistoryMessage {
-                reactions: reactions(chat, info),
+                reactions: reactions(chat, info, map),
                 message,
                 extras,
             })
@@ -120,18 +122,52 @@ fn mute_end(raw: Option<u64>, now_ms: i64) -> Option<i64> {
 }
 
 /// The chat JID to store a conversation under: the phone-number JID when
-/// WhatsApp keys it by LID but knows the number.
-fn conversation_jid(conv: &wa::Conversation) -> &str {
+/// WhatsApp keys it by LID and gives (`pn_jid`) or the map knows the number.
+fn conversation_jid(conv: &wa::Conversation, map: &LidMap) -> String {
     let id = conv.id.as_str();
     match conv.pn_jid.as_deref() {
-        Some(pn) if id.ends_with("@lid") && pn.ends_with("@s.whatsapp.net") => pn,
-        _ => id,
+        Some(pn) if id.ends_with("@lid") && pn.ends_with("@s.whatsapp.net") => {
+            lid::resolve_str(pn, map)
+        }
+        _ => lid::resolve_str(id, map),
     }
 }
 
+/// The LIDs a conversation names (its id and its message authors), to look
+/// up before [`conversation`] runs.
+pub fn conversation_lids(conv: &wa::Conversation) -> Vec<Jid> {
+    let participants = conv
+        .messages
+        .iter()
+        .filter_map(|m| m.message.as_option())
+        .flat_map(|info| {
+            let key = info.key.as_option();
+            [
+                info.participant.as_deref(),
+                key.and_then(|k| k.participant.as_deref()),
+            ]
+            .into_iter()
+            .flatten()
+            .chain(
+                info.reactions
+                    .iter()
+                    .filter_map(|r| r.key.as_option().and_then(|k| k.participant.as_deref())),
+            )
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+        });
+    std::iter::once(conv.id.clone())
+        .chain(participants)
+        .filter(|id| id.contains("@lid"))
+        .filter_map(|id| id.parse::<Jid>().ok())
+        .filter(Jid::is_lid)
+        .collect()
+}
+
 /// One conversation. `None` for chats the apps do not show.
-pub fn conversation(conv: &wa::Conversation, now_ms: i64) -> Option<HistoryChat> {
-    let jid = conversation_jid(conv);
+pub fn conversation(conv: &wa::Conversation, now_ms: i64, map: &LidMap) -> Option<HistoryChat> {
+    let jid = conversation_jid(conv, map);
+    let jid = jid.as_str();
     if jid.is_empty() || is_skipped(jid) {
         return None;
     }
@@ -139,7 +175,7 @@ pub fn conversation(conv: &wa::Conversation, now_ms: i64) -> Option<HistoryChat>
         .messages
         .iter()
         .filter_map(|m| m.message.as_option())
-        .filter_map(|info| history_message(jid, info))
+        .filter_map(|info| history_message(jid, info, map))
         .collect();
     let newest = messages
         .iter()
@@ -174,10 +210,10 @@ pub fn conversation(conv: &wa::Conversation, now_ms: i64) -> Option<HistoryChat>
 }
 
 /// Every conversation of a decoded sync.
-pub fn sync_to_chats(sync: &wa::HistorySync, now_ms: i64) -> Vec<HistoryChat> {
+pub fn sync_to_chats(sync: &wa::HistorySync, now_ms: i64, map: &LidMap) -> Vec<HistoryChat> {
     sync.conversations
         .iter()
-        .filter_map(|c| conversation(c, now_ms))
+        .filter_map(|c| conversation(c, now_ms, map))
         .collect()
 }
 
@@ -203,6 +239,21 @@ pub struct Drained {
     pub statuses: Vec<StoredStatus>,
 }
 
+/// Every LID the sync's conversations name, for [`Resolver::prefetch`]. Blocking
+/// like [`drain`].
+pub fn lids(lazy: &LazyHistorySync) -> Result<Vec<Jid>, HistorySyncError> {
+    let mut stream = lazy.stream();
+    let mut found: Vec<Jid> = Vec::new();
+    while let Some(conv) = stream.next_conversation()? {
+        for jid in conversation_lids(&conv) {
+            if !found.iter().any(|f| f.user == jid.user) {
+                found.push(jid);
+            }
+        }
+    }
+    Ok(found)
+}
+
 /// Walks the lazily decoded sync one conversation at a time, so the whole
 /// inflated blob never sits in memory. Blocking and CPU-heavy: call it from
 /// `spawn_blocking`.
@@ -212,6 +263,7 @@ pub fn drain(
     lazy: &LazyHistorySync,
     now_ms: i64,
     own_pn: Option<&str>,
+    map: &LidMap,
 ) -> Result<Drained, HistorySyncError> {
     let mut stream = lazy.stream();
     let mut chats = Vec::new();
@@ -221,7 +273,7 @@ pub fn drain(
             statuses.extend(status::from_history(&conv, own_pn));
             continue;
         }
-        chats.extend(conversation(&conv, now_ms));
+        chats.extend(conversation(&conv, now_ms, map));
     }
     // Push names are optional: a sync whose tail does not decode still
     // delivers its chats.
@@ -307,7 +359,7 @@ mod tests {
 
     #[test]
     fn maps_conversations_and_skips_status() {
-        let chats = sync_to_chats(&sync(), 0);
+        let chats = sync_to_chats(&sync(), 0, &LidMap::default());
         assert_eq!(chats.len(), 2);
 
         let direct = &chats[0];
@@ -344,7 +396,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let chat = conversation(&conv, 0).unwrap();
+        let chat = conversation(&conv, 0, &LidMap::default()).unwrap();
         assert!(chat.messages.is_empty());
     }
 
@@ -367,7 +419,7 @@ mod tests {
             .await
             .unwrap();
 
-        let chats = sync_to_chats(&sync(), 0);
+        let chats = sync_to_chats(&sync(), 0, &LidMap::default());
         assert_eq!(
             store
                 .import_history(id.clone(), chats.clone())
@@ -432,7 +484,7 @@ mod tests {
             messages: vec![mine, theirs],
             ..Default::default()
         };
-        let chat = conversation(&conv, 0).unwrap();
+        let chat = conversation(&conv, 0, &LidMap::default()).unwrap();
         assert_eq!(
             chat.jid, "905321234567@s.whatsapp.net",
             "LID chats use the number"
@@ -477,6 +529,44 @@ mod tests {
             push_names(&sync),
             [("905321234567@s.whatsapp.net".to_owned(), "Ayse".to_owned())]
         );
+    }
+
+    #[test]
+    fn the_map_supplies_the_number_of_a_lid_chat() {
+        let lid_author = "555:3@lid";
+        let conv = wa::Conversation {
+            id: "1234@lid".into(),
+            messages: vec![web_message("M", false, 10, "x", None)],
+            ..Default::default()
+        };
+        let group = wa::Conversation {
+            id: "1-2@g.us".into(),
+            messages: vec![web_message("G", false, 11, "y", Some(lid_author))],
+            ..Default::default()
+        };
+        let none = LidMap::default();
+        let known = LidMap::from_entries([("1234", "905321234567"), ("555", "4915")]);
+
+        assert_eq!(conversation(&conv, 0, &none).unwrap().jid, "1234@lid");
+        let chat = conversation(&conv, 0, &known).unwrap();
+        assert_eq!(chat.jid, "905321234567@s.whatsapp.net");
+        assert_eq!(chat.messages[0].message.chat, chat.jid);
+
+        let chat = conversation(&group, 0, &none).unwrap();
+        assert_eq!(chat.messages[0].message.sender.as_deref(), Some("555@lid"));
+        let chat = conversation(&group, 0, &known).unwrap();
+        assert_eq!(chat.jid, "1-2@g.us");
+        assert_eq!(
+            chat.messages[0].message.sender.as_deref(),
+            Some("4915@s.whatsapp.net")
+        );
+
+        let users: Vec<String> = conversation_lids(&conv)
+            .into_iter()
+            .chain(conversation_lids(&group))
+            .map(|j| j.user.to_string())
+            .collect();
+        assert_eq!(users, ["1234", "555"]);
     }
 
     #[test]

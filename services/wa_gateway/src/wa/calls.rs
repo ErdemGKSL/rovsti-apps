@@ -42,6 +42,7 @@ use crate::now_ms;
 use crate::push::{PushKind, Pusher};
 use crate::store::InstanceId;
 use crate::wa::convert::parse_jid;
+use crate::wa::lid::{self, LidMap};
 
 /// A ringing call that nobody answers ends as missed after this long.
 pub const RING_TIMEOUT: Duration = Duration::from_secs(60);
@@ -552,7 +553,7 @@ impl CallTable {
     }
 
     /// An `IncomingCall` event: a new offer, or the peer's answer to ours.
-    pub fn on_incoming(self: &Arc<Self>, call: &IncomingCall) {
+    pub fn on_incoming(self: &Arc<Self>, call: &IncomingCall, map: &LidMap) {
         match &call.action {
             CallAction::Offer {
                 call_id,
@@ -565,7 +566,7 @@ impl CallTable {
                     log::info!("{}: ignoring a group call", self.instance);
                     return;
                 }
-                let from = call.from.to_non_ad().to_string();
+                let from = lid::resolve(&call.from, None, map).to_string();
                 let mut entry = CallEntry::new(CallDirection::In, from.clone());
                 entry.wire_peer = call.from.to_string();
                 entry.creator = call_creator.to_string();
@@ -1377,7 +1378,8 @@ mod tests {
     }
 
     fn ring(rig: &Rig, id: &str) {
-        rig.table.on_incoming(&offer(id, FROM, Some("Ayse")));
+        rig.table
+            .on_incoming(&offer(id, FROM, Some("Ayse")), &LidMap::default());
     }
 
     #[tokio::test]
@@ -1568,7 +1570,8 @@ mod tests {
         assert_eq!(rig.calls.ops(), [format!("place {FROM}")]);
 
         let live = rig.calls.lives().pop().unwrap();
-        rig.table.on_incoming(&callee_says(&id, "accept"));
+        rig.table
+            .on_incoming(&callee_says(&id, "accept"), &LidMap::default());
         live.emit(LiveEvent::MediaUp);
         wait_phase(&rig.table, &id, CallPhase::Active).await;
 
@@ -1979,7 +1982,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(30)).await;
         assert_eq!(rig.table.phase(&id), Some(CallPhase::Ringing));
         // The callee's <accept> answers it; media is already up.
-        rig.table.on_incoming(&callee_says(&id, "accept"));
+        rig.table
+            .on_incoming(&callee_says(&id, "accept"), &LidMap::default());
         assert_eq!(rig.table.phase(&id), Some(CallPhase::Active));
     }
 
@@ -1987,7 +1991,8 @@ mod tests {
     async fn an_accept_before_the_relay_waits_for_media() {
         let rig = rig();
         let id = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
-        rig.table.on_incoming(&callee_says(&id, "accept"));
+        rig.table
+            .on_incoming(&callee_says(&id, "accept"), &LidMap::default());
         assert_eq!(rig.table.phase(&id), Some(CallPhase::Connecting));
         rig.calls.lives().pop().unwrap().emit(LiveEvent::MediaUp);
         wait_phase(&rig.table, &id, CallPhase::Active).await;
@@ -1998,14 +2003,16 @@ mod tests {
         let rig = rig();
         let id = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
         // One of the callee's devices cannot take calls; the others ring on.
-        rig.table.on_incoming(&callee_says(&id, "busy"));
+        rig.table
+            .on_incoming(&callee_says(&id, "busy"), &LidMap::default());
         assert_eq!(rig.table.phase(&id), Some(CallPhase::Ringing));
         // So the caller can still cancel it, and WhatsApp hears about it.
         rig.table.end(&rig.calls, &id).await.unwrap();
         assert_eq!(rig.calls.ops().last(), Some(&format!("terminate {id}")));
 
         let declined = rig.table.place(&rig.calls, FROM).await.unwrap().call_id;
-        rig.table.on_incoming(&callee_says(&declined, "reject"));
+        rig.table
+            .on_incoming(&callee_says(&declined, "reject"), &LidMap::default());
         assert_eq!(
             rig.table.phase(&declined),
             Some(CallPhase::Ended(EndReason::Rejected))

@@ -12,6 +12,7 @@ use whatsapp_rust::wacore::types::message::MessageSource;
 use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::waproto::whatsapp::message::protocol_message::Type as ProtocolType;
 
+use super::lid::{self, LidMap};
 use crate::driver::DriverError;
 use crate::store::{MAX_THUMBNAIL_BYTES, MessageExtras};
 
@@ -468,36 +469,27 @@ pub fn group_sender(chat: &str, sender: &Jid) -> Option<String> {
     is_group(chat).then(|| sender.to_non_ad().to_string())
 }
 
-/// `jid`, or its phone-number form `alt` when `jid` is a LID: the apps
-/// match people by phone number.
-pub fn prefer_pn(jid: &Jid, alt: Option<&Jid>) -> Jid {
-    match alt {
-        Some(alt) if jid.is_lid() && alt.is_pn() => alt.to_non_ad(),
-        _ => jid.to_non_ad(),
-    }
-}
-
-/// The chat and author JIDs of a live message, by phone number when
-/// WhatsApp addressed them by LID but told the number too.
-pub fn chat_and_sender(source: &MessageSource) -> (String, Option<String>) {
+/// The chat and author JIDs of a live message, by phone number when `map`
+/// knows the LID or WhatsApp told the number too (the `*_alt` fields).
+pub fn chat_and_sender(source: &MessageSource, map: &LidMap) -> (String, Option<String>) {
     let chat = if source.is_group {
         source.chat.to_non_ad()
     } else if source.is_from_me {
-        prefer_pn(&source.chat, source.recipient_alt.as_ref())
+        lid::resolve(&source.chat, source.recipient_alt.as_ref(), map)
     } else {
-        prefer_pn(&source.chat, source.sender_alt.as_ref())
+        lid::resolve(&source.chat, source.sender_alt.as_ref(), map)
     }
     .to_string();
-    let author = prefer_pn(&source.sender, source.sender_alt.as_ref());
+    let author = lid::resolve(&source.sender, source.sender_alt.as_ref(), map);
     let sender = group_sender(&chat, &author);
     (chat, sender)
 }
 
 /// Converts a live message. The raw protobuf is kept for media, so the file
 /// can be downloaded later.
-pub fn message(ctx: &MessageContext) -> Converted {
+pub fn message(ctx: &MessageContext, map: &LidMap) -> Converted {
     let source: &MessageSource = &ctx.info.source;
-    let (chat, sender) = chat_and_sender(source);
+    let (chat, sender) = chat_and_sender(source, map);
     let mut converted = convert(
         Origin {
             id: &ctx.info.id,
@@ -743,11 +735,43 @@ mod tests {
 
     #[test]
     fn lids_give_way_to_phone_numbers() {
-        let lid: Jid = "1234:5@lid".parse().unwrap();
         let pn: Jid = "905321234567@s.whatsapp.net".parse().unwrap();
-        assert_eq!(prefer_pn(&lid, Some(&pn)), pn);
-        assert_eq!(prefer_pn(&lid, None).to_string(), "1234@lid");
-        assert_eq!(prefer_pn(&pn, Some(&lid)), pn);
+        let none = LidMap::default();
+        let known = LidMap::from_entries([("1234", "905321234567")]);
+
+        let mut source = MessageSource {
+            chat: "1234:5@lid".parse().unwrap(),
+            sender: "1234:5@lid".parse().unwrap(),
+            ..Default::default()
+        };
+        // No alt, no mapping: the LID stays.
+        assert_eq!(chat_and_sender(&source, &none).0, "1234@lid");
+        // No alt, but the map knows it: the PN chat.
+        assert_eq!(chat_and_sender(&source, &known).0, pn.to_string());
+        // The alt supplies the number.
+        source.sender_alt = Some(pn.clone());
+        assert_eq!(chat_and_sender(&source, &none).0, pn.to_string());
+
+        // My own message from another device: only the recipient alt counts.
+        let mine = MessageSource {
+            chat: "1234@lid".parse().unwrap(),
+            sender: "999:3@s.whatsapp.net".parse().unwrap(),
+            is_from_me: true,
+            ..Default::default()
+        };
+        assert_eq!(chat_and_sender(&mine, &none).0, "1234@lid");
+        assert_eq!(chat_and_sender(&mine, &known).0, pn.to_string());
+
+        // Groups: the chat stays, the author resolves.
+        let group = MessageSource {
+            chat: "1-2@g.us".parse().unwrap(),
+            sender: "1234:5@lid".parse().unwrap(),
+            is_group: true,
+            ..Default::default()
+        };
+        let (chat, sender) = chat_and_sender(&group, &known);
+        assert_eq!(chat, "1-2@g.us");
+        assert_eq!(sender.as_deref(), Some("905321234567@s.whatsapp.net"));
     }
 
     fn body(converted: Converted) -> MessageBody {

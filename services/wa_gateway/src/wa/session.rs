@@ -29,6 +29,7 @@ use whatsapp_rust::waproto::buffa::Message as _;
 
 use super::calls::{CallBackend, WaCalls};
 use super::convert;
+use super::lid::{self, LidMap, Resolver};
 use super::{app_state, groups, history, media, picture, reaction, status};
 use crate::driver::{
     DriverError, EventSink, MessageRef, PictureFetch, SendMedia, StatusReceipt, WaDriver,
@@ -42,6 +43,7 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(10);
 struct Running {
     generation: u64,
     client: Arc<Client>,
+    resolver: Arc<Resolver>,
     handle: BotHandle,
     sink: EventSink,
 }
@@ -110,8 +112,13 @@ fn members_besides_me(participants: &[Jid], own: &[&Jid]) -> usize {
 /// One name per group member for counting receipts, whether WhatsApp named
 /// them by phone number or by LID: the phone number when it is known (from
 /// the receipt, else from the group's LID map), else the LID.
-fn participant_key(sender: &Jid, alt: Option<&Jid>, group: Option<&WaGroupInfo>) -> String {
-    let jid = convert::prefer_pn(sender, alt);
+fn participant_key(
+    sender: &Jid,
+    alt: Option<&Jid>,
+    group: Option<&WaGroupInfo>,
+    map: &LidMap,
+) -> String {
+    let jid = lid::resolve(sender, alt, map);
     if jid.is_lid()
         && let Some(pn) = group.and_then(|g| g.phone_jid_for_lid_user(&jid.user))
     {
@@ -225,6 +232,12 @@ impl WaRuntime {
             return Err(DriverError::NotConnected);
         }
         Ok((Arc::clone(&r.client), r.sink.clone()))
+    }
+
+    fn resolver_of(&self, instance: &InstanceId) -> Result<Arc<Resolver>, DriverError> {
+        let running = self.running();
+        let r = running.get(instance).ok_or(DriverError::NotConnected)?;
+        Ok(Arc::clone(&r.resolver))
     }
 
     /// Stops the bot of `instance` (when it is still the run `generation`, if
@@ -356,23 +369,22 @@ impl WaRuntime {
                 let sink = sink.clone();
                 move |ctx| {
                     let sink = sink.clone();
-                    // Status updates are stored apart, never as a chat.
-                    let story = status::is_status(&ctx).then(|| status::live(&ctx));
-                    // An encrypted edit needs the stored secret of the edited
-                    // message; the rest converts without any lookup.
-                    let pending = story
-                        .is_none()
-                        .then(|| app_state::encrypted_edit(&ctx))
-                        .flatten();
-                    let converted = convert::message(&ctx);
                     async move {
-                        if let Some(update) = story {
-                            status::apply(&sink, update).await;
+                        // Mappings first (the library keeps them), so a
+                        // message without a phone-number alt still lands in
+                        // the phone-number chat.
+                        let resolver = Resolver::new(Arc::clone(&ctx.client));
+                        let map = resolver.prefetch(&lid::source_jids(&ctx.info.source)).await;
+                        // Status updates are stored apart, never as a chat.
+                        if status::is_status(&ctx) {
+                            status::apply(&sink, status::live(&ctx, &map)).await;
                             return;
                         }
-                        let converted = match pending {
+                        // An encrypted edit needs the stored secret of the
+                        // edited message; the rest converts without any lookup.
+                        let converted = match app_state::encrypted_edit(&ctx, &map) {
                             Some(edit) => edit.resolve(&sink).await,
-                            None => converted,
+                            None => convert::message(&ctx, &map),
                         };
                         app_state::apply_converted(&sink, converted).await;
                     }
@@ -415,7 +427,8 @@ impl WaRuntime {
                         let instance = instance.clone();
                         let was_connected = Arc::clone(&was_connected);
                         async move {
-                            handle_event(&sink, &client, &instance, &was_connected, &event).await;
+                            let resolver = Resolver::new(client);
+                            handle_event(&sink, &resolver, &instance, &was_connected, &event).await;
                         }
                     }
                 },
@@ -429,12 +442,14 @@ impl WaRuntime {
 
         let bot = builder.build().await.map_err(failed)?;
         let client = bot.client();
+        let resolver = Arc::new(Resolver::new(Arc::clone(&client)));
         let handle = bot.spawn();
         self.running().insert(
             instance,
             Running {
                 generation,
                 client,
+                resolver,
                 handle,
                 sink,
             },
@@ -448,8 +463,10 @@ impl WaRuntime {
         req: SendMedia,
     ) -> Result<Sent, DriverError> {
         let (client, sink) = self.client_of(instance)?;
+        let resolver = self.resolver_of(instance)?;
         let to = convert::parse_jid(&req.chat)?;
-        let chat = to.to_non_ad().to_string();
+        // Stored under the phone number; delivered to what the app sent.
+        let chat = resolver.resolve(&to, None).await.to_string();
         let size = req.data.len() as u64;
 
         let uploaded: media::Uploaded = client
@@ -532,8 +549,10 @@ impl WaRuntime {
         req: SendReaction,
     ) -> Result<(), DriverError> {
         let (client, sink) = self.client_of(instance)?;
+        let resolver = self.resolver_of(instance)?;
         let to = convert::parse_jid(&req.chat)?;
-        let chat = to.to_non_ad().to_string();
+        let wire_chat = to.to_non_ad().to_string();
+        let chat = resolver.resolve(&to, None).await.to_string();
         let own = client
             .persistence_manager()
             .get_device_snapshot()
@@ -544,7 +563,8 @@ impl WaRuntime {
 
         let stored = sink.find_message(&chat, &req.message_id).await;
         let author = reaction::target_author(&req, stored.as_ref(), own_jid.as_deref());
-        let key = reaction::message_key(&chat, &req.message_id, req.from_me, author.as_deref());
+        let key =
+            reaction::message_key(&wire_chat, &req.message_id, req.from_me, author.as_deref());
         client
             .send_reaction(to, key, &req.emoji)
             .await
@@ -571,6 +591,7 @@ impl WaRuntime {
         only: Option<Jid>,
     ) -> Result<Vec<GroupInfo>, DriverError> {
         let (client, sink) = self.client_of(instance)?;
+        let resolver = self.resolver_of(instance)?;
         let metadata: Vec<_> = match only {
             Some(jid) => vec![client.groups().get_metadata(&jid).await.map_err(failed)?],
             None => client
@@ -581,6 +602,13 @@ impl WaRuntime {
                 .into_values()
                 .collect(),
         };
+        let unmapped: Vec<&Jid> = metadata
+            .iter()
+            .flat_map(|g| g.participants.iter())
+            .filter(|p| p.phone_number.is_none())
+            .map(|p| &p.jid)
+            .collect();
+        let map = resolver.prefetch(&unmapped).await;
         let mut infos = Vec::with_capacity(metadata.len());
         for group in &metadata {
             let mut info = groups::group_info(
@@ -588,7 +616,7 @@ impl WaRuntime {
                 &group.subject,
                 group.participants.iter().map(|p| {
                     (
-                        groups::participant_jid(&p.jid, p.phone_number.as_ref()),
+                        groups::participant_jid(&p.jid, p.phone_number.as_ref(), &map),
                         p.is_admin(),
                     )
                 }),
@@ -613,8 +641,9 @@ impl WaRuntime {
         req: SendText,
     ) -> Result<Sent, DriverError> {
         let (client, sink) = self.client_of(instance)?;
+        let resolver = self.resolver_of(instance)?;
         let to = convert::parse_jid(&req.chat)?;
-        let chat = to.to_non_ad().to_string();
+        let chat = resolver.resolve(&to, None).await.to_string();
         let own = client
             .persistence_manager()
             .get_device_snapshot()
@@ -678,16 +707,15 @@ impl WaRuntime {
 /// other member got that far. `ReadSelf`: I read their messages on another
 /// of my devices, which clears the unread count and marks their messages
 /// read in the apps, never mine. Receipts from my own devices are ignored.
-async fn on_receipt(sink: &EventSink, client: &Client, receipt: &Receipt) {
+async fn on_receipt(sink: &EventSink, resolver: &Resolver, receipt: &Receipt) {
+    let client = resolver.client();
     if receipt.message_ids.is_empty() {
         return;
     }
     let source = &receipt.source;
-    let chat_jid = if source.chat.is_lid() {
-        convert::prefer_pn(&source.chat, source.sender_alt.as_ref())
-    } else {
-        source.chat.to_non_ad()
-    };
+    let chat_jid = resolver
+        .resolve(&source.chat, source.sender_alt.as_ref())
+        .await;
     let chat = chat_jid.to_string();
     let ids: Vec<String> = receipt
         .message_ids
@@ -730,8 +758,16 @@ async fn on_receipt(sink: &EventSink, client: &Client, receipt: &Receipt) {
         let members = group
             .as_deref()
             .map(|g| members_besides_me(&g.participants, &own));
-        let participant =
-            participant_key(&source.sender, source.sender_alt.as_ref(), group.as_deref());
+        let sender_jids: Vec<&Jid> = std::iter::once(&source.sender)
+            .chain(source.sender_alt.iter())
+            .collect();
+        let map = resolver.prefetch(&sender_jids).await;
+        let participant = participant_key(
+            &source.sender,
+            source.sender_alt.as_ref(),
+            group.as_deref(),
+            &map,
+        );
         sink.group_receipt(&chat, participant, ids, status, members)
             .await;
     } else {
@@ -741,21 +777,27 @@ async fn on_receipt(sink: &EventSink, client: &Client, receipt: &Receipt) {
 
 async fn handle_event(
     sink: &EventSink,
-    client: &Client,
+    resolver: &Resolver,
     instance: &InstanceId,
     was_connected: &AtomicBool,
     event: &Event,
 ) {
     match event {
-        Event::Receipt(receipt) => on_receipt(sink, client, receipt).await,
+        Event::Receipt(receipt) => on_receipt(sink, resolver, receipt).await,
         Event::Presence(update) => sink.publish(GatewayEvent::Presence {
-            jid: update.from.to_non_ad().to_string(),
+            jid: resolver.resolve(&update.from, None).await.to_string(),
             available: !update.unavailable,
             last_seen_ms: update.last_seen.map(|t| t.timestamp_millis()),
         }),
         Event::ChatPresence(update) => sink.publish(GatewayEvent::Typing {
-            chat: update.source.chat.to_non_ad().to_string(),
-            jid: update.source.sender.to_non_ad().to_string(),
+            chat: resolver
+                .resolve(&update.source.chat, update.source.sender_alt.as_ref())
+                .await
+                .to_string(),
+            jid: resolver
+                .resolve(&update.source.sender, update.source.sender_alt.as_ref())
+                .await
+                .to_string(),
             state: typing_state(update.state, update.media),
         }),
         Event::GroupUpdate(update) => {
@@ -769,15 +811,26 @@ async fn handle_event(
             let progress = lazy.progress();
             let lazy = (**lazy).clone();
             let now = now_ms();
-            let own_pn = client
+            let own_pn = resolver
+                .client()
                 .persistence_manager()
                 .get_device_snapshot()
                 .pn
                 .as_ref()
                 .map(|jid| jid.to_non_ad().to_string());
-            let drained =
-                tokio::task::spawn_blocking(move || history::drain(&lazy, now, own_pn.as_deref()))
-                    .await;
+            // Look up every LID the sync names before the blocking walk.
+            let lids = {
+                let lazy = lazy.clone();
+                tokio::task::spawn_blocking(move || history::lids(&lazy)).await
+            };
+            let map = match lids {
+                Ok(Ok(lids)) => resolver.prefetch(&lids.iter().collect::<Vec<_>>()).await,
+                _ => LidMap::default(),
+            };
+            let drained = tokio::task::spawn_blocking(move || {
+                history::drain(&lazy, now, own_pn.as_deref(), &map)
+            })
+            .await;
             match drained {
                 Ok(Ok(drained)) => {
                     sink.set_push_names(drained.push_names).await;
@@ -797,7 +850,10 @@ async fn handle_event(
                     .await;
             }
         }
-        Event::IncomingCall(call) => sink.calls().on_incoming(call),
+        Event::IncomingCall(call) => {
+            let map = resolver.prefetch(&[&call.from]).await;
+            sink.calls().on_incoming(call, &map);
+        }
         Event::MissedCall(missed) => sink.calls().on_missed(&missed.call_id),
         Event::CallEndedElsewhere(ended) => sink.calls().on_ended_elsewhere(&ended.call_id),
         Event::StreamReplaced(_) => {
@@ -821,7 +877,7 @@ async fn handle_event(
                     .await;
             }
         }
-        other => app_state::handle(sink, other).await,
+        other => app_state::handle(sink, resolver, other).await,
     }
 }
 
@@ -877,7 +933,11 @@ impl WaDriver for WaRuntime {
                 .map(convert::parse_jid)
                 .transpose()?;
             let (client, sink) = self.client_of(&instance)?;
-            let chat_key = chat.to_non_ad().to_string();
+            let chat_key = self
+                .resolver_of(&instance)?
+                .resolve(&chat, None)
+                .await
+                .to_string();
             if !chat.is_group() {
                 let ids: Vec<&str> = req.ids.iter().map(String::as_str).collect();
                 client
@@ -1053,7 +1113,12 @@ impl WaDriver for WaRuntime {
         Box::pin(async move {
             let to = convert::parse_jid(&req.chat)?;
             let (client, sink) = self.client_of(&instance)?;
-            let stored = sink.find_message(&req.chat, &req.message_id).await;
+            let chat_key = self
+                .resolver_of(&instance)?
+                .resolve(&to, None)
+                .await
+                .to_string();
+            let stored = sink.find_message(&chat_key, &req.message_id).await;
             let content = match stored.map(|m| m.body) {
                 // A caption edit resends the media message with the new caption.
                 Some(MessageBody::Media { kind, .. }) => app_state::caption_edit(kind, &req.text)
@@ -1389,18 +1454,24 @@ mod tests {
         let lid = jid("111:4@lid");
         let pn = jid("4915@s.whatsapp.net");
         assert_eq!(
-            participant_key(&lid, Some(&pn), None),
+            participant_key(&lid, Some(&pn), None, &LidMap::default()),
             "4915@s.whatsapp.net"
         );
-        assert_eq!(participant_key(&lid, None, None), "111@lid");
+        let none = LidMap::default();
+        assert_eq!(participant_key(&lid, None, None, &none), "111@lid");
+        let known = LidMap::from_entries([("111", "4915")]);
+        assert_eq!(
+            participant_key(&lid, None, None, &known),
+            "4915@s.whatsapp.net"
+        );
         let mut group = WaGroupInfo::new(Vec::new(), AddressingMode::Lid);
         group.add_participants([(&jid("111@lid"), Some(&pn))]);
         assert_eq!(
-            participant_key(&lid, None, Some(&group)),
+            participant_key(&lid, None, Some(&group), &none),
             "4915@s.whatsapp.net"
         );
         assert_eq!(
-            participant_key(&jid("4915:1@s.whatsapp.net"), None, Some(&group)),
+            participant_key(&jid("4915:1@s.whatsapp.net"), None, Some(&group), &none),
             "4915@s.whatsapp.net"
         );
     }

@@ -7,6 +7,7 @@ use whatsapp_rust::features::message_edit;
 use whatsapp_rust::prelude::*;
 
 use super::convert::{self, Converted, Origin};
+use super::lid::{LidMap, Resolver};
 use crate::driver::EventSink;
 use crate::store::{ChatChange, MessageChange, ProfileChange};
 
@@ -52,7 +53,7 @@ pub struct PendingEdit {
 }
 
 /// The encrypted edit `ctx` carries, if it is one.
-pub fn encrypted_edit(ctx: &MessageContext) -> Option<PendingEdit> {
+pub fn encrypted_edit(ctx: &MessageContext, map: &LidMap) -> Option<PendingEdit> {
     let envelope = message_edit::extract_envelope(&ctx.message)?;
     let target_id = envelope.target_id()?.to_owned();
     let source = &ctx.info.source;
@@ -63,7 +64,7 @@ pub fn encrypted_edit(ctx: &MessageContext) -> Option<PendingEdit> {
         device.pn.clone()
     }?;
     let author = envelope.original_sender_for_dispatch(source.is_from_me, &source.sender, &own);
-    let (chat, sender) = convert::chat_and_sender(source);
+    let (chat, sender) = convert::chat_and_sender(source, map);
     Some(PendingEdit {
         id: ctx.info.id.to_string(),
         chat,
@@ -167,30 +168,35 @@ pub fn mute_change(muted: Option<bool>, end_ms: Option<i64>) -> ChatChange {
 }
 
 /// The chat JID an app-state event names, as the store keys it.
-fn chat_of(jid: &Jid) -> String {
-    jid.to_non_ad().to_string()
+/// A LID is stored under its phone number once the client knows it.
+async fn chat_of(resolver: &Resolver, jid: &Jid) -> String {
+    resolver.resolve(jid, None).await.to_string()
 }
 
 /// Applies the app-state and profile events; other events are ignored.
-pub async fn handle(sink: &EventSink, event: &Event) {
+pub async fn handle(sink: &EventSink, resolver: &Resolver, event: &Event) {
     match event {
         Event::PinUpdate(u) => {
             let pinned = u.action.pinned.unwrap_or(false);
-            sink.change_chat(&chat_of(&u.jid), ChatChange::Pinned(pinned))
+            sink.change_chat(&chat_of(resolver, &u.jid).await, ChatChange::Pinned(pinned))
                 .await;
         }
         Event::ArchiveUpdate(u) => {
             let archived = u.action.archived.unwrap_or(false);
-            sink.change_chat(&chat_of(&u.jid), ChatChange::Archived(archived))
-                .await;
+            sink.change_chat(
+                &chat_of(resolver, &u.jid).await,
+                ChatChange::Archived(archived),
+            )
+            .await;
         }
         Event::MuteUpdate(u) => {
             let change = mute_change(u.action.muted, u.action.mute_end_timestamp);
-            sink.change_chat(&chat_of(&u.jid), change).await;
+            sink.change_chat(&chat_of(resolver, &u.jid).await, change)
+                .await;
         }
         Event::MarkChatAsReadUpdate(u) => {
             let read = u.action.read.unwrap_or(true);
-            let chat = chat_of(&u.jid);
+            let chat = chat_of(resolver, &u.jid).await;
             if read {
                 sink.mark_chat_read(&chat).await;
             }
@@ -200,21 +206,27 @@ pub async fn handle(sink: &EventSink, event: &Event) {
         Event::StarUpdate(u) => {
             let starred = u.action.starred.unwrap_or(false);
             sink.change_message(
-                &chat_of(&u.chat_jid),
+                &chat_of(resolver, &u.chat_jid).await,
                 &u.message_id,
                 MessageChange::Star(starred),
             )
             .await;
         }
         Event::DeleteMessageForMeUpdate(u) => {
-            sink.delete_message(&chat_of(&u.chat_jid), &u.message_id)
+            sink.delete_message(&chat_of(resolver, &u.chat_jid).await, &u.message_id)
                 .await;
         }
-        Event::DeleteChatUpdate(u) => sink.delete_chat(&chat_of(&u.jid), false).await,
-        Event::ClearChatUpdate(u) => sink.delete_chat(&chat_of(&u.jid), true).await,
+        Event::DeleteChatUpdate(u) => {
+            sink.delete_chat(&chat_of(resolver, &u.jid).await, false)
+                .await
+        }
+        Event::ClearChatUpdate(u) => {
+            sink.delete_chat(&chat_of(resolver, &u.jid).await, true)
+                .await
+        }
         Event::PushNameUpdate(u) => {
             sink.change_profile(
-                &chat_of(&u.jid),
+                &chat_of(resolver, &u.jid).await,
                 ProfileChange::PushName(u.new_push_name.clone()),
             )
             .await;
@@ -225,12 +237,15 @@ pub async fn handle(sink: &EventSink, event: &Event) {
                 .full_name
                 .clone()
                 .or_else(|| u.action.first_name.clone());
-            sink.change_profile(&chat_of(&u.jid), ProfileChange::ContactName(name))
-                .await;
+            sink.change_profile(
+                &chat_of(resolver, &u.jid).await,
+                ProfileChange::ContactName(name),
+            )
+            .await;
         }
         Event::UserAboutUpdate(u) => {
             sink.change_profile(
-                &chat_of(&u.jid),
+                &chat_of(resolver, &u.jid).await,
                 ProfileChange::About(Some(u.status.clone()).filter(|s| !s.is_empty())),
             )
             .await;
@@ -242,10 +257,11 @@ pub async fn handle(sink: &EventSink, event: &Event) {
                 // Changed, but to what is not said: ask again next time.
                 (false, _) => ProfileChange::Stale,
             };
-            sink.change_profile(&chat_of(&u.jid), change).await;
+            sink.change_profile(&chat_of(resolver, &u.jid).await, change)
+                .await;
         }
         Event::ContactUpdated(u) => {
-            sink.change_profile(&chat_of(&u.jid), ProfileChange::Stale)
+            sink.change_profile(&chat_of(resolver, &u.jid).await, ProfileChange::Stale)
                 .await;
         }
         _ => {}

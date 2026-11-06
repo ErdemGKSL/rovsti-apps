@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use whatsapp_rust::prelude::*;
+use whatsapp_rust::wacore::types::message::MessageSource;
 
 /// Known LID -> phone-number mappings, keyed by bare user parts.
 #[derive(Debug, Clone, Default)]
@@ -68,6 +69,13 @@ pub fn resolve_str(id: &str, map: &LidMap) -> String {
     }
 }
 
+/// Every JID of a message source that may be a LID, for [`Resolver::prefetch`].
+pub fn source_jids(source: &MessageSource) -> Vec<&Jid> {
+    let mut jids = vec![&source.chat, &source.sender];
+    jids.extend(source.sender_alt.iter().chain(source.recipient_alt.iter()));
+    jids
+}
+
 /// Resolves LIDs against the live client's mapping store, remembering hits.
 pub struct Resolver {
     client: Arc<Client>,
@@ -80,6 +88,11 @@ impl Resolver {
             client,
             learned: Mutex::new(LidMap::default()),
         }
+    }
+
+    /// The client the mappings come from.
+    pub fn client(&self) -> &Arc<Client> {
+        &self.client
     }
 
     fn cached(&self, lid_user: &str) -> Option<String> {
@@ -206,6 +219,17 @@ mod tests {
             resolve(&jid("1234@lid"), Some(&alt), &map()).to_string(),
             "905321234567@s.whatsapp.net"
         );
+    }
+
+    #[test]
+    fn source_jids_lists_all_addresses() {
+        let source = MessageSource {
+            chat: jid("1@lid"),
+            sender: jid("2@lid"),
+            sender_alt: Some(jid("3@s.whatsapp.net")),
+            ..Default::default()
+        };
+        assert_eq!(source_jids(&source).len(), 3);
     }
 
     #[test]

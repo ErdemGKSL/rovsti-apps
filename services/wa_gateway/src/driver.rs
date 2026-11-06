@@ -991,7 +991,10 @@ mod fake {
         /// Makes `instance` ring: an incoming call `call_id` from `from`.
         pub fn ring(&self, instance: &InstanceId, call_id: &str, from: &str, name: Option<&str>) {
             if let Some(sink) = self.sink(instance) {
-                sink.calls().on_incoming(&offer(call_id, from, name));
+                sink.calls().on_incoming(
+                    &offer(call_id, from, name),
+                    &crate::wa::lid::LidMap::default(),
+                );
             }
         }
 

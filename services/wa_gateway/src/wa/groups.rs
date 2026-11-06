@@ -1,13 +1,20 @@
 //! Group metadata to gateway types. Pure.
 
 use rovsti_wa_proto::{GroupInfo, Participant};
+
+use super::lid::{self, LidMap};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::wacore::stanza::groups::GroupNotificationAction;
 
 /// The JID the apps should know a participant by: the phone-number JID when
-/// the group addresses members by LID, otherwise the JID itself.
-pub fn participant_jid(jid: &Jid, phone_number: Option<&Jid>) -> String {
-    phone_number.unwrap_or(jid).to_non_ad().to_string()
+/// the group addresses members by LID (given by the group, else by `map`),
+/// otherwise the JID itself.
+pub fn participant_jid(jid: &Jid, phone_number: Option<&Jid>, map: &LidMap) -> String {
+    match phone_number {
+        Some(pn) => pn.to_non_ad(),
+        None => lid::resolve(jid, None, map),
+    }
+    .to_string()
 }
 
 /// A group as the apps see it.
@@ -55,10 +62,15 @@ mod tests {
         let lid = jid("1234:5@lid");
         let pn = jid("905321234567@s.whatsapp.net");
         assert_eq!(
-            participant_jid(&lid, Some(&pn)),
+            participant_jid(&lid, Some(&pn), &LidMap::default()),
             "905321234567@s.whatsapp.net"
         );
-        assert_eq!(participant_jid(&lid, None), "1234@lid");
+        assert_eq!(participant_jid(&lid, None, &LidMap::default()), "1234@lid");
+        let known = LidMap::from_entries([("1234", "905321234567")]);
+        assert_eq!(
+            participant_jid(&lid, None, &known),
+            "905321234567@s.whatsapp.net"
+        );
     }
 
     #[test]

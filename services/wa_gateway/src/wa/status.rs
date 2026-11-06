@@ -8,7 +8,7 @@ use whatsapp_rust::wacore_binary::JidExt as _;
 use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::waproto::whatsapp::message::protocol_message::Type as ProtocolType;
 
-use super::convert;
+use super::lid::{self, LidMap};
 use crate::driver::EventSink;
 use crate::store::{MAX_THUMBNAIL_BYTES, StoredStatus};
 
@@ -138,9 +138,9 @@ pub fn is_status(ctx: &MessageContext) -> bool {
 }
 
 /// Converts a live status update.
-pub fn live(ctx: &MessageContext) -> StatusUpdate {
+pub fn live(ctx: &MessageContext, map: &LidMap) -> StatusUpdate {
     let source = &ctx.info.source;
-    let author = convert::prefer_pn(&source.sender, source.sender_alt.as_ref()).to_string();
+    let author = lid::resolve(&source.sender, source.sender_alt.as_ref(), map).to_string();
     let participant = source.sender.to_non_ad().to_string();
     convert(
         StatusOrigin {

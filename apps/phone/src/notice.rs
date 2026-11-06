@@ -62,6 +62,13 @@ impl Notice {
         }
     }
 
+    /// A notice that fades by itself: it offers no action and is not the
+    /// standing Preview banner.
+    #[allow(dead_code, reason = "wired up by the next step")]
+    pub(crate) fn transient(self) -> bool {
+        self.action().is_none() && self != Self::Preview
+    }
+
     fn icon(self) -> Icon {
         match self {
             Self::Preview | Self::System => Icon::LucideSmartphone,
@@ -367,6 +374,16 @@ impl PhoneApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transient_notices_have_no_action_and_are_not_preview() {
+        assert!(Notice::Failed.transient());
+        assert!(Notice::System.transient());
+        assert!(Notice::WhatsApp("Another call is in progress").transient());
+        assert!(!Notice::Preview.transient());
+        assert!(!Notice::NeedsPhone.transient());
+        assert!(!Notice::WhatsApp(crate::wa_call::NOT_CONNECTED).transient());
+    }
 
     #[test]
     fn not_connected_offers_connect() {

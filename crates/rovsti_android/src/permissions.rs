@@ -26,6 +26,9 @@ pub enum Group {
     /// only; not in [`Group::ALL`]. Android 11+ answers a request with the app's
     /// location settings page instead of a dialog.
     BackgroundLocation,
+    /// `RECORD_AUDIO`, asked on demand by Phone for WhatsApp calls; not in
+    /// [`Group::ALL`].
+    Microphone,
 }
 
 impl Group {
@@ -41,6 +44,7 @@ impl Group {
             Self::Bluetooth => "bluetooth",
             Self::Location => "location",
             Self::BackgroundLocation => "background_location",
+            Self::Microphone => "microphone",
         }
     }
 }
@@ -137,12 +141,15 @@ mod tests {
             Group::Bluetooth,
             Group::Location,
             Group::BackgroundLocation,
+            Group::Microphone,
         ];
         let keys: std::collections::HashSet<_> = every.iter().map(|g| g.key()).collect();
         assert_eq!(keys.len(), every.len());
         assert_eq!(Group::BackgroundLocation.key(), "background_location");
         assert!(!Group::ALL.contains(&Group::Location));
         assert!(!Group::ALL.contains(&Group::BackgroundLocation));
+        assert!(!Group::ALL.contains(&Group::Microphone));
+        assert_eq!(Group::Microphone.key(), "microphone");
     }
 
     #[cfg(not(target_os = "android"))]
@@ -157,6 +164,7 @@ mod tests {
             request(Group::BackgroundLocation),
             Err(Error::Unsupported)
         ));
+        assert!(matches!(state(Group::Microphone), Err(Error::Unsupported)));
         assert!(matches!(state(Group::Phone), Err(Error::Unsupported)));
         assert!(matches!(has(Group::Contacts), Err(Error::Unsupported)));
         assert!(matches!(

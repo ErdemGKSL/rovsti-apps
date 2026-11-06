@@ -287,9 +287,10 @@ impl PhoneApp {
                         Group::Contacts => p.contacts,
                         Group::Notifications => p.notifications,
                         // Never a Setup row: asked on demand (route popover, Stops).
-                        Group::Bluetooth | Group::Location | Group::BackgroundLocation => {
-                            Access::Denied
-                        }
+                        Group::Bluetooth
+                        | Group::Location
+                        | Group::BackgroundLocation
+                        | Group::Microphone => Access::Denied,
                     }
                 };
                 let requested = if access == Access::PermanentlyDenied {

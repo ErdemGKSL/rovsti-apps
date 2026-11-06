@@ -497,6 +497,7 @@ object RovstiBridge {
             android.Manifest.permission.ACCESS_COARSE_LOCATION,
         ),
         "background_location" to listOf(android.Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+        "microphone" to listOf(android.Manifest.permission.RECORD_AUDIO),
     )
 
     private fun missing(group: String): List<String>? =

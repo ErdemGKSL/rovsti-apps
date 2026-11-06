@@ -356,6 +356,37 @@ pub fn speaker_applied(result: &rovsti_android::Result<bool>) -> bool {
     )
 }
 
+/// Shown when a WhatsApp call needs the microphone and it is not allowed.
+#[allow(dead_code, reason = "wired up by the next step")]
+pub(crate) const MIC_OFF: &str = "Allow the microphone so they can hear you";
+
+/// What to do about the microphone before a call's audio starts.
+#[allow(dead_code, reason = "wired up by the next step")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MicAsk {
+    Ready,
+    Ask,
+    OpenSettings,
+}
+
+/// Maps the microphone permission state to the next step.
+#[allow(dead_code, reason = "wired up by the next step")]
+pub(crate) fn mic_ask(access: rovsti_android::permissions::Access) -> MicAsk {
+    use rovsti_android::permissions::Access;
+    match access {
+        Access::Granted => MicAsk::Ready,
+        Access::Denied => MicAsk::Ask,
+        Access::PermanentlyDenied => MicAsk::OpenSettings,
+    }
+}
+
+/// Whether the microphone start counts as started. Without Android (desktop)
+/// or on any error there is nothing to wait for, so the call carries on.
+#[allow(dead_code, reason = "wired up by the next step")]
+pub(crate) fn mic_started(result: &rovsti_android::Result<bool>) -> bool {
+    !matches!(result, Ok(false))
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1243,6 +1274,22 @@ impl Render for WaCallUi {
 mod tests {
     use super::*;
     use CallDirection::{In, Out};
+
+    #[test]
+    fn mic_ask_follows_access() {
+        use rovsti_android::permissions::Access;
+        assert_eq!(mic_ask(Access::Granted), MicAsk::Ready);
+        assert_eq!(mic_ask(Access::Denied), MicAsk::Ask);
+        assert_eq!(mic_ask(Access::PermanentlyDenied), MicAsk::OpenSettings);
+    }
+
+    #[test]
+    fn mic_started_is_false_only_for_ok_false() {
+        assert!(mic_started(&Ok(true)));
+        assert!(!mic_started(&Ok(false)));
+        assert!(mic_started(&Err(AndroidError::Unsupported)));
+        assert!(mic_started(&Err(AndroidError::NotInitialized)));
+    }
 
     #[test]
     fn a_speaker_request_counts_unless_android_refuses_it() {

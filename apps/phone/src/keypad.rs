@@ -1756,9 +1756,26 @@ impl PhoneApp {
     }
 }
 
+/// Screen-reader label for a digit key, naming its speed dial when assigned.
+#[allow(dead_code, reason = "wired up by the next step")]
+pub(crate) fn speed_dial_aria(digit: &str, name: Option<&str>) -> Option<String> {
+    let name = name.map(str::trim).filter(|n| !n.is_empty())?;
+    Some(format!("{digit}, speed dial {name}. Long press to call"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speed_dial_aria_names_assigned_digits_only() {
+        assert_eq!(
+            speed_dial_aria("5", Some("Ayşe")).as_deref(),
+            Some("5, speed dial Ayşe. Long press to call")
+        );
+        assert_eq!(speed_dial_aria("5", Some("  ")), None);
+        assert_eq!(speed_dial_aria("5", None), None);
+    }
 
     #[test]
     fn suggestion_of_resolves_hits_and_rejects_stale_ones() {

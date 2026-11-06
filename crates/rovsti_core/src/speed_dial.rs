@@ -6,6 +6,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::avatar;
 use crate::phone_number::PhoneNumber;
 use crate::settings::{MAX_FIELD_CHARS, SPEED_DIAL_DIGITS, SpeedDialEntry};
 
@@ -116,6 +117,27 @@ pub fn digit_for(map: &BTreeMap<u8, SpeedDialEntry>, numbers: &[&str]) -> Option
     })
 }
 
+/// What a dialpad key shows for its speed dial: the shown name and avatar hue.
+/// Index `d - 1` is digit `d`; digit 1 (voicemail) and free digits are `None`.
+pub fn badges(map: &BTreeMap<u8, SpeedDialEntry>) -> [Option<(String, Option<usize>)>; 9] {
+    let mut out: [Option<(String, Option<usize>)>; 9] = Default::default();
+    for digit in SPEED_DIAL_DIGITS {
+        let Some(entry) = map.get(&digit) else {
+            continue;
+        };
+        let number = entry.number_raw.trim();
+        if number.is_empty() {
+            continue;
+        }
+        let name = entry.name.trim();
+        let shown = if name.is_empty() { number } else { name };
+        let digits: String = number.chars().filter(char::is_ascii_digit).collect();
+        let hue = avatar::avatar_hue(avatar::AvatarKey::Number(&digits));
+        out[usize::from(digit) - 1] = Some((shown.to_owned(), hue));
+    }
+    out
+}
+
 /// Pill text after assigning `digit`.
 pub fn assigned_text(digit: u8, name: &str, previous: Option<&SpeedDialEntry>) -> String {
     match previous {
@@ -134,6 +156,40 @@ mod tests {
             number_raw: number.into(),
             name: "Ana".into(),
         }
+    }
+
+    #[test]
+    fn badges_empty_map_has_none() {
+        assert!(badges(&BTreeMap::new()).iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn badges_show_name_and_hue_on_assigned_digit() {
+        let mut map = BTreeMap::new();
+        let mut e = entry("+90 532 111 22 33");
+        e.name = " Ayşe ".into();
+        map.insert(5, e);
+        let b = badges(&map);
+        let expected = avatar::avatar_hue(avatar::AvatarKey::Number("905321112233"));
+        assert_eq!(b[4], Some(("Ayşe".to_owned(), expected)));
+        assert_eq!(b.iter().filter(|x| x.is_some()).count(), 1);
+    }
+
+    #[test]
+    fn badges_ignore_digit_one_and_blank_numbers() {
+        let mut map = BTreeMap::new();
+        map.insert(1, entry("111"));
+        map.insert(3, entry("   "));
+        assert!(badges(&map).iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn badges_nameless_shows_number() {
+        let mut map = BTreeMap::new();
+        let mut e = entry(" 0532 ");
+        e.name = " ".into();
+        map.insert(2, e);
+        assert_eq!(badges(&map)[1].as_ref().map(|b| b.0.as_str()), Some("0532"));
     }
 
     #[test]

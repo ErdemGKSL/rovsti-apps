@@ -307,60 +307,36 @@ impl StopsApp {
             })),
             _ => start,
         };
-        let moving = match self.relocating {
-            Some(id) => match self.saved.get(id) {
-                Some(p) => Some(pick::relocate_hint(&p.name)),
-                None => {
-                    self.relocating = None;
-                    None
-                }
-            },
-            None => None,
-        };
         let mut buttons = div().flex().items_center().gap(px(8.0));
-        if moving.is_some() {
+        if any_end {
             buttons = buttons.child(
-                glass_pill(theme, "Cancel")
-                    .id("relocate-cancel")
-                    .flex_1()
+                glass_pill(theme, "Clear")
+                    .id("clear-ends")
                     .h(px(52.0))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.relocating = None;
-                        this.tabs.jump_to(1);
+                        let ends = this.pick.ends.clone();
+                        this.pick.clear();
+                        this.map.follow = true;
+                        this.show_pill(
+                            "Points cleared",
+                            Some(crate::PillAction::RestoreEnds(ends)),
+                            cx,
+                        );
+                    })),
+            );
+        }
+        if any_end {
+            buttons = buttons.child(
+                glass_pill(theme, "Swap")
+                    .id("swap-ends")
+                    .h(px(52.0))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.pick.swap();
                         cx.notify();
                     })),
             );
-        } else {
-            if any_end {
-                buttons = buttons.child(
-                    glass_pill(theme, "Clear")
-                        .id("clear-ends")
-                        .h(px(52.0))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            let ends = this.pick.ends.clone();
-                            this.pick.clear();
-                            this.map.follow = true;
-                            this.show_pill(
-                                "Points cleared",
-                                Some(crate::PillAction::RestoreEnds(ends)),
-                                cx,
-                            );
-                        })),
-                );
-            }
-            if any_end {
-                buttons = buttons.child(
-                    glass_pill(theme, "Swap")
-                        .id("swap-ends")
-                        .h(px(52.0))
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.pick.swap();
-                            cx.notify();
-                        })),
-                );
-            }
-            buttons = buttons.child(start);
         }
+        buttons = buttons.child(start);
         let mut bar = div()
             .px(px(16.0))
             .flex()
@@ -374,7 +350,7 @@ impl StopsApp {
                         pick::Hint::Invalid(_) => colors.red,
                         _ => colors.label,
                     })
-                    .child(moving.clone().unwrap_or_else(|| hint.text())),
+                    .child(hint.text()),
             )
             .child(buttons);
         if let Some(Ok(d)) = self.pick.ends.diameter() {
@@ -402,7 +378,7 @@ impl StopsApp {
         let sources = list_row(
             theme,
             None,
-            "Saved places, recent trips, links",
+            "Saved stops, recent trips, links",
             None,
             Some("Open".into()),
         )
@@ -674,7 +650,6 @@ impl StopsApp {
             return;
         }
         self.pick.close_menu();
-        self.relocating = None;
         self.busy = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -795,8 +770,8 @@ impl StopsApp {
         }
         let ends = self.trip.as_ref().map(|t| {
             (
-                pick::dest_from_endpoint(&t.a, &self.saved),
-                pick::dest_from_endpoint(&t.b, &self.saved),
+                pick::dest_from_endpoint(&t.a),
+                pick::dest_from_endpoint(&t.b),
             )
         });
         self.busy = true;

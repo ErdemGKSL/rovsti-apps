@@ -13,7 +13,6 @@ pub mod dest;
 pub mod gtfs;
 pub mod history;
 pub mod notice;
-pub mod places;
 pub mod poll;
 pub mod prefs;
 pub mod saved_stops;
@@ -32,7 +31,6 @@ pub use dest::{DestError, SharedPlace, parse_location, share_text};
 pub use gtfs::{Feed, FeedBuilder, FeedReport, GtfsError, Pattern, Route, Stop, read_zip};
 pub use history::{History, Outcome, Stats, TripRecord};
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};
-pub use places::{Place, PlaceError, SavedPlaces};
 pub use prefs::{NOTICE_MINUTES, NoticePrefs, NoticeWhen, SNOOZE_CHOICES, StopsPrefs};
 pub use saved_stops::{LoadedStops, SavedStop, SavedStopError, SavedStops};
 pub use session::{

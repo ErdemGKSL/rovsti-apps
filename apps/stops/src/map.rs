@@ -2,7 +2,7 @@
 //! map tiles where they are loaded (the radar look shows where they are not).
 //!
 //! It shows where you are with the accuracy of the fix, the circle on AB,
-//! the breadcrumb of this trip, the A and B pins, your saved places as
+//! the breadcrumb of this trip, the A and B pins, your saved stops as
 //! orange rings and, after a transit import, the stops in view and the chosen line. A finger drags to pan, two
 //! fingers (or a double tap) zoom, a tap picks the stop under it.
 //!
@@ -27,7 +27,7 @@ use gpui::{
 };
 use rovsti_android::location;
 use rovsti_geo::{
-    Coord, Diameter, EARTH_RADIUS_M, Feed, History, Place, SavedPlaces, Side, Stop,
+    Coord, Diameter, EARTH_RADIUS_M, Feed, History, SavedStop, SavedStops, Side, Stop,
     tiles::{
         ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileCover, TileGeometry,
         TileLayer, build_layer, line_width, tiles_for_view,
@@ -180,45 +180,30 @@ pub fn pick_stop(
     )
 }
 
-/// The saved place under a tap at `at` (pixels from the view centre): the
-/// nearest one drawn within `max_px`.
-pub fn pick_saved(
-    places: &[Place],
-    viewport: &Viewport,
-    _size: (f32, f32),
-    at: (f32, f32),
-    max_px: f32,
-) -> Option<usize> {
-    let coords: Vec<Coord> = places.iter().map(|p| p.coord).collect();
-    viewport.nearest_on_screen(&coords, at, max_px)
-}
-
-/// A fingerprint of the saved places (id and position), to tell when the
-/// drawn markers need rebuilding.
-pub fn saved_key(saved: &SavedPlaces) -> u64 {
+/// A fingerprint of the saved stops (id and both ends), to tell when the
+/// drawn rings need rebuilding.
+pub fn saved_key(saved: &SavedStops) -> u64 {
     let mut hasher = DefaultHasher::new();
-    for place in &saved.places {
-        place.id.hash(&mut hasher);
-        place.coord.lat.to_bits().hash(&mut hasher);
-        place.coord.lon.to_bits().hash(&mut hasher);
+    for stop in &saved.stops {
+        stop.id.hash(&mut hasher);
+        for end in [&stop.a, &stop.b] {
+            end.coord.lat.to_bits().hash(&mut hasher);
+            end.coord.lon.to_bits().hash(&mut hasher);
+        }
     }
     hasher.finish()
 }
 
-/// What a tap or a dropped pin at `at` (pixels from the view centre) means: a
-/// saved place within [`PICK_RADIUS_PX`] (exactly, with its name), else the
-/// GTFS stop within it (its name, id and place), else the raw point under the
-/// finger. Stops and raw points take the name of a saved place close to them.
+/// What a tap or a dropped pin at `at` (pixels from the view centre) means:
+/// the GTFS stop within [`PICK_RADIUS_PX`] (its name, id and place), else the
+/// raw point under the finger. Saved stops are not targets: a saved stop is a
+/// pair of points, and neither end is a stop of its own.
 pub fn snap_destination(
     feed: Option<&Feed>,
-    saved: &SavedPlaces,
     viewport: &Viewport,
     size: (f32, f32),
     at: (f32, f32),
 ) -> Destination {
-    if let Some(k) = pick_saved(&saved.places, viewport, size, at, PICK_RADIUS_PX) {
-        return Destination::from_place(&saved.places[k]);
-    }
     let stop = feed.and_then(|feed| {
         let index = pick_stop(feed, viewport, size, at, PICK_RADIUS_PX)?;
         feed.stops.get(index as usize)
@@ -232,7 +217,6 @@ pub fn snap_destination(
         },
         None => Destination::dropped(viewport.unproject(at)),
     }
-    .named_from(saved)
 }
 
 /// Index of the GTFS stop `id` in the feed, for the pin menu's "Lines" row.
@@ -306,20 +290,20 @@ pub fn idle_view(
 }
 
 /// Where to open when there is no fix: the middle of the last trip, else the
-/// first saved place.
-pub fn fallback_centre(history: &History, saved: &SavedPlaces) -> Option<Coord> {
+/// first saved stop.
+pub fn fallback_centre(history: &History, saved: &SavedStops) -> Option<Coord> {
     if let Some((a, b)) = history.recent_pairs(1).into_iter().next() {
         return Some(Coord::new(
             (a.coord.lat + b.coord.lat) / 2.0,
             (a.coord.lon + b.coord.lon) / 2.0,
         ));
     }
-    saved.places.first().map(|p| p.coord)
+    saved.stops.first().map(SavedStop::center)
 }
 
 /// Width and height of the small menu over a tapped pin.
 pub const PIN_MENU_W: f32 = 180.0;
-pub const PIN_MENU_H: f32 = 204.0;
+pub const PIN_MENU_H: f32 = 168.0;
 /// Height of one row of the pin menu.
 const PIN_MENU_ROW_H: f32 = 36.0;
 const PIN_MENU_MARGIN: f32 = 8.0;
@@ -698,7 +682,7 @@ pub struct Scene {
     pub segment: Option<((f32, f32), (f32, f32))>,
     pub trail: Vec<(f32, f32)>,
     pub stops: Vec<(f32, f32)>,
-    /// The saved places in view (plus a margin), drawn as rings.
+    /// The middles of the saved stops in view (plus a margin), drawn as rings.
     pub saved: Vec<(f32, f32)>,
     pub line: Vec<(f32, f32)>,
     /// Map tiles under everything else; empty where none are loaded.
@@ -772,13 +756,13 @@ pub struct SceneInput<'a> {
     pub trail: &'a Breadcrumb,
     pub feed: Option<&'a Feed>,
     pub pattern: Option<u32>,
-    /// The positions of the saved places.
+    /// The middles of the saved stops.
     pub saved: &'a [Coord],
     /// Loaded map tiles under the scene.
     pub tiles: &'a [&'a TileGeometry],
 }
 
-/// How far outside the view a saved place is still projected, in px.
+/// How far outside the view a saved stop is still projected, in px.
 const SAVED_MARGIN_PX: f32 = 24.0;
 
 /// Whether a point (pixels from the view centre) lies within the view of
@@ -1247,7 +1231,7 @@ fn scene_paths(scene: &Scene, dragging: Option<Slot>, pal: &Palette) -> Paths {
         }
     }
 
-    // Saved places: hollow rings, so they read as neither a stop dot nor the line.
+    // Saved stops: hollow rings at their middle, so they read as neither a stop dot nor the line.
     if !scene.saved.is_empty() {
         for &p in &scene.saved {
             fill_circle(out, to_window(p), 6.5, pal.halo);
@@ -1410,7 +1394,7 @@ struct SceneKey {
     diameter: Option<Diameter>,
     pins: [Option<(Coord, bool)>; 2],
     trail: u64,
-    /// [`saved_key`] of the saved places.
+    /// [`saved_key`] of the saved stops.
     saved: u64,
     /// The feed's address; a new feed also forgets the scene.
     feed: usize,
@@ -1740,7 +1724,7 @@ impl StopsApp {
                 .filter(|_| self.trip.is_none())
                 .map(|d| (d.coord, d.gtfs_stop.is_some()))
         });
-        let saved_coords: Vec<Coord> = self.saved.places.iter().map(|p| p.coord).collect();
+        let saved_coords: Vec<Coord> = self.saved.stops.iter().map(SavedStop::center).collect();
         let key = SceneKey {
             viewport,
             size,
@@ -1933,9 +1917,7 @@ impl StopsApp {
             .as_deref()
             .and_then(|id| stop_index(self.gtfs.as_deref(), id));
         let details = pick::details_text(dest);
-        let known = self.saved.near(dest.coord).map(|p| p.id);
         let share_dest = dest.clone();
-        let dest = dest.clone();
         let colors = theme::colors(theme);
         let row = |id: &'static str, label: &'static str, color: Hsla| {
             div()
@@ -1959,20 +1941,6 @@ impl StopsApp {
             .py(px(4.0))
             .flex()
             .flex_col()
-            .child(match known {
-                Some(id) => row("pin-rename", "Rename", colors.label).on_click(cx.listener(
-                    move |this, _, _, cx| {
-                        this.pick.close_menu();
-                        this.open_rename(id, cx);
-                    },
-                )),
-                None => row("pin-save", "Save", colors.label).on_click(cx.listener(
-                    move |this, _, _, cx| {
-                        this.pick.close_menu();
-                        this.open_save_point(dest.clone(), Some(slot), cx);
-                    },
-                )),
-            })
             .child(
                 row("pin-share", "Share", colors.label).on_click(cx.listener(
                     move |this, _, _, cx| {
@@ -2089,8 +2057,6 @@ impl StopsApp {
                 let at = self.map.to_view(at);
                 self.map.viewport.zoom_about(2.0, at);
             }
-            // While a saved place is being moved, A/B pins stay quiet: a tap sets its spot.
-            Gesture::PinTap { .. } if self.relocating.is_some() => {}
             Gesture::PinTap { slot } => self.pick.open_menu(slot),
             Gesture::PinDrag { slot, at } => {
                 // The auto view would chase the pin under the finger.
@@ -2106,7 +2072,6 @@ impl StopsApp {
                 let at = self.map.to_view(at);
                 let dest = snap_destination(
                     self.gtfs.as_deref(),
-                    &self.saved,
                     &self.map.viewport,
                     self.map.size(),
                     at,
@@ -2133,13 +2098,8 @@ impl StopsApp {
         // Keep the view where the user tapped: the idle fit would otherwise
         // recentre on the new pin and move it from under the finger.
         self.map.take_over();
-        if let Some(id) = self.relocating {
-            self.relocate_tap(id, at, cx);
-            return;
-        }
         let dest = snap_destination(
             self.gtfs.as_deref(),
-            &self.saved,
             &self.map.viewport,
             self.map.size(),
             at,
@@ -2149,55 +2109,6 @@ impl StopsApp {
             TapOutcome::Full => {
                 self.show_pill("Drag a pin to adjust it, or tap Clear.", None, cx);
             }
-        }
-    }
-
-    /// Starts moving saved place `id`: centres the map on it; the next tap sets its new spot.
-    pub(crate) fn begin_relocate(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(place) = self.saved.get(id) else {
-            return;
-        };
-        let at = place.coord;
-        self.expanded = None;
-        self.relocating = Some(id);
-        self.pick.close_menu();
-        self.map.take_over();
-        self.map.viewport = Viewport::new(at, STREET_MPP);
-        self.tabs.jump_to(0);
-        cx.notify();
-    }
-
-    /// A map tap while moving place `id`: snaps to stops only, never to saved places.
-    fn relocate_tap(&mut self, id: u64, at: (f32, f32), cx: &mut Context<Self>) {
-        let dest = snap_destination(
-            self.gtfs.as_deref(),
-            &SavedPlaces::default(),
-            &self.map.viewport,
-            self.map.size(),
-            at,
-        );
-        let result = self.saved.relocate(id, dest.coord, dest.gtfs_stop.clone());
-        let name = self
-            .saved
-            .get(id)
-            .map(|p| p.name.clone())
-            .unwrap_or_default();
-        let text = pick::relocate_result_text(&result, &name, &self.saved);
-        match result {
-            Ok((coord, gtfs_stop)) => {
-                self.save_places(cx);
-                self.relocating = None;
-                self.show_pill(
-                    text,
-                    Some(crate::PillAction::UndoRelocate {
-                        id,
-                        coord,
-                        gtfs_stop,
-                    }),
-                    cx,
-                );
-            }
-            Err(_) => self.show_pill(text, None, cx),
         }
     }
 
@@ -2458,68 +2369,52 @@ mod tests {
         // 10 m/px: S2 sits 100 px right of the centre.
         let vp = Viewport::new(IST, 10.0);
         let size = (400.0, 300.0);
-        let none = SavedPlaces::default();
 
-        let snapped = snap_destination(Some(&feed), &none, &vp, size, (103.0, -4.0));
+        let snapped = snap_destination(Some(&feed), &vp, size, (103.0, -4.0));
         assert_eq!(snapped.label, "Moda");
         assert_eq!(snapped.gtfs_stop.as_deref(), Some("S2"));
         assert_eq!(snapped.coord, feed.stops[1].coord);
         assert!(snapped.is_named());
 
-        let raw = snap_destination(Some(&feed), &none, &vp, size, (50.0, 0.0));
+        let raw = snap_destination(Some(&feed), &vp, size, (50.0, 0.0));
         assert!(!raw.is_named());
         assert_eq!(raw.gtfs_stop, None);
         assert_eq!(raw.coord, vp.unproject((50.0, 0.0)));
 
-        let no_feed = snap_destination(None, &none, &vp, size, (0.0, 0.0));
+        let no_feed = snap_destination(None, &vp, size, (0.0, 0.0));
         assert!(!no_feed.is_named());
     }
 
-    #[test]
-    fn a_tap_near_a_saved_place_picks_it_exactly() {
-        let feed = Feed::new(vec![named_stop("S2", "Moda", 1_000.0)], vec![], vec![], 0);
-        let vp = Viewport::new(IST, 10.0);
-        let size = (400.0, 300.0);
-        let mut saved = SavedPlaces::default();
-        // The stop is 10 px from the tap, the place 30 px.
-        let spot = vp.unproject((140.0, 0.0));
-        let id = saved.add("Home", spot).unwrap();
-        saved.places[0].gtfs_stop = Some("H1".into());
-
-        let picked = snap_destination(Some(&feed), &saved, &vp, size, (110.0, 0.0));
-        assert_eq!(picked.label, "Home");
-        assert_eq!(picked.coord, spot);
-        assert_eq!(picked.gtfs_stop.as_deref(), Some("H1"));
-        assert_eq!(saved.get(id).unwrap().coord, spot);
-
-        // 60 px away is out of reach: the stop wins.
-        let mut far = SavedPlaces::default();
-        far.add("Far", vp.unproject((170.0, 0.0))).unwrap();
-        let picked = snap_destination(Some(&feed), &far, &vp, size, (110.0, 0.0));
-        assert_eq!(picked.label, "Moda");
-        assert_eq!(picked.gtfs_stop.as_deref(), Some("S2"));
-        assert_eq!(pick_saved(&far.places, &vp, size, (110.0, 0.0), 40.0), None);
-        assert_eq!(
-            pick_saved(&far.places, &vp, size, (150.0, 0.0), 40.0),
-            Some(0)
-        );
+    /// A saved stop whose gate runs from `a` to `b`.
+    fn add_gate(saved: &mut SavedStops, name: &str, a: Coord, b: Coord) -> u64 {
+        let end = |coord| rovsti_geo::Endpoint {
+            label: String::new(),
+            coord,
+        };
+        saved.add(name, end(a), end(b), 0).unwrap()
     }
 
     #[test]
-    fn saved_key_changes_with_the_places() {
+    fn saved_key_changes_with_the_stops_and_either_end() {
         let vp = Viewport::new(IST, 10.0);
-        let mut a = SavedPlaces::default();
+        let at = |x: f32, y: f32| vp.unproject((x, y));
+        let mut a = SavedStops::default();
         let empty = saved_key(&a);
-        a.add("One", vp.unproject((0.0, 0.0))).unwrap();
+        add_gate(&mut a, "One", at(0.0, 0.0), at(0.0, 60.0));
         let one = saved_key(&a);
         assert_ne!(empty, one);
-        let id = a.add("Two", vp.unproject((100.0, 0.0))).unwrap();
+        let id = add_gate(&mut a, "Two", at(100.0, 0.0), at(100.0, 60.0));
         let two = saved_key(&a);
         assert_ne!(one, two);
-        let mut b = SavedPlaces::default();
-        b.add("One", vp.unproject((0.0, 0.0))).unwrap();
-        b.add("Two", vp.unproject((100.0, 0.0))).unwrap();
+        let mut b = SavedStops::default();
+        add_gate(&mut b, "One", at(0.0, 0.0), at(0.0, 60.0));
+        add_gate(&mut b, "Two", at(100.0, 0.0), at(100.0, 60.0));
         assert_eq!(saved_key(&b), two);
+        // Moving only the B end changes the key too.
+        let mut c = SavedStops::default();
+        add_gate(&mut c, "One", at(0.0, 0.0), at(0.0, 60.0));
+        add_gate(&mut c, "Two", at(100.0, 0.0), at(100.0, 80.0));
+        assert_ne!(saved_key(&c), two);
         a.remove(id);
         assert_eq!(saved_key(&a), one);
     }
@@ -2965,15 +2860,15 @@ mod tests {
     }
 
     #[test]
-    fn saved_places_in_view_are_projected() {
+    fn saved_stop_rings_in_view_are_projected() {
         let trail = Breadcrumb::default();
-        let near_place = near(100.0, 50.0).coord;
-        let far_place = near(50_000.0, 0.0).coord;
-        let places = [near_place, far_place];
+        let near_ring = near(100.0, 50.0).coord;
+        let far_ring = near(50_000.0, 0.0).coord;
+        let rings = [near_ring, far_ring];
         let mut input = scene_input(&trail, None);
-        input.saved = &places;
+        input.saved = &rings;
         let scene = Scene::build(&input);
-        assert_eq!(scene.saved, vec![input.viewport.project(near_place)]);
+        assert_eq!(scene.saved, vec![input.viewport.project(near_ring)]);
         assert!(in_view((212.0, 0.0), (400.0, 300.0), 24.0));
         assert!(!in_view((225.0, 0.0), (400.0, 300.0), 24.0));
     }
@@ -3201,17 +3096,26 @@ mod tests {
     }
 
     #[test]
-    fn the_fallback_is_the_last_trip_then_the_first_saved_place() {
+    fn the_fallback_is_the_last_trip_then_the_first_saved_stop() {
         let mut history = History::default();
-        let mut saved = SavedPlaces::default();
+        let mut saved = SavedStops::default();
         assert_eq!(fallback_centre(&history, &saved), None);
 
-        saved.add("Home", Coord::new(40.0, 30.0)).unwrap();
-        saved.add("Work", Coord::new(41.0, 31.0)).unwrap();
-        assert_eq!(
-            fallback_centre(&history, &saved),
-            Some(Coord::new(40.0, 30.0))
+        add_gate(
+            &mut saved,
+            "Home",
+            Coord::new(40.0, 30.0),
+            Coord::new(40.004, 30.0),
         );
+        add_gate(
+            &mut saved,
+            "Work",
+            Coord::new(41.0, 31.0),
+            Coord::new(41.004, 31.0),
+        );
+        // The middle of the first gate.
+        let first = fallback_centre(&history, &saved).unwrap();
+        assert!((first.lat - 40.002).abs() < 1e-9 && (first.lon - 30.0).abs() < 1e-9);
 
         let ep = |lat, lon| rovsti_geo::Endpoint {
             label: String::new(),
@@ -3260,8 +3164,8 @@ mod tests {
 
     #[test]
     fn the_menu_rows_fit_the_menu_box() {
-        // Save or Rename, Share, Move, Remove, Lines and the details line.
-        const { assert!(5.0 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
+        // Share, Move, Remove, Lines and the details line.
+        const { assert!(4.0 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
     }
 
     #[test]

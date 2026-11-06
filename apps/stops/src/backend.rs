@@ -16,7 +16,7 @@ use rovsti_android::{
 };
 use rovsti_geo::{
     ActiveTrip, AlarmPlan, Diameter, DiameterError, Endpoint, Feed, FixIn, History, NoticePrefs,
-    Outcome, SavedPlaces, StopsPrefs,
+    Outcome, SavedStops, StopsPrefs, saved_stops::load_saved_stops,
 };
 use rovsti_ui::storage;
 use serde_json::json;
@@ -56,7 +56,7 @@ impl Default for NextTrip {
 #[derive(Default)]
 pub struct Data {
     pub prefs: StopsPrefs,
-    pub saved: SavedPlaces,
+    pub saved: SavedStops,
     pub history: History,
     pub trip: Option<ActiveTrip>,
     pub draft: Ends,
@@ -68,7 +68,7 @@ pub struct Data {
 pub fn load(dir: &Path) -> Data {
     Data {
         prefs: storage::load_json(dir, store::PREFS_FILE).unwrap_or_default(),
-        saved: storage::load_json(dir, store::SAVED_FILE).unwrap_or_default(),
+        saved: load_saved(dir),
         history: storage::load_json(dir, store::HISTORY_FILE).unwrap_or_default(),
         trip: store::load_trip(dir),
         draft: storage::load_json(dir, store::DRAFT_FILE).unwrap_or_default(),
@@ -79,6 +79,22 @@ pub fn load(dir: &Path) -> Data {
             Arc::new(feed)
         }),
     }
+}
+
+/// Reads the saved stops. Old single-point data (or anything unreadable) is
+/// discarded, and the file is overwritten with an empty v2 list right away.
+fn load_saved(dir: &Path) -> SavedStops {
+    let text = std::fs::read_to_string(dir.join(store::SAVED_FILE)).ok();
+    let loaded = load_saved_stops(text.as_deref());
+    if loaded.discarded {
+        log::warn!("discarding old saved data; starting with no saved stops");
+        log_save(storage::save_json(
+            dir,
+            store::SAVED_FILE,
+            &SavedStops::default(),
+        ));
+    }
+    loaded.stops
 }
 
 /// The trip file and the history, which the headless handler changes behind
@@ -95,7 +111,7 @@ pub fn save_prefs(dir: &Path, prefs: &StopsPrefs) {
     log_save(storage::save_json(dir, store::PREFS_FILE, prefs));
 }
 
-pub fn save_places(dir: &Path, saved: &SavedPlaces) {
+pub fn save_stops(dir: &Path, saved: &SavedStops) {
     log_save(storage::save_json(dir, store::SAVED_FILE, saved));
 }
 
@@ -739,7 +755,37 @@ mod tests {
     fn a_missing_file_loads_the_defaults() {
         let data = load(&tmp("backend-empty"));
         assert!(data.trip.is_none() && data.gtfs.is_none());
-        assert!(data.saved.places.is_empty());
+        assert!(data.saved.stops.is_empty());
         assert_eq!(data.prefs, StopsPrefs::default());
+    }
+
+    #[test]
+    fn an_old_single_point_file_loads_empty_and_is_rewritten_as_v2() {
+        let dir = tmp("backend-old-saved");
+        std::fs::create_dir_all(&dir).unwrap();
+        let old =
+            r#"{"next_id":2,"places":[{"id":1,"name":"Home","coord":{"lat":41.0,"lon":29.0}}]}"#;
+        std::fs::write(dir.join(store::SAVED_FILE), old).unwrap();
+        let data = load(&dir);
+        assert!(data.saved.stops.is_empty());
+        let text = std::fs::read_to_string(dir.join(store::SAVED_FILE)).unwrap();
+        let again = load_saved_stops(Some(&text));
+        assert!(!again.discarded, "the file on disk is v2 now: {text}");
+        assert_eq!(again.stops.version, rovsti_geo::saved_stops::FORMAT_VERSION);
+        assert!(!text.contains("places"));
+    }
+
+    #[test]
+    fn saved_stops_survive_a_save_and_load() {
+        use rovsti_geo::{Coord, Endpoint};
+        let dir = tmp("backend-saved-round");
+        let mut saved = SavedStops::default();
+        let ep = |lat| Endpoint {
+            coord: Coord::new(lat, 29.0),
+            label: String::new(),
+        };
+        saved.add("Gate", ep(41.0), ep(41.002), 5).unwrap();
+        save_stops(&dir, &saved);
+        assert_eq!(load(&dir).saved, saved);
     }
 }

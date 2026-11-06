@@ -1,4 +1,4 @@
-//! Choosing where to go: the sheet with a paste field, saved places and recent
+//! Choosing where to go: the sheet with a paste field, saved stops and recent
 //! destinations, and the confirmation that follows a shared location.
 //!
 //! [`offer`] is the pure core: text from a share, a link or the paste field
@@ -8,7 +8,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ListSizingBehavior, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, list, px,
 };
-use rovsti_geo::{Coord, Diameter, DiameterError, Feed, Place, SavedPlaces, dest::parse_location};
+use rovsti_geo::{Coord, Diameter, DiameterError, Feed, dest::parse_location};
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
     field::field_box,
@@ -39,15 +39,6 @@ pub struct Destination {
 }
 
 impl Destination {
-    pub fn from_place(place: &Place) -> Self {
-        Self {
-            label: place.name.clone(),
-            coord: place.coord,
-            gtfs_stop: place.gtfs_stop.clone(),
-            pattern: None,
-        }
-    }
-
     pub fn new(label: impl Into<String>, coord: Coord) -> Self {
         Self {
             label: label.into(),
@@ -55,18 +46,6 @@ impl Destination {
             gtfs_stop: None,
             pattern: None,
         }
-    }
-
-    /// This point under the name the user gave a saved place within reach.
-    /// Coordinate and line stay; a missing GTFS stop is filled from the place.
-    pub fn named_from(mut self, saved: &SavedPlaces) -> Self {
-        if let Some(place) = saved.near(self.coord) {
-            self.label = place.name.clone();
-            if self.gtfs_stop.is_none() {
-                self.gtfs_stop = place.gtfs_stop.clone();
-            }
-        }
-        self
     }
 
     /// A raw point dropped on the map: it has no name.
@@ -197,17 +176,12 @@ pub fn offer(text: &str) -> Offer {
 /// What the sheet is showing.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SheetMode {
-    /// Paste field, Saved, Recent.
+    /// Paste field, saved stops, Recent.
     Pick,
-    /// "Use ...": Use as A / Use as B, Save toggle.
+    /// "Use ...": Use as A / Use as B.
     Confirm(Destination),
-    /// A new name for a saved place.
+    /// A new name for a saved stop.
     Rename(u64),
-    /// A name for a point that is not saved yet; `slot` is the pin it came from.
-    SavePoint {
-        dest: Destination,
-        slot: Option<Slot>,
-    },
     /// A transit stop (index into the feed): its lines, Use as A / Use as B.
     Stop(u32),
 }
@@ -244,10 +218,11 @@ pub enum PickItem {
         lines: usize,
         at: lists::Place,
     },
-    Saved {
+    /// A saved stop: both points at once.
+    SavedStop {
         id: u64,
-        dest: Destination,
-        /// What the place is and how far it is.
+        name: String,
+        /// The gate length and how far it is.
         detail: String,
         at: lists::Place,
     },
@@ -276,7 +251,7 @@ impl PickItem {
             Self::Refusal(why) => lists::key(1, why.len() as u64),
             Self::Header(text) => lists::key(2, text.len() as u64),
             Self::Stop { index, .. } => lists::key(3, u64::from(*index)),
-            Self::Saved { id, .. } => lists::key(4, *id),
+            Self::SavedStop { id, .. } => lists::key(4, *id),
             Self::Pair { i, .. } => lists::key(5, *i as u64),
             Self::Recent { i, .. } => lists::key(6, *i as u64),
             Self::Hint => lists::key(7, 0),
@@ -310,7 +285,6 @@ impl StopsApp {
         self.field.update(cx, |f, cx| f.clear(cx));
         self.pick_list.scroll_to_top();
         self.sheet_mode = SheetMode::Pick;
-        self.save_place = false;
         self.sheet.open();
         cx.notify();
     }
@@ -319,10 +293,7 @@ impl StopsApp {
     /// or say why not.
     pub(crate) fn offer_text(&mut self, text: &str, cx: &mut Context<Self>) {
         match offer(text) {
-            Offer::Confirm(dest) => {
-                let dest = dest.named_from(&self.saved);
-                self.confirm_destination(dest, cx);
-            }
+            Offer::Confirm(dest) => self.confirm_destination(dest, cx),
             Offer::Refused(why) => self.show_pill(why, None, cx),
         }
     }
@@ -337,7 +308,6 @@ impl StopsApp {
             return;
         };
         if let Offer::Confirm(dest) = offer(&text) {
-            let dest = dest.named_from(&self.saved);
             self.confirm_destination(dest, cx);
         } else {
             self.field.update(cx, |f, cx| f.set(&text, cx));
@@ -349,126 +319,23 @@ impl StopsApp {
         // A ringing alarm stays on top: the confirmation waits under it until
         // the alarm is dismissed or snoozed.
         self.sheet_mode = SheetMode::Confirm(dest);
-        self.save_place = false;
         self.sheet.open();
         cx.notify();
     }
 
-    /// Remembers the open confirmation or stop sheet so a Rename or Save
-    /// opened from it goes back to it afterwards; anything else has nothing to
-    /// go back to.
-    fn remember_return(&mut self) {
-        self.sheet_return = match &self.sheet_mode {
-            SheetMode::Confirm(_) | SheetMode::Stop(_) if self.sheet.is_open() => {
-                Some(self.sheet_mode.clone())
-            }
-            _ => None,
-        };
-    }
-
-    /// Leaves a Rename or Save sheet: back to the sheet it came from, else closed.
-    fn finish_sub_sheet(&mut self, cx: &mut Context<Self>) {
-        match self.sheet_return.take() {
-            Some(mode) => {
-                if matches!(mode, SheetMode::Stop(_)) {
-                    // The line previewed there is drawn again.
-                    self.map.pattern = self.stop_pattern;
-                }
-                self.sheet_mode = mode;
-            }
-            None => self.sheet.close(),
-        }
-        cx.notify();
-    }
-
+    /// Opens the Rename sheet for the saved stop `id` with its name in the field.
     pub(crate) fn open_rename(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(place) = self.saved.get(id) else {
+        let Some(stop) = self.saved.get(id) else {
             return;
         };
-        let name = place.name.clone();
-        self.remember_return();
-        if matches!(self.sheet_mode, SheetMode::Stop(_)) {
-            // The line previewed on the stop sheet leaves the map again.
-            self.map.pattern = self
-                .pick
-                .ends
-                .get(self.pick.sheet_slot())
-                .and_then(|d| d.pattern);
-        }
+        let name = stop.name.clone();
         self.field.update(cx, |f, cx| f.set(&name, cx));
         self.sheet_mode = SheetMode::Rename(id);
         self.sheet.open();
         cx.notify();
     }
 
-    /// Opens the Save sheet for `dest` with its name in the field.
-    pub(crate) fn open_save_point(
-        &mut self,
-        dest: Destination,
-        slot: Option<Slot>,
-        cx: &mut Context<Self>,
-    ) {
-        self.remember_return();
-        if matches!(self.sheet_mode, SheetMode::Stop(_)) {
-            // The line previewed on the stop sheet leaves the map again.
-            self.map.pattern = self
-                .pick
-                .ends
-                .get(self.pick.sheet_slot())
-                .and_then(|d| d.pattern);
-        }
-        let name = pick::save_prefill(&dest);
-        self.field.update(cx, |f, cx| f.set(&name, cx));
-        self.sheet_mode = SheetMode::SavePoint { dest, slot };
-        self.sheet.open();
-        cx.notify();
-    }
-
-    /// Saves the point of the Save sheet under the name in the field.
-    fn commit_save_point(&mut self, cx: &mut Context<Self>) {
-        let SheetMode::SavePoint { dest, .. } = self.sheet_mode.clone() else {
-            return;
-        };
-        let name = self.field.read(cx).text().to_owned();
-        if self.save_named(&name, &dest, cx) {
-            self.finish_sub_sheet(cx);
-        }
-        cx.notify();
-    }
-
-    /// Saves `dest` as `name` and shows the pill. True when the place is now
-    /// in Saved (new or already there); false when the name was refused.
-    fn save_named(&mut self, name: &str, dest: &Destination, cx: &mut Context<Self>) -> bool {
-        let result = self.saved.save(name, dest.coord, dest.gtfs_stop.clone());
-        let text = pick::save_result_text(&result, &self.saved);
-        let id = match result {
-            Ok(id) => {
-                self.save_places(cx);
-                Some(id)
-            }
-            Err(rovsti_geo::PlaceError::Duplicate(id)) => Some(id),
-            Err(_) => None,
-        };
-        if let Some(id) = id
-            && let Some(place) = self.saved.get(id)
-        {
-            let (coord, label) = (place.coord, place.name.clone());
-            self.pick.relabel_near(coord, &label);
-        }
-        self.show_pill(text, None, cx);
-        id.is_some()
-    }
-
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
-        if matches!(
-            self.sheet_mode,
-            SheetMode::Rename(_) | SheetMode::SavePoint { .. }
-        ) {
-            // Cancel, Back or the scrim: one step back, to the sheet it came from.
-            self.finish_sub_sheet(cx);
-            return;
-        }
-        self.sheet_return = None;
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // A line looked at but not chosen leaves the map again.
             self.map.pattern = self
@@ -481,29 +348,15 @@ impl StopsApp {
         cx.notify();
     }
 
-    /// A saved or recent point was tapped: it fills the active slot, and the
+    /// A recent point was tapped: it fills the active slot, and the
     /// next pick goes to the other end.
     pub(crate) fn choose_destination(&mut self, dest: Destination, cx: &mut Context<Self>) {
         let slot = self.pick.sheet_slot();
-        self.use_as(slot, dest, false, cx);
+        self.use_as(slot, dest, cx);
     }
 
-    /// Puts `dest` into `slot`, optionally keeping it in Saved too.
-    pub(crate) fn use_as(
-        &mut self,
-        slot: Slot,
-        dest: Destination,
-        save: bool,
-        cx: &mut Context<Self>,
-    ) {
-        if save {
-            let name = self.field.read(cx).text().to_owned();
-            if !self.save_named(&name, &dest, cx) {
-                // The sheet stays open so the name can be fixed.
-                cx.notify();
-                return;
-            }
-        }
+    /// Puts `dest` into `slot`.
+    pub(crate) fn use_as(&mut self, slot: Slot, dest: Destination, cx: &mut Context<Self>) {
         if self.trip.is_some() {
             // The running trip keeps its line and view; the point waits.
             self.pick.place(slot, dest);
@@ -522,7 +375,17 @@ impl StopsApp {
         cx.notify();
     }
 
-    /// Both ends at once, from a recent trip.
+    /// A saved stop was tapped: both of its points go on the map.
+    pub(crate) fn choose_saved_stop(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(stop) = self.saved.get(id) else {
+            return;
+        };
+        let a = pick::dest_from_endpoint(&stop.a);
+        let b = pick::dest_from_endpoint(&stop.b);
+        self.choose_pair(a, b, cx);
+    }
+
+    /// Both ends at once, from a recent trip or a saved stop.
     pub(crate) fn choose_pair(&mut self, a: Destination, b: Destination, cx: &mut Context<Self>) {
         self.pick.set_pair(a, b);
         self.sheet.close();
@@ -535,17 +398,14 @@ impl StopsApp {
         cx.notify();
     }
 
-    fn rename_place(&mut self, id: u64, cx: &mut Context<Self>) {
+    /// Renames the saved stop `id` to the name in the field.
+    fn rename_stop(&mut self, id: u64, cx: &mut Context<Self>) {
         let name = self.field.read(cx).text().to_owned();
-        let coord = self.saved.get(id).map(|p| p.coord);
         match self.saved.rename(id, &name) {
             Ok(()) => {
-                let new_name = self.saved.get(id).map_or(name, |p| p.name.clone());
-                if let Some(coord) = coord {
-                    self.pick.relabel_near(coord, &new_name);
-                }
-                self.save_places(cx);
-                self.finish_sub_sheet(cx);
+                let new_name = self.saved.get(id).map_or(name, |s| s.name.clone());
+                self.save_stops(cx);
+                self.sheet.close();
                 self.show_pill(format!("Renamed to {new_name}"), None, cx);
             }
             Err(error) => self.show_pill(error.message(), None, cx),
@@ -578,14 +438,8 @@ impl StopsApp {
                 self.pick.sheet_slot().picker_title(),
                 self.pick_body(theme, window, cx),
             ),
-            SheetMode::Confirm(dest) => (
-                "Use this point",
-                self.confirm_body(theme, &dest, window, cx),
-            ),
-            SheetMode::Rename(id) => ("Rename place", self.rename_body(theme, id, window, cx)),
-            SheetMode::SavePoint { dest, .. } => {
-                ("Save place", self.save_point_body(theme, &dest, window, cx))
-            }
+            SheetMode::Confirm(dest) => ("Use this point", self.confirm_body(theme, &dest, cx)),
+            SheetMode::Rename(id) => ("Rename stop", self.rename_body(theme, id, window, cx)),
             SheetMode::Stop(stop) => ("Transit stop", self.stop_body(theme, stop, cx)),
         };
         let body = div()
@@ -663,7 +517,7 @@ impl StopsApp {
                         theme,
                         "dest-field",
                         &self.field,
-                        "Search stops and saved places, or paste a link",
+                        "Search stops, saved stops, or paste a link",
                         window,
                         cx,
                     )))
@@ -699,16 +553,16 @@ impl StopsApp {
             .into_any_element()
     }
 
-    /// The rows for `query`: the pasted point, stops, saved places and, with
+    /// The rows for `query`: the pasted point, stops, saved stops and, with
     /// no query, the recent trips and points.
     fn pick_rows(&mut self, query: &str) -> Vec<PickItem> {
         let mut items = Vec::new();
         if !query.is_empty() {
             match offer(query) {
                 Offer::Confirm(dest) => {
-                    items.push(PickItem::Offer(dest.named_from(&self.saved)));
+                    items.push(PickItem::Offer(dest));
                 }
-                // Typing a name searches Saved below: only a link or a pair of
+                // Typing a name searches saved stops below: only a link or a pair of
                 // numbers that failed is worth an explanation.
                 Offer::Refused(why) if looks_like_link(query) => {
                     items.push(PickItem::Refusal(why));
@@ -725,22 +579,25 @@ impl StopsApp {
             .saved
             .search(query)
             .into_iter()
-            .map(|p| {
+            .map(|st| {
                 (
-                    p.id,
-                    Destination::from_place(p),
-                    crate::saved_ui::place_detail(p, here),
+                    st.id,
+                    st.name.clone(),
+                    crate::saved_ui::stop_detail(st, here),
                 )
             })
             .collect();
-        group(&mut items, "Saved", saved, |_, (id, dest, detail), at| {
-            PickItem::Saved {
+        group(
+            &mut items,
+            "Saved stops",
+            saved,
+            |_, (id, name, detail), at| PickItem::SavedStop {
                 id,
-                dest,
+                name,
                 detail,
                 at,
-            }
-        });
+            },
+        );
         if !query.is_empty() && items.is_empty() {
             items.push(PickItem::NoMatch(pick::no_match_text(
                 query,
@@ -749,25 +606,23 @@ impl StopsApp {
         }
         if query.is_empty() {
             let pairs = self.history.recent_pairs(3);
-            let saved = &self.saved;
             group(&mut items, "Recent trips", pairs, |i, (a, b), at| {
                 PickItem::Pair {
                     i,
-                    a: pick::dest_from_endpoint(&a, saved),
-                    b: pick::dest_from_endpoint(&b, saved),
+                    a: pick::dest_from_endpoint(&a),
+                    b: pick::dest_from_endpoint(&b),
                     at,
                 }
             });
             let recent = self.history.recent_points(5);
-            let saved = &self.saved;
             group(&mut items, "Recent", recent, |i, point, at| {
                 PickItem::Recent {
                     i,
-                    dest: pick::dest_from_endpoint(&point, saved),
+                    dest: pick::dest_from_endpoint(&point),
                     at,
                 }
             });
-            if self.saved.places.is_empty() && self.history.records.is_empty() {
+            if self.saved.stops.is_empty() && self.history.records.is_empty() {
                 items.push(PickItem::Hint);
             }
         }
@@ -818,23 +673,21 @@ impl StopsApp {
                     .on_click(cx.listener(move |this, _, _, cx| this.open_stop(index, cx)));
                 lists::grouped(theme, at, row).into_any_element()
             }
-            PickItem::Saved {
+            PickItem::SavedStop {
                 id,
-                dest,
+                name,
                 detail,
                 at,
             } => {
                 let row = list_row(
                     theme,
                     None,
-                    pick::row_label(&dest.label),
+                    pick::row_label(&name),
                     Some(detail.into()),
                     None,
                 )
                 .id(("pick-saved", id as usize))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.choose_destination(dest.clone(), cx);
-                }));
+                .on_click(cx.listener(move |this, _, _, cx| this.choose_saved_stop(id, cx)));
                 lists::grouped(theme, at, row).into_any_element()
             }
             PickItem::Pair { i, a, b, at } => {
@@ -899,7 +752,7 @@ impl StopsApp {
         }
     }
 
-    /// A stop of the feed: a line to draw, Use as A / Use as B, Save.
+    /// A stop of the feed: a line to draw, Use as A / Use as B.
     fn stop_body(&mut self, theme: Theme, stop: u32, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
         let Some(feed) = self.gtfs.clone() else {
@@ -973,24 +826,6 @@ impl StopsApp {
             ..here.clone()
         };
         let b_dest = a_dest.clone();
-        let save_dest = here;
-        let already = self.saved.near(coord).map(|p| (p.id, p.name.clone()));
-        let save_row = match already {
-            Some((id, name)) => list_row(
-                theme,
-                None,
-                format!("Saved as {name}"),
-                None,
-                Some("Rename".into()),
-            )
-            .id("stop-rename")
-            .on_click(cx.listener(move |this, _, _, cx| this.open_rename(id, cx))),
-            None => list_row(theme, None, "Save this stop", None, None)
-                .id("stop-save")
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.open_save_point(save_dest.clone(), None, cx);
-                })),
-        };
         body = body.child(section(
             theme,
             Some("This stop".into()),
@@ -998,16 +833,15 @@ impl StopsApp {
                 list_row(theme, None, "Use as A", None, None)
                     .id("stop-use-a")
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.use_as(Slot::A, a_dest.clone(), false, cx);
+                        this.use_as(Slot::A, a_dest.clone(), cx);
                     }))
                     .into_any_element(),
                 list_row(theme, None, "Use as B", None, None)
                     .id("stop-use-b")
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.use_as(Slot::B, b_dest.clone(), false, cx);
+                        this.use_as(Slot::B, b_dest.clone(), cx);
                     }))
                     .into_any_element(),
-                save_row.into_any_element(),
             ],
         ));
         body.child(
@@ -1025,40 +859,9 @@ impl StopsApp {
         &mut self,
         theme: Theme,
         dest: &Destination,
-        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = theme::colors(theme);
-        let prefill = dest.clone();
-        let already = self.saved.near(dest.coord).map(|p| (p.id, p.name.clone()));
-        let is_saved = already.is_some();
-        let save_row = match already {
-            Some((id, name)) => list_row(
-                theme,
-                None,
-                format!("Saved as {name}"),
-                None,
-                Some("Rename".into()),
-            )
-            .id("save-rename")
-            .on_click(cx.listener(move |this, _, _, cx| this.open_rename(id, cx))),
-            None => list_row(
-                theme,
-                None,
-                "Save this place",
-                None,
-                Some(if self.save_place { "On" } else { "Off" }.into()),
-            )
-            .id("save-toggle")
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.save_place = !this.save_place;
-                if this.save_place {
-                    let name = pick::save_prefill(&prefill);
-                    this.field.update(cx, |f, cx| f.set(&name, cx));
-                }
-                cx.notify();
-            })),
-        };
         let as_a = dest.clone();
         let as_b = dest.clone();
         let default = self.pick.confirm_slot();
@@ -1076,17 +879,6 @@ impl StopsApp {
             .gap(px(8.0))
             .child(Self::sheet_title(theme, dest.title()))
             .child(Self::footnote(theme, pick::details_text(dest)))
-            .child(section(theme, None, [save_row.into_any_element()]))
-            .children((self.save_place && !is_saved).then(|| {
-                div().px(px(16.0)).child(field_box(
-                    theme,
-                    "confirm-save-field",
-                    &self.field,
-                    "Name",
-                    window,
-                    cx,
-                ))
-            }))
             .child(
                 div()
                     .flex()
@@ -1105,8 +897,7 @@ impl StopsApp {
                             .id("confirm-use-a")
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                let save = this.save_place && !is_saved;
-                                this.use_as(Slot::A, as_a.clone(), save, cx);
+                                this.use_as(Slot::A, as_a.clone(), cx);
                             })),
                     )
                     .child(
@@ -1114,55 +905,8 @@ impl StopsApp {
                             .id("confirm-use-b")
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                let save = this.save_place && !is_saved;
-                                this.use_as(Slot::B, as_b.clone(), save, cx);
+                                this.use_as(Slot::B, as_b.clone(), cx);
                             })),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn save_point_body(
-        &mut self,
-        theme: Theme,
-        dest: &Destination,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let colors = theme::colors(theme);
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(Self::sheet_title(theme, "Save place"))
-            .child(Self::footnote(theme, pick::details_text(dest)))
-            .child(div().px(px(16.0)).child(field_box(
-                theme,
-                "save-field",
-                &self.field,
-                "Name",
-                window,
-                cx,
-            )))
-            .child(
-                div()
-                    .flex()
-                    .gap(px(12.0))
-                    .px(px(16.0))
-                    .pt(px(8.0))
-                    .child(
-                        glass_pill(theme, "Cancel")
-                            .id("save-cancel")
-                            .flex_1()
-                            .text_color(colors.secondary_label)
-                            .on_click(cx.listener(|this, _, _, cx| this.close_sheet(cx))),
-                    )
-                    .child(
-                        glass_pill(theme, "Save")
-                            .id("save-commit")
-                            .flex_1()
-                            .text_color(colors.accent)
-                            .on_click(cx.listener(|this, _, _, cx| this.commit_save_point(cx))),
                     ),
             )
             .into_any_element()
@@ -1180,7 +924,7 @@ impl StopsApp {
             .flex()
             .flex_col()
             .gap(px(8.0))
-            .child(Self::sheet_title(theme, "Rename place"))
+            .child(Self::sheet_title(theme, "Rename stop"))
             .child(div().px(px(16.0)).child(field_box(
                 theme,
                 "rename-field",
@@ -1205,7 +949,7 @@ impl StopsApp {
                         glass_pill(theme, "Save")
                             .id("rename-save")
                             .text_color(colors.accent)
-                            .on_click(cx.listener(move |this, _, _, cx| this.rename_place(id, cx))),
+                            .on_click(cx.listener(move |this, _, _, cx| this.rename_stop(id, cx))),
                     ),
             )
             .into_any_element()
@@ -1235,41 +979,6 @@ fn looks_like_link(text: &str) -> bool {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-
-    fn saved_home() -> SavedPlaces {
-        let mut s = SavedPlaces::default();
-        s.save("Home", Coord::new(41.0, 29.0), Some("H1".into()))
-            .unwrap();
-        s
-    }
-
-    #[test]
-    fn a_raw_point_near_a_saved_place_takes_its_name() {
-        let d = Destination::dropped(Coord::new(41.0, 29.0002)).named_from(&saved_home());
-        assert_eq!(d.label, "Home");
-        assert_eq!(d.coord, Coord::new(41.0, 29.0002));
-        assert_eq!(d.gtfs_stop.as_deref(), Some("H1"));
-    }
-
-    #[test]
-    fn a_stop_near_a_saved_place_takes_the_user_name_and_keeps_its_id() {
-        let stop = Destination {
-            gtfs_stop: Some("S9".into()),
-            pattern: Some(3),
-            ..Destination::new("Kadikoy Iskele", Coord::new(41.0, 29.0001))
-        };
-        let d = stop.named_from(&saved_home());
-        assert_eq!(d.label, "Home");
-        assert_eq!(d.gtfs_stop.as_deref(), Some("S9"));
-        assert_eq!(d.pattern, Some(3));
-    }
-
-    #[test]
-    fn a_far_point_stays_unnamed() {
-        let d = Destination::dropped(Coord::new(41.0, 29.01)).named_from(&saved_home());
-        assert!(!d.is_named());
-        assert_eq!(d.gtfs_stop, None);
-    }
 
     fn confirm(text: &str) -> Destination {
         match offer(text) {
@@ -1326,20 +1035,6 @@ mod tests {
 
     fn dest(label: &str, lon: f64) -> Destination {
         Destination::new(label, Coord::new(41.0, lon))
-    }
-
-    #[test]
-    fn a_saved_place_becomes_a_point() {
-        let place = Place {
-            id: 3,
-            name: "Home".into(),
-            coord: Coord::new(41.0, 29.0),
-            gtfs_stop: Some("S1".into()),
-        };
-        let d = Destination::from_place(&place);
-        assert_eq!(d.label, "Home");
-        assert_eq!(d.gtfs_stop.as_deref(), Some("S1"));
-        assert_eq!(d.coord, place.coord);
     }
 
     #[test]
@@ -1419,29 +1114,29 @@ mod tests {
     #[test]
     fn a_group_gets_a_header_and_rounded_ends() {
         let mut items = Vec::new();
-        group(&mut items, "Saved", Vec::<u64>::new(), |_, id, at| {
-            PickItem::Saved {
+        group(&mut items, "Saved stops", Vec::<u64>::new(), |_, id, at| {
+            PickItem::SavedStop {
                 id,
-                dest: dest("x", 29.0),
+                name: "x".into(),
                 detail: String::new(),
                 at,
             }
         });
         assert!(items.is_empty(), "no rows, no header");
-        group(&mut items, "Saved", vec![1, 2, 3], |_, id, at| {
-            PickItem::Saved {
+        group(&mut items, "Saved stops", vec![1, 2, 3], |_, id, at| {
+            PickItem::SavedStop {
                 id,
-                dest: dest("x", 29.0),
+                name: "x".into(),
                 detail: String::new(),
                 at,
             }
         });
         assert_eq!(items.len(), 4);
-        assert_eq!(items[0], PickItem::Header("Saved"));
+        assert_eq!(items[0], PickItem::Header("Saved stops"));
         let places: Vec<_> = items[1..]
             .iter()
             .map(|item| match item {
-                PickItem::Saved { at, .. } => (at.first, at.last),
+                PickItem::SavedStop { at, .. } => (at.first, at.last),
                 other => panic!("{other:?}"),
             })
             .collect();
@@ -1456,9 +1151,9 @@ mod tests {
                 at: lists::Place::ALONE
             }
             .key(),
-            PickItem::Saved {
+            PickItem::SavedStop {
                 id: 1,
-                dest: dest("x", 29.0),
+                name: "x".into(),
                 detail: String::new(),
                 at: lists::Place::ALONE
             }
@@ -1487,21 +1182,5 @@ mod tests {
         assert!(looks_like_link("-3, 4"));
         assert!(!looks_like_link("home"));
         assert!(!looks_like_link("  kad"));
-    }
-
-    #[test]
-    fn a_saved_pin_takes_the_name_and_is_found_again() {
-        let mut saved = SavedPlaces::default();
-        let coord = Coord::new(41.0, 29.0);
-        let dest = Destination::new("Stop X", coord);
-        let name = pick::save_prefill(&dest);
-        let id = saved.save(&name, coord, None).unwrap();
-        assert_eq!(saved.near(coord).map(|p| p.id), Some(id));
-        let again = Destination::dropped(coord).named_from(&saved);
-        assert_eq!(again.label, "Stop X");
-        assert!(matches!(
-            saved.save("Other", coord, None),
-            Err(rovsti_geo::PlaceError::Duplicate(d)) if d == id
-        ));
     }
 }

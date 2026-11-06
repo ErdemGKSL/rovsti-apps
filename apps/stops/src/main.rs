@@ -26,7 +26,7 @@ use rovsti_android::{
     trip::{AlarmAction, parse_trip_alarm},
 };
 use rovsti_core::wire::{DocumentOp, DocumentResult};
-use rovsti_geo::{ActiveTrip, Coord, Feed, History, Place, SavedPlaces, StopsPrefs};
+use rovsti_geo::{ActiveTrip, Coord, Feed, History, SavedStop, SavedStops, StopsPrefs};
 use rovsti_ui::{
     Icon, IconAssets,
     components::large_title,
@@ -78,18 +78,13 @@ pub(crate) enum Page {
 
 /// What the Undo button on the notice pill does.
 pub(crate) enum PillAction {
-    UndoDelete(Place, usize),
+    UndoDelete(SavedStop, usize),
     RestoreHistory(History),
     RestoreRecord(rovsti_geo::TripRecord, usize),
     RestoreEnds(picker::Ends),
     RestartTrip(Destination, Destination),
     RestoreTileUrl(Option<String>),
     RestoreNotice(rovsti_geo::NoticePrefs),
-    UndoRelocate {
-        id: u64,
-        coord: rovsti_geo::Coord,
-        gtfs_stop: Option<String>,
-    },
 }
 
 pub(crate) struct StopsApp {
@@ -104,7 +99,7 @@ pub(crate) struct StopsApp {
     /// The A/B last written to `draft.json`.
     draft_saved: picker::Ends,
     pub(crate) prefs: StopsPrefs,
-    pub(crate) saved: SavedPlaces,
+    pub(crate) saved: SavedStops,
     pub(crate) history: History,
     /// The imported transit feed: searched by the stop picker, drawn on the map.
     pub(crate) gtfs: Option<Arc<Feed>>,
@@ -137,17 +132,10 @@ pub(crate) struct StopsApp {
 
     pub(crate) sheet: Sheet,
     pub(crate) sheet_mode: SheetMode,
-    /// The confirmation or stop sheet a Rename or Save sheet was opened from,
-    /// shown again when that one is done.
-    pub(crate) sheet_return: Option<SheetMode>,
     pub(crate) field: Entity<TextField>,
-    /// The confirmation's Save toggle.
-    pub(crate) save_place: bool,
     pub(crate) back_enabled: bool,
-    /// The saved place whose actions are open.
+    /// The saved stop whose actions are open.
     pub(crate) expanded: Option<u64>,
-    /// The saved place being moved: the next map tap sets its new spot.
-    pub(crate) relocating: Option<u64>,
     /// The virtualised lists: the Saved tab, History, the chat picker and the
     /// destination search.
     pub(crate) saved_list: lists::KeyedList,
@@ -302,7 +290,7 @@ impl StopsApp {
             loaded: false,
             draft_saved: picker::Ends::default(),
             prefs: StopsPrefs::default(),
-            saved: SavedPlaces::default(),
+            saved: SavedStops::default(),
             history: History::default(),
             gtfs: None,
             transit: transit::Transit::default(),
@@ -322,12 +310,9 @@ impl StopsApp {
             rering: None,
             sheet: Sheet::new(),
             sheet_mode: SheetMode::Pick,
-            sheet_return: None,
             field,
-            save_place: false,
             back_enabled: false,
             expanded: None,
-            relocating: None,
             saved_list: lists::KeyedList::default(),
             history_list: lists::KeyedList::default(),
             notice_list: lists::KeyedList::default(),
@@ -493,7 +478,7 @@ impl StopsApp {
     }
 
     /// Whether System Back has a layer to close: a pin menu, an armed "Move", the alarm, a
-    /// sheet, a Settings page, an opened saved place, or any tab but the first (Trip). When it
+    /// sheet, a Settings page, an opened saved stop, or any tab but the first (Trip). When it
     /// has not, Back leaves the app.
     pub(crate) fn can_go_back(&self) -> bool {
         self.pick.menu().is_some()
@@ -502,7 +487,6 @@ impl StopsApp {
             || self.sheet.is_open()
             || (self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main)
             || self.expanded.is_some()
-            || self.relocating.is_some()
             || self.tabs.selected() != 0
     }
 
@@ -510,9 +494,6 @@ impl StopsApp {
     fn on_back(&mut self, cx: &mut Context<Self>) {
         if self.pick.menu().is_some() {
             self.pick.close_menu();
-            cx.notify();
-        } else if self.relocating.is_some() {
-            self.relocating = None;
             cx.notify();
         } else if self.alarm.is_some() {
             // With no snoozes left Back does nothing; the alarm stays.
@@ -575,13 +556,13 @@ impl StopsApp {
             .detach();
     }
 
-    pub(crate) fn save_places(&self, cx: &mut Context<Self>) {
+    pub(crate) fn save_stops(&self, cx: &mut Context<Self>) {
         let Some(dir) = self.dir.clone() else {
             return;
         };
         let saved = self.saved.clone();
         cx.background_executor()
-            .spawn(async move { backend::save_places(&dir, &saved) })
+            .spawn(async move { backend::save_stops(&dir, &saved) })
             .detach();
     }
 
@@ -625,22 +606,12 @@ impl StopsApp {
             return;
         }
         match action {
-            PillAction::UndoDelete(place, index) => self.undo_delete(place, index, cx),
+            PillAction::UndoDelete(stop, index) => self.undo_delete(stop, index, cx),
             PillAction::RestoreHistory(history) => self.restore_history(history, cx),
             PillAction::RestoreRecord(record, index) => self.restore_record(record, index, cx),
             PillAction::RestartTrip(a, b) => self.request_start(a, b, cx),
             PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
-            PillAction::UndoRelocate {
-                id,
-                coord,
-                gtfs_stop,
-            } => {
-                // An error means the old spot got taken meanwhile; nothing to undo then.
-                self.saved.relocate(id, coord, gtfs_stop).ok();
-                self.save_places(cx);
-                cx.notify();
-            }
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);
                 self.map.follow = true;
@@ -773,7 +744,6 @@ impl Render for StopsApp {
                             this.confirm_clear = false;
                             this.confirm_remove_feed = false;
                             this.pick.close_menu();
-                            this.relocating = None;
                             this.page.restart();
                             this.saved_list.scroll_to_top();
                             if index == 2 {

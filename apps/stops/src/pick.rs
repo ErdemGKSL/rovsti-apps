@@ -4,24 +4,21 @@
 //! reads the stage, the hint and the labels out. Points are shown by name or
 //! as "Point A" / "Point B"; a coordinate is only ever a details line.
 
-use rovsti_geo::{
-    Coord, DiameterError, Endpoint, MAX_DIAMETER_M, MIN_DIAMETER_M, PlaceError, SavedPlaces,
-    places::DUPLICATE_RADIUS_M,
-};
+use rovsti_geo::{Coord, DiameterError, Endpoint, MAX_DIAMETER_M, MIN_DIAMETER_M};
 
 use crate::{
     picker::{Destination, Ends, Slot, coord_text},
     trip_ui::distance_text,
 };
 
-/// The empty-search line of the place picker.
+/// The empty-search line of the stop picker.
 pub fn no_match_text(query: &str, has_feed: bool) -> String {
     let q = query.trim();
     if has_feed {
-        format!("No stops or saved places match \u{201c}{q}\u{201d}.")
+        format!("No stops or saved stops match \u{201c}{q}\u{201d}.")
     } else {
         format!(
-            "No saved places match \u{201c}{q}\u{201d}. Import a GTFS feed in Settings to search stops too."
+            "No saved stops match \u{201c}{q}\u{201d}. Import a GTFS feed in Settings to search stops too."
         )
     }
 }
@@ -77,53 +74,11 @@ impl Hint {
     }
 }
 
-/// What the save-place field starts with: the point's name, else nothing.
-pub fn save_prefill(dest: &Destination) -> String {
-    dest.label.trim().to_owned()
-}
-
-/// A stored endpoint as a destination: generic labels ("Point A") mean no
-/// name, and a saved place within reach gives its current name.
-pub fn dest_from_endpoint(ep: &Endpoint, saved: &SavedPlaces) -> Destination {
-    let dest = match ep.label.trim() {
+/// A stored endpoint as a destination: generic labels ("Point A") mean no name.
+pub fn dest_from_endpoint(ep: &Endpoint) -> Destination {
+    match ep.label.trim() {
         "" | "Point" | "Point A" | "Point B" => Destination::dropped(ep.coord),
         label => Destination::new(label, ep.coord),
-    };
-    dest.named_from(saved)
-}
-
-/// The toast after trying to save a place.
-pub fn save_result_text(result: &Result<u64, PlaceError>, saved: &SavedPlaces) -> String {
-    let name = |id: &u64| saved.get(*id).map(|p| p.name.clone()).unwrap_or_default();
-    match result {
-        Ok(id) => format!("Saved as {}", name(id)),
-        Err(PlaceError::Duplicate(id)) => format!("Already saved as {}", name(id)),
-        Err(error) => error.message().to_owned(),
-    }
-}
-
-/// The hint while a saved place is being moved.
-pub fn relocate_hint(name: &str) -> String {
-    if name.is_empty() {
-        "Tap the map to move the place".to_owned()
-    } else {
-        format!("Tap the map to move {name}")
-    }
-}
-
-/// The toast after trying to move a saved place.
-pub fn relocate_result_text(
-    result: &Result<(Coord, Option<String>), PlaceError>,
-    name: &str,
-    saved: &SavedPlaces,
-) -> String {
-    match result {
-        Ok(_) => format!("Moved {name}"),
-        Err(PlaceError::Duplicate(id)) => {
-            let other = saved.get(*id).map(|p| p.name.clone()).unwrap_or_default();
-            format!("{other} is already saved there")
-        }
-        Err(error) => error.message().to_owned(),
     }
 }
 
@@ -131,7 +86,7 @@ pub fn relocate_result_text(
 #[derive(Debug, Default)]
 pub struct Picking {
     pub ends: Ends,
-    /// "Move" was chosen: the next tap relocates this pin.
+    /// "Move" was chosen: the next tap moves this pin.
     moving: Option<Slot>,
     /// The pin menu is open for this slot.
     menu: Option<Slot>,
@@ -199,15 +154,6 @@ impl Picking {
         self.sheet_slot = self.ends.next_slot();
     }
 
-    /// Renames each end within [`DUPLICATE_RADIUS_M`] of `coord`.
-    pub fn relabel_near(&mut self, coord: Coord, label: &str) {
-        for end in [&mut self.ends.a, &mut self.ends.b].into_iter().flatten() {
-            if end.coord.distance_m(coord) <= DUPLICATE_RADIUS_M {
-                end.label = label.to_owned();
-            }
-        }
-    }
-
     /// Puts back ends captured earlier (undo), dropping gestures in progress.
     pub fn restore(&mut self, ends: Ends) {
         self.ends = ends;
@@ -244,7 +190,7 @@ impl Picking {
         self.sheet_slot = self.ends.next_slot();
     }
 
-    /// Arms `slot`: the next tap on the map relocates it.
+    /// Arms `slot`: the next tap on the map moves it.
     pub fn begin_move(&mut self, slot: Slot) {
         self.moving = Some(slot);
         self.menu = None;
@@ -412,11 +358,11 @@ mod tests {
     fn no_match_text_names_the_query() {
         assert_eq!(
             no_match_text("  moda ", true),
-            "No stops or saved places match \u{201c}moda\u{201d}."
+            "No stops or saved stops match \u{201c}moda\u{201d}."
         );
         assert_eq!(
             no_match_text("moda", false),
-            "No saved places match \u{201c}moda\u{201d}. Import a GTFS feed in Settings to search stops too."
+            "No saved stops match \u{201c}moda\u{201d}. Import a GTFS feed in Settings to search stops too."
         );
     }
 
@@ -479,35 +425,18 @@ mod tests {
             label: "Point A".into(),
             coord: Coord::new(41.0, 29.0),
         };
-        let d = dest_from_endpoint(&ep, &SavedPlaces::default());
+        let d = dest_from_endpoint(&ep);
         assert!(!d.is_named());
         assert_eq!(point_label(Slot::B, Some(&d)), "Point B");
     }
 
     #[test]
-    fn endpoint_near_a_renamed_place_takes_the_new_name() {
-        let mut saved = SavedPlaces::default();
-        saved
-            .save("Work", Coord::new(41.0, 29.0), Some("W1".into()))
-            .unwrap();
-        let ep = Endpoint {
-            label: "Old name".into(),
-            coord: Coord::new(41.0, 29.0001),
-        };
-        let d = dest_from_endpoint(&ep, &saved);
-        assert_eq!(d.label, "Work");
-        assert_eq!(d.gtfs_stop.as_deref(), Some("W1"));
-    }
-
-    #[test]
     fn a_named_far_endpoint_keeps_its_label() {
-        let mut saved = SavedPlaces::default();
-        saved.save("Work", Coord::new(41.0, 29.0), None).unwrap();
         let ep = Endpoint {
             label: " Pier ".into(),
             coord: Coord::new(41.0, 29.1),
         };
-        assert_eq!(dest_from_endpoint(&ep, &saved).label, "Pier");
+        assert_eq!(dest_from_endpoint(&ep).label, "Pier");
     }
 
     #[test]
@@ -563,7 +492,7 @@ mod tests {
     }
 
     #[test]
-    fn move_relocates_the_armed_pin_and_disarms() {
+    fn move_places_the_armed_pin_and_disarms() {
         let mut p = two();
         p.begin_move(Slot::B);
         assert_eq!(p.moving(), Some(Slot::B));
@@ -768,60 +697,6 @@ mod tests {
         assert_eq!(row_label("  Home "), "Home");
         assert_eq!(row_label(""), "Point");
         assert_eq!(row_label("   "), "Point");
-    }
-
-    #[test]
-    fn save_prefill_is_the_trimmed_label() {
-        assert_eq!(
-            save_prefill(&Destination::new("  Cafe ", Coord::new(41.0, 29.0))),
-            "Cafe"
-        );
-        assert_eq!(save_prefill(&at(0.0)), "");
-    }
-
-    #[test]
-    fn save_result_text_covers_ok_duplicate_and_errors() {
-        let mut saved = SavedPlaces::default();
-        let id = saved.add("Home", Coord::new(41.0, 29.0)).unwrap();
-        assert_eq!(save_result_text(&Ok(id), &saved), "Saved as Home");
-        assert_eq!(
-            save_result_text(&Err(PlaceError::Duplicate(id)), &saved),
-            "Already saved as Home"
-        );
-        assert_eq!(
-            save_result_text(&Err(PlaceError::InvalidName), &saved),
-            PlaceError::InvalidName.message()
-        );
-    }
-
-    #[test]
-    fn relocate_hint_names_the_place_or_falls_back() {
-        assert_eq!(relocate_hint("Home"), "Tap the map to move Home");
-        assert_eq!(relocate_hint(""), "Tap the map to move the place");
-    }
-
-    #[test]
-    fn relocate_result_text_covers_ok_duplicate_and_errors() {
-        let mut saved = SavedPlaces::default();
-        let id = saved.add("Work", Coord::new(41.0, 29.0)).unwrap();
-        let ok = Ok((Coord::new(41.1, 29.1), None));
-        assert_eq!(relocate_result_text(&ok, "Home", &saved), "Moved Home");
-        assert_eq!(
-            relocate_result_text(&Err(PlaceError::Duplicate(id)), "Home", &saved),
-            "Work is already saved there"
-        );
-        assert_eq!(
-            relocate_result_text(&Err(PlaceError::InvalidCoord), "Home", &saved),
-            PlaceError::InvalidCoord.message()
-        );
-    }
-
-    #[test]
-    fn relabel_near_touches_only_nearby_ends() {
-        let mut p = two();
-        p.relabel_near(Coord::new(41.0, 29.0), "Home");
-        assert_eq!(p.ends.a.as_ref().unwrap().label, "Home");
-        assert_eq!(p.ends.b.as_ref().unwrap().label, "");
     }
 
     #[test]

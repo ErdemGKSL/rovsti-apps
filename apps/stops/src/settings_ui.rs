@@ -852,8 +852,8 @@ impl StopsApp {
                             .id(("history-use", i))
                             .text_color(colors.accent)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                let a = crate::pick::dest_from_endpoint(&a, &this.saved);
-                                let b = crate::pick::dest_from_endpoint(&b, &this.saved);
+                                let a = crate::pick::dest_from_endpoint(&a);
+                                let b = crate::pick::dest_from_endpoint(&b);
                                 this.choose_pair(a, b, cx);
                                 this.tabs.jump_to(0);
                                 this.open_settings(SettingsPage::Main, cx);

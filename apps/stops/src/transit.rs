@@ -472,9 +472,6 @@ impl StopsApp {
         if matches!(self.sheet_mode, crate::picker::SheetMode::Stop(_)) {
             self.sheet_mode = crate::picker::SheetMode::Pick;
         }
-        if matches!(self.sheet_return, Some(crate::picker::SheetMode::Stop(_))) {
-            self.sheet_return = None;
-        }
     }
 }
 

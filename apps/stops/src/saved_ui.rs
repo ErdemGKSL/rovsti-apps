@@ -1,46 +1,34 @@
-//! The Saved tab: places kept for one-tap trips. Tapping a row opens its
-//! actions (Use as A, Use as B, Share, Rename, Move, Up, Down, Delete); a delete can be undone from the
-//! pill. Share opens the system share sheet (`telecom::share_text`) and falls back to the
-//! clipboard when there is no sheet (desktop, or no app answered).
+//! The Saved tab: stops (a gate of two points) kept for one-tap trips. Tapping a
+//! row opens its actions (Rename, Up, Down, Delete); a delete can be undone from
+//! the pill. `share_point` opens the system share sheet (`telecom::share_text`)
+//! and falls back to the clipboard when there is no sheet (desktop, or no app
+//! answered).
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, list, px,
 };
 use rovsti_android::Error as AndroidError;
-use rovsti_geo::{Coord, Place, SavedPlaces};
+use rovsti_geo::{Coord, SavedStop};
 use rovsti_ui::{
     components::{empty_state, glass_pill, large_title, list_row},
     theme,
     tokens::Theme,
 };
 
-use crate::{
-    Page, StopsApp, lists, pick,
-    picker::{Destination, Slot},
-    trip_ui::distance_text,
-};
+use crate::{Page, StopsApp, lists, trip_ui::distance_text};
 
-/// The row subtitle: what the place is, then how far it is when your position is known.
-pub fn place_detail(place: &Place, here: Option<Coord>) -> String {
-    let kind = if place.gtfs_stop.is_some() {
-        "Transit stop"
-    } else {
-        "Place"
-    };
+/// The row subtitle: the gate length, then how far its middle is when your
+/// position is known.
+pub fn stop_detail(stop: &SavedStop, here: Option<Coord>) -> String {
+    let gate = format!("Gate {}", distance_text(stop.length_m()));
     match here {
-        Some(h) => format!("{kind}, {}", distance_text(h.distance_m(place.coord))),
-        None => kind.to_owned(),
+        Some(h) => format!(
+            "{gate}, {} away",
+            distance_text(h.distance_m(stop.center()))
+        ),
+        None => gate,
     }
-}
-
-/// Puts a deleted place back where it was (or at the end if the list shrank).
-pub fn restore(saved: &mut SavedPlaces, place: Place, index: usize) {
-    if saved.places.iter().any(|p| p.id == place.id) {
-        return;
-    }
-    let at = index.min(saved.places.len());
-    saved.places.insert(at, place);
 }
 
 /// What to do after the share call returned.
@@ -54,7 +42,7 @@ pub enum ShareOutcome {
     Failed(String),
 }
 
-/// Maps the result of `telecom::share_text` to the follow-up for place `name`.
+/// Maps the result of `telecom::share_text` to the follow-up for `name`.
 pub fn share_outcome(result: &Result<bool, AndroidError>, name: &str) -> ShareOutcome {
     match result {
         Ok(true) => ShareOutcome::Shared,
@@ -65,9 +53,9 @@ pub fn share_outcome(result: &Result<bool, AndroidError>, name: &str) -> ShareOu
 
 impl StopsApp {
     /// The Saved tab: a virtualised list whose first item is the title, so the
-    /// title scrolls away with the places as before.
+    /// title scrolls away with the stops.
     pub(crate) fn saved_tab(&mut self, theme: Theme, cx: &mut Context<Self>) -> Page {
-        if self.saved.places.is_empty() {
+        if self.saved.stops.is_empty() {
             let colors = theme::colors(theme);
             return Page::Flow(
                 div()
@@ -76,8 +64,8 @@ impl StopsApp {
                     .items_center()
                     .child(empty_state(
                         theme,
-                        "No Saved Places",
-                        "Tap a pin on the map and choose Save, or save a stop or a shared place. Saved places appear here for one-tap use as A or B.",
+                        "No Saved Stops",
+                        "Set point A and point B on the map, then tap Save stop.",
                     ))
                     .child(
                         glass_pill(theme, "Open the map")
@@ -92,13 +80,13 @@ impl StopsApp {
                     .into_any_element(),
             );
         }
-        // An opened place is taller: its key changes so it is measured again.
+        // An opened stop is taller: its key changes so it is measured again.
         let keys = std::iter::once(lists::key(0, 0))
             .chain(
                 self.saved
-                    .places
+                    .stops
                     .iter()
-                    .map(|p| lists::key(1 + u8::from(self.expanded == Some(p.id)), p.id)),
+                    .map(|st| lists::key(1 + u8::from(self.expanded == Some(st.id)), st.id)),
             )
             .collect();
         let state = self.saved_list.sync(keys);
@@ -114,24 +102,24 @@ impl StopsApp {
         )))
     }
 
-    /// Saved place `i` with its actions when it is open.
+    /// Saved stop `i` with its actions when it is open.
     fn saved_item(&mut self, theme: Theme, i: usize, cx: &mut Context<Self>) -> AnyElement {
-        let count = self.saved.places.len();
-        let Some(place) = self.saved.places.get(i) else {
+        let count = self.saved.stops.len();
+        let Some(stop) = self.saved.stops.get(i) else {
             return div().into_any_element();
         };
         let colors = theme::colors(theme);
-        let id = place.id;
-        let detail = place_detail(place, self.map.position.map(|(c, _)| c));
+        let id = stop.id;
+        let detail = stop_detail(stop, self.map.position.map(|(c, _)| c));
         let open = self.expanded == Some(id);
         let row = list_row(
             theme,
             None,
-            place.name.clone(),
+            stop.name.clone(),
             Some(detail.into()),
             Some(if open { "Close" } else { "" }.into()),
         )
-        .id(("place", id as usize))
+        .id(("saved-stop", id as usize))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.expanded = if this.expanded == Some(id) {
                 None
@@ -142,61 +130,12 @@ impl StopsApp {
         }));
         let mut item = div().flex().flex_col().child(row);
         if open {
-            let dest_a = Destination::from_place(place);
-            let dest_b = dest_a.clone();
-            item = item.child(
-                div()
-                    .flex()
-                    .gap(px(10.0))
-                    .px(px(12.0))
-                    .pt(px(10.0))
-                    .pb(px(6.0))
-                    .child(
-                        glass_pill(theme, "Use as A")
-                            .id(("place-use-a", id as usize))
-                            .flex_1()
-                            .text_color(colors.accent)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.expanded = None;
-                                this.use_as(Slot::A, dest_a.clone(), false, cx);
-                                if this.trip.is_some() {
-                                    let text = pick::queued_text(Slot::A, &dest_a);
-                                    this.show_pill(text, None, cx);
-                                }
-                                this.tabs.jump_to(0);
-                            })),
-                    )
-                    .child(
-                        glass_pill(theme, "Use as B")
-                            .id(("place-use-b", id as usize))
-                            .flex_1()
-                            .text_color(colors.accent)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.expanded = None;
-                                this.use_as(Slot::B, dest_b.clone(), false, cx);
-                                if this.trip.is_some() {
-                                    let text = pick::queued_text(Slot::B, &dest_b);
-                                    this.show_pill(text, None, cx);
-                                }
-                                this.tabs.jump_to(0);
-                            })),
-                    )
-                    .child(
-                        glass_pill(theme, "Share")
-                            .id(("place-share", id as usize))
-                            .flex_1()
-                            .text_color(colors.accent)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.share_place(id, cx);
-                            })),
-                    ),
-            );
             let pill_row = || div().flex().gap(px(10.0)).px(px(12.0)).pb(px(10.0));
             let up: AnyElement = if i > 0 {
                 glass_pill(theme, "Up")
-                    .id(("place-up", id as usize))
+                    .id(("stop-up", id as usize))
                     .flex_1()
-                    .on_click(cx.listener(move |this, _, _, cx| this.move_place(id, -1, cx)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.move_stop(id, -1, cx)))
                     .into_any_element()
             } else {
                 glass_pill(theme, "Up")
@@ -206,9 +145,9 @@ impl StopsApp {
             };
             let down: AnyElement = if i + 1 < count {
                 glass_pill(theme, "Down")
-                    .id(("place-down", id as usize))
+                    .id(("stop-down", id as usize))
                     .flex_1()
-                    .on_click(cx.listener(move |this, _, _, cx| this.move_place(id, 1, cx)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.move_stop(id, 1, cx)))
                     .into_any_element()
             } else {
                 glass_pill(theme, "Down")
@@ -220,33 +159,21 @@ impl StopsApp {
                 pill_row()
                     .child(
                         glass_pill(theme, "Rename")
-                            .id(("place-rename", id as usize))
+                            .id(("stop-rename", id as usize))
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_rename(id, cx);
-                            })),
-                    )
-                    .child(
-                        glass_pill(theme, "Move")
-                            .id(("place-move", id as usize))
-                            .flex_1()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                if this.trip.is_some() {
-                                    this.show_pill("Not while a trip is running", None, cx);
-                                } else {
-                                    this.begin_relocate(id, cx);
-                                }
                             })),
                     )
                     .child(up)
                     .child(down)
                     .child(
                         glass_pill(theme, "Delete")
-                            .id(("place-delete", id as usize))
+                            .id(("stop-delete", id as usize))
                             .flex_1()
                             .text_color(colors.red)
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.delete_place(id, cx);
+                                this.delete_stop(id, cx);
                             })),
                     ),
             );
@@ -254,20 +181,11 @@ impl StopsApp {
         lists::grouped(theme, lists::Place::of(i, count), item).into_any_element()
     }
 
-    fn move_place(&mut self, id: u64, delta: isize, cx: &mut Context<Self>) {
+    fn move_stop(&mut self, id: u64, delta: isize, cx: &mut Context<Self>) {
         if self.saved.move_by(id, delta) {
-            self.save_places(cx);
+            self.save_stops(cx);
             cx.notify();
         }
-    }
-
-    /// Opens the share sheet with the place's text; copies it when there is none.
-    fn share_place(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(place) = self.saved.places.iter().find(|p| p.id == id) else {
-            return;
-        };
-        let name = place.name.clone();
-        self.share_point(name.clone(), place.coord, &name, cx);
     }
 
     /// Shares a point as text (`label` plus the map link; the link alone when
@@ -299,22 +217,22 @@ impl StopsApp {
         .detach();
     }
 
-    fn delete_place(&mut self, id: u64, cx: &mut Context<Self>) {
-        let Some(index) = self.saved.places.iter().position(|p| p.id == id) else {
+    fn delete_stop(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(index) = self.saved.stops.iter().position(|st| st.id == id) else {
             return;
         };
-        let place = self.saved.places[index].clone();
+        let stop = self.saved.stops[index].clone();
         self.saved.remove(id);
         self.expanded = None;
-        self.save_places(cx);
-        let text = format!("Deleted {}", place.name);
-        self.show_pill(text, Some(crate::PillAction::UndoDelete(place, index)), cx);
+        self.save_stops(cx);
+        let text = format!("Deleted {}", stop.name);
+        self.show_pill(text, Some(crate::PillAction::UndoDelete(stop, index)), cx);
     }
 
     /// Undo on the pill.
-    pub(crate) fn undo_delete(&mut self, place: Place, index: usize, cx: &mut Context<Self>) {
-        restore(&mut self.saved, place, index);
-        self.save_places(cx);
+    pub(crate) fn undo_delete(&mut self, stop: SavedStop, index: usize, cx: &mut Context<Self>) {
+        self.saved.restore(stop, index);
+        self.save_stops(cx);
         cx.notify();
     }
 }
@@ -323,22 +241,31 @@ impl StopsApp {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use rovsti_geo::Coord;
+    use rovsti_geo::{Endpoint, SavedStops};
+
+    fn stop(name: &str, lat_b: f64) -> SavedStop {
+        let mut s = SavedStops::default();
+        let ep = |lat| Endpoint {
+            label: String::new(),
+            coord: Coord::new(lat, 29.0),
+        };
+        let id = s.add(name, ep(41.0), ep(lat_b), 0).unwrap();
+        s.get(id).unwrap().clone()
+    }
 
     #[test]
-    fn detail_names_the_kind_and_distance() {
-        let mut p = Place {
-            id: 1,
-            name: "Home".into(),
-            coord: Coord::new(41.0, 29.0),
-            gtfs_stop: None,
-        };
-        assert_eq!(place_detail(&p, None), "Place");
-        let here = Coord::new(41.0, 29.0);
-        assert_eq!(place_detail(&p, Some(here)), "Place, 0 m");
-        p.gtfs_stop = Some("S1".into());
-        assert_eq!(place_detail(&p, None), "Transit stop");
-        assert!(place_detail(&p, Some(Coord::new(41.1, 29.0))).starts_with("Transit stop, 11."));
+    fn detail_names_the_gate_and_distance() {
+        // 0.0038 degrees of latitude is about 420 m.
+        let st = stop("Pier", 41.0038);
+        assert_eq!(stop_detail(&st, None), "Gate 420 m");
+        let here = st.center();
+        assert_eq!(stop_detail(&st, Some(here)), "Gate 420 m, 0 m away");
+        let far = Coord::new(41.1, 29.0);
+        let text = stop_detail(&st, Some(far));
+        assert!(
+            text.starts_with("Gate 420 m, 10.") && text.ends_with(" km away"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -349,32 +276,37 @@ mod tests {
         assert_eq!(share_outcome(&Err(AndroidError::Unsupported), "Home"), copy);
     }
 
-    fn saved() -> SavedPlaces {
-        let mut s = SavedPlaces::default();
-        s.add("Home", Coord::new(41.0, 29.0)).unwrap();
-        s.add("Work", Coord::new(41.1, 29.1)).unwrap();
-        s.add("Gym", Coord::new(41.2, 29.2)).unwrap();
+    fn saved() -> SavedStops {
+        let mut s = SavedStops::default();
+        for (i, name) in ["Home", "Work", "Gym"].into_iter().enumerate() {
+            let lat = 41.0 + i as f64;
+            let ep = |lat| Endpoint {
+                label: String::new(),
+                coord: Coord::new(lat, 29.0),
+            };
+            s.add(name, ep(lat), ep(lat + 0.003), 0).unwrap();
+        }
         s
     }
 
     #[test]
-    fn a_deleted_place_returns_to_its_slot() {
+    fn a_deleted_stop_returns_to_its_slot() {
         let mut s = saved();
-        let work = s.places[1].clone();
+        let work = s.stops[1].clone();
         s.remove(work.id);
-        restore(&mut s, work.clone(), 1);
-        let names: Vec<_> = s.places.iter().map(|p| p.name.as_str()).collect();
+        s.restore(work, 1);
+        let names: Vec<_> = s.stops.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["Home", "Work", "Gym"]);
     }
 
     #[test]
     fn restoring_twice_or_past_the_end_is_safe() {
         let mut s = saved();
-        let gym = s.places[2].clone();
+        let gym = s.stops[2].clone();
         s.remove(gym.id);
-        restore(&mut s, gym.clone(), 99);
-        restore(&mut s, gym, 0);
-        assert_eq!(s.places.len(), 3);
-        assert_eq!(s.places[2].name, "Gym");
+        s.restore(gym.clone(), 99);
+        s.restore(gym, 0);
+        assert_eq!(s.stops.len(), 3);
+        assert_eq!(s.stops[2].name, "Gym");
     }
 }

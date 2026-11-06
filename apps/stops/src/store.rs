@@ -21,7 +21,7 @@ use rovsti_ui::storage;
 pub const TRIP_FILE: &str = "trip.json";
 /// Ended trips, newest first.
 pub const HISTORY_FILE: &str = "history.json";
-/// Saved places.
+/// Saved stops (format v2: a name and the two points of each gate).
 pub const SAVED_FILE: &str = "saved.json";
 /// Stops preferences.
 pub const PREFS_FILE: &str = "stops-prefs.json";

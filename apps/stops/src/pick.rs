@@ -315,7 +315,6 @@ pub fn point_label(slot: Slot, dest: Option<&Destination>) -> String {
 
 /// Clipboard text ready for a field: trimmed, line breaks joined with one
 /// space; `None` when nothing is left.
-#[allow(dead_code)] // wired up by a later step
 pub fn clean_paste(text: Option<&str>) -> Option<String> {
     let joined = text?.split_whitespace().collect::<Vec<_>>().join(" ");
     (!joined.is_empty()).then_some(joined)

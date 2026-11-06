@@ -1056,14 +1056,27 @@ impl StopsApp {
                 "Map tiles come from this server and are kept on the phone. Any VersaTiles-compatible Shortbread vector tile server works.",
                 false,
             ))
-            .child(div().px(px(16.0)).child(field_box(
-                theme,
-                "tiles-url",
-                &self.tile_field,
-                DEFAULT_TILE_URL,
-                window,
-                cx,
-            )))
+            .child(
+                div()
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().flex_1().child(field_box(
+                        theme,
+                        "tiles-url",
+                        &self.tile_field,
+                        DEFAULT_TILE_URL,
+                        window,
+                        cx,
+                    )))
+                    .child(
+                        glass_pill(theme, "Paste")
+                            .id("tiles-paste")
+                            .text_color(rovsti_ui::theme::colors(theme).accent)
+                            .on_click(cx.listener(|this, _, _, cx| this.paste_tile_url(cx))),
+                    ),
+            )
             .child(note(
                 theme,
                 "Use {z}, {x} and {y} for the tile position.",
@@ -1071,6 +1084,15 @@ impl StopsApp {
             ))
             .child(section(theme, None, [save, reset]))
             .into_any_element()
+    }
+
+    /// Paste button: fills the field only; the user still taps Test and save.
+    fn paste_tile_url(&mut self, cx: &mut Context<Self>) {
+        let clip = cx.read_from_clipboard().and_then(|item| item.text());
+        match crate::pick::clean_paste(clip.as_deref()) {
+            Some(text) => self.tile_field.update(cx, |f, cx| f.set(&text, cx)),
+            None => self.show_pill("Nothing to paste", None, cx),
+        }
     }
 
     /// Puts the saved server URL into the text field.

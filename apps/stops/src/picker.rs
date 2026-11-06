@@ -324,6 +324,23 @@ impl StopsApp {
         }
     }
 
+    /// Paste button: a location opens the Confirm sheet, other text lands in
+    /// the field. The clipboard is read on the tap only (Android shows a
+    /// notice on every read).
+    fn paste_into_picker(&mut self, cx: &mut Context<Self>) {
+        let clip = cx.read_from_clipboard().and_then(|item| item.text());
+        let Some(text) = pick::clean_paste(clip.as_deref()) else {
+            self.show_pill("Nothing to paste", None, cx);
+            return;
+        };
+        if let Offer::Confirm(dest) = offer(&text) {
+            let dest = dest.named_from(&self.saved);
+            self.confirm_destination(dest, cx);
+        } else {
+            self.field.update(cx, |f, cx| f.set(&text, cx));
+        }
+    }
+
     pub(crate) fn confirm_destination(&mut self, dest: Destination, cx: &mut Context<Self>) {
         self.tabs.jump_to(0);
         self.alarm = None;
@@ -579,14 +596,27 @@ impl StopsApp {
                 theme,
                 self.pick.sheet_slot().picker_title(),
             ))
-            .child(div().px(px(16.0)).child(field_box(
-                theme,
-                "dest-field",
-                &self.field,
-                "Search stops and saved places, or paste a link",
-                window,
-                cx,
-            )));
+            .child(
+                div()
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().flex_1().child(field_box(
+                        theme,
+                        "dest-field",
+                        &self.field,
+                        "Search stops and saved places, or paste a link",
+                        window,
+                        cx,
+                    )))
+                    .child(
+                        glass_pill(theme, "Paste")
+                            .id("dest-paste")
+                            .text_color(theme::colors(theme).accent)
+                            .on_click(cx.listener(|this, _, _, cx| this.paste_into_picker(cx))),
+                    ),
+            );
         // The list is as tall as its rows up to what the sheet can hold; past
         // that it scrolls, building only the rows on screen.
         let results = list(

@@ -123,6 +123,21 @@ impl History {
         self.records.truncate(MAX_RECORDS);
     }
 
+    /// Removes and returns the record at `index`; `None` when out of range.
+    pub fn take(&mut self, index: usize) -> Option<TripRecord> {
+        (index < self.records.len()).then(|| self.records.remove(index))
+    }
+
+    /// Re-inserts a record taken earlier (undo) at `index`, clamped to the
+    /// end. Does nothing when an equal record is already present.
+    pub fn put_back(&mut self, index: usize, record: TripRecord) {
+        if self.records.contains(&record) {
+            return;
+        }
+        self.records.insert(index.min(self.records.len()), record);
+        self.records.truncate(MAX_RECORDS);
+    }
+
     /// Distinct recent (A, B) pairs, newest first. Legacy single-destination
     /// records have no pair and are skipped.
     pub fn recent_pairs(&self, limit: usize) -> Vec<(Endpoint, Endpoint)> {
@@ -211,6 +226,80 @@ impl History {
 mod tests {
     use super::*;
     use crate::{NoticeRule, session::NoticeState};
+
+    #[test]
+    fn take_and_put_back_round_trip_the_order() {
+        let mut h = History::default();
+        for id in 1..=3 {
+            h.push(TripRecord {
+                id,
+                ..TripRecord::default()
+            });
+        }
+        let before = h.clone();
+        let r = h.take(1).unwrap();
+        assert_eq!(h.records.len(), 2);
+        h.put_back(1, r);
+        assert_eq!(h, before);
+    }
+
+    #[test]
+    fn take_out_of_range_is_none_and_put_back_clamps() {
+        let mut h = History::default();
+        assert!(h.take(0).is_none());
+        h.push(TripRecord {
+            id: 1,
+            ..TripRecord::default()
+        });
+        assert!(h.take(5).is_none());
+        h.put_back(
+            99,
+            TripRecord {
+                id: 2,
+                ..TripRecord::default()
+            },
+        );
+        assert_eq!(h.records[1].id, 2);
+    }
+
+    #[test]
+    fn double_put_back_is_a_no_op() {
+        let mut h = History::default();
+        let r = TripRecord {
+            id: 7,
+            ..TripRecord::default()
+        };
+        h.put_back(0, r.clone());
+        h.put_back(0, r);
+        assert_eq!(h.records.len(), 1);
+    }
+
+    #[test]
+    fn take_drops_points_only_that_record_had() {
+        let ep = |label: &str, lon: f64| Endpoint {
+            label: label.into(),
+            coord: Coord::new(41.0, lon),
+        };
+        let mut h = History::default();
+        h.push(TripRecord {
+            id: 1,
+            a: Some(ep("Home", 29.0)),
+            b: Some(ep("Work", 29.1)),
+            ..TripRecord::default()
+        });
+        h.push(TripRecord {
+            id: 2,
+            a: Some(ep("Home", 29.0)),
+            b: Some(ep("Gym", 29.2)),
+            ..TripRecord::default()
+        });
+        assert_eq!(h.recent_points(10).len(), 3);
+        let r = h.take(1).unwrap();
+        assert_eq!(r.id, 1);
+        let labels: Vec<_> = h.recent_points(10).into_iter().map(|p| p.label).collect();
+        assert_eq!(labels, ["Home", "Gym"]);
+        assert_eq!(h.recent_pairs(10).len(), 1);
+    }
 
     fn rec(id: u64, label: &str, dest: Coord, ended_ms: i64, outcome: Outcome) -> TripRecord {
         TripRecord {

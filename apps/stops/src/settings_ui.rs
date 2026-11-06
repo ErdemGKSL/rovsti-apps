@@ -134,6 +134,18 @@ pub fn distance_text(metres: f64) -> String {
     }
 }
 
+/// Cache size: "None", "< 1 MB", "4.2 MB", "37 MB".
+#[allow(dead_code)] // wired up by a later step
+pub fn bytes_text(bytes: u64) -> String {
+    const MIB: u64 = 1024 * 1024;
+    match bytes {
+        0 => "None".to_owned(),
+        1..MIB => "< 1 MB".to_owned(),
+        _ if bytes < 10 * MIB => format!("{:.1} MB", bytes as f64 / MIB as f64),
+        _ => format!("{} MB", (bytes as f64 / MIB as f64).round() as u64),
+    }
+}
+
 pub fn outcome_text(outcome: Outcome) -> &'static str {
     match outcome {
         Outcome::Arrived => "Arrived",
@@ -1173,6 +1185,18 @@ impl StopsApp {
 mod tests {
     use super::*;
     use rovsti_geo::Coord;
+
+    #[test]
+    fn bytes_text_edges() {
+        const MIB: u64 = 1024 * 1024;
+        assert_eq!(bytes_text(0), "None");
+        assert_eq!(bytes_text(1), "< 1 MB");
+        assert_eq!(bytes_text(MIB - 1), "< 1 MB");
+        assert_eq!(bytes_text(MIB), "1.0 MB");
+        assert_eq!(bytes_text(10 * MIB - 1), "10.0 MB");
+        assert_eq!(bytes_text(10 * MIB), "10 MB");
+        assert_eq!(bytes_text(37 * MIB + MIB / 4), "37 MB");
+    }
 
     fn chat(jid: &str, name: Option<&str>, group: bool) -> ChatSummary {
         ChatSummary {

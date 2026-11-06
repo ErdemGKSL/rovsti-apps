@@ -89,8 +89,24 @@ const DATA_DIR_RETRY: std::time::Duration = std::time::Duration::from_millis(400
 /// A notice goes away after this long (one that ends in "…" stays: it is
 /// replaced by the outcome).
 const NOTICE_LIFE: std::time::Duration = std::time::Duration::from_secs(4);
+/// A notice with an action (Undo) stays this long.
+const UNDO_LIFE: std::time::Duration = std::time::Duration::from_secs(5);
+/// The text of the notice that carries the Undo button.
+const UNDO_NOTICE: &str = "Contact deleted.";
 /// Space kept between a focused editor field and the keyboard.
 const REVEAL_MARGIN: f32 = 16.0;
+
+/// The button a notice carries.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NoticeAction {
+    UndoDelete,
+}
+
+/// A deleted contact, hidden but not yet removed from Android.
+struct PendingDelete {
+    id: i64,
+    task: gpui::Task<()>,
+}
 
 /// A virtualised page: item 0 is the header (title, search, notes), the rows
 /// follow. Only the items on screen are built and laid out.
@@ -219,6 +235,10 @@ struct ContactsApp {
     /// "Use as Contact Photo" is fetching or saving.
     wa_photo_busy: bool,
     notice: Option<SharedString>,
+    /// The button of `notice`, cleared with it or when another notice replaces it.
+    notice_action: Option<NoticeAction>,
+    /// The contact whose delete waits for its Undo window.
+    pending_delete: Option<PendingDelete>,
     /// The timer that clears `notice` (the text it was started for).
     notice_timer: Option<(SharedString, gpui::Task<()>)>,
     /// Bring the focused editor field above the keyboard: the focus and the
@@ -259,6 +279,8 @@ impl ContactsApp {
         cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.reload(cx);
+            } else {
+                this.commit_pending_delete(cx);
             }
         })
         .detach();
@@ -379,6 +401,8 @@ impl ContactsApp {
             import_settle: None,
             wa_photo_busy: false,
             notice: None,
+            notice_action: None,
+            pending_delete: None,
             notice_timer: None,
             reveal_focus: None,
             reveal_keyboard: px(0.0),
@@ -417,6 +441,14 @@ impl ContactsApp {
                 .await;
             this.update(cx, |this, cx| {
                 if this.pulls == pull_id {
+                    let book = match (book, this.pending_delete.as_ref()) {
+                        (Book::Ready(index), Some(pending)) => {
+                            Book::Ready(Arc::new(rovsti_core::search::ContactIndex::new(
+                                rovsti_core::contacts_view::without(index.all(), &[pending.id]),
+                            )))
+                        }
+                        (book, _) => book,
+                    };
                     this.book = book;
                     this.groups = groups;
                     this.accounts = accounts;
@@ -1424,9 +1456,18 @@ impl ContactsApp {
     /// Starts the timer that takes the notice away, once per new text. A
     /// notice ending in "…" says work is under way and stays until replaced.
     fn keep_notice_timer(&mut self, cx: &mut Context<Self>) {
+        // The button belongs to the Undo notice only: any other text drops it.
+        if self.notice.as_deref() != Some(UNDO_NOTICE) {
+            self.notice_action = None;
+        }
         let Some(text) = self.notice.clone() else {
             self.notice_timer = None;
             return;
+        };
+        let life = if self.notice_action.is_some() {
+            UNDO_LIFE
+        } else {
+            NOTICE_LIFE
         };
         if text.ends_with('…') {
             self.notice_timer = None;
@@ -1441,10 +1482,11 @@ impl ContactsApp {
         }
         let timed = text.clone();
         let task = cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(NOTICE_LIFE).await;
+            cx.background_executor().timer(life).await;
             this.update(cx, |this, cx| {
                 if this.notice.as_ref() == Some(&timed) {
                     this.notice = None;
+                    this.notice_action = None;
                     cx.notify();
                 }
             })
@@ -1453,9 +1495,13 @@ impl ContactsApp {
         self.notice_timer = Some((text, task));
     }
 
-    fn notice(&self, theme: Theme) -> Option<AnyElement> {
+    fn notice(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let colors = theme::colors(theme);
         let text = self.notice.clone()?;
+        let undo = (self.notice_action == Some(NoticeAction::UndoDelete)).then(|| {
+            crate::ui::pill(theme, "notice-undo", "Undo", false)
+                .on_click(cx.listener(|this, _, _, cx| this.undo_delete(cx)))
+        });
         Some(
             div()
                 .absolute()
@@ -1474,7 +1520,11 @@ impl ContactsApp {
                         .py(px(10.0))
                         .text_size(typography::FOOTNOTE.size)
                         .text_color(colors.label)
-                        .child(text),
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
+                        .child(text)
+                        .children(undo),
                 )
                 .into_any_element(),
         )
@@ -1592,7 +1642,7 @@ impl Render for ContactsApp {
                 theme::colors(theme).green,
             ))
             .child(scroller)
-            .children(self.notice(theme))
+            .children(self.notice(theme, cx))
             // No tab bar while a form is open: no stray tap loses the edits.
             .children((!editing && !picking).then(|| {
                 self.tabs.render(

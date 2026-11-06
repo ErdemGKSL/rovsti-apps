@@ -2,12 +2,14 @@
 //! "Replace the photo?" (with the WhatsApp one), "Discard changes?" on a
 //! dirty edit form and "Add these contacts?" after a vCard was read.
 
+use std::sync::Arc;
+
 use gpui::{AnyElement, Context, IntoElement, SharedString, StatefulInteractiveElement};
-use rovsti_core::contact_edit::ContactDraft;
+use rovsti_core::{contact_edit::ContactDraft, contacts_view, search::ContactIndex};
 use rovsti_ui::tokens::Theme;
 
 use crate::{
-    ContactsApp, backend,
+    Book, ContactsApp, NoticeAction, PendingDelete, UNDO_LIFE, UNDO_NOTICE, backend,
     ui::{confirm_card, pill},
 };
 
@@ -119,30 +121,64 @@ impl ContactsApp {
         }
     }
 
+    /// Hides the contact at once and deletes it for real after `UNDO_LIFE`,
+    /// unless the owner taps Undo.
     fn delete_contact(&mut self, id: i64, cx: &mut Context<Self>) {
+        self.commit_pending_delete(cx);
+        if let Some(index) = self.index() {
+            let rest = contacts_view::without(index.all(), &[id]);
+            self.book = Book::Ready(Arc::new(ContactIndex::new(rest)));
+        }
+        self.editor = None;
+        self.open = None;
+        self.open_draft = None;
+        self.page.restart();
+        self.rebuild(cx);
+        self.notice = Some(UNDO_NOTICE.into());
+        self.notice_action = Some(NoticeAction::UndoDelete);
+        // A second delete within the window must restart the timer.
+        self.notice_timer = None;
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(UNDO_LIFE).await;
+            this.update(cx, |this, cx| this.commit_pending_delete(cx))
+                .ok();
+        });
+        self.pending_delete = Some(PendingDelete { id, task });
+        cx.notify();
+    }
+
+    /// Runs the delete that is waiting for its Undo window, now.
+    pub(crate) fn commit_pending_delete(&mut self, cx: &mut Context<Self>) {
+        let Some(PendingDelete { id, task }) = self.pending_delete.take() else {
+            return;
+        };
+        drop(task);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { backend::delete(id) })
                 .await;
             this.update(cx, |this, cx| {
-                match result {
-                    Ok(()) => {
-                        this.editor = None;
-                        this.open = None;
-                        this.open_draft = None;
-                        this.page.restart();
-                        this.notice = Some("Contact deleted.".into());
-                    }
-                    Err(words) => {
-                        this.notice = Some(format!("Can't delete the contact: {words}.").into());
-                    }
+                if let Err(words) = result {
+                    this.notice = Some(format!("Can't delete the contact: {words}.").into());
                 }
                 this.reload(cx);
             })
             .ok();
         })
         .detach();
+    }
+
+    /// The owner tapped Undo: the contact comes back and its card opens.
+    pub(crate) fn undo_delete(&mut self, cx: &mut Context<Self>) {
+        let Some(pending) = self.pending_delete.take() else {
+            return;
+        };
+        self.notice = None;
+        self.notice_action = None;
+        self.pending_open = Some(pending.id);
+        self.reload(cx);
+        cx.notify();
     }
 
     fn add_imported(&mut self, cards: Vec<ContactDraft>, cx: &mut Context<Self>) {

@@ -246,6 +246,18 @@ pub fn reordered_keys(shown: &[&WireContact], from: usize, to: usize) -> Vec<Str
     keys
 }
 
+/// The contacts whose id is not in `hidden`, in the order given.
+pub fn without<'a>(
+    contacts: impl IntoIterator<Item = &'a WireContact>,
+    hidden: &[i64],
+) -> Vec<WireContact> {
+    contacts
+        .into_iter()
+        .filter(|c| !hidden.contains(&c.id))
+        .cloned()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -491,5 +503,19 @@ mod tests {
         ];
         let out = ordered(&people, NameStyle::default());
         assert_eq!(out[0].id, 2);
+    }
+
+    #[test]
+    fn without_hides_the_listed_ids_and_keeps_the_order() {
+        let all = [
+            person(3, "C", Vec::new()),
+            person(1, "A", Vec::new()),
+            person(2, "B", Vec::new()),
+        ];
+        let kept: Vec<i64> = without(&all, &[1]).iter().map(|c| c.id).collect();
+        assert_eq!(kept, [3, 2]);
+        let kept: Vec<i64> = without(&all, &[]).iter().map(|c| c.id).collect();
+        assert_eq!(kept, [3, 1, 2]);
+        assert!(without(&all, &[1, 2, 3]).is_empty());
     }
 }

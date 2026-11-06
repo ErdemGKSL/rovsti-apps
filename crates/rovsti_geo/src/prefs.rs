@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::NoticeRule;
 use crate::notice::{DEFAULT_TEMPLATE, TemplateError, validate};
 use crate::session::NoticeState;
+use crate::tiles::TileSource;
 
 /// Snooze lengths the Settings row cycles through, minutes.
 pub const SNOOZE_CHOICES: [u8; 5] = [1, 3, 5, 10, 15];
@@ -99,6 +100,8 @@ pub struct StopsPrefs {
     pub snooze_min: u8,
     /// `None`: the arriving-soon message is off.
     pub notice: Option<NoticePrefs>,
+    /// Map tile URL template; `None` is the default public server.
+    pub tile_url: Option<String>,
 }
 
 impl Default for StopsPrefs {
@@ -108,11 +111,25 @@ impl Default for StopsPrefs {
             vibrate: true,
             snooze_min: 5,
             notice: None,
+            tile_url: None,
         }
     }
 }
 
 impl StopsPrefs {
+    /// The chosen tile server; a missing or invalid stored value is the default.
+    pub fn tile_source(&self) -> TileSource {
+        self.tile_url
+            .as_deref()
+            .and_then(|u| TileSource::parse(u).ok())
+            .unwrap_or_default()
+    }
+
+    /// Stores `s`; the default server is stored as `None`.
+    pub fn set_tile_url(&mut self, s: &TileSource) {
+        self.tile_url = (!s.is_default()).then(|| s.template().to_owned());
+    }
+
     /// Flips the alarm sound. The last of sound and vibration cannot be
     /// turned off (a silent alarm would not wake anyone): returns `false`
     /// and changes nothing then.
@@ -256,5 +273,25 @@ mod tests {
         let p: StopsPrefs = serde_json::from_str(json).unwrap();
         assert!(!p.sound);
         assert_eq!(p.notice.unwrap().chat, "c");
+    }
+
+    #[test]
+    fn tile_url_round_trip_and_fallback() {
+        let mut p = StopsPrefs::default();
+        assert!(p.tile_source().is_default());
+        let m = TileSource::parse("https://maps.maltepe.edu.tr/tiles/osm/{z}/{x}/{y}").unwrap();
+        p.set_tile_url(&m);
+        let back: StopsPrefs = serde_json::from_str(&serde_json::to_string(&p).unwrap()).unwrap();
+        assert_eq!(back.tile_source(), m);
+        p.set_tile_url(&TileSource::default_source());
+        assert_eq!(p.tile_url, None);
+        p.tile_url = Some("nonsense".into());
+        assert!(p.tile_source().is_default());
+    }
+
+    #[test]
+    fn old_prefs_json_has_no_tile_url() {
+        let p: StopsPrefs = serde_json::from_str(r#"{"sound":false}"#).unwrap();
+        assert_eq!(p.tile_url, None);
     }
 }

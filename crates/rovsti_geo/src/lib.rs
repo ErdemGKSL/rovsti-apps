@@ -15,6 +15,7 @@ pub mod notice;
 pub mod places;
 pub mod prefs;
 mod session;
+pub mod tiles;
 mod trip;
 pub mod view;
 

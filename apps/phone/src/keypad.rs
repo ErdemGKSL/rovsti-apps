@@ -143,8 +143,6 @@ struct T9Rows {
     more_aria: SharedString,
 }
 
-/// The digits worth a T9 lookup: at least one, and nothing but digits (`+`,
-/// `*` and `#` are not T9).
 /// Title of the T9 results list.
 pub(crate) fn results_title(digits: &str, count: usize) -> String {
     if count == 1 {
@@ -171,6 +169,8 @@ pub(crate) fn t9_result_index(id: &str) -> Option<(usize, bool)> {
     }
 }
 
+/// The digits worth a T9 lookup: at least one, and nothing but digits (`+`,
+/// `*` and `#` are not T9).
 fn t9_digits(dialed: &str) -> Option<&str> {
     (!dialed.is_empty() && dialed.bytes().all(|b| b.is_ascii_digit())).then_some(dialed)
 }

@@ -8,13 +8,15 @@
 
 use std::{
     rc::Rc,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
 use gpui::{
     AnyElement, Context, Entity, HapticFeedback, Hsla, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled,
-    Task, Window, div, linear_color_stop, linear_gradient, prelude::*, px, svg,
+    MouseButton, ObjectFit, ParentElement, Render, RenderImage, Role, SharedString,
+    StatefulInteractiveElement, Styled, StyledImage, Task, Window, div, linear_color_stop,
+    linear_gradient, prelude::*, px, svg,
 };
 use rovsti_core::{
     avatar,
@@ -39,6 +41,7 @@ use crate::{
     aura::{Aura, AuraState, Phase},
     backend::{self, CallCommand, now_ms},
     fx::{A_AUDIO, A_AVATAR, A_END},
+    wa_peer::{CallerPhoto, WaCaller, caller_hue},
     zone::{self, Face, Moment, Slot, ZoneState, slots},
 };
 
@@ -116,6 +119,8 @@ pub struct CallView {
     pub secondary: Option<SharedString>,
     pub monogram: Option<SharedString>,
     pub hue: Option<usize>,
+    /// The caller's picture: the contact's photo, then WhatsApp's (WhatsApp calls only).
+    pub photo: CallerPhoto,
     pub can_hold: bool,
     pub connect_time_ms: i64,
     pub muted: bool,
@@ -132,6 +137,8 @@ pub struct WaitingView {
     pub name: SharedString,
     pub monogram: Option<SharedString>,
     pub hue: Option<usize>,
+    /// The caller's picture (a WhatsApp offer only).
+    pub photo: CallerPhoto,
     /// The name "End and answer" ends ("Ends Ayşe").
     pub ends: SharedString,
     /// An Active, a Held and a Ringing call: the primary pill ends the held call.
@@ -174,6 +181,7 @@ impl WaitingView {
                 call.contact_id
                     .map_or(avatar::AvatarKey::Unknown, avatar::AvatarKey::Contact),
             ),
+            photo: CallerPhoto::default(),
             ends: ends.into(),
             relabelled: scene.held().is_some(),
             hold_reason,
@@ -191,12 +199,33 @@ impl WaitingView {
             name: middle_truncate(&screen.title, 22).into(),
             monogram: avatar::monogram(&screen.title).map(|c| SharedString::from(c.to_string())),
             hue: avatar::avatar_hue(avatar::AvatarKey::Unknown),
+            photo: CallerPhoto::default(),
             ends: SharedString::default(),
             relabelled: false,
             hold_reason: Some(DisabledReason::WhatsAppCall),
             end_reason: Some(DisabledReason::WhatsAppCall),
         }
     }
+
+    /// The offer's caller as the address book and WhatsApp know them.
+    #[must_use]
+    pub(crate) fn with_wa_caller(mut self, caller: &WaCaller) -> Self {
+        let (name, monogram, hue) = caller_look(caller);
+        self.name = name;
+        self.monogram = monogram;
+        self.hue = hue;
+        self.photo = caller.photo.clone();
+        self
+    }
+}
+
+/// Name (truncated for the screen), monogram and hue of a WhatsApp caller.
+fn caller_look(caller: &WaCaller) -> (SharedString, Option<SharedString>, Option<usize>) {
+    (
+        middle_truncate(&caller.name, 22).into(),
+        avatar::monogram(&caller.name).map(|c| SharedString::from(c.to_string())),
+        caller_hue(caller.contact_id),
+    )
 }
 
 fn middle_truncate(text: &str, max: usize) -> String {
@@ -245,6 +274,7 @@ impl CallView {
                     .filter(|_| !conference)
                     .map_or(avatar::AvatarKey::Unknown, avatar::AvatarKey::Contact),
             ),
+            photo: CallerPhoto::default(),
             can_hold: call.can_hold,
             connect_time_ms: call.connect_time_ms,
             muted: audio.muted,
@@ -282,6 +312,7 @@ impl CallView {
             secondary: Some(WA_CAPTION.into()),
             monogram: avatar::monogram(&screen.title).map(|c| SharedString::from(c.to_string())),
             hue: avatar::avatar_hue(avatar::AvatarKey::Unknown),
+            photo: CallerPhoto::default(),
             can_hold: false,
             connect_time_ms,
             muted: screen.muted,
@@ -291,6 +322,17 @@ impl CallView {
                 AudioRoute::Earpiece
             },
         }
+    }
+
+    /// The call's peer as the address book and WhatsApp know them.
+    #[must_use]
+    pub(crate) fn with_wa_caller(mut self, caller: &WaCaller) -> Self {
+        let (name, monogram, hue) = caller_look(caller);
+        self.name = name;
+        self.monogram = monogram;
+        self.hue = hue;
+        self.photo = caller.photo.clone();
+        self
     }
 
     pub(crate) fn phase(&self) -> Phase {
@@ -852,6 +894,12 @@ impl PhoneApp {
             let wa = self.wa_call.read(cx);
             (wa.screen(), wa.view())
         };
+        let wa_caller = wa_view
+            .as_ref()
+            .map(|v| self.wa_caller(&v.peer, &v.peer_label, cx));
+        if let Some(jid) = wa_caller.as_ref().and_then(|c| c.photo.wa_jid.clone()) {
+            self.want_wa_profile(&jid, cx);
+        }
         let (telecom_view, locked, call_only, telecom_waiting, telecom_scene) = {
             let backend = self.backend.read(cx);
             let model = backend.calls();
@@ -888,9 +936,16 @@ impl PhoneApp {
                     // A cellular call rings beside a running WhatsApp call: its own screen.
                     self.route_incoming(ringing_call, locked, window, cx);
                 }
-                let wa = CallView::from_wa(screen);
+                let mut wa = CallView::from_wa(screen);
+                if let Some(caller) = &wa_caller {
+                    wa = wa.with_wa_caller(caller);
+                }
                 let key = zone::wa_key(screen);
-                let changed = self.incall.wa_zone.as_ref() != Some(&key) || full;
+                // A name or look that resolved late rebuilds the zone's party too.
+                let restyled = self.incall.zone.primary.as_ref().is_some_and(|p| {
+                    p.name != wa.name || p.monogram != wa.monogram || p.hue != wa.hue
+                });
+                let changed = self.incall.wa_zone.as_ref() != Some(&key) || full || restyled;
                 scene_in = changed.then(|| zone::SceneIn::whatsapp(screen, &wa));
                 self.incall.wa_zone = Some(key);
                 view = Some(wa);
@@ -898,7 +953,11 @@ impl PhoneApp {
             }
             (Arbitration::WaWaiting, Some(screen)) => {
                 if waiting.is_none() {
-                    waiting = Some(WaitingView::from_wa(screen));
+                    let offer = WaitingView::from_wa(screen);
+                    waiting = Some(match &wa_caller {
+                        Some(caller) => offer.with_wa_caller(caller),
+                        None => offer,
+                    });
                 }
             }
             (Arbitration::RejectWaBusy, Some(screen)) => self.reject_wa_busy(&screen.call_id, cx),
@@ -2118,7 +2177,15 @@ impl PhoneApp {
             .child(label)
     }
 
-    pub(crate) fn avatar_view(&self, theme: Theme, view: &CallView, size: f32) -> impl IntoElement {
+    /// The live call's avatar; `photo` (the caller's picture and its opacity)
+    /// covers the monogram once it is held.
+    pub(crate) fn avatar_view(
+        &self,
+        theme: Theme,
+        view: &CallView,
+        size: f32,
+        photo: Option<(Arc<RenderImage>, f32)>,
+    ) -> impl IntoElement {
         let u = size / 96.0;
         let ic = &self.incall;
         let colors = theme::colors(theme);
@@ -2196,10 +2263,19 @@ impl PhoneApp {
                                 a: 0.35,
                                 ..gpui::white()
                             })
+                            .relative()
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(inner),
+                            .child(inner)
+                            .children(photo.map(|(image, opacity)| {
+                                gpui::img(image)
+                                    .absolute()
+                                    .inset_0()
+                                    .rounded_full()
+                                    .object_fit(ObjectFit::Cover)
+                                    .opacity(opacity)
+                            })),
                     ),
             )
     }
@@ -2283,6 +2359,10 @@ impl PhoneApp {
         let Some(view) = view else {
             return Some(root.into_any_element());
         };
+        self.want_caller_photo(&view.photo, cx);
+        if let Some(offer) = self.incall.waiting.as_ref().map(|w| w.photo.clone()) {
+            self.want_caller_photo(&offer, cx);
+        }
         let t = self.incall.keypad_t.value.clamp(0.0, 1.0);
         let keypad_mode = t >= 0.5;
         let zone = self.render_zone(theme, &view, window, cx);

@@ -213,7 +213,12 @@ impl PhoneApp {
                 };
                 at(scaled)
                     .opacity(a_opacity * fade * flown)
-                    .child(self.avatar_view(theme, view, scaled.size))
+                    .child(self.avatar_view(
+                        theme,
+                        view,
+                        scaled.size,
+                        self.caller_photo(&view.photo, cx),
+                    ))
                     .into_any_element()
             };
             content = content.child(primary);

@@ -73,6 +73,8 @@ pub(crate) struct ContactRow {
     call_aria: SharedString,
     /// Provider URI of the contact's photo (story 10.5).
     photo: Option<SharedString>,
+    /// Without a photo: the WhatsApp JID whose profile picture stands in.
+    wa_jid: Option<SharedString>,
 }
 
 impl From<ContactVm> for ContactRow {
@@ -82,6 +84,11 @@ impl From<ContactVm> for ContactRow {
             None => v.name.clone(),
         };
         let call_aria = format!("Call {}", v.name);
+        let wa_jid = v
+            .photo_uri
+            .is_none()
+            .then(|| crate::wa_peer::contact_jid(v.numbers.iter().map(|n| n.raw.as_str())))
+            .flatten();
         Self {
             id: v.id,
             call_aria: call_aria.into(),
@@ -95,6 +102,7 @@ impl From<ContactVm> for ContactRow {
             starred: v.starred,
             aria: aria.into(),
             photo: v.photo_uri.map(Into::into),
+            wa_jid,
         }
     }
 }
@@ -789,11 +797,7 @@ impl PhoneApp {
                     look: Look {
                         hue: row.hue,
                         monogram: row.monogram.clone(),
-                        photo: row
-                            .photo
-                            .as_ref()
-                            .and_then(|_| self.photos.get(row.id))
-                            .map(|(image, _)| Arc::clone(image)),
+                        photo: self.row_photo(&row, cx).map(|(image, _)| image),
                     },
                 });
                 let from = index.and_then(|i| self.favorites.avatar_rect(i));
@@ -1334,7 +1338,8 @@ impl PhoneApp {
                         .filter_map(|r| r.photo.as_ref().map(|uri| (r.id, uri))),
                     cx,
                 );
-                this.contact_rows(theme, range)
+                this.want_wa_pictures(range.clone().filter_map(|i| rows.get(i)), cx);
+                this.contact_rows(theme, range, cx)
             }),
         )
         .track_scroll(&c.scroll)
@@ -1358,7 +1363,35 @@ impl PhoneApp {
             .into_any_element()
     }
 
-    fn contact_rows(&self, theme: Theme, range: Range<usize>) -> Vec<AnyElement> {
+    /// Starts loading the WhatsApp pictures of the photo-less contacts in `rows`.
+    fn want_wa_pictures<'a>(
+        &mut self,
+        rows: impl Iterator<Item = &'a ContactRow>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.wa_linked(cx) {
+            return;
+        }
+        self.wa_avatars.update(cx, |avatars, cx| {
+            for jid in rows.filter_map(|r| r.wa_jid.as_ref()) {
+                avatars.want(jid, None, cx);
+            }
+        });
+    }
+
+    /// A row's picture: the contact's photo, else its WhatsApp picture.
+    fn row_photo(&self, row: &ContactRow, cx: &gpui::App) -> Option<(Arc<RenderImage>, f32)> {
+        match (&row.photo, &row.wa_jid) {
+            (Some(_), _) => self
+                .photos
+                .get(row.id)
+                .map(|(image, opacity)| (Arc::clone(image), opacity)),
+            (None, Some(jid)) => self.wa_avatars.read(cx).picture(jid),
+            (None, None) => None,
+        }
+    }
+
+    fn contact_rows(&self, theme: Theme, range: Range<usize>, cx: &gpui::App) -> Vec<AnyElement> {
         let c = &self.contacts;
         range
             .map(|i| match c.rows.get(i) {
@@ -1369,8 +1402,14 @@ impl PhoneApp {
                     } else {
                         0.0
                     };
-                    let photo = row.photo.as_ref().and_then(|_| self.photos.get(row.id));
-                    contact_row(theme, i, row, press, photo)
+                    let photo = self.row_photo(row, cx);
+                    contact_row(
+                        theme,
+                        i,
+                        row,
+                        press,
+                        photo.as_ref().map(|(image, opacity)| (image, *opacity)),
+                    )
                 }
                 None => div().h(px(ROW_H)).into_any_element(),
             })
@@ -1453,7 +1492,14 @@ impl PhoneApp {
                         .filter_map(|r| r.photo.as_ref().map(|uri| (r.id, uri))),
                     cx,
                 );
-                this.favorite_rows(theme, width, range)
+                this.want_wa_pictures(
+                    tiles
+                        .iter()
+                        .skip(range.start * cols)
+                        .take(range.len() * cols),
+                    cx,
+                );
+                this.favorite_rows(theme, width, range, cx)
             }),
         )
         .track_scroll(&f.scroll)
@@ -1476,7 +1522,13 @@ impl PhoneApp {
             .into_any_element()
     }
 
-    fn favorite_rows(&self, theme: Theme, width: f32, range: Range<usize>) -> Vec<AnyElement> {
+    fn favorite_rows(
+        &self,
+        theme: Theme,
+        width: f32,
+        range: Range<usize>,
+        cx: &gpui::App,
+    ) -> Vec<AnyElement> {
         let f = &self.favorites;
         let cols = contacts_view::favorite_columns(width);
         let inset = f32::from(metrics::ROW_INSET);
@@ -1503,8 +1555,15 @@ impl PhoneApp {
                             0.0
                         };
                         let tile = &f.tiles[i];
-                        let photo = tile.photo.as_ref().and_then(|_| self.photos.get(tile.id));
-                        favorite_tile(theme, i, tile, tile_w, press, photo)
+                        let photo = self.row_photo(tile, cx);
+                        favorite_tile(
+                            theme,
+                            i,
+                            tile,
+                            tile_w,
+                            press,
+                            photo.as_ref().map(|(image, opacity)| (image, *opacity)),
+                        )
                     }))
                     .into_any_element()
             })
@@ -1529,6 +1588,7 @@ impl PhoneApp {
                 .child(el)
         };
         let contact = &sheet.contact;
+        let sheet_photo = self.row_photo(contact, cx);
         let header = if sheet.chooser {
             div()
                 .flex()
@@ -1576,10 +1636,9 @@ impl PhoneApp {
                             contact.hue,
                             contact.monogram.as_ref(),
                             SHEET_AVATAR * self.sheet.avatar_scale(),
-                            contact
-                                .photo
+                            sheet_photo
                                 .as_ref()
-                                .and_then(|_| self.photos.get(contact.id)),
+                                .map(|(image, opacity)| (image, *opacity)),
                         )),
                 )
                 .child(

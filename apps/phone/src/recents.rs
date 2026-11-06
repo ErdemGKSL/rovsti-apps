@@ -18,9 +18,9 @@ use std::{
 
 use gpui::{
     AnyElement, Bounds, Context, HapticFeedback, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, Pixels, Point, Role, SharedString, StatefulInteractiveElement, Styled, Task,
-    TouchPhase, UniformListScrollHandle, Window, div, linear_color_stop, linear_gradient,
-    prelude::*, px, svg, uniform_list,
+    ObjectFit, ParentElement, Pixels, Point, RenderImage, Role, SharedString,
+    StatefulInteractiveElement, Styled, StyledImage, Task, TouchPhase, UniformListScrollHandle,
+    Window, div, linear_color_stop, linear_gradient, prelude::*, px, svg, uniform_list,
 };
 use rovsti_core::{
     recents::{self, Direction, RowView},
@@ -41,6 +41,7 @@ use crate::{
     backend::{self, Access, CallLog, Group, Load, Placement},
     flight::{Home, Look},
     notice::Notice,
+    wa_peer::CallerPhoto,
 };
 
 /// Fixed row height (UX-DR5): scroll offsets are `index * ROW_H`.
@@ -106,6 +107,8 @@ pub(crate) struct RowVm {
     named: bool,
     /// A WhatsApp call: the row shows a WhatsApp badge.
     whatsapp: bool,
+    /// A WhatsApp row's picture: the contact's photo, then WhatsApp's.
+    photo: CallerPhoto,
     /// The SIM the newest call used, resolved once per call-log swap (never per frame).
     /// `None` with one SIM or when the log's key matches no account (the slot stays empty).
     sim: Option<SimBadge>,
@@ -137,6 +140,7 @@ impl RowVm {
             monogram: None,
             named,
             whatsapp: false,
+            photo: CallerPhoto::default(),
         }
     }
 
@@ -169,6 +173,7 @@ impl RowVm {
             monogram: v.monogram.map(|c| c.to_string().into()),
             named: v.named,
             whatsapp: v.whatsapp,
+            photo: CallerPhoto::default(),
         }
     }
 }
@@ -218,6 +223,11 @@ pub(crate) struct RecentsView {
     missed_counted: bool,
     /// The WhatsApp call history revision the rows were built from.
     wa_history_seen: u64,
+    /// WhatsApp rows titled without a contact or a WhatsApp profile name: a
+    /// profile that arrives for one of them rebuilds the rows.
+    wa_unnamed: Vec<SharedString>,
+    /// Their profiles, still to be asked for.
+    wa_ask: Vec<SharedString>,
     /// A long press already opened the info sheet: swallow the tap after it.
     suppress_click: bool,
     tap: TapGuard,
@@ -252,6 +262,8 @@ impl RecentsView {
             missed: 0,
             missed_counted: false,
             wa_history_seen: 0,
+            wa_unnamed: Vec::new(),
+            wa_ask: Vec::new(),
             suppress_click: false,
             tap: TapGuard::default(),
             inserted: 0,
@@ -382,6 +394,27 @@ impl PhoneApp {
         }
         self.sync_missed_label(cx);
         self.arm_view_timer(cx);
+        self.sync_wa_names(cx);
+    }
+
+    /// Asks for the profiles of unnamed WhatsApp rows, and rebuilds the rows
+    /// once one of them has a WhatsApp name.
+    pub(crate) fn sync_wa_names(&mut self, cx: &mut Context<Self>) {
+        if self.wa_linked(cx) {
+            for jid in std::mem::take(&mut self.recents.wa_ask) {
+                self.want_wa_profile(&jid, cx);
+            }
+        }
+        let avatars = self.wa_avatars.read(cx);
+        let named = self
+            .recents
+            .wa_unnamed
+            .iter()
+            .any(|jid| avatars.name(jid).is_some());
+        if named && let Some(log) = self.recents.log.clone() {
+            self.rebuild_recents(log, cx);
+            cx.notify();
+        }
     }
 
     /// Story 10.3: a new snapshot replaced `old`. New calls fade in at the top
@@ -457,6 +490,7 @@ impl PhoneApp {
         if let Some(log) = self.recents.log.clone() {
             self.rebuild_recents(log, cx);
             self.sync_missed_label(cx);
+            self.sync_wa_names(cx);
         } else {
             self.recents.wa_history_seen = self.wa_call.read(cx).history_rev();
         }
@@ -475,29 +509,62 @@ impl PhoneApp {
         let started = Instant::now();
         let wa = self.wa_call.read(cx);
         self.recents.wa_history_seen = wa.history_rev();
-        let merged = recents::merge_extras(&log.rows, &wa.recents_extras());
-        let views = recents::build(&merged, backend::now_ms(), log.locale);
         let sims = self.backend.read(cx).sims();
         let format = self.backend.read(cx).settings().name_format;
-        let contacts = match self.backend.read(cx).contacts() {
-            backend::Load::Ready(index) if format == rovsti_core::wire::NameFormat::LastFirst => {
-                Some(index)
-            }
+        let index = match self.backend.read(cx).contacts() {
+            backend::Load::Ready(index) => Some(index),
             _ => None,
         };
+        // WhatsApp calls are titled by the contact, then WhatsApp's profile name.
+        let avatars = self.wa_avatars.read(cx);
+        let mut unnamed = Vec::new();
+        let extras: Vec<_> = wa
+            .recents_extras()
+            .into_iter()
+            .map(|mut extra| {
+                let contact = index
+                    .as_ref()
+                    .and_then(|i| i.match_number(&extra.number_raw));
+                if let Some(contact) = contact {
+                    extra.label = Some(rovsti_core::names::display(contact, format).into_owned());
+                } else if let Ok(jid) = rovsti_wa_proto::user_jid(&extra.number_raw) {
+                    match avatars.name(&jid) {
+                        Some(name) => extra.label = Some(name.to_owned()),
+                        None => unnamed.push(SharedString::from(jid)),
+                    }
+                }
+                extra
+            })
+            .collect();
+        unnamed.sort();
+        unnamed.dedup();
+        let merged = recents::merge_extras(&log.rows, &extras);
+        let views = recents::build(&merged, backend::now_ms(), log.locale);
+        let last_first = format == rovsti_core::wire::NameFormat::LastFirst;
         let rows: Vec<RowVm> = views
             .into_iter()
             .map(|mut v| {
                 // Last, First: the title of a known person follows the setting (story 16.9).
-                if let Some(index) = &contacts
+                if last_first
                     && v.named
+                    && !v.whatsapp
+                    && let Some(index) = &index
                     && let Some(contact) = index.match_number(&v.number)
                 {
                     v.title = rovsti_core::names::display(contact, format).into_owned();
                 }
-                RowVm::build(v, &sims)
+                let photo = if v.whatsapp {
+                    wa_row_photo(index.as_deref(), &v.number)
+                } else {
+                    CallerPhoto::default()
+                };
+                let mut row = RowVm::build(v, &sims);
+                row.photo = photo;
+                row
             })
             .collect();
+        self.recents.wa_ask.clone_from(&unnamed);
+        self.recents.wa_unnamed = unnamed;
         self.recents.format = format;
         self.recents.sims = sims;
         log::debug!(
@@ -727,7 +794,7 @@ impl PhoneApp {
             look: Look {
                 hue: row.hue,
                 monogram: row.monogram.clone(),
-                photo: None,
+                photo: self.caller_photo(&row.photo, cx).map(|(image, _)| image),
             },
         };
         let from = self.recents.avatar_rect(index);
@@ -917,9 +984,10 @@ impl PhoneApp {
         let list = uniform_list(
             "recents",
             r.rows.len() + TAIL_ROWS,
-            cx.processor(move |this, range: Range<usize>, window, _cx| {
+            cx.processor(move |this, range: Range<usize>, window, cx| {
                 let theme = rovsti_ui::current_theme(window);
-                this.recents_rows(theme, range)
+                this.want_recent_photos(range.clone(), cx);
+                this.recents_rows(theme, range, cx)
             }),
         )
         .track_scroll(&r.scroll)
@@ -943,8 +1011,18 @@ impl PhoneApp {
             .into_any_element()
     }
 
+    /// Starts loading the pictures of the WhatsApp rows in `range`.
+    fn want_recent_photos(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        let rows = Arc::clone(&self.recents.rows);
+        for vm in range.filter_map(|i| rows.get(i)) {
+            if !vm.photo.is_empty() {
+                self.want_caller_photo(&vm.photo, cx);
+            }
+        }
+    }
+
     /// The rows for `range`; indices past the data are the empty tail.
-    fn recents_rows(&self, theme: Theme, range: Range<usize>) -> Vec<AnyElement> {
+    fn recents_rows(&self, theme: Theme, range: Range<usize>, cx: &gpui::App) -> Vec<AnyElement> {
         #[cfg(test)]
         ROWS_BUILT.with(|built| built.set(built.get() + range.len()));
         let r = &self.recents;
@@ -964,8 +1042,20 @@ impl PhoneApp {
                         _ => (0.0, 0.0),
                     };
                     let fx = self.row_fx(i);
-                    let row =
-                        recents_row(theme, i, vm, row_press, info_press, r.sims.visible(), fx);
+                    let photo = if vm.photo.is_empty() {
+                        None
+                    } else {
+                        self.caller_photo(&vm.photo, cx)
+                    };
+                    let row = recents_row(
+                        theme,
+                        i,
+                        vm,
+                        (row_press, info_press),
+                        r.sims.visible(),
+                        fx,
+                        photo,
+                    );
                     if live {
                         live_row(row, i, r.inserted, r.fresh, progress)
                     } else {
@@ -1036,7 +1126,12 @@ impl PhoneApp {
             .items_center()
             .gap(px(4.0))
             .pb(px(8.0))
-            .child(avatar_view(theme, row, 72.0))
+            .child(avatar_view(
+                theme,
+                row,
+                72.0,
+                self.caller_photo(&row.photo, cx),
+            ))
             .child(
                 div()
                     .pt(px(8.0))
@@ -1219,8 +1314,26 @@ fn direction_icon(direction: Direction) -> Icon {
 }
 
 /// A round avatar: the contact's hue pair as a diagonal gradient with the
-/// monogram, or the person glyph on a neutral fill for unknown numbers.
-pub(crate) fn avatar_view(theme: Theme, row: &RowVm, size: f32) -> gpui::Div {
+/// monogram, or the person glyph on a neutral fill for unknown numbers;
+/// `photo` (a WhatsApp row's picture and its opacity) fades in over it.
+pub(crate) fn avatar_view(
+    theme: Theme,
+    row: &RowVm,
+    size: f32,
+    photo: Option<(Arc<RenderImage>, f32)>,
+) -> gpui::Div {
+    let covered = |base: gpui::Div, inset: f32| {
+        base.relative().children(photo.map(|(image, opacity)| {
+            gpui::img(image)
+                .absolute()
+                .top(px(-inset))
+                .left(px(-inset))
+                .size(px(size))
+                .rounded_full()
+                .object_fit(ObjectFit::Cover)
+                .opacity(opacity)
+        }))
+    };
     let colors = theme::colors(theme);
     let base = div()
         .size(px(size))
@@ -1230,11 +1343,14 @@ pub(crate) fn avatar_view(theme: Theme, row: &RowVm, size: f32) -> gpui::Div {
         .items_center()
         .justify_center();
     if !row.named {
-        return base.bg(colors.fill).child(
-            svg()
-                .path(Icon::LucideUser.path())
-                .size(px(size * 0.5))
-                .text_color(colors.secondary_label),
+        return covered(
+            base.bg(colors.fill).child(
+                svg()
+                    .path(Icon::LucideUser.path())
+                    .size(px(size * 0.5))
+                    .text_color(colors.secondary_label),
+            ),
+            0.0,
         );
     }
     let (top, bottom) = theme::hue_pair(theme, row.hue);
@@ -1249,7 +1365,7 @@ pub(crate) fn avatar_view(theme: Theme, row: &RowVm, size: f32) -> gpui::Div {
             linear_color_stop(top, 0.0),
             linear_color_stop(bottom, 1.0),
         ));
-    match &row.monogram {
+    let base = match &row.monogram {
         Some(letter) => base
             .text_size(px(size * 0.42))
             .font_weight(typography::HEADLINE.weight)
@@ -1261,6 +1377,24 @@ pub(crate) fn avatar_view(theme: Theme, row: &RowVm, size: f32) -> gpui::Div {
                 .size(px(size * 0.5))
                 .text_color(gpui::white()),
         ),
+    };
+    // The 1.5 px border is inside the box: the photo covers it.
+    covered(base, 1.5)
+}
+
+/// Where a WhatsApp row's picture comes from: the matched contact's photo,
+/// then the WhatsApp picture of its number.
+fn wa_row_photo(index: Option<&rovsti_core::search::ContactIndex>, number: &str) -> CallerPhoto {
+    let contact = index.and_then(|i| i.match_number(number));
+    CallerPhoto {
+        contact: contact.and_then(|c| {
+            c.photo_uri
+                .as_deref()
+                .map(|uri| (c.id, SharedString::from(uri.to_owned())))
+        }),
+        wa_jid: rovsti_wa_proto::user_jid(number)
+            .ok()
+            .map(SharedString::from),
     }
 }
 
@@ -1316,10 +1450,10 @@ fn recents_row(
     theme: Theme,
     index: usize,
     vm: &RowVm,
-    row_press: f32,
-    info_press: f32,
+    (row_press, info_press): (f32, f32),
     sim_slot: bool,
     fx: Option<crate::block_ui::RowFx>,
+    photo: Option<(Arc<RenderImage>, f32)>,
 ) -> AnyElement {
     let colors = theme::colors(theme);
     let danger = call_colors(theme).danger;
@@ -1374,7 +1508,7 @@ fn recents_row(
                         .relative()
                         .flex_none()
                         .size(px(AVATAR))
-                        .child(avatar_view(theme, vm, AVATAR))
+                        .child(avatar_view(theme, vm, AVATAR, photo))
                         .child(
                             div()
                                 .absolute()
@@ -1396,7 +1530,7 @@ fn recents_row(
                                 ),
                         )
                         .into_any_element(),
-                    _ => avatar_view(theme, vm, AVATAR).into_any_element(),
+                    _ => avatar_view(theme, vm, AVATAR, photo).into_any_element(),
                 })
                 .child(
                     div()

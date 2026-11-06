@@ -43,6 +43,7 @@ mod signature;
 mod sim_ui;
 mod speed_dial_ui;
 mod wa_call;
+mod wa_peer;
 mod waiting_card;
 mod zone;
 mod zone_ui;
@@ -214,6 +215,10 @@ struct PhoneApp {
     wa_call: Entity<wa_call::WaCallUi>,
     /// WhatsApp wake-ups already forwarded to `whatsapp`.
     wa_pushes_seen: u64,
+    /// WhatsApp profile pictures and names of the people Phone shows.
+    wa_avatars: Entity<rovsti_wa_ui::WaAvatars>,
+    /// A WhatsApp picture is fading in (read once per frame for `tick`).
+    wa_fading: bool,
 
     /// The Recents tab: row view-models, scroll and the seen-timer.
     recents: RecentsView,
@@ -318,7 +323,8 @@ impl PhoneApp {
         let reply_fields = replies_ed.fields.clone();
         let whatsapp = cx
             .new(|cx| rovsti_wa_ui::WhatsAppSettings::new(rovsti_wa_ui::AppId::Phone, "phone", cx));
-        let wa_call = cx.new(|cx| wa_call::WaCallUi::new(whatsapp.clone(), cx));
+        let wa_avatars = cx.new(|cx| rovsti_wa_ui::WaAvatars::new(&whatsapp, cx));
+        let wa_call = cx.new(|cx| wa_call::WaCallUi::new(whatsapp.clone(), wa_avatars.clone(), cx));
         // The glass In-Call and Incoming screens draw WhatsApp calls.
         wa_call.update(cx, |ui, _| ui.set_incall_mounted(true));
         let mut subscriptions = vec![
@@ -371,6 +377,14 @@ impl PhoneApp {
                         "The WhatsApp call could not be placed",
                     ));
                 }
+            }),
+            // A WhatsApp picture or name arrived: the call screens and Recents follow.
+            cx.observe_in(&wa_avatars, window, |this, _, window, cx| {
+                if this.wa_call.read(cx).has_call() {
+                    this.sync_calls(window, cx);
+                }
+                this.sync_wa_names(cx);
+                cx.notify();
             }),
             cx.observe_window_appearance(window, |_, _, cx| cx.notify()),
             // Typing in the add field of the Blocked numbers page clears its error.
@@ -492,6 +506,8 @@ impl PhoneApp {
             whatsapp,
             wa_call,
             wa_pushes_seen: 0,
+            wa_avatars,
+            wa_fading: false,
             back_enabled: false,
             recents: RecentsView::new(),
             contacts: contacts_view,
@@ -953,6 +969,7 @@ impl PhoneApp {
         moving |= self.tabs_away.tick(dt);
         moving |= self.pill_in.tick(dt);
         moving |= self.photos.fading();
+        moving |= self.wa_fading;
         moving |= self.ghost.tick(dt);
         moving |= self.flights.tick(dt);
         for spring in [
@@ -1280,6 +1297,7 @@ impl Render for PhoneApp {
         self.sync_dial_match(cx);
         self.sync_t9_match(cx);
         self.sync_t9_rows(cx);
+        self.wa_fading = self.wa_avatars.read(cx).fading();
         let mut motion = std::mem::take(&mut self.motion);
         motion.frame_timed(window, |dt, real| self.tick(dt, real));
         self.flights_ready(cx);

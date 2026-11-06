@@ -149,3 +149,13 @@ cargo check -p rovsti_wa_client --target aarch64-linux-android
 cargo check -p rovsti_tiles --target aarch64-linux-android
 ```
 Disk: 7.7 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
+
+## Status (after S8)
+
+Fixed: R1 (A/B survive a restart), R2 (Stop can be undone), R3 (history and recent rows use the
+saved place name and stop), R4 (feed removal is confirmed), R5 (settings resets can be undone),
+R6 (share a saved place), R7 (pin Remove can be undone), R8 (a saved point shows its name and
+Rename instead of Save), R9 (copy fixes and detail lines).
+
+Deferred: R10 (delete single History records), recorded in `docs/roadmap.md` as an open idea.
+R11 needed no change.

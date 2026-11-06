@@ -128,6 +128,8 @@ list in `docs/phone-acceptance.md`.
 - [x] Pick A and B on the map: tap to drop, drag to adjust, snap to stops, my location (done
       without a device)
 - [x] Save and manage places from map pins, links and stops (name, rename, reorder, delete with
-      undo); reuse trips from History (done without a device)
+      undo); share a place; the chosen A/B survive a restart; Stop and settings resets can be undone;
+      reuse trips from History (done without a device)
+- [ ] Idea (open, R10): delete single History records (today only the whole list, with undo)
 - [ ] Check map picking one-handed on a phone
 - [ ] Check the trip, alarm and Doze on a phone: written without a device

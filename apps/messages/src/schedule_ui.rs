@@ -68,14 +68,12 @@ pub fn next_schedule_id(existing: &[ScheduledSms], now_ms: i64) -> u64 {
 /// The pill after scheduled sends failed: what to say and, when an SMS can be
 /// reopened in the composer, its `(to, body)`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct FailedNotice {
     pub text: String,
     pub reopen: Option<(String, String)>,
 }
 
 /// `None` when nothing failed. WhatsApp items never reopen (the gateway owns them).
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn failed_notice(failed: &[ScheduledSms]) -> Option<FailedNotice> {
     let sms = |item: &ScheduledSms| match &item.target {
         ScheduleTarget::Sms { to, .. } => Some((to.clone(), item.body.clone())),
@@ -105,12 +103,10 @@ pub fn failed_notice(failed: &[ScheduledSms]) -> Option<FailedNotice> {
 }
 
 /// Shown in the Send later sheet when Android may deliver an SMS late.
-#[cfg_attr(not(test), allow(dead_code))]
 pub const LATE_NOTE: &str =
     "Android may send it a few minutes late. Tap to allow exact alarms in App info.";
 
 /// The note only applies to SMS while exact alarms are known to be denied.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn late_note(is_sms: bool, exact_allowed: Option<bool>) -> Option<&'static str> {
     (is_sms && exact_allowed == Some(false)).then_some(LATE_NOTE)
 }
@@ -426,6 +422,8 @@ pub struct ScheduleSheet {
     error: Option<SharedString>,
     /// The -/+ pick; `None` until touched, then [`CustomPick::initial`] is shown.
     pick: Option<CustomPick>,
+    /// Tappable hint that Android may deliver an SMS late.
+    late_note: Option<&'static str>,
 }
 
 impl ScheduleSheet {
@@ -440,7 +438,12 @@ impl ScheduleSheet {
             custom,
             error: None,
             pick: None,
+            late_note: None,
         }
+    }
+
+    pub fn set_late_note(&mut self, note: Option<&'static str>) {
+        self.late_note = note;
     }
 
     pub fn open(&mut self, draft: Draft, cx: &mut Context<MessagesApp>) {
@@ -613,6 +616,30 @@ impl ScheduleSheet {
                     .text_size(typography::FOOTNOTE.size)
                     .text_color(colors.red)
                     .child(error),
+            );
+        }
+        if let Some(note) = self.late_note {
+            body = body.child(
+                div()
+                    .id("sched-late-note")
+                    .px(px(20.0))
+                    .pt(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.secondary_label)
+                    .child(
+                        gpui::svg()
+                            .path(rovsti_ui::Icon::LucideAlarmClock.path())
+                            .size(px(14.0))
+                            .text_color(colors.secondary_label),
+                    )
+                    .child(note)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.backend
+                            .update(cx, |backend, cx| backend.open_app_settings(cx));
+                    })),
             );
         }
         let entity = cx.entity();

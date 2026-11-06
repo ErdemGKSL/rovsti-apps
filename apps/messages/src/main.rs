@@ -171,6 +171,8 @@ enum PillAction {
     Chat(String, ChatActionKind),
     /// Sets an SMS thread's mute back (thread id, muted).
     SmsMute(i64, bool),
+    /// Reopens a failed scheduled SMS in the composer (to, body).
+    ReopenScheduled { to: String, body: String },
 }
 
 /// The page pushed over the tabs.
@@ -377,6 +379,20 @@ impl MessagesApp {
                     cx.notify();
                 }
                 BackendEvent::ThreadDeleted(id) => this.on_thread_deleted(*id, cx),
+                BackendEvent::ScheduledFailed(items) => {
+                    if let Some(notice) = schedule_ui::failed_notice(items) {
+                        match notice.reopen {
+                            Some((to, body)) => this.show_pill_action(
+                                notice.text,
+                                "Open",
+                                PillAction::ReopenScheduled { to, body },
+                                cx,
+                            ),
+                            None => this.show_pill(notice.text),
+                        }
+                    }
+                    cx.notify();
+                }
                 BackendEvent::SmsChanged | BackendEvent::Status(_) | BackendEvent::Document(_) => {}
             }),
             cx.subscribe(&settings, |this, _, event, cx| match event {
@@ -1542,6 +1558,25 @@ impl MessagesApp {
             PillAction::Settings(undo) => self.undo_settings(undo, cx),
             PillAction::Chat(jid, undo) => self.chat_action(&jid, undo, true, cx),
             PillAction::SmsMute(id, mute) => self.set_sms_mute(id, mute, cx),
+            PillAction::ReopenScheduled { to, body } => {
+                let title = self
+                    .backend
+                    .read(cx)
+                    .contacts()
+                    .match_number(&to)
+                    .map_or_else(|| to.clone(), |c| c.display_name.clone());
+                self.open_recipient_sms(
+                    &Recipient {
+                        title,
+                        number: to,
+                        detail: None,
+                    },
+                    cx,
+                );
+                if let Open::Sms(conversation) = &self.open {
+                    conversation.update(cx, |c, cx| c.set_draft(&body, cx));
+                }
+            }
             PillAction::Reblock(raw) => self.reblock(raw, cx),
             PillAction::RequestSmsRole => self
                 .backend
@@ -2495,6 +2530,9 @@ impl MessagesApp {
             },
             body,
         };
+        let exact = self.backend.read(cx).exact_alarms();
+        self.schedule
+            .set_late_note(schedule_ui::late_note(true, exact));
         self.schedule.open(draft, cx);
         cx.notify();
     }
@@ -2507,6 +2545,7 @@ impl MessagesApp {
             dest: Dest::WhatsApp { chat: chat.clone() },
             body,
         };
+        self.schedule.set_late_note(None);
         self.schedule.open(draft, cx);
         cx.notify();
     }

@@ -91,6 +91,8 @@ pub enum BackendEvent {
     Notice(String),
     /// A conversation was deleted (the thread id): pages and notifications of it go.
     ThreadDeleted(i64),
+    /// Scheduled sends that fired while no UI looked and failed.
+    ScheduledFailed(Vec<ScheduledSms>),
 }
 
 impl EventEmitter<BackendEvent> for Backend {}
@@ -172,6 +174,8 @@ pub struct Backend {
     locale: LocaleTime,
     /// `None` until the first answer (the banner stays hidden meanwhile).
     sms_role: Option<bool>,
+    /// Whether Android lets the app set exact alarms (`None` = unknown, or desktop).
+    exact_alarms: Option<bool>,
     prefs: MessagesPrefs,
     /// Scheduled SMS waiting for their alarm (`scheduled.json`).
     queue: ScheduleQueue,
@@ -210,6 +214,7 @@ impl Backend {
                 contacts_denied: false,
                 locale: LocaleTime::default(),
                 sms_role: None,
+                exact_alarms: None,
                 prefs: MessagesPrefs::default(),
                 queue: ScheduleQueue::default(),
                 blocked: Arc::new(BlockSet::default()),
@@ -404,6 +409,7 @@ impl Backend {
         self.pull_role(cx);
         self.pull_blocked(cx);
         self.pull_access(cx);
+        self.pull_exact_alarms(cx);
     }
 
     /// The window came back to the front: the user may have changed things in
@@ -416,6 +422,7 @@ impl Backend {
         if pulls.access {
             self.pull_access(cx);
         }
+        self.pull_exact_alarms(cx);
         if pulls.threads {
             self.pull_threads(cx);
         }
@@ -626,6 +633,34 @@ impl Backend {
             .ok();
         })
         .detach();
+    }
+
+    /// Reads whether exact alarms are allowed (the Send later sheet's late note).
+    pub fn pull_exact_alarms(&mut self, cx: &mut Context<Self>) {
+        let task = cx
+            .background_executor()
+            .spawn(async { rovsti_android::trip::can_schedule_exact_alarms() });
+        cx.spawn(async move |this, cx| {
+            let allowed = task.await;
+            this.update(cx, |this, cx| {
+                this.exact_alarms = match allowed {
+                    Ok(allowed) => Some(allowed),
+                    Err(Error::Unsupported) => None,
+                    Err(error) => {
+                        log::warn!("reading the exact alarm permission failed: {error}");
+                        None
+                    }
+                };
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Whether exact alarms are allowed, when known.
+    pub fn exact_alarms(&self) -> Option<bool> {
+        self.exact_alarms
     }
 
     pub fn pull_role(&mut self, cx: &mut Context<Self>) {
@@ -994,12 +1029,7 @@ impl Backend {
                 let failed = this.queue.reconcile(&fired);
                 this.persist(cx);
                 if !failed.is_empty() {
-                    let many = failed.len() != 1;
-                    cx.emit(BackendEvent::Notice(format!(
-                        "{} scheduled message{} couldn't be sent",
-                        failed.len(),
-                        if many { "s" } else { "" }
-                    )));
+                    cx.emit(BackendEvent::ScheduledFailed(failed));
                 }
                 cx.notify();
             })

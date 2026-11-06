@@ -169,7 +169,7 @@ impl PhoneApp {
             HoldDigit::Unassigned(d) => self.show_pill_action(
                 format!("No speed dial on {d}"),
                 "Set",
-                PillAction::SpeedDial,
+                PillAction::SpeedDial(d),
                 cx,
             ),
             HoldDigit::Ignore => {}
@@ -226,7 +226,12 @@ impl PhoneApp {
 
     /// Leaves Settings for the Contacts tab, where the next number tapped in a
     /// contact's sheet is assigned to `digit`.
-    fn speed_dial_pick(&mut self, digit: u8, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn speed_dial_pick(
+        &mut self,
+        digit: u8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.speed_dial.menu = None;
         self.settings_close(window, cx);
         self.select_tab(crate::CONTACTS_TAB, cx);
@@ -261,7 +266,7 @@ impl PhoneApp {
             self.show_pill_action(
                 format!("Speed dial {digit}: {name}"),
                 "View",
-                PillAction::SpeedDial,
+                PillAction::ViewSpeedDial,
                 cx,
             );
         } else {

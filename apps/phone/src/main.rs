@@ -128,6 +128,12 @@ struct PhoneApp {
     /// The Tab Bar's own cached view (it re-renders only when the bar changes).
     tab_view: Entity<TabBarView>,
     dialed: String,
+    /// Speed-dial map the badges below were built from (rebuilt only on change).
+    speed_map: std::collections::BTreeMap<u8, rovsti_core::settings::SpeedDialEntry>,
+    /// Keypad badge per digit (index `d - 1`): shown name and avatar hue.
+    speed_badges: [Option<(SharedString, Option<usize>)>; 9],
+    /// Keypad screen-reader label per digit when it has a speed dial.
+    speed_aria: [Option<SharedString>; 9],
     /// The keypad's "Allow Contacts" hint was used this session (not persisted).
     t9_hint_dismissed: bool,
     /// `dialed` split into the settled digits and the newest one, as text
@@ -381,6 +387,7 @@ impl PhoneApp {
                 {
                     this.wa_call.update(cx, |w, cx| w.retry_mic(cx));
                 }
+                this.sync_speed_badges(cx);
                 this.sync_restore(cx);
                 this.sync_calls(window, cx);
                 this.sync_documents(window, cx);
@@ -483,6 +490,9 @@ impl PhoneApp {
             tabs,
             tab_view,
             dialed: String::new(),
+            speed_map: Default::default(),
+            speed_badges: Default::default(),
+            speed_aria: Default::default(),
             shown_digits: (
                 String::new(),
                 SharedString::default(),
@@ -583,6 +593,7 @@ impl PhoneApp {
                 .ok();
             }));
         }
+        app.sync_speed_badges(cx);
         app.sync_restore(cx);
         app.sync_recents(cx);
         app.sync_contacts(cx);

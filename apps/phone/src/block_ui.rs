@@ -50,7 +50,8 @@ pub(crate) enum PillAction {
     /// Undo of an Unblock, or the post-call "Block".
     Block(SharedString, SharedString),
     /// Open Settings on the Speed dial page.
-    SpeedDial,
+    SpeedDial(u8),
+    ViewSpeedDial,
     /// Stop choosing a contact for a speed-dial digit.
     CancelSpeedDialPick,
     /// Undo of a speed-dial Remove: put the entry back on its digit.
@@ -272,7 +273,8 @@ impl PhoneApp {
         match action {
             PillAction::Unblock(raw, who) => self.run_unblock(raw, who, false, window, cx),
             PillAction::Block(raw, who) => self.start_block(raw, who, None, window, cx),
-            PillAction::SpeedDial => self.speed_dial_open_page(window, cx),
+            PillAction::SpeedDial(digit) => self.speed_dial_pick(digit, window, cx),
+            PillAction::ViewSpeedDial => self.speed_dial_open_page(window, cx),
             PillAction::CancelSpeedDialPick => {
                 self.speed_dial.pick = None;
                 cx.notify();

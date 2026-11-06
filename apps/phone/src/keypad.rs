@@ -1318,12 +1318,14 @@ impl PhoneApp {
                 )
             })
             .child(key.letters);
+        let badge = self.key_badge(key, in_call);
         div()
             .id(id)
             .role(Role::Button)
-            .aria_label(match key.hold_label {
-                Some(hold) if !in_call => hold,
-                _ => key.label,
+            .aria_label(match (&badge, key.hold_label) {
+                (Some((_, aria)), _) => aria.clone(),
+                (None, Some(hold)) if !in_call => SharedString::from(hold),
+                _ => SharedString::from(key.label),
             })
             .size(px(size))
             .flex()
@@ -1358,7 +1360,47 @@ impl PhoneApp {
                 )
                 .child(caption),
             )
+            .children(badge.map(|(hue, _)| {
+                div()
+                    .absolute()
+                    .top(px((size - side) / 2.0 + 2.0))
+                    .right(px((size - side) / 2.0 + 2.0))
+                    .size(px(14.0))
+                    .rounded_full()
+                    .bg(theme::hue_pair(theme, hue).0)
+                    .border(px(1.5))
+                    .border_color(colors.background)
+            }))
             .into_any_element()
+    }
+
+    /// The speed-dial dot (hue) and spoken label for a Keypad digit key.
+    fn key_badge(&self, key: &Key, in_call: bool) -> Option<(Option<usize>, SharedString)> {
+        if in_call {
+            return None;
+        }
+        let d = key
+            .digit
+            .parse::<usize>()
+            .ok()
+            .filter(|d| (2..=9).contains(d))?;
+        let (_, hue) = self.speed_badges[d - 1].as_ref()?;
+        let aria = self.speed_aria[d - 1].clone()?;
+        Some((*hue, aria))
+    }
+
+    /// Rebuild the key badges when the speed-dial map changed (not per frame).
+    pub(crate) fn sync_speed_badges(&mut self, cx: &mut Context<Self>) {
+        let backend = self.backend.read(cx);
+        let map = &backend.prefs().speed_dial;
+        if *map == self.speed_map {
+            return;
+        }
+        let map = map.clone();
+        self.speed_badges = speed_badges(&map);
+        self.speed_aria = speed_aria_labels(&map);
+        self.speed_map = map;
+        cx.notify();
     }
 
     /// The twelve keys as one grid. Keys at rest share ONE backdrop effect
@@ -1756,8 +1798,27 @@ impl PhoneApp {
     }
 }
 
+type Badges = [Option<(SharedString, Option<usize>)>; 9];
+
+fn speed_badges(
+    map: &std::collections::BTreeMap<u8, rovsti_core::settings::SpeedDialEntry>,
+) -> Badges {
+    rovsti_core::speed_dial::badges(map).map(|b| b.map(|(n, h)| (SharedString::from(n), h)))
+}
+
+/// Spoken label per digit key (index `d - 1`); `None` for free digits.
+fn speed_aria_labels(
+    map: &std::collections::BTreeMap<u8, rovsti_core::settings::SpeedDialEntry>,
+) -> [Option<SharedString>; 9] {
+    let badges = rovsti_core::speed_dial::badges(map);
+    std::array::from_fn(|i| {
+        let digit = (i + 1).to_string();
+        let name = badges[i].as_ref().map(|(n, _)| n.as_str());
+        speed_dial_aria(&digit, name).map(SharedString::from)
+    })
+}
+
 /// Screen-reader label for a digit key, naming its speed dial when assigned.
-#[allow(dead_code, reason = "wired up by the next step")]
 pub(crate) fn speed_dial_aria(digit: &str, name: Option<&str>) -> Option<String> {
     let name = name.map(str::trim).filter(|n| !n.is_empty())?;
     Some(format!("{digit}, speed dial {name}. Long press to call"))
@@ -1766,6 +1827,26 @@ pub(crate) fn speed_dial_aria(digit: &str, name: Option<&str>) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aria_labels_follow_the_map() {
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(
+            5,
+            rovsti_core::settings::SpeedDialEntry {
+                lookup_key: String::new(),
+                number_raw: "0555".into(),
+                name: "Ayşe".into(),
+            },
+        );
+        let aria = speed_aria_labels(&map);
+        assert_eq!(
+            aria[4].as_deref(),
+            Some("5, speed dial Ayşe. Long press to call")
+        );
+        assert_eq!(aria.iter().flatten().count(), 1);
+        assert_eq!(speed_badges(&map).iter().flatten().count(), 1);
+    }
 
     #[test]
     fn speed_dial_aria_names_assigned_digits_only() {

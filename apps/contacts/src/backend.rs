@@ -182,7 +182,8 @@ pub(crate) fn delete_group(group_id: i64) -> Result<(), String> {
 }
 
 /// Every contact (with or without a number) as vCard text, and how many that is.
-pub(crate) fn export_text() -> Result<(String, usize), String> {
+/// `hidden` is a contact in its Undo window: it is left out of the file.
+pub(crate) fn export_text(hidden: Option<i64>) -> Result<(String, usize), String> {
     let mut contacts = match decode::<FullPayload>(contacts_edit::full()) {
         Ok(payload) => payload.contacts,
         Err(Failed::Unsupported) => sample::contacts()
@@ -195,6 +196,7 @@ pub(crate) fn export_text() -> Result<(String, usize), String> {
         contact.clean();
     }
     contacts.retain(|c| c.validate().is_ok());
+    contacts.retain(|c| hidden.is_none() || c.id != hidden);
     contacts.sort_by_cached_key(|c| fold(&c.display_name()));
     Ok((vcard::write(&contacts), contacts.len()))
 }
@@ -428,8 +430,11 @@ mod tests {
             delete(1).expect_err("desktop cannot delete"),
             "this needs an Android phone"
         );
-        let (text, count) = export_text().expect("sample exports");
+        let (text, count) = export_text(None).expect("sample exports");
         assert_eq!(count, sample::contacts().len());
         assert!(text.contains("BEGIN:VCARD"));
+        let first = sample::contacts()[0].id;
+        let (_, fewer) = export_text(Some(first)).expect("sample exports");
+        assert_eq!(fewer, count - 1);
     }
 }

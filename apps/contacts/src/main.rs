@@ -130,7 +130,7 @@ mod notice_tests {
 
 /// A deleted contact, hidden but not yet removed from Android.
 struct PendingDelete {
-    id: i64,
+    pub(crate) id: i64,
     task: gpui::Task<()>,
 }
 

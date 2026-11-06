@@ -13,6 +13,15 @@ use rovsti_core::{
 
 use crate::{ContactsApp, backend, confirm::Confirm};
 
+/// What the export notice says for `count` contacts written.
+pub(crate) fn export_words(count: usize) -> String {
+    match count {
+        0 => "There are no contacts to export.".to_owned(),
+        1 => "Saved 1 contact to the file.".to_owned(),
+        n => format!("Saved {n} contacts to the file."),
+    }
+}
+
 impl ContactsApp {
     /// Reads every contact and offers it as `contacts.vcf`.
     pub(crate) fn export_contacts(&mut self, cx: &mut Context<Self>) {
@@ -22,17 +31,25 @@ impl ContactsApp {
         }
         self.transfer_busy = true;
         self.notice = Some("Preparing the file…".into());
+        let hidden = self.pending_delete.as_ref().map(|p| p.id);
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let (text, count) = backend::export_text()?;
+                    let (text, count) = backend::export_text(hidden)?;
+                    if count == 0 {
+                        return Ok(0);
+                    }
                     backend::start_export(&text).map(|()| count)
                 })
                 .await;
             this.update(cx, |this, cx| {
                 match result {
+                    Ok(0) => {
+                        this.transfer_busy = false;
+                        this.notice = Some(export_words(0).into());
+                    }
                     Ok(count) => this.exported = Some(count),
                     Err(words) => {
                         this.transfer_busy = false;
@@ -103,13 +120,7 @@ impl ContactsApp {
                 let count = self.exported.take();
                 // A cancelled picker answers `ok: false` with no error: say nothing.
                 self.notice = match (result.ok, result.error, count) {
-                    (true, _, Some(count)) => Some(
-                        format!(
-                            "Saved {count} {} to the file.",
-                            if count == 1 { "contact" } else { "contacts" }
-                        )
-                        .into(),
-                    ),
+                    (true, _, Some(count)) => Some(export_words(count).into()),
                     (false, Some(_), _) => Some("Can't save the file.".into()),
                     _ => None,
                 };
@@ -241,5 +252,17 @@ impl ContactsApp {
             .ok();
         })
         .detach();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::export_words;
+
+    #[test]
+    fn export_words_by_count() {
+        assert_eq!(export_words(0), "There are no contacts to export.");
+        assert_eq!(export_words(1), "Saved 1 contact to the file.");
+        assert_eq!(export_words(12), "Saved 12 contacts to the file.");
     }
 }

@@ -2582,8 +2582,6 @@ impl MessagesApp {
         self.copy_text(code, true, cx);
     }
 
-    /// Copies text to the clipboard (`sensitive` hides it from the paste preview)
-    /// and says "Copied". A sensitive copy also marks the inbox's code chip.
     /// Opens the system share sheet with `text`, off the UI thread.
     fn share_text(&mut self, text: String, cx: &mut Context<Self>) {
         let task = cx
@@ -2609,6 +2607,8 @@ impl MessagesApp {
         .detach();
     }
 
+    /// Copies text to the clipboard (`sensitive` hides it from the paste preview)
+    /// and says "Copied". A sensitive copy also marks the inbox's code chip.
     fn copy_text(&mut self, code: SharedString, sensitive: bool, cx: &mut Context<Self>) {
         let text = code.clone();
         let task = cx

@@ -37,8 +37,8 @@ use rovsti_core::{
     search::ContactIndex,
     setup::{self, Reading, SetupChecklist, SetupFacts, SetupItem, XiaomiConfirmations},
     wire::{
-        AudioRoute, CallLogEntry, CallLogPayload, CallSnapshot, ContactsPayload, Envelope,
-        FavoritesPayload, WireContact, WireError,
+        self, AudioRoute, CallLogEntry, CallLogPayload, CallSnapshot, ContactsPayload, Envelope,
+        FavoritesPayload, WireContact, WireError, WriteError,
     },
 };
 use rovsti_core::{settings::Settings, sim::SimInfo};
@@ -1137,6 +1137,39 @@ impl Backend {
         })
     }
 
+    /// Deletes call-log rows by id off the UI thread, then re-pulls Recents.
+    pub fn delete_calls(&mut self, ids: Vec<i64>, cx: &mut Context<Self>) -> Task<WriteOutcome> {
+        self.call_log_write(move || write_delete_calls(&ids), cx)
+    }
+
+    /// Undo of a delete: re-inserts the rows (the provider assigns new ids).
+    pub fn restore_calls(
+        &mut self,
+        entries: Vec<CallLogEntry>,
+        cx: &mut Context<Self>,
+    ) -> Task<WriteOutcome> {
+        self.call_log_write(move || write_restore_calls(&entries), cx)
+    }
+
+    /// Deletes the whole call log.
+    pub fn delete_all_calls(&mut self, cx: &mut Context<Self>) -> Task<WriteOutcome> {
+        self.call_log_write(write_delete_all_calls, cx)
+    }
+
+    fn call_log_write(
+        &mut self,
+        write: impl FnOnce() -> WriteOutcome + Send + 'static,
+        cx: &mut Context<Self>,
+    ) -> Task<WriteOutcome> {
+        cx.spawn(async move |this, cx| {
+            let outcome = cx.background_executor().spawn(async move { write() }).await;
+            if matches!(outcome, WriteOutcome::Done(_)) {
+                this.update(cx, |this, cx| this.refresh_call_log(cx)).ok();
+            }
+            outcome
+        })
+    }
+
     fn refresh_contacts(&mut self, cx: &mut Context<Self>) {
         self.contacts_pull += 1;
         let pull = self.contacts_pull;
@@ -1493,6 +1526,66 @@ fn write_starred(contact_id: i64, starred: bool) -> bool {
             log::warn!("set starred failed: {error}");
             false
         }
+    }
+}
+
+/// What a call-log write came to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WriteOutcome {
+    /// The write went through; how many rows changed.
+    Done(u32),
+    /// The call-log write permission is missing.
+    Permission,
+    /// The system refused, or the write failed.
+    Refused,
+}
+
+fn outcome_of(result: Result<String, Error>) -> WriteOutcome {
+    match result.map(|json| wire::parse_write_count(&json)) {
+        Ok(Ok(count)) => WriteOutcome::Done(count),
+        Ok(Err(WriteError::Permission)) => WriteOutcome::Permission,
+        Ok(Err(error)) => {
+            log::warn!("call-log write failed: {error:?}");
+            WriteOutcome::Refused
+        }
+        Err(error) => {
+            log::warn!("call-log write failed: {error}");
+            WriteOutcome::Refused
+        }
+    }
+}
+
+/// `ROVSTI_PREVIEW_CALLLOG_FAIL=1` rehearses a missing permission on desktop.
+#[cfg(not(target_os = "android"))]
+fn preview_call_write(apply: impl FnOnce() -> u32) -> WriteOutcome {
+    if std::env::var_os("ROVSTI_PREVIEW_CALLLOG_FAIL").is_some() {
+        return WriteOutcome::Permission;
+    }
+    std::thread::sleep(Duration::from_millis(120));
+    WriteOutcome::Done(apply())
+}
+
+fn write_delete_calls(ids: &[i64]) -> WriteOutcome {
+    match providers::delete_call_log(ids) {
+        #[cfg(not(target_os = "android"))]
+        Err(Error::Unsupported) => preview_call_write(|| sample::delete_calls(ids, now_ms())),
+        result => outcome_of(result),
+    }
+}
+
+fn write_restore_calls(entries: &[CallLogEntry]) -> WriteOutcome {
+    match providers::restore_call_log(&wire::call_log_restore_json(entries)) {
+        #[cfg(not(target_os = "android"))]
+        Err(Error::Unsupported) => preview_call_write(|| sample::restore_calls(entries.to_vec())),
+        result => outcome_of(result),
+    }
+}
+
+fn write_delete_all_calls() -> WriteOutcome {
+    match providers::delete_all_call_log() {
+        #[cfg(not(target_os = "android"))]
+        Err(Error::Unsupported) => preview_call_write(|| sample::clear_calls(now_ms())),
+        result => outcome_of(result),
     }
 }
 

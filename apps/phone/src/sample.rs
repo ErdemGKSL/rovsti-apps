@@ -309,9 +309,96 @@ pub fn preview_call_log(now_ms: i64) -> Vec<CallLogEntry> {
     if let Ok(extra) = EXTRA_CALLS.lock() {
         let mut all: Vec<CallLogEntry> = extra.iter().rev().cloned().collect();
         all.append(&mut log);
-        return all;
+        log = all;
     }
-    log
+    match EDITS.lock() {
+        Ok(edits) => edits.apply(log),
+        Err(_) => log,
+    }
+}
+
+/// What the user deleted or restored in the desktop call log.
+struct LogEdits {
+    deleted: Vec<i64>,
+    restored: Vec<CallLogEntry>,
+    next_id: i64,
+}
+
+impl LogEdits {
+    const fn new() -> Self {
+        Self {
+            deleted: Vec::new(),
+            restored: Vec::new(),
+            next_id: 0,
+        }
+    }
+
+    /// The log without deleted rows, restored rows merged in newest first.
+    fn apply(&self, log: Vec<CallLogEntry>) -> Vec<CallLogEntry> {
+        let mut all: Vec<CallLogEntry> = log
+            .into_iter()
+            .filter(|e| !self.deleted.contains(&e.id))
+            .chain(self.restored.iter().cloned())
+            .collect();
+        all.sort_by_key(|e| std::cmp::Reverse(e.date_ms));
+        all
+    }
+
+    /// Deletes the rows with these ids; `visible` is the log as shown now.
+    fn delete(&mut self, ids: &[i64], visible: &[CallLogEntry]) -> u32 {
+        let mut count = 0;
+        for id in ids {
+            if visible.iter().any(|e| e.id == *id) {
+                self.deleted.push(*id);
+                count += 1;
+            }
+        }
+        // A restored row that is deleted again is gone for good.
+        self.restored.retain(|e| !ids.contains(&e.id));
+        count
+    }
+
+    /// Like the provider: restored rows get fresh ids.
+    fn restore(&mut self, entries: Vec<CallLogEntry>) -> u32 {
+        let mut count = 0;
+        for mut entry in entries {
+            self.next_id += 1;
+            entry.id = 100_000 + self.next_id;
+            self.restored.push(entry);
+            count += 1;
+        }
+        count
+    }
+
+    fn clear(&mut self, visible: &[CallLogEntry]) -> u32 {
+        self.deleted.extend(visible.iter().map(|e| e.id));
+        self.restored.clear();
+        u32::try_from(visible.len()).unwrap_or(u32::MAX)
+    }
+}
+
+static EDITS: std::sync::Mutex<LogEdits> = std::sync::Mutex::new(LogEdits::new());
+
+/// Desktop stand-in for deleting call-log rows; how many existed.
+#[cfg(not(target_os = "android"))]
+pub fn delete_calls(ids: &[i64], now_ms: i64) -> u32 {
+    let visible = preview_call_log(now_ms);
+    EDITS
+        .lock()
+        .map_or(0, |mut edits| edits.delete(ids, &visible))
+}
+
+/// Desktop stand-in for undoing a delete.
+#[cfg(not(target_os = "android"))]
+pub fn restore_calls(entries: Vec<CallLogEntry>) -> u32 {
+    EDITS.lock().map_or(0, |mut edits| edits.restore(entries))
+}
+
+/// Desktop stand-in for "Delete all call history".
+#[cfg(not(target_os = "android"))]
+pub fn clear_calls(now_ms: i64) -> u32 {
+    let visible = preview_call_log(now_ms);
+    EDITS.lock().map_or(0, |mut edits| edits.clear(&visible))
 }
 
 // ---- The blocklist on desktop (Epic 17) ----------------------------------------------------------
@@ -522,4 +609,42 @@ pub fn photo(uri: &str, size: u32) -> Option<image::RgbaImage> {
             tint(fy, 1.0)
         })
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delete_and_restore_round_trip() {
+        let log = call_log(1_000_000_000);
+        let total = log.len();
+        let first = log[0].clone();
+        let mut edits = LogEdits::new();
+        assert_eq!(edits.delete(&[first.id, 999_999], &log), 1);
+        let after = edits.apply(log.clone());
+        assert_eq!(after.len(), total - 1);
+        assert!(after.iter().all(|e| e.id != first.id));
+
+        assert_eq!(edits.restore(vec![first.clone()]), 1);
+        let back = edits.apply(log.clone());
+        assert_eq!(back.len(), total);
+        let restored = back
+            .iter()
+            .find(|e| e.date_ms == first.date_ms)
+            .expect("restored");
+        assert_ne!(restored.id, first.id, "the provider assigns a new id");
+        assert_eq!(back[0].date_ms, first.date_ms, "still newest first");
+    }
+
+    #[test]
+    fn clear_removes_everything_and_restore_brings_back() {
+        let log = call_log(1_000_000_000);
+        let mut edits = LogEdits::new();
+        let count = edits.clear(&log);
+        assert_eq!(usize::try_from(count).expect("fits"), log.len());
+        assert!(edits.apply(log.clone()).is_empty());
+        edits.restore(vec![log[1].clone()]);
+        assert_eq!(edits.apply(log).len(), 1);
+    }
 }

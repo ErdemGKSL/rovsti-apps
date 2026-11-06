@@ -39,7 +39,7 @@ use rovsti_ui::{
 use rovsti_wa_client::{CallAudio, ClientError};
 use rovsti_wa_proto::{
     CallDirection, CallPhase, CallSummary, CallUpdate, ConnectKey, EndReason, GatewayEvent,
-    GatewayUrl, WaCallHistory, WaCallView, WaScreen, plan_snapshot, tracked_end,
+    GatewayUrl, WaCallHistory, WaCallRecord, WaCallView, WaScreen, plan_snapshot, tracked_end,
 };
 use rovsti_wa_ui::{StoredLink, WaAvatars, WhatsAppSettings};
 
@@ -51,6 +51,8 @@ const MIC_POLL: Duration = Duration::from_millis(20);
 const MIC_BURST: usize = 8;
 /// The local WhatsApp call history, next to `prefs.json`.
 const HISTORY_FILE: &str = "wa-calls.json";
+/// Ids of deleted calls, so a gateway snapshot does not bring them back.
+const FORGOTTEN_FILE: &str = "wa-calls-forgotten.json";
 /// A notification action waits this long for its call to reach the app.
 const ACTION_TTL_MS: i64 = 60_000;
 /// How many handled call ids the guard remembers.
@@ -497,14 +499,19 @@ impl WaCallUi {
             let read = {
                 let dir = dir.clone();
                 cx.background_executor()
-                    .spawn(async move { std::fs::read_to_string(dir.join(HISTORY_FILE)) })
+                    .spawn(async move {
+                        let history = std::fs::read_to_string(dir.join(HISTORY_FILE));
+                        let forgotten = std::fs::read_to_string(dir.join(FORGOTTEN_FILE));
+                        history.map(|text| (text, forgotten.unwrap_or_default()))
+                    })
                     .await
             };
             this.update(cx, |this, cx| {
                 this.history_dir = Some(dir);
-                if let Ok(text) = read {
+                if let Ok((text, forgotten)) = read {
                     // Calls ended while the file was being read stay on top.
-                    let mut loaded = WaCallHistory::from_json(&text);
+                    let mut loaded =
+                        WaCallHistory::from_json(&text).with_forgotten_json(&forgotten);
                     loaded.extend_newest(&this.history);
                     this.history = loaded;
                     this.history_rev += 1;
@@ -662,6 +669,8 @@ impl WaCallUi {
             return;
         };
         let records: Vec<_> = self.history.iter().cloned().collect();
+        let forgotten: Vec<String> =
+            serde_json::from_str(&self.history.forgotten_to_json()).unwrap_or_default();
         let generation = self.write_gen.fetch_add(1, Ordering::SeqCst) + 1;
         let latest = self.write_gen.clone();
         cx.background_executor()
@@ -672,8 +681,43 @@ impl WaCallUi {
                 if let Err(error) = rovsti_ui::storage::save_json(&dir, HISTORY_FILE, &records) {
                     log::warn!("saving the WhatsApp call history failed: {}", error.kind());
                 }
+                if let Err(error) = rovsti_ui::storage::save_json(&dir, FORGOTTEN_FILE, &forgotten)
+                {
+                    log::warn!("saving the deleted WhatsApp calls failed: {}", error.kind());
+                }
             })
             .detach();
+    }
+
+    /// Deletes the WhatsApp calls with these ids from the history. Returns the
+    /// removed records (for undo).
+    #[allow(dead_code)] // wired to the Recents delete UI in the next step
+    pub fn forget_calls(&mut self, ids: &[String], cx: &mut Context<Self>) -> Vec<WaCallRecord> {
+        let removed = self.history.forget(ids);
+        self.history_changed(cx);
+        removed
+    }
+
+    /// Undo of [`Self::forget_calls`].
+    #[allow(dead_code)] // as above
+    pub fn restore_calls(&mut self, records: Vec<WaCallRecord>, cx: &mut Context<Self>) {
+        self.history.restore(records);
+        self.history_changed(cx);
+    }
+
+    /// Deletes the whole WhatsApp history. Returns how many calls went.
+    #[allow(dead_code)] // as above
+    pub fn forget_all_calls(&mut self, cx: &mut Context<Self>) -> usize {
+        let count = self.history.forget_all();
+        self.history_changed(cx);
+        count
+    }
+
+    #[allow(dead_code)] // as above
+    fn history_changed(&mut self, cx: &mut Context<Self>) {
+        self.history_rev += 1;
+        self.save_history(cx);
+        cx.notify();
     }
 
     /// Fetches the gateway's call snapshot and folds it in: a live call becomes
@@ -1505,15 +1549,16 @@ mod tests {
         );
     }
 
+    fn ended(id: &str, peer: &str, name: Option<&str>, phase: CallPhase) -> WaCallView {
+        let mut u = update(id, In, phase);
+        u.peer = peer.into();
+        u.peer_name = name.map(str::to_owned);
+        WaCallView::from_update(&u, 0)
+    }
+
     #[test]
     fn history_becomes_recents_extras() {
         let mut history = WaCallHistory::new();
-        let ended = |id: &str, peer: &str, name: Option<&str>, phase| {
-            let mut u = update(id, In, phase);
-            u.peer = peer.into();
-            u.peer_name = name.map(str::to_owned);
-            WaCallView::from_update(&u, 0)
-        };
         history.record_end(
             &ended(
                 "a",
@@ -1544,6 +1589,33 @@ mod tests {
         assert_eq!(extras[0].number_raw, "+905550000000");
         assert_eq!(extras[0].label, None);
         assert_eq!(extras[1].label.as_deref(), Some("Ayşe"));
+        assert_eq!(extras[0].call_id, "b");
+        assert_eq!(extras[1].call_id, "a");
         assert!(extras[1].missed);
+    }
+
+    #[test]
+    fn forgotten_calls_survive_a_storage_round_trip() {
+        let mut history = WaCallHistory::new();
+        history.record_end(
+            &ended(
+                "a",
+                "905551234567@s.whatsapp.net",
+                None,
+                CallPhase::Ended(EndReason::Missed),
+            ),
+            10,
+            &EndReason::Missed,
+        );
+        let removed = history.forget(&["a".to_owned()]);
+        assert_eq!(removed.len(), 1);
+        let saved = history.forgotten_to_json();
+        let loaded = WaCallHistory::new().with_forgotten_json(&saved);
+        assert!(loaded.knows("a"), "a snapshot must not bring it back");
+
+        let mut loaded = loaded;
+        loaded.restore(removed);
+        assert_eq!(extra_calls(&loaded).len(), 1);
+        assert!(loaded.knows("a"));
     }
 }

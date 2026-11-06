@@ -254,6 +254,8 @@ struct PhoneApp {
     confirm_delete: Option<history_ui::DeleteScope>,
     /// 0 = Tab Bar in place, 1 = slid away under the keyboard.
     tabs_away: Spring,
+    /// Effective bottom inset (system bar / gesture area) from the last render, in px.
+    safe_bottom: f32,
     /// The Return-to-call pill: 0 = away, 1 = shown; its text and 1 s timer.
     pill_in: Spring,
     pill_text: SharedString,
@@ -564,6 +566,7 @@ impl PhoneApp {
             contact_sheet: None,
             confirm_delete: None,
             tabs_away: Spring::new(0.0, motion_tokens::select()).with_epsilon(0.002),
+            safe_bottom: 0.0,
             pill_in: Spring::new(0.0, motion_tokens::appear()).with_epsilon(0.002),
             pill_text: SharedString::default(),
             pill_task: None,
@@ -1202,7 +1205,10 @@ impl PhoneApp {
         } else if self.sheet.is_visible() || self.settings.covers() {
             GAP + 10.0
         } else {
-            f32::from(metrics::TAB_BAR_MARGIN) + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1 + GAP
+            self.safe_bottom
+                + f32::from(metrics::TAB_BAR_MARGIN)
+                + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1
+                + GAP
         }
     }
 
@@ -1383,9 +1389,16 @@ impl PhoneApp {
     }
 }
 
+/// Effective bottom inset of the window in px (0 on desktop).
+pub(crate) fn safe_bottom(window: &Window) -> f32 {
+    f32::from(window.insets().effective().bottom)
+}
+
 impl Render for PhoneApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = current_theme(window);
+        self.safe_bottom = safe_bottom(window);
+        let safe_bottom = self.safe_bottom;
         let reduced = window.prefers_reduced_motion();
         self.sheet.set_reduced(reduced);
         self.pill.set_reduced(reduced);
@@ -1466,7 +1479,7 @@ impl Render for PhoneApp {
                     div()
                         .id("tab-bar-slot")
                         .absolute()
-                        .bottom(metrics::TAB_BAR_MARGIN - px(away * 140.0))
+                        .bottom(metrics::TAB_BAR_MARGIN + px(safe_bottom) - px(away * 140.0))
                         .left_0()
                         .right_0()
                         .h(metrics::TAB_BAR_HEIGHT * 1.1)

@@ -565,6 +565,13 @@ mod tests {
         let l = check(input(360.0, 640.0, insets, 0));
         assert_ne!(l.mode, KeypadMode::Landscape);
         assert!(l.key >= KEY_FLOOR);
+        assert!((l.tab_bar.bottom() - (640.0 - insets.bottom - 12.0)).abs() < 0.001);
+    }
+
+    #[test]
+    fn zero_insets_tab_bar_sits_at_margin() {
+        let l = check(plain(412.0, 915.0));
+        assert!((l.tab_bar.bottom() - (915.0 - 12.0)).abs() < 0.001);
     }
 
     #[test]

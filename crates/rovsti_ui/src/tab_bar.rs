@@ -454,7 +454,12 @@ fn bar_body(
 
 /// Bottom padding a scrolling page needs so its last row clears the bar.
 pub fn content_bottom_inset() -> gpui::Pixels {
-    metrics::TAB_BAR_HEIGHT + metrics::TAB_BAR_MARGIN * 2.0
+    content_bottom_inset_with(0.0)
+}
+
+/// [`content_bottom_inset`] plus the window's bottom safe-area inset (px).
+pub fn content_bottom_inset_with(safe_bottom: f32) -> gpui::Pixels {
+    metrics::TAB_BAR_HEIGHT + metrics::TAB_BAR_MARGIN * 2.0 + gpui::px(safe_bottom)
 }
 
 #[cfg(test)]

@@ -110,6 +110,44 @@ impl MapTiles {
         self.client.clone()
     }
 
+    /// `<data dir>/tiles`, once the data directory is known.
+    pub fn root(&self) -> Option<PathBuf> {
+        self.root.clone()
+    }
+
+    /// Deletes every server's cached tiles, then reopens the current server's
+    /// (empty) cache so the map refetches its view; `done` runs afterwards.
+    pub fn clear_disk(
+        &mut self,
+        cx: &mut Context<StopsApp>,
+        done: impl FnOnce(&mut StopsApp, &mut Context<StopsApp>) + 'static,
+    ) {
+        self.queue.clear();
+        self.memory.clear();
+        self.cache = None;
+        self.generation += 1;
+        cx.notify();
+        let root = self.root.clone();
+        cx.spawn(async move |this, cx| {
+            if let Some(root) = root {
+                let cleared = cx
+                    .background_executor()
+                    .spawn(async move { rovsti_tiles::clear_all(&root) })
+                    .await;
+                if let Err(error) = cleared {
+                    log::warn!("cannot clear the tile cache: {error}");
+                }
+            }
+            this.update(cx, |app, cx| {
+                let source = app.map_tiles.source.clone();
+                app.map_tiles.set_source(source, cx);
+                done(app, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     /// The data directory is known and the prefs are read: use their server.
     pub fn attach(&mut self, data_dir: &Path, source: TileSource, cx: &mut Context<StopsApp>) {
         self.root = Some(cache_root(data_dir));

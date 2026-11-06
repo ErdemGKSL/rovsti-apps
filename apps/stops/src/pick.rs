@@ -14,6 +14,18 @@ use crate::{
     trip_ui::distance_text,
 };
 
+/// The empty-search line of the place picker.
+pub fn no_match_text(query: &str, has_feed: bool) -> String {
+    let q = query.trim();
+    if has_feed {
+        format!("No stops or saved places match \u{201c}{q}\u{201d}.")
+    } else {
+        format!(
+            "No saved places match \u{201c}{q}\u{201d}. Import a GTFS feed in Settings to search stops too."
+        )
+    }
+}
+
 /// How much of the pair is chosen.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -318,6 +330,23 @@ pub fn point_label(slot: Slot, dest: Option<&Destination>) -> String {
     }
 }
 
+/// Clipboard text ready for a field: trimmed, line breaks joined with one
+/// space; `None` when nothing is left.
+pub fn clean_paste(text: Option<&str>) -> Option<String> {
+    let joined = text?.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// Pill text after a point is queued for the next trip.
+#[allow(dead_code)] // wired up by a later step
+pub fn queued_text(slot: Slot, dest: &Destination) -> String {
+    format!(
+        "{} is {} for your next trip",
+        point_label(slot, Some(dest)),
+        slot.label()
+    )
+}
+
 /// A stored label for a list row: itself, else "Point" (a dropped point has
 /// none, and an old record may not either).
 pub fn row_label(label: &str) -> String {
@@ -354,6 +383,18 @@ pub fn trip_endpoint(slot: Slot, dest: &Destination) -> Endpoint {
 mod tests {
     use super::*;
 
+    #[test]
+    fn no_match_text_names_the_query() {
+        assert_eq!(
+            no_match_text("  moda ", true),
+            "No stops or saved places match \u{201c}moda\u{201d}."
+        );
+        assert_eq!(
+            no_match_text("moda", false),
+            "No saved places match \u{201c}moda\u{201d}. Import a GTFS feed in Settings to search stops too."
+        );
+    }
+
     /// 0.001 degrees of longitude at 41N is about 84 m.
     fn at(metres: f64) -> Destination {
         Destination::dropped(Coord::new(41.0, 29.0 + metres / 84_000.0))
@@ -379,6 +420,32 @@ mod tests {
         b.windows(5)
             .any(|w| w[0].is_ascii_digit() && w[1] == b'.' && w[2..].iter().all(u8::is_ascii_digit))
             || text.contains(", ") && text.split(", ").all(|p| p.parse::<f64>().is_ok())
+    }
+
+    #[test]
+    fn clean_paste_trims_and_joins_lines() {
+        assert_eq!(clean_paste(None), None);
+        assert_eq!(clean_paste(Some("  \n\t ")), None);
+        assert_eq!(
+            clean_paste(Some(" Kadikoy Pier\n41.0, 29.0\r\n")).as_deref(),
+            Some("Kadikoy Pier 41.0, 29.0")
+        );
+        assert_eq!(
+            clean_paste(Some("https://maps.app.goo.gl/abc")).as_deref(),
+            Some("https://maps.app.goo.gl/abc")
+        );
+    }
+
+    #[test]
+    fn queued_text_names_the_place_or_the_slot() {
+        assert_eq!(
+            queued_text(Slot::B, &stop("Taksim")),
+            "Taksim is B for your next trip"
+        );
+        assert_eq!(
+            queued_text(Slot::A, &at(0.0)),
+            "Point A is A for your next trip"
+        );
     }
 
     #[test]

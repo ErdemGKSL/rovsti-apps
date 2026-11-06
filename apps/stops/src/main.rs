@@ -57,7 +57,7 @@ mod trip_ui;
 
 use backend::Preflight;
 use picker::{Destination, SheetMode};
-use settings_ui::{ChatList, SettingsPage};
+use settings_ui::{ChatList, ChatRow, SettingsPage};
 use trip_ui::{AlarmView, Live};
 
 const TABS: [&str; 3] = ["Trip", "Saved", "Settings"];
@@ -78,6 +78,7 @@ pub(crate) enum Page {
 pub(crate) enum PillAction {
     UndoDelete(Place, usize),
     RestoreHistory(History),
+    RestoreRecord(rovsti_geo::TripRecord, usize),
     RestoreEnds(picker::Ends),
     RestartTrip(Destination, Destination),
     RestoreTileUrl(Option<String>),
@@ -161,12 +162,22 @@ pub(crate) struct StopsApp {
     pub(crate) tile_testing: bool,
     /// The chats the message can go to.
     pub(crate) chats: ChatList,
+    /// The search box of the chat picker.
+    pub(crate) chat_query: Entity<TextField>,
+    /// The chat rows the picker shows now (filtered, capped).
+    pub(crate) chat_view: Vec<ChatRow>,
     /// Clear history was tapped once.
     pub(crate) confirm_clear: bool,
+    /// The History row whose actions (Use, Delete) are showing.
+    pub(crate) history_open: Option<usize>,
     /// The first tap on "Remove transit data" has armed the second.
     pub(crate) confirm_remove_feed: bool,
     /// The phone's time zone, seconds east of UTC, for the dates in History.
     pub(crate) tz_offset_s: i32,
+    /// Bytes of downloaded map tiles on disk; `None` while being measured.
+    pub(crate) tile_usage: Option<u64>,
+    /// The first tap on "Downloaded maps" has armed the second.
+    pub(crate) confirm_clear_tiles: bool,
 }
 
 impl StopsApp {
@@ -183,6 +194,8 @@ impl StopsApp {
         let template_field = cx.new(TextField::new);
         let tile_field = cx.new(TextField::new);
         cx.observe(&tile_field, |_, _, cx| cx.notify()).detach();
+        let chat_query = cx.new(TextField::new);
+        cx.observe(&chat_query, |_, _, cx| cx.notify()).detach();
         cx.observe(&template_field, |this, _, cx| this.on_template_edited(cx))
             .detach();
 
@@ -318,9 +331,14 @@ impl StopsApp {
             tile_field,
             tile_testing: false,
             chats: ChatList::default(),
+            chat_query,
+            chat_view: Vec::new(),
             confirm_clear: false,
+            history_open: None,
             confirm_remove_feed: false,
             tz_offset_s: 0,
+            tile_usage: None,
+            confirm_clear_tiles: false,
         };
         app.refresh_preflight_later(cx);
         app.load_time_zone(cx);
@@ -493,6 +511,12 @@ impl StopsApp {
             cx.notify();
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
+        } else if self.tabs.selected() == 2
+            && self.settings_page == SettingsPage::History
+            && self.history_open.is_some()
+        {
+            self.history_open = None;
+            cx.notify();
         } else if self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main {
             // The WhatsApp page steps back inside itself first.
             let stepped = self.settings_page == SettingsPage::WhatsApp
@@ -590,6 +614,7 @@ impl StopsApp {
         match action {
             PillAction::UndoDelete(place, index) => self.undo_delete(place, index, cx),
             PillAction::RestoreHistory(history) => self.restore_history(history, cx),
+            PillAction::RestoreRecord(record, index) => self.restore_record(record, index, cx),
             PillAction::RestartTrip(a, b) => self.request_start(a, b, cx),
             PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),

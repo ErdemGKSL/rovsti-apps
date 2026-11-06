@@ -16,7 +16,7 @@ use rovsti_ui::{
 };
 
 use crate::{
-    Page, StopsApp, lists,
+    Page, StopsApp, lists, pick,
     picker::{Destination, Slot},
     trip_ui::distance_text,
 };
@@ -144,6 +144,10 @@ impl StopsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.expanded = None;
                                 this.use_as(Slot::A, dest_a.clone(), false, cx);
+                                if this.trip.is_some() {
+                                    let text = pick::queued_text(Slot::A, &dest_a);
+                                    this.show_pill(text, None, cx);
+                                }
                                 this.tabs.jump_to(0);
                             })),
                     )
@@ -155,6 +159,10 @@ impl StopsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.expanded = None;
                                 this.use_as(Slot::B, dest_b.clone(), false, cx);
+                                if this.trip.is_some() {
+                                    let text = pick::queued_text(Slot::B, &dest_b);
+                                    this.show_pill(text, None, cx);
+                                }
                                 this.tabs.jump_to(0);
                             })),
                     )
@@ -232,7 +240,19 @@ impl StopsApp {
             return;
         };
         let name = place.name.clone();
-        let text = rovsti_geo::share_text(&place.name, place.coord);
+        self.share_point(name.clone(), place.coord, &name, cx);
+    }
+
+    /// Shares a point as text (`label` plus the map link; the link alone when
+    /// the label is empty). Falls back to the clipboard with a pill naming `name`.
+    pub(crate) fn share_point(
+        &mut self,
+        name: String,
+        coord: Coord,
+        label: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let text = rovsti_geo::share_text(label, coord);
         cx.spawn(async move |this, cx| {
             let sent = text.clone();
             let result = cx

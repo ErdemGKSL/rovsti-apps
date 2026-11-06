@@ -9,6 +9,7 @@
 
 use std::time::Duration;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, list, px,
@@ -76,12 +77,17 @@ enum NoticeItem {
     Header,
     Intro,
     SendTo,
+    /// The search box, shown for long chat lists.
+    Search,
     /// Loading, failed or no chats: one row in place of the chats.
     Status,
-    Chat(usize),
+    /// Index into `chat_view`, and the chat's key.
+    Chat(usize, u64),
     /// The template field, its hint and the preview.
     Message {
         refused: bool,
+        /// The saved template differs from the default: the restore row shows.
+        custom: bool,
     },
     When,
     Off,
@@ -102,13 +108,27 @@ impl NoticeItem {
                     ChatList::Failed(_) => 2,
                 },
             ),
-            Self::Chat(i) => lists::key(4, i as u64),
-            Self::Message { refused } => lists::key(5, u64::from(refused)),
+            Self::Search => lists::key(8, 0),
+            Self::Chat(_, k) => lists::key(4, k),
+            Self::Message { refused, custom } => {
+                lists::key(5, u64::from(refused) | (u64::from(custom) << 1))
+            }
             Self::When => lists::key(6, 0),
             Self::Off => lists::key(7, 0),
         }
     }
 }
+
+/// A stable key for a chat row, so a filtered list re-measures.
+fn chat_key(jid: &str) -> u64 {
+    // FNV-1a: deterministic across runs.
+    jid.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+/// Chats from this count on get a search box.
+const SEARCH_FROM: usize = 8;
 
 // ---- pure --------------------------------------------------------------------------
 
@@ -131,6 +151,28 @@ pub fn distance_text(metres: f64) -> String {
         format!("{:.1} km", metres / 1_000.0)
     } else {
         format!("{} km", (metres / 1_000.0).round() as u32)
+    }
+}
+
+/// Title and subtitle of the "Downloaded maps" row.
+pub fn tile_cache_texts(usage: Option<u64>, armed: bool) -> (&'static str, String) {
+    let title = if armed {
+        "Tap again to clear"
+    } else {
+        "Downloaded maps"
+    };
+    let subtitle = usage.map_or_else(|| "Checking...".to_owned(), bytes_text);
+    (title, subtitle)
+}
+
+/// Cache size: "None", "< 1 MB", "4.2 MB", "37 MB".
+pub fn bytes_text(bytes: u64) -> String {
+    const MIB: u64 = 1024 * 1024;
+    match bytes {
+        0 => "None".to_owned(),
+        1..MIB => "< 1 MB".to_owned(),
+        _ if bytes < 10 * MIB => format!("{:.1} MB", bytes as f64 / MIB as f64),
+        _ => format!("{} MB", (bytes as f64 / MIB as f64).round() as u64),
     }
 }
 
@@ -204,17 +246,101 @@ fn chat_title(chat: &ChatSummary) -> String {
     }
 }
 
-/// The picker rows: the gateway's order, groups kept and marked, capped.
+/// The picker rows: the gateway's order, groups kept and marked.
 pub fn chat_rows(chats: &[ChatSummary]) -> Vec<ChatRow> {
     chats
         .iter()
-        .take(MAX_CHATS)
         .map(|c| ChatRow {
             jid: c.jid.clone(),
             title: chat_title(c),
             group: c.is_group,
         })
         .collect()
+}
+
+/// The rows to show for `query`: at most `cap` matches by title or phone
+/// digits. With no query the selected chat `(jid, name)` is pinned first.
+pub fn visible_chats(
+    rows: &[ChatRow],
+    query: &str,
+    selected: Option<(&str, &str)>,
+    cap: usize,
+) -> Vec<ChatRow> {
+    let folded = rovsti_core::search::fold(query.trim());
+    if folded.is_empty() {
+        let mut out: Vec<ChatRow> = rows.iter().take(cap).cloned().collect();
+        if let Some((jid, name)) = selected
+            && !out.iter().any(|r| r.jid == jid)
+        {
+            let row = rows
+                .iter()
+                .find(|r| r.jid == jid)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let name = name.trim();
+                    ChatRow {
+                        jid: jid.to_owned(),
+                        title: if name.is_empty() {
+                            "Selected chat"
+                        } else {
+                            name
+                        }
+                        .to_owned(),
+                        group: jid.ends_with("@g.us"),
+                    }
+                });
+            out.insert(0, row);
+        }
+        return out;
+    }
+    let digits: String = folded.chars().filter(char::is_ascii_digit).collect();
+    rows.iter()
+        .filter(|r| {
+            rovsti_core::search::fold(&r.title).contains(&folded)
+                || (!digits.is_empty()
+                    && r.jid.split('@').next().is_some_and(|user| {
+                        user.split(':').next().unwrap_or(user).contains(&digits)
+                    }))
+        })
+        .take(cap)
+        .cloned()
+        .collect()
+}
+
+/// The single status row of the chat list, as (title, subtitle, trailing
+/// action), or `None` when chat rows show.
+pub fn chat_status_text(
+    list: &ChatList,
+    query: &str,
+) -> Option<(&'static str, Option<String>, Option<&'static str>)> {
+    match list {
+        ChatList::Idle | ChatList::Loading => Some(("Loading chats...", None, None)),
+        ChatList::Failed(reason) => Some((
+            "Could not load your chats",
+            Some(reason.clone()),
+            Some("Retry"),
+        )),
+        ChatList::Ready(rows) if rows.is_empty() => Some((
+            "No chats yet",
+            Some("Chats appear after history sync.".to_owned()),
+            Some("Refresh"),
+        )),
+        ChatList::Ready(rows) => {
+            visible_chats(rows, query, None, 1)
+                .is_empty()
+                .then_some(("No chats match", None, None))
+        }
+    }
+}
+
+/// What a chat reload does, as (fetch, show loading): it never overlaps a
+/// running fetch, and it keeps a populated list on screen while refreshing.
+pub fn reload_plan(list: &ChatList) -> (bool, bool) {
+    match list {
+        ChatList::Loading => (false, false),
+        ChatList::Ready(rows) if !rows.is_empty() => (true, false),
+        _ => (true, true),
+    }
 }
 
 /// The message as it would read for a four-minute ETA to "Kadikoy".
@@ -388,16 +514,22 @@ impl StopsApp {
     pub(crate) fn open_settings(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         self.settings_page = page;
         self.confirm_clear = false;
+        self.history_open = None;
         self.confirm_remove_feed = false;
+        self.confirm_clear_tiles = false;
         self.page.restart();
         self.history_list.scroll_to_top();
         self.notice_list.scroll_to_top();
         match page {
             SettingsPage::Notice => {
                 self.sync_template_field(cx);
-                self.load_chats(false, cx);
+                self.chat_query.update(cx, |f, cx| f.set("", cx));
+                self.load_chats(true, cx);
             }
-            SettingsPage::MapTiles => self.sync_tile_field(cx),
+            SettingsPage::MapTiles => {
+                self.sync_tile_field(cx);
+                self.measure_tiles(cx);
+            }
             SettingsPage::Main => self.refresh_preflight(cx),
             _ => {}
         }
@@ -644,7 +776,11 @@ impl StopsApp {
             lists::key(2, 0),
         ]
         .into_iter()
-        .chain(self.history.records.iter().map(|r| lists::key(3, r.id)))
+        .chain(self.history.records.iter().enumerate().map(|(i, r)| {
+            // An open row is taller: a new key makes the list measure it again.
+            let kind = if self.history_open == Some(i) { 5 } else { 3 };
+            lists::key(kind, r.id)
+        }))
         .chain([lists::key(4, 0)])
         .collect();
         let state = self.history_list.sync(keys);
@@ -675,6 +811,7 @@ impl StopsApp {
             ix if ix - RECORDS_FROM < count => {
                 let i = ix - RECORDS_FROM;
                 let r = &self.history.records[i];
+                let open = self.history_open == Some(i);
                 let pair = match (&r.a, &r.b) {
                     (Some(a), Some(b)) => Some((a.clone(), b.clone())),
                     _ => None,
@@ -685,30 +822,51 @@ impl StopsApp {
                     record_pair(r),
                     Some(record_details(r, now_ms(), self.tz_offset_s).into()),
                     Some(
-                        if pair.is_some() {
-                            "Use"
+                        if open {
+                            "Close"
                         } else {
                             outcome_text(r.outcome)
                         }
                         .into(),
                     ),
-                );
+                )
+                .id(("history-row", i))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.history_open = if this.history_open == Some(i) {
+                        None
+                    } else {
+                        Some(i)
+                    };
+                    cx.notify();
+                }));
                 let place = lists::Place::of(i, count);
-                match pair {
-                    Some((a, b)) => {
-                        let row = row.id(("history-use", i)).on_click(cx.listener(
-                            move |this, _, _, cx| {
+                let grouped = lists::grouped(theme, place, row);
+                if !open {
+                    return grouped.into_any_element();
+                }
+                let colors = theme::colors(theme);
+                let mut pills = div().px(px(16.0)).pt(px(8.0)).flex().gap(px(12.0));
+                if let Some((a, b)) = pair {
+                    pills = pills.child(
+                        glass_pill(theme, "Use")
+                            .id(("history-use", i))
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 let a = crate::pick::dest_from_endpoint(&a, &this.saved);
                                 let b = crate::pick::dest_from_endpoint(&b, &this.saved);
                                 this.choose_pair(a, b, cx);
                                 this.tabs.jump_to(0);
                                 this.open_settings(SettingsPage::Main, cx);
-                            },
-                        ));
-                        lists::grouped(theme, place, row).into_any_element()
-                    }
-                    None => lists::grouped(theme, place, row).into_any_element(),
+                            })),
+                    );
                 }
+                pills = pills.child(
+                    glass_pill(theme, "Delete")
+                        .id(("history-delete", i))
+                        .text_color(colors.red)
+                        .on_click(cx.listener(move |this, _, _, cx| this.delete_record(i, cx))),
+                );
+                div().child(grouped).child(pills).into_any_element()
             }
             _ => {
                 let colors = theme::colors(theme);
@@ -742,6 +900,7 @@ impl StopsApp {
             return;
         }
         self.confirm_clear = false;
+        self.history_open = None;
         let old = std::mem::take(&mut self.history);
         if let Some(dir) = self.dir.clone() {
             cx.background_executor()
@@ -755,9 +914,44 @@ impl StopsApp {
         );
     }
 
+    /// Removes one trip; the pill offers Undo.
+    fn delete_record(&mut self, i: usize, cx: &mut Context<Self>) {
+        self.history_open = None;
+        let Some(r) = self.history.take(i) else {
+            cx.notify();
+            return;
+        };
+        self.save_history_in_background(cx);
+        let text = format!("Removed {}", record_pair(&r));
+        self.show_pill(text, Some(crate::PillAction::RestoreRecord(r, i)), cx);
+    }
+
+    /// Undo on the pill: the trip returns to its place and is saved.
+    pub(crate) fn restore_record(
+        &mut self,
+        record: rovsti_geo::TripRecord,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.history.put_back(index, record);
+        self.history_open = None;
+        self.save_history_in_background(cx);
+        cx.notify();
+    }
+
+    fn save_history_in_background(&self, cx: &mut Context<Self>) {
+        if let Some(dir) = self.dir.clone() {
+            let history = self.history.clone();
+            cx.background_executor()
+                .spawn(async move { backend::save_history(&dir, &history) })
+                .detach();
+        }
+    }
+
     /// Undo on the pill: the old trips come back and are saved again.
     pub(crate) fn restore_history(&mut self, history: rovsti_geo::History, cx: &mut Context<Self>) {
         self.history = history.clone();
+        self.history_open = None;
         if let Some(dir) = self.dir.clone() {
             cx.background_executor()
                 .spawn(async move { backend::save_history(&dir, &history) })
@@ -781,18 +975,40 @@ impl StopsApp {
             .as_ref()
             .is_some_and(|n| !n.chat.is_empty());
         let mut items = vec![NoticeItem::Header, NoticeItem::Intro, NoticeItem::SendTo];
-        match &self.chats {
-            ChatList::Ready(rows) if !rows.is_empty() => {
-                items.extend((0..rows.len()).map(NoticeItem::Chat));
+        let query = self.chat_query.read(cx).text().to_owned();
+        self.chat_view.clear();
+        if let ChatList::Ready(rows) = &self.chats {
+            if rows.len() > SEARCH_FROM {
+                items.push(NoticeItem::Search);
             }
-            _ => items.push(NoticeItem::Status),
+            let selected = self
+                .prefs
+                .notice
+                .as_ref()
+                .filter(|n| !n.chat.is_empty())
+                .map(|n| (n.chat.as_str(), n.chat_name.as_str()));
+            self.chat_view = visible_chats(rows, &query, selected, MAX_CHATS);
+        }
+        items.extend(
+            self.chat_view
+                .iter()
+                .enumerate()
+                .map(|(i, r)| NoticeItem::Chat(i, chat_key(&r.jid))),
+        );
+        if chat_status_text(&self.chats, &query).is_some() {
+            items.push(NoticeItem::Status);
         }
         if chosen {
             // A refused template adds an error line under the field.
             let text = self.template_field.read(cx).text();
             let refused = rovsti_geo::notice::validate(text).is_err();
+            let custom = self
+                .prefs
+                .notice
+                .as_ref()
+                .is_some_and(|n| n.template != DEFAULT_TEMPLATE);
             items.extend([
-                NoticeItem::Message { refused },
+                NoticeItem::Message { refused, custom },
                 NoticeItem::When,
                 NoticeItem::Off,
             ]);
@@ -853,36 +1069,42 @@ impl StopsApp {
                 false,
             ),
             NoticeItem::SendTo => lists::section_header(theme, "Send to", 20.0),
+            NoticeItem::Search => div()
+                .px(px(16.0))
+                .pb(px(6.0))
+                .child(field_box(
+                    theme,
+                    "chat-search",
+                    &self.chat_query,
+                    "Search chats",
+                    window,
+                    cx,
+                ))
+                .into_any_element(),
             NoticeItem::Status => {
-                let row = match &self.chats {
-                    ChatList::Failed(reason) => list_row(
-                        theme,
-                        None,
-                        "Could not load your chats",
-                        Some(reason.clone().into()),
-                        Some("Retry".into()),
-                    )
-                    .id("chats-retry")
-                    .on_click(cx.listener(|this, _, _, cx| this.load_chats(true, cx)))
-                    .into_any_element(),
-                    ChatList::Ready(_) => list_row(
-                        theme,
-                        None,
-                        "No chats yet",
-                        Some("Chats appear after history sync.".into()),
-                        None,
-                    )
-                    .into_any_element(),
-                    ChatList::Idle | ChatList::Loading => {
-                        list_row(theme, None, "Loading chats...", None, None).into_any_element()
-                    }
+                let query = self.chat_query.read(cx).text().to_owned();
+                let Some((title, subtitle, action)) = chat_status_text(&self.chats, &query) else {
+                    return div().into_any_element();
+                };
+                let retry = action.is_some();
+                let row = list_row(
+                    theme,
+                    None,
+                    title,
+                    subtitle.map(Into::into),
+                    action.map(Into::into),
+                );
+                let row = if retry {
+                    row.id("chats-retry")
+                        .on_click(cx.listener(|this, _, _, cx| this.load_chats(true, cx)))
+                        .into_any_element()
+                } else {
+                    row.into_any_element()
                 };
                 lists::grouped(theme, lists::Place::ALONE, row).into_any_element()
             }
-            NoticeItem::Chat(i) => {
-                let ChatList::Ready(rows) = &self.chats else {
-                    return div().into_any_element();
-                };
+            NoticeItem::Chat(i, _) => {
+                let rows = &self.chat_view;
                 let Some(chat) = rows.get(i) else {
                     return div().into_any_element();
                 };
@@ -910,6 +1132,7 @@ impl StopsApp {
                     .as_ref()
                     .map(|n| n.template.clone())
                     .unwrap_or_default();
+                let custom = template != DEFAULT_TEMPLATE;
                 let text = self.template_field.read(cx).text().to_owned();
                 let check = rovsti_geo::notice::validate(&text);
                 let shown = if check.is_ok() { text } else { template };
@@ -946,6 +1169,15 @@ impl StopsApp {
                             .text_color(colors.label)
                             .child(notice_preview(&shown)),
                     )
+                    .when(custom, |d| {
+                        d.child(
+                            list_row(theme, None, "Use the default text", None, None)
+                                .id("notice-default")
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.use_default_template(cx)),
+                                ),
+                        )
+                    })
                     .into_any_element()
             }
             NoticeItem::When => {
@@ -1013,6 +1245,17 @@ impl StopsApp {
         .id("tiles-reset")
         .on_click(cx.listener(|this, _, _, cx| this.reset_tiles(cx)))
         .into_any_element();
+        let (title, subtitle) = tile_cache_texts(self.tile_usage, self.confirm_clear_tiles);
+        let downloaded = list_row(
+            theme,
+            None,
+            title,
+            Some(subtitle.into()),
+            Some("Clear".into()),
+        )
+        .id("tiles-clear")
+        .on_click(cx.listener(|this, _, _, cx| this.clear_tiles(cx)))
+        .into_any_element();
         div()
             .flex()
             .flex_col()
@@ -1022,21 +1265,89 @@ impl StopsApp {
                 "Map tiles come from this server and are kept on the phone. Any VersaTiles-compatible Shortbread vector tile server works.",
                 false,
             ))
-            .child(div().px(px(16.0)).child(field_box(
-                theme,
-                "tiles-url",
-                &self.tile_field,
-                DEFAULT_TILE_URL,
-                window,
-                cx,
-            )))
+            .child(
+                div()
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().flex_1().child(field_box(
+                        theme,
+                        "tiles-url",
+                        &self.tile_field,
+                        DEFAULT_TILE_URL,
+                        window,
+                        cx,
+                    )))
+                    .child(
+                        glass_pill(theme, "Paste")
+                            .id("tiles-paste")
+                            .text_color(rovsti_ui::theme::colors(theme).accent)
+                            .on_click(cx.listener(|this, _, _, cx| this.paste_tile_url(cx))),
+                    ),
+            )
             .child(note(
                 theme,
                 "Use {z}, {x} and {y} for the tile position.",
                 false,
             ))
             .child(section(theme, None, [save, reset]))
+            .child(section(theme, None, [downloaded]))
+            .child(note(
+                theme,
+                "Kept for offline use, up to 128 MB per map server.",
+                false,
+            ))
             .into_any_element()
+    }
+
+    /// Measures the tile cache off the UI thread.
+    fn measure_tiles(&mut self, cx: &mut Context<Self>) {
+        self.tile_usage = None;
+        let Some(root) = self.map_tiles.root() else {
+            self.tile_usage = Some(0);
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let bytes = cx
+                .background_executor()
+                .spawn(async move { rovsti_tiles::disk_usage(&root) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.tile_usage = Some(bytes);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Two taps: the first asks, the second clears. Refused during a trip.
+    fn clear_tiles(&mut self, cx: &mut Context<Self>) {
+        if self.trip.is_some() {
+            self.show_pill("Not while a trip is running", None, cx);
+            return;
+        }
+        if !self.confirm_clear_tiles {
+            self.confirm_clear_tiles = true;
+            cx.notify();
+            return;
+        }
+        self.confirm_clear_tiles = false;
+        self.map_tiles.clear_disk(cx, |app, cx| {
+            app.tile_usage = Some(0);
+            app.show_pill("Downloaded maps cleared", None, cx);
+        });
+        cx.notify();
+    }
+
+    /// Paste button: fills the field only; the user still taps Test and save.
+    fn paste_tile_url(&mut self, cx: &mut Context<Self>) {
+        let clip = cx.read_from_clipboard().and_then(|item| item.text());
+        match crate::pick::clean_paste(clip.as_deref()) {
+            Some(text) => self.tile_field.update(cx, |f, cx| f.set(&text, cx)),
+            None => self.show_pill("Nothing to paste", None, cx),
+        }
     }
 
     /// Puts the saved server URL into the text field.
@@ -1174,6 +1485,24 @@ impl StopsApp {
         cx.notify();
     }
 
+    /// Sets the template back to the default, with undo.
+    fn use_default_template(&mut self, cx: &mut Context<Self>) {
+        let old = self.prefs.notice.clone();
+        if let Some(prefs) = self.prefs.notice.as_mut() {
+            prefs.template = DEFAULT_TEMPLATE.to_owned();
+        }
+        self.save_prefs(cx);
+        self.sync_template_field(cx);
+        if let Some(old) = old {
+            self.show_pill(
+                "Default text restored",
+                Some(crate::PillAction::RestoreNotice(old)),
+                cx,
+            );
+        }
+        cx.notify();
+    }
+
     /// Undo of "turn off": brings the message setup back.
     pub(crate) fn restore_notice(&mut self, old: rovsti_geo::NoticePrefs, cx: &mut Context<Self>) {
         self.prefs.notice = Some(old);
@@ -1183,16 +1512,17 @@ impl StopsApp {
     }
 
     /// Reads the chat list from the gateway on the background executor.
-    fn load_chats(&mut self, force: bool, cx: &mut Context<Self>) {
+    fn load_chats(&mut self, _force: bool, cx: &mut Context<Self>) {
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             return;
         };
-        match &self.chats {
-            ChatList::Loading => return,
-            ChatList::Ready(_) if !force => return,
-            _ => {}
+        let (fetch, show_loading) = reload_plan(&self.chats);
+        if !fetch {
+            return;
         }
-        self.chats = ChatList::Loading;
+        if show_loading {
+            self.chats = ChatList::Loading;
+        }
         cx.notify();
         let task = cx
             .background_executor()
@@ -1200,13 +1530,16 @@ impl StopsApp {
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
-                this.chats = match result {
-                    Ok(chats) => ChatList::Ready(chat_rows(&chats)),
+                match result {
+                    Ok(chats) => this.chats = ChatList::Ready(chat_rows(&chats)),
+                    Err(_) if matches!(&this.chats, ChatList::Ready(rows) if !rows.is_empty()) => {
+                        this.show_pill("Could not refresh your chats", None, cx);
+                    }
                     Err(error) => {
                         log::warn!("could not load the chats: {error}");
-                        ChatList::Failed(chats_error_text(&error).to_owned())
+                        this.chats = ChatList::Failed(chats_error_text(&error).to_owned());
                     }
-                };
+                }
                 cx.notify();
             })
             .ok();
@@ -1220,6 +1553,42 @@ impl StopsApp {
 mod tests {
     use super::*;
     use rovsti_geo::Coord;
+
+    #[test]
+    fn reload_plan_keeps_rows_and_skips_overlap() {
+        assert_eq!(reload_plan(&ChatList::Loading), (false, false));
+        assert_eq!(reload_plan(&ChatList::Idle), (true, true));
+        assert_eq!(reload_plan(&ChatList::Failed("x".into())), (true, true));
+        assert_eq!(reload_plan(&ChatList::Ready(vec![])), (true, true));
+        let row = ChatRow {
+            jid: "a@s.whatsapp.net".into(),
+            title: "A".into(),
+            group: false,
+        };
+        assert_eq!(reload_plan(&ChatList::Ready(vec![row])), (true, false));
+    }
+
+    #[test]
+    fn tile_cache_texts_cover_states() {
+        assert_eq!(
+            tile_cache_texts(None, false),
+            ("Downloaded maps", "Checking...".to_owned())
+        );
+        assert_eq!(tile_cache_texts(Some(0), true).0, "Tap again to clear");
+        assert_eq!(tile_cache_texts(Some(0), false).1, bytes_text(0));
+    }
+
+    #[test]
+    fn bytes_text_edges() {
+        const MIB: u64 = 1024 * 1024;
+        assert_eq!(bytes_text(0), "None");
+        assert_eq!(bytes_text(1), "< 1 MB");
+        assert_eq!(bytes_text(MIB - 1), "< 1 MB");
+        assert_eq!(bytes_text(MIB), "1.0 MB");
+        assert_eq!(bytes_text(10 * MIB - 1), "10.0 MB");
+        assert_eq!(bytes_text(10 * MIB), "10 MB");
+        assert_eq!(bytes_text(37 * MIB + MIB / 4), "37 MB");
+    }
 
     fn chat(jid: &str, name: Option<&str>, group: bool) -> ChatSummary {
         ChatSummary {
@@ -1239,14 +1608,25 @@ mod tests {
             loading,
             NoticeItem::Status.key(&ChatList::Failed("x".into()))
         );
+        let message =
+            |refused, custom| NoticeItem::Message { refused, custom }.key(&ChatList::Idle);
+        assert_ne!(message(false, false), message(true, false));
+        assert_ne!(message(false, false), message(false, true));
+        assert_ne!(message(true, false), message(false, true));
         assert_ne!(
-            NoticeItem::Message { refused: false }.key(&ChatList::Idle),
-            NoticeItem::Message { refused: true }.key(&ChatList::Idle)
+            NoticeItem::Chat(0, chat_key("a@s.whatsapp.net")).key(&ChatList::Idle),
+            NoticeItem::Chat(0, chat_key("b@s.whatsapp.net")).key(&ChatList::Idle)
         );
         assert_ne!(
-            NoticeItem::Chat(0).key(&ChatList::Idle),
-            NoticeItem::Chat(1).key(&ChatList::Idle)
+            NoticeItem::Search.key(&ChatList::Idle),
+            NoticeItem::SendTo.key(&ChatList::Idle)
         );
+    }
+
+    #[test]
+    fn chat_key_is_stable_and_distinct() {
+        assert_eq!(chat_key("a@g.us"), chat_key("a@g.us"));
+        assert_ne!(chat_key("a@g.us"), chat_key("b@g.us"));
     }
 
     #[test]
@@ -1407,7 +1787,91 @@ mod tests {
         let chats: Vec<_> = (0..200)
             .map(|i| chat(&format!("{i}@s.whatsapp.net"), None, false))
             .collect();
-        assert_eq!(chat_rows(&chats).len(), MAX_CHATS);
+        let rows = chat_rows(&chats);
+        assert_eq!(rows.len(), 200);
+        assert_eq!(visible_chats(&rows, "", None, MAX_CHATS).len(), MAX_CHATS);
+    }
+
+    fn row(jid: &str, title: &str) -> ChatRow {
+        ChatRow {
+            jid: jid.into(),
+            title: title.into(),
+            group: jid.ends_with("@g.us"),
+        }
+    }
+
+    fn many() -> Vec<ChatRow> {
+        (0..100)
+            .map(|i| match i {
+                80 => row("80@s.whatsapp.net", "Family"),
+                81 => row("905321234567@s.whatsapp.net", "Ali"),
+                82 => row("82@s.whatsapp.net", "Kadıköy Group"),
+                _ => row(&format!("{i}@s.whatsapp.net"), &format!("Chat {i}")),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn visible_chats_caps_and_searches_deep() {
+        let rows = many();
+        assert_eq!(visible_chats(&rows, " ", None, 60).len(), 60);
+        let fam = visible_chats(&rows, "fam", None, 60);
+        assert_eq!(fam.len(), 1);
+        assert_eq!(fam[0].title, "Family");
+        assert_eq!(
+            visible_chats(&rows, "kadikoy", None, 60)[0].jid,
+            "82@s.whatsapp.net"
+        );
+        assert_eq!(visible_chats(&rows, "5321", None, 60)[0].title, "Ali");
+        assert_eq!(visible_chats(&rows, "chat", None, 5).len(), 5);
+    }
+
+    #[test]
+    fn visible_chats_pins_the_selected_chat_once() {
+        let rows = many();
+        let out = visible_chats(&rows, "", Some(("80@s.whatsapp.net", "Family")), 10);
+        assert_eq!(out.len(), 11);
+        assert_eq!(out[0].title, "Family");
+        assert_eq!(
+            out.iter().filter(|r| r.jid == "80@s.whatsapp.net").count(),
+            1
+        );
+        let inside = visible_chats(&rows, "", Some(("3@s.whatsapp.net", "x")), 10);
+        assert_eq!(inside.len(), 10);
+        assert_eq!(inside[0].jid, "0@s.whatsapp.net");
+        let unknown = visible_chats(&rows, "", Some(("9@g.us", " ")), 10);
+        assert_eq!(unknown[0].title, "Selected chat");
+        assert!(unknown[0].group);
+        // A query shows only matches, no pinned chat.
+        assert_eq!(
+            visible_chats(&rows, "fam", Some(("9@g.us", "")), 10).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn chat_status_covers_each_state() {
+        let none = |l: &ChatList| chat_status_text(l, "");
+        assert_eq!(none(&ChatList::Idle).unwrap().0, "Loading chats...");
+        assert_eq!(none(&ChatList::Loading).unwrap().0, "Loading chats...");
+        let failed = none(&ChatList::Failed("offline".into())).unwrap();
+        assert_eq!(
+            failed,
+            (
+                "Could not load your chats",
+                Some("offline".into()),
+                Some("Retry")
+            )
+        );
+        let empty = none(&ChatList::Ready(vec![])).unwrap();
+        assert_eq!((empty.0, empty.2), ("No chats yet", Some("Refresh")));
+        let ready = ChatList::Ready(many());
+        assert_eq!(none(&ready), None);
+        assert_eq!(chat_status_text(&ready, "fam"), None);
+        assert_eq!(
+            chat_status_text(&ready, "zzz"),
+            Some(("No chats match", None, None))
+        );
     }
 
     #[test]

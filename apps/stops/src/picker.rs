@@ -264,6 +264,8 @@ pub enum PickItem {
     },
     /// How to get a destination in at all.
     Hint,
+    /// Why a typed query found nothing.
+    NoMatch(String),
 }
 
 impl PickItem {
@@ -278,6 +280,7 @@ impl PickItem {
             Self::Pair { i, .. } => lists::key(5, *i as u64),
             Self::Recent { i, .. } => lists::key(6, *i as u64),
             Self::Hint => lists::key(7, 0),
+            Self::NoMatch(text) => lists::key(8, text.len() as u64),
         }
     }
 }
@@ -321,6 +324,23 @@ impl StopsApp {
                 self.confirm_destination(dest, cx);
             }
             Offer::Refused(why) => self.show_pill(why, None, cx),
+        }
+    }
+
+    /// Paste button: a location opens the Confirm sheet, other text lands in
+    /// the field. The clipboard is read on the tap only (Android shows a
+    /// notice on every read).
+    fn paste_into_picker(&mut self, cx: &mut Context<Self>) {
+        let clip = cx.read_from_clipboard().and_then(|item| item.text());
+        let Some(text) = pick::clean_paste(clip.as_deref()) else {
+            self.show_pill("Nothing to paste", None, cx);
+            return;
+        };
+        if let Offer::Confirm(dest) = offer(&text) {
+            let dest = dest.named_from(&self.saved);
+            self.confirm_destination(dest, cx);
+        } else {
+            self.field.update(cx, |f, cx| f.set(&text, cx));
         }
     }
 
@@ -633,14 +653,27 @@ impl StopsApp {
                 theme,
                 self.pick.sheet_slot().picker_title(),
             ))
-            .child(div().px(px(16.0)).child(field_box(
-                theme,
-                "dest-field",
-                &self.field,
-                "Search stops and saved places, or paste a link",
-                window,
-                cx,
-            )));
+            .child(
+                div()
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().flex_1().child(field_box(
+                        theme,
+                        "dest-field",
+                        &self.field,
+                        "Search stops and saved places, or paste a link",
+                        window,
+                        cx,
+                    )))
+                    .child(
+                        glass_pill(theme, "Paste")
+                            .id("dest-paste")
+                            .text_color(theme::colors(theme).accent)
+                            .on_click(cx.listener(|this, _, _, cx| this.paste_into_picker(cx))),
+                    ),
+            );
         // The list is as tall as its rows up to what the sheet can hold; past
         // that it scrolls, building only the rows on screen.
         let results = list(
@@ -708,6 +741,12 @@ impl StopsApp {
                 at,
             }
         });
+        if !query.is_empty() && items.is_empty() {
+            items.push(PickItem::NoMatch(pick::no_match_text(
+                query,
+                self.gtfs.is_some(),
+            )));
+        }
         if query.is_empty() {
             let pairs = self.history.recent_pairs(3);
             let saved = &self.saved;
@@ -753,6 +792,7 @@ impl StopsApp {
                 lists::grouped(theme, lists::Place::ALONE, row).into_any_element()
             }
             PickItem::Refusal(why) => Self::footnote(theme, why),
+            PickItem::NoMatch(text) => Self::footnote(theme, text),
             PickItem::Header(text) => lists::section_header(theme, text, 8.0),
             PickItem::Stop { index, lines, at } => {
                 let Some(stop) = self
@@ -1424,6 +1464,13 @@ mod tests {
             }
             .key()
         );
+    }
+
+    #[test]
+    fn no_match_key_differs_from_hint_and_refusal() {
+        let k = PickItem::NoMatch("abc".into()).key();
+        assert_ne!(k, PickItem::Hint.key());
+        assert_ne!(k, PickItem::Refusal("abc").key());
     }
 
     #[test]

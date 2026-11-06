@@ -5,5 +5,5 @@
 pub mod cache;
 pub mod http;
 
-pub use cache::{DEFAULT_CAP_BYTES, DiskCache, load};
+pub use cache::{DEFAULT_CAP_BYTES, DiskCache, clear_all, disk_usage, load};
 pub use http::{Fetched, TileClient, TileError, USER_AGENT};

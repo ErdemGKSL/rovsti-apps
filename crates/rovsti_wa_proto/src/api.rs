@@ -43,6 +43,10 @@ pub mod routes {
     pub const CHAT_ACTION: &str = "/v1/chats/action";
     pub const PROFILES: &str = "/v1/contacts/profiles";
     pub const PICTURE: &str = "/v1/pictures/{jid}";
+    pub const STATUSES: &str = "/v1/statuses";
+    pub const STATUS_VIEWED: &str = "/v1/statuses/viewed";
+    pub const STATUS_MEDIA: &str = "/v1/statuses/{id}/media";
+    pub const STATUS_THUMBNAIL: &str = "/v1/statuses/{id}/thumbnail";
 
     /// Replaces `{name}` in `template` with `value`, percent-encoding every
     /// byte that is not unreserved (so a JID's `@` is safe in a path).

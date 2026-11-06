@@ -144,20 +144,29 @@ impl PhoneApp {
                     .top(px((1.0 - k) * 22.0))
                     .bottom(px((1.0 - k) * 22.0))
                     .rounded_full()
+                    .overflow_hidden()
+                    .px(px(12.0))
                     .flex()
                     .items_center()
                     .justify_center()
                     .gap(px(8.0))
-                    .children(
-                        icon.map(|icon| svg().path(icon.path()).size(px(18.0)).text_color(text)),
-                    )
+                    .children(icon.map(|icon| {
+                        svg()
+                            .path(icon.path())
+                            .size(px(18.0))
+                            .flex_none()
+                            .text_color(text)
+                    }))
                     .child(
                         div()
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .items_center()
                             .child(
                                 div()
+                                    .max_w_full()
+                                    .truncate()
                                     .text_size(px(15.0))
                                     .font_weight(typography::HEADLINE.weight)
                                     .text_color(text)
@@ -165,6 +174,8 @@ impl PhoneApp {
                             )
                             .children(sub.map(|sub| {
                                 div()
+                                    .max_w_full()
+                                    .truncate()
                                     .text_size(px(11.0))
                                     .text_color(Hsla { a: 0.8, ..text })
                                     .child(sub)
@@ -207,7 +218,8 @@ impl PhoneApp {
         };
         let end_sub: SharedString = format!("Ends {}", w.ends).into();
         let hold_label = if w.relabelled {
-            "End held call and answer"
+            // Fits a half-width pill on a 360 px screen ("End held call and answer" did not).
+            "End held & answer"
         } else {
             "Hold and answer"
         };
@@ -321,6 +333,8 @@ impl PhoneApp {
                 .top(px(top))
                 .h(px(slots::WAITING_H))
                 .opacity(alpha)
+                // Taps on the card's header and gaps never reach the zone under it.
+                .occlude()
                 .child(
                     flat_glass(theme, None)
                         .size_full()

@@ -23,6 +23,10 @@ pub struct TextField {
     marked: Option<Range<usize>>,
     /// Bumped on every edit; the page compares it instead of the text.
     pub edits: u64,
+    /// Bumped each time the keyboard's action key (Send, Go, ...) is pressed.
+    actions: u64,
+    /// The action key keeps the keyboard up (a composer that sends on it).
+    keep_focus_on_action: bool,
 }
 
 impl TextField {
@@ -44,7 +48,21 @@ impl TextField {
             content: String::new(),
             marked: None,
             edits: 0,
+            actions: 0,
+            keep_focus_on_action: false,
         }
+    }
+
+    /// How many times the keyboard's action key was pressed. A page that acts
+    /// on it (Send in a composer) observes the field and compares this.
+    pub fn actions(&self) -> u64 {
+        self.actions
+    }
+
+    /// Whether the action key leaves the keyboard up instead of putting it
+    /// away (the default). A composer that sends on it keeps typing.
+    pub fn set_keep_focus_on_action(&mut self, keep: bool) {
+        self.keep_focus_on_action = keep;
     }
 
     /// Sets the text (a pasted value, or a preview typing a query).
@@ -146,11 +164,15 @@ impl EntityInputHandler for TextField {
         &mut self,
         _: TextInputAction,
         window: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> bool {
-        // The enter key puts the keyboard away; the text stays and the page
-        // reads it when its own button is tapped.
-        window.blur();
+        // The enter key puts the keyboard away (unless the page keeps it); the
+        // text stays, and a page that observes `actions` acts on it.
+        if !self.keep_focus_on_action {
+            window.blur();
+        }
+        self.actions += 1;
+        cx.notify();
         true
     }
 
@@ -323,6 +345,35 @@ pub fn field_box(
     window: &Window,
     cx: &App,
 ) -> impl IntoElement {
+    field_box_with(theme, id, field, placeholder, false, window, cx)
+}
+
+/// [`field_box`] for a passphrase: every character shows as a dot.
+pub fn secret_field_box(
+    theme: Theme,
+    id: impl Into<gpui::ElementId>,
+    field: &Entity<TextField>,
+    placeholder: &'static str,
+    window: &Window,
+    cx: &App,
+) -> impl IntoElement {
+    field_box_with(theme, id, field, placeholder, true, window, cx)
+}
+
+/// What a secret field shows for `text`: one dot per character.
+pub fn masked(text: &str) -> String {
+    "•".repeat(text.chars().count())
+}
+
+fn field_box_with(
+    theme: Theme,
+    id: impl Into<gpui::ElementId>,
+    field: &Entity<TextField>,
+    placeholder: &'static str,
+    secret: bool,
+    window: &Window,
+    cx: &App,
+) -> impl IntoElement {
     use gpui::{InteractiveElement, MouseButton, ParentElement};
     use liquid_glass_kit::{
         glass::{GlassSpec, glass},
@@ -331,7 +382,12 @@ pub fn field_box(
 
     let colors = crate::theme::colors(theme);
     let focus = field.read(cx).focus_handle();
-    let text: gpui::SharedString = field.read(cx).text().to_owned().into();
+    let raw = field.read(cx).text();
+    let text: gpui::SharedString = if secret {
+        masked(raw).into()
+    } else {
+        raw.to_owned().into()
+    };
     let typing = focus.is_focused(window);
     let shown = if text.is_empty() && !typing {
         div()
@@ -409,5 +465,11 @@ mod tests {
         field.read_with(cx, |f, _| assert_eq!(f.text(), "https://a "));
         field.update(cx, |f, cx| f.clear(cx));
         field.read_with(cx, |f, _| assert_eq!(f.text(), ""));
+    }
+
+    #[test]
+    fn secrets_show_one_dot_per_character() {
+        assert_eq!(masked(""), "");
+        assert_eq!(masked("şifre1"), "••••••");
     }
 }

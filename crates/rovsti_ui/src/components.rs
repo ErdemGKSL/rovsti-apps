@@ -26,7 +26,11 @@ pub fn large_title(
         .pt(px(56.0))
         .pb(px(8.0))
         .child(
+            // Shrinks beside the accessory, so a long title (a group's or a
+            // contact's name) wraps instead of running off the screen.
             div()
+                .flex_1()
+                .min_w_0()
                 .text_size(typography::LARGE_TITLE.size)
                 .line_height(typography::LARGE_TITLE.line)
                 .font_weight(typography::LARGE_TITLE.weight)

@@ -60,6 +60,8 @@ pub struct WhatsAppSettings {
     /// The link the FCM token was registered for (once per link and launch).
     push_for: Option<StoredLink>,
     qr: Option<(String, Arc<Image>)>,
+    /// Why "Share QR to PC…" did not work, shown under the QR.
+    share_note: Option<SharedString>,
     url_field: Entity<TextField>,
     phone_field: Entity<TextField>,
     key_field: Entity<TextField>,
@@ -69,9 +71,36 @@ pub struct WhatsAppSettings {
 fn error_input(error: ClientError) -> Input {
     match error {
         ClientError::Unauthorized => Input::Unauthorized,
-        other => Input::Error(other.to_string()),
+        other => Input::Error(error_words(&other)),
     }
 }
+
+/// What the settings say when the gateway can't be asked. Transport and
+/// decoding details go to the log, never on screen.
+fn error_words(error: &ClientError) -> String {
+    match error {
+        // A typed address or a pasted key that does not parse: their own words.
+        ClientError::Url(_) | ClientError::Key(_) => error.to_string(),
+        ClientError::Unauthorized => crate::model::MSG_KEY_REJECTED.to_owned(),
+        // The gateway's own sentence ("too many instances").
+        ClientError::Api(api) => api.message.clone(),
+        ClientError::Http(_) | ClientError::Ws(_) | ClientError::Tls(_) | ClientError::Closed => {
+            log::warn!("the gateway can't be reached: {error}");
+            MSG_UNREACHABLE.to_owned()
+        }
+        ClientError::Decode(_) => {
+            log::warn!("the gateway answered oddly: {error}");
+            MSG_ODD_ANSWER.to_owned()
+        }
+    }
+}
+
+const MSG_UNREACHABLE: &str =
+    "Can't reach your gateway. Check the internet connection and the gateway address.";
+const MSG_ODD_ANSWER: &str =
+    "Your gateway sent an answer this app can't read. Update the gateway and the app.";
+const MSG_NO_STORAGE: &str = "Can't open this app's storage on the phone. Try again.";
+const MSG_SHARE_FAILED: &str = "Couldn't share the QR code. Scan it from this screen instead.";
 
 /// Runs a blocking gateway job and turns a panic inside it into an error.
 ///
@@ -126,6 +155,7 @@ impl WhatsAppSettings {
             events: Vec::new(),
             push_for: None,
             qr: None,
+            share_note: None,
             url_field,
             phone_field,
             key_field,
@@ -156,7 +186,10 @@ impl WhatsAppSettings {
             };
             this.update(cx, |this, cx| match found {
                 Ok(dir) => this.storage_ready(dir, cx),
-                Err(error) => this.dispatch(Input::Error(error), cx),
+                Err(error) => {
+                    log::warn!("the data folder can't be reached: {error}");
+                    this.dispatch(Input::Error(MSG_NO_STORAGE.to_owned()), cx);
+                }
             })
             .ok();
         })
@@ -334,6 +367,7 @@ impl WhatsAppSettings {
             }
         } else {
             self.qr = None;
+            self.share_note = None;
         }
     }
 
@@ -523,9 +557,15 @@ impl WhatsAppSettings {
     /// Writes the current QR to a PNG and opens the system share sheet, so
     /// the user can send it to a PC or tablet and scan it there.
     fn share_qr(&mut self, cx: &mut Context<Self>) {
-        let (Screen::ShowQr { payload }, Some(dir)) = (&self.model.screen, &self.data_dir) else {
+        let Screen::ShowQr { payload } = &self.model.screen else {
             return;
         };
+        let Some(dir) = &self.data_dir else {
+            self.share_note = Some(MSG_SHARE_FAILED.into());
+            cx.notify();
+            return;
+        };
+        self.share_note = None;
         let path = dir.join(QR_FILE);
         let payload = payload.clone();
         let executor = cx.background_executor().clone();
@@ -558,6 +598,11 @@ impl WhatsAppSettings {
             };
             if let Err(error) = result {
                 log::warn!("sharing the QR failed: {error}");
+                this.update(cx, |this, cx| {
+                    this.share_note = Some(MSG_SHARE_FAILED.into());
+                    cx.notify();
+                })
+                .ok();
             }
         })
         .detach();
@@ -805,7 +850,7 @@ impl WhatsAppSettings {
                 .into_any_element(),
             None => Self::note(theme, "Could not draw the QR code."),
         };
-        Self::page(vec![
+        let mut children = vec![
             Self::note(
                 theme,
                 "On another screen, open WhatsApp → Settings → Linked devices → Link a device \
@@ -815,10 +860,27 @@ impl WhatsAppSettings {
             Self::button(theme, "wa-share-qr", "Share QR to PC…", cx, |this, cx| {
                 this.share_qr(cx);
             }),
-            Self::button(theme, "wa-cancel", "Cancel", cx, |this, cx| {
+        ];
+        if let Some(note) = &self.share_note {
+            children.push(
+                div()
+                    .px(metrics::ROW_INSET)
+                    .text_size(typography::SUBHEADLINE.size)
+                    .text_color(theme.colors().red)
+                    .child(note.clone())
+                    .into_any_element(),
+            );
+        }
+        children.push(Self::button(
+            theme,
+            "wa-cancel",
+            "Cancel",
+            cx,
+            |this, cx| {
                 this.dispatch(Input::Cancel, cx);
-            }),
-        ])
+            },
+        ));
+        Self::page(children)
     }
 
     fn show_code(&self, theme: Theme, code: &str, cx: &mut Context<Self>) -> AnyElement {
@@ -879,7 +941,7 @@ impl WhatsAppSettings {
                 this.dispatch(Input::OpenKeys, cx);
             }),
             Self::button(theme, "wa-unlink", ACTION_UNLINK, cx, |this, cx| {
-                this.dispatch(Input::Unlink, cx);
+                this.dispatch(Input::RequestUnlink, cx);
             }),
             Self::note(
                 theme,
@@ -941,7 +1003,7 @@ impl WhatsAppSettings {
                     .mx(metrics::ROW_INSET)
                     .text_color(theme.colors().red)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.dispatch(Input::Revoke(key_id.clone()), cx);
+                        this.dispatch(Input::RequestRevoke(key_id.clone()), cx);
                     }))
                     .into_any_element(),
             );
@@ -991,7 +1053,7 @@ impl WhatsAppSettings {
                 },
             ),
             Self::button(theme, "wa-unlink", ACTION_UNLINK, cx, |this, cx| {
-                this.dispatch(Input::Unlink, cx);
+                this.dispatch(Input::RequestUnlink, cx);
             }),
         ])
     }
@@ -1012,6 +1074,42 @@ impl WhatsAppSettings {
                     this.dispatch(Input::ConfirmDelete, cx);
                 },
             ),
+            Self::back_button(theme, cx),
+        ])
+    }
+
+    fn confirm_unlink(theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        Self::page(vec![
+            Self::note(
+                theme,
+                "This app forgets its WhatsApp link. To use WhatsApp here again, paste a connect \
+                 key from another Rovsti app or link again. Your other apps stay linked.",
+            ),
+            Self::danger_button(theme, "wa-unlink-confirm", "Unlink", cx, |this, cx| {
+                this.dispatch(Input::Unlink, cx);
+            }),
+            Self::back_button(theme, cx),
+        ])
+    }
+
+    fn confirm_revoke(theme: Theme, key: &KeyInfo, cx: &mut Context<Self>) -> AnyElement {
+        let text = if key.current {
+            format!(
+                "“{}” is this app's own key. Revoking it unlinks this app from WhatsApp.",
+                key.label
+            )
+        } else {
+            format!(
+                "The app using “{}” is signed out of WhatsApp and needs a new key.",
+                key.label
+            )
+        };
+        let key_id = key.key_id.clone();
+        Self::page(vec![
+            Self::note(theme, text),
+            Self::danger_button(theme, "wa-revoke-confirm", "Revoke", cx, move |this, cx| {
+                this.dispatch(Input::Revoke(key_id.clone()), cx);
+            }),
             Self::back_button(theme, cx),
         ])
     }
@@ -1082,6 +1180,8 @@ impl Render for WhatsAppSettings {
             Screen::Keys { keys } => self.keys_screen(theme, keys, cx),
             Screen::LoggedOut => self.logged_out(theme, window, cx),
             Screen::ConfirmDelete => Self::confirm_delete(theme, cx),
+            Screen::ConfirmUnlink => Self::confirm_unlink(theme, cx),
+            Screen::ConfirmRevoke { key, .. } => Self::confirm_revoke(theme, key, cx),
             Screen::Failed { message, .. } => Self::failed(theme, message, cx),
         }
     }
@@ -1092,6 +1192,31 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    #[test]
+    fn transport_failures_read_as_plain_words() {
+        for error in [
+            ClientError::Http("io: connection refused (os error 111)".into()),
+            ClientError::Ws("handshake".into()),
+            ClientError::Tls("bad certificate".into()),
+            ClientError::Closed,
+        ] {
+            assert_eq!(error_input(error), Input::Error(MSG_UNREACHABLE.into()));
+        }
+        assert_eq!(
+            error_input(ClientError::Decode("expected value at line 1".into())),
+            Input::Error(MSG_ODD_ANSWER.into())
+        );
+        assert_eq!(error_input(ClientError::Unauthorized), Input::Unauthorized);
+        let api = rovsti_wa_proto::ApiError::new(
+            rovsti_wa_proto::ErrorCode::LimitReached,
+            "too many instances",
+        );
+        assert_eq!(
+            error_input(ClientError::Api(api)),
+            Input::Error("too many instances".into())
+        );
+    }
 
     #[test]
     fn a_panicking_job_becomes_an_error() {

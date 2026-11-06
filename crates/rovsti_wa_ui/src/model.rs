@@ -85,6 +85,14 @@ pub enum Screen {
     LoggedOut,
     /// "Delete instance" waits for a second tap.
     ConfirmDelete,
+    /// "Unlink this app" waits for a second tap; Back returns to the
+    /// connected (or logged-out) page.
+    ConfirmUnlink,
+    /// Revoking `key` waits for a second tap; Back returns to the list.
+    ConfirmRevoke {
+        key: KeyInfo,
+        keys: Vec<KeyInfo>,
+    },
     Failed {
         message: String,
         back: Box<Screen>,
@@ -113,7 +121,11 @@ pub enum Input {
     RequestShareKey,
     ShowKey(IssuedKey),
     CopyKey,
+    /// "Unlink this app": asks first ([`Screen::ConfirmUnlink`]).
+    RequestUnlink,
     Unlink,
+    /// "Revoke" on a key of the list: asks first ([`Screen::ConfirmRevoke`]).
+    RequestRevoke(String),
     /// Leave a form screen.
     Back,
     /// Give up a half-made link (QR or code on screen) and delete its instance.
@@ -257,6 +269,8 @@ impl LinkModel {
             | Screen::ShareKey { .. }
             | Screen::Keys { .. }
             | Screen::ConfirmDelete
+            | Screen::ConfirmUnlink
+            | Screen::ConfirmRevoke { .. }
             | Screen::Failed { .. } => Some(Input::Back),
             Screen::ShowQr { .. } | Screen::ShowCode { .. } => Some(Input::Cancel),
             Screen::Choose | Screen::Connecting | Screen::Connected { .. } | Screen::LoggedOut => {
@@ -421,20 +435,43 @@ impl LinkModel {
                 Screen::ShareKey { key } => vec![Effect::CopyToClipboard(key.clone())],
                 _ => Vec::new(),
             },
+            Input::RequestUnlink => {
+                if self.link.is_some() {
+                    self.screen = Screen::ConfirmUnlink;
+                }
+                Vec::new()
+            }
             Input::Unlink => {
                 self.drop_link();
                 self.screen = Screen::Choose;
                 vec![Effect::Forget]
+            }
+            Input::RequestRevoke(key_id) => {
+                if let (Screen::Keys { keys }, Some(_)) = (&self.screen, &self.link)
+                    && let Some(key) = keys.iter().find(|k| k.key_id == key_id)
+                {
+                    self.screen = Screen::ConfirmRevoke {
+                        key: key.clone(),
+                        keys: keys.clone(),
+                    };
+                }
+                Vec::new()
             }
             Input::Back => {
                 match &self.screen {
                     Screen::EnterUrl | Screen::LinkNew { .. } | Screen::PasteKey => {
                         self.screen = Screen::Choose;
                     }
-                    Screen::ShareKey { .. } | Screen::Keys { .. } | Screen::ConfirmDelete => {
+                    Screen::ShareKey { .. }
+                    | Screen::Keys { .. }
+                    | Screen::ConfirmDelete
+                    | Screen::ConfirmUnlink => {
                         self.screen = self.home();
                     }
                     Screen::Failed { back, .. } => self.screen = (**back).clone(),
+                    Screen::ConfirmRevoke { keys, .. } => {
+                        self.screen = Screen::Keys { keys: keys.clone() };
+                    }
                     _ => {}
                 }
                 Vec::new()
@@ -482,6 +519,11 @@ impl LinkModel {
             }
             Input::Revoke(key_id) => match (&self.screen, &self.link) {
                 (Screen::Keys { .. }, Some(_)) => vec![Effect::RevokeKey(key_id)],
+                // Confirmed: back to the list, which `Revoked` then shrinks.
+                (Screen::ConfirmRevoke { keys, .. }, Some(_)) => {
+                    self.screen = Screen::Keys { keys: keys.clone() };
+                    vec![Effect::RevokeKey(key_id)]
+                }
                 _ => Vec::new(),
             },
             Input::Revoked(key_id) => self.revoked(&key_id),
@@ -624,6 +666,8 @@ impl LinkModel {
                             | Screen::Failed { .. }
                             | Screen::Keys { .. }
                             | Screen::ConfirmDelete
+                            | Screen::ConfirmUnlink
+                            | Screen::ConfirmRevoke { .. }
                     );
                     // After a logout only a real reconnection ends the page.
                     let logged_out = self.screen == Screen::LoggedOut
@@ -1042,6 +1086,72 @@ mod tests {
         assert_eq!(m.apply(Input::Revoked("k1".into())), vec![Effect::Forget]);
         assert_eq!(m.screen, Screen::Choose);
         assert!(m.link.is_none());
+    }
+
+    #[test]
+    fn unlink_asks_first_and_back_keeps_the_link() {
+        let mut m = linked();
+        assert!(m.apply(Input::RequestUnlink).is_empty());
+        assert_eq!(m.screen, Screen::ConfirmUnlink);
+        assert_eq!(m.back_input(), Some(Input::Back));
+        m.apply(Input::Back);
+        assert!(matches!(m.screen, Screen::Connected { .. }));
+        assert!(m.link.is_some());
+        // A status arriving while the question is up does not dismiss it.
+        m.apply(Input::RequestUnlink);
+        m.apply(Input::Event(GatewayEvent::State(status(
+            InstanceState::Disconnected,
+        ))));
+        assert_eq!(m.screen, Screen::ConfirmUnlink);
+        assert_eq!(m.apply(Input::Unlink), vec![Effect::Forget]);
+        assert_eq!(m.screen, Screen::Choose);
+        assert!(m.link.is_none());
+        // Nothing to unlink without a link.
+        let mut m = model();
+        m.apply(Input::RequestUnlink);
+        assert_eq!(m.screen, Screen::Choose);
+    }
+
+    #[test]
+    fn unlink_from_the_logged_out_page_backs_out_to_it() {
+        let mut m = linked();
+        m.apply(Input::Event(GatewayEvent::State(status(
+            InstanceState::LoggedOut,
+        ))));
+        m.apply(Input::RequestUnlink);
+        assert_eq!(m.screen, Screen::ConfirmUnlink);
+        m.apply(Input::Back);
+        assert_eq!(m.screen, Screen::LoggedOut);
+    }
+
+    #[test]
+    fn revoke_asks_first_and_back_returns_to_the_list() {
+        let mut m = linked();
+        open_keys(&mut m);
+        assert!(m.apply(Input::RequestRevoke("k2".into())).is_empty());
+        assert!(
+            matches!(&m.screen, Screen::ConfirmRevoke { key, keys } if key.key_id == "k2" && keys.len() == 2)
+        );
+        assert_eq!(m.back_input(), Some(Input::Back));
+        m.apply(Input::Back);
+        assert!(matches!(&m.screen, Screen::Keys { keys } if keys.len() == 2));
+        // Confirmed: the gateway is asked, and its answer shrinks the list.
+        m.apply(Input::RequestRevoke("k2".into()));
+        assert_eq!(
+            m.apply(Input::Revoke("k2".into())),
+            vec![Effect::RevokeKey("k2".into())]
+        );
+        assert!(matches!(&m.screen, Screen::Keys { .. }));
+        m.apply(Input::Revoked("k2".into()));
+        assert_eq!(
+            m.screen,
+            Screen::Keys {
+                keys: vec![key("k1", true)]
+            }
+        );
+        // An unknown key asks nothing.
+        m.apply(Input::RequestRevoke("nope".into()));
+        assert!(matches!(&m.screen, Screen::Keys { .. }));
     }
 
     #[test]

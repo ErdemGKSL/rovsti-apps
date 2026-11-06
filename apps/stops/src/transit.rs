@@ -150,10 +150,15 @@ fn civil_from_days(days: i64) -> (i64, usize, i64) {
     (year, month as usize, day)
 }
 
-/// "5 Nov" for a moment in the current year (UTC), "5 Nov 2025" otherwise.
-pub fn date_text(ms: i64, now_ms: i64) -> String {
-    let (year, month, day) = civil_from_days(ms.div_euclid(86_400_000));
-    let (this_year, _, _) = civil_from_days(now_ms.div_euclid(86_400_000));
+/// "5 Nov" for a moment in the current year, "5 Nov 2025" otherwise, on the
+/// phone's calendar (`tz_offset_s` east of UTC, e.g. 10 800 in Turkey).
+pub fn date_text(ms: i64, now_ms: i64, tz_offset_s: i32) -> String {
+    let local_day = |ms: i64| {
+        ms.saturating_add(i64::from(tz_offset_s) * 1_000)
+            .div_euclid(86_400_000)
+    };
+    let (year, month, day) = civil_from_days(local_day(ms));
+    let (this_year, _, _) = civil_from_days(local_day(now_ms));
     if year == this_year {
         format!("{day} {}", MONTHS[month - 1])
     } else {
@@ -162,8 +167,11 @@ pub fn date_text(ms: i64, now_ms: i64) -> String {
 }
 
 /// "Imported 5 Nov", with a note when the import dropped rows.
-pub fn imported_text(feed: &Feed, skipped_rows: u64, now_ms: i64) -> String {
-    let mut text = format!("Imported {}", date_text(feed.imported_ms, now_ms));
+pub fn imported_text(feed: &Feed, skipped_rows: u64, now_ms: i64, tz_offset_s: i32) -> String {
+    let mut text = format!(
+        "Imported {}",
+        date_text(feed.imported_ms, now_ms, tz_offset_s)
+    );
     if skipped_rows > 0 {
         text.push_str(&format!(
             ", {} unusable rows skipped",
@@ -179,11 +187,16 @@ pub fn imported_text(feed: &Feed, skipped_rows: u64, now_ms: i64) -> String {
 /// the picked copy. Errors are the sentence to show, `GtfsError` verbatim.
 pub fn import_file(dir: &Path, path: &Path) -> Result<(Feed, FeedReport), String> {
     let result = File::open(path)
-        .map_err(|e| format!("Could not open the file: {e}"))
+        .map_err(|e| {
+            log::warn!("could not open the picked feed: {e}");
+            "Could not open the file. Pick it again.".to_owned()
+        })
         .and_then(|file| read_zip(file).map_err(|e| e.to_string()))
         .and_then(|(feed, report)| {
-            storage::save_json(dir, store::GTFS_FILE, &feed)
-                .map_err(|e| format!("Could not save the feed: {e}"))?;
+            storage::save_json(dir, store::GTFS_FILE, &feed).map_err(|e| {
+                log::warn!("could not save the feed: {e}");
+                "Could not save the feed on the phone. Free some space and try again.".to_owned()
+            })?;
             Ok((feed, report))
         });
     // The picked copy is only a hand-off: gone whether the import worked or not.
@@ -262,7 +275,13 @@ impl StopsApp {
                         None,
                         feed_summary(feed),
                         Some(
-                            imported_text(feed, self.transit.skipped_rows, store::now_ms()).into(),
+                            imported_text(
+                                feed,
+                                self.transit.skipped_rows,
+                                store::now_ms(),
+                                self.tz_offset_s,
+                            )
+                            .into(),
                         ),
                         None,
                     )
@@ -361,7 +380,10 @@ impl StopsApp {
                 Err(AndroidError::Unsupported) => {
                     Some("Importing a transit feed works on the phone only.".to_owned())
                 }
-                Err(error) => Some(format!("The file picker could not open: {error}")),
+                Err(error) => {
+                    log::warn!("the file picker could not open: {error}");
+                    Some("The file picker could not open.".to_owned())
+                }
             };
             this.update(cx, |this, cx| {
                 this.transit.state = ImportState::Idle;
@@ -408,7 +430,7 @@ impl StopsApp {
                         this.transit.error = None;
                         this.transit.skipped_rows = report.skipped_rows;
                         this.set_feed(Some(Arc::new(feed)));
-                        this.show_pill("Transit data imported.", None, cx);
+                        this.show_pill("Transit data imported", None, cx);
                     }
                     Err(why) => this.transit.error = Some(why),
                 }
@@ -430,7 +452,7 @@ impl StopsApp {
         self.confirm_remove_feed = false;
         self.transit = Transit::default();
         self.set_feed(None);
-        self.show_pill("Transit data removed.", None, cx);
+        self.show_pill("Transit data removed", None, cx);
         cx.notify();
     }
 
@@ -449,6 +471,9 @@ impl StopsApp {
         }
         if matches!(self.sheet_mode, crate::picker::SheetMode::Stop(_)) {
             self.sheet_mode = crate::picker::SheetMode::Pick;
+        }
+        if matches!(self.sheet_return, Some(crate::picker::SheetMode::Stop(_))) {
+            self.sheet_return = None;
         }
     }
 }
@@ -574,17 +599,33 @@ mod tests {
         // 2024-11-05 00:00 UTC and 2025-11-05 (a year of 365 days later).
         let nov5_2024 = 1_730_764_800_000;
         let nov5_2025 = nov5_2024 + 365 * 86_400_000;
-        assert_eq!(date_text(nov5_2025, nov5_2025 + 5_000), "5 Nov");
-        assert_eq!(date_text(nov5_2024, nov5_2025), "5 Nov 2024");
-        assert_eq!(date_text(0, nov5_2025), "1 Jan 1970");
+        assert_eq!(date_text(nov5_2025, nov5_2025 + 5_000, 0), "5 Nov");
+        assert_eq!(date_text(nov5_2024, nov5_2025, 0), "5 Nov 2024");
+        assert_eq!(date_text(0, nov5_2025, 0), "1 Jan 1970");
         // Leap day, and the last second of a year.
-        assert_eq!(date_text(1_709_164_800_000, nov5_2024), "29 Feb");
-        assert_eq!(date_text(1_735_689_599_000, nov5_2024), "31 Dec");
+        assert_eq!(date_text(1_709_164_800_000, nov5_2024, 0), "29 Feb");
+        assert_eq!(date_text(1_735_689_599_000, nov5_2024, 0), "31 Dec");
         let f = feed();
-        assert_eq!(imported_text(&f, 0, nov5_2024), "Imported 5 Nov");
+        assert_eq!(imported_text(&f, 0, nov5_2024, 0), "Imported 5 Nov");
         assert_eq!(
-            imported_text(&f, 1_200, nov5_2024),
+            imported_text(&f, 1_200, nov5_2024, 0),
             "Imported 5 Nov, 1 200 unusable rows skipped"
+        );
+    }
+
+    #[test]
+    fn dates_follow_the_phone_time_zone() {
+        const TURKEY: i32 = 3 * 3_600;
+        // 2024-11-04 22:30 UTC is already 5 Nov 01:30 in Istanbul.
+        let late = 1_730_764_800_000 - 90 * 60_000;
+        assert_eq!(date_text(late, late, 0), "4 Nov");
+        assert_eq!(date_text(late, late, TURKEY), "5 Nov");
+        // 31 Dec 23:00 UTC is New Year in Istanbul: the year follows too.
+        let new_year = 1_735_689_600_000 - 3_600_000;
+        assert_eq!(date_text(new_year, new_year, TURKEY), "1 Jan");
+        assert_eq!(
+            date_text(new_year, new_year - 86_400_000, TURKEY),
+            "1 Jan 2025"
         );
     }
 

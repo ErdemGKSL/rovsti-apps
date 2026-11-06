@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use rovsti_core::PhoneNumber;
 
-use crate::api::{LinkError, MediaKind, MessageBody, Reaction, Sent, WaMessage};
+use crate::api::{LinkError, MarkRead, MediaKind, MessageBody, Reaction, Sent, WaMessage};
 use crate::event::{GatewayEvent, ReceiptKind};
 use crate::meta::{DeliveryStatus, MessageMeta, RichMessage};
 
@@ -303,15 +303,24 @@ impl Timeline {
 
     /// Incoming messages not yet known to be read.
     pub fn unread_ids(&self) -> Vec<String> {
+        self.unread().map(|m| m.id.clone()).collect()
+    }
+
+    /// Incoming messages not yet known to be read, in timeline order.
+    pub fn unread(&self) -> impl Iterator<Item = &WaMessage> {
         self.items
             .iter()
             .filter(|i| !i.message.from_me && i.state != ItemState::Read)
-            .map(|i| i.message.id.clone())
-            .collect()
+            .map(|i| &i.message)
     }
 
     pub fn items(&self) -> &[Item] {
         &self.items
+    }
+
+    /// The chat JID this timeline shows.
+    pub fn chat(&self) -> &str {
+        &self.chat
     }
 
     pub fn has_older(&self) -> bool {
@@ -387,6 +396,33 @@ fn upgrade(state: &mut ItemState, to: ItemState) -> bool {
         }
         _ => false,
     }
+}
+
+/// The read receipts for `unread` messages of `chat`, as `(author, id)`
+/// pairs. A one-to-one chat needs one request; in a group WhatsApp wants the
+/// author of the messages a receipt covers, so there is one request per
+/// author, in order of first appearance (`sender: None` for messages whose
+/// author is unknown; the gateway then looks them up).
+pub fn read_requests<'a>(
+    chat: &str,
+    unread: impl IntoIterator<Item = (Option<&'a str>, &'a str)>,
+) -> Vec<MarkRead> {
+    let group = chat.ends_with("@g.us");
+    let mut out: Vec<MarkRead> = Vec::new();
+    for (sender, id) in unread {
+        let sender = sender
+            .filter(|s| group && !s.trim().is_empty())
+            .map(str::to_owned);
+        match out.iter_mut().find(|r| r.sender == sender) {
+            Some(request) => request.ids.push(id.to_owned()),
+            None => out.push(MarkRead {
+                chat: chat.to_owned(),
+                sender,
+                ids: vec![id.to_owned()],
+            }),
+        }
+    }
+    out
 }
 
 /// `+905321234567` becomes `905321234567@s.whatsapp.net`.
@@ -611,6 +647,87 @@ mod tests {
         assert!(t.apply_event(&receipt(&["a"], ReceiptKind::Read)));
         assert!(!t.apply_event(&receipt(&["a"], ReceiptKind::Delivered)));
         assert_eq!(t.items()[0].state, ItemState::Read);
+    }
+
+    #[test]
+    fn ticks_walk_pending_sent_delivered_read_and_survive_reloads() {
+        let mut t = Timeline::new(CHAT);
+        t.push_pending(1, "hi".into(), 100);
+        // A receipt cannot skip the confirmation of a pending send.
+        assert!(!t.apply_event(&receipt(&["pending-1"], ReceiptKind::Read)));
+        t.confirm(1, &sent("real"));
+        assert_eq!(t.items()[0].state, ItemState::Sent);
+        assert!(t.apply_event(&receipt(&["real"], ReceiptKind::Delivered)));
+        assert_eq!(t.items()[0].state, ItemState::Delivered);
+        assert!(t.apply_event(&receipt(&["real"], ReceiptKind::Read)));
+
+        let at = |status| RichMessage {
+            message: msg("real", 200, true),
+            meta: MessageMeta {
+                status,
+                ..Default::default()
+            },
+        };
+        // A reload with older (or no) ticks keeps the blue ones.
+        t.apply_rich_page(vec![at(Some(DeliveryStatus::Delivered))], 50);
+        assert_eq!(t.items()[0].state, ItemState::Read);
+        t.apply_rich_page(vec![at(None)], 50);
+        assert_eq!(t.items()[0].state, ItemState::Read);
+
+        // A fresh view starts from what the gateway stored.
+        let mut fresh = Timeline::new(CHAT);
+        fresh.apply_rich_page(vec![at(Some(DeliveryStatus::Played))], 50);
+        assert_eq!(fresh.items()[0].state, ItemState::Read);
+        assert_eq!(
+            fresh.meta("real").and_then(|m| m.status),
+            Some(DeliveryStatus::Played)
+        );
+    }
+
+    #[test]
+    fn read_requests_name_group_authors() {
+        let dm = read_requests(CHAT, [(Some("x@s.whatsapp.net"), "a"), (None, "b")]);
+        assert_eq!(
+            dm,
+            [MarkRead {
+                chat: CHAT.into(),
+                sender: None,
+                ids: vec!["a".into(), "b".into()],
+            }]
+        );
+
+        let group = "1-2@g.us";
+        let ada = "1@s.whatsapp.net";
+        let bob = "2@s.whatsapp.net";
+        let requests = read_requests(
+            group,
+            [
+                (Some(ada), "a"),
+                (Some(bob), "b"),
+                (Some(ada), "c"),
+                (None, "d"),
+                (Some(" "), "e"),
+            ],
+        );
+        let sent: Vec<(Option<&str>, Vec<&str>)> = requests
+            .iter()
+            .map(|r| {
+                assert_eq!(r.chat, group);
+                (
+                    r.sender.as_deref(),
+                    r.ids.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            sent,
+            [
+                (Some(ada), vec!["a", "c"]),
+                (Some(bob), vec!["b"]),
+                (None, vec!["d", "e"]),
+            ]
+        );
+        assert!(read_requests(group, []).is_empty());
     }
 
     #[test]

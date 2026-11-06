@@ -117,6 +117,13 @@ pub enum GatewayEvent {
     /// A person's or group's push name, about text or picture changed. A new
     /// `picture_id` means cached picture bytes are stale.
     Profile(WaProfile),
+    /// Status updates (stories) changed: one was posted, deleted, seen or
+    /// expired. `author` is set when only that person's changed. Refetch
+    /// `GET /v1/statuses`. Older clients skip it.
+    StatusChanged {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        author: Option<String>,
+    },
     /// The client missed events; refetch chats.
     Resync,
     /// The key used for this socket was revoked.
@@ -305,6 +312,16 @@ mod tests {
                     ..Default::default()
                 }),
                 r#"{"type":"profile","jid":"j","push_name":null,"contact_name":null,"about":null,"picture_id":"7","business":false,"verified_name":null,"fetched_ms":0}"#,
+            ),
+            (
+                GatewayEvent::StatusChanged {
+                    author: Some("a".into()),
+                },
+                r#"{"type":"status_changed","author":"a"}"#,
+            ),
+            (
+                GatewayEvent::StatusChanged { author: None },
+                r#"{"type":"status_changed"}"#,
             ),
             (GatewayEvent::Resync, r#"{"type":"resync"}"#),
             (GatewayEvent::KeyRevoked, r#"{"type":"key_revoked"}"#),

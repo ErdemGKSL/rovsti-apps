@@ -457,8 +457,8 @@ fn avatar_copy(theme: Theme, flight: &AvatarFlight, to: Bounds<Pixels>) -> AnyEl
                         .left_0()
                         .size_full()
                         .rounded_full()
+                        // Opaque all the way: the avatar it lands on shows the same photo.
                         .object_fit(ObjectFit::Cover)
-                        .opacity(1.0 - p)
                 })),
         )
         .into_any_element()

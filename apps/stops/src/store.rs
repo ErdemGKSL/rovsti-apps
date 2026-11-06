@@ -27,6 +27,8 @@ pub const SAVED_FILE: &str = "saved.json";
 pub const PREFS_FILE: &str = "stops-prefs.json";
 /// The A and B being picked, kept so a restart does not lose them.
 pub const DRAFT_FILE: &str = "draft.json";
+/// Choices for the next trip that are not A/B ([`crate::backend::NextTrip`]).
+pub const NEXT_TRIP_FILE: &str = "next-trip.json";
 /// The imported GTFS feed.
 pub const GTFS_FILE: &str = "gtfs.json";
 

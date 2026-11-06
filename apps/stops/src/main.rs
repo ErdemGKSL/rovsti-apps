@@ -135,6 +135,9 @@ pub(crate) struct StopsApp {
 
     pub(crate) sheet: Sheet,
     pub(crate) sheet_mode: SheetMode,
+    /// The confirmation or stop sheet a Rename or Save sheet was opened from,
+    /// shown again when that one is done.
+    pub(crate) sheet_return: Option<SheetMode>,
     pub(crate) field: Entity<TextField>,
     /// The confirmation's Save toggle.
     pub(crate) save_place: bool,
@@ -176,6 +179,8 @@ pub(crate) struct StopsApp {
     pub(crate) history_open: Option<usize>,
     /// The first tap on "Remove transit data" has armed the second.
     pub(crate) confirm_remove_feed: bool,
+    /// The phone's time zone, seconds east of UTC, for the dates in History.
+    pub(crate) tz_offset_s: i32,
     /// Bytes of downloaded map tiles on disk; `None` while being measured.
     pub(crate) tile_usage: Option<u64>,
     /// The first tap on "Downloaded maps" has armed the second.
@@ -274,6 +279,7 @@ impl StopsApp {
                     this.map.follow = true;
                 }
                 this.draft_saved = data.draft;
+                this.notice_on = data.next.notice_on;
                 this.resume_service(cx);
                 this.start_simulation(cx);
                 cx.notify();
@@ -314,6 +320,7 @@ impl StopsApp {
             rering: None,
             sheet: Sheet::new(),
             sheet_mode: SheetMode::Pick,
+            sheet_return: None,
             field,
             save_place: false,
             back_enabled: false,
@@ -337,12 +344,40 @@ impl StopsApp {
             confirm_clear: false,
             history_open: None,
             confirm_remove_feed: false,
+            tz_offset_s: 0,
             tile_usage: None,
             confirm_clear_tiles: false,
         };
         app.refresh_preflight_later(cx);
+        app.load_time_zone(cx);
         app.load_last_location(cx);
         app
+    }
+
+    /// Reads the phone's time zone (UTC stays on desktop or when it is unreadable).
+    fn load_time_zone(&self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let info = cx
+                .background_executor()
+                .spawn(async { rovsti_android::providers::local_time_info() })
+                .await;
+            let locale = match info {
+                Ok(text) => rovsti_core::recents::LocaleTime::parse(&text),
+                Err(rovsti_android::Error::Unsupported) => None,
+                Err(error) => {
+                    log::warn!("could not read the time zone: {error}");
+                    None
+                }
+            };
+            if let Some(locale) = locale {
+                this.update(cx, |this, cx| {
+                    this.tz_offset_s = locale.tz_offset_s;
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
     }
 
     /// Centres the idle map on the newest device fix when it is fresh. Silent when
@@ -369,8 +404,11 @@ impl StopsApp {
         {
             return;
         }
-        self.map
-            .set_device_fix(Coord::new(fix.lat, fix.lon), fix.accuracy_m);
+        self.map.set_device_fix(
+            Coord::new(fix.lat, fix.lon),
+            fix.accuracy_m,
+            store::now_ms(),
+        );
         cx.notify();
     }
 
@@ -439,6 +477,7 @@ impl StopsApp {
             kind::PERMISSIONS_CHANGED => {
                 self.refresh_preflight(cx);
                 self.resume_pending_start(cx);
+                self.locate_after_permission(cx);
             }
             kind::DOCUMENT_RESULT => match serde_json::from_str::<DocumentResult>(&event.json) {
                 Ok(result) if result.op == DocumentOp::ImportGtfs => {
@@ -451,10 +490,12 @@ impl StopsApp {
         }
     }
 
-    /// Whether System Back has a layer to close: a pin menu, the alarm, a sheet, a Settings page,
-    /// an opened saved place, or any tab but the first (Trip). When it has not, Back leaves the app.
+    /// Whether System Back has a layer to close: a pin menu, an armed "Move", the alarm, a
+    /// sheet, a Settings page, an opened saved place, or any tab but the first (Trip). When it
+    /// has not, Back leaves the app.
     pub(crate) fn can_go_back(&self) -> bool {
         self.pick.menu().is_some()
+            || self.pick.moving().is_some()
             || self.alarm.is_some()
             || self.sheet.is_open()
             || (self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main)
@@ -476,6 +517,9 @@ impl StopsApp {
             if self.trip.as_ref().is_none_or(|t| t.snoozes_left() > 0) {
                 self.alarm_action(AlarmAction::Snooze, cx);
             }
+        } else if self.pick.moving().is_some() {
+            self.pick.cancel_move();
+            cx.notify();
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
         } else if self.tabs.selected() == 2
@@ -497,6 +541,8 @@ impl StopsApp {
             self.expanded = None;
             cx.notify();
         } else if self.tabs.select(0) {
+            self.confirm_clear = false;
+            self.confirm_remove_feed = false;
             self.page.restart();
             cx.notify();
         }
@@ -511,6 +557,19 @@ impl StopsApp {
         let prefs = self.prefs.clone();
         cx.background_executor()
             .spawn(async move { backend::save_prefs(&dir, &prefs) })
+            .detach();
+    }
+
+    /// Writes the next trip's choices (the arrival text toggle).
+    pub(crate) fn save_next_trip(&self, cx: &mut Context<Self>) {
+        let Some(dir) = self.dir.clone() else {
+            return;
+        };
+        let next = backend::NextTrip {
+            notice_on: self.notice_on,
+        };
+        cx.background_executor()
+            .spawn(async move { backend::save_next_trip(&dir, &next) })
             .detach();
     }
 
@@ -588,21 +647,35 @@ impl StopsApp {
         }
     }
 
-    /// 12 px above the tab bar, or above the bottom edge over a sheet.
-    fn pill_bottom(&self) -> f32 {
+    /// The pill's gap to the window bottom: 12 px above the tab bar; above the
+    /// soft keyboard while it is up; at the top of the screen while a sheet is
+    /// up, so it neither hides behind the keyboard nor covers the sheet's buttons.
+    fn pill_bottom(&self, window: &Window) -> f32 {
         const GAP: f32 = 12.0;
-        if self.sheet.is_visible() {
-            GAP + 10.0
+        let insets = window.insets();
+        let keyboard = f32::from((insets.ime.bottom - insets.consumed.bottom).max(px(0.0)));
+        // `is_open`: a sheet sliding away already gives the pill its usual place.
+        if self.sheet.is_open() {
+            let top = f32::from((insets.safe_area.top - insets.consumed.top).max(px(0.0)));
+            let height = f32::from(window.viewport_size().height);
+            (height - top - 8.0 - rovsti_ui::notice_pill::HEIGHT).max(keyboard + GAP)
+        } else if keyboard > 0.0 {
+            keyboard + GAP
         } else {
             f32::from(metrics::TAB_BAR_MARGIN) + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1 + GAP
         }
     }
 
-    fn render_pill(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_pill(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let entity = cx.entity();
         self.pill.render(
             theme,
-            self.pill_bottom(),
+            self.pill_bottom(window),
             move |pointer, position, _, cx| {
                 entity.update(cx, |this, cx| {
                     if this.pill.pointer(pointer, position) == PillEvent::Action {
@@ -686,7 +759,6 @@ impl Render for StopsApp {
                 rovsti_ui::theme::colors(theme).orange,
             ))
             .child(page)
-            .children(self.render_pill(theme, cx))
             .child(self.tabs.render(
                 theme,
                 move |index, _, cx| {
@@ -694,6 +766,11 @@ impl Render for StopsApp {
                         this.tabs.press();
                         if this.tabs.select(index) {
                             this.expanded = None;
+                            // Leaving disarms a half-done destructive tap and
+                            // closes the pin menu nobody can see any more.
+                            this.confirm_clear = false;
+                            this.confirm_remove_feed = false;
+                            this.pick.close_menu();
                             this.relocating = None;
                             this.page.restart();
                             this.saved_list.scroll_to_top();
@@ -712,6 +789,8 @@ impl Render for StopsApp {
                 },
             ))
             .children(self.sheet_view(theme, window, cx))
+            // Over the sheet, so a refused name or a save result is seen.
+            .children(self.render_pill(theme, window, cx))
             .children(self.alarm_screen(theme, cx))
     }
 }

@@ -576,7 +576,9 @@ pub(crate) struct ReplyEditor {
 impl ReplyEditor {
     pub fn new(cx: &mut Context<PhoneApp>) -> Self {
         Self {
-            fields: (0..MAX_REPLIES).map(|_| cx.new(SearchField::new)).collect(),
+            fields: (0..MAX_REPLIES)
+                .map(|_| cx.new(|cx| SearchField::new(cx).with_action(gpui::TextInputAction::Done)))
+                .collect(),
             order: Vec::new(),
             seen: [0; MAX_REPLIES],
             drag: None,
@@ -692,6 +694,8 @@ impl PhoneApp {
             .collect();
         self.backend
             .update(cx, |b, cx| b.update_prefs(cx, |p| p.quick_replies = texts));
+        // The "Quick replies" row under the page shows the count.
+        self.sync_settings_rows(cx, false);
     }
 
     pub(crate) fn replies_tap(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -744,6 +748,7 @@ impl PhoneApp {
                 });
             });
             self.replies_load(cx);
+            self.sync_settings_rows(cx, false);
             rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
         }
         self.replies_ed.confirm_reset = false;
@@ -928,6 +933,15 @@ impl PhoneApp {
                 div()
                     .text_color(colors.tertiary_label)
                     .child("Write a reply")
+                    .into_any_element()
+            } else if focused {
+                // While typing the ellipsis cuts the start, never the words just typed.
+                div()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
+                    .text_color(colors.label)
+                    .child(text.clone())
                     .into_any_element()
             } else {
                 div()

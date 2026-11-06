@@ -9,5 +9,6 @@ pub mod media;
 pub mod picture;
 pub mod reaction;
 pub mod session;
+pub mod status;
 
 pub use session::WaRuntime;

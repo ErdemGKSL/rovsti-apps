@@ -2,6 +2,7 @@
 
 use rovsti_wa_proto::{
     ChatMeta, DeliveryStatus, MessageBody, MessageMeta, RichChat, RichMessage, WaProfile,
+    is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -161,6 +162,45 @@ pub fn apply_change(
             meta.status = Some(merged);
             (false, changed)
         }
+    }
+}
+
+/// How many other members of a group reached each state with one of my
+/// messages (a member who read it also counts as delivered).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ReceiptCounts {
+    pub delivered: usize,
+    pub read: usize,
+    pub played: usize,
+}
+
+/// The ticks a group message shows, like WhatsApp: delivered once every other
+/// member has it, read once every other member read it, played once every
+/// other member played it. `members` is the number of other members now;
+/// `None` when the gateway could not learn it, and then one receipt is
+/// enough for two grey ticks but never for blue ones. `None` result: still
+/// one tick.
+///
+/// Approximate: the member count is today's, not the one at send time, so a
+/// member who joined later (and never got the message) holds the ticks back,
+/// and one who left is still waited for until the group is re-read.
+pub fn group_status(members: Option<usize>, counts: ReceiptCounts) -> Option<DeliveryStatus> {
+    match members.filter(|&n| n > 0) {
+        Some(n) if counts.played >= n => Some(DeliveryStatus::Played),
+        Some(n) if counts.read >= n => Some(DeliveryStatus::Read),
+        Some(n) if counts.delivered >= n => Some(DeliveryStatus::Delivered),
+        Some(_) => None,
+        None => (counts.delivered > 0).then_some(DeliveryStatus::Delivered),
+    }
+}
+
+/// The `receipts.status` value of a state (`Sent` is never stored).
+fn receipt_rank(status: DeliveryStatus) -> i64 {
+    match status {
+        DeliveryStatus::Sent => 0,
+        DeliveryStatus::Delivered => 1,
+        DeliveryStatus::Read => 2,
+        DeliveryStatus::Played => 3,
     }
 }
 
@@ -364,6 +404,10 @@ impl Store {
         message: rovsti_wa_proto::WaMessage,
         extras: MessageExtras,
     ) -> Result<bool, StoreError> {
+        // Status updates never become a chat or an unread count.
+        if is_status_chat(&message.chat) {
+            return Ok(false);
+        }
         self.run(move |conn| {
             let tx = conn.transaction()?;
             let fresh = insert_row(&tx, &instance, &message.chat, &message, &extras)?;
@@ -473,7 +517,8 @@ impl Store {
         self.run(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT jid, name, is_group, unread FROM chats
-                 WHERE instance_id = ?1 ORDER BY last_ms DESC, jid",
+                 WHERE instance_id = ?1 AND jid != 'status@broadcast'
+                 ORDER BY last_ms DESC, jid",
             )?;
             let rows = stmt
                 .query_map([instance.as_str()], |r| {
@@ -567,6 +612,10 @@ impl Store {
                     "DELETE FROM reactions WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
                     params![instance.as_str(), chat, id],
                 )?;
+                tx.execute(
+                    "DELETE FROM receipts WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                    params![instance.as_str(), chat, id],
+                )?;
             }
             tx.commit()?;
             Ok(Some((body_changed.then_some(body), meta)))
@@ -574,24 +623,113 @@ impl Store {
         .await
     }
 
-    /// Records a receipt for my messages `ids` in `chat`.
+    /// Records a receipt for my messages `ids` in `chat`. Returns the messages
+    /// whose ticks moved, with their new meta.
     pub async fn set_status(
         &self,
         instance: InstanceId,
         chat: String,
         ids: Vec<String>,
         status: DeliveryStatus,
-    ) -> Result<(), StoreError> {
+    ) -> Result<Vec<(String, MessageMeta)>, StoreError> {
+        let mut changed = Vec::new();
         for id in ids {
-            self.change_message(
-                instance.clone(),
-                chat.clone(),
-                id,
-                MessageChange::Status(status),
-            )
-            .await?;
+            if let Some((_, meta)) = self
+                .change_message(
+                    instance.clone(),
+                    chat.clone(),
+                    id.clone(),
+                    MessageChange::Status(status),
+                )
+                .await?
+            {
+                changed.push((id, meta));
+            }
         }
-        Ok(())
+        Ok(changed)
+    }
+
+    /// Records that group member `participant` reached `status` with my
+    /// messages `ids` in group `chat`, then moves each message's ticks to
+    /// what the whole group reached ([`group_status`] with `members` other
+    /// members). Returns the messages whose ticks moved, with their new meta.
+    /// Receipts for messages that are not mine are ignored.
+    pub async fn record_group_receipt(
+        &self,
+        instance: InstanceId,
+        chat: String,
+        participant: String,
+        ids: Vec<String>,
+        status: DeliveryStatus,
+        members: Option<usize>,
+    ) -> Result<Vec<(String, MessageMeta)>, StoreError> {
+        let rank = receipt_rank(status);
+        if rank == 0 {
+            return Ok(Vec::new());
+        }
+        self.run(move |conn| {
+            let tx = conn.transaction()?;
+            let mut changed = Vec::new();
+            for id in ids {
+                let row = tx
+                    .query_row(
+                        "SELECT from_me, body_json, meta_json FROM messages
+                         WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                        params![instance.as_str(), chat, id],
+                        |r| {
+                            Ok((
+                                r.get::<_, bool>(0)?,
+                                r.get::<_, String>(1)?,
+                                r.get::<_, Option<String>>(2)?,
+                            ))
+                        },
+                    )
+                    .optional()?;
+                let Some((true, body, meta)) = row else {
+                    continue;
+                };
+                tx.execute(
+                    "INSERT INTO receipts (instance_id, chat, id, participant, status)
+                     VALUES (?1, ?2, ?3, ?4, ?5)
+                     ON CONFLICT (instance_id, chat, id, participant)
+                     DO UPDATE SET status = MAX(status, excluded.status)",
+                    params![instance.as_str(), chat, id, participant, rank],
+                )?;
+                let counts = tx.query_row(
+                    "SELECT COUNT(*),
+                            COALESCE(SUM(status >= 2), 0),
+                            COALESCE(SUM(status >= 3), 0)
+                     FROM receipts WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                    params![instance.as_str(), chat, id],
+                    |r| {
+                        let n = |i| r.get::<_, i64>(i).map(|v| usize::try_from(v).unwrap_or(0));
+                        Ok(ReceiptCounts {
+                            delivered: n(0)?,
+                            read: n(1)?,
+                            played: n(2)?,
+                        })
+                    },
+                )?;
+                let Some(group) = group_status(members, counts) else {
+                    continue;
+                };
+                let mut body: MessageBody = serde_json::from_str(&body)?;
+                let mut meta = meta_from(meta)?;
+                let (_, moved) =
+                    apply_change(&mut body, &mut meta, true, MessageChange::Status(group));
+                if moved {
+                    tx.execute(
+                        "UPDATE messages SET meta_json = ?4
+                         WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                        params![instance.as_str(), chat, id, meta_json(&meta)?],
+                    )?;
+                    changed.push((id, meta));
+                }
+            }
+            tx.commit()?;
+            Ok(changed)
+        })
+        .await
     }
 
     /// The secret of a stored message (for encrypted edits).
@@ -651,6 +789,10 @@ impl Store {
                 "DELETE FROM reactions WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
                 params![instance.as_str(), chat, id],
             )?;
+            tx.execute(
+                "DELETE FROM receipts WHERE instance_id = ?1 AND chat = ?2 AND id = ?3",
+                params![instance.as_str(), chat, id],
+            )?;
             tx.commit()?;
             Ok(n > 0)
         })
@@ -673,6 +815,10 @@ impl Store {
             )?;
             tx.execute(
                 "DELETE FROM reactions WHERE instance_id = ?1 AND chat = ?2",
+                params![instance.as_str(), jid],
+            )?;
+            tx.execute(
+                "DELETE FROM receipts WHERE instance_id = ?1 AND chat = ?2",
                 params![instance.as_str(), jid],
             )?;
             if keep_chat {
@@ -878,6 +1024,28 @@ impl Store {
 mod tests {
     use super::*;
     use rovsti_wa_proto::MediaKind;
+
+    #[test]
+    fn group_ticks_wait_for_every_member() {
+        use DeliveryStatus::*;
+        let counts = |delivered, read, played| ReceiptCounts {
+            delivered,
+            read,
+            played,
+        };
+        // Three other members: one reader is not enough for blue ticks.
+        assert_eq!(group_status(Some(3), counts(1, 1, 0)), None);
+        assert_eq!(group_status(Some(3), counts(3, 1, 0)), Some(Delivered));
+        assert_eq!(group_status(Some(3), counts(3, 2, 0)), Some(Delivered));
+        assert_eq!(group_status(Some(3), counts(3, 3, 0)), Some(Read));
+        assert_eq!(group_status(Some(3), counts(3, 3, 3)), Some(Played));
+        // Readers who never sent "delivered" still count as delivered.
+        assert_eq!(group_status(Some(2), counts(2, 2, 1)), Some(Read));
+        // Unknown member count: grey ticks at most.
+        assert_eq!(group_status(None, counts(0, 0, 0)), None);
+        assert_eq!(group_status(None, counts(5, 5, 5)), Some(Delivered));
+        assert_eq!(group_status(Some(0), counts(1, 1, 0)), Some(Delivered));
+    }
 
     fn photo(caption: Option<&str>) -> MessageBody {
         MessageBody::Media {

@@ -10,10 +10,10 @@ use rovsti_wa_proto::api::routes;
 use rovsti_wa_proto::{
     CallStarted, CallSummary, ChatAction, ChatState, ChatSummary, ConnectKey, CreateInstance,
     CreatedInstance, DeleteForMe, EditMessage, GatewayUrl, GroupInfo, InstanceStatus, IssuedKey,
-    KeyInfo, LinkRequest, LookupUsers, MarkRead, MediaKind, MediaOptions, MintKey, PlaceCall,
-    ProfilesRequest, PushRegistration, RevokeMessage, RichChat, RichMessage, ScheduleText,
-    ScheduledText, SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage,
-    SubscribePresence, WaMessage, WaProfile, WaUser,
+    KeyInfo, LinkRequest, LookupUsers, MarkRead, MarkStatusViewed, MediaKind, MediaOptions,
+    MintKey, PlaceCall, ProfilesRequest, PushRegistration, RevokeMessage, RichChat, RichMessage,
+    ScheduleText, ScheduledText, SendReaction, SendText, Sent, SetMuted, SetPresence, StarMessage,
+    StatusList, SubscribePresence, WaMessage, WaProfile, WaUser,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -486,6 +486,43 @@ impl Gateway {
             .limit(JSON_LIMIT)
             .read_to_vec()
             .map_err(ClientError::from)
+    }
+
+    /// The current status updates (stories): mine, and everyone else's
+    /// grouped by author, unseen first. Expired ones are left out.
+    pub fn statuses(&self) -> Result<StatusList, ClientError> {
+        self.get(routes::STATUSES)
+    }
+
+    /// The photo or video of a status update.
+    pub fn status_media(&self, id: &str) -> Result<Vec<u8>, ClientError> {
+        let path = routes::fill(routes::STATUS_MEDIA, "id", id);
+        let mut resp = self.exec(Method::GET, &path, true, Payload::None)?;
+        resp.body_mut()
+            .with_config()
+            .limit(MEDIA_LIMIT)
+            .read_to_vec()
+            .map_err(ClientError::from)
+    }
+
+    /// The small preview image of a photo or video status update.
+    pub fn status_thumbnail(&self, id: &str) -> Result<Vec<u8>, ClientError> {
+        let path = routes::fill(routes::STATUS_THUMBNAIL, "id", id);
+        let mut resp = self.exec(Method::GET, &path, true, Payload::None)?;
+        resp.body_mut()
+            .with_config()
+            .limit(JSON_LIMIT)
+            .read_to_vec()
+            .map_err(ClientError::from)
+    }
+
+    /// Marks status updates seen; their authors get a read receipt. A
+    /// `status_changed` event follows.
+    pub fn mark_status_viewed(&self, ids: &[String]) -> Result<(), ClientError> {
+        self.post_unit(
+            routes::STATUS_VIEWED,
+            &MarkStatusViewed { ids: ids.to_vec() },
+        )
     }
 
     /// Edits the text or caption of a message I sent (WhatsApp allows 15

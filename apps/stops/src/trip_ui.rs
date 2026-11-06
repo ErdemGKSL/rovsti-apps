@@ -35,8 +35,10 @@ use crate::{
 
 /// "450 m", "1.2 km": metres to the nearest 10 below a kilometre.
 pub fn distance_text(metres: f64) -> String {
-    if metres < 1_000.0 {
-        format!("{} m", (metres.max(0.0) / 10.0).round() as i64 * 10)
+    // Rounded first, so 995 m reads "1.0 km", never "1000 m".
+    let tens = (metres.max(0.0) / 10.0).round() as i64 * 10;
+    if tens < 1_000 {
+        format!("{tens} m")
     } else {
         format!("{:.1} km", metres / 1_000.0)
     }
@@ -432,6 +434,7 @@ impl StopsApp {
                 .id("notice-toggle")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.notice_on = !this.notice_on;
+                    this.save_next_trip(cx);
                     cx.notify();
                 }))
                 .into_any_element()],
@@ -815,7 +818,7 @@ impl StopsApp {
                             cx,
                         );
                     }
-                    None => this.show_pill("Trip stopped.", None, cx),
+                    None => this.show_pill("Trip stopped", None, cx),
                 }
             })
             .ok();
@@ -945,7 +948,9 @@ impl StopsApp {
                 .detach();
             }
             Status::Searching => {
-                if self.trip.is_some() {
+                // Only before the first fix: later the card already says where
+                // you are, and a repeat would push away an Undo or a snooze pill.
+                if self.trip.is_some() && self.live.is_none() {
                     self.show_pill("Looking for your location...", None, cx);
                 }
             }
@@ -1164,7 +1169,10 @@ mod tests {
     fn distances_and_waits_round_for_reading() {
         assert_eq!(distance_text(0.0), "0 m");
         assert_eq!(distance_text(487.0), "490 m");
-        assert_eq!(distance_text(999.0), "1000 m");
+        assert_eq!(distance_text(994.0), "990 m");
+        assert_eq!(distance_text(995.0), "1.0 km");
+        assert_eq!(distance_text(999.0), "1.0 km");
+        assert_eq!(distance_text(f64::NAN), "0 m");
         assert_eq!(distance_text(1_240.0), "1.2 km");
         assert_eq!(distance_text(-5.0), "0 m");
         assert_eq!(wait_text(3_000), "3 s");

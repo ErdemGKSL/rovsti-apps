@@ -662,6 +662,11 @@ impl SettingsUi {
         self.sub.is_some()
     }
 
+    /// A second-level page is open and not already leaving (Back steps out of it).
+    pub fn sub_shown(&self) -> bool {
+        self.sub.is_some() && self.sub_shown
+    }
+
     /// 0 when the second-level page is away, 1 when it has settled.
     pub fn sub_progress(&self) -> f32 {
         if self.reduced && !self.sub_shown {
@@ -844,15 +849,20 @@ impl PhoneApp {
         let Some(sub) = self.settings.sub else { return };
         self.settings.close_sub(window.prefers_reduced_motion());
         window.blur();
+        self.settings_sub_cleanup(sub, cx);
+        self.presses.release_all();
+        self.update_back(window);
+        cx.notify();
+    }
+
+    /// What a second-level page lets go of when it closes.
+    fn settings_sub_cleanup(&mut self, sub: Sub, cx: &mut Context<Self>) {
         match sub {
             Sub::Blocked => self.blocked_closed(cx),
             Sub::Replies => self.replies_closed(cx),
             Sub::SpeedDial => self.speed_dial_closed(),
             Sub::WhatsApp => {}
         }
-        self.presses.release_all();
-        self.update_back(window);
-        cx.notify();
     }
 
     /// Rebuilds the rows when something they depend on changed; moves the
@@ -1057,6 +1067,7 @@ impl PhoneApp {
             self.settings.anim[row.index()].snap(target);
         }
         rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.say_if_unsaved(cx);
     }
 
     fn pick_setting(
@@ -1076,6 +1087,7 @@ impl PhoneApp {
             self.settings.anim[row.index()].snap(index as f32);
         }
         rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.say_if_unsaved(cx);
     }
 
     /// Once per render, before the springs tick: the gear's target, and a
@@ -1083,6 +1095,10 @@ impl PhoneApp {
     pub(crate) fn sync_settings_frame(&mut self, window: &Window, cx: &mut Context<Self>) {
         let reduced = window.prefers_reduced_motion();
         if self.settings.covers() && (self.incall.covers() || self.incoming.covers()) {
+            // The page under it lets go of what it holds (the blocked-calls pull, drafts).
+            if let Some(sub) = self.settings.sub {
+                self.settings_sub_cleanup(sub, cx);
+            }
             self.settings.close_now();
         }
         self.settings.reduced = reduced;
@@ -1097,6 +1113,18 @@ impl PhoneApp {
             if self.settings.sub == Some(Sub::Blocked) {
                 self.blocked_sync(cx);
             }
+        }
+    }
+
+    /// Without a data directory a change holds only until the app closes: say so.
+    fn say_if_unsaved(&mut self, cx: &mut Context<Self>) {
+        if self.backend.read(cx).prefs_unsaved() {
+            self.show_notice_pill(
+                "Couldn't save setting. It lasts until the app closes",
+                None,
+                false,
+                cx,
+            );
         }
     }
 

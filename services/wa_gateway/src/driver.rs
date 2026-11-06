@@ -6,8 +6,8 @@ use std::sync::Arc;
 use futures::future::BoxFuture;
 use rovsti_wa_proto::{
     ChatAction, ChatState, DeliveryStatus, EditMessage, GatewayEvent, GroupInfo, LinkRequest,
-    MarkRead, MediaKind, Reaction, RevokeMessage, SendReaction, SendText, Sent, WaMessage,
-    WaProfile, WaUser,
+    MarkRead, MediaKind, MessageMeta, Reaction, RevokeMessage, SendReaction, SendText, Sent,
+    WaMessage, WaProfile, WaUser, event::ReceiptKind, is_status_chat,
 };
 
 use crate::hub::Hub;
@@ -15,8 +15,50 @@ use crate::now_ms;
 use crate::push::{PushKind, Pusher, should_push};
 use crate::store::{
     ChatChange, FetchedProfile, InstanceId, MessageChange, MessageExtras, ProfileChange, Store,
+    StoredStatus,
 };
 use crate::wa::calls::{CallBackend, CallTable};
+
+/// What the apps hear when the ticks of my messages `moved` in `chat`: one
+/// `Receipt` for those now delivered and one for those now read or played,
+/// then a `MessageMeta` per played message, which is how an app learns a voice
+/// note was heard (a `Receipt` only says delivered or read).
+pub fn tick_events(chat: &str, moved: Vec<(String, MessageMeta)>) -> Vec<GatewayEvent> {
+    let mut delivered = Vec::new();
+    let mut read = Vec::new();
+    let mut played = Vec::new();
+    for (id, meta) in moved {
+        match meta.status {
+            Some(DeliveryStatus::Delivered) => delivered.push(id),
+            Some(DeliveryStatus::Read) => read.push(id),
+            Some(DeliveryStatus::Played) => {
+                read.push(id.clone());
+                played.push((id, meta));
+            }
+            Some(DeliveryStatus::Sent) | None => {}
+        }
+    }
+    let receipts = [
+        (ReceiptKind::Delivered, delivered),
+        (ReceiptKind::Read, read),
+    ]
+    .into_iter()
+    .filter(|(_, ids)| !ids.is_empty())
+    .map(|(kind, ids)| GatewayEvent::Receipt {
+        chat: chat.to_owned(),
+        ids,
+        kind,
+    });
+    let metas = played
+        .into_iter()
+        .map(|(id, meta)| GatewayEvent::MessageMeta {
+            chat: chat.to_owned(),
+            id,
+            body: None,
+            meta: Box::new(meta),
+        });
+    receipts.chain(metas).collect()
+}
 
 /// A file to send as a media message.
 #[derive(Clone)]
@@ -196,6 +238,60 @@ impl EventSink {
         }
     }
 
+    /// Stores a status update and tells the apps. Status updates are never a
+    /// chat, an unread count or a push.
+    pub async fn emit_status(&self, status: StoredStatus) {
+        let author = status.item.author.clone();
+        match self
+            .store
+            .insert_status(self.instance.clone(), status, now_ms())
+            .await
+        {
+            Ok(true) => self.publish(GatewayEvent::StatusChanged {
+                author: Some(author),
+            }),
+            Ok(false) => {}
+            Err(e) => log::warn!("{}: saving a status update failed: {e}", self.instance),
+        }
+    }
+
+    /// Status updates from a history sync, announced with one event.
+    pub async fn import_statuses(&self, statuses: Vec<StoredStatus>) {
+        let mut fresh = false;
+        let now = now_ms();
+        for status in statuses {
+            match self
+                .store
+                .insert_status(self.instance.clone(), status, now)
+                .await
+            {
+                Ok(new) => fresh |= new,
+                Err(e) => {
+                    log::warn!("{}: saving a status update failed: {e}", self.instance);
+                    break;
+                }
+            }
+        }
+        if fresh {
+            self.publish(GatewayEvent::StatusChanged { author: None });
+        }
+    }
+
+    /// The author deleted a status update.
+    pub async fn revoke_status(&self, id: &str) {
+        match self
+            .store
+            .delete_status(self.instance.clone(), id.to_owned())
+            .await
+        {
+            Ok(Some(author)) => self.publish(GatewayEvent::StatusChanged {
+                author: Some(author),
+            }),
+            Ok(None) => {}
+            Err(e) => log::warn!("{}: deleting a status update failed: {e}", self.instance),
+        }
+    }
+
     /// Names a group chat once its subject is known (only if the chat exists).
     pub async fn rename_chat(&self, jid: &str, name: &str) {
         if let Err(e) = self
@@ -266,6 +362,11 @@ impl EventSink {
     /// `MessageMeta` event when its meta is not empty. A message that is
     /// already stored is not published again.
     pub async fn emit_full(&self, message: WaMessage, extras: MessageExtras) {
+        // Status updates go through `emit_status`; they are never a chat.
+        if is_status_chat(&message.chat) {
+            log::debug!("{}: a status update reached the chat path", self.instance);
+            return;
+        }
         let meta = extras.meta.clone();
         match self
             .store
@@ -323,15 +424,68 @@ impl EventSink {
         }
     }
 
-    /// Stores the ticks of my messages (the `Receipt` event tells the apps).
+    /// Stores the ticks a one-to-one receipt puts on my messages and tells
+    /// the apps about the ones that moved.
     pub async fn set_status(&self, chat: &str, ids: Vec<String>, status: DeliveryStatus) {
-        if let Err(e) = self
+        match self
             .store
             .set_status(self.instance.clone(), chat.to_owned(), ids, status)
             .await
         {
-            log::warn!("{}: saving receipts failed: {e}", self.instance);
+            Ok(moved) => self.publish_ticks(chat, moved),
+            Err(e) => log::warn!("{}: saving receipts failed: {e}", self.instance),
         }
+    }
+
+    /// Stores one group member's receipt for my messages and tells the apps
+    /// about the messages whose group-wide ticks moved (see
+    /// [`crate::store::group_status`]).
+    pub async fn group_receipt(
+        &self,
+        chat: &str,
+        participant: String,
+        ids: Vec<String>,
+        status: DeliveryStatus,
+        members: Option<usize>,
+    ) {
+        match self
+            .store
+            .record_group_receipt(
+                self.instance.clone(),
+                chat.to_owned(),
+                participant,
+                ids,
+                status,
+                members,
+            )
+            .await
+        {
+            Ok(moved) => self.publish_ticks(chat, moved),
+            Err(e) => log::warn!("{}: saving receipts failed: {e}", self.instance),
+        }
+    }
+
+    /// A `Receipt` event per new tick state, and for played voice notes also
+    /// the new meta (a `Receipt` only knows delivered and read).
+    fn publish_ticks(&self, chat: &str, moved: Vec<(String, MessageMeta)>) {
+        for event in tick_events(chat, moved) {
+            self.publish(event);
+        }
+    }
+
+    /// The ids among `ids` that are not my own messages (unknown ids too).
+    pub async fn not_mine(&self, chat: &str, ids: Vec<String>) -> Vec<String> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            if !self
+                .find_message(chat, &id)
+                .await
+                .is_some_and(|m| m.from_me)
+            {
+                out.push(id);
+            }
+        }
+        out
     }
 
     /// Deletes a message on this account's devices and tells the apps.
@@ -619,6 +773,39 @@ pub trait WaDriver: Send + Sync + 'static {
     ) -> BoxFuture<'_, Result<PictureFetch, DriverError>> {
         Box::pin(async { Err(DriverError::NotConnected) })
     }
+
+    /// Read receipts for status updates, one batch per author: the receipt
+    /// goes to `status@broadcast` and names `participant` (the author as
+    /// WhatsApp addressed the update).
+    fn mark_status_viewed(
+        &self,
+        _instance: &InstanceId,
+        _batches: Vec<StatusReceipt>,
+    ) -> BoxFuture<'_, Result<(), DriverError>> {
+        Box::pin(async { Err(DriverError::NotConnected) })
+    }
+}
+
+/// The status updates of one author that were seen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatusReceipt {
+    pub participant: String,
+    pub ids: Vec<String>,
+}
+
+/// Groups seen updates into one receipt per author, in first-seen order.
+pub fn status_receipts(seen: impl IntoIterator<Item = (String, String)>) -> Vec<StatusReceipt> {
+    let mut out: Vec<StatusReceipt> = Vec::new();
+    for (participant, id) in seen {
+        match out.iter_mut().find(|r| r.participant == participant) {
+            Some(receipt) => receipt.ids.push(id),
+            None => out.push(StatusReceipt {
+                participant,
+                ids: vec![id],
+            }),
+        }
+    }
+    out
 }
 
 /// Refuses to start sessions, so the gateway can serve its API without
@@ -830,6 +1017,13 @@ mod fake {
         /// would report (incoming messages, edits, app-state changes).
         pub fn sink_of(&self, instance: &InstanceId) -> Option<EventSink> {
             self.sink(instance)
+        }
+
+        /// Delivers a status update as WhatsApp would.
+        pub async fn deliver_status(&self, instance: &InstanceId, status: StoredStatus) {
+            if let Some(sink) = self.sink(instance) {
+                sink.emit_status(status).await;
+            }
         }
 
         /// Delivers an incoming message with its extras.
@@ -1307,13 +1501,90 @@ mod fake {
                     });
             Box::pin(async move { result })
         }
+
+        fn mark_status_viewed(
+            &self,
+            instance: &InstanceId,
+            batches: Vec<StatusReceipt>,
+        ) -> BoxFuture<'_, Result<(), DriverError>> {
+            let mut result = Ok(());
+            for batch in batches {
+                result = result.and_then(|()| {
+                    self.record(
+                        instance,
+                        format!("status-read {} {}", batch.participant, batch.ids.join(",")),
+                    )
+                });
+            }
+            Box::pin(async move { result })
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_wa_proto::{MessageMeta, Quoted};
+    use rovsti_wa_proto::Quoted;
+
+    #[test]
+    fn moved_ticks_become_receipts_and_played_meta() {
+        let at = |status| MessageMeta {
+            status: Some(status),
+            ..Default::default()
+        };
+        let events = tick_events(
+            "c",
+            vec![
+                ("d".into(), at(DeliveryStatus::Delivered)),
+                ("r".into(), at(DeliveryStatus::Read)),
+                ("p".into(), at(DeliveryStatus::Played)),
+            ],
+        );
+        assert_eq!(
+            events,
+            [
+                GatewayEvent::Receipt {
+                    chat: "c".into(),
+                    ids: vec!["d".into()],
+                    kind: ReceiptKind::Delivered,
+                },
+                GatewayEvent::Receipt {
+                    chat: "c".into(),
+                    ids: vec!["r".into(), "p".into()],
+                    kind: ReceiptKind::Read,
+                },
+                GatewayEvent::MessageMeta {
+                    chat: "c".into(),
+                    id: "p".into(),
+                    body: None,
+                    meta: Box::new(at(DeliveryStatus::Played)),
+                },
+            ]
+        );
+        assert!(tick_events("c", Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn status_receipts_batch_by_author() {
+        let got = status_receipts([
+            ("a@lid".to_owned(), "1".to_owned()),
+            ("b@lid".to_owned(), "2".to_owned()),
+            ("a@lid".to_owned(), "3".to_owned()),
+        ]);
+        assert_eq!(
+            got,
+            [
+                StatusReceipt {
+                    participant: "a@lid".into(),
+                    ids: vec!["1".into(), "3".into()],
+                },
+                StatusReceipt {
+                    participant: "b@lid".into(),
+                    ids: vec!["2".into()],
+                },
+            ]
+        );
+    }
 
     #[test]
     fn only_meta_worth_a_second_event_is_announced() {

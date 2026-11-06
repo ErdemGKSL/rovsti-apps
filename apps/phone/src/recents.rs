@@ -613,6 +613,11 @@ impl PhoneApp {
         self.window_active = active;
         self.recents.view_task = None;
         self.recents.marked = false;
+        if !active {
+            // A speed-dial pick belongs to this visit: coming back later, a
+            // contact's numbers call again instead of assigning a digit.
+            self.speed_dial.pick = None;
+        }
         if active {
             self.recents_tab_changed(cx);
         }
@@ -1276,8 +1281,9 @@ impl PhoneApp {
                 if outcome == backend::Outcome::Done {
                     self.close_sheet(cx);
                 } else {
-                    self.setup_note =
-                        Some(outcome.why_not("Couldn't open the Contacts app").into());
+                    // The Number sheet has no note line: the pill says it.
+                    let text = outcome.why_not("Couldn't open the Contacts app");
+                    self.show_notice_pill(text, None, false, cx);
                 }
             }
             _ => {}

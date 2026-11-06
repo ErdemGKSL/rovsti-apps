@@ -119,7 +119,9 @@ for (profile in listOf("debug", "release")) {
 if (firebaseEnabled) {
     apply(plugin = "com.google.gms.google-services")
     // RovstiMessagingService and its MESSAGING_EVENT manifest entry only exist in this build.
-    android.sourceSets.getByName("main").java.directories.add(file("src/firebase/kotlin").absolutePath)
+    // A Kotlin source directory: built-in Kotlin does not compile .kt files from java
+    // directories, which left the manifest's service without a class (crash on every push).
+    android.sourceSets.getByName("main").kotlin.directories.add(file("src/firebase/kotlin").absolutePath)
     for (type in listOf("debug", "release")) {
         android.sourceSets.getByName(type).manifest.srcFile(file("src/firebase/AndroidManifest.xml"))
     }

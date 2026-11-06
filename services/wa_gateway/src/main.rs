@@ -59,6 +59,10 @@ async fn run(config_path: Option<&std::path::Path>) -> Result<(), String> {
         listener.local_addr().map_err(|e| e.to_string())?
     );
     let _sweeper = wa_gateway::schedule::spawn_sweeper(state.clone(), SWEEP_EVERY);
+    let _purger = wa_gateway::status_routes::spawn_purger(
+        state.clone(),
+        wa_gateway::status_routes::PURGE_EVERY,
+    );
     tokio::select! {
         result = serve(listener, state) => result.map_err(|e| e.to_string()),
         _ = tokio::signal::ctrl_c() => {

@@ -1,6 +1,6 @@
 //! History sync: WhatsApp's `HistorySync` protobuf to store rows.
 
-use rovsti_wa_proto::{DeliveryStatus, MUTED_FOREVER, MessageBody, Reaction};
+use rovsti_wa_proto::{DeliveryStatus, MUTED_FOREVER, MessageBody, Reaction, is_status_chat};
 use whatsapp_rust::prelude::*;
 use whatsapp_rust::wacore::history_sync::HistorySyncError;
 use whatsapp_rust::wacore::types::events::LazyHistorySync;
@@ -8,7 +8,8 @@ use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::waproto::whatsapp::web_message_info::Status as WebStatus;
 
 use super::convert::{self, Converted, Origin};
-use crate::store::{ChatSettings, HistoryChat, HistoryMessage};
+use super::status;
+use crate::store::{ChatSettings, HistoryChat, HistoryMessage, StoredStatus};
 
 /// Chats that are not conversations the apps show.
 fn is_skipped(jid: &str) -> bool {
@@ -198,15 +199,28 @@ pub fn push_names(sync: &wa::HistorySync) -> Vec<(String, String)> {
 pub struct Drained {
     pub chats: Vec<HistoryChat>,
     pub push_names: Vec<(String, String)>,
+    /// Status updates from the `status@broadcast` conversation.
+    pub statuses: Vec<StoredStatus>,
 }
 
 /// Walks the lazily decoded sync one conversation at a time, so the whole
 /// inflated blob never sits in memory. Blocking and CPU-heavy: call it from
 /// `spawn_blocking`.
-pub fn drain(lazy: &LazyHistorySync, now_ms: i64) -> Result<Drained, HistorySyncError> {
+/// `own_pn` is this account's phone-number JID, the author of my own status
+/// updates.
+pub fn drain(
+    lazy: &LazyHistorySync,
+    now_ms: i64,
+    own_pn: Option<&str>,
+) -> Result<Drained, HistorySyncError> {
     let mut stream = lazy.stream();
     let mut chats = Vec::new();
+    let mut statuses = Vec::new();
     while let Some(conv) = stream.next_conversation()? {
+        if is_status_chat(&conv.id) {
+            statuses.extend(status::from_history(&conv, own_pn));
+            continue;
+        }
         chats.extend(conversation(&conv, now_ms));
     }
     // Push names are optional: a sync whose tail does not decode still
@@ -218,7 +232,11 @@ pub fn drain(lazy: &LazyHistorySync, now_ms: i64) -> Result<Drained, HistorySync
             Vec::new()
         }
     };
-    Ok(Drained { chats, push_names })
+    Ok(Drained {
+        chats,
+        push_names,
+        statuses,
+    })
 }
 
 #[cfg(test)]

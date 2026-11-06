@@ -65,6 +65,8 @@ pub(crate) struct Editor {
     /// A picked image for a contact that is not saved yet; it becomes the
     /// photo once the first save returns the id.
     pending_photo: Option<String>,
+    /// The form as it opened: leaving with anything else asks first.
+    initial: ContactDraft,
 }
 
 /// The account a new contact starts in: the remembered one while it is still
@@ -115,7 +117,7 @@ impl Editor {
         if numbers.is_empty() {
             numbers = make_rows(&[DraftField::new("", FieldKind::Mobile)], Config::PHONE, cx);
         }
-        Self {
+        let mut editor = Self {
             id: draft.id,
             account: draft.account.clone(),
             starred: draft.starred,
@@ -129,7 +131,17 @@ impl Editor {
             error: None,
             saving: false,
             pending_photo: None,
-        }
+            initial: ContactDraft::default(),
+        };
+        // Read back from the form (with its blank first number), so an
+        // untouched form compares equal.
+        editor.initial = editor.draft(cx);
+        editor
+    }
+
+    /// Whether the owner changed anything since the form opened.
+    fn is_dirty(&self, cx: &gpui::App) -> bool {
+        self.pending_photo.is_some() || self.draft(cx) != self.initial
     }
 
     /// The form as a draft; not yet cleaned or checked.
@@ -220,6 +232,21 @@ impl ContactsApp {
         self.notice = None;
         self.page.restart();
         cx.notify();
+    }
+
+    /// Cancel or Back on the form: closes it, after asking when there are
+    /// unsaved changes.
+    pub(crate) fn leave_editor(&mut self, cx: &mut Context<Self>) {
+        let dirty = self
+            .editor
+            .as_ref()
+            .is_some_and(|editor| !editor.saving && editor.is_dirty(cx));
+        if dirty {
+            self.confirm = Some(crate::confirm::Confirm::DiscardEdits);
+            cx.notify();
+        } else {
+            self.close_editor(cx);
+        }
     }
 
     pub(crate) fn close_editor(&mut self, cx: &mut Context<Self>) {
@@ -327,6 +354,8 @@ impl ContactsApp {
                     this.photo_sheet.close();
                     let photo = this.editor.as_mut().and_then(|e| e.pending_photo.take());
                     this.editor = None;
+                    // Its numbers may have changed: look WhatsApp up again.
+                    this.wa.lookups.remove(&id);
                     this.pending_open = Some(id);
                     this.notice = Some("Saved.".into());
                     this.page.restart();
@@ -547,7 +576,7 @@ impl ContactsApp {
             .pt(px(48.0))
             .child(
                 pill(theme, "editor-cancel", "Cancel", false)
-                    .on_click(cx.listener(|this, _, _, cx| this.close_editor(cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.leave_editor(cx))),
             )
             .child(
                 pill(

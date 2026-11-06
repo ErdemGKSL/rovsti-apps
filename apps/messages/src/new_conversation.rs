@@ -205,6 +205,8 @@ impl NewConversation {
                 Some(
                     div()
                         .id(("new-option", index))
+                        // List items are sized to their content: fill the row.
+                        .w_full()
                         .h(px(ROW_H))
                         .flex()
                         .items_center()

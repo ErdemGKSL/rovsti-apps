@@ -13,6 +13,7 @@ pub mod push;
 pub mod rich_routes;
 pub mod routes;
 pub mod schedule;
+pub mod status_routes;
 pub mod store;
 pub mod wa;
 

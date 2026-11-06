@@ -35,13 +35,14 @@ use crate::{
     keyed_list::{KeyedList, key_of},
     photos::ContactPhotos,
     schedule_ui::{self, StripItem, StripKey},
+    ticks::{Tick, read_color, ticks},
 };
 use rovsti_wa_proto::{
-    ChatState, DeleteForMe, DeliveryStatus, EditMessage, GatewayEvent, Item, ItemState, Location,
-    MarkRead, MediaKind, MediaMeta, MediaOptions, MessageBody, MessageMeta, Quoted, RevokeMessage,
+    ChatState, DeleteForMe, EditMessage, GatewayEvent, Item, ItemState, Location, MarkRead,
+    MediaKind, MediaMeta, MediaOptions, MessageBody, MessageMeta, Quoted, RevokeMessage,
     SendReaction, SendText, Sent, SharedContact, StarMessage, Timeline, TypingState,
     TypingThrottle, WaMessage, check_size, classify, day_breaks, jid_user, meta::body_preview,
-    reaction_chips,
+    reaction_chips, read_requests,
 };
 
 /// Messages per history request.
@@ -102,6 +103,8 @@ pub struct Setup {
     pub avatars: Entity<WaAvatars>,
     pub photos: Entity<ContactPhotos>,
     pub peer: Peer,
+    /// The window is in front of the user (see [`Conversation::set_active`]).
+    pub active: bool,
 }
 
 /// The message the composer answers.
@@ -165,6 +168,9 @@ pub struct Conversation {
     loading: bool,
     /// Incoming ids already reported to the gateway as read.
     marked: HashSet<String>,
+    /// The window is in front of the user: only then do incoming messages
+    /// count as seen and get read receipts.
+    active: bool,
     /// The last failed load, shown above the messages.
     error: Option<SharedString>,
     /// The virtualised, bottom-aligned timeline: item 0 is the "Load earlier"
@@ -246,6 +252,7 @@ impl Conversation {
             avatars,
             photos,
             peer,
+            active,
         } = setup;
         let composer =
             cx.new(|cx| TextField::with_input(TextInputPurpose::Text, TextInputAction::Send, cx));
@@ -280,6 +287,7 @@ impl Conversation {
             next_local: 1,
             loading: false,
             marked: HashSet::new(),
+            active,
             error: None,
             list: KeyedList::new(ListAlignment::Bottom, 1),
             entries: Vec::new(),
@@ -648,6 +656,19 @@ impl Conversation {
         }
     }
 
+    /// The window came to the front or left it (app backgrounded, screen
+    /// off, another app or the shade on top). Coming back reads what
+    /// arrived meanwhile.
+    pub fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if self.active == active {
+            return;
+        }
+        self.active = active;
+        if active {
+            self.mark_unread(cx);
+        }
+    }
+
     pub fn set_switch(
         &mut self,
         switch: Option<(ThreadId, crate::inbox::Badge)>,
@@ -843,32 +864,34 @@ impl Conversation {
         .detach();
     }
 
-    /// Tells the gateway about incoming messages that were not reported yet.
+    /// Tells the gateway about incoming messages that were not reported yet,
+    /// while the user can see them: nothing is "seen" from the background
+    /// ([`Self::set_active`] catches up). In a group there is one receipt
+    /// per author, as WhatsApp wants.
     fn mark_unread(&mut self, cx: &mut Context<Self>) {
-        let ids: Vec<String> = self
-            .timeline
-            .unread_ids()
-            .into_iter()
-            .filter(|id| !self.marked.contains(id))
-            .collect();
-        if ids.is_empty() {
-            return;
+        for request in reads_due(&self.timeline, &self.marked, self.active) {
+            self.marked.extend(request.ids.iter().cloned());
+            self.send_read(request, cx);
         }
-        self.marked.extend(ids.iter().cloned());
-        let request = MarkRead {
-            chat: self.chat.clone(),
-            sender: None,
-            ids,
-        };
+    }
+
+    fn send_read(&self, request: MarkRead, cx: &mut Context<Self>) {
         let gateway = self.gateway.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { gateway.mark_read(&request).map(|()| request.ids) });
+        let task = cx.background_executor().spawn(async move {
+            let result = gateway.mark_read(&request);
+            (result, request.ids)
+        });
         cx.spawn(async move |this, cx| {
-            if let Err(error) = task.await {
+            let (result, ids) = task.await;
+            if let Err(error) = result {
                 log::warn!("marking WhatsApp messages read failed: {error}");
                 // Forget them so the next event tries again.
-                this.update(cx, |this, _| this.marked.clear()).ok();
+                this.update(cx, |this, _| {
+                    for id in &ids {
+                        this.marked.remove(id);
+                    }
+                })
+                .ok();
             }
         })
         .detach();
@@ -1541,13 +1564,8 @@ impl Conversation {
         } else {
             fill
         };
-        let meta_color = if failed {
-            colors.red
-        } else if item.state == ItemState::Read {
-            gpui::white()
-        } else {
-            quiet
-        };
+        let meta_color = if failed { colors.red } else { quiet };
+        let tick = Tick::of_item(item, meta);
         let line: SharedString = if failed {
             "Not sent · Tap to retry".into()
         } else {
@@ -1631,9 +1649,13 @@ impl Conversation {
         bubble = bubble.child(content).child(
             div()
                 .self_end()
+                .flex()
+                .items_center()
+                .gap(px(3.0))
                 .text_size(typography::CAPTION.size)
                 .text_color(meta_color)
-                .child(line),
+                .child(line)
+                .children(tick.map(|tick| ticks(tick, 14.0, quiet, read_color(true)))),
         );
         let confirmed = !matches!(
             item.state,
@@ -2392,27 +2414,35 @@ pub(crate) fn now_ms() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
-/// The line under a bubble's text: the time, then "Sending…", "Not sent" or
-/// the delivery ticks for our own messages. Within a minute the time reads
-/// "Now".
+/// The read receipts the open chat owes: none while the window is not in
+/// front of the user (`active`), else one per author for the incoming
+/// messages not yet `marked`.
+fn reads_due(timeline: &Timeline, marked: &HashSet<String>, active: bool) -> Vec<MarkRead> {
+    if !active {
+        return Vec::new();
+    }
+    let unread = timeline
+        .unread()
+        .filter(|m| !marked.contains(&m.id))
+        .map(|m| (m.sender.as_deref(), m.id.as_str()));
+    read_requests(timeline.chat(), unread)
+}
+
+/// The text under a bubble: the time ("Now" within a minute), or "Not sent".
+/// The ticks of my messages are icons after it ([`Tick`]).
 fn meta_at(item: &Item, now_ms: i64, offset_s: i32) -> String {
+    if matches!(item.state, ItemState::Failed { .. }) {
+        return "Not sent".to_owned();
+    }
     let ts = item.message.timestamp_ms;
-    let time = if (0..60_000).contains(&(now_ms - ts)) {
+    if (0..60_000).contains(&(now_ms - ts)) {
         "Now".to_owned()
     } else {
         clock(ts, offset_s)
-    };
-    match item.state {
-        ItemState::Pending { .. } => "Sending…".to_owned(),
-        ItemState::Failed { .. } => "Not sent".to_owned(),
-        ItemState::Sent if item.message.from_me => format!("{time} ✓"),
-        ItemState::Delivered | ItemState::Read if item.message.from_me => format!("{time} ✓✓"),
-        _ => time,
     }
 }
 
-/// The line under a bubble: a star, "Edited", the time and ticks, and
-/// "Played" once a voice note I sent was heard.
+/// The text under a bubble: a star, "Edited" and the time.
 fn meta_line(
     item: &Item,
     meta: Option<&MessageMeta>,
@@ -2427,14 +2457,10 @@ fn meta_line(
     );
     if let Some(meta) = meta
         && !failed_or_pending
+        && meta.edited_ms.is_some()
+        && !meta.revoked
     {
-        if meta.edited_ms.is_some() && !meta.revoked {
-            line = format!("Edited · {line}");
-        }
-        let voice = meta.media.as_ref().is_some_and(|m| m.voice_note);
-        if item.message.from_me && voice && meta.status == Some(DeliveryStatus::Played) {
-            line.push_str(" · Played");
-        }
+        line = format!("Edited · {line}");
     }
     if starred {
         line = format!("★ {line}");
@@ -2821,7 +2847,7 @@ fn body_text(body: &MessageBody) -> String {
 
 #[cfg(test)]
 mod tests {
-    use rovsti_wa_proto::WaMessage;
+    use rovsti_wa_proto::{DeliveryStatus, WaMessage};
 
     use super::*;
 
@@ -2846,22 +2872,14 @@ mod tests {
     #[test]
     fn bubble_meta_shows_time_and_state() {
         let later = T + 3_600_000;
-        assert_eq!(
-            meta_at(&item(T, true, ItemState::Sent), later, 0),
-            "14:05 ✓"
-        );
-        assert_eq!(
-            meta_at(&item(T, true, ItemState::Delivered), later, 0),
-            "14:05 ✓✓"
-        );
-        assert_eq!(
-            meta_at(&item(T, true, ItemState::Read), later, 0),
-            "14:05 ✓✓"
-        );
+        // The ticks are icons after the time (see `ticks`).
+        for state in [ItemState::Sent, ItemState::Delivered, ItemState::Read] {
+            assert_eq!(meta_at(&item(T, true, state), later, 0), "14:05");
+        }
         assert_eq!(meta_at(&item(T, false, ItemState::Sent), later, 0), "14:05");
         assert_eq!(
             meta_at(&item(T, true, ItemState::Pending { local_id: 1 }), later, 0),
-            "Sending…"
+            "14:05"
         );
         assert_eq!(
             meta_at(&item(T, true, ItemState::Failed { local_id: 1 }), later, 0),
@@ -2895,9 +2913,9 @@ mod tests {
         );
         assert_eq!(
             meta_line(&sent, Some(&edited), false, later, 0),
-            "Edited · 14:05 ✓✓"
+            "Edited · 14:05"
         );
-        assert_eq!(meta_line(&sent, None, true, later, 0), "★ 14:05 ✓✓");
+        assert_eq!(meta_line(&sent, None, true, later, 0), "★ 14:05");
         let voice = MessageMeta {
             status: Some(DeliveryStatus::Played),
             media: Some(MediaMeta {
@@ -2906,16 +2924,59 @@ mod tests {
             }),
             ..MessageMeta::default()
         };
+        // A heard voice note says so with a blue microphone by its ticks.
         let read = item(T, true, ItemState::Read);
-        assert_eq!(
-            meta_line(&read, Some(&voice), false, later, 0),
-            "14:05 ✓✓ · Played"
-        );
+        assert_eq!(meta_line(&read, Some(&voice), false, later, 0), "14:05");
+        assert_eq!(Tick::of_item(&read, Some(&voice)), Some(Tick::Played));
         let pending = item(T, true, ItemState::Pending { local_id: 1 });
-        assert_eq!(
-            meta_line(&pending, Some(&edited), false, later, 0),
-            "Sending…"
+        assert_eq!(meta_line(&pending, Some(&edited), false, later, 0), "14:05");
+        assert_eq!(Tick::of_item(&pending, None), Some(Tick::Pending));
+    }
+
+    #[test]
+    fn read_receipts_only_while_seen_and_per_group_author() {
+        let group = "1-2@g.us";
+        let incoming = |id: &str, sender: &str| WaMessage {
+            id: id.into(),
+            chat: group.into(),
+            sender: Some(sender.into()),
+            from_me: false,
+            timestamp_ms: T,
+            body: MessageBody::Text(id.into()),
+            reactions: vec![],
+        };
+        let mut timeline = Timeline::new(group);
+        timeline.apply_page(
+            vec![
+                incoming("a", "1@s.whatsapp.net"),
+                incoming("b", "2@s.whatsapp.net"),
+                incoming("c", "1@s.whatsapp.net"),
+            ],
+            50,
         );
+        let mut marked = HashSet::new();
+        // In the background (or with the screen off) nothing is "seen".
+        assert!(reads_due(&timeline, &marked, false).is_empty());
+        let due = reads_due(&timeline, &marked, true);
+        let by_author: Vec<(Option<&str>, Vec<&str>)> = due
+            .iter()
+            .map(|r| {
+                (
+                    r.sender.as_deref(),
+                    r.ids.iter().map(String::as_str).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            by_author,
+            [
+                (Some("1@s.whatsapp.net"), vec!["a", "c"]),
+                (Some("2@s.whatsapp.net"), vec!["b"]),
+            ]
+        );
+        // Once reported, a message is not reported again this session.
+        marked.extend(["a".to_owned(), "b".to_owned(), "c".to_owned()]);
+        assert!(reads_due(&timeline, &marked, true).is_empty());
     }
 
     #[test]

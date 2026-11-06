@@ -66,6 +66,20 @@ const RESTRICTED_STEPS: &str = "Android 15 and later blocks apps installed from 
 Open App info, tap the three-dot menu, then Allow restricted settings (Kısıtlı ayarlara izin ver), and come back. \
 The menu item shows up only after one blocked attempt, so tap Set as default once first if you do not see it.";
 
+/// The line under the checklist after a button: why nothing opened. A hidden
+/// role dialog offers its own "Open default apps" button, and a Xiaomi page that
+/// fell back to App info says so in its steps, so those two need no line.
+fn setup_note(act: Act, outcome: Outcome) -> Option<&'static str> {
+    match outcome {
+        Outcome::Done => None,
+        Outcome::NotAvailable => Some("Not available on this platform"),
+        Outcome::Declined => match act {
+            Act::RequestRole | Act::Xiaomi(_) | Act::Confirm => None,
+            _ => Some("Couldn't open settings"),
+        },
+    }
+}
+
 /// Which string a [`interned`] entry is.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum Label {
@@ -291,8 +305,7 @@ impl PhoneApp {
                 Outcome::Done
             }
         };
-        self.setup_note =
-            (outcome == Outcome::NotAvailable).then(|| "Not available on this platform".into());
+        self.setup_note = setup_note(act, outcome).map(SharedString::new_static);
         cx.notify();
     }
 
@@ -593,5 +606,29 @@ impl PhoneApp {
                 });
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_page_that_did_not_open_says_so() {
+        assert_eq!(setup_note(Act::AppInfo, Outcome::Done), None);
+        assert_eq!(
+            setup_note(Act::FullScreen, Outcome::Declined),
+            Some("Couldn't open settings")
+        );
+        assert_eq!(
+            setup_note(Act::BatteryDialog, Outcome::NotAvailable),
+            Some("Not available on this platform")
+        );
+        // These two explain themselves on the sheet.
+        assert_eq!(setup_note(Act::RequestRole, Outcome::Declined), None);
+        assert_eq!(
+            setup_note(Act::Xiaomi(XiaomiSetting::Autostart), Outcome::Declined),
+            None
+        );
     }
 }

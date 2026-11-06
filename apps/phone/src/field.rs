@@ -20,6 +20,10 @@ pub(crate) struct SearchField {
     marked: Option<Range<usize>>,
     /// Bumped on every edit; the page compares it instead of the text.
     pub(crate) edits: u64,
+    /// The keyboard's action key (Search unless the page chose another).
+    action: TextInputAction,
+    /// Bumped each time the action key is pressed; the page compares it.
+    pub(crate) submits: u64,
 }
 
 impl SearchField {
@@ -29,7 +33,15 @@ impl SearchField {
             content: String::new(),
             marked: None,
             edits: 0,
+            action: TextInputAction::Search,
+            submits: 0,
         }
+    }
+
+    /// The keyboard's action key: Done for a quick reply, Go for the Block field.
+    pub(crate) fn with_action(mut self, action: TextInputAction) -> Self {
+        self.action = action;
+        self
     }
 
     pub(crate) fn text(&self) -> &str {
@@ -121,18 +133,21 @@ impl EntityInputHandler for SearchField {
     }
 
     fn text_input_action(&self, _: &mut Window, _: &mut Context<Self>) -> Option<TextInputAction> {
-        Some(TextInputAction::Search)
+        Some(self.action)
     }
 
     fn perform_text_input_action(
         &mut self,
         _: TextInputAction,
         window: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> bool {
-        // "Search" on the keyboard: the list already follows every keystroke,
-        // so it just puts the keyboard away (the text stays).
+        // The action key puts the keyboard away (the text stays); a page that
+        // acts on it (Block) watches `submits`. Search lists already follow
+        // every keystroke.
+        self.submits += 1;
         window.blur();
+        cx.notify();
         true
     }
 

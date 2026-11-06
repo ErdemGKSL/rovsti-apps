@@ -71,6 +71,15 @@ fn decode<T: DeserializeOwned + Default>(raw: rovsti_android::Result<String>) ->
     envelope.into_result().map_err(Failed::Wire)
 }
 
+/// What the notice line says after "Can't ...: " for an Android call that
+/// failed outright (the detail goes to the log, never on screen).
+pub(crate) fn android_words(error: &Error) -> String {
+    match error {
+        Error::Unsupported => Failed::Unsupported.words(),
+        other => Failed::Other(other.to_string()).words(),
+    }
+}
+
 fn done(result: rovsti_android::Result<bool>) -> Result<(), String> {
     match result {
         Ok(true) => Ok(()),
@@ -300,6 +309,19 @@ mod tests {
             Failed::Other("bad json at 3".to_owned()).words(),
             "something went wrong",
             "internal detail stays out of the notice"
+        );
+    }
+
+    #[test]
+    fn android_failures_never_show_their_detail() {
+        assert_eq!(
+            android_words(&Error::Unsupported),
+            "this needs an Android phone"
+        );
+        assert_eq!(
+            android_words(&Error::NotInitialized),
+            "something went wrong",
+            "the bridge detail stays in the log"
         );
     }
 

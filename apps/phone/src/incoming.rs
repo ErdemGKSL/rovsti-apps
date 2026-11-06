@@ -185,7 +185,9 @@ impl RingFx {
         let mut moving = self.drop.tick(dt);
         moving |= self.live.tick(dt);
         moving |= self.calm.tick(dt);
-        if loops && self.running {
+        // Fully hushed, the loops are invisible: no frames for them (battery).
+        let hushed = self.calm.target >= 0.5 && self.calm.is_settled();
+        if loops && self.running && !hushed {
             self.clock = (self.clock + dt.as_secs_f32()) % WRAP;
             moving = true;
         }
@@ -889,6 +891,22 @@ impl PhoneApp {
         inc.hidden[1].set_target(1.0);
     }
 
+    /// A WhatsApp Answer or Decline failed at the gateway while the call still rings:
+    /// both buttons (and the drag) come back so the owner can try again.
+    pub(crate) fn incoming_rearm(&mut self, cx: &mut Context<Self>) {
+        let inc = &mut self.incoming;
+        let whatsapp = inc.source().is_some_and(CallSource::is_whatsapp);
+        if !whatsapp || !inc.is_ringing() || inc.acted.is_none() || inc.reply_label.is_some() {
+            return;
+        }
+        inc.acted = None;
+        inc.hidden[0].set_target(0.0);
+        inc.hidden[1].set_target(0.0);
+        inc.off_x.set_target(0.0);
+        inc.card_alpha.set_target(1.0);
+        cx.notify();
+    }
+
     /// Every touch on the screen, for the tap guard.
     pub(crate) fn incoming_touch_all(
         &mut self,
@@ -919,7 +937,8 @@ impl PhoneApp {
         let (x, y) = (f32::from(position.x), f32::from(position.y));
         let live = {
             let inc = &self.incoming;
-            inc.is_ringing() && inc.acted.is_none() && !self.sheet.is_visible()
+            // A tab sheet left open under the ringing screen does not stop the drag.
+            inc.is_ringing() && inc.acted.is_none() && !self.sheet_blocks()
         };
         let reduced = window.prefers_reduced_motion();
         match phase {
@@ -1020,11 +1039,16 @@ impl PhoneApp {
                     .update(cx, |backend, cx| backend.send(command, cx))
             }
             CallSource::WhatsApp(_) => {
-                self.wa_call.update(cx, |ui, cx| match act {
+                let started = self.wa_call.update(cx, |ui, cx| match act {
                     Act::Answer => ui.answer(cx),
                     Act::Decline => ui.hang_up(true, cx),
                 });
-                backend::Outcome::Done
+                // Not even sent (WhatsApp not connected): the buttons stay live.
+                if started {
+                    backend::Outcome::Done
+                } else {
+                    backend::Outcome::Declined
+                }
             }
         };
         rovsti_ui::haptics::perform(
@@ -1167,7 +1191,8 @@ impl PhoneApp {
         let visible = if message {
             has_number && !self.backend.read(cx).prefs().quick_replies.is_empty()
         } else {
-            !self.backend.read(cx).silence_refused()
+            // Silence is Telecom's ringer: a WhatsApp call (no call id) has none to silence.
+            inc.call_id().is_some() && !self.backend.read(cx).silence_refused()
         };
         if !visible {
             return slot.into_any_element();

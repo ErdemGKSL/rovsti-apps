@@ -50,7 +50,8 @@ use crate::{
 const SHORT_CALL_MS: i64 = 15_000;
 const ENDED_HOLD: Duration = Duration::from_millis(1000);
 const FAILED_HOLD: Duration = Duration::from_millis(2000);
-const DIGIT_LINE: usize = 24;
+/// Keys the in-call digit line shows: 18 at 28 px fit a 320 px wide screen.
+const DIGIT_LINE: usize = 18;
 /// The in-call digit buffer keeps only the latest keys.
 const DIGIT_BUFFER: usize = 64;
 
@@ -998,10 +999,16 @@ impl PhoneApp {
         }
         let waiting_before = self.incall.waiting.clone();
         let ic = &mut self.incall;
-        if waiting.is_some() && !ic.waiting_open && ic.has_call() {
-            // A second caller rings: the call screen comes to the front.
+        if waiting.is_some() && !ic.waiting_open && ic.has_call() && !ic.shown {
+            // A second caller rings: the call screen comes to the front, its timer ticking.
             ic.set_shown(true);
             ic.hidden_for = None;
+            let (state, connect) = ic
+                .view
+                .as_ref()
+                .map_or((CallState::Unknown, 0), |v| (v.state, v.connect_time_ms));
+            ic.status
+                .update(cx, |s, cx| s.update(state, connect, true, cx));
         }
         if waiting.is_some() && !ic.waiting_open {
             ic.aura.update(cx, |a, cx| a.waiting_pulse(cx));
@@ -1482,6 +1489,8 @@ impl PhoneApp {
         ic.view = None;
         ic.last_id = None;
         ic.set_shown(false);
+        // No call is left to add to: the Add call sheet goes with the screen.
+        self.close_add_call(cx);
         // S4: the avatar flies back to its row or tile if it is still there.
         self.begin_return_flight();
         let ic = &mut self.incall;

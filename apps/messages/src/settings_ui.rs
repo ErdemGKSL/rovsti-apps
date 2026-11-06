@@ -29,7 +29,7 @@ use rovsti_core::{
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
     current_theme,
-    field::{TextField, field_box},
+    field::{TextField, field_box, secret_field_box},
     theme,
     tokens::{Theme, typography},
 };
@@ -288,13 +288,14 @@ impl SettingsView {
         for field in [&self.pass, &self.confirm] {
             field.update(cx, |field, cx| field.clear(cx));
         }
-        let (snapshot, spam, scheduled, dir) = {
+        let (snapshot, spam, scheduled, dir, tz_offset_s) = {
             let backend = self.backend.read(cx);
             (
                 backend.snapshot(cx),
                 backend.spam_rules().clone(),
                 backend.queue().items().to_vec(),
                 backend.data_dir().map(Path::to_path_buf),
+                backend.locale().tz_offset_s,
             )
         };
         let Some(dir) = dir else {
@@ -321,7 +322,7 @@ impl SettingsView {
                                 &dir,
                                 &body,
                                 &pass,
-                                &backup_ui::backup_file_name(body.created_ms),
+                                &backup_ui::backup_file_name(body.created_ms, tz_offset_s),
                             )
                         })
                         .await
@@ -480,7 +481,10 @@ impl SettingsView {
                 let outcome = match answer {
                     Ok(answer) => backup_ui::restore_outcome(&answer),
                     Err(Error::Unsupported) => Err("Restoring needs an Android phone.".to_owned()),
-                    Err(error) => Err(format!("Restoring failed: {error}")),
+                    Err(error) => {
+                        log::warn!("restoring messages failed: {error}");
+                        Err("Restoring failed. Try again.".to_owned())
+                    }
                 };
                 if outcome.is_ok() {
                     this.restore_settings(&restore.body, cx);
@@ -853,22 +857,19 @@ impl SettingsView {
                 ));
             }
             BackupState::Export { issue } => {
-                rows.push(Self::form_row(div().flex_1().min_w_0().child(field_box(
-                    theme,
-                    "backup-pass",
-                    &self.pass,
-                    "Passphrase",
-                    window,
-                    cx,
-                ))));
-                rows.push(Self::form_row(div().flex_1().min_w_0().child(field_box(
-                    theme,
-                    "backup-confirm",
-                    &self.confirm,
-                    "Type it again",
-                    window,
-                    cx,
-                ))));
+                rows.push(Self::form_row(div().flex_1().min_w_0().child(
+                    secret_field_box(theme, "backup-pass", &self.pass, "Passphrase", window, cx),
+                )));
+                rows.push(Self::form_row(div().flex_1().min_w_0().child(
+                    secret_field_box(
+                        theme,
+                        "backup-confirm",
+                        &self.confirm,
+                        "Type it again",
+                        window,
+                        cx,
+                    ),
+                )));
                 if let Some(label) = backup_ui::strength_label(self.pass.read(cx).text()) {
                     rows.push(Self::text_line(theme, format!("Strength: {label}"), false));
                 }
@@ -900,14 +901,16 @@ impl SettingsView {
                     "Type the passphrase this backup was made with.",
                     false,
                 ));
-                rows.push(Self::form_row(div().flex_1().min_w_0().child(field_box(
-                    theme,
-                    "backup-open-pass",
-                    &self.open_pass,
-                    "Passphrase",
-                    window,
-                    cx,
-                ))));
+                rows.push(Self::form_row(div().flex_1().min_w_0().child(
+                    secret_field_box(
+                        theme,
+                        "backup-open-pass",
+                        &self.open_pass,
+                        "Passphrase",
+                        window,
+                        cx,
+                    ),
+                )));
                 if wrong {
                     rows.push(Self::text_line(
                         theme,

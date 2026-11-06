@@ -331,7 +331,11 @@ impl ScheduleSheet {
     ) -> Option<AnyElement> {
         let draft = self.draft.as_ref()?;
         let colors = theme::colors(theme);
-        let mut body = div().flex().flex_col().pb(px(12.0)).child(
+        // The sheet sits on the screen's bottom: lift the custom-time field
+        // above the keyboard while it types.
+        let insets = window.insets();
+        let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
+        let mut body = div().flex().flex_col().pb(px(12.0) + keyboard).child(
             div()
                 .px(px(20.0))
                 .pb(px(8.0))

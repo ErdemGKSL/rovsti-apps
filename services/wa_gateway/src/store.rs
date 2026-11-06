@@ -9,15 +9,17 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use rovsti_wa_proto::{
     AppId, ChatSummary, InstanceState, InstanceStatus, KeyHash, KeyId, KeyInfo, MessageBody,
-    Reaction, ScheduledState, ScheduledText, WaMessage,
+    Reaction, ScheduledState, ScheduledText, WaMessage, is_status_chat,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 mod rich;
+mod status;
 pub use rich::{
     ChatChange, ChatSettings, FetchedProfile, MAX_THUMBNAIL_BYTES, MessageChange, MessageExtras,
-    ProfileChange, apply_change, merge_edit,
+    ProfileChange, ReceiptCounts, apply_change, group_status, merge_edit,
 };
+pub use status::{StatusTarget, StoredStatus};
 
 /// Active (not revoked) keys one instance may hold.
 pub const MAX_KEYS_PER_INSTANCE: u32 = 32;
@@ -232,6 +234,42 @@ const MIGRATIONS: &[&str] = &[
         fetched_ms INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (instance_id, jid)
     );
+    ",
+    // v4: how far each group member got with my group messages
+    // (1 delivered, 2 read, 3 played), for group-wide ticks.
+    "
+    CREATE TABLE receipts (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        chat TEXT NOT NULL,
+        id TEXT NOT NULL,
+        participant TEXT NOT NULL,
+        status INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, chat, id, participant)
+    );
+    ",
+    // v5: status updates (stories) live apart from the chats. Older
+    // gateways stored them as a `status@broadcast` chat: drop that.
+    "
+    CREATE TABLE statuses (
+        instance_id TEXT NOT NULL REFERENCES instances(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        author TEXT NOT NULL,
+        participant TEXT NOT NULL,
+        from_me INTEGER NOT NULL DEFAULT 0,
+        ts_ms INTEGER NOT NULL,
+        expires_ms INTEGER NOT NULL,
+        item_json TEXT NOT NULL,
+        raw_proto BLOB,
+        thumb BLOB,
+        viewed INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (instance_id, id)
+    );
+    CREATE INDEX statuses_by_expiry ON statuses(expires_ms);
+    DELETE FROM reactions WHERE chat = 'status@broadcast';
+    DELETE FROM receipts WHERE chat = 'status@broadcast';
+    DELETE FROM messages WHERE chat = 'status@broadcast';
+    DELETE FROM chat_settings WHERE jid = 'status@broadcast';
+    DELETE FROM chats WHERE jid = 'status@broadcast';
     ",
 ];
 
@@ -910,7 +948,8 @@ impl Store {
         self.run(move |conn| {
             let tx = conn.transaction()?;
             let mut written = 0u32;
-            for chat in &chats {
+            // Status updates are stored apart, never as a chat.
+            for chat in chats.iter().filter(|c| !is_status_chat(&c.jid)) {
                 tx.execute(
                     "INSERT INTO chats (instance_id, jid, name, is_group, unread, last_ms)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -1012,7 +1051,8 @@ impl Store {
         self.run(move |conn| {
             let mut stmt = conn.prepare(
                 "SELECT jid, name, is_group, unread FROM chats
-                 WHERE instance_id = ?1 ORDER BY last_ms DESC, jid",
+                 WHERE instance_id = ?1 AND jid != 'status@broadcast'
+                 ORDER BY last_ms DESC, jid",
             )?;
             let rows = stmt.query_map([instance.as_str()], |r| {
                 Ok((
@@ -1280,6 +1320,8 @@ mod tests {
             "scheduled",
             "chat_settings",
             "profiles",
+            "receipts",
+            "statuses",
         ] {
             assert!(tables.iter().any(|n| n == t), "missing {t}: {tables:?}");
         }
@@ -1325,6 +1367,85 @@ mod tests {
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(version, MIGRATIONS.len() as u32);
+    }
+
+    #[tokio::test]
+    async fn v5_drops_the_status_chat_an_older_gateway_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gateway.db");
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            let tx = conn.transaction().unwrap();
+            for sql in &MIGRATIONS[..4] {
+                tx.execute_batch(sql).unwrap();
+            }
+            tx.execute_batch("PRAGMA user_version = 4").unwrap();
+            tx.execute_batch(
+                "INSERT INTO instances (id, created_ms, state) VALUES ('old', 1, 'connected');
+                 INSERT INTO chats (instance_id, jid, unread, last_ms)
+                     VALUES ('old', 'status@broadcast', 3, 9),
+                            ('old', '1@s.whatsapp.net', 1, 5);
+                 INSERT INTO messages (instance_id, chat, id, from_me, ts_ms, body_json)
+                     VALUES ('old', 'status@broadcast', 'S1', 0, 9, '{\"text\":\"story\"}'),
+                            ('old', '1@s.whatsapp.net', 'M1', 0, 5, '{\"text\":\"hi\"}');
+                 INSERT INTO reactions (instance_id, chat, id, sender, emoji)
+                     VALUES ('old', 'status@broadcast', 'S1', 'x', 'y');",
+            )
+            .unwrap();
+            tx.commit().unwrap();
+        }
+        let store = Store::open(&path).unwrap();
+        let old = InstanceId::new("old");
+        let chats = store.chats(old.clone()).await.unwrap();
+        assert_eq!(chats.len(), 1);
+        assert_eq!(chats[0].jid, "1@s.whatsapp.net");
+        assert!(
+            store
+                .messages(old.clone(), "status@broadcast".into(), None, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .messages(old, "1@s.whatsapp.net".into(), None, 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn status_messages_never_become_chats() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .create_instance(id(1), new_key(1, "a").1, 10, 4)
+            .await
+            .unwrap();
+        let fresh = store
+            .insert_message(id(1), text("status@broadcast", "S1", 5, false), None)
+            .await
+            .unwrap();
+        assert!(!fresh);
+        let written = store
+            .import_history(
+                id(1),
+                vec![HistoryChat {
+                    jid: "status@broadcast".into(),
+                    name: None,
+                    is_group: false,
+                    unread: 4,
+                    last_ms: 5,
+                    messages: vec![],
+                    settings: ChatSettings::default(),
+                }],
+            )
+            .await
+            .unwrap();
+        assert_eq!(written, 0);
+        assert!(store.chats(id(1)).await.unwrap().is_empty());
+        assert!(store.chats_rich(id(1)).await.unwrap().is_empty());
     }
 
     fn sched(id: &str, at: i64) -> ScheduledText {
@@ -1989,6 +2110,62 @@ mod tests {
             .unwrap();
         assert_eq!(page[0].meta.status, Some(DeliveryStatus::Delivered));
         assert_eq!(page[1].meta.status, None);
+    }
+
+    #[tokio::test]
+    async fn group_receipts_need_every_member() {
+        use rovsti_wa_proto::DeliveryStatus;
+        let store = store_with_instance().await;
+        let group = "g@g.us";
+        let mine = text(group, "m", 1, true);
+        store.insert_message(id(1), mine, None).await.unwrap();
+        let theirs = text(group, "t", 2, false);
+        store.insert_message(id(1), theirs, None).await.unwrap();
+        let receipt = |who: &str, status| {
+            store.record_group_receipt(
+                id(1),
+                group.into(),
+                who.into(),
+                vec!["m".into(), "t".into(), "unknown".into()],
+                status,
+                Some(2),
+            )
+        };
+        let status_of = |page: &[rovsti_wa_proto::RichMessage], msg: &str| {
+            page.iter()
+                .find(|r| r.message.id == msg)
+                .and_then(|r| r.meta.status)
+        };
+
+        // One of two members read it: not even delivered to all yet.
+        assert!(receipt("a", DeliveryStatus::Read).await.unwrap().is_empty());
+        // A repeated, older receipt does not count twice or go back.
+        assert!(
+            receipt("a", DeliveryStatus::Delivered)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let moved = receipt("b", DeliveryStatus::Delivered).await.unwrap();
+        assert_eq!(moved.len(), 1);
+        assert_eq!(moved[0].0, "m");
+        assert_eq!(moved[0].1.status, Some(DeliveryStatus::Delivered));
+        let moved = receipt("b", DeliveryStatus::Read).await.unwrap();
+        assert_eq!(moved[0].1.status, Some(DeliveryStatus::Read));
+
+        let page = store
+            .messages_rich(id(1), group.into(), None, 10)
+            .await
+            .unwrap();
+        // The ticks survive a reload; their message never gets any.
+        assert_eq!(status_of(&page, "m"), Some(DeliveryStatus::Read));
+        assert_eq!(status_of(&page, "t"), None);
+
+        // Clearing the chat forgets the receipts with the messages.
+        store.delete_chat(id(1), group.into(), true).await.unwrap();
+        let again = text(group, "m", 1, true);
+        store.insert_message(id(1), again, None).await.unwrap();
+        assert!(receipt("b", DeliveryStatus::Read).await.unwrap().is_empty());
     }
 
     #[tokio::test]

@@ -97,6 +97,12 @@ impl SmsTimeline {
         self.thread_id
     }
 
+    /// A draft's first send created the provider thread: its pages read from
+    /// now on, and the bubbles already shown stay (they link by local id).
+    pub fn adopt_thread(&mut self, thread_id: i64) {
+        self.thread_id = thread_id;
+    }
+
     pub fn has_older(&self) -> bool {
         self.has_older
     }

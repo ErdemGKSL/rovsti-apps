@@ -1539,7 +1539,7 @@ impl PhoneApp {
             .children(rows)
     }
 
-    pub(crate) fn number_display(&self, theme: Theme) -> impl IntoElement {
+    pub(crate) fn number_display(&self, theme: Theme, height: f32) -> impl IntoElement {
         let colors = theme::colors(theme);
         let (_, _, head, last) = &self.shown_digits;
         let font = self.font.value;
@@ -1565,7 +1565,7 @@ impl PhoneApp {
             .aria_label(SharedString::from(self.dialed.clone()))
             .relative()
             .left(px(self.shake.value * 0.02))
-            .h(px(52.0))
+            .h(px(height))
             .w_full()
             .px(px(24.0))
             .flex()
@@ -1836,7 +1836,7 @@ impl PhoneApp {
                 .w_full()
                 .flex()
                 .justify_center()
-                .child(self.number_display(theme))
+                .child(self.number_display(theme, layout.number.h))
                 .when(self.dialed.is_empty(), |el| {
                     el.child(self.paste_pill(theme, cx))
                 }),

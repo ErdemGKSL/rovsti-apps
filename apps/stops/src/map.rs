@@ -287,7 +287,7 @@ pub fn fallback_centre(history: &History, saved: &SavedPlaces) -> Option<Coord> 
 
 /// Width and height of the small menu over a tapped pin.
 pub const PIN_MENU_W: f32 = 180.0;
-pub const PIN_MENU_H: f32 = 132.0;
+pub const PIN_MENU_H: f32 = 168.0;
 /// Height of one row of the pin menu.
 const PIN_MENU_ROW_H: f32 = 36.0;
 const PIN_MENU_MARGIN: f32 = 8.0;
@@ -1828,6 +1828,8 @@ impl StopsApp {
             .as_deref()
             .and_then(|id| stop_index(self.gtfs.as_deref(), id));
         let details = pick::details_text(dest);
+        let known = self.saved.near(dest.coord).map(|p| p.id);
+        let dest = dest.clone();
         let colors = theme::colors(theme);
         let row = |id: &'static str, label: &'static str, color: Hsla| {
             div()
@@ -1851,6 +1853,20 @@ impl StopsApp {
             .py(px(4.0))
             .flex()
             .flex_col()
+            .child(match known {
+                Some(id) => row("pin-rename", "Rename", colors.label).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.pick.close_menu();
+                        this.open_rename(id, cx);
+                    },
+                )),
+                None => row("pin-save", "Save", colors.label).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.pick.close_menu();
+                        this.open_save_point(dest.clone(), Some(slot), cx);
+                    },
+                )),
+            })
             .child(row("pin-move", "Move", colors.label).on_click(cx.listener(
                 move |this, _, _, cx| {
                     this.pick.begin_move(slot);
@@ -1970,7 +1986,8 @@ impl StopsApp {
                     &self.map.viewport,
                     self.map.size(),
                     at,
-                );
+                )
+                .named_from(&self.saved);
                 self.pick.drag_end(slot, dest);
             }
             Gesture::PinCancel { .. } => self.pick.drag_cancel(),
@@ -1992,7 +2009,8 @@ impl StopsApp {
             &self.map.viewport,
             self.map.size(),
             at,
-        );
+        )
+        .named_from(&self.saved);
         match self.pick.tap(dest) {
             TapOutcome::Placed(_) | TapOutcome::MenuClosed => cx.notify(),
             TapOutcome::Full => {
@@ -2959,8 +2977,8 @@ mod tests {
 
     #[test]
     fn the_menu_rows_fit_the_menu_box() {
-        // Move, Remove, Lines and the details line.
-        const { assert!(3.0 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
+        // Save or Rename, Move, Remove, Lines and the details line.
+        const { assert!(4.0 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
     }
 
     #[test]

@@ -202,6 +202,11 @@ pub enum SheetMode {
     Confirm(Destination),
     /// A new name for a saved place.
     Rename(u64),
+    /// A name for a point that is not saved yet; `slot` is the pin it came from.
+    SavePoint {
+        dest: Destination,
+        slot: Option<Slot>,
+    },
     /// A transit stop (index into the feed): its lines, Use as A / Use as B.
     Stop(u32),
 }
@@ -308,7 +313,10 @@ impl StopsApp {
     /// or say why not.
     pub(crate) fn offer_text(&mut self, text: &str, cx: &mut Context<Self>) {
         match offer(text) {
-            Offer::Confirm(dest) => self.confirm_destination(dest, cx),
+            Offer::Confirm(dest) => {
+                let dest = dest.named_from(&self.saved);
+                self.confirm_destination(dest, cx);
+            }
             Offer::Refused(why) => self.show_pill(why, None, cx),
         }
     }
@@ -330,6 +338,47 @@ impl StopsApp {
         self.field.update(cx, |f, cx| f.set(&name, cx));
         self.sheet_mode = SheetMode::Rename(id);
         self.sheet.open();
+        cx.notify();
+    }
+
+    /// Opens the Save sheet for `dest` with its name in the field.
+    pub(crate) fn open_save_point(
+        &mut self,
+        dest: Destination,
+        slot: Option<Slot>,
+        cx: &mut Context<Self>,
+    ) {
+        let name = pick::save_prefill(&dest);
+        self.field.update(cx, |f, cx| f.set(&name, cx));
+        self.sheet_mode = SheetMode::SavePoint { dest, slot };
+        self.sheet.open();
+        cx.notify();
+    }
+
+    /// Saves the point of the Save sheet under the name in the field.
+    fn commit_save_point(&mut self, cx: &mut Context<Self>) {
+        let SheetMode::SavePoint { dest, .. } = self.sheet_mode.clone() else {
+            return;
+        };
+        let name = self.field.read(cx).text().to_owned();
+        let result = self.saved.save(&name, dest.coord, dest.gtfs_stop.clone());
+        let text = pick::save_result_text(&result, &self.saved);
+        let id = match result {
+            Ok(id) => {
+                self.save_places(cx);
+                Some(id)
+            }
+            Err(rovsti_geo::PlaceError::Duplicate(id)) => Some(id),
+            Err(_) => None,
+        };
+        if let Some(id) = id {
+            if let Some(place) = self.saved.get(id) {
+                let (coord, label) = (place.coord, place.name.clone());
+                self.pick.relabel_near(coord, &label);
+            }
+            self.sheet.close();
+        }
+        self.show_pill(text, None, cx);
         cx.notify();
     }
 
@@ -433,6 +482,9 @@ impl StopsApp {
             ),
             SheetMode::Confirm(dest) => ("Use this point", self.confirm_body(theme, &dest, cx)),
             SheetMode::Rename(id) => ("Rename place", self.rename_body(theme, id, window, cx)),
+            SheetMode::SavePoint { dest, .. } => {
+                ("Save place", self.save_point_body(theme, &dest, window, cx))
+            }
             SheetMode::Stop(stop) => ("Transit stop", self.stop_body(theme, stop, cx)),
         };
         let body = div()
@@ -539,7 +591,9 @@ impl StopsApp {
         let mut items = Vec::new();
         if !query.is_empty() {
             match offer(query) {
-                Offer::Confirm(dest) => items.push(PickItem::Offer(dest)),
+                Offer::Confirm(dest) => {
+                    items.push(PickItem::Offer(dest.named_from(&self.saved)));
+                }
                 // Typing a name searches Saved below: only a link or a pair of
                 // numbers that failed is worth an explanation.
                 Offer::Refused(why) if looks_like_link(query) => {
@@ -899,6 +953,52 @@ impl StopsApp {
             .into_any_element()
     }
 
+    fn save_point_body(
+        &mut self,
+        theme: Theme,
+        dest: &Destination,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(Self::sheet_title(theme, "Save place"))
+            .child(Self::footnote(theme, pick::details_text(dest)))
+            .child(div().px(px(16.0)).child(field_box(
+                theme,
+                "save-field",
+                &self.field,
+                "Name",
+                window,
+                cx,
+            )))
+            .child(
+                div()
+                    .flex()
+                    .gap(px(12.0))
+                    .px(px(16.0))
+                    .pt(px(8.0))
+                    .child(
+                        glass_pill(theme, "Cancel")
+                            .id("save-cancel")
+                            .flex_1()
+                            .text_color(colors.secondary_label)
+                            .on_click(cx.listener(|this, _, _, cx| this.close_sheet(cx))),
+                    )
+                    .child(
+                        glass_pill(theme, "Save")
+                            .id("save-commit")
+                            .flex_1()
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(|this, _, _, cx| this.commit_save_point(cx))),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn rename_body(
         &mut self,
         theme: Theme,
@@ -1197,5 +1297,21 @@ mod tests {
         assert!(looks_like_link("-3, 4"));
         assert!(!looks_like_link("home"));
         assert!(!looks_like_link("  kad"));
+    }
+
+    #[test]
+    fn a_saved_pin_takes_the_name_and_is_found_again() {
+        let mut saved = SavedPlaces::default();
+        let coord = Coord::new(41.0, 29.0);
+        let dest = Destination::new("Stop X", coord);
+        let name = pick::save_prefill(&dest);
+        let id = saved.save(&name, coord, None).unwrap();
+        assert_eq!(saved.near(coord).map(|p| p.id), Some(id));
+        let again = Destination::dropped(coord).named_from(&saved);
+        assert_eq!(again.label, "Stop X");
+        assert!(matches!(
+            saved.save("Other", coord, None),
+            Err(rovsti_geo::PlaceError::Duplicate(d)) if d == id
+        ));
     }
 }

@@ -817,6 +817,10 @@ impl MessagesApp {
             ConversationEvent::CancelScheduled(key) => this.cancel_scheduled(key.clone(), cx),
             ConversationEvent::ToggleMute => this.toggle_open_mute(cx),
             ConversationEvent::Copy(text) => this.copy_text(text.clone().into(), false, cx),
+            ConversationEvent::Notice(text) => {
+                this.show_pill(text.clone());
+                cx.notify();
+            }
         })
         .detach();
         // Opening reads the chat.

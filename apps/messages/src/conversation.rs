@@ -15,6 +15,7 @@ use gpui::{
     ListAlignment, ObjectFit, ParentElement, Render, SharedString, StatefulInteractiveElement,
     Styled, StyledImage, Window, div, img, list, prelude::*, px,
 };
+use rovsti_android::{Error as AndroidError, documents};
 use rovsti_core::{ThreadId, recents::LocaleTime, wire::DocumentOp};
 use rovsti_ui::{
     Icon,
@@ -97,6 +98,8 @@ pub enum ConversationEvent {
     ToggleMute,
     /// The Copy pill of a message: the page puts the text on the clipboard.
     Copy(String),
+    /// A short message for the page's pill (save results).
+    Notice(String),
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
@@ -205,6 +208,8 @@ pub struct Conversation {
     media_cache: Vec<(String, Arc<Image>)>,
     media_loading: HashSet<String>,
     media_failed: HashSet<String>,
+    /// The cached file handed to "Save as" while its answer is pending.
+    saving: Option<std::path::PathBuf>,
     /// The message whose quick-reaction strip is open.
     strip: Option<String>,
     throttle: TypingThrottle,
@@ -280,16 +285,22 @@ impl Conversation {
             .detach();
         let subscriptions = vec![
             cx.subscribe(&backend, |this, _, event, cx| {
-                if let BackendEvent::Document(result) = event
-                    && result.op == DocumentOp::Attachment
-                {
-                    this.on_attachment(
+                let BackendEvent::Document(result) = event else {
+                    return;
+                };
+                match result.op {
+                    DocumentOp::Attachment => this.on_attachment(
                         result.ok,
                         result.path.clone(),
                         result.name.clone(),
                         result.mime.clone(),
                         cx,
-                    );
+                    ),
+                    // The answer of "Save as" for a received file. Settings'
+                    // backup shares this op but waits only inside its own
+                    // modal sheet, so the two are never pending together.
+                    DocumentOp::ExportMessages => this.on_saved(result.ok, cx),
+                    _ => {}
                 }
             }),
             // A picture arrived: the header and the bubbles repaint.
@@ -315,6 +326,7 @@ impl Conversation {
             media_cache: Vec::new(),
             media_loading: HashSet::new(),
             media_failed: HashSet::new(),
+            saving: None,
             strip: None,
             throttle: TypingThrottle::new(),
             last_text: String::new(),
@@ -855,6 +867,88 @@ impl Conversation {
             .ok();
         })
         .detach();
+        cx.notify();
+    }
+
+    /// Downloads a received file and offers it to "Save as".
+    fn save_media(
+        &mut self,
+        id: String,
+        kind: MediaKind,
+        mime: String,
+        name: String,
+        cx: &mut Context<Self>,
+    ) {
+        self.strip = None;
+        self.rows_dirty = true;
+        if self.saving.is_some() || self.media_loading.contains(&id) {
+            cx.emit(ConversationEvent::Notice(
+                "Already saving a file".to_owned(),
+            ));
+            cx.notify();
+            return;
+        }
+        if !saveable(kind) {
+            cx.notify();
+            return;
+        }
+        let Some(dir) = self.backend.read(cx).data_dir().map(|d| d.join("cache")) else {
+            cx.emit(ConversationEvent::Notice(
+                "The app's storage is not ready yet.".to_owned(),
+            ));
+            cx.notify();
+            return;
+        };
+        let path = dir.join(format!("wa-save-{}", cache_stem(&id)));
+        self.saving = Some(path.clone());
+        self.media_failed.remove(&id);
+        self.media_loading.insert(id.clone());
+        let gateway = self.gateway.clone();
+        let wanted = id.clone();
+        let task = cx.background_executor().spawn(async move {
+            let bytes = gateway.media(&wanted).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+            Ok::<_, String>(
+                documents::export_file(&name, &mime, &path.to_string_lossy())
+                    .map_err(|e| matches!(e, AndroidError::Unsupported)),
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.media_loading.remove(&id);
+                this.rows_dirty = true;
+                let (notice, started) = save_outcome(result);
+                if !started {
+                    this.finish_saving();
+                }
+                if let Some(notice) = notice {
+                    cx.emit(ConversationEvent::Notice(notice.to_owned()));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Forgets the pending save and deletes its cached copy.
+    fn finish_saving(&mut self) {
+        if let Some(path) = self.saving.take() {
+            std::fs::remove_file(path).ok();
+        }
+    }
+
+    /// The "Save as" sheet answered; ignored unless a save is pending.
+    fn on_saved(&mut self, ok: bool, cx: &mut Context<Self>) {
+        if self.saving.is_none() {
+            return;
+        }
+        self.finish_saving();
+        let notice = if ok { "Saved" } else { "Not saved" };
+        cx.emit(ConversationEvent::Notice(notice.to_owned()));
         cx.notify();
     }
 
@@ -1821,6 +1915,7 @@ impl Conversation {
         let colors = theme::colors(theme);
         let media = meta.and_then(|m| m.media.as_ref());
         let downloadable = matches!(kind, MediaKind::Image | MediaKind::Sticker);
+        let save_here = !downloadable && saveable(*kind);
         let mut card = div().flex().flex_col().gap(px(4.0));
         if let Some(image) = self.cached_image(&message.id) {
             card = card.child(
@@ -1831,11 +1926,17 @@ impl Conversation {
             );
         } else {
             let status = if self.media_loading.contains(&message.id) {
-                "Loading…"
+                if save_here {
+                    "Downloading…"
+                } else {
+                    "Loading…"
+                }
             } else if self.media_failed.contains(&message.id) {
                 "Couldn't load · Tap to retry"
             } else if downloadable {
                 "Tap to load"
+            } else if save_here {
+                "Tap to save"
             } else {
                 ""
             };
@@ -1897,6 +1998,15 @@ impl Conversation {
                 let mime = mime.clone();
                 inner = inner.on_click(cx.listener(move |this, _, _, cx| {
                     this.fetch_media(id.clone(), mime.clone(), cx);
+                }));
+            }
+            if save_here {
+                let id = message.id.clone();
+                let kind = *kind;
+                let mime = mime.clone();
+                let name = save_name(kind, media, &mime, &id);
+                inner = inner.on_click(cx.listener(move |this, _, _, cx| {
+                    this.save_media(id.clone(), kind, mime.clone(), name.clone(), cx);
                 }));
             }
             card = card.child(inner);
@@ -2054,6 +2164,20 @@ impl Conversation {
                     },
                 )),
             );
+        }
+        if let MessageBody::Media { kind, mime, .. } = &message.body
+            && saveable(*kind)
+            && !revoked
+        {
+            let kind = *kind;
+            let mime = mime.clone();
+            let name = save_name(kind, meta.and_then(|m| m.media.as_ref()), &mime, &id);
+            let target = id.clone();
+            row = row.child(pill("save", Icon::LucideDownload, "Save", false).on_click(
+                cx.listener(move |this, _, _, cx| {
+                    this.save_media(target.clone(), kind, mime.clone(), name.clone(), cx);
+                }),
+            ));
         }
         if can_edit(item, meta, now) {
             let target = id.clone();
@@ -2875,13 +2999,29 @@ fn media_label(kind: MediaKind) -> &'static str {
 }
 
 /// Whether a media message can be saved to the phone.
-#[allow(dead_code)]
 fn saveable(kind: MediaKind) -> bool {
     !matches!(kind, MediaKind::Sticker)
 }
 
+/// A message id as a safe cache file stem.
+fn cache_stem(id: &str) -> String {
+    id.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// The pill text for the end of the download and "Save as" hand-off, and
+/// whether the sheet is open (its answer is still to come). `Err(true)` in
+/// the inner result means the seam is unsupported (desktop).
+fn save_outcome(result: Result<Result<bool, bool>, String>) -> (Option<&'static str>, bool) {
+    match result {
+        Ok(Ok(true)) => (None, true),
+        Ok(Err(true)) => (Some("Saving needs an Android phone."), false),
+        Ok(Ok(false) | Err(false)) | Err(_) => (Some("Couldn't save that file"), false),
+    }
+}
+
 /// The file name a saved media message gets.
-#[allow(dead_code)]
 fn save_name(kind: MediaKind, media: Option<&MediaMeta>, mime: &str, message_id: &str) -> String {
     if let Some(name) = media
         .and_then(|m| m.file_name.as_deref())
@@ -3291,6 +3431,24 @@ mod tests {
             save_name(MediaKind::Video, None, "application/x-weird", "ab"),
             "WhatsApp video ab.bin"
         );
+    }
+
+    #[test]
+    fn save_outcome_tells_what_happened() {
+        assert_eq!(save_outcome(Ok(Ok(true))), (None, true));
+        assert_eq!(
+            save_outcome(Ok(Err(true))),
+            (Some("Saving needs an Android phone."), false)
+        );
+        assert_eq!(
+            save_outcome(Ok(Ok(false))),
+            (Some("Couldn't save that file"), false)
+        );
+        assert_eq!(
+            save_outcome(Err("disk".to_owned())),
+            (Some("Couldn't save that file"), false)
+        );
+        assert_eq!(cache_stem("3EB0/../x"), "3EB0____x");
     }
 
     #[test]

@@ -1278,6 +1278,8 @@ pub struct MapState {
     /// Where the surface was last painted, in window coordinates.
     pub bounds: Rc<Cell<Bounds<Pixels>>>,
     tap_timer: Option<Task<()>>,
+    /// The my-location button was pressed and its fix has not arrived yet.
+    locate_pending: bool,
 }
 
 /// How old a device fix may be and still centre the idle map.
@@ -1300,16 +1302,32 @@ impl Default for MapState {
             pattern: None,
             bounds: Rc::default(),
             tap_timer: None,
+            locate_pending: false,
         }
     }
 }
 
 impl MapState {
-    /// Records a device fix and recentres the view on it at street level. The
-    /// trail is left alone.
+    /// The next device fix should recentre the view (the my-location button).
+    pub fn ask_locate(&mut self) {
+        self.locate_pending = true;
+    }
+
+    /// The asked-for fix will not come (no permission, location off, error).
+    pub fn cancel_locate(&mut self) {
+        self.locate_pending = false;
+    }
+
+    /// Records a device fix. The view moves to it at street level only when the
+    /// my-location button asked for it; otherwise the view is left alone (a
+    /// following idle view already centres on `position`). The trail is left alone.
     pub fn set_device_fix(&mut self, at: Coord, accuracy_m: f64) {
         self.position = Some((at, accuracy_m));
-        self.viewport = Viewport::new(at, STREET_MPP);
+        if self.locate_pending {
+            self.viewport = Viewport::new(at, STREET_MPP);
+            self.follow = false;
+            self.locate_pending = false;
+        }
     }
 
     fn size(&self) -> (f32, f32) {
@@ -1856,6 +1874,7 @@ impl StopsApp {
     /// The my-location button: centre on the last known position at once, then
     /// ask for a fresh fix (the permission first when it is missing).
     pub(crate) fn locate_me(&mut self, cx: &mut Context<Self>) {
+        self.map.ask_locate();
         if let Some((at, _)) = self.map.position {
             self.map.take_over();
             self.map.viewport = Viewport::new(at, STREET_MPP);
@@ -1876,6 +1895,9 @@ impl StopsApp {
             };
             this.update(cx, |this, cx| {
                 this.preflight = pre;
+                if step.is_some() || matches!(asked, Some(Ok(false) | Err(_))) {
+                    this.map.cancel_locate();
+                }
                 let text = match (step, asked) {
                     (Some(step), _) => step.message(),
                     (None, Some(Ok(true))) => "Looking for your location...",
@@ -1924,6 +1946,49 @@ mod tests {
     use super::*;
 
     const IST: Coord = Coord::new(41.0, 29.0);
+
+    #[test]
+    fn a_startup_fix_does_not_move_a_view_the_user_took_over() {
+        let mut m = MapState {
+            follow: false,
+            viewport: Viewport::new(IST, 40.0),
+            ..MapState::default()
+        };
+        m.set_device_fix(Coord::new(40.0, 30.0), 12.0);
+        assert_eq!(m.viewport.center, IST);
+        assert_eq!(m.viewport.metres_per_px, 40.0);
+        assert_eq!(m.position, Some((Coord::new(40.0, 30.0), 12.0)));
+    }
+
+    #[test]
+    fn an_asked_for_fix_centres_at_street_level_once() {
+        let mut m = MapState::default();
+        m.ask_locate();
+        let fix = Coord::new(40.0, 30.0);
+        m.set_device_fix(fix, 5.0);
+        assert_eq!(m.viewport.center, fix);
+        assert_eq!(m.viewport.metres_per_px, STREET_MPP);
+        assert!(!m.follow);
+        m.set_device_fix(Coord::new(40.5, 30.5), 5.0);
+        assert_eq!(m.viewport.center, fix);
+    }
+
+    #[test]
+    fn a_following_idle_view_uses_the_fix() {
+        let mut m = MapState {
+            follow: true,
+            ..MapState::default()
+        };
+        let fix = Coord::new(40.0, 30.0);
+        m.set_device_fix(fix, 5.0);
+        let vp = idle_view(
+            &Ends::default(),
+            m.position.map(|p| p.0),
+            None,
+            (400.0, 800.0),
+        );
+        assert_eq!(vp.center, fix);
+    }
 
     fn stop_at(lat: f64, lon: f64) -> Stop {
         Stop {

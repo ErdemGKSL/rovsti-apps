@@ -168,7 +168,8 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 - **AD-ST8 History is local.** `history.json` (cap 500, newest first) holds each ended trip. The
   Settings > History page lists the latest 100 and shows `History::stats` (trips, arrived share,
   total distance, average length, last 30 days, top three places). Clear takes two taps.
-- **AD-ST9 The map is the picker.** The idle Trip tab is a tall map with a pick bar; the first
+- **AD-ST9 The map is the picker.** A device fix recentres the map only after the my-location
+  button; otherwise it only feeds the opening view. The idle Trip tab is a tall map with a pick bar; the first
   tap drops A, the second drops B and the circle shows at once, with no sheet and no
   coordinates. A tap within `PICK_RADIUS_PX` of a drawn GTFS stop snaps to that stop (its name,
   id and coordinate), also when a dragged pin is dropped; otherwise the point is unnamed and

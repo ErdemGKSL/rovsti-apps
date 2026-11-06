@@ -717,6 +717,16 @@ object RovstiBridge {
         return start(Intent(Intent.ACTION_EDIT).setDataAndType(uri, android.provider.ContactsContract.Contacts.CONTENT_ITEM_TYPE))
     }
 
+    // ---- Stops location --------------------------------------------------
+
+    /** The newest known fix as `{lat, lon, accuracy_m, time_ms}`, or "" without one or the permission. */
+    @JvmStatic
+    fun lastLocation(): String = StopsLocation.last(app)
+
+    /** Asks for one fresh fix, answered by the `stops_location` event; false without permission or provider. */
+    @JvmStatic
+    fun locateOnce(): Boolean = StopsLocation.once(app)
+
     // ---- Window --------------------------------------------------------
 
     /** Sends the task to the background (never `finish()`, AD-3a); keeps the GPUI session warm. */

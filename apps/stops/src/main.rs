@@ -4,6 +4,9 @@
 //!
 //! * `backend`: files, permission checks, starting and stopping the trip.
 //! * `trip_ui`: the Trip tab, the live card and the alarm screen.
+//! * `pick`: the pure picking state machine (A, B, pins, drag, hint, labels).
+//! * `map`: the map surface and its gestures; your position arrives as a `stops_location`
+//!   event from `rovsti_android::location` (a seam, no tracking).
 //! * `picker`: the destination sheet and the shared-location confirmation.
 //! * `saved_ui`: the Saved tab.
 //! * `settings_ui`: the Settings list, History, and the arriving-soon message page.
@@ -19,10 +22,11 @@ use gpui::{
 };
 use rovsti_android::{
     events::{self, RawEvent, kind},
+    location::{self, LocationFix, parse_location_fix},
     trip::{AlarmAction, parse_trip_alarm},
 };
 use rovsti_core::wire::{DocumentOp, DocumentResult};
-use rovsti_geo::{ActiveTrip, Feed, History, Place, SavedPlaces, StopsPrefs};
+use rovsti_geo::{ActiveTrip, Coord, Feed, History, Place, SavedPlaces, StopsPrefs};
 use rovsti_ui::{
     Icon, IconAssets,
     components::large_title,
@@ -41,6 +45,7 @@ mod headless;
 #[cfg(test)]
 mod kotlin_contract;
 mod map;
+mod pick;
 mod picker;
 mod saved_ui;
 mod settings_ui;
@@ -90,9 +95,7 @@ pub(crate) struct StopsApp {
     pub(crate) stop_pattern: Option<u32>,
 
     /// The two points chosen, not started.
-    pub(crate) ends: picker::Ends,
-    /// Which end the next picked point fills.
-    pub(crate) active_slot: picker::Slot,
+    pub(crate) pick: pick::Picking,
     /// Text the chat when arriving, for the next trip.
     pub(crate) notice_on: bool,
     /// The trip in progress.
@@ -247,8 +250,7 @@ impl StopsApp {
             map_tiles: tiles::MapTiles::default(),
             stop_hits: picker::StopHits::default(),
             stop_pattern: None,
-            ends: picker::Ends::default(),
-            active_slot: picker::Slot::default(),
+            pick: pick::Picking::default(),
             notice_on: true,
             trip: None,
             live: None,
@@ -275,7 +277,37 @@ impl StopsApp {
             confirm_clear: false,
         };
         app.refresh_preflight_later(cx);
+        app.load_last_location(cx);
         app
+    }
+
+    /// Centres the idle map on the newest device fix when it is fresh. Silent when
+    /// there is none, no permission, or on desktop.
+    fn load_last_location(&self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let fix = cx
+                .background_executor()
+                .spawn(async { location::last_location() })
+                .await;
+            if let Ok(Some(fix)) = fix {
+                this.update(cx, |this, cx| this.apply_fix(fix, true, cx))
+                    .ok();
+            }
+        })
+        .detach();
+    }
+
+    /// Puts a device fix on the map. No trip means the idle map follows it; a
+    /// running trip keeps its own view.
+    fn apply_fix(&mut self, fix: LocationFix, require_fresh: bool, cx: &mut Context<Self>) {
+        if self.trip.is_some()
+            || (require_fresh && !map::fresh_enough(fix.time_ms, store::now_ms()))
+        {
+            return;
+        }
+        self.map
+            .set_device_fix(Coord::new(fix.lat, fix.lon), fix.accuracy_m);
+        cx.notify();
     }
 
     /// `ROVSTI_STOPS_SIMULATE=1` on desktop: a synthetic fix every second,
@@ -336,6 +368,10 @@ impl StopsApp {
                 Some(alarm) => self.on_alarm_event(alarm, cx),
                 None => log::warn!("unreadable trip_alarm event"),
             },
+            kind::STOPS_LOCATION => match parse_location_fix(&event.json) {
+                Some(fix) => self.apply_fix(fix, false, cx),
+                None => log::warn!("unreadable stops_location event"),
+            },
             kind::PERMISSIONS_CHANGED => {
                 self.refresh_preflight(cx);
                 self.resume_pending_start(cx);
@@ -351,20 +387,23 @@ impl StopsApp {
         }
     }
 
-    /// System Back: the alarm snoozes, a sheet closes.
-    /// Whether System Back has a layer to close: the alarm, a sheet, a Settings page, an opened
-    /// saved place, or any tab but the first (Trip). When it has not, Back leaves the app.
+    /// Whether System Back has a layer to close: a pin menu, the alarm, a sheet, a Settings page,
+    /// an opened saved place, or any tab but the first (Trip). When it has not, Back leaves the app.
     pub(crate) fn can_go_back(&self) -> bool {
-        self.alarm.is_some()
+        self.pick.menu().is_some()
+            || self.alarm.is_some()
             || self.sheet.is_open()
             || (self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main)
             || self.expanded.is_some()
             || self.tabs.selected() != 0
     }
 
-    /// System Back: one step out of the top-most layer.
+    /// System Back: one step out of the top-most layer (an open pin menu first).
     fn on_back(&mut self, cx: &mut Context<Self>) {
-        if self.alarm.is_some() {
+        if self.pick.menu().is_some() {
+            self.pick.close_menu();
+            cx.notify();
+        } else if self.alarm.is_some() {
             self.alarm_action(AlarmAction::Snooze, cx);
         } else if self.sheet.is_open() {
             self.close_sheet(cx);

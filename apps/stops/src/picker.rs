@@ -8,7 +8,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, px,
 };
-use rovsti_geo::{Coord, Diameter, DiameterError, Endpoint, Place, dest::parse_location};
+use rovsti_geo::{Coord, Diameter, DiameterError, Place, dest::parse_location};
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
     field::field_box,
@@ -17,7 +17,7 @@ use rovsti_ui::{
 };
 
 use crate::{
-    StopsApp,
+    StopsApp, pick,
     transit::{self, MAX_LINES},
     trip_ui,
 };
@@ -55,21 +55,23 @@ impl Destination {
         }
     }
 
+    /// A raw point dropped on the map: it has no name.
+    pub fn dropped(coord: Coord) -> Self {
+        Self::new(String::new(), coord)
+    }
+
+    /// Whether the point has a name worth showing.
+    pub fn is_named(&self) -> bool {
+        !self.label.trim().is_empty()
+    }
+
     /// The confirmation sheet's heading.
     pub fn title(&self) -> String {
-        format!("Use {}", self.label)
-    }
-
-    /// The point as the trip stores it.
-    pub fn endpoint(&self) -> Endpoint {
-        Endpoint {
-            label: self.label.clone(),
-            coord: self.coord,
+        if self.is_named() {
+            format!("Use {}", self.label)
+        } else {
+            "Use this point".to_owned()
         }
-    }
-
-    pub fn coords_text(&self) -> String {
-        coord_text(self.coord)
     }
 }
 
@@ -148,7 +150,7 @@ impl Ends {
     }
 }
 
-/// `41.0370, 28.9850`: the name of a pin that came without one.
+/// `41.0370, 28.9850`: for a details line only, never a name or a main-flow label.
 pub fn coord_text(coord: Coord) -> String {
     format!("{:.4}, {:.4}", coord.lat, coord.lon)
 }
@@ -163,8 +165,7 @@ pub enum Offer {
 }
 
 /// Reads a location out of `text` (a `geo:` URI, a maps link, bare
-/// coordinates). Nothing is fetched. A pin without a name is labelled with its
-/// coordinates.
+/// coordinates). Nothing is fetched. A pin without a name stays unnamed.
 pub fn offer(text: &str) -> Offer {
     match parse_location(text) {
         Ok(place) => {
@@ -172,7 +173,7 @@ pub fn offer(text: &str) -> Offer {
                 .label
                 .map(|l| l.trim().to_owned())
                 .filter(|l| !l.is_empty())
-                .unwrap_or_else(|| coord_text(place.coord));
+                .unwrap_or_default();
             Offer::Confirm(Destination::new(label, place.coord))
         }
         Err(error) => Offer::Refused(error.message()),
@@ -242,7 +243,11 @@ impl StopsApp {
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // A line looked at but not chosen leaves the map again.
-            self.map.pattern = self.ends.get(self.active_slot).and_then(|d| d.pattern);
+            self.map.pattern = self
+                .pick
+                .ends
+                .get(self.pick.sheet_slot())
+                .and_then(|d| d.pattern);
         }
         self.sheet.close();
         cx.notify();
@@ -251,7 +256,7 @@ impl StopsApp {
     /// A saved or recent point was tapped: it fills the active slot, and the
     /// next pick goes to the other end.
     pub(crate) fn choose_destination(&mut self, dest: Destination, cx: &mut Context<Self>) {
-        let slot = self.active_slot;
+        let slot = self.pick.sheet_slot();
         self.use_as(slot, dest, false, cx);
     }
 
@@ -268,16 +273,14 @@ impl StopsApp {
         }
         self.map.pattern = dest.pattern;
         self.map.follow = true;
-        self.ends.set(slot, dest);
-        self.active_slot = self.ends.next_slot();
+        self.pick.place(slot, dest);
         self.sheet.close();
         cx.notify();
     }
 
     /// Both ends at once, from a recent trip.
     pub(crate) fn choose_pair(&mut self, a: Destination, b: Destination, cx: &mut Context<Self>) {
-        self.ends.set_pair(a, b);
-        self.active_slot = self.ends.next_slot();
+        self.pick.set_pair(a, b);
         self.map.pattern = None;
         self.map.follow = true;
         self.sheet.close();
@@ -332,7 +335,7 @@ impl StopsApp {
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
         let (label, content) = match self.sheet_mode.clone() {
             SheetMode::Pick => (
-                self.active_slot.picker_title(),
+                self.pick.sheet_slot().picker_title(),
                 self.pick_body(theme, window, cx),
             ),
             SheetMode::Confirm(dest) => ("Use this point", self.confirm_body(theme, &dest, cx)),
@@ -386,7 +389,10 @@ impl StopsApp {
         let query = self.field.read(cx).text().trim().to_owned();
         let mut body = div().flex().flex_col().gap(px(8.0));
         body = body
-            .child(Self::sheet_title(theme, self.active_slot.picker_title()))
+            .child(Self::sheet_title(
+                theme,
+                self.pick.sheet_slot().picker_title(),
+            ))
             .child(div().px(px(16.0)).child(field_box(
                 theme,
                 "dest-field",
@@ -403,7 +409,7 @@ impl StopsApp {
                         theme,
                         None,
                         dest.title(),
-                        Some(dest.coords_text().into()),
+                        Some(pick::details_text(&dest).into()),
                         None,
                     )
                     .id("offer-row")
@@ -433,8 +439,7 @@ impl StopsApp {
             .collect();
         if !saved.is_empty() {
             let rows = saved.into_iter().map(|(id, dest)| {
-                let subtitle = dest.coords_text();
-                list_row(theme, None, dest.label.clone(), Some(subtitle.into()), None)
+                list_row(theme, None, pick::row_label(&dest.label), None, None)
                     .id(("pick-saved", id as usize))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.choose_destination(dest.clone(), cx);
@@ -447,7 +452,11 @@ impl StopsApp {
             let pairs = self.history.recent_pairs(3);
             if !pairs.is_empty() {
                 let rows = pairs.into_iter().enumerate().map(|(i, (a, b))| {
-                    let title = format!("{} – {}", a.label, b.label);
+                    let title = format!(
+                        "{} – {}",
+                        pick::row_label(&a.label),
+                        pick::row_label(&b.label)
+                    );
                     let (a, b) = (
                         Destination::new(a.label, a.coord),
                         Destination::new(b.label, b.coord),
@@ -465,18 +474,12 @@ impl StopsApp {
             if !recent.is_empty() {
                 let rows = recent.into_iter().enumerate().map(|(i, point)| {
                     let dest = Destination::new(point.label, point.coord);
-                    list_row(
-                        theme,
-                        None,
-                        dest.label.clone(),
-                        Some(dest.coords_text().into()),
-                        None,
-                    )
-                    .id(("pick-recent", i))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.choose_destination(dest.clone(), cx);
-                    }))
-                    .into_any_element()
+                    list_row(theme, None, pick::row_label(&dest.label), None, None)
+                        .id(("pick-recent", i))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.choose_destination(dest.clone(), cx);
+                        }))
+                        .into_any_element()
                 });
                 body = body.child(section(theme, Some("Recent".into()), rows));
             }
@@ -563,7 +566,7 @@ impl StopsApp {
             .flex_col()
             .gap(px(8.0))
             .child(Self::sheet_title(theme, name.clone()))
-            .child(Self::footnote(theme, coord_text(coord)));
+            .child(Self::footnote(theme, pick::details_text(&here)));
 
         let chosen = self.stop_pattern;
         let lines = transit::lines_through(&feed, stop, MAX_LINES);
@@ -691,7 +694,7 @@ impl StopsApp {
         }));
         let as_a = dest.clone();
         let as_b = dest.clone();
-        let default = self.ends.next_slot();
+        let default = self.pick.confirm_slot();
         let pill = |label: &'static str, slot: Slot| {
             let p = glass_pill(theme, label);
             if slot == default {
@@ -705,7 +708,7 @@ impl StopsApp {
             .flex_col()
             .gap(px(8.0))
             .child(Self::sheet_title(theme, dest.title()))
-            .child(Self::footnote(theme, dest.coords_text()))
+            .child(Self::footnote(theme, pick::details_text(dest)))
             .child(section(theme, None, [save_row.into_any_element()]))
             .child(
                 div()
@@ -815,12 +818,13 @@ mod tests {
     }
 
     #[test]
-    fn a_pin_without_a_name_is_named_by_its_coordinates() {
+    fn a_pin_without_a_name_stays_unnamed() {
         let d = confirm("geo:40.9917,29.0233");
-        assert_eq!(d.label, "40.9917, 29.0233");
-        assert_eq!(d.coords_text(), "40.9917, 29.0233");
+        assert!(!d.is_named());
+        assert_eq!(d.title(), "Use this point");
+        assert_eq!(coord_text(d.coord), "40.9917, 29.0233");
         let d = confirm("https://www.google.com/maps/@41.0082,28.9784,15z");
-        assert_eq!(d.label, "41.0082, 28.9784");
+        assert!(d.label.is_empty());
     }
 
     #[test]
@@ -866,8 +870,7 @@ mod tests {
         let d = Destination::from_place(&place);
         assert_eq!(d.label, "Home");
         assert_eq!(d.gtfs_stop.as_deref(), Some("S1"));
-        let e = d.endpoint();
-        assert_eq!((e.label.as_str(), e.coord), ("Home", place.coord));
+        assert_eq!(d.coord, place.coord);
     }
 
     #[test]

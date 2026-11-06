@@ -73,7 +73,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS`); `INTERNET` for the gateway (WhatsApp only); Photo Picker for contact photos (no permission); handoff to Phone and Messages (`dev.rovsti.permission.HANDOFF`, signature); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
 | Stops | none | foreground service of type `location` (`TripService`) feeding fixes to `rovsti_geo::ActiveTrip` through the headless call, `AlarmActivity` (native Views over the lock screen, full-screen intent), `TripAlarm`/`AlarmSound` (alarm-usage audio focus, `STREAM_ALARM` volume raise and restore, `CATEGORY_ALARM` channel), `USE_EXACT_ALARM` for snooze and the watchdog (`setAlarmClock`, `setExactAndAllowWhileIdle` as fallback), boot receiver that ends a stale trip; `INTERNET` for the gateway (the arriving-soon message only); `geo:` and maps-link `VIEW` filters and `SEND text/plain` |
 
-### Stops: decisions (AD-ST1 to AD-ST8, AD-SA1 to AD-SA9, AD-SX1 to AD-SX8)
+### Stops: decisions (AD-ST1 to AD-ST9, AD-SA1 to AD-SA9, AD-SX1 to AD-SX8)
 
 - **AD-ST1 Pure first.** The trip session, destination parsing, saved places, history and
   statistics, prefs, the arriving-soon template, GTFS parsing and the map projection are
@@ -152,7 +152,9 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   "(c) OpenStreetMap contributors".
 - **AD-ST5 Points are local.** A and B each come from the same sources: are `geo:` URIs and maps links (shared, opened or
   pasted), saved places, recent trips and GTFS stops. No geocoding: a link without coordinates is
-  refused and nothing is fetched to resolve it.
+  refused and nothing is fetched to resolve it. The picking state (A, B, pin menu, drag, the
+  hint line, labels) is the pure `apps/stops/src/pick.rs`; a point without a name is shown as
+  "Point A" / "Point B" and the pair as "A-B 850 m", never as coordinates.
 - **AD-ST6 GTFS is optional and local.** A `.zip` picked with the file picker is parsed on the
   background executor into `gtfs.json` (caps on stops, patterns and rows). It names stops
   (a point source for A or B) and draws them and their lines on the map; it has no alarm rule.
@@ -166,6 +168,23 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 - **AD-ST8 History is local.** `history.json` (cap 500, newest first) holds each ended trip. The
   Settings > History page lists the latest 100 and shows `History::stats` (trips, arrived share,
   total distance, average length, last 30 days, top three places). Clear takes two taps.
+- **AD-ST9 The map is the picker.** A device fix recentres the map only after the my-location
+  button; otherwise it only feeds the opening view. The idle Trip tab is a tall map with a pick bar; the first
+  tap drops A, the second drops B and the circle shows at once, with no sheet and no
+  coordinates. A tap within `PICK_RADIUS_PX` of a drawn GTFS stop snaps to that stop (its name,
+  id and coordinate), also when a dragged pin is dropped; otherwise the point is unnamed and
+  shown as "Point A" / "Point B" by its slot (Swap stays right), frozen to that text only when the
+  trip starts. With A and B set a third tap on empty map places nothing and says to drag a pin or
+  Clear; "Move" in the pin menu arms a pin so the next tap relocates it. Pins drag directly (no
+  long-press, which would delay every pan): a touch within `PIN_GRAB_PX` of a pin grabs it, a
+  second finger cancels the drag into a pinch. A map tap never moves the view. Sheet picks
+  (saved, recent, stop search, stop sheet, shared links through the Confirm sheet, which
+  emphasises the open end) refit the view. The idle view is the pair, else your position at
+  street level, else the last trip or first saved place, else the default city. Your position
+  comes from the `stops_location` seam in `rovsti_android::location` (last known location plus
+  one fresh fix on request; no background tracking, nothing leaves the phone). All state and
+  label text is the pure, tested `apps/stops/src/pick.rs`; coordinates survive only in the pin
+  menu's and the Confirm sheet's details lines.
 
 The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius, ETA and
 "N stops before" rules are gone.

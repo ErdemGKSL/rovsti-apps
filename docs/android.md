@@ -141,6 +141,12 @@ still refuses a background restart, `TripService` posts a notification on the ch
 | `BootReceiver` | ends a trip left running before a reboot (`trip_end`, `cancelled`) |
 | `MainActivity` | `VIEW` for `geo:` and the maps hosts (`maps.google.com`, `www.google.com/maps`, `www.openstreetmap.org`, `maps.apple.com`), `SEND text/plain`; both reach Rust through `Application::on_open_urls` and `on_receive_share` |
 
+**Idle location.** To centre the map before a trip, `StopsLocation` answers two bridge calls:
+`lastLocation` (sync, the last known fix or nothing) and `locateOnce` (asks for one fresh fix and
+returns false without permission or a provider). The fix arrives as a `stops_location` event
+(`rovsti_android::location`, parsed by `parse_location_fix`). There is no background tracking and
+no fix is stored.
+
 `RovstiStopsApp.onCreate` installs the bridge and sets `Headless.libName = "rovsti_stops"`. Kinds and
 JSON of the headless call are documented at the top of `apps/stops/src/headless.rs`.
 

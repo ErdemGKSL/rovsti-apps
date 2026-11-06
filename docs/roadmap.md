@@ -125,4 +125,7 @@ list in `docs/phone-acceptance.md`.
 - [x] Trip history and statistics, all local (done without a device)
 - [x] Arriving-soon WhatsApp message: one chat, a template, with the alarm or 5/10/15 min
       before, through the gateway (done without a device)
+- [x] Pick A and B on the map: tap to drop, drag to adjust, snap to stops, my location (done
+      without a device)
+- [ ] Check map picking one-handed on a phone
 - [ ] Check the trip, alarm and Doze on a phone: written without a device

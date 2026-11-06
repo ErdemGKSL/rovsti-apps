@@ -14,12 +14,13 @@ use std::{cell::Cell, collections::VecDeque, rc::Rc, time::Duration};
 
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, Context, Corners, Edges, Hsla, InteractiveElement,
-    IntoElement, MouseButton, MouseDownEvent, ParentElement, PathBuilder, Pixels, Point,
-    StatefulInteractiveElement, Styled, Task, TouchEvent, TouchPhase, Window, canvas, div, point,
-    px, quad,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    PathBuilder, Pixels, Point, StatefulInteractiveElement, Styled, Task, TouchEvent, TouchPhase,
+    Window, canvas, div, point, px, quad,
 };
+use rovsti_android::location;
 use rovsti_geo::{
-    Coord, Diameter, EARTH_RADIUS_M, Feed, Side, Stop,
+    Coord, Diameter, EARTH_RADIUS_M, Feed, History, SavedPlaces, Side, Stop,
     tiles::{
         ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileGeometry, TileLayer,
         build_layer, line_width, tiles_for_view,
@@ -35,7 +36,9 @@ use rovsti_ui::{
 
 use crate::{
     StopsApp,
-    picker::{Destination, SheetMode, coord_text},
+    backend::{Preflight, Step},
+    pick::{self, TapOutcome},
+    picker::{Destination, Ends, SheetMode, Slot},
     store::now_ms,
 };
 
@@ -58,14 +61,20 @@ const FIT_PADDING_PX: f32 = 48.0;
 /// Two taps this close in time and space are a double tap.
 const DOUBLE_TAP_MS: u64 = 300;
 const DOUBLE_TAP_SLOP_PX: f32 = 40.0;
-/// A mouse click this soon after a touch is that touch's echo.
+/// A mouse sequence starting this soon after a touch is that touch's echo.
 const CLICK_ECHO_MS: u64 = 700;
+/// A finger that starts this close to a pin grabs it.
+const PIN_GRAB_PX: f32 = 32.0;
+/// The touch id the mouse uses.
+const MOUSE_ID: u64 = u64::MAX;
 /// Two fingers closer than this give no usable zoom ratio.
 const MIN_PINCH_PX: f32 = 12.0;
 /// Rings and dots beyond this many pixels are not worth tessellating.
 const MAX_RADIUS_PX: f32 = 4_000.0;
 
 pub const MAP_HEIGHT: f32 = 340.0;
+/// The map is the main surface while no trip runs.
+pub const IDLE_MAP_HEIGHT: f32 = 460.0;
 const DEFAULT_SIZE: (f32, f32) = (370.0, MAP_HEIGHT);
 const CONTROL_SIZE: f32 = 40.0;
 const CONTROL_GAP: f32 = 8.0;
@@ -164,6 +173,36 @@ pub fn pick_stop(
     )
 }
 
+/// What a tap or a dropped pin at `at` (pixels from the view centre) means: the
+/// GTFS stop within [`PICK_RADIUS_PX`] (its name, id and place), else the raw
+/// point under the finger, unnamed.
+pub fn snap_destination(
+    feed: Option<&Feed>,
+    viewport: &Viewport,
+    size: (f32, f32),
+    at: (f32, f32),
+) -> Destination {
+    let stop = feed.and_then(|feed| {
+        let index = pick_stop(feed, viewport, size, at, PICK_RADIUS_PX)?;
+        feed.stops.get(index as usize)
+    });
+    match stop {
+        Some(stop) => Destination {
+            label: stop.name.clone(),
+            coord: stop.coord,
+            gtfs_stop: Some(stop.id.clone()),
+            pattern: None,
+        },
+        None => Destination::dropped(viewport.unproject(at)),
+    }
+}
+
+/// Index of the GTFS stop `id` in the feed, for the pin menu's "Lines" row.
+pub fn stop_index(feed: Option<&Feed>, id: &str) -> Option<u32> {
+    let index = feed?.stops.iter().position(|s| s.id == id)?;
+    u32::try_from(index).ok()
+}
+
 /// The corners of the box around `centre` that holds a circle of `metres`.
 fn extent(centre: Coord, metres: f64) -> [Coord; 2] {
     let dlat = (metres / EARTH_RADIUS_M).to_degrees();
@@ -193,6 +232,82 @@ pub fn fit_view(
         fitted.center,
         fitted.metres_per_px.max(MIN_FIT_MPP),
     ))
+}
+
+/// Metres per pixel at street level: tiles show streets and names.
+pub const STREET_MPP: f64 = 1.5;
+/// Metres per pixel for the last-resort city view.
+pub const CITY_MPP: f64 = 12.0;
+/// Where the map opens with no position, no ends and nothing remembered.
+pub const DEFAULT_CENTRE: Coord = Coord::new(41.0082, 28.9784);
+
+/// Where the idle map opens: the pair if there is one, else the one end, else
+/// you, else somewhere you used before, else the default city.
+pub fn idle_view(
+    ends: &Ends,
+    position: Option<Coord>,
+    fallback: Option<Coord>,
+    size: (f32, f32),
+) -> Viewport {
+    let a = ends.a.as_ref().map(|d| d.coord);
+    let b = ends.b.as_ref().map(|d| d.coord);
+    match (a, b) {
+        (Some(a), Some(b)) => match Diameter::new(a, b) {
+            Ok(d) => fit_view(None, Some(&d), size).unwrap_or_else(|| Viewport::new(a, STREET_MPP)),
+            Err(_) => {
+                let fitted = Viewport::fit(&[a, b], size.0, size.1, FIT_PADDING_PX);
+                Viewport::new(fitted.center, fitted.metres_per_px.max(STREET_MPP))
+            }
+        },
+        (Some(end), None) | (None, Some(end)) => Viewport::new(end, STREET_MPP),
+        (None, None) => match position.or(fallback) {
+            Some(at) => Viewport::new(at, STREET_MPP),
+            None => Viewport::new(DEFAULT_CENTRE, CITY_MPP),
+        },
+    }
+}
+
+/// Where to open when there is no fix: the middle of the last trip, else the
+/// first saved place.
+pub fn fallback_centre(history: &History, saved: &SavedPlaces) -> Option<Coord> {
+    if let Some((a, b)) = history.recent_pairs(1).into_iter().next() {
+        return Some(Coord::new(
+            (a.coord.lat + b.coord.lat) / 2.0,
+            (a.coord.lon + b.coord.lon) / 2.0,
+        ));
+    }
+    saved.places.first().map(|p| p.coord)
+}
+
+/// Width and height of the small menu over a tapped pin.
+pub const PIN_MENU_W: f32 = 180.0;
+pub const PIN_MENU_H: f32 = 132.0;
+/// Height of one row of the pin menu.
+const PIN_MENU_ROW_H: f32 = 36.0;
+const PIN_MENU_MARGIN: f32 = 8.0;
+/// Gap between the pin and its menu, and the pin's own height above its point.
+const PIN_MENU_GAP: f32 = 14.0;
+
+/// The pin menu box `(x, y, w, h)` in map-local pixels from the top-left: above
+/// `pin`, below it where there is no room, kept inside `size` with a margin.
+pub fn pin_menu_rect(pin: (f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) {
+    let (w, h) = (PIN_MENU_W, PIN_MENU_H);
+    let above = pin.1 - PIN_MENU_GAP - h;
+    let y = if above >= PIN_MENU_MARGIN {
+        above
+    } else {
+        pin.1 + PIN_MENU_GAP
+    };
+    let clamp = |v: f32, len: f32, bound: f32| {
+        let hi = (bound - len - PIN_MENU_MARGIN).max(PIN_MENU_MARGIN);
+        v.clamp(PIN_MENU_MARGIN, hi)
+    };
+    (clamp(pin.0 - w / 2.0, w, size.0), clamp(y, h, size.1), w, h)
+}
+
+/// Whether `at` is inside `rect` `(x, y, w, h)`.
+pub fn over_rect(rect: (f32, f32, f32, f32), at: (f32, f32)) -> bool {
+    at.0 >= rect.0 && at.0 <= rect.0 + rect.2 && at.1 >= rect.1 && at.1 <= rect.1 + rect.3
 }
 
 /// A scale bar for `metres_per_px`: its length in pixels and its label.
@@ -304,6 +419,33 @@ pub enum Gesture {
     DoubleTap {
         at: (f32, f32),
     },
+    /// A finger touched a pin without moving.
+    PinTap {
+        slot: Slot,
+    },
+    /// The grabbed pin goes to `at` (the finger minus the grab offset).
+    PinDrag {
+        slot: Slot,
+        at: (f32, f32),
+    },
+    /// The grabbed pin was let go at `at`.
+    PinDrop {
+        slot: Slot,
+        at: (f32, f32),
+    },
+    /// The grab was interrupted: the pin goes back.
+    PinCancel {
+        slot: Slot,
+    },
+}
+
+/// A pin held by the first finger.
+#[derive(Clone, Copy, Debug)]
+struct Grab {
+    slot: Slot,
+    /// Finger minus pin at the start, so the pin does not jump.
+    offset: (f32, f32),
+    moved: bool,
 }
 
 /// Turns raw touches into gestures. Positions are whatever space the caller
@@ -321,12 +463,26 @@ pub struct Gestures {
     /// The sequence moved or used two fingers: it is not a tap.
     dragging: bool,
     pending: Option<((f32, f32), u64)>,
+    /// Last real (non-mouse) touch.
     last_touch_ms: Option<u64>,
+    /// Where the pins are, in the same space as the touches.
+    handles: Vec<(Slot, (f32, f32))>,
+    grab: Option<Grab>,
+    /// The running mouse sequence is a touch's echo.
+    mouse_ignored: bool,
 }
 
 impl Gestures {
+    /// The pins a finger can grab, in the touches' space.
+    pub fn set_handles(&mut self, handles: &[(Slot, (f32, f32))]) {
+        self.handles.clear();
+        self.handles.extend_from_slice(handles);
+    }
+
     pub fn touch(&mut self, id: u64, phase: Phase, at: (f32, f32), now_ms: u64) -> Option<Gesture> {
-        self.last_touch_ms = Some(now_ms);
+        if id != MOUSE_ID {
+            self.last_touch_ms = Some(now_ms);
+        }
         match phase {
             Phase::Start => {
                 if self.touches.len() >= 2 || self.touches.iter().any(|t| t.0 == id) {
@@ -337,13 +493,38 @@ impl Gestures {
                     self.start = at;
                     self.anchor = at;
                     self.dragging = false;
+                    self.grab = self
+                        .handles
+                        .iter()
+                        .map(|&(slot, h)| (slot, h, dist(at, h)))
+                        .filter(|t| t.2 <= PIN_GRAB_PX)
+                        .min_by(|a, b| a.2.total_cmp(&b.2))
+                        .map(|(slot, h, _)| Grab {
+                            slot,
+                            offset: (at.0 - h.0, at.1 - h.1),
+                            moved: false,
+                        });
+                    None
                 } else {
                     self.dragging = true;
+                    // A second finger turns the grab into a pinch.
+                    self.grab
+                        .take()
+                        .map(|grab| Gesture::PinCancel { slot: grab.slot })
                 }
-                None
             }
             Phase::Move => {
                 let i = self.touches.iter().position(|t| t.0 == id)?;
+                if let Some(grab) = &mut self.grab {
+                    self.touches[i].1 = at;
+                    if !grab.moved && dist(at, self.start) > TAP_SLOP {
+                        grab.moved = true;
+                    }
+                    return grab.moved.then_some(Gesture::PinDrag {
+                        slot: grab.slot,
+                        at: (at.0 - grab.offset.0, at.1 - grab.offset.1),
+                    });
+                }
                 let old = std::mem::replace(&mut self.touches[i].1, at);
                 if self.touches.len() == 2 {
                     let other = self.touches[1 - i].1;
@@ -371,7 +552,21 @@ impl Gestures {
                 if phase == Phase::Cancel {
                     self.touches.clear();
                     self.dragging = false;
-                    return None;
+                    return self
+                        .grab
+                        .take()
+                        .map(|grab| Gesture::PinCancel { slot: grab.slot });
+                }
+                if let Some(grab) = self.grab.take() {
+                    self.touches.remove(i);
+                    return Some(if grab.moved {
+                        Gesture::PinDrop {
+                            slot: grab.slot,
+                            at: (at.0 - grab.offset.0, at.1 - grab.offset.1),
+                        }
+                    } else {
+                        Gesture::PinTap { slot: grab.slot }
+                    });
                 }
                 let tap =
                     self.touches.len() == 1 && !self.dragging && dist(at, self.start) <= TAP_SLOP;
@@ -391,16 +586,22 @@ impl Gestures {
         }
     }
 
-    /// A mouse click (desktop). The click that follows a touch is that
-    /// touch's echo and is ignored.
-    pub fn click(&mut self, at: (f32, f32), now_ms: u64) -> Option<Gesture> {
-        if self
-            .last_touch_ms
-            .is_some_and(|t| now_ms.saturating_sub(t) < CLICK_ECHO_MS)
-        {
+    /// The left mouse button (desktop) as a one-finger touch. A sequence
+    /// that starts right after a real touch is that touch's echo and is
+    /// ignored to its end.
+    pub fn mouse(&mut self, phase: Phase, at: (f32, f32), now_ms: u64) -> Option<Gesture> {
+        if phase == Phase::Start {
+            self.mouse_ignored = self
+                .last_touch_ms
+                .is_some_and(|t| now_ms.saturating_sub(t) < CLICK_ECHO_MS);
+        }
+        if self.mouse_ignored {
+            if matches!(phase, Phase::End | Phase::Cancel) {
+                self.mouse_ignored = false;
+            }
             return None;
         }
-        self.register_tap(at, now_ms)
+        self.touch(MOUSE_ID, phase, at, now_ms)
     }
 
     fn register_tap(&mut self, at: (f32, f32), now_ms: u64) -> Option<Gesture> {
@@ -443,11 +644,24 @@ pub struct Scene {
     pub position: Option<((f32, f32), f32)>,
     /// The circle on AB with its two halves.
     pub diameter: Option<DiameterScene>,
+    /// The pins of A and B, for every end that is set.
+    pub pins: Vec<PinScene>,
+    /// AB drawn as a plain warning line when both ends are set but make no valid circle.
+    pub segment: Option<((f32, f32), (f32, f32))>,
     pub trail: Vec<(f32, f32)>,
     pub stops: Vec<(f32, f32)>,
     pub line: Vec<(f32, f32)>,
     /// Map tiles under everything else; empty where none are loaded.
     pub tiles: TileLayer,
+}
+
+/// One pin, in pixels from the view centre.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PinScene {
+    pub slot: Slot,
+    pub at: (f32, f32),
+    /// The pin sits on a GTFS stop.
+    pub snapped: bool,
 }
 
 /// The circle with AB as its diameter, in pixels from the view centre.
@@ -503,6 +717,8 @@ pub struct SceneInput<'a> {
     pub size: (f32, f32),
     pub position: Option<(Coord, f64)>,
     pub diameter: Option<Diameter>,
+    /// A and B with whether each snapped to a stop.
+    pub pins: [Option<(Coord, bool)>; 2],
     pub trail: &'a Breadcrumb,
     pub feed: Option<&'a Feed>,
     pub pattern: Option<u32>,
@@ -525,6 +741,22 @@ impl Scene {
         let mpp = vp.metres_per_px;
         let metres = |m: f64| ((m / mpp) as f32).clamp(0.0, MAX_RADIUS_PX);
         let diameter = input.diameter.map(|d| DiameterScene::build(&d, vp));
+        let pins: Vec<PinScene> = [Slot::A, Slot::B]
+            .into_iter()
+            .zip(input.pins)
+            .filter_map(|(slot, pin)| {
+                let (coord, snapped) = pin?;
+                Some(PinScene {
+                    slot,
+                    at: vp.project(coord),
+                    snapped,
+                })
+            })
+            .collect();
+        let segment = match (input.pins[0], input.pins[1], &diameter) {
+            (Some((a, _)), Some((b, _)), None) => Some((vp.project(a), vp.project(b))),
+            _ => None,
+        };
         let trail: Vec<_> = input.trail.iter().map(|c| vp.project(c)).collect();
         let (stops, line) = match input.feed {
             Some(feed) => {
@@ -552,6 +784,8 @@ impl Scene {
                 .position
                 .map(|(c, accuracy)| (vp.project(c), metres(accuracy))),
             diameter,
+            pins,
+            segment,
             trail: thin_polyline(&trail, TRAIL_MIN_PX),
             stops,
             line: thin_polyline(&line, LINE_MIN_PX),
@@ -881,7 +1115,13 @@ fn paint_diameter(
 }
 
 /// Paints `scene` into `bounds`. Scene points are from the view centre.
-fn paint_scene(scene: &Scene, bounds: Bounds<Pixels>, pal: &Palette, window: &mut Window) {
+fn paint_scene(
+    scene: &Scene,
+    dragging: Option<Slot>,
+    bounds: Bounds<Pixels>,
+    pal: &Palette,
+    window: &mut Window,
+) {
     window.paint_quad(quad(
         bounds,
         Corners::all(radius::CARD),
@@ -915,6 +1155,9 @@ fn paint_scene(scene: &Scene, bounds: Bounds<Pixels>, pal: &Palette, window: &mu
     if let Some(d) = &scene.diameter {
         paint_diameter(d, &to_window, pal, window);
     }
+    if let Some((a, b)) = scene.segment {
+        stroke_line(window, &[to_window(a), to_window(b)], 3.5, pal.ring);
+    }
 
     stroke_line(window, &to_window_all(&scene.trail), 3.0, pal.trail);
 
@@ -924,6 +1167,98 @@ fn paint_scene(scene: &Scene, bounds: Bounds<Pixels>, pal: &Palette, window: &mu
         fill_circle(window, at, 9.0, pal.halo);
         fill_circle(window, at, 6.5, pal.you);
     }
+
+    for pin in &scene.pins {
+        let at = to_window(pin.at);
+        let r = pin_radius(dragging == Some(pin.slot));
+        let color = pin_color(pal, pin.slot);
+        fill_circle(window, at, r + PIN_RIM_PX, pal.halo);
+        fill_circle(window, at, r, color);
+        if pin.snapped {
+            let mut ring = PathBuilder::stroke(px(2.0));
+            add_circle(&mut ring, at, r + PIN_RIM_PX + 3.5, false);
+            if let Ok(path) = ring.build() {
+                window.paint_path(path, color);
+            }
+        }
+    }
+}
+
+/// Radius of a pin disc; the pin in the finger is drawn larger.
+const PIN_RADIUS_PX: f32 = 12.0;
+const PIN_RIM_PX: f32 = 2.5;
+const PIN_DRAG_SCALE: f32 = 1.2;
+/// Widest a pin's name caption grows.
+const PIN_CAPTION_W: f32 = 160.0;
+
+fn pin_radius(dragged: bool) -> f32 {
+    if dragged {
+        PIN_RADIUS_PX * PIN_DRAG_SCALE
+    } else {
+        PIN_RADIUS_PX
+    }
+}
+
+fn pin_color(pal: &Palette, slot: Slot) -> Hsla {
+    match slot {
+        Slot::A => pal.left,
+        Slot::B => pal.right,
+    }
+}
+
+/// The letter on a pin and the name under it, as elements over the canvas.
+fn pin_labels(
+    theme: Theme,
+    scene: &Scene,
+    dragging: Option<Slot>,
+    ends: &Ends,
+    size: (f32, f32),
+) -> Vec<AnyElement> {
+    let colors = theme::colors(theme);
+    let mut out = Vec::with_capacity(scene.pins.len() * 2);
+    for pin in &scene.pins {
+        let r = pin_radius(dragging == Some(pin.slot));
+        let (x, y) = (size.0 / 2.0 + pin.at.0, size.1 / 2.0 + pin.at.1);
+        out.push(
+            div()
+                .absolute()
+                .left(px(x - r))
+                .top(px(y - r))
+                .size(px(r * 2.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(typography::FOOTNOTE.size)
+                .font_weight(typography::HEADLINE.weight)
+                .text_color(gpui::white())
+                .child(pin.slot.label())
+                .into_any_element(),
+        );
+        let name = pick::point_label(pin.slot, ends.get(pin.slot));
+        out.push(
+            div()
+                .absolute()
+                .left(px(x - PIN_CAPTION_W / 2.0))
+                .top(px(y + r + PIN_RIM_PX + 4.0))
+                .w(px(PIN_CAPTION_W))
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .max_w(px(PIN_CAPTION_W))
+                        .px(px(8.0))
+                        .py(px(2.0))
+                        .rounded_full()
+                        .bg(with_alpha(colors.secondary_background, 0.88))
+                        .truncate()
+                        .text_size(typography::CAPTION.size)
+                        .text_color(colors.label)
+                        .child(name),
+                )
+                .into_any_element(),
+        );
+    }
+    out
 }
 
 // ---- state and element glue --------------------------------------------------------------
@@ -943,6 +1278,17 @@ pub struct MapState {
     /// Where the surface was last painted, in window coordinates.
     pub bounds: Rc<Cell<Bounds<Pixels>>>,
     tap_timer: Option<Task<()>>,
+    /// The my-location button was pressed and its fix has not arrived yet.
+    locate_pending: bool,
+}
+
+/// How old a device fix may be and still centre the idle map.
+pub const FIX_MAX_AGE_MS: i64 = 10 * 60 * 1000;
+
+/// Whether a fix taken at `time_ms` is recent enough at `now_ms` (a fix from the
+/// future, within clock skew, counts as fresh).
+pub fn fresh_enough(time_ms: i64, now_ms: i64) -> bool {
+    time_ms > 0 && now_ms.saturating_sub(time_ms) <= FIX_MAX_AGE_MS
 }
 
 impl Default for MapState {
@@ -956,11 +1302,34 @@ impl Default for MapState {
             pattern: None,
             bounds: Rc::default(),
             tap_timer: None,
+            locate_pending: false,
         }
     }
 }
 
 impl MapState {
+    /// The next device fix should recentre the view (the my-location button).
+    pub fn ask_locate(&mut self) {
+        self.locate_pending = true;
+    }
+
+    /// The asked-for fix will not come (no permission, location off, error).
+    pub fn cancel_locate(&mut self) {
+        self.locate_pending = false;
+    }
+
+    /// Records a device fix. The view moves to it at street level only when the
+    /// my-location button asked for it; otherwise the view is left alone (a
+    /// following idle view already centres on `position`). The trail is left alone.
+    pub fn set_device_fix(&mut self, at: Coord, accuracy_m: f64) {
+        self.position = Some((at, accuracy_m));
+        if self.locate_pending {
+            self.viewport = Viewport::new(at, STREET_MPP);
+            self.follow = false;
+            self.locate_pending = false;
+        }
+    }
+
     fn size(&self) -> (f32, f32) {
         let b = self.bounds.get();
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
@@ -996,7 +1365,8 @@ enum MapInput {
         phase: Phase,
         at: (f32, f32),
     },
-    Click {
+    Mouse {
+        phase: Phase,
         at: (f32, f32),
     },
 }
@@ -1005,6 +1375,7 @@ enum MapInput {
 /// mouse clicks, and keeps the page from scrolling under a finger on the map.
 fn input_surface(
     bounds_out: Rc<Cell<Bounds<Pixels>>>,
+    menu_rect: Option<(f32, f32, f32, f32)>,
     on_input: impl Fn(MapInput, &mut App) + 'static,
 ) -> impl IntoElement {
     let on_input = Rc::new(on_input);
@@ -1013,14 +1384,13 @@ fn input_surface(
         move |bounds, (), window, _| {
             bounds_out.set(bounds);
             let size = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+            // The controls and the pin menu are not the map's.
             let on_controls = move |p: Point<Pixels>| {
-                over_controls(
-                    size,
-                    (
-                        f32::from(p.x - bounds.origin.x),
-                        f32::from(p.y - bounds.origin.y),
-                    ),
-                )
+                let local = (
+                    f32::from(p.x - bounds.origin.x),
+                    f32::from(p.y - bounds.origin.y),
+                );
+                over_controls(size, local) || menu_rect.is_some_and(|r| over_rect(r, local))
             };
             let touch = Rc::clone(&on_input);
             window.on_mouse_event(move |event: &TouchEvent, phase, window, cx| {
@@ -1043,15 +1413,45 @@ fn input_surface(
                     cx,
                 );
             });
-            let click = Rc::clone(&on_input);
+            let mouse = Rc::clone(&on_input);
+            let pressed = Rc::new(Cell::new(false));
+            let down = Rc::clone(&pressed);
+            let down_input = Rc::clone(&mouse);
             window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
                 if phase.bubble()
                     && event.button == MouseButton::Left
                     && bounds.contains(&event.position)
                     && !on_controls(event.position)
                 {
-                    click(
-                        MapInput::Click {
+                    down.set(true);
+                    down_input(
+                        MapInput::Mouse {
+                            phase: Phase::Start,
+                            at: (f32::from(event.position.x), f32::from(event.position.y)),
+                        },
+                        cx,
+                    );
+                }
+            });
+            let moved = Rc::clone(&pressed);
+            let move_input = Rc::clone(&mouse);
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                if phase.bubble() && moved.get() && event.pressed_button == Some(MouseButton::Left)
+                {
+                    move_input(
+                        MapInput::Mouse {
+                            phase: Phase::Move,
+                            at: (f32::from(event.position.x), f32::from(event.position.y)),
+                        },
+                        cx,
+                    );
+                }
+            });
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                if phase.bubble() && event.button == MouseButton::Left && pressed.replace(false) {
+                    mouse(
+                        MapInput::Mouse {
+                            phase: Phase::End,
                             at: (f32::from(event.position.x), f32::from(event.position.y)),
                         },
                         cx,
@@ -1105,39 +1505,37 @@ impl StopsApp {
     fn map_diameter(&self) -> Option<Diameter> {
         match &self.trip {
             Some(trip) => Some(trip.trip.diameter),
-            None => self.ends.diameter().and_then(Result::ok),
+            None => self.pick.ends.diameter().and_then(Result::ok),
         }
-    }
-
-    /// Something to show: a fix, a destination, or a feed to browse.
-    fn map_has_content(&self) -> bool {
-        self.map.position.is_some()
-            || self.trip.is_some()
-            || !self.ends.is_empty()
-            || self.gtfs.is_some()
     }
 
     /// The map card for the Trip tab, or `None` while there is nothing to show.
     pub(crate) fn map_card(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.map_has_content() {
-            return None;
-        }
         let size = self.map.size();
         let diameter = self.map_diameter();
         let position = self.map.position;
         if self.map.follow {
-            let fitted = fit_view(position.map(|p| p.0), diameter.as_ref(), size).or_else(|| {
-                // Browsing a feed with no fix and no destination: start at its first stop.
-                self.gtfs
-                    .as_ref()
-                    .and_then(|f| f.stops.first())
-                    .map(|s| Viewport::new(s.coord, 12.0))
-            });
-            if let Some(view) = fitted {
-                self.map.viewport = view;
-            }
+            self.map.viewport = if self.trip.is_some() {
+                fit_view(position.map(|p| p.0), diameter.as_ref(), size)
+                    .unwrap_or(self.map.viewport)
+            } else {
+                let fallback = fallback_centre(&self.history, &self.saved);
+                idle_view(&self.pick.ends, position.map(|p| p.0), fallback, size)
+            };
         }
         let viewport = self.map.viewport;
+        let centre = self.map.bounds.get().center();
+        // Pins are only grabbable while the pair can be edited.
+        let editable = self.trip.is_none() && self.alarm.is_none();
+        let handles: Vec<(Slot, (f32, f32))> = [Slot::A, Slot::B]
+            .into_iter()
+            .filter(|_| editable)
+            .filter_map(|slot| {
+                let (x, y) = viewport.project(self.pick.ends.get(slot)?.coord);
+                Some((slot, (f32::from(centre.x) + x, f32::from(centre.y) + y)))
+            })
+            .collect();
+        self.map.gestures.set_handles(&handles);
         let cover = tiles_for_view(&viewport, size, VIEW_TILE_CAP);
         self.map_tiles.request_view(&cover, cx);
         let loaded = self.map_tiles.gather(&cover);
@@ -1147,6 +1545,12 @@ impl StopsApp {
             size,
             position,
             diameter,
+            pins: [Slot::A, Slot::B].map(|slot| {
+                self.pick
+                    .ends
+                    .get(slot)
+                    .map(|d| (d.coord, d.gtfs_stop.is_some()))
+            }),
             trail: &self.map.trail,
             feed: self.gtfs.as_deref(),
             pattern: self.map.pattern,
@@ -1160,8 +1564,6 @@ impl StopsApp {
             .as_ref()
             .map(|d| {
                 [
-                    ("A", d.a, colors.label, (-18.0, -22.0)),
-                    ("B", d.b, colors.label, (6.0, -22.0)),
                     ("L", d.left_label, palette.left, (-6.0, -9.0)),
                     ("R", d.right_label, palette.right, (-6.0, -9.0)),
                 ]
@@ -1170,13 +1572,32 @@ impl StopsApp {
                 .collect()
             })
             .unwrap_or_default();
+        let dragging = self.pick.dragging();
+        let pin_labels = pin_labels(theme, &scene, dragging, &self.pick.ends, size);
+        let idle = self.trip.is_none();
 
         let entity = cx.entity();
         let input = entity.clone();
-        let surface = input_surface(self.map.bounds.clone(), move |event, cx| {
+        let menu = self.pin_menu(theme, &scene, size, cx);
+        let menu_rect = menu.as_ref().map(|(rect, _)| *rect);
+        let surface = input_surface(self.map.bounds.clone(), menu_rect, move |event, cx| {
             input.update(cx, |this, cx| this.map_input(event, cx));
         });
         let pinch = entity;
+        let last_control = if idle {
+            control_button(theme, "Me")
+                .id("map-locate")
+                .text_size(typography::FOOTNOTE.size)
+                .on_click(cx.listener(|this, _, _, cx| this.locate_me(cx)))
+        } else {
+            control_button(theme, "Fit")
+                .id("map-fit")
+                .text_size(typography::FOOTNOTE.size)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.map.follow = true;
+                    cx.notify();
+                }))
+        };
         let controls = div()
             .absolute()
             .top(px(CONTROL_MARGIN))
@@ -1194,15 +1615,7 @@ impl StopsApp {
                     .id("map-zoom-out")
                     .on_click(cx.listener(|this, _, _, cx| this.map_zoom(0.5, cx))),
             )
-            .child(
-                control_button(theme, "Fit")
-                    .id("map-fit")
-                    .text_size(typography::FOOTNOTE.size)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.map.follow = true;
-                        cx.notify();
-                    })),
-            );
+            .child(last_control);
         let scale = div()
             .absolute()
             .left(px(14.0))
@@ -1237,7 +1650,7 @@ impl StopsApp {
                     div()
                         .id("map")
                         .relative()
-                        .h(px(MAP_HEIGHT))
+                        .h(px(if idle { IDLE_MAP_HEIGHT } else { MAP_HEIGHT }))
                         .w_full()
                         .rounded(radius::CARD)
                         .overflow_hidden()
@@ -1250,19 +1663,102 @@ impl StopsApp {
                             canvas(
                                 |_, _, _| (),
                                 move |bounds, (), window, _| {
-                                    paint_scene(&scene, bounds, &palette, window);
+                                    paint_scene(&scene, dragging, bounds, &palette, window);
                                 },
                             )
                             .size_full(),
                         )
                         .children(labels)
+                        .children(pin_labels)
                         .child(surface)
+                        .children(menu.map(|(_, card)| card))
                         .child(scale)
                         .child(attribution)
                         .child(controls),
                 )
                 .into_any_element(),
         )
+    }
+
+    /// The small card over a tapped pin and its box in map-local pixels: Move,
+    /// Remove, Lines for a stop, and the coordinates as a details line.
+    fn pin_menu(
+        &mut self,
+        theme: Theme,
+        scene: &Scene,
+        size: (f32, f32),
+        cx: &mut Context<Self>,
+    ) -> Option<((f32, f32, f32, f32), AnyElement)> {
+        let slot = self.pick.menu()?;
+        let dest = self.pick.ends.get(slot)?;
+        let pin = scene.pins.iter().find(|p| p.slot == slot)?;
+        let rect = pin_menu_rect((size.0 / 2.0 + pin.at.0, size.1 / 2.0 + pin.at.1), size);
+        let stop = dest
+            .gtfs_stop
+            .as_deref()
+            .and_then(|id| stop_index(self.gtfs.as_deref(), id));
+        let details = pick::details_text(dest);
+        let colors = theme::colors(theme);
+        let row = |id: &'static str, label: &'static str, color: Hsla| {
+            div()
+                .id(id)
+                .h(px(PIN_MENU_ROW_H))
+                .w_full()
+                .px(px(14.0))
+                .flex()
+                .items_center()
+                .text_size(typography::BODY.size)
+                .text_color(color)
+                .child(label)
+        };
+        let mut card = flat_glass(theme, None)
+            .absolute()
+            .left(px(rect.0))
+            .top(px(rect.1))
+            .w(px(rect.2))
+            .h(px(rect.3))
+            .rounded(radius::CARD)
+            .py(px(4.0))
+            .flex()
+            .flex_col()
+            .child(row("pin-move", "Move", colors.label).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.pick.begin_move(slot);
+                    cx.notify();
+                },
+            )))
+            .child(
+                row("pin-remove", "Remove", colors.red).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.pick.remove(slot);
+                        this.map.follow = true;
+                        cx.notify();
+                    },
+                )),
+            );
+        if let Some(stop) = stop {
+            card = card.child(
+                row("pin-lines", "Lines", colors.label).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.pick.close_menu();
+                        this.open_stop(stop, cx);
+                    },
+                )),
+            );
+        }
+        let card = card
+            .child(div().flex_1())
+            .child(
+                div()
+                    .px(px(14.0))
+                    .pb(px(6.0))
+                    .truncate()
+                    .text_size(typography::CAPTION.size)
+                    .text_color(colors.secondary_label)
+                    .child(details),
+            )
+            .into_any_element();
+        Some((rect, card))
     }
 
     fn map_zoom(&mut self, factor: f64, cx: &mut Context<Self>) {
@@ -1281,13 +1777,19 @@ impl StopsApp {
                 self.map.gestures.touch(id, phase, at, now),
                 phase == Phase::End,
             ),
-            MapInput::Click { at } => (self.map.gestures.click(at, now), true),
+            MapInput::Mouse { phase, at } => {
+                (self.map.gestures.mouse(phase, at, now), phase == Phase::End)
+            }
         };
         if let Some(gesture) = gesture {
             self.apply_gesture(gesture);
             cx.notify();
         }
-        if touch_ended {
+        let pin_end = matches!(
+            gesture,
+            Some(Gesture::PinTap { .. } | Gesture::PinDrop { .. })
+        );
+        if touch_ended && !pin_end {
             // A single tap waits out the double-tap window before it acts.
             self.map.tap_timer = Some(cx.spawn(async move |this, cx| {
                 cx.background_executor()
@@ -1320,29 +1822,96 @@ impl StopsApp {
                 let at = self.map.to_view(at);
                 self.map.viewport.zoom_about(2.0, at);
             }
+            Gesture::PinTap { slot } => self.pick.open_menu(slot),
+            Gesture::PinDrag { slot, at } => {
+                // The auto view would chase the pin under the finger.
+                self.map.take_over();
+                if self.pick.dragging() != Some(slot) && !self.pick.drag_start(slot) {
+                    return;
+                }
+                let coord = self.map.viewport.unproject(self.map.to_view(at));
+                self.pick.drag_to(slot, coord);
+            }
+            Gesture::PinDrop { slot, at } => {
+                self.map.take_over();
+                let at = self.map.to_view(at);
+                let dest = snap_destination(
+                    self.gtfs.as_deref(),
+                    &self.map.viewport,
+                    self.map.size(),
+                    at,
+                );
+                self.pick.drag_end(slot, dest);
+            }
+            Gesture::PinCancel { .. } => self.pick.drag_cancel(),
         }
     }
 
-    /// A tap at `at` (pixels from the view centre): the stop under it opens
-    /// in the sheet; on empty ground the tapped point is offered as the
-    /// destination. The map only looks while a trip runs.
+    /// A tap at `at` (pixels from the view centre) on the idle map drops the
+    /// next pin: on the stop under it when there is one, else on the point
+    /// itself. The view does not move. The map only looks while a trip runs.
     fn map_tap(&mut self, at: (f32, f32), cx: &mut Context<Self>) {
         if self.trip.is_some() || self.sheet.is_open() || self.alarm.is_some() {
             return;
         }
-        let viewport = self.map.viewport;
-        let size = self.map.size();
-        let stop = self
-            .gtfs
-            .as_ref()
-            .and_then(|feed| pick_stop(feed, &viewport, size, at, PICK_RADIUS_PX));
-        match stop {
-            Some(stop) => self.open_stop(stop, cx),
-            None => {
-                let coord = viewport.unproject(at);
-                self.confirm_destination(Destination::new(coord_text(coord), coord), cx);
+        // Keep the view where the user tapped: the idle fit would otherwise
+        // recentre on the new pin and move it from under the finger.
+        self.map.take_over();
+        let dest = snap_destination(
+            self.gtfs.as_deref(),
+            &self.map.viewport,
+            self.map.size(),
+            at,
+        );
+        match self.pick.tap(dest) {
+            TapOutcome::Placed(_) | TapOutcome::MenuClosed => cx.notify(),
+            TapOutcome::Full => {
+                self.show_pill("Drag a pin to adjust it, or tap Clear.", None, cx);
             }
         }
+    }
+
+    /// The my-location button: centre on the last known position at once, then
+    /// ask for a fresh fix (the permission first when it is missing).
+    pub(crate) fn locate_me(&mut self, cx: &mut Context<Self>) {
+        self.map.ask_locate();
+        if let Some((at, _)) = self.map.position {
+            self.map.take_over();
+            self.map.viewport = Viewport::new(at, STREET_MPP);
+            cx.notify();
+        }
+        cx.spawn(async move |this, cx| {
+            let executor = cx.background_executor().clone();
+            let pre = executor.spawn(async { Preflight::gather() }).await;
+            let step = pre
+                .next_step()
+                .filter(|s| matches!(s, Step::RequestLocation | Step::LocationInSettings));
+            if let Some(step) = step {
+                executor.spawn(async move { step.perform() }).await;
+            }
+            let asked = match step {
+                Some(_) => None,
+                None => Some(executor.spawn(async { location::request_location() }).await),
+            };
+            this.update(cx, |this, cx| {
+                this.preflight = pre;
+                if step.is_some() || matches!(asked, Some(Ok(false) | Err(_))) {
+                    this.map.cancel_locate();
+                }
+                let text = match (step, asked) {
+                    (Some(step), _) => step.message(),
+                    (None, Some(Ok(true))) => "Looking for your location...",
+                    (None, Some(Ok(false))) => "Turn on location to see where you are.",
+                    (None, Some(Err(rovsti_android::Error::Unsupported))) => {
+                        "Location is not available here."
+                    }
+                    (None, _) => "Could not get your location.",
+                };
+                this.show_pill(text, None, cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Opens the sheet on a stop: its lines and "N stops before".
@@ -1377,6 +1946,49 @@ mod tests {
     use super::*;
 
     const IST: Coord = Coord::new(41.0, 29.0);
+
+    #[test]
+    fn a_startup_fix_does_not_move_a_view_the_user_took_over() {
+        let mut m = MapState {
+            follow: false,
+            viewport: Viewport::new(IST, 40.0),
+            ..MapState::default()
+        };
+        m.set_device_fix(Coord::new(40.0, 30.0), 12.0);
+        assert_eq!(m.viewport.center, IST);
+        assert_eq!(m.viewport.metres_per_px, 40.0);
+        assert_eq!(m.position, Some((Coord::new(40.0, 30.0), 12.0)));
+    }
+
+    #[test]
+    fn an_asked_for_fix_centres_at_street_level_once() {
+        let mut m = MapState::default();
+        m.ask_locate();
+        let fix = Coord::new(40.0, 30.0);
+        m.set_device_fix(fix, 5.0);
+        assert_eq!(m.viewport.center, fix);
+        assert_eq!(m.viewport.metres_per_px, STREET_MPP);
+        assert!(!m.follow);
+        m.set_device_fix(Coord::new(40.5, 30.5), 5.0);
+        assert_eq!(m.viewport.center, fix);
+    }
+
+    #[test]
+    fn a_following_idle_view_uses_the_fix() {
+        let mut m = MapState {
+            follow: true,
+            ..MapState::default()
+        };
+        let fix = Coord::new(40.0, 30.0);
+        m.set_device_fix(fix, 5.0);
+        let vp = idle_view(
+            &Ends::default(),
+            m.position.map(|p| p.0),
+            None,
+            (400.0, 800.0),
+        );
+        assert_eq!(vp.center, fix);
+    }
 
     fn stop_at(lat: f64, lon: f64) -> Stop {
         Stop {
@@ -1457,6 +2069,44 @@ mod tests {
         assert_eq!(pick_stop(&feed, &vp, size, (11.0, 0.0), 40.0), Some(1));
         assert_eq!(pick_stop(&feed, &vp, size, (14.0, 2.0), 40.0), Some(2));
         assert_eq!(pick_stop(&feed, &vp, size, (-100.0, 0.0), 40.0), None);
+    }
+
+    fn named_stop(id: &str, name: &str, east: f64) -> Stop {
+        Stop {
+            id: id.into(),
+            name: name.into(),
+            ..near(east, 0.0)
+        }
+    }
+
+    #[test]
+    fn a_tap_near_a_stop_snaps_to_it_and_far_away_stays_a_raw_point() {
+        let feed = Feed::new(
+            vec![
+                named_stop("S1", "Kadikoy Pier", 0.0),
+                named_stop("S2", "Moda", 1_000.0),
+            ],
+            vec![],
+            vec![],
+            0,
+        );
+        // 10 m/px: S2 sits 100 px right of the centre.
+        let vp = Viewport::new(IST, 10.0);
+        let size = (400.0, 300.0);
+
+        let snapped = snap_destination(Some(&feed), &vp, size, (103.0, -4.0));
+        assert_eq!(snapped.label, "Moda");
+        assert_eq!(snapped.gtfs_stop.as_deref(), Some("S2"));
+        assert_eq!(snapped.coord, feed.stops[1].coord);
+        assert!(snapped.is_named());
+
+        let raw = snap_destination(Some(&feed), &vp, size, (50.0, 0.0));
+        assert!(!raw.is_named());
+        assert_eq!(raw.gtfs_stop, None);
+        assert_eq!(raw.coord, vp.unproject((50.0, 0.0)));
+
+        let no_feed = snap_destination(None, &vp, size, (0.0, 0.0));
+        assert!(!no_feed.is_named());
     }
 
     // -- polyline thinning --
@@ -1641,18 +2291,147 @@ mod tests {
     }
 
     #[test]
-    fn a_click_right_after_a_touch_is_its_echo() {
+    fn a_mouse_sequence_right_after_a_touch_is_its_echo() {
         let mut g = Gestures::default();
         tap(&mut g, (10.0, 10.0), 1_000);
-        assert_eq!(g.click((10.0, 10.0), 1_100), None);
+        assert_eq!(mouse_click(&mut g, (10.0, 10.0), 1_100), None);
         // The echo did not turn the tap into a double tap.
         assert_eq!(g.due_tap(1_400), Some((10.0, 10.0)));
         // A desktop mouse never touches: clicks count, twice is a double click.
-        let mut mouse = Gestures::default();
-        assert_eq!(mouse.click((5.0, 5.0), 100), None);
+        let mut m = Gestures::default();
+        assert_eq!(mouse_click(&mut m, (5.0, 5.0), 100), None);
         assert_eq!(
-            mouse.click((5.0, 5.0), 250),
+            mouse_click(&mut m, (5.0, 5.0), 250),
             Some(Gesture::DoubleTap { at: (5.0, 5.0) })
+        );
+    }
+
+    fn mouse_click(g: &mut Gestures, at: (f32, f32), t: u64) -> Option<Gesture> {
+        assert_eq!(g.mouse(Phase::Start, at, t), None);
+        g.mouse(Phase::End, at, t + 20)
+    }
+
+    #[test]
+    fn the_mouse_pans_and_drags_pins() {
+        let mut g = Gestures::default();
+        g.mouse(Phase::Start, (100.0, 100.0), 0);
+        assert_eq!(
+            g.mouse(Phase::Move, (120.0, 100.0), 10),
+            Some(Gesture::Pan { dx: 20.0, dy: 0.0 })
+        );
+        assert_eq!(g.mouse(Phase::End, (120.0, 100.0), 20), None);
+        assert_eq!(g.due_tap(10_000), None);
+        g.set_handles(&[(Slot::A, (50.0, 50.0))]);
+        g.mouse(Phase::Start, (52.0, 50.0), 5_000);
+        assert_eq!(
+            g.mouse(Phase::Move, (92.0, 50.0), 5_010),
+            Some(Gesture::PinDrag {
+                slot: Slot::A,
+                at: (90.0, 50.0)
+            })
+        );
+        assert_eq!(
+            g.mouse(Phase::End, (92.0, 50.0), 5_020),
+            Some(Gesture::PinDrop {
+                slot: Slot::A,
+                at: (90.0, 50.0)
+            })
+        );
+    }
+
+    fn with_pin() -> Gestures {
+        let mut g = Gestures::default();
+        g.set_handles(&[(Slot::A, (100.0, 100.0))]);
+        g
+    }
+
+    #[test]
+    fn dragging_a_pin_never_pans_and_keeps_the_grab_offset() {
+        let mut g = with_pin();
+        g.touch(1, Phase::Start, (110.0, 95.0), 0);
+        assert_eq!(g.touch(1, Phase::Move, (112.0, 95.0), 10), None);
+        assert_eq!(
+            g.touch(1, Phase::Move, (150.0, 95.0), 20),
+            Some(Gesture::PinDrag {
+                slot: Slot::A,
+                at: (140.0, 100.0)
+            })
+        );
+        assert_eq!(
+            g.touch(1, Phase::Move, (150.0, 120.0), 30),
+            Some(Gesture::PinDrag {
+                slot: Slot::A,
+                at: (140.0, 125.0)
+            })
+        );
+        assert_eq!(
+            g.touch(1, Phase::End, (150.0, 120.0), 40),
+            Some(Gesture::PinDrop {
+                slot: Slot::A,
+                at: (140.0, 125.0)
+            })
+        );
+        assert_eq!(g.due_tap(10_000), None);
+    }
+
+    #[test]
+    fn a_still_touch_on_a_pin_is_an_immediate_pin_tap() {
+        let mut g = with_pin();
+        assert_eq!(g.touch(1, Phase::Start, (105.0, 100.0), 0), None);
+        assert_eq!(
+            g.touch(1, Phase::End, (105.0, 100.0), 50),
+            Some(Gesture::PinTap { slot: Slot::A })
+        );
+        assert_eq!(g.due_tap(10_000), None);
+    }
+
+    #[test]
+    fn a_touch_40px_from_a_pin_pans() {
+        let mut g = with_pin();
+        g.touch(1, Phase::Start, (140.0, 100.0), 0);
+        assert_eq!(
+            g.touch(1, Phase::Move, (170.0, 100.0), 10),
+            Some(Gesture::Pan { dx: 30.0, dy: 0.0 })
+        );
+    }
+
+    #[test]
+    fn a_second_finger_cancels_the_grab_and_pinches() {
+        let mut g = with_pin();
+        g.touch(1, Phase::Start, (100.0, 100.0), 0);
+        assert_eq!(
+            g.touch(2, Phase::Start, (200.0, 100.0), 5),
+            Some(Gesture::PinCancel { slot: Slot::A })
+        );
+        assert_eq!(
+            g.touch(2, Phase::Move, (250.0, 100.0), 10),
+            Some(Gesture::Zoom {
+                factor: 1.5,
+                focal: (175.0, 100.0)
+            })
+        );
+    }
+
+    #[test]
+    fn cancel_cancels_the_grab() {
+        let mut g = with_pin();
+        g.touch(1, Phase::Start, (100.0, 100.0), 0);
+        g.touch(1, Phase::Move, (150.0, 100.0), 10);
+        assert_eq!(
+            g.touch(1, Phase::Cancel, (150.0, 100.0), 20),
+            Some(Gesture::PinCancel { slot: Slot::A })
+        );
+        assert_eq!(g.due_tap(10_000), None);
+    }
+
+    #[test]
+    fn the_nearest_of_two_handles_wins() {
+        let mut g = Gestures::default();
+        g.set_handles(&[(Slot::A, (100.0, 100.0)), (Slot::B, (120.0, 100.0))]);
+        g.touch(1, Phase::Start, (112.0, 100.0), 0);
+        assert_eq!(
+            g.touch(1, Phase::End, (112.0, 100.0), 10),
+            Some(Gesture::PinTap { slot: Slot::B })
         );
     }
 
@@ -1673,6 +2452,7 @@ mod tests {
             size: (400.0, 300.0),
             position: None,
             diameter: None,
+            pins: [None, None],
             trail,
             feed,
             pattern: None,
@@ -1808,6 +2588,176 @@ mod tests {
         let scene = Scene::build(&input);
         assert_eq!(scene.position.unwrap().1, MAX_RADIUS_PX);
         assert_eq!(scene.diameter.unwrap().radius_px, MAX_RADIUS_PX);
+    }
+
+    // -- pins, segment, opening view, menu --
+
+    fn dest_at(coord: Coord) -> Destination {
+        Destination::dropped(coord)
+    }
+
+    fn ends_of(a: Option<Coord>, b: Option<Coord>) -> Ends {
+        Ends {
+            a: a.map(dest_at),
+            b: b.map(dest_at),
+        }
+    }
+
+    #[test]
+    fn a_pin_appears_for_every_end_that_is_set() {
+        let trail = Breadcrumb::default();
+        let mut input = scene_input(&trail, None);
+        input.pins = [None, Some((near(100.0, 0.0).coord, true))];
+        let scene = Scene::build(&input);
+        assert_eq!(scene.pins.len(), 1);
+        assert_eq!(scene.pins[0].slot, Slot::B);
+        assert!(scene.pins[0].snapped);
+        assert!(scene.segment.is_none());
+        assert!(scene.diameter.is_none());
+    }
+
+    #[test]
+    fn an_invalid_pair_shows_pins_and_a_segment_but_no_circle() {
+        let trail = Breadcrumb::default();
+        let mut input = scene_input(&trail, None);
+        let (a, b) = (near(0.0, 0.0).coord, near(5.0, 0.0).coord);
+        input.pins = [Some((a, false)), Some((b, false))];
+        let scene = Scene::build(&input);
+        assert_eq!(scene.pins.len(), 2);
+        assert_eq!(scene.pins[0].slot, Slot::A);
+        let (sa, sb) = scene.segment.unwrap();
+        assert_eq!(sa, scene.pins[0].at);
+        assert_eq!(sb, scene.pins[1].at);
+    }
+
+    #[test]
+    fn a_valid_pair_has_a_circle_and_no_segment() {
+        let trail = Breadcrumb::default();
+        let mut input = scene_input(&trail, None);
+        let d = diameter_600();
+        input.diameter = Some(d);
+        input.pins = [Some((d.a(), false)), Some((d.b(), false))];
+        let scene = Scene::build(&input);
+        assert!(scene.diameter.is_some());
+        assert_eq!(scene.pins.len(), 2);
+        assert!(scene.segment.is_none());
+    }
+
+    #[test]
+    fn the_idle_view_follows_its_priority_chain() {
+        let size = (370.0, 340.0);
+        let pos = near(50.0, 50.0).coord;
+        let fallback = near(900.0, 900.0).coord;
+        let a = near(-300.0, 0.0).coord;
+        let b = near(300.0, 0.0).coord;
+
+        // Both ends valid: the whole circle fits.
+        let both = ends_of(Some(a), Some(b));
+        let vp = idle_view(&both, Some(pos), Some(fallback), size);
+        let d = Diameter::new(a, b).unwrap();
+        assert_eq!(vp, fit_view(None, Some(&d), size).unwrap());
+
+        // Both ends invalid (5 m apart): the two points, never zoomed out past street level.
+        let close = ends_of(Some(a), Some(near(-295.0, 0.0).coord));
+        let vp = idle_view(&close, Some(pos), Some(fallback), size);
+        assert_eq!(vp.metres_per_px, STREET_MPP);
+        assert!(vp.project(a).0.abs() < 10.0);
+
+        // One end: that end at street level, wherever you are.
+        let one = ends_of(None, Some(b));
+        let vp = idle_view(&one, Some(pos), Some(fallback), size);
+        assert_eq!(vp.metres_per_px, STREET_MPP);
+        assert!(vp.project(b).0.abs() < 0.01);
+
+        // No ends: you, then the fallback, then the default city.
+        let none = Ends::default();
+        let vp = idle_view(&none, Some(pos), Some(fallback), size);
+        assert_eq!(vp.metres_per_px, STREET_MPP);
+        assert!(vp.project(pos).0.abs() < 0.01);
+        let vp = idle_view(&none, None, Some(fallback), size);
+        assert_eq!(vp.metres_per_px, STREET_MPP);
+        assert!(vp.project(fallback).0.abs() < 0.01);
+        let vp = idle_view(&none, None, None, size);
+        assert_eq!(vp.metres_per_px, CITY_MPP);
+        assert!(vp.project(DEFAULT_CENTRE).0.abs() < 0.01);
+    }
+
+    #[test]
+    fn the_fallback_is_the_last_trip_then_the_first_saved_place() {
+        let mut history = History::default();
+        let mut saved = SavedPlaces::default();
+        assert_eq!(fallback_centre(&history, &saved), None);
+
+        saved.add("Home", Coord::new(40.0, 30.0)).unwrap();
+        saved.add("Work", Coord::new(41.0, 31.0)).unwrap();
+        assert_eq!(
+            fallback_centre(&history, &saved),
+            Some(Coord::new(40.0, 30.0))
+        );
+
+        let ep = |lat, lon| rovsti_geo::Endpoint {
+            label: String::new(),
+            coord: Coord::new(lat, lon),
+        };
+        history.push(rovsti_geo::TripRecord {
+            a: Some(ep(41.0, 29.0)),
+            b: Some(ep(41.2, 29.2)),
+            ..Default::default()
+        });
+        let c = fallback_centre(&history, &saved).unwrap();
+        assert!((c.lat - 41.1).abs() < 1e-9 && (c.lon - 29.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_pin_menu_stays_inside_the_map() {
+        let size = (370.0, 340.0);
+        let inside = |r: (f32, f32, f32, f32)| {
+            r.0 >= 8.0 && r.1 >= 8.0 && r.0 + r.2 <= size.0 - 8.0 && r.1 + r.3 <= size.1 - 8.0
+        };
+        for pin in [
+            (0.0, 0.0),
+            (size.0, 0.0),
+            (0.0, size.1),
+            (size.0, size.1),
+            (185.0, 170.0),
+        ] {
+            let r = pin_menu_rect(pin, size);
+            assert!(inside(r), "{pin:?} -> {r:?}");
+            assert_eq!((r.2, r.3), (PIN_MENU_W, PIN_MENU_H));
+        }
+    }
+
+    #[test]
+    fn a_stop_pin_finds_its_feed_index_for_the_lines_row() {
+        let feed = Feed::new(
+            vec![named_stop("S1", "One", 0.0), named_stop("S2", "Two", 50.0)],
+            vec![],
+            vec![],
+            0,
+        );
+        assert_eq!(stop_index(Some(&feed), "S2"), Some(1));
+        assert_eq!(stop_index(Some(&feed), "nope"), None);
+        assert_eq!(stop_index(None, "S1"), None);
+    }
+
+    #[test]
+    fn the_menu_rows_fit_the_menu_box() {
+        // Move, Remove, Lines and the details line.
+        const { assert!(3.0 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
+    }
+
+    #[test]
+    fn the_pin_menu_opens_above_and_flips_below_near_the_top() {
+        let size = (370.0, 340.0);
+        let pin = (185.0, 250.0);
+        let above = pin_menu_rect(pin, size);
+        assert!(above.1 + above.3 < pin.1);
+        let top = (185.0, 40.0);
+        let below = pin_menu_rect(top, size);
+        assert!(below.1 > top.1);
+        assert!(over_rect(below, (below.0 + 1.0, below.1 + 1.0)));
+        assert!(!over_rect(below, (below.0 - 1.0, below.1 + 1.0)));
+        assert!(!over_rect(below, (below.0 + 1.0, below.1 + below.3 + 1.0)));
     }
 
     // -- the view --

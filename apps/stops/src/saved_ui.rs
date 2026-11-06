@@ -41,13 +41,12 @@ impl StopsApp {
         for place in self.saved.places.clone() {
             let id = place.id;
             let open = self.expanded == Some(id);
-            let coords = Destination::from_place(&place).coords_text();
             rows.push(
                 list_row(
                     theme,
                     None,
                     place.name.clone(),
-                    Some(coords.into()),
+                    None,
                     Some(if open { "Close" } else { "" }.into()),
                 )
                 .id(("place", id as usize))

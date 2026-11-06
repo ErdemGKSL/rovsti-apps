@@ -18,6 +18,7 @@ pub mod documents;
 pub mod events;
 pub mod handoff;
 pub mod headless;
+pub mod location;
 pub mod notify;
 pub mod perf;
 pub mod permissions;

@@ -422,7 +422,10 @@ impl StopsApp {
         self.stop_hits = Default::default();
         self.stop_pattern = None;
         self.map.pattern = None;
-        for dest in [&mut self.ends.a, &mut self.ends.b].into_iter().flatten() {
+        for dest in [&mut self.pick.ends.a, &mut self.pick.ends.b]
+            .into_iter()
+            .flatten()
+        {
             dest.pattern = None;
         }
         if matches!(self.sheet_mode, crate::picker::SheetMode::Stop(_)) {

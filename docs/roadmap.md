@@ -37,6 +37,14 @@ list in `docs/phone-acceptance.md`.
 - [x] WhatsApp calls in Recents with a WhatsApp badge (done without a device)
 - [x] Answer from the notification after a cold start, call_end push, and missed WhatsApp
       calls in Recents (done without a device)
+- [x] Quick actions (Message, Copy, Share, Block) on the Contact and Number sheets, with a
+      number chooser (done without a device)
+- [x] Call history in the sheets: recent calls with time and duration (done without a device)
+- [x] Favorites in the user's order with Move earlier/later and drag reorder, and the Frequent
+      row with a Show Frequent setting (done without a device)
+- [x] Keypad Add to contacts and Message, Recents menu Add to contacts, WhatsApp call-back from
+      Recents, Undo pills for speed dial Remove and quick reply Clear (done without a device)
+- [ ] Delete call history (CallLogWrite, spike S12)
 
 ## Rovsti Messages
 

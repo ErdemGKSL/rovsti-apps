@@ -269,3 +269,19 @@ Acceptance:
   `rovsti_android::providers` mirror (desktop `Unsupported` + tests), Recents menu "Delete entry"
   with Undo, and Settings > Data "Delete all call history" behind a confirm sheet.
 - Re-audit after P1 to P8.
+
+## Status
+
+P1 to P8 are implemented on `main` (checks green after each step; no device, cargo only):
+
+- `08bc2d8` P1 rovsti_core pure logic: history lines, duration, favorites order (+tests)
+- `af1ee79` P2 Quick actions strip on the Contact sheet and Number sheet
+- `7ff7ef7` P3 Recent calls in the Number sheet and Contact sheet
+- `b06fa0e` P4 Favorites in the user's order with Move earlier/later and drag reorder
+- `1f720c7` P5 Frequent row under Favorites and the Show Frequent setting
+- `7c0ff03` P6 Keypad Add to contacts/Message, Recents menu Add to contacts, WhatsApp call-back
+- `bac54ab` P7 Undo pills for speed dial Remove and quick reply Clear
+- P8 docs (`docs/phone-acceptance.md`, `docs/roadmap.md`, `sprint-status.yaml` 19-1/19-3/19-5/19-6 to
+  review, this section): uncommitted at the time of writing.
+
+Open: G12 (delete call history, `CallLogWrite`, spike S12) stays on the roadmap, unticked.

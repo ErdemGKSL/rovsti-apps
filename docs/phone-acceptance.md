@@ -128,6 +128,38 @@ phone to call this one; its number goes into the S6, S7 and S8 steps below.
 | **Diagnostics (long-press the Settings title)** | | | | |
 | D1 | Blocking (after B2 and B4), Reject text (call this phone within 40 s of Run), Silence (three rings within 75 s: tap Silence, volume key, flip), TalkBack/system (with TalkBack on, walk the flows). | Copy the report and fill the PENDING tables in `docs/spikes/s6-blocklist.md`, `s7-reject-text.md`, `s8-silence.md` and `s14-system.md`. | | |
 
+## Quick actions, history, Favorites order (UX pass)
+
+Install over the previous release. Needs a contact with one number, a contact with two numbers and
+no default, an unsaved number in Recents, and a few calls (one missed) with the same person.
+
+| # | Step | Expected | Pass / Fail | Notes |
+|---|---|---|---|---|
+| **Quick actions** | | | | |
+| X1 | Open a contact with one number (Contacts or a Favorites tile). | Under the header a strip of four tiles: Message, Copy, Share, Block. | | |
+| X2 | Tap Message, then Copy, then Share. | Message opens the SMS app on that number. Copy shows the pill "Number copied". Share opens the system share sheet with the number. | | |
+| X3 | Tap Block. | The sheet closes and the pill "Blocked {name}" shows with Undo. Undo restores it; the tile reads Unblock while blocked. | | |
+| X4 | Open a contact with two numbers and no default; tap Message. | The sheet asks "Message which number?"; tapping a number sends that one to the SMS app instead of calling. The same works for Copy, Share and Block. | | |
+| X5 | Recents: tap "i" on an unsaved number. | The Number sheet shows the same strip, plus a WhatsApp pill under Call when WhatsApp is connected. | | |
+| **Recent calls** | | | | |
+| X6 | Tap "i" on a grouped row such as "Ayşe (3)". | "Recent calls" lists up to 10 lines: icon, type, day and time on the right, and the duration for answered calls. Missed lines are red and show no duration. | | |
+| X7 | Open the Contact sheet of the same person. | The same "Recent calls" section. A contact with no calls shows no section. | | |
+| X8 | Open the sheet of a person with a WhatsApp call. | The line reads "WhatsApp ..." with the WhatsApp badge. | | |
+| **Favorites order and Frequent** | | | | |
+| X9 | Open a contact from a Favorites tile, tap "Move earlier". | The tile moves one place up. "Move earlier" is dimmed on the first tile, "Move later" on the last. | | |
+| X10 | Hold a tile, then drag it onto another slot and lift. | The order changes once. Close and reopen the app: the order is kept. Export then Import a backup: the order is kept. | | |
+| X11 | Star a new contact. | It is added at the end of Favorites. | | |
+| X12 | Call two or more non-starred people several times, open Favorites. | A "Frequent" row of up to four people shows below the grid. Tapping one opens the sheet and never places a call. | | |
+| X13 | Settings, Display, turn "Show Frequent" off. | The Frequent row is gone at once. On brings it back. | | |
+| **Keypad, Recents menu, call-back** | | | | |
+| X14 | Keypad: type an unsaved valid number. | The status line offers "Add to contacts" and "Message". A saved number shows its name instead. | | |
+| X15 | Tap "Add to contacts"; then clear and try "Message". | The Contacts app opens with the number filled in; Message opens the SMS app. | | |
+| X16 | Recents: hold an unsaved row. | The menu has "Add to contacts" after Copy number; a saved row does not show it. | | |
+| X17 | Miss a WhatsApp call, tap that row in Recents (WhatsApp connected). | A WhatsApp call starts, not a carrier call. With WhatsApp disconnected it calls by carrier. | | |
+| **Undo pills** | | | | |
+| X18 | Settings, Speed dial: remove an assigned digit. | The pill "Removed speed dial {d}" shows with Undo; Undo restores the same contact. | | |
+| X19 | Settings, Quick replies: tap Clear on a filled reply. | The pill "Reply cleared" shows with Undo; Undo restores the text. Clearing an empty field shows no pill. | | |
+
 ## WhatsApp calls
 
 Needs the gateway running (`docs/whatsapp-gateway.md`), WhatsApp linked or connected under

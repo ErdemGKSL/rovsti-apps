@@ -241,12 +241,12 @@ development_status:
   epic-18-retrospective: optional
 
   epic-19: backlog
-  19-1-add-to-contacts-on-every-surface: backlog
+  19-1-add-to-contacts-on-every-surface: review
   19-2-delete-a-contact-and-spike-s11: backlog
-  19-3-quick-actions-strip-share-and-long-press-copy: backlog
+  19-3-quick-actions-strip-share-and-long-press-copy: review
   19-4-contact-ringtone-row-gated-by-spike-s11: backlog
-  19-5-favorites-reorder-and-s34-reorder-lift: backlog
-  19-6-frequent-row: backlog
+  19-5-favorites-reorder-and-s34-reorder-lift: review
+  19-6-frequent-row: review
   19-7-in-app-contact-editor-p3-stretch-cut-first: backlog
   epic-19-retrospective: optional
 

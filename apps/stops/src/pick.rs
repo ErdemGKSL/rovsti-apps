@@ -4,7 +4,10 @@
 //! reads the stage, the hint and the labels out. Points are shown by name or
 //! as "Point A" / "Point B"; a coordinate is only ever a details line.
 
-use rovsti_geo::{Coord, DiameterError, Endpoint, MAX_DIAMETER_M, MIN_DIAMETER_M};
+use rovsti_geo::{
+    Coord, DiameterError, Endpoint, MAX_DIAMETER_M, MIN_DIAMETER_M, PlaceError, SavedPlaces,
+    places::DUPLICATE_RADIUS_M,
+};
 
 use crate::{
     picker::{Destination, Ends, Slot, coord_text},
@@ -59,6 +62,23 @@ impl Hint {
             ),
             Self::Invalid(error) => error.message().to_owned(),
         }
+    }
+}
+
+/// What the save-place field starts with: the point's name, else nothing.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn save_prefill(dest: &Destination) -> String {
+    dest.label.trim().to_owned()
+}
+
+/// The toast after trying to save a place.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn save_result_text(result: &Result<u64, PlaceError>, saved: &SavedPlaces) -> String {
+    let name = |id: &u64| saved.get(*id).map(|p| p.name.clone()).unwrap_or_default();
+    match result {
+        Ok(id) => format!("Saved as {}", name(id)),
+        Err(PlaceError::Duplicate(id)) => format!("Already saved as {}", name(id)),
+        Err(error) => error.message().to_owned(),
     }
 }
 
@@ -128,6 +148,26 @@ impl Picking {
 
     pub fn set_pair(&mut self, a: Destination, b: Destination) {
         self.ends.set_pair(a, b);
+        self.moving = None;
+        self.menu = None;
+        self.drag = None;
+        self.sheet_slot = self.ends.next_slot();
+    }
+
+    /// Renames each end within [`DUPLICATE_RADIUS_M`] of `coord`.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn relabel_near(&mut self, coord: Coord, label: &str) {
+        for end in [&mut self.ends.a, &mut self.ends.b].into_iter().flatten() {
+            if end.coord.distance_m(coord) <= DUPLICATE_RADIUS_M {
+                end.label = label.to_owned();
+            }
+        }
+    }
+
+    /// Puts back ends captured earlier (undo), dropping gestures in progress.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn restore(&mut self, ends: Ends) {
+        self.ends = ends;
         self.moving = None;
         self.menu = None;
         self.drag = None;
@@ -570,5 +610,48 @@ mod tests {
         assert_eq!(row_label("  Home "), "Home");
         assert_eq!(row_label(""), "Point");
         assert_eq!(row_label("   "), "Point");
+    }
+
+    #[test]
+    fn save_prefill_is_the_trimmed_label() {
+        assert_eq!(
+            save_prefill(&Destination::new("  Cafe ", Coord::new(41.0, 29.0))),
+            "Cafe"
+        );
+        assert_eq!(save_prefill(&at(0.0)), "");
+    }
+
+    #[test]
+    fn save_result_text_covers_ok_duplicate_and_errors() {
+        let mut saved = SavedPlaces::default();
+        let id = saved.add("Home", Coord::new(41.0, 29.0)).unwrap();
+        assert_eq!(save_result_text(&Ok(id), &saved), "Saved as Home");
+        assert_eq!(
+            save_result_text(&Err(PlaceError::Duplicate(id)), &saved),
+            "Already saved as Home"
+        );
+        assert_eq!(
+            save_result_text(&Err(PlaceError::InvalidName), &saved),
+            PlaceError::InvalidName.message()
+        );
+    }
+
+    #[test]
+    fn relabel_near_touches_only_nearby_ends() {
+        let mut p = two();
+        p.relabel_near(Coord::new(41.0, 29.0), "Home");
+        assert_eq!(p.ends.a.as_ref().unwrap().label, "Home");
+        assert_eq!(p.ends.b.as_ref().unwrap().label, "");
+    }
+
+    #[test]
+    fn restore_round_trips() {
+        let mut p = two();
+        let before = p.ends.clone();
+        p.remove(Slot::B);
+        p.open_menu(Slot::A);
+        p.restore(before.clone());
+        assert_eq!(p.ends, before);
+        assert_eq!(p.menu(), None);
     }
 }

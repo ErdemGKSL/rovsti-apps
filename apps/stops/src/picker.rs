@@ -8,7 +8,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ListSizingBehavior, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, list, px,
 };
-use rovsti_geo::{Coord, Diameter, DiameterError, Feed, Place, dest::parse_location};
+use rovsti_geo::{Coord, Diameter, DiameterError, Feed, Place, SavedPlaces, dest::parse_location};
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
     field::field_box,
@@ -53,6 +53,19 @@ impl Destination {
             gtfs_stop: None,
             pattern: None,
         }
+    }
+
+    /// This point under the name the user gave a saved place within reach.
+    /// Coordinate and line stay; a missing GTFS stop is filled from the place.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn named_from(mut self, saved: &SavedPlaces) -> Self {
+        if let Some(place) = saved.near(self.coord) {
+            self.label = place.name.clone();
+            if self.gtfs_stop.is_none() {
+                self.gtfs_stop = place.gtfs_stop.clone();
+            }
+        }
+        self
     }
 
     /// A raw point dropped on the map: it has no name.
@@ -942,6 +955,41 @@ fn looks_like_link(text: &str) -> bool {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    fn saved_home() -> SavedPlaces {
+        let mut s = SavedPlaces::default();
+        s.save("Home", Coord::new(41.0, 29.0), Some("H1".into()))
+            .unwrap();
+        s
+    }
+
+    #[test]
+    fn a_raw_point_near_a_saved_place_takes_its_name() {
+        let d = Destination::dropped(Coord::new(41.0, 29.0002)).named_from(&saved_home());
+        assert_eq!(d.label, "Home");
+        assert_eq!(d.coord, Coord::new(41.0, 29.0002));
+        assert_eq!(d.gtfs_stop.as_deref(), Some("H1"));
+    }
+
+    #[test]
+    fn a_stop_near_a_saved_place_takes_the_user_name_and_keeps_its_id() {
+        let stop = Destination {
+            gtfs_stop: Some("S9".into()),
+            pattern: Some(3),
+            ..Destination::new("Kadikoy Iskele", Coord::new(41.0, 29.0001))
+        };
+        let d = stop.named_from(&saved_home());
+        assert_eq!(d.label, "Home");
+        assert_eq!(d.gtfs_stop.as_deref(), Some("S9"));
+        assert_eq!(d.pattern, Some(3));
+    }
+
+    #[test]
+    fn a_far_point_stays_unnamed() {
+        let d = Destination::dropped(Coord::new(41.0, 29.01)).named_from(&saved_home());
+        assert!(!d.is_named());
+        assert_eq!(d.gtfs_stop, None);
+    }
 
     fn confirm(text: &str) -> Destination {
         match offer(text) {

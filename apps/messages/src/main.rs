@@ -27,7 +27,13 @@ mod sms_conversation;
 mod status_ui;
 mod ticks;
 
-use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
+use std::{
+    borrow::Cow,
+    collections::{BTreeMap, HashMap},
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
 
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClipboardItem, Context, Entity, Hsla,
@@ -50,6 +56,7 @@ use rovsti_ui::{
     field::{TextField, field_box},
     glass::{GlassSpec, glass},
     notice_pill::{NoticePill, PillEvent},
+    storage,
     tab_bar::{Tab, TabBar, content_bottom_inset},
     theme,
     tokens::{Theme, metrics, shadow, typography},
@@ -232,6 +239,14 @@ struct MessagesApp {
     /// The gateway's chats as inbox threads (SMS comes from the backend).
     /// Change it through [`Self::wa_threads_mut`], which marks the inbox stale.
     drafts: drafts::Drafts,
+    /// The drafts file was asked for (once the data directory is known).
+    drafts_loading: bool,
+    /// The drafts file has been merged in; saving is allowed.
+    drafts_loaded: bool,
+    /// The drafts revision last written (or being written).
+    drafts_saved_rev: u64,
+    /// A drafts write is running.
+    drafts_saving: bool,
     wa_threads: Vec<InboxThread>,
     /// Archive, pin, mute and preview details of each chat, by JID. Change it
     /// through [`Self::wa_info_mut`].
@@ -384,6 +399,7 @@ impl MessagesApp {
                     this.contacts_seen = contacts;
                     this.photos.update(cx, |photos, _| photos.forget_misses());
                 }
+                this.load_drafts(cx);
                 this.rebuild(cx);
                 cx.notify();
             }),
@@ -457,6 +473,10 @@ impl MessagesApp {
             remote_scheduled: Vec::new(),
             back_enabled: false,
             drafts: drafts::Drafts::default(),
+            drafts_loading: false,
+            drafts_loaded: false,
+            drafts_saved_rev: 0,
+            drafts_saving: false,
             wa_threads: Vec::new(),
             wa_info: HashMap::new(),
             avatars,
@@ -526,6 +546,10 @@ impl MessagesApp {
                 self.backend.update(cx, |backend, cx| backend.on_resume(cx));
             }
             self.seen_active = true;
+        }
+        if !active {
+            self.stash_open_draft(cx);
+            self.save_drafts(cx);
         }
         self.sms_window_active(active, cx);
         if let Open::Status(page) = &self.open {
@@ -622,6 +646,79 @@ impl MessagesApp {
         }
         self.update_switch(cx);
         self.sync_open_page(cx);
+        self.save_drafts(cx);
+    }
+
+    /// Reads the drafts file once the data directory is known and merges it
+    /// under this session's drafts.
+    fn load_drafts(&mut self, cx: &mut Context<Self>) {
+        if self.drafts_loading {
+            return;
+        }
+        let Some(dir) = self.backend.read(cx).data_dir().map(Path::to_path_buf) else {
+            return;
+        };
+        self.drafts_loading = true;
+        let task = cx.background_executor().spawn(async move {
+            storage::load_json::<BTreeMap<String, String>>(&dir, drafts::DRAFTS_FILE)
+        });
+        cx.spawn(async move |this, cx| {
+            let map = task.await.unwrap_or_default();
+            this.update(cx, |this, cx| {
+                this.drafts.merge_loaded(drafts::Drafts::from_map(&map));
+                this.drafts_loaded = true;
+                this.rebuild(cx);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Writes the drafts when they changed, one write at a time.
+    fn save_drafts(&mut self, cx: &mut Context<Self>) {
+        if !self.drafts_loaded || self.drafts_saving || self.drafts.rev() == self.drafts_saved_rev {
+            return;
+        }
+        let Some(dir) = self.backend.read(cx).data_dir().map(Path::to_path_buf) else {
+            return;
+        };
+        self.drafts_saving = true;
+        let rev = self.drafts.rev();
+        let map = self.drafts.to_map();
+        let task = cx
+            .background_executor()
+            .spawn(async move { storage::save_json(&dir, drafts::DRAFTS_FILE, &map) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.drafts_saving = false;
+                let saved = result.is_ok();
+                match result {
+                    Ok(()) => this.drafts_saved_rev = rev,
+                    Err(error) => log::warn!("saving the drafts failed: {error}"),
+                }
+                // Changed meanwhile: write again right away. After a failure
+                // the next rebuild retries.
+                if saved {
+                    this.save_drafts(cx);
+                }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Puts the open page's composer text into the drafts (nothing closes).
+    fn stash_open_draft(&mut self, cx: &App) {
+        if let Some(thread) = self.open_thread_id(cx) {
+            let text = match &self.open {
+                Open::WhatsApp(_, conversation) => conversation.read(cx).draft(cx),
+                Open::Sms(conversation) => conversation.read(cx).draft(cx),
+                _ => String::new(),
+            };
+            self.drafts.put(thread, &text);
+        }
     }
 
     /// Points the open conversation's header switch at the person's other thread.

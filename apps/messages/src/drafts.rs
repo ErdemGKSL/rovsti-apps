@@ -6,7 +6,6 @@ use std::collections::{BTreeMap, HashMap};
 use rovsti_core::ThreadId;
 
 /// The file the drafts are kept in (a map of thread tag to text).
-#[cfg_attr(not(test), allow(dead_code))]
 pub const DRAFTS_FILE: &str = "drafts.json";
 
 #[derive(Default)]
@@ -52,7 +51,6 @@ impl Drafts {
     }
 
     /// The drafts as the file keeps them, keyed by conversation tag.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn to_map(&self) -> BTreeMap<String, String> {
         self.map
             .iter()
@@ -61,7 +59,6 @@ impl Drafts {
     }
 
     /// Reads [`Drafts::to_map`] back; bad tags, new-thread ids and blank texts are skipped.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn from_map(map: &BTreeMap<String, String>) -> Drafts {
         let mut drafts = Drafts::default();
         for (tag, text) in map {
@@ -74,7 +71,6 @@ impl Drafts {
     }
 
     /// Adds drafts from `loaded` for threads without one now; this session's text wins.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn merge_loaded(&mut self, loaded: Drafts) {
         let mut added = false;
         for (thread, text) in loaded.map {

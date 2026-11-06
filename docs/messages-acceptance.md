@@ -72,7 +72,7 @@ APK: build with `gpuiforge build android` in `apps/messages`. Put `google-servic
 | 47 | Long press a row, choose Block; tap Undo. | The number is blocked (also in Phone) and Undo unblocks it. Emergency numbers are refused. | | |
 | 48 | Long press a message bubble, choose Copy, or Copy code on an OTP. | The text is on the clipboard and a pill says Copied; the same Copy pill shows in WhatsApp chats. | | |
 | 49 | Open the menu in an SMS page: Call, Add to contacts. | The dialer or the contact editor opens with the number. | | |
-| 50 | Type a draft, press Back, open the conversation again. | The draft is still there and the inbox row shows Draft. | | |
+| 50 | Type a draft, press Back, open the conversation again. | The draft is still there and the inbox row shows Draft. Closing the app (or sending it to the background) and reopening keeps it too. | | |
 | 51 | Tap search in Chats and type part of a name or text. | Only matching conversations show; no match shows No Results; Back clears the search. | | |
 | 52 | In New message pick a contact with two numbers. | Both numbers are listed with their labels. | | |
 | 53 | With WhatsApp linked, pick a contact in New message. | A menu offers SMS or WhatsApp; WhatsApp opens the chat, or says the person is not on WhatsApp. | | |

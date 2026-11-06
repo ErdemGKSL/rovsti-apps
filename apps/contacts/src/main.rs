@@ -229,6 +229,9 @@ struct ContactsApp {
     photos: Photos,
     /// The "Contact photo" sheet over the editor.
     photo_sheet: Sheet,
+    /// The per-field actions sheet over the contact card, and what it acts on.
+    field_sheet: Sheet,
+    field_target: Option<detail::FieldTarget>,
     /// System Back is routed to the app (a sheet is open).
     back_enabled: bool,
     /// The shared WhatsApp settings screen, and whether its page is showing.
@@ -382,6 +385,8 @@ impl ContactsApp {
             reveal_pending: false,
             photos: Photos::new(),
             photo_sheet: Sheet::new(),
+            field_sheet: Sheet::new(),
+            field_target: None,
             back_enabled: false,
             whatsapp,
             whatsapp_open: false,
@@ -545,6 +550,7 @@ impl ContactsApp {
             .and_then(|index| index.all().find(|c| c.id == id))
             .map(|c| ContactCard::new(c, format));
         self.open_draft = None;
+        self.close_field_sheet_now();
         self.notice = None;
         // The lists keep their own scroll; the card starts at its top.
         self.scroll.set_offset(gpui::point(px(0.0), px(0.0)));
@@ -594,6 +600,7 @@ impl ContactsApp {
     }
 
     fn close_contact(&mut self, cx: &mut Context<Self>) {
+        self.close_field_sheet_now();
         self.open = None;
         self.open_draft = None;
         self.page.restart();
@@ -607,6 +614,7 @@ impl ContactsApp {
     fn can_go_back(&self, cx: &App) -> bool {
         self.confirm.is_some()
             || self.photo_sheet.is_open()
+            || self.field_sheet.is_open()
             || self.picker.is_some()
             || self.editor.is_some()
             || self.group_edit.is_some()
@@ -623,6 +631,8 @@ impl ContactsApp {
             self.answer(false, cx);
         } else if self.photo_sheet.is_open() {
             self.close_photo_sheet(cx);
+        } else if self.field_sheet.is_open() {
+            self.close_field_sheet(cx);
         } else if self.picker.is_some() {
             self.close_picker(cx);
         } else if self.editor.is_some() {
@@ -1460,6 +1470,8 @@ impl Render for ContactsApp {
                 | fading
                 | self.photo_sheet.tick(dt)
                 | self.photo_sheet.tick_real(real)
+                | self.field_sheet.tick(dt)
+                | self.field_sheet.tick_real(real)
         });
         self.motion = motion;
         let entity = cx.entity();
@@ -1586,6 +1598,7 @@ impl Render for ContactsApp {
             }))
             .children(self.confirm_view(theme, cx))
             .children(self.photo_sheet_view(theme, window, cx))
+            .children(self.field_sheet_view(theme, window, cx))
     }
 }
 

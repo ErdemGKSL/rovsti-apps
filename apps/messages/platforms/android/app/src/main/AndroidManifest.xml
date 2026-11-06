@@ -24,7 +24,8 @@
     <application
         android:name=".RovstiMessagesApp"
         android:label="Rovsti Messages"
-        android:icon="@drawable/ic_stat_message"
+        android:icon="@drawable/gpui_app_icon"
+        android:roundIcon="@drawable/gpui_app_icon"
         android:theme="@style/GpuiTheme"
         android:allowBackup="false"
         android:supportsRtl="true">

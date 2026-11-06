@@ -297,6 +297,8 @@ impl NoticePill {
                 .right(px(INSET))
                 .bottom(px(bottom - lift))
                 .h(px(HEIGHT))
+                // A tap on the pill (its Undo) must not also reach what is under it.
+                .occlude()
                 .opacity(t)
                 .child(capsule)
                 .into_any_element(),

@@ -21,3 +21,13 @@ signing.env
 google-services.json
 *firebase-adminsdk*.json
 service-account.json
+
+# Private keys, local gateway data and logs never belong in the repo
+*.pem
+*.key
+*.p12
+*.pfx
+wa-gateway-data/
+*.log
+.claude/settings.local.json
+.claude/worktrees/

@@ -14,6 +14,7 @@
         "notifications",
         "audio-playback"
       ],
+      "icon": "assets/app.png",
       "permissions": [
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",

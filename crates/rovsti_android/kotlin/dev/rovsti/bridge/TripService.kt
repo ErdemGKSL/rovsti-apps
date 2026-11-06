@@ -384,7 +384,7 @@ class TripService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(applicationInfo.icon)
+            .setSmallIcon(NotificationIcon.small(this))
             .setContentTitle(title)
             .setContentText(text)
             .setCategory(Notification.CATEGORY_NAVIGATION)

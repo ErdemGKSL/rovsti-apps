@@ -609,6 +609,14 @@ impl ContactsApp {
                 div()
                     .text_color(colors.tertiary_label)
                     .child("Search name or number")
+            } else if typing {
+                // While typing the end of the query counts: cut the start, not the end.
+                div()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
+                    .text_color(colors.label)
+                    .child(text.clone())
             } else {
                 div()
                     .truncate()
@@ -982,6 +990,8 @@ impl ContactsApp {
                 .px(px(24.0))
                 .child(
                     glass(GlassSpec::control(theme))
+                        // A tap on the notice must not reach the page under it.
+                        .occlude()
                         .rounded_full()
                         .px(px(16.0))
                         .py(px(10.0))

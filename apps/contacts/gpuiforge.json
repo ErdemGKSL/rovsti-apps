@@ -13,6 +13,7 @@
       "features": [
         "sharing"
       ],
+      "icon": "assets/app.png",
       "management": "manual",
       "permissions": [
         "android.permission.READ_CONTACTS",

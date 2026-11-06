@@ -33,6 +33,7 @@ use rovsti_ui::{
 
 use crate::{
     CONTACTS_TAB, FAVORITES_TAB, PhoneApp, SheetKind,
+    actions_ui::StripAction,
     backend::{self, Access, Group, Load},
     field::{SearchField, input_layer, on_backspace},
     flight::{Home, Look},
@@ -359,6 +360,8 @@ pub(crate) struct ContactSheet {
     starred: bool,
     /// "Call {name}": only the numbers, no star or edit.
     chooser: bool,
+    /// A quick action waiting for the owner to pick a number (chooser mode).
+    pending: Option<StripAction>,
     note: Option<SharedString>,
     note_task: Option<Task<()>>,
 }
@@ -832,6 +835,7 @@ impl PhoneApp {
             contact,
             starred,
             chooser,
+            pending: None,
             note: None,
             note_task: None,
         });
@@ -958,9 +962,12 @@ impl PhoneApp {
             if let Some(number) = sheet.contact.numbers.get(index) {
                 let raw = number.raw.clone();
                 let name = sheet.contact.name.to_string();
+                let pending = sheet.pending;
                 self.close_sheet(cx);
                 if self.speed_dial.pick.is_some() {
                     self.speed_dial_assign(&name, &raw, window, cx);
+                } else if let Some(action) = pending {
+                    self.run_strip_action(action, raw.into(), name.into(), window, cx);
                 } else {
                     let _ = self.place_call_from(&raw, window, cx);
                 }
@@ -976,6 +983,23 @@ impl PhoneApp {
                 self.close_sheet(cx);
                 self.place_whatsapp(&raw, cx);
             }
+            return;
+        }
+        if let Some(action) = StripAction::from_id(id) {
+            match contacts_view::call_target(&sheet.contact.numbers) {
+                CallTarget::Direct(i) => {
+                    let raw = sheet.contact.numbers[i].raw.clone();
+                    let name = sheet.contact.name.clone();
+                    self.run_strip_action(action, raw.into(), name, window, cx);
+                }
+                CallTarget::Choose => {
+                    sheet.pending = Some(action);
+                    sheet.chooser = true;
+                    sheet.note = None;
+                }
+                CallTarget::Nothing => {}
+            }
+            cx.notify();
             return;
         }
         match id {
@@ -1601,10 +1625,13 @@ impl PhoneApp {
                         .line_height(typography::TITLE2.line)
                         .font_weight(typography::TITLE2.weight)
                         .text_color(colors.label)
-                        .child(SharedString::from(match self.speed_dial.pick {
-                            Some(digit) => format!("Speed dial {digit}: {}", contact.name),
-                            None => format!("Call {}", contact.name),
-                        })),
+                        .child(SharedString::from(
+                            match (self.speed_dial.pick, sheet.pending) {
+                                (Some(digit), _) => format!("Speed dial {digit}: {}", contact.name),
+                                (None, Some(action)) => action.chooser_title().to_owned(),
+                                (None, None) => format!("Call {}", contact.name),
+                            },
+                        )),
                 )
                 .child(
                     div()
@@ -1731,6 +1758,11 @@ impl PhoneApp {
                     .map(|(i, n)| number_row(self, theme, i, n, i + 1 < count, cx)),
             );
 
+        let strip_target = match contacts_view::call_target(&contact.numbers) {
+            CallTarget::Direct(i) => Some(&contact.numbers[i]),
+            _ => None,
+        };
+        let strip_blocked = strip_target.is_some_and(|n| self.backend.read(cx).is_blocked(&n.raw));
         let mut children = vec![
             reveal(0, header.into_any_element()),
             reveal(
@@ -1746,11 +1778,25 @@ impl PhoneApp {
                     .children(sheet.note.clone())
                     .into_any_element(),
             ),
-            reveal(2, numbers.into_any_element()),
         ];
         if !sheet.chooser {
             children.push(reveal(
-                3,
+                2,
+                crate::actions_ui::action_strip(
+                    self,
+                    theme,
+                    crate::actions_ui::CONTACT_IDS,
+                    strip_blocked,
+                    contact.numbers.is_empty(),
+                    false,
+                    cx,
+                ),
+            ));
+        }
+        children.push(reveal(3, numbers.into_any_element()));
+        if !sheet.chooser {
+            children.push(reveal(
+                4,
                 crate::recents::sheet_pill(
                     self,
                     "sheet-cedit",

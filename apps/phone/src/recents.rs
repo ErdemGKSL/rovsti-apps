@@ -1149,9 +1149,26 @@ impl PhoneApp {
             }));
         let answer = call_colors(theme).answer;
         let mut children = vec![reveal(0, header.into_any_element())];
-        if row.callable {
+        if !row.number.is_empty() {
+            let backend = self.backend.read(cx);
+            let blocked = backend.is_blocked(&row.number);
+            let refusal = backend.block_refusal(&row.number);
             children.push(reveal(
                 1,
+                crate::actions_ui::action_strip(
+                    self,
+                    theme,
+                    crate::actions_ui::NUMBER_IDS,
+                    blocked,
+                    false,
+                    refusal.is_some() && !blocked,
+                    cx,
+                ),
+            ));
+        }
+        if row.callable {
+            children.push(reveal(
+                2,
                 sheet_pill(
                     self,
                     "sheet-ncall",
@@ -1164,9 +1181,24 @@ impl PhoneApp {
                 .into_any_element(),
             ));
         }
+        if row.callable && self.whatsapp.read(cx).is_connected() {
+            children.push(reveal(
+                3,
+                sheet_pill(
+                    self,
+                    "sheet-nwa",
+                    Icon::LucideMessageCircle,
+                    "WhatsApp",
+                    colors.fill,
+                    colors.label,
+                    cx,
+                )
+                .into_any_element(),
+            ));
+        }
         if !row.named && !row.number.is_empty() {
             children.push(reveal(
-                2,
+                4,
                 sheet_pill(
                     self,
                     "sheet-nadd",
@@ -1204,10 +1236,22 @@ impl PhoneApp {
         let Some(row) = self.recents.number.clone() else {
             return;
         };
+        if let Some(action) = crate::actions_ui::StripAction::from_id(id) {
+            if !row.number.is_empty() {
+                let number = row.number.clone();
+                let who = row.title.clone();
+                self.run_strip_action(action, number, who, window, cx);
+            }
+            return;
+        }
         match id {
             "sheet-ncall" => {
                 self.close_sheet(cx);
                 let _ = self.place_call_from(&row.number, window, cx);
+            }
+            "sheet-nwa" => {
+                self.close_sheet(cx);
+                self.place_whatsapp(&row.number, cx);
             }
             "sheet-nadd" => {
                 let outcome = backend::add_contact(&row.number);

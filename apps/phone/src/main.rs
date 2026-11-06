@@ -11,6 +11,7 @@ use gpui::{
     ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
     TouchPhase, Window, WindowBounds, WindowOptions, div, prelude::*, px, size,
 };
+mod actions_ui;
 mod addcall;
 mod aura;
 mod backend;

@@ -1226,6 +1226,11 @@ pub fn send_sms_to(number: &str) -> Outcome {
     Outcome::from(telecom::send_sms_to(number), "message")
 }
 
+/// Opens the system share sheet with `text`.
+pub fn share_text(text: &str) -> Outcome {
+    Outcome::from(telecom::share_text(text), "sharing")
+}
+
 /// Opens the system Contacts app.
 pub fn open_contacts_app() -> Outcome {
     Outcome::from(telecom::open_contacts(), "open contacts")

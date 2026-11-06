@@ -10,6 +10,8 @@
 //! optional, so a contact can be just an email address or a name. Numbers and
 //! emails that are present must be well formed.
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -370,6 +372,58 @@ fn clean_fields(fields: &mut Vec<DraftField>, key: impl Fn(&str) -> String) {
     fields.truncate(MAX_FIELDS);
 }
 
+/// Membership edits for one group: ids to add and ids to remove.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SelectionChange {
+    pub add: Vec<i64>,
+    pub remove: Vec<i64>,
+}
+
+impl SelectionChange {
+    /// True when nothing would change.
+    pub fn is_empty(&self) -> bool {
+        self.add.is_empty() && self.remove.is_empty()
+    }
+}
+
+/// Difference between the initial members and the chosen set, ascending.
+pub fn selection_change(initial: &[i64], chosen: &BTreeSet<i64>) -> SelectionChange {
+    let initial: BTreeSet<i64> = initial.iter().copied().collect();
+    SelectionChange {
+        add: chosen.difference(&initial).copied().collect(),
+        remove: initial.difference(chosen).copied().collect(),
+    }
+}
+
+/// Result of a group membership change, as Kotlin reports it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MembersPayload {
+    #[serde(default)]
+    pub added: u32,
+    #[serde(default)]
+    pub removed: u32,
+    #[serde(default)]
+    pub skipped: u32,
+}
+
+/// One-line message for a finished membership change.
+pub fn members_summary(title: &str, done: &MembersPayload) -> String {
+    let mut text = match (done.added, done.removed) {
+        (0, 0) => "No changes.".to_owned(),
+        (a, 0) => format!("Added {a} to {title}."),
+        (0, r) => format!("Removed {r} from {title}."),
+        (a, r) => format!("Added {a} to {title} and removed {r}."),
+    };
+    match done.skipped {
+        0 => {}
+        1 => text.push_str(" 1 contact is in another account and can't join."),
+        n => text.push_str(&format!(
+            " {n} contacts are in another account and can't join."
+        )),
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,6 +641,64 @@ mod tests {
         assert_eq!(
             group_title("Work", &groups, Some(1)),
             Err(GroupError::Duplicate)
+        );
+    }
+
+    fn set(ids: &[i64]) -> BTreeSet<i64> {
+        ids.iter().copied().collect()
+    }
+
+    #[test]
+    fn selection_change_cases() {
+        let c = selection_change(&[1, 2], &set(&[1, 2, 5, 3]));
+        assert_eq!((c.add, c.remove), (vec![3, 5], vec![]));
+        let c = selection_change(&[4, 2, 1], &set(&[1]));
+        assert_eq!((c.add, c.remove), (vec![], vec![2, 4]));
+        let c = selection_change(&[1, 2], &set(&[2, 3]));
+        assert_eq!((c.add, c.remove), (vec![3], vec![1]));
+        assert!(selection_change(&[1, 2], &set(&[2, 1])).is_empty());
+        let c = selection_change(&[2, 2, 1, 1], &set(&[]));
+        assert_eq!(c.remove, vec![1, 2]);
+        assert!(!c.is_empty());
+    }
+
+    #[test]
+    fn members_summary_branches() {
+        let p = |added, removed, skipped| MembersPayload {
+            added,
+            removed,
+            skipped,
+        };
+        assert_eq!(members_summary("Family", &p(2, 0, 0)), "Added 2 to Family.");
+        assert_eq!(
+            members_summary("Family", &p(0, 1, 0)),
+            "Removed 1 from Family."
+        );
+        assert_eq!(
+            members_summary("Family", &p(1, 2, 0)),
+            "Added 1 to Family and removed 2."
+        );
+        assert_eq!(members_summary("Family", &p(0, 0, 0)), "No changes.");
+        assert_eq!(
+            members_summary("Family", &p(2, 0, 1)),
+            "Added 2 to Family. 1 contact is in another account and can't join."
+        );
+        assert_eq!(
+            members_summary("Family", &p(0, 0, 3)),
+            "No changes. 3 contacts are in another account and can't join."
+        );
+    }
+
+    #[test]
+    fn members_payload_defaults() {
+        let p: MembersPayload = serde_json::from_str(r#"{"added":1}"#).expect("decodes");
+        assert_eq!(
+            p,
+            MembersPayload {
+                added: 1,
+                removed: 0,
+                skipped: 0
+            }
         );
     }
 }

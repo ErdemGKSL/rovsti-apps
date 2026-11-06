@@ -55,13 +55,11 @@ impl ContactCard {
     }
 }
 
-/// Starred contacts with at least one number, in the order given.
+/// Starred contacts, in the order given.
 pub fn favorites<'a>(
     contacts: impl IntoIterator<Item = &'a WireContact>,
 ) -> impl Iterator<Item = &'a WireContact> {
-    contacts
-        .into_iter()
-        .filter(|c| c.starred && !c.numbers.is_empty())
+    contacts.into_iter().filter(|c| c.starred)
 }
 
 #[cfg(test)]
@@ -134,13 +132,13 @@ mod tests {
     }
 
     #[test]
-    fn favorites_skip_unstarred_and_numberless() {
+    fn favorites_keep_numberless_skip_unstarred() {
         let all = [
             person(1, "A", vec![num("1", None, false)], true),
             person(2, "B", vec![num("2", None, false)], false),
             person(3, "C", vec![], true),
         ];
         let ids: Vec<i64> = favorites(&all).map(|c| c.id).collect();
-        assert_eq!(ids, [1]);
+        assert_eq!(ids, [1, 3]);
     }
 }

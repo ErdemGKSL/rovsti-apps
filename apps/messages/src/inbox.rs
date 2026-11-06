@@ -144,7 +144,6 @@ impl InboxView {
 
     /// True when the row holding `thread` is SMS only: no WhatsApp chat, no
     /// WhatsApp thread (so it may be moved into Spam).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn sms_only(&self, thread: &ThreadId) -> bool {
         self.all_rows()
             .find(|r| r.threads.contains(thread))

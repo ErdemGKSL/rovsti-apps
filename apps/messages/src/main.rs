@@ -134,6 +134,21 @@ struct SmsRowMenu {
     contact_id: Option<i64>,
     /// The sender is on the system blocklist.
     blocked: bool,
+    /// The sender is a phone number (not an alphanumeric name).
+    sender_is_number: bool,
+    /// The row is SMS-only, so it may be moved into Spam.
+    can_be_spam: bool,
+}
+
+/// Whether a sender is a blockable phone number (not missing or alphanumeric).
+fn is_number_sender(sender: Option<&str>) -> bool {
+    sender.is_some_and(|s| {
+        PhoneNumber::parse(s.trim()).is_ok()
+            && !matches!(
+                blocklist::can_block(s, &EmergencyList::default()),
+                Err(blocklist::BlockRefusal::NoNumber | blocklist::BlockRefusal::NotANumber)
+            )
+    })
 }
 
 /// The SMS actions a row menu lists.
@@ -144,9 +159,8 @@ fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
         in_spam: sms.in_spam,
         single_sender: sms.sender.is_some(),
         known_contact: sms.contact_id.is_some(),
-        // Until the menu carries them (move to Spam): numbers only, no Move to Spam.
-        sender_is_number: true,
-        can_be_spam: false,
+        sender_is_number: sms.sender_is_number,
+        can_be_spam: sms.can_be_spam,
         blocked: sms.blocked,
         on_page: sms.on_page,
     });
@@ -162,6 +176,11 @@ fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
 enum PillAction {
     /// Puts a sender back in Spam.
     Unallow(String),
+    /// Takes a sender back out of Spam after Move to Spam.
+    Unspam {
+        sender: String,
+        mark: prefs::SpamMark,
+    },
     /// Unblocks a number.
     Unblock(String),
     /// Blocks a number again after an Unblock.
@@ -1159,6 +1178,7 @@ impl MessagesApp {
             },
         );
         let sms = sms.map(|(thread_id, sender)| {
+            let can_be_spam = self.view.sms_only(&ThreadId::Sms(thread_id));
             let backend = self.backend.read(cx);
             let blocked = sender
                 .as_deref()
@@ -1166,6 +1186,7 @@ impl MessagesApp {
             let contact_id = sender
                 .as_deref()
                 .and_then(|s| backend.contacts().match_number(s).map(|c| c.id));
+            let sender_is_number = is_number_sender(sender.as_deref());
             SmsRowMenu {
                 thread_id,
                 sender,
@@ -1180,6 +1201,8 @@ impl MessagesApp {
                 on_page: false,
                 contact_id,
                 blocked,
+                sender_is_number,
+                can_be_spam,
             }
         });
         self.row_menu = Some(RowMenu {
@@ -1205,6 +1228,26 @@ impl MessagesApp {
         });
         let text = if mute { "Muted" } else { "Unmuted" };
         self.show_pill_action(text, "Undo", PillAction::SmsMute(id, !mute), cx);
+    }
+
+    /// Move to Spam: a sender rule and off the allow list, with Undo.
+    fn move_to_spam(&mut self, sender: String, title: SharedString, cx: &mut Context<Self>) {
+        let mut result = None;
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| result = Some(p.mark_spam(&sender)))
+        });
+        match result {
+            Some(Ok(mark)) => self.show_pill_action(
+                sms_actions::moved_to_spam_text(&title),
+                "Undo",
+                PillAction::Unspam { sender, mark },
+                cx,
+            ),
+            Some(Err(rovsti_core::spam::RuleError::TooMany)) => {
+                self.show_pill(sms_actions::TOO_MANY_RULES)
+            }
+            _ => self.show_pill("Couldn't move that to Spam"),
+        }
     }
 
     /// One SMS item of the row menu.
@@ -1285,8 +1328,12 @@ impl MessagesApp {
                     self.telecom_action(action, sender, cx);
                 }
             }
-            // Not offered yet (the menus pass `can_be_spam: false`).
-            SmsAction::MoveToSpam => {}
+            SmsAction::MoveToSpam => {
+                let title = self.row_menu.take().map(|m| m.title).unwrap_or_default();
+                if let Some(sender) = sms.sender {
+                    self.move_to_spam(sender, title, cx);
+                }
+            }
         }
         cx.notify();
     }
@@ -1374,6 +1421,8 @@ impl MessagesApp {
         };
         let sender = sms_actions::sender_of(&recipients).map(str::to_owned);
         let in_spam = self.view.in_spam(&ThreadId::Sms(thread_id));
+        let can_be_spam = self.view.sms_only(&ThreadId::Sms(thread_id));
+        let sender_is_number = is_number_sender(sender.as_deref());
         let (contact_id, blocked, muted) = {
             let backend = self.backend.read(cx);
             (
@@ -1404,6 +1453,8 @@ impl MessagesApp {
                 on_page: true,
                 contact_id,
                 blocked,
+                sender_is_number,
+                can_be_spam,
             }),
             delete_confirm: false,
             page_number: None,
@@ -1566,6 +1617,12 @@ impl MessagesApp {
                     })
                 });
                 self.show_pill("Back in Spam");
+            }
+            PillAction::Unspam { sender, mark } => {
+                self.backend.update(cx, |backend, cx| {
+                    backend.update_prefs(cx, |p| p.unmark_spam(&sender, mark))
+                });
+                self.show_pill("Back in the inbox");
             }
             PillAction::Settings(undo) => self.undo_settings(undo, cx),
             PillAction::Chat(jid, undo) => self.chat_action(&jid, undo, true, cx),
@@ -1945,6 +2002,7 @@ impl MessagesApp {
                         sms_actions::SmsAction::Block => Icon::LucideBan,
                         sms_actions::SmsAction::Unblock => Icon::LucideCircleCheck,
                         sms_actions::SmsAction::OpenContact => Icon::LucideUser,
+                        sms_actions::SmsAction::MoveToSpam => Icon::LucideShieldAlert,
                         _ => Icon::LucideTrash2,
                     };
                     items.push(
@@ -3679,7 +3737,27 @@ mod tests {
             on_page: false,
             contact_id: None,
             blocked: false,
+            sender_is_number: true,
+            can_be_spam: false,
         }
+    }
+
+    #[test]
+    fn number_sender_excludes_names_and_missing() {
+        assert!(is_number_sender(Some("+905321234567")));
+        assert!(!is_number_sender(Some("TRENDYOL")));
+        assert!(!is_number_sender(None));
+    }
+
+    #[test]
+    fn alphanumeric_spam_candidate_gets_only_move_to_spam() {
+        let mut m = menu(false, false, false);
+        m.sender = Some("TRENDYOL".into());
+        m.sender_is_number = false;
+        m.can_be_spam = true;
+        let a = row_sms_actions(&m);
+        assert!(a.contains(&MoveToSpam));
+        assert!(!a.contains(&Block) && !a.contains(&Call) && !a.contains(&AddContact));
     }
 
     #[test]

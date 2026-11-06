@@ -139,7 +139,6 @@ pub fn not_spam_text(sender: &str) -> String {
 }
 
 /// What the pill says after Move to Spam; a blank title reads "this sender".
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn moved_to_spam_text(title: &str) -> String {
     let title = title.trim();
     format!(
@@ -153,7 +152,6 @@ pub fn moved_to_spam_text(title: &str) -> String {
 }
 
 /// Shown when the spam rule list is full.
-#[cfg_attr(not(test), allow(dead_code))]
 pub const TOO_MANY_RULES: &str = "Too many spam rules. Remove one in Settings first.";
 
 /// What the pill says after Block; a blank title reads "this number".

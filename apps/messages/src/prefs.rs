@@ -30,7 +30,6 @@ pub fn default_spam_rules() -> SpamRules {
 
 /// What [`MessagesPrefs::mark_spam`] changed, so Undo can restore it exactly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct SpamMark {
     /// A new sender rule was added (not already there).
     pub rule_added: bool,
@@ -143,7 +142,6 @@ impl MessagesPrefs {
 
     /// Moves a sender into Spam: a sender rule, and off the allow list (which
     /// beats rules). An existing rule is fine; on any other error nothing changes.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn mark_spam(&mut self, sender: &str) -> Result<SpamMark, RuleError> {
         let sender = sender.trim();
         let was_allowed = self.unallow_sender(sender);
@@ -169,7 +167,6 @@ impl MessagesPrefs {
     }
 
     /// Undoes [`MessagesPrefs::mark_spam`].
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn unmark_spam(&mut self, sender: &str, mark: SpamMark) {
         let sender = sender.trim();
         if mark.rule_added {

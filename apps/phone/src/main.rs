@@ -138,6 +138,8 @@ enum SheetKind {
     RemindPick,
     /// Settings > Data > "Delete older calls": the age chooser (`prune_ui::prune_sheet`).
     PruneAge,
+    /// Stats page: the calls of one tapped bar (`stats_ui::stats_bucket_sheet`).
+    StatsBucket,
     /// "Which number?": several numbers on the clipboard (`keypad::paste_choose_sheet`).
     PasteChoose,
 }
@@ -1508,6 +1510,7 @@ impl PhoneApp {
             SheetKind::QuickReplyPick => self.quick_reply_sheet(theme, window, cx),
             SheetKind::RemindPick => self.remind_pick_sheet(theme, window, cx),
             SheetKind::PruneAge => self.prune_sheet(theme, window, cx),
+            SheetKind::StatsBucket => self.stats_bucket_sheet(theme, window, cx),
             SheetKind::PasteChoose => self.paste_choose_sheet(theme, window, cx),
             SheetKind::CallDetails => self.details_sheet(theme, window, cx),
             SheetKind::ImportPreview => {

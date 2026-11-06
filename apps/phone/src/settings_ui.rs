@@ -802,7 +802,11 @@ impl SettingsUi {
     /// second-level page up, only its own controls (and sheets) react.
     pub fn owns(&self, id: &str) -> bool {
         match self.sub {
-            Some(sub) => id.starts_with(sub.prefix()) || id.starts_with("sheet-"),
+            Some(sub) => {
+                id.starts_with(sub.prefix())
+                    || id.starts_with("sheet-")
+                    || (sub == Sub::Stats && id.starts_with(crate::stats_ui::BAR_PREFIX))
+            }
             None => id.starts_with("set-") || id.starts_with("sheet-"),
         }
     }
@@ -1061,7 +1065,9 @@ impl PhoneApp {
                 self.replies_tap(id, window, cx);
             } else if id.starts_with(Sub::SpeedDial.prefix()) {
                 self.speed_dial_tap(id, window, cx);
-            } else if id.starts_with(Sub::Stats.prefix()) {
+            } else if id.starts_with(Sub::Stats.prefix())
+                || id.starts_with(crate::stats_ui::BAR_PREFIX)
+            {
                 self.stats_tap(id, window, cx);
             } else if id.starts_with(Sub::Notes.prefix()) {
                 self.notes_tap(id, window, cx);

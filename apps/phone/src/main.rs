@@ -25,6 +25,7 @@ mod diagnostics;
 mod field;
 mod flight;
 mod fx;
+mod history_ui;
 mod incall;
 mod incoming;
 mod keypad;
@@ -107,6 +108,8 @@ enum SheetKind {
     Reply,
     /// "Reset quick replies?" (story 18.3).
     ResetReplies,
+    /// "Delete calls with {who}?" / "Delete all call history?" (`history_ui`).
+    ConfirmDelete,
 }
 
 /// The line under the number field.
@@ -228,6 +231,8 @@ struct PhoneApp {
     favorites: FavoritesView,
     /// The open Contact sheet or number chooser.
     contact_sheet: Option<ContactSheet>,
+    /// What the confirm-delete sheet will remove.
+    confirm_delete: Option<history_ui::DeleteScope>,
     /// 0 = Tab Bar in place, 1 = slid away under the keyboard.
     tabs_away: Spring,
     /// The Return-to-call pill: 0 = away, 1 = shown; its text and 1 s timer.
@@ -519,6 +524,7 @@ impl PhoneApp {
             contacts: contacts_view,
             favorites: FavoritesView::new(),
             contact_sheet: None,
+            confirm_delete: None,
             tabs_away: Spring::new(0.0, motion_tokens::select()).with_epsilon(0.002),
             pill_in: Spring::new(0.0, motion_tokens::appear()).with_epsilon(0.002),
             pill_text: SharedString::default(),
@@ -1290,6 +1296,7 @@ impl PhoneApp {
             // Drawn over the In-Call screen by `add_call_overlay`; the reply sheet by `reply_overlay`.
             SheetKind::AddCall | SheetKind::SimChooser | SheetKind::Reply => None,
             SheetKind::ResetReplies => self.replies_reset_sheet(theme, window, cx),
+            SheetKind::ConfirmDelete => self.confirm_delete_sheet(theme, window, cx),
             SheetKind::ImportPreview => {
                 if !self.sheet.is_visible() {
                     return None;

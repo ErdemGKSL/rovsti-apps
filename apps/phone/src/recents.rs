@@ -99,7 +99,7 @@ pub(crate) fn call_back_on_whatsapp(row_whatsapp: bool, connected: bool) -> bool
 /// One row, ready to draw.
 #[derive(Clone)]
 pub(crate) struct RowVm {
-    title: SharedString,
+    pub(crate) title: SharedString,
     count: Option<SharedString>,
     subtitle: SharedString,
     time: SharedString,
@@ -107,7 +107,7 @@ pub(crate) struct RowVm {
     direction: Direction,
     missed: bool,
     callable: bool,
-    number: SharedString,
+    pub(crate) number: SharedString,
     hue: Option<usize>,
     monogram: Option<SharedString>,
     named: bool,
@@ -1231,7 +1231,16 @@ impl PhoneApp {
             ));
         }
         if let Some(section) = history_section(theme, &self.recents.number_history) {
-            children.push(reveal(4, section));
+            let del = self.history_delete_button(theme, crate::history_ui::NUMBER_SHEET_DELETE, cx);
+            children.push(reveal(
+                4,
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(section)
+                    .child(del)
+                    .into_any_element(),
+            ));
         }
         if !row.named && !row.number.is_empty() {
             children.push(reveal(

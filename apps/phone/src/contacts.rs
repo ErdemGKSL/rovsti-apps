@@ -2306,7 +2306,17 @@ impl PhoneApp {
         if !sheet.chooser
             && let Some(section) = crate::recents::history_section(theme, &sheet.history)
         {
-            children.push(reveal(4, section));
+            let del =
+                self.history_delete_button(theme, crate::history_ui::CONTACT_SHEET_DELETE, cx);
+            children.push(reveal(
+                4,
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(section)
+                    .child(del)
+                    .into_any_element(),
+            ));
         }
         if !sheet.chooser {
             children.push(reveal(

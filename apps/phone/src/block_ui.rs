@@ -506,6 +506,17 @@ impl PhoneApp {
         cx: &mut Context<Self>,
     ) {
         let (ids, wa_ids) = split_refs(&refs);
+        self.delete_call_ids(ids, wa_ids, window, cx);
+    }
+
+    /// Deletes call-log rows `ids` and WhatsApp calls `wa_ids`. Done shows "Deleted n" with Undo.
+    pub(crate) fn delete_call_ids(
+        &mut self,
+        ids: Vec<i64>,
+        wa_ids: Vec<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let entries = match self.backend.read(cx).call_log() {
             backend::Load::Ready(log) => entries_by_id(&log.source, &ids),
             _ => Vec::new(),

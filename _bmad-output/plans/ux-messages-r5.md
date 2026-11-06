@@ -221,4 +221,24 @@ in parallel).
 
 ## Status
 
-Planned (round 5). Nothing implemented yet.
+Done (round 5), all without a device; each step is its own commit.
+
+- Step 1 (e2cc71b): pure logic with tests: `SmsAction::MoveToSpam` and context flags
+  (`sender_is_number`, `can_be_spam`), `Prefs::mark_spam/unmark_spam`, `InboxView::sms_only`,
+  draft file map (`to_map/from_map/merge_loaded`), scheduled `overview`, subtitle and
+  `newly_failed`, `status_ui::message_target`.
+- Step 2 (7839a2b, P1): Move to Spam in row and page menus with Undo; Block/Call/Add hidden
+  for alphanumeric senders; rule-limit pill.
+- Step 3 (295120c, P2): drafts load from and save to `drafts.json`, and are stored when the
+  app goes to the background.
+- Step 4 (68a6275, P5): Send later in both page menus; empty composer explains instead of
+  doing nothing.
+- Step 5 (337da3d, P3): Scheduled overview row in Chats listing SMS and WhatsApp items,
+  including failed ones; gateway items loaded on connect.
+- Step 6 (e52942b, P4): pill with Open when a WhatsApp scheduled message newly fails.
+- Step 7 (1a6492e, P6, P7): Message button in the Status viewer; search also finds
+  archived chats.
+- Step 8 (this step): acceptance rows 85 to 94, roadmap line, this status.
+
+Not planned (Info): recipient-keyed draft for a new number, in-conversation search, bulk
+select, emptying Spam, Status replies with quote, and the earlier rounds' Info items.

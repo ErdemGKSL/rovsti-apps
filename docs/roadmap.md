@@ -86,6 +86,9 @@ list in `docs/phone-acceptance.md`.
 - [x] Fourth UX pass: permission asks and refresh on return, location and contact card
       actions, one WhatsApp mute, Not spam from the conversation, resend failed scheduled
       SMS, recovery after failed WhatsApp actions (done without a device)
+- [x] Fifth UX pass: move a sender to Spam, drafts survive restarts, Send later in the
+      menu, scheduled overview, failed WhatsApp schedule notice, message from Status,
+      search archived chats (done without a device)
 
 ## WhatsApp gateway (`services/wa_gateway`)
 

@@ -4,6 +4,9 @@
 //!
 //! * `backend`: files, permission checks, starting and stopping the trip.
 //! * `trip_ui`: the Trip tab, the live card and the alarm screen.
+//! * `pick`: the pure picking state machine (A, B, pins, drag, hint, labels).
+//! * `map`: the map surface and its gestures; your position arrives as a `stops_location`
+//!   event from `rovsti_android::location` (a seam, no tracking).
 //! * `picker`: the destination sheet and the shared-location confirmation.
 //! * `saved_ui`: the Saved tab.
 //! * `settings_ui`: the Settings list, History, and the arriving-soon message page.

@@ -17,7 +17,7 @@ use rovsti_ui::{
 };
 
 use crate::{
-    StopsApp,
+    StopsApp, pick,
     transit::{self, MAX_LINES},
     trip_ui,
 };
@@ -72,10 +72,6 @@ impl Destination {
         } else {
             "Use this point".to_owned()
         }
-    }
-
-    pub fn coords_text(&self) -> String {
-        coord_text(self.coord)
     }
 }
 
@@ -154,7 +150,7 @@ impl Ends {
     }
 }
 
-/// `41.0370, 28.9850`: the name of a pin that came without one.
+/// `41.0370, 28.9850`: for a details line only, never a name or a main-flow label.
 pub fn coord_text(coord: Coord) -> String {
     format!("{:.4}, {:.4}", coord.lat, coord.lon)
 }
@@ -413,7 +409,7 @@ impl StopsApp {
                         theme,
                         None,
                         dest.title(),
-                        Some(dest.coords_text().into()),
+                        Some(pick::details_text(&dest).into()),
                         None,
                     )
                     .id("offer-row")
@@ -443,8 +439,7 @@ impl StopsApp {
             .collect();
         if !saved.is_empty() {
             let rows = saved.into_iter().map(|(id, dest)| {
-                let subtitle = dest.coords_text();
-                list_row(theme, None, dest.label.clone(), Some(subtitle.into()), None)
+                list_row(theme, None, pick::row_label(&dest.label), None, None)
                     .id(("pick-saved", id as usize))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.choose_destination(dest.clone(), cx);
@@ -457,7 +452,11 @@ impl StopsApp {
             let pairs = self.history.recent_pairs(3);
             if !pairs.is_empty() {
                 let rows = pairs.into_iter().enumerate().map(|(i, (a, b))| {
-                    let title = format!("{} – {}", a.label, b.label);
+                    let title = format!(
+                        "{} – {}",
+                        pick::row_label(&a.label),
+                        pick::row_label(&b.label)
+                    );
                     let (a, b) = (
                         Destination::new(a.label, a.coord),
                         Destination::new(b.label, b.coord),
@@ -475,18 +474,12 @@ impl StopsApp {
             if !recent.is_empty() {
                 let rows = recent.into_iter().enumerate().map(|(i, point)| {
                     let dest = Destination::new(point.label, point.coord);
-                    list_row(
-                        theme,
-                        None,
-                        dest.label.clone(),
-                        Some(dest.coords_text().into()),
-                        None,
-                    )
-                    .id(("pick-recent", i))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.choose_destination(dest.clone(), cx);
-                    }))
-                    .into_any_element()
+                    list_row(theme, None, pick::row_label(&dest.label), None, None)
+                        .id(("pick-recent", i))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.choose_destination(dest.clone(), cx);
+                        }))
+                        .into_any_element()
                 });
                 body = body.child(section(theme, Some("Recent".into()), rows));
             }
@@ -573,7 +566,7 @@ impl StopsApp {
             .flex_col()
             .gap(px(8.0))
             .child(Self::sheet_title(theme, name.clone()))
-            .child(Self::footnote(theme, coord_text(coord)));
+            .child(Self::footnote(theme, pick::details_text(&here)));
 
         let chosen = self.stop_pattern;
         let lines = transit::lines_through(&feed, stop, MAX_LINES);
@@ -701,7 +694,7 @@ impl StopsApp {
         }));
         let as_a = dest.clone();
         let as_b = dest.clone();
-        let default = self.pick.ends.next_slot();
+        let default = self.pick.confirm_slot();
         let pill = |label: &'static str, slot: Slot| {
             let p = glass_pill(theme, label);
             if slot == default {
@@ -715,7 +708,7 @@ impl StopsApp {
             .flex_col()
             .gap(px(8.0))
             .child(Self::sheet_title(theme, dest.title()))
-            .child(Self::footnote(theme, dest.coords_text()))
+            .child(Self::footnote(theme, pick::details_text(dest)))
             .child(section(theme, None, [save_row.into_any_element()]))
             .child(
                 div()
@@ -829,7 +822,7 @@ mod tests {
         let d = confirm("geo:40.9917,29.0233");
         assert!(!d.is_named());
         assert_eq!(d.title(), "Use this point");
-        assert_eq!(d.coords_text(), "40.9917, 29.0233");
+        assert_eq!(coord_text(d.coord), "40.9917, 29.0233");
         let d = confirm("https://www.google.com/maps/@41.0082,28.9784,15z");
         assert!(d.label.is_empty());
     }

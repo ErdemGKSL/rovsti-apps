@@ -106,7 +106,11 @@ pub fn outcome_text(outcome: Outcome) -> &'static str {
 /// "A – B" for a trip with two points, the single label of a legacy record.
 pub fn record_pair(record: &TripRecord) -> String {
     match (&record.a, &record.b) {
-        (Some(a), Some(b)) => format!("{} – {}", a.label, b.label),
+        (Some(a), Some(b)) => format!(
+            "{} – {}",
+            crate::pick::row_label(&a.label),
+            crate::pick::row_label(&b.label)
+        ),
         _ if record.label.is_empty() => "Trip".to_owned(),
         _ => record.label.clone(),
     }

@@ -237,6 +237,12 @@ impl Picking {
     }
 
     /// Start is allowed: a valid pair and no pin in the air.
+    /// The end the confirmation sheet emphasises: the pin being moved, else the
+    /// first empty end, else A.
+    pub fn confirm_slot(&self) -> Slot {
+        self.slot_for_tap().unwrap_or(Slot::A)
+    }
+
     pub fn can_start(&self) -> bool {
         self.drag.is_none() && matches!(self.ends.diameter(), Some(Ok(_)))
     }
@@ -252,6 +258,17 @@ pub fn point_label(slot: Slot, dest: Option<&Destination>) -> String {
     match dest {
         Some(d) if d.is_named() => d.label.trim().to_owned(),
         _ => format!("Point {}", slot.label()),
+    }
+}
+
+/// A stored label for a list row: itself, else "Point" (a dropped point has
+/// none, and an old record may not either).
+pub fn row_label(label: &str) -> String {
+    let label = label.trim();
+    if label.is_empty() {
+        "Point".to_owned()
+    } else {
+        label.to_owned()
     }
 }
 
@@ -533,5 +550,25 @@ mod tests {
             assert!(!has_coordinate(&text), "{text}");
         }
         assert!(has_coordinate(&details_text(a)));
+    }
+
+    #[test]
+    fn the_confirm_sheet_emphasises_the_open_end_else_a() {
+        let mut p = Picking::default();
+        assert_eq!(p.confirm_slot(), Slot::A);
+        p.place(Slot::A, Destination::dropped(Coord::new(41.0, 29.0)));
+        assert_eq!(p.confirm_slot(), Slot::B);
+        p.place(Slot::B, Destination::dropped(Coord::new(41.0, 29.01)));
+        assert_eq!(p.confirm_slot(), Slot::A);
+        p.begin_move(Slot::B);
+        assert_eq!(p.confirm_slot(), Slot::B);
+    }
+
+    #[test]
+    fn list_rows_fall_back_for_empty_labels() {
+        assert_eq!(row_label("Home"), "Home");
+        assert_eq!(row_label("  Home "), "Home");
+        assert_eq!(row_label(""), "Point");
+        assert_eq!(row_label("   "), "Point");
     }
 }

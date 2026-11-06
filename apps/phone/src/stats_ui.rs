@@ -347,12 +347,13 @@ impl PhoneApp {
             return;
         }
         let csv = call_stats::people_csv(&people, range);
+        self.backup.export_kind = crate::backup_ui::ExportKind::Stats;
         let outcome = backend::export_calls(&call_stats::stats_csv_file_name(range, now, tz), &csv);
         if outcome.failed() || outcome == backend::Outcome::NotAvailable {
             self.show_notice_pill(outcome.why_not("Couldn't export"), None, false, cx);
         } else {
+            // The picker's result pill says "Call statistics exported".
             rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Confirm);
-            self.show_notice_pill(export_pill_text(people.len()), None, false, cx);
         }
     }
 

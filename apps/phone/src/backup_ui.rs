@@ -39,9 +39,14 @@ pub(crate) fn export_calls_note(loaded: bool) -> Option<&'static str> {
 }
 
 /// Pill text for the answer of the call history export.
-pub(crate) fn export_calls_pill(ok: bool, failed: bool) -> Option<&'static str> {
+pub(crate) fn export_calls_pill(kind: ExportKind, ok: bool, failed: bool) -> Option<&'static str> {
     if ok {
-        Some("Call history exported")
+        Some(match kind {
+            ExportKind::Calls => "Call history exported",
+            ExportKind::Stats => "Call statistics exported",
+            ExportKind::Blocked => "Blocked numbers exported",
+            ExportKind::Notes => "Call notes exported",
+        })
     } else if failed {
         Some("Couldn't export")
     } else {
@@ -49,8 +54,20 @@ pub(crate) fn export_calls_pill(ok: bool, failed: bool) -> Option<&'static str> 
     }
 }
 
+/// What the last "save as" export held, so its result pill can say so.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ExportKind {
+    #[default]
+    Calls,
+    Stats,
+    Blocked,
+    Notes,
+}
+
 #[derive(Default)]
 pub(crate) struct BackupUi {
+    /// Set before every `backend::export_calls`.
+    pub export_kind: ExportKind,
     /// The parsed file the open sheet would import.
     pub preview: Option<ImportPreview>,
     /// "{name} moved from {from} to {to}" notes under the line.
@@ -75,6 +92,7 @@ impl PhoneApp {
                 return;
             }
         };
+        self.backup.export_kind = ExportKind::Calls;
         let extras = self.wa_call.read(cx).recents_extras();
         let notes = self.notes.snapshot();
         let now_ms = std::time::SystemTime::now()
@@ -136,9 +154,16 @@ impl PhoneApp {
                 }
             }
             DocumentOp::ExportCalls => {
-                if let Some(text) = export_calls_pill(result.ok, result.error.is_some()) {
+                let kind = self.backup.export_kind;
+                if let Some(text) = export_calls_pill(kind, result.ok, result.error.is_some()) {
                     self.show_notice_pill(text, None, false, cx);
                 }
+            }
+            DocumentOp::ImportMessages => {
+                if !std::mem::take(&mut self.blocked.import_pending) {
+                    return;
+                }
+                self.blocked_file_picked(result, cx);
             }
             DocumentOp::ContactPhoto => self.photo_picked(result, cx),
             DocumentOp::ImportBackup => {
@@ -388,12 +413,34 @@ mod tests {
             export_calls_note(false),
             Some("Call history isn't loaded yet")
         );
+        use ExportKind::*;
         assert_eq!(
-            export_calls_pill(true, false),
+            export_calls_pill(Calls, true, false),
             Some("Call history exported")
         );
-        assert_eq!(export_calls_pill(false, true), Some("Couldn't export"));
-        assert_eq!(export_calls_pill(false, false), Some("Export cancelled"));
+        assert_eq!(
+            export_calls_pill(Stats, true, false),
+            Some("Call statistics exported")
+        );
+        assert_eq!(
+            export_calls_pill(Blocked, true, false),
+            Some("Blocked numbers exported")
+        );
+        assert_eq!(
+            export_calls_pill(Notes, true, false),
+            Some("Call notes exported")
+        );
+        for kind in [Calls, Stats, Blocked, Notes] {
+            assert_eq!(
+                export_calls_pill(kind, false, true),
+                Some("Couldn't export")
+            );
+            assert_eq!(
+                export_calls_pill(kind, false, false),
+                Some("Export cancelled")
+            );
+        }
+        assert_eq!(ExportKind::default(), Calls);
     }
 
     #[test]

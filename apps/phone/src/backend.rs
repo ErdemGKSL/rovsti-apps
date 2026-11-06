@@ -1412,6 +1412,12 @@ pub fn export_calls(name: &str, csv: &str) -> Outcome {
     Outcome::from(documents::export_calls(name, csv), "exporting calls")
 }
 
+/// Opens the file picker for a text file of at most `max_bytes`; the answer is a
+/// `document_result` with op `import_messages`.
+pub fn import_file(max_bytes: u64) -> Outcome {
+    Outcome::from(documents::import_file(max_bytes), "importing")
+}
+
 /// A contact's photo at up to [`FULL_PHOTO_SIZE`] px with the PNG file it was
 /// read from, so save and share have a path. Blocks: only call it on the
 /// background executor. Desktop paints the sample portrait into a temp PNG

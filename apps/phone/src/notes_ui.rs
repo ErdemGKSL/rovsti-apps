@@ -33,6 +33,7 @@ use crate::{
 pub(crate) const FIELD_ID: &str = "set-nt-field";
 /// The "Share all" pill of the page.
 pub(crate) const SHARE_ID: &str = "set-nt-share";
+pub(crate) const EXPORT_ID: &str = "set-nt-export";
 /// A row opens its call (`{ROW_PREFIX}{i}`), the glyph deletes its note.
 pub(crate) const ROW_PREFIX: &str = "set-nt-row-";
 pub(crate) const DEL_PREFIX: &str = "set-nt-del-";
@@ -185,6 +186,8 @@ impl PhoneApp {
     pub(crate) fn notes_tap(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if id == SHARE_ID {
             self.notes_share_all(window, cx);
+        } else if id == EXPORT_ID {
+            self.notes_export(window, cx);
         } else if let Some(i) = id_index(id, ROW_PREFIX) {
             self.notes_open_row(i, window, cx);
         } else if let Some(i) = id_index(id, DEL_PREFIX) {
@@ -210,6 +213,24 @@ impl PhoneApp {
                 false,
                 cx,
             );
+        }
+    }
+
+    /// Every note as a CSV file through "save as".
+    fn notes_export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name_of = self.notes_name_of(cx);
+        let tz = self.notes_locale(cx).tz_offset_s;
+        let snapshot = self.notes.snapshot();
+        if snapshot.notes.is_empty() {
+            return;
+        }
+        let csv = snapshot.to_csv(name_of, tz);
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.backup.export_kind = crate::backup_ui::ExportKind::Notes;
+        let name = rovsti_core::call_notes::notes_csv_file_name(backend::now_ms(), tz);
+        let outcome = backend::export_calls(&name, &csv);
+        if outcome != backend::Outcome::Done {
+            self.show_notice_pill(outcome.why_not("Couldn't export"), None, false, cx);
         }
     }
 
@@ -301,23 +322,18 @@ impl PhoneApp {
             .into_any_element()
     }
 
-    /// The "Share all" pill under the field.
+    /// The "Share all" and "Export" pills under the field.
     fn notes_header(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
-        let press = self.presses.value(SHARE_ID).clamp(0.0, 1.0);
-        div()
-            .flex_none()
-            .h(px(HEADER_H))
-            .mx(px(16.0))
-            .pt(px(8.0))
-            .pb(px(0.0))
-            .child(
+        let pill =
+            |id: &'static str, label: &'static str, aria: &'static str, cx: &mut Context<Self>| {
+                let press = self.presses.value(id).clamp(0.0, 1.0);
                 div()
-                    .id(SHARE_ID)
+                    .id(id)
                     .role(Role::Button)
-                    .aria_label("Share all notes")
+                    .aria_label(aria)
                     .relative()
-                    .w_full()
+                    .flex_1()
                     .h(px(36.0))
                     .rounded_full()
                     .bg(Hsla {
@@ -330,19 +346,26 @@ impl PhoneApp {
                     .text_size(typography::SUBHEADLINE.size)
                     .font_weight(typography::HEADLINE.weight)
                     .text_color(colors.accent)
-                    .child("Share all")
+                    .child(label)
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
-                            this.presses.down(SHARE_ID);
-                            this.settings_tap(SHARE_ID, window, cx);
+                        cx.listener(move |this, _, window, cx| {
+                            this.presses.down(id);
+                            this.settings_tap(id, window, cx);
                         }),
                     )
-                    .child(touch_surface(Self::touch_listener(
-                        cx,
-                        Some(SHARE_ID.into()),
-                    ))),
-            )
+                    .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
+            };
+        div()
+            .flex_none()
+            .h(px(HEADER_H))
+            .mx(px(16.0))
+            .pt(px(8.0))
+            .pb(px(0.0))
+            .flex()
+            .gap(px(8.0))
+            .child(pill(SHARE_ID, "Share all", "Share all notes", cx))
+            .child(pill(EXPORT_ID, "Export", "Export notes as CSV", cx))
             .into_any_element()
     }
 
@@ -551,10 +574,12 @@ mod tests {
 
     #[test]
     fn ids_stay_on_the_notes_page_and_apart() {
-        for id in [FIELD_ID, SHARE_ID, ROW_PREFIX, DEL_PREFIX] {
+        for id in [FIELD_ID, SHARE_ID, EXPORT_ID, ROW_PREFIX, DEL_PREFIX] {
             assert!(id.starts_with(Sub::Notes.prefix()), "{id}");
         }
         assert!(!SHARE_ID.starts_with(ROW_PREFIX) && !SHARE_ID.starts_with(DEL_PREFIX));
+        assert!(!EXPORT_ID.starts_with(ROW_PREFIX) && !EXPORT_ID.starts_with(DEL_PREFIX));
+        assert_eq!(id_index(EXPORT_ID, DEL_PREFIX), None);
         assert!(!ROW_PREFIX.starts_with(DEL_PREFIX) && !DEL_PREFIX.starts_with(ROW_PREFIX));
         assert_eq!(ROW_PREFIX, "set-nt-row-");
         assert_eq!(DEL_PREFIX, "set-nt-del-");

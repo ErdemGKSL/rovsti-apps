@@ -42,6 +42,10 @@ use crate::{
 
 const SHARE_ID: &str = "set-bk-share";
 const UNALL_ID: &str = "set-bk-unall";
+const EXPORT_ID: &str = "set-bk-export";
+const IMPORT_ID: &str = "set-bk-import";
+/// Longest file the Import picker accepts.
+const IMPORT_MAX_BYTES: u64 = 256 * 1024;
 const UNALL_YES: &str = "sheet-bk-yes";
 const UNALL_NO: &str = "sheet-bk-no";
 const FIELD_H: f32 = 44.0;
@@ -106,6 +110,8 @@ pub(crate) struct BlockedUi {
     fresh: Option<f32>,
     skeleton_on: bool,
     skeleton_task: Option<Task<()>>,
+    /// The file picker was opened by Import; the next `import_messages` answer is ours.
+    pub import_pending: bool,
 }
 
 impl BlockedUi {
@@ -131,6 +137,7 @@ impl BlockedUi {
             fresh: None,
             skeleton_on: false,
             skeleton_task: None,
+            import_pending: false,
         }
     }
 
@@ -377,6 +384,8 @@ impl PhoneApp {
             "set-bk-grant" => self.blocked_grant(cx),
             SHARE_ID => self.blocked_share(window, cx),
             UNALL_ID => self.blocked_unall_ask(window, cx),
+            EXPORT_ID => self.blocked_export(window, cx),
+            IMPORT_ID => self.blocked_import(window, cx),
             _ => {
                 if let Some(i) = id
                     .strip_prefix("set-bk-un-")
@@ -632,15 +641,27 @@ impl PhoneApp {
                 )
                 .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
         };
+        let any = !self.blocked.numbers.is_empty();
+        let row = || div().flex().gap(px(8.0)).h(px(36.0));
+        let rows = if any { 2.0 } else { 1.0 };
         div()
             .flex_none()
-            .h(px(HEADER_H))
+            .h(px(rows * HEADER_H))
             .mx(px(16.0))
             .pb(px(8.0))
             .flex()
+            .flex_col()
             .gap(px(8.0))
-            .child(pill(SHARE_ID, "Share", colors.accent, cx))
-            .child(pill(UNALL_ID, "Unblock all", call_colors(theme).danger, cx))
+            .children(any.then(|| {
+                row()
+                    .child(pill(SHARE_ID, "Share", colors.accent, cx))
+                    .child(pill(UNALL_ID, "Unblock all", call_colors(theme).danger, cx))
+            }))
+            .child(
+                row()
+                    .children(any.then(|| pill(EXPORT_ID, "Export", colors.accent, cx)))
+                    .child(pill(IMPORT_ID, "Import", colors.accent, cx)),
+            )
             .into_any_element()
     }
 
@@ -714,6 +735,17 @@ impl PhoneApp {
         cx: &mut Context<Self>,
     ) {
         rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        self.bulk_block_run(many, blocklist::bulk_text, cx);
+    }
+
+    /// Blocks `many.to_block` one by one, then shows `text_of(blocked ones)` with
+    /// Undo. Shared by the pasted list and the file import.
+    fn bulk_block_run(
+        &mut self,
+        many: blocklist::BulkParse,
+        text_of: impl FnOnce(&blocklist::BulkParse) -> String + 'static,
+        cx: &mut Context<Self>,
+    ) {
         let raws: Vec<SharedString> = many.to_block.iter().cloned().map(Into::into).collect();
         let tasks: Vec<_> = raws
             .iter()
@@ -734,11 +766,130 @@ impl PhoneApp {
                         to_block: done.iter().map(ToString::to_string).collect(),
                         ..many
                     };
-                    let text = blocklist::bulk_text(&shown);
+                    let text = text_of(&shown);
                     let done: Arc<[SharedString]> = done.into();
                     this.show_pill_action(text, "Undo", PillAction::UnblockAll(done), cx);
                 }
                 cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Export: the list as CSV through "save as".
+    fn blocked_export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (rows, contacts, format, tz) = {
+            let backend = self.backend.read(cx);
+            let Load::Ready(state) = backend.blocklist() else {
+                return;
+            };
+            (
+                state.rows.clone(),
+                backend.contacts(),
+                backend.settings().name_format,
+                match backend.call_log() {
+                    Load::Ready(log) => log.locale.tz_offset_s,
+                    _ => 0,
+                },
+            )
+        };
+        if rows.is_empty() {
+            return;
+        }
+        let csv = blocklist::to_csv(&rows, |raw| {
+            let Load::Ready(index) = &contacts else {
+                return None;
+            };
+            index
+                .match_number(raw)
+                .map(|c| rovsti_core::names::display(c, format).into_owned())
+        });
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.backup.export_kind = crate::backup_ui::ExportKind::Blocked;
+        let outcome = backend::export_calls(&blocklist::csv_file_name(backend::now_ms(), tz), &csv);
+        if outcome != backend::Outcome::Done {
+            self.show_notice_pill(outcome.why_not("Couldn't export"), None, false, cx);
+        }
+    }
+
+    /// Import: opens the file picker; `sync_documents` hands the answer back.
+    fn blocked_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.backend.read(cx).can_block_here() {
+            return;
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.blocked.import_pending = true;
+        let outcome = backend::import_file(IMPORT_MAX_BYTES);
+        if outcome != backend::Outcome::Done {
+            self.blocked.import_pending = false;
+            self.show_notice_pill(
+                outcome.why_not("Couldn't open the file picker"),
+                None,
+                false,
+                cx,
+            );
+        }
+    }
+
+    /// The picker answered an Import: reads the file, blocks what it lists.
+    pub(crate) fn blocked_file_picked(
+        &mut self,
+        result: rovsti_core::wire::DocumentResult,
+        cx: &mut Context<Self>,
+    ) {
+        if !result.ok {
+            if result.error.is_some() {
+                self.show_notice_pill("Couldn't read the file", None, false, cx);
+            }
+            return; // otherwise the picker was cancelled
+        }
+        let Some(path) = result.path else {
+            self.show_notice_pill("Couldn't read the file", None, false, cx);
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let text = cx
+                .background_executor()
+                .spawn(async move {
+                    let text = std::fs::read_to_string(&path);
+                    std::fs::remove_file(&path).ok();
+                    text
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                let Ok(text) = text else {
+                    this.show_notice_pill("Couldn't read the file", None, false, cx);
+                    return;
+                };
+                let file = {
+                    let backend = this.backend.read(cx);
+                    blocklist::parse_file(
+                        &text,
+                        &EmergencyList::default(),
+                        &backend.blocked_numbers_set(),
+                    )
+                };
+                if file.bulk.to_block.is_empty() {
+                    this.show_notice_pill(blocklist::import_text(&file), None, false, cx);
+                    return;
+                }
+                let blocklist::FileImport {
+                    bulk,
+                    skipped_lines,
+                    truncated,
+                } = file;
+                this.bulk_block_run(
+                    bulk,
+                    move |shown| {
+                        blocklist::import_text(&blocklist::FileImport {
+                            bulk: shown.clone(),
+                            skipped_lines,
+                            truncated,
+                        })
+                    },
+                    cx,
+                );
             })
             .ok();
         })
@@ -1462,7 +1613,7 @@ impl PhoneApp {
                     .flex()
                     .flex_col()
                     .children(
-                        (segment == 0 && state == Shown::Ready && count > 0)
+                        (segment == 0 && state == Shown::Ready)
                             .then(|| self.blocked_header(theme, cx)),
                     )
                     .child(list),
@@ -1502,9 +1653,11 @@ mod tests {
     fn ids_belong_to_the_blocked_page_and_sheet() {
         assert!(SHARE_ID.starts_with(Sub::Blocked.prefix()));
         assert!(UNALL_ID.starts_with(Sub::Blocked.prefix()));
+        assert!(EXPORT_ID.starts_with(Sub::Blocked.prefix()));
+        assert!(IMPORT_ID.starts_with(Sub::Blocked.prefix()));
         assert!(UNALL_YES.starts_with("sheet-") && UNALL_NO.starts_with("sheet-"));
         // The row ids keep their own prefixes, so the list never mistakes a pill for a row.
-        for id in [SHARE_ID, UNALL_ID] {
+        for id in [SHARE_ID, UNALL_ID, EXPORT_ID, IMPORT_ID] {
             assert!(
                 !id.starts_with("set-bk-un-") && !id.starts_with("set-bk-call-"),
                 "{id}"

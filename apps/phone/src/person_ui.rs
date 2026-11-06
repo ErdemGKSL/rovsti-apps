@@ -197,6 +197,7 @@ impl PhoneApp {
             this.update(cx, |this, cx| match made {
                 None => this.show_notice_pill(NO_CALLS_PILL, None, false, cx),
                 Some((name, csv)) => {
+                    this.backup.export_kind = crate::backup_ui::ExportKind::Calls;
                     let outcome = backend::export_calls(&name, &csv);
                     if outcome != backend::Outcome::Done {
                         this.show_notice_pill(outcome.why_not("Couldn't export"), None, false, cx);

@@ -14,9 +14,9 @@ use std::{cell::Cell, collections::VecDeque, rc::Rc, time::Duration};
 
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, Context, Corners, Edges, Hsla, InteractiveElement,
-    IntoElement, MouseButton, MouseDownEvent, ParentElement, PathBuilder, Pixels, Point,
-    StatefulInteractiveElement, Styled, Task, TouchEvent, TouchPhase, Window, canvas, div, point,
-    px, quad,
+    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement,
+    PathBuilder, Pixels, Point, StatefulInteractiveElement, Styled, Task, TouchEvent, TouchPhase,
+    Window, canvas, div, point, px, quad,
 };
 use rovsti_geo::{
     Coord, Diameter, EARTH_RADIUS_M, Feed, Side, Stop,
@@ -35,7 +35,7 @@ use rovsti_ui::{
 
 use crate::{
     StopsApp,
-    picker::{Destination, SheetMode, coord_text},
+    picker::{Destination, SheetMode, Slot, coord_text},
     store::now_ms,
 };
 
@@ -58,8 +58,12 @@ const FIT_PADDING_PX: f32 = 48.0;
 /// Two taps this close in time and space are a double tap.
 const DOUBLE_TAP_MS: u64 = 300;
 const DOUBLE_TAP_SLOP_PX: f32 = 40.0;
-/// A mouse click this soon after a touch is that touch's echo.
+/// A mouse sequence starting this soon after a touch is that touch's echo.
 const CLICK_ECHO_MS: u64 = 700;
+/// A finger that starts this close to a pin grabs it.
+const PIN_GRAB_PX: f32 = 32.0;
+/// The touch id the mouse uses.
+const MOUSE_ID: u64 = u64::MAX;
 /// Two fingers closer than this give no usable zoom ratio.
 const MIN_PINCH_PX: f32 = 12.0;
 /// Rings and dots beyond this many pixels are not worth tessellating.
@@ -304,6 +308,33 @@ pub enum Gesture {
     DoubleTap {
         at: (f32, f32),
     },
+    /// A finger touched a pin without moving.
+    PinTap {
+        slot: Slot,
+    },
+    /// The grabbed pin goes to `at` (the finger minus the grab offset).
+    PinDrag {
+        slot: Slot,
+        at: (f32, f32),
+    },
+    /// The grabbed pin was let go at `at`.
+    PinDrop {
+        slot: Slot,
+        at: (f32, f32),
+    },
+    /// The grab was interrupted: the pin goes back.
+    PinCancel {
+        slot: Slot,
+    },
+}
+
+/// A pin held by the first finger.
+#[derive(Clone, Copy, Debug)]
+struct Grab {
+    slot: Slot,
+    /// Finger minus pin at the start, so the pin does not jump.
+    offset: (f32, f32),
+    moved: bool,
 }
 
 /// Turns raw touches into gestures. Positions are whatever space the caller
@@ -321,12 +352,26 @@ pub struct Gestures {
     /// The sequence moved or used two fingers: it is not a tap.
     dragging: bool,
     pending: Option<((f32, f32), u64)>,
+    /// Last real (non-mouse) touch.
     last_touch_ms: Option<u64>,
+    /// Where the pins are, in the same space as the touches.
+    handles: Vec<(Slot, (f32, f32))>,
+    grab: Option<Grab>,
+    /// The running mouse sequence is a touch's echo.
+    mouse_ignored: bool,
 }
 
 impl Gestures {
+    /// The pins a finger can grab, in the touches' space.
+    pub fn set_handles(&mut self, handles: &[(Slot, (f32, f32))]) {
+        self.handles.clear();
+        self.handles.extend_from_slice(handles);
+    }
+
     pub fn touch(&mut self, id: u64, phase: Phase, at: (f32, f32), now_ms: u64) -> Option<Gesture> {
-        self.last_touch_ms = Some(now_ms);
+        if id != MOUSE_ID {
+            self.last_touch_ms = Some(now_ms);
+        }
         match phase {
             Phase::Start => {
                 if self.touches.len() >= 2 || self.touches.iter().any(|t| t.0 == id) {
@@ -337,13 +382,38 @@ impl Gestures {
                     self.start = at;
                     self.anchor = at;
                     self.dragging = false;
+                    self.grab = self
+                        .handles
+                        .iter()
+                        .map(|&(slot, h)| (slot, h, dist(at, h)))
+                        .filter(|t| t.2 <= PIN_GRAB_PX)
+                        .min_by(|a, b| a.2.total_cmp(&b.2))
+                        .map(|(slot, h, _)| Grab {
+                            slot,
+                            offset: (at.0 - h.0, at.1 - h.1),
+                            moved: false,
+                        });
+                    None
                 } else {
                     self.dragging = true;
+                    // A second finger turns the grab into a pinch.
+                    self.grab
+                        .take()
+                        .map(|grab| Gesture::PinCancel { slot: grab.slot })
                 }
-                None
             }
             Phase::Move => {
                 let i = self.touches.iter().position(|t| t.0 == id)?;
+                if let Some(grab) = &mut self.grab {
+                    self.touches[i].1 = at;
+                    if !grab.moved && dist(at, self.start) > TAP_SLOP {
+                        grab.moved = true;
+                    }
+                    return grab.moved.then_some(Gesture::PinDrag {
+                        slot: grab.slot,
+                        at: (at.0 - grab.offset.0, at.1 - grab.offset.1),
+                    });
+                }
                 let old = std::mem::replace(&mut self.touches[i].1, at);
                 if self.touches.len() == 2 {
                     let other = self.touches[1 - i].1;
@@ -371,7 +441,21 @@ impl Gestures {
                 if phase == Phase::Cancel {
                     self.touches.clear();
                     self.dragging = false;
-                    return None;
+                    return self
+                        .grab
+                        .take()
+                        .map(|grab| Gesture::PinCancel { slot: grab.slot });
+                }
+                if let Some(grab) = self.grab.take() {
+                    self.touches.remove(i);
+                    return Some(if grab.moved {
+                        Gesture::PinDrop {
+                            slot: grab.slot,
+                            at: (at.0 - grab.offset.0, at.1 - grab.offset.1),
+                        }
+                    } else {
+                        Gesture::PinTap { slot: grab.slot }
+                    });
                 }
                 let tap =
                     self.touches.len() == 1 && !self.dragging && dist(at, self.start) <= TAP_SLOP;
@@ -391,16 +475,22 @@ impl Gestures {
         }
     }
 
-    /// A mouse click (desktop). The click that follows a touch is that
-    /// touch's echo and is ignored.
-    pub fn click(&mut self, at: (f32, f32), now_ms: u64) -> Option<Gesture> {
-        if self
-            .last_touch_ms
-            .is_some_and(|t| now_ms.saturating_sub(t) < CLICK_ECHO_MS)
-        {
+    /// The left mouse button (desktop) as a one-finger touch. A sequence
+    /// that starts right after a real touch is that touch's echo and is
+    /// ignored to its end.
+    pub fn mouse(&mut self, phase: Phase, at: (f32, f32), now_ms: u64) -> Option<Gesture> {
+        if phase == Phase::Start {
+            self.mouse_ignored = self
+                .last_touch_ms
+                .is_some_and(|t| now_ms.saturating_sub(t) < CLICK_ECHO_MS);
+        }
+        if self.mouse_ignored {
+            if matches!(phase, Phase::End | Phase::Cancel) {
+                self.mouse_ignored = false;
+            }
             return None;
         }
-        self.register_tap(at, now_ms)
+        self.touch(MOUSE_ID, phase, at, now_ms)
     }
 
     fn register_tap(&mut self, at: (f32, f32), now_ms: u64) -> Option<Gesture> {
@@ -996,7 +1086,8 @@ enum MapInput {
         phase: Phase,
         at: (f32, f32),
     },
-    Click {
+    Mouse {
+        phase: Phase,
         at: (f32, f32),
     },
 }
@@ -1043,15 +1134,45 @@ fn input_surface(
                     cx,
                 );
             });
-            let click = Rc::clone(&on_input);
+            let mouse = Rc::clone(&on_input);
+            let pressed = Rc::new(Cell::new(false));
+            let down = Rc::clone(&pressed);
+            let down_input = Rc::clone(&mouse);
             window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
                 if phase.bubble()
                     && event.button == MouseButton::Left
                     && bounds.contains(&event.position)
                     && !on_controls(event.position)
                 {
-                    click(
-                        MapInput::Click {
+                    down.set(true);
+                    down_input(
+                        MapInput::Mouse {
+                            phase: Phase::Start,
+                            at: (f32::from(event.position.x), f32::from(event.position.y)),
+                        },
+                        cx,
+                    );
+                }
+            });
+            let moved = Rc::clone(&pressed);
+            let move_input = Rc::clone(&mouse);
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                if phase.bubble() && moved.get() && event.pressed_button == Some(MouseButton::Left)
+                {
+                    move_input(
+                        MapInput::Mouse {
+                            phase: Phase::Move,
+                            at: (f32::from(event.position.x), f32::from(event.position.y)),
+                        },
+                        cx,
+                    );
+                }
+            });
+            window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                if phase.bubble() && event.button == MouseButton::Left && pressed.replace(false) {
+                    mouse(
+                        MapInput::Mouse {
+                            phase: Phase::End,
                             at: (f32::from(event.position.x), f32::from(event.position.y)),
                         },
                         cx,
@@ -1138,6 +1259,15 @@ impl StopsApp {
             }
         }
         let viewport = self.map.viewport;
+        let centre = self.map.bounds.get().center();
+        let handles: Vec<(Slot, (f32, f32))> = [Slot::A, Slot::B]
+            .into_iter()
+            .filter_map(|slot| {
+                let (x, y) = viewport.project(self.pick.ends.get(slot)?.coord);
+                Some((slot, (f32::from(centre.x) + x, f32::from(centre.y) + y)))
+            })
+            .collect();
+        self.map.gestures.set_handles(&handles);
         let cover = tiles_for_view(&viewport, size, VIEW_TILE_CAP);
         self.map_tiles.request_view(&cover, cx);
         let loaded = self.map_tiles.gather(&cover);
@@ -1281,13 +1411,19 @@ impl StopsApp {
                 self.map.gestures.touch(id, phase, at, now),
                 phase == Phase::End,
             ),
-            MapInput::Click { at } => (self.map.gestures.click(at, now), true),
+            MapInput::Mouse { phase, at } => {
+                (self.map.gestures.mouse(phase, at, now), phase == Phase::End)
+            }
         };
         if let Some(gesture) = gesture {
             self.apply_gesture(gesture);
             cx.notify();
         }
-        if touch_ended {
+        let pin_end = matches!(
+            gesture,
+            Some(Gesture::PinTap { .. } | Gesture::PinDrop { .. })
+        );
+        if touch_ended && !pin_end {
             // A single tap waits out the double-tap window before it acts.
             self.map.tap_timer = Some(cx.spawn(async move |this, cx| {
                 cx.background_executor()
@@ -1320,6 +1456,19 @@ impl StopsApp {
                 let at = self.map.to_view(at);
                 self.map.viewport.zoom_about(2.0, at);
             }
+            Gesture::PinTap { slot } => self.pick.open_menu(slot),
+            Gesture::PinDrag { slot, at } => {
+                if self.pick.dragging() != Some(slot) && !self.pick.drag_start(slot) {
+                    return;
+                }
+                let coord = self.map.viewport.unproject(self.map.to_view(at));
+                self.pick.drag_to(slot, coord);
+            }
+            Gesture::PinDrop { slot, at } => {
+                let coord = self.map.viewport.unproject(self.map.to_view(at));
+                self.pick.drag_end(slot, Destination::dropped(coord));
+            }
+            Gesture::PinCancel { .. } => self.pick.drag_cancel(),
         }
     }
 
@@ -1641,18 +1790,147 @@ mod tests {
     }
 
     #[test]
-    fn a_click_right_after_a_touch_is_its_echo() {
+    fn a_mouse_sequence_right_after_a_touch_is_its_echo() {
         let mut g = Gestures::default();
         tap(&mut g, (10.0, 10.0), 1_000);
-        assert_eq!(g.click((10.0, 10.0), 1_100), None);
+        assert_eq!(mouse_click(&mut g, (10.0, 10.0), 1_100), None);
         // The echo did not turn the tap into a double tap.
         assert_eq!(g.due_tap(1_400), Some((10.0, 10.0)));
         // A desktop mouse never touches: clicks count, twice is a double click.
-        let mut mouse = Gestures::default();
-        assert_eq!(mouse.click((5.0, 5.0), 100), None);
+        let mut m = Gestures::default();
+        assert_eq!(mouse_click(&mut m, (5.0, 5.0), 100), None);
         assert_eq!(
-            mouse.click((5.0, 5.0), 250),
+            mouse_click(&mut m, (5.0, 5.0), 250),
             Some(Gesture::DoubleTap { at: (5.0, 5.0) })
+        );
+    }
+
+    fn mouse_click(g: &mut Gestures, at: (f32, f32), t: u64) -> Option<Gesture> {
+        assert_eq!(g.mouse(Phase::Start, at, t), None);
+        g.mouse(Phase::End, at, t + 20)
+    }
+
+    #[test]
+    fn the_mouse_pans_and_drags_pins() {
+        let mut g = Gestures::default();
+        g.mouse(Phase::Start, (100.0, 100.0), 0);
+        assert_eq!(
+            g.mouse(Phase::Move, (120.0, 100.0), 10),
+            Some(Gesture::Pan { dx: 20.0, dy: 0.0 })
+        );
+        assert_eq!(g.mouse(Phase::End, (120.0, 100.0), 20), None);
+        assert_eq!(g.due_tap(10_000), None);
+        g.set_handles(&[(Slot::A, (50.0, 50.0))]);
+        g.mouse(Phase::Start, (52.0, 50.0), 5_000);
+        assert_eq!(
+            g.mouse(Phase::Move, (92.0, 50.0), 5_010),
+            Some(Gesture::PinDrag {
+                slot: Slot::A,
+                at: (90.0, 50.0)
+            })
+        );
+        assert_eq!(
+            g.mouse(Phase::End, (92.0, 50.0), 5_020),
+            Some(Gesture::PinDrop {
+                slot: Slot::A,
+                at: (90.0, 50.0)
+            })
+        );
+    }
+
+    fn with_pin() -> Gestures {
+        let mut g = Gestures::default();
+        g.set_handles(&[(Slot::A, (100.0, 100.0))]);
+        g
+    }
+
+    #[test]
+    fn dragging_a_pin_never_pans_and_keeps_the_grab_offset() {
+        let mut g = with_pin();
+        g.touch(1, Phase::Start, (110.0, 95.0), 0);
+        assert_eq!(g.touch(1, Phase::Move, (112.0, 95.0), 10), None);
+        assert_eq!(
+            g.touch(1, Phase::Move, (150.0, 95.0), 20),
+            Some(Gesture::PinDrag {
+                slot: Slot::A,
+                at: (140.0, 100.0)
+            })
+        );
+        assert_eq!(
+            g.touch(1, Phase::Move, (150.0, 120.0), 30),
+            Some(Gesture::PinDrag {
+                slot: Slot::A,
+                at: (140.0, 125.0)
+            })
+        );
+        assert_eq!(
+            g.touch(1, Phase::End, (150.0, 120.0), 40),
+            Some(Gesture::PinDrop {
+                slot: Slot::A,
+                at: (140.0, 125.0)
+            })
+        );
+        assert_eq!(g.due_tap(10_000), None);
+    }
+
+    #[test]
+    fn a_still_touch_on_a_pin_is_an_immediate_pin_tap() {
+        let mut g = with_pin();
+        assert_eq!(g.touch(1, Phase::Start, (105.0, 100.0), 0), None);
+        assert_eq!(
+            g.touch(1, Phase::End, (105.0, 100.0), 50),
+            Some(Gesture::PinTap { slot: Slot::A })
+        );
+        assert_eq!(g.due_tap(10_000), None);
+    }
+
+    #[test]
+    fn a_touch_40px_from_a_pin_pans() {
+        let mut g = with_pin();
+        g.touch(1, Phase::Start, (140.0, 100.0), 0);
+        assert_eq!(
+            g.touch(1, Phase::Move, (170.0, 100.0), 10),
+            Some(Gesture::Pan { dx: 30.0, dy: 0.0 })
+        );
+    }
+
+    #[test]
+    fn a_second_finger_cancels_the_grab_and_pinches() {
+        let mut g = with_pin();
+        g.touch(1, Phase::Start, (100.0, 100.0), 0);
+        assert_eq!(
+            g.touch(2, Phase::Start, (200.0, 100.0), 5),
+            Some(Gesture::PinCancel { slot: Slot::A })
+        );
+        assert_eq!(
+            g.touch(2, Phase::Move, (250.0, 100.0), 10),
+            Some(Gesture::Zoom {
+                factor: 1.5,
+                focal: (175.0, 100.0)
+            })
+        );
+    }
+
+    #[test]
+    fn cancel_cancels_the_grab() {
+        let mut g = with_pin();
+        g.touch(1, Phase::Start, (100.0, 100.0), 0);
+        g.touch(1, Phase::Move, (150.0, 100.0), 10);
+        assert_eq!(
+            g.touch(1, Phase::Cancel, (150.0, 100.0), 20),
+            Some(Gesture::PinCancel { slot: Slot::A })
+        );
+        assert_eq!(g.due_tap(10_000), None);
+    }
+
+    #[test]
+    fn the_nearest_of_two_handles_wins() {
+        let mut g = Gestures::default();
+        g.set_handles(&[(Slot::A, (100.0, 100.0)), (Slot::B, (120.0, 100.0))]);
+        g.touch(1, Phase::Start, (112.0, 100.0), 0);
+        assert_eq!(
+            g.touch(1, Phase::End, (112.0, 100.0), 10),
+            Some(Gesture::PinTap { slot: Slot::B })
         );
     }
 

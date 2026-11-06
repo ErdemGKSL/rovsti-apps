@@ -165,7 +165,6 @@ impl Picking {
         self.menu = None;
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S2/S5/S6"))]
     pub fn open_menu(&mut self, slot: Slot) {
         self.menu = Some(slot);
         self.moving = None;
@@ -187,7 +186,6 @@ impl Picking {
     }
 
     /// Grabs the pin in `slot`. `false` when that end is empty.
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S2/S5/S6"))]
     pub fn drag_start(&mut self, slot: Slot) -> bool {
         self.drag_cancel();
         let Some(original) = self.ends.get(slot).cloned() else {
@@ -200,7 +198,6 @@ impl Picking {
     }
 
     /// The grabbed pin follows the finger: a raw, unnamed point.
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S2/S5/S6"))]
     pub fn drag_to(&mut self, slot: Slot, coord: Coord) {
         if self.drag.as_ref().is_some_and(|(s, _)| *s == slot) {
             self.ends.set(slot, Destination::dropped(coord));
@@ -208,7 +205,6 @@ impl Picking {
     }
 
     /// The pin was let go at `dest` (a stop when it snapped).
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S2/S5/S6"))]
     pub fn drag_end(&mut self, slot: Slot, dest: Destination) {
         if self.drag.as_ref().is_some_and(|(s, _)| *s == slot) {
             self.drag = None;
@@ -217,14 +213,12 @@ impl Picking {
     }
 
     /// The drag was interrupted: the pin goes back where it was.
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S2/S5/S6"))]
     pub fn drag_cancel(&mut self) {
         if let Some((slot, original)) = self.drag.take() {
             self.ends.set(slot, original);
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired in S2/S5/S6"))]
     pub fn dragging(&self) -> Option<Slot> {
         self.drag.as_ref().map(|(slot, _)| *slot)
     }

@@ -678,8 +678,24 @@ fn fill_polygon(window: &mut Window, points: &[(f32, f32)], color: Hsla) {
     }
 }
 
+/// Bounding box of a polygon's rings: (min x, min y, max x, max y).
+fn polygon_bbox(polygon: &[Vec<(f32, f32)>]) -> (f32, f32, f32, f32) {
+    let mut b = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for &(x, y) in polygon.iter().flatten() {
+        b = (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y));
+    }
+    b
+}
+
+fn bboxes_meet(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> bool {
+    a.0 <= b.2 && b.0 <= a.2 && a.1 <= b.3 && b.1 <= a.3
+}
+
 /// Fills `polygons` (each a list of rings: outline first, then holes) in
-/// `color`, even-odd, in paths of at most `PATH_POINT_CAP` points.
+/// `color`. A path fills even-odd, so two overlapping polygons in one path
+/// would cancel out (tiles overlap by their buffer, and a coarse stand-in tile
+/// overlaps finer ones). Polygons whose boxes meet therefore never share a
+/// path; the rest are batched, at most `PATH_POINT_CAP` points per path.
 fn fill_polygons(
     window: &mut Window,
     polygons: &[Vec<Vec<(f32, f32)>>],
@@ -688,7 +704,23 @@ fn fill_polygons(
 ) {
     let mut path = PathBuilder::fill();
     let mut points = 0;
-    for (i, polygon) in polygons.iter().enumerate() {
+    let mut boxes: Vec<(f32, f32, f32, f32)> = Vec::new();
+    let flush = |path: &mut PathBuilder,
+                 points: &mut usize,
+                 boxes: &mut Vec<(f32, f32, f32, f32)>,
+                 window: &mut Window| {
+        let full = std::mem::replace(path, PathBuilder::fill());
+        *points = 0;
+        boxes.clear();
+        if let Ok(path) = full.build() {
+            window.paint_path(path, color);
+        }
+    };
+    for polygon in polygons {
+        let bbox = polygon_bbox(polygon);
+        if !boxes.is_empty() && boxes.iter().any(|&b| bboxes_meet(b, bbox)) {
+            flush(&mut path, &mut points, &mut boxes, window);
+        }
         for ring in polygon.iter().filter(|r| r.len() >= 3) {
             let pts: Vec<_> = ring
                 .iter()
@@ -700,13 +732,13 @@ fn fill_polygons(
             path.add_polygon(&pts, true);
             points += pts.len();
         }
-        if points >= PATH_POINT_CAP || i + 1 == polygons.len() {
-            let full = std::mem::replace(&mut path, PathBuilder::fill());
-            points = 0;
-            if let Ok(path) = full.build() {
-                window.paint_path(path, color);
-            }
+        boxes.push(bbox);
+        if points >= PATH_POINT_CAP {
+            flush(&mut path, &mut points, &mut boxes, window);
         }
+    }
+    if !boxes.is_empty() {
+        flush(&mut path, &mut points, &mut boxes, window);
     }
 }
 
@@ -1837,6 +1869,15 @@ mod tests {
             FIXTURE,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn overlapping_polygons_do_not_share_a_fill_path() {
+        let a = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)]];
+        let b = vec![vec![(5.0, 5.0), (20.0, 5.0), (20.0, 20.0)]];
+        let c = vec![vec![(30.0, 30.0), (40.0, 30.0), (40.0, 40.0)]];
+        assert!(bboxes_meet(polygon_bbox(&a), polygon_bbox(&b)));
+        assert!(!bboxes_meet(polygon_bbox(&a), polygon_bbox(&c)));
     }
 
     #[test]

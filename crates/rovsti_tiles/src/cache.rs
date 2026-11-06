@@ -211,25 +211,28 @@ pub fn load(
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     };
-    let cached = lock().get(id);
-    let bytes = match cached {
-        Some(b) => b,
-        None if offline_only => return Err(TileError::Http("tile is not cached".to_owned())),
-        None => {
-            let bytes = match client.fetch(src, id)? {
-                Fetched::Tile(b) => b,
-                Fetched::Empty => Vec::new(),
-            };
-            // Decode before storing, so a broken tile is never cached.
-            let geometry = to_geometry(id, &bytes)?;
-            let mut c = lock();
-            if let Err(e) = c.put(id, &bytes).and_then(|()| c.flush()) {
-                log::warn!("tile cache: cannot store {id:?}: {e}");
-            }
-            return Ok(geometry);
+    if let Some(bytes) = lock().get(id) {
+        match to_geometry(id, &bytes) {
+            Ok(geometry) => return Ok(geometry),
+            // A damaged file: download it again (which overwrites it).
+            Err(e) if offline_only => return Err(e),
+            Err(e) => log::warn!("tile cache: {id:?} is damaged, fetching again: {e}"),
         }
+    }
+    if offline_only {
+        return Err(TileError::Http("tile is not cached".to_owned()));
+    }
+    let bytes = match client.fetch(src, id)? {
+        Fetched::Tile(b) => b,
+        Fetched::Empty => Vec::new(),
     };
-    to_geometry(id, &bytes)
+    // Decode before storing, so a broken tile is never cached.
+    let geometry = to_geometry(id, &bytes)?;
+    let mut c = lock();
+    if let Err(e) = c.put(id, &bytes).and_then(|()| c.flush()) {
+        log::warn!("tile cache: cannot store {id:?}: {e}");
+    }
+    Ok(geometry)
 }
 
 fn to_geometry(id: TileId, bytes: &[u8]) -> Result<TileGeometry, TileError> {

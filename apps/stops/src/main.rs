@@ -38,6 +38,8 @@ use rovsti_wa_ui::{AppId, WhatsAppSettings};
 
 mod backend;
 mod headless;
+#[cfg(test)]
+mod kotlin_contract;
 mod map;
 mod picker;
 mod saved_ui;

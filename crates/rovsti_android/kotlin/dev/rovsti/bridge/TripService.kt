@@ -26,8 +26,9 @@ import java.util.concurrent.Executors
 internal const val TRIP_MIN_INTERVAL_MS = 1_000L
 internal const val TRIP_MAX_INTERVAL_MS = 300_000L
 
-/** Slack added to twice the expected interval before the watchdog asks for a fix itself. */
-internal const val TRIP_WATCHDOG_SLACK_MS = 30_000L
+/** Grace after the expected interval before the watchdog asks for a fix itself: interval / 4 within these bounds. */
+internal const val TRIP_WATCHDOG_MIN_GRACE_MS = 5_000L
+internal const val TRIP_WATCHDOG_MAX_GRACE_MS = 30_000L
 
 /** Pure: [nextFixMs] limited to what a provider accepts. */
 internal fun tripIntervalMs(nextFixMs: Long): Long = nextFixMs.coerceIn(TRIP_MIN_INTERVAL_MS, TRIP_MAX_INTERVAL_MS)
@@ -39,8 +40,11 @@ internal fun tripProvider(highAccuracy: Boolean, hasFused: Boolean): String = wh
     else -> LocationManager.NETWORK_PROVIDER
 }
 
-/** Pure: how long after the last fix the watchdog fires, 2 x the expected interval + 30 s. */
-internal fun tripWatchdogMs(intervalMs: Long): Long = 2 * tripIntervalMs(intervalMs) + TRIP_WATCHDOG_SLACK_MS
+/** Pure: how long after the last fix the watchdog fires; mirrors `rovsti_geo::poll::retry_after`. */
+internal fun tripWatchdogMs(intervalMs: Long): Long {
+    val interval = tripIntervalMs(intervalMs)
+    return interval + (interval / 4).coerceIn(5_000L, 30_000L)
+}
 
 /** `AlarmManager.canScheduleExactAlarms`, which only exists (and is only needed) from Android 12. */
 internal fun AlarmManager.exactAllowed(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || canScheduleExactAlarms()
@@ -52,9 +56,20 @@ internal data class TripSpec(
     val text: String,
     val nextFixMs: Long,
     val highAccuracy: Boolean,
+    /** Raw JSON of Rust's `AlarmPlan`, kept verbatim so the alarm can ring after a process restart. */
+    val alarm: String? = null,
 ) {
-    fun toJson(): String = JSONObject().put("dir", dir).put("title", title).put("text", text)
-        .put("next_fix_ms", nextFixMs).put("high_accuracy", highAccuracy).toString()
+    fun toJson(): String {
+        val o = JSONObject().put("dir", dir).put("title", title).put("text", text)
+            .put("next_fix_ms", nextFixMs).put("high_accuracy", highAccuracy)
+        if (alarm != null) {
+            try {
+                o.put("alarm", JSONObject(alarm))
+            } catch (_: JSONException) {
+            }
+        }
+        return o.toString()
+    }
 
     companion object {
         /** Pure: the spec in [json], or null when it is malformed or has no `dir`. */
@@ -67,6 +82,7 @@ internal data class TripSpec(
                 TripSpec(
                     dir, o.optString("title", "Trip"), o.optString("text"),
                     o.optLong("next_fix_ms", 10_000L), o.optBoolean("high_accuracy", false),
+                    o.optJSONObject("alarm")?.toString(),
                 )
             } catch (_: JSONException) {
                 null
@@ -83,6 +99,8 @@ internal data class TripAnswer(
     val ring: Boolean,
     val title: String,
     val text: String,
+    /** Rust's own retry window (`retry_ms`); 0 when absent, then [tripWatchdogMs] applies. */
+    val retryMs: Long = 0L,
 ) {
     val ended: Boolean get() = state == "ended"
 
@@ -95,6 +113,7 @@ internal data class TripAnswer(
                 TripAnswer(
                     o.optString("state"), o.optLong("next_fix_ms", 10_000L), o.optBoolean("high_accuracy", false),
                     o.optBoolean("ring", false), o.optString("title"), o.optString("text"),
+                    o.optLong("retry_ms", 0L).coerceAtLeast(0L),
                 )
             } catch (_: JSONException) {
                 null
@@ -121,6 +140,9 @@ internal object TripPrefs {
     fun load(context: Context): TripSpec? = TripSpec.parse(prefs(context).getString("spec", null))
 
     fun clear(context: Context) = prefs(context).edit().remove("spec").apply()
+
+    /** The raw alarm plan JSON of the running trip, or null (the alarm then uses its built-in defaults). */
+    fun alarmPlan(context: Context): String? = load(context)?.alarm
 
     /** The data directory the alarm hands back to Rust, from the last started trip. */
     fun dir(context: Context): String? = load(context)?.dir
@@ -182,7 +204,7 @@ class TripService : Service() {
             shutdown(emitStopped = false)
             return START_NOT_STICKY
         }
-        armWatchdog(incoming.nextFixMs)
+        armWatchdog(tripWatchdogMs(incoming.nextFixMs))
         if (intent?.action == ACTION_WATCHDOG) worker.execute { askForFix(incoming) }
         return START_REDELIVER_INTENT
     }
@@ -229,6 +251,7 @@ class TripService : Service() {
         } catch (_: IllegalArgumentException) {
             // The provider disappeared (location switched off): the watchdog keeps trying.
             requested = null
+            armWatchdog(tripWatchdogMs(TRIP_MIN_INTERVAL_MS * 10))
             true
         }
     }
@@ -254,7 +277,7 @@ class TripService : Service() {
         val answer = TripAnswer.parse(raw)
         if (raw != null) emitStatus(raw)
         if (answer == null) {
-            armWatchdog(current.nextFixMs)
+            armWatchdog(tripWatchdogMs(current.nextFixMs))
             return
         }
         // Ring first: an ended trip stops the service right after, and the alarm must outlive it.
@@ -271,19 +294,43 @@ class TripService : Service() {
         TripPrefs.save(this, updated)
         getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID, notification(updated.title, updated.text))
         requestUpdates(answer.nextFixMs, answer.highAccuracy)
-        armWatchdog(answer.nextFixMs)
+        armWatchdog(answer.retryMs.takeIf { it > 0 } ?: tripWatchdogMs(answer.nextFixMs))
     }
 
-    /** The watchdog fired: no fix arrived in time, so ask for one now. */
+    /**
+     * The watchdog fired: no fix arrived in time, so ask for one now. A null location tries the other
+     * provider once, then reports `searching`; the watchdog stays armed, so this is never silent.
+     */
     private fun askForFix(current: TripSpec) {
-        val provider = tripProvider(current.highAccuracy, locations.hasProvider(LocationManager.FUSED_PROVIDER))
+        val hasFused = locations.hasProvider(LocationManager.FUSED_PROVIDER)
+        val first = tripProvider(current.highAccuracy, hasFused)
+        val second = tripProvider(!current.highAccuracy, hasFused)
         try {
-            locations.getCurrentLocation(provider, null, worker) { location ->
-                if (location != null) onFix(location)
+            locations.getCurrentLocation(first, null, worker) { location ->
+                if (location != null) {
+                    onFix(location)
+                } else {
+                    askOtherProvider(second)
+                }
             }
         } catch (_: SecurityException) {
             emitStatus(JSONObject().put("state", "error").put("error", "permission").toString())
+        } catch (_: IllegalArgumentException) {
+            // The provider is gone (location switched off): keep retrying.
+            armWatchdog(tripWatchdogMs(TRIP_MIN_INTERVAL_MS * 10))
         } catch (_: RuntimeException) {
+            armWatchdog(tripWatchdogMs(TRIP_MIN_INTERVAL_MS * 10))
+        }
+    }
+
+    private fun askOtherProvider(provider: String) {
+        try {
+            locations.getCurrentLocation(provider, null, worker) { location ->
+                if (location != null) onFix(location) else emitStatus(JSONObject().put("state", "searching").toString())
+            }
+        } catch (_: RuntimeException) {
+            emitStatus(JSONObject().put("state", "searching").toString())
+            armWatchdog(tripWatchdogMs(TRIP_MIN_INTERVAL_MS * 10))
         }
     }
 
@@ -303,8 +350,9 @@ class TripService : Service() {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
-    private fun armWatchdog(expectedIntervalMs: Long) {
-        val at = System.currentTimeMillis() + tripWatchdogMs(expectedIntervalMs)
+    /** Arms the watchdog [delayMs] from now (already includes the grace, see [tripWatchdogMs]). */
+    private fun armWatchdog(delayMs: Long) {
+        val at = System.currentTimeMillis() + delayMs
         try {
             if (alarms.exactAllowed()) {
                 alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, watchdogIntent())

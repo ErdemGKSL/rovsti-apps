@@ -27,19 +27,25 @@ use rovsti_ui::{
     motion::press_scale,
     motion_tokens::{self, scale},
     spring::Spring,
-    theme,
+    theme::{self, call_colors},
     tokens::{Theme, metrics, shadow, typography},
     touch::touch_surface,
 };
 
 use crate::{
-    PhoneApp,
+    PhoneApp, SheetKind,
     backend::{self, Access, Group, Load},
+    block_ui::PillAction,
     field::{SearchField, input_layer, on_backspace},
     recents::{ROW_H, state_view},
 };
 
+const SHARE_ID: &str = "set-bk-share";
+const UNALL_ID: &str = "set-bk-unall";
+const UNALL_YES: &str = "sheet-bk-yes";
+const UNALL_NO: &str = "sheet-bk-no";
 const FIELD_H: f32 = 44.0;
+const HEADER_H: f32 = 44.0;
 const SEG_H: f32 = 32.0;
 const SKELETON_DELAY: Duration = Duration::from_millis(150);
 /// A removed row fades this long, then the list re-lays at once.
@@ -369,6 +375,8 @@ impl PhoneApp {
             "set-bk-add" => self.blocked_add(window, cx),
             "set-bk-retry" => self.backend.update(cx, |b, cx| b.retry_blocklist(cx)),
             "set-bk-grant" => self.blocked_grant(cx),
+            SHARE_ID => self.blocked_share(window, cx),
+            UNALL_ID => self.blocked_unall_ask(window, cx),
             _ => {
                 if let Some(i) = id
                     .strip_prefix("set-bk-un-")
@@ -384,6 +392,256 @@ impl PhoneApp {
             }
         }
         cx.notify();
+    }
+
+    /// The Numbers list as text through the system share sheet.
+    fn blocked_share(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (rows, contacts, format) = {
+            let backend = self.backend.read(cx);
+            let Load::Ready(state) = backend.blocklist() else {
+                return;
+            };
+            (
+                state.rows.clone(),
+                backend.contacts(),
+                backend.settings().name_format,
+            )
+        };
+        let text = blocklist::list_text(&rows, |raw| {
+            let Load::Ready(index) = &contacts else {
+                return None;
+            };
+            index
+                .match_number(raw)
+                .map(|c| rovsti_core::names::display(c, format).into_owned())
+        });
+        if text.is_empty() {
+            return;
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        let outcome = backend::share_text(&text);
+        if outcome != backend::Outcome::Done {
+            self.show_notice_pill(
+                outcome.why_not("Couldn't open the share sheet"),
+                None,
+                false,
+                cx,
+            );
+        }
+    }
+
+    /// "Unblock all": opens the confirm sheet.
+    fn blocked_unall_ask(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.blocked.numbers.is_empty()
+            || !self.backend.read(cx).can_block_here()
+            || self.sheet.is_visible()
+        {
+            return;
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        self.sheet_kind = SheetKind::UnblockAll;
+        self.sheet.open();
+        cx.notify();
+    }
+
+    /// The confirm sheet's buttons.
+    pub(crate) fn blocked_unall_act(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if id == UNALL_YES {
+            let raws: Vec<SharedString> = self
+                .blocked
+                .numbers
+                .iter()
+                .map(|r| r.raw.clone())
+                .filter(|r| !r.trim().is_empty())
+                .collect();
+            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+            self.close_sheet(cx);
+            if raws.is_empty() {
+                return;
+            }
+            // Each write runs on the background executor (`Backend::unblock`).
+            let tasks: Vec<_> = raws
+                .iter()
+                .map(|raw| self.backend.update(cx, |b, cx| b.unblock(raw, cx)))
+                .collect();
+            cx.spawn(async move |this, cx| {
+                let mut done: Vec<SharedString> = Vec::new();
+                for (raw, task) in raws.into_iter().zip(tasks) {
+                    if task.await {
+                        done.push(raw);
+                    }
+                }
+                this.update(cx, |this, cx| {
+                    if done.is_empty() {
+                        this.show_notice_pill("Couldn't unblock the numbers", None, false, cx);
+                    } else {
+                        let text = blocklist::unblocked_all_text(done.len());
+                        let done: Arc<[SharedString]> = done.into();
+                        this.show_pill_action(text, "Undo", PillAction::BlockAll(done), cx);
+                    }
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+        } else {
+            self.close_sheet(cx);
+        }
+    }
+
+    /// Undo of "Unblock all": blocks every number again.
+    pub(crate) fn blocked_block_all(
+        &mut self,
+        raws: Arc<[SharedString]>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        let tasks: Vec<_> = raws
+            .iter()
+            .map(|raw| self.backend.update(cx, |b, cx| b.block(raw, cx)))
+            .collect();
+        cx.spawn(async move |this, cx| {
+            let mut n = 0;
+            for task in tasks {
+                if task.await {
+                    n += 1;
+                }
+            }
+            this.update(cx, |this, cx| {
+                let text = if n == 0 {
+                    "Couldn't block the numbers".to_owned()
+                } else {
+                    blocklist::blocked_again_text(n)
+                };
+                this.show_notice_pill(text, None, false, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The confirm sheet of Unblock all.
+    pub(crate) fn blocked_unall_sheet(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.sheet.is_visible() {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        let (title, text) = blocklist::unblock_all_text(self.blocked.numbers.len());
+        let button = |id: &'static str,
+                      label: &'static str,
+                      fill: Hsla,
+                      ink: Hsla,
+                      cx: &mut Context<Self>| {
+            let press = self.presses.value(id).clamp(0.0, 1.0);
+            div()
+                .id(id)
+                .role(Role::Button)
+                .aria_label(label)
+                .relative()
+                .h(px(52.0))
+                .rounded_full()
+                .bg(rovsti_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(typography::HEADLINE.size)
+                .font_weight(typography::HEADLINE.weight)
+                .text_color(ink)
+                .child(label)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.presses.down(id);
+                        this.blocked_unall_act(id, window, cx);
+                    }),
+                )
+                .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
+        };
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .px(px(18.0))
+            .pb(px(18.0))
+            .child(
+                div()
+                    .text_size(typography::TITLE3.size)
+                    .font_weight(typography::TITLE3.weight)
+                    .text_color(colors.label)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_size(typography::SUBHEADLINE.size)
+                    .text_color(colors.secondary_label)
+                    .child(text),
+            )
+            .child(button(
+                UNALL_YES,
+                "Unblock all",
+                call_colors(theme).danger,
+                gpui::white(),
+                cx,
+            ))
+            .child(button(UNALL_NO, "Cancel", colors.fill, colors.label, cx))
+            .into_any_element();
+        self.modal_sheet(theme, window, "Unblock all numbers", body, cx)
+    }
+
+    /// The Share and Unblock all pills above the Numbers list.
+    fn blocked_header(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let colors = theme::colors(theme);
+        let pill = |id: &'static str, label: &'static str, ink: Hsla, cx: &mut Context<Self>| {
+            let press = self.presses.value(id).clamp(0.0, 1.0);
+            div()
+                .id(id)
+                .role(Role::Button)
+                .aria_label(label)
+                .relative()
+                .flex_1()
+                .h(px(36.0))
+                .rounded_full()
+                .bg(Hsla {
+                    a: 0.7 + 0.2 * press,
+                    ..colors.fill
+                })
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(typography::SUBHEADLINE.size)
+                .font_weight(typography::HEADLINE.weight)
+                .text_color(ink)
+                .child(label)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.presses.down(id);
+                        this.blocked_tap(id, window, cx);
+                    }),
+                )
+                .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
+        };
+        div()
+            .flex_none()
+            .h(px(HEADER_H))
+            .mx(px(16.0))
+            .pb(px(8.0))
+            .flex()
+            .gap(px(8.0))
+            .child(pill(SHARE_ID, "Share", colors.accent, cx))
+            .child(pill(UNALL_ID, "Unblock all", call_colors(theme).danger, cx))
+            .into_any_element()
     }
 
     fn blocked_segment(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -1109,6 +1367,10 @@ impl PhoneApp {
                     .w_full()
                     .flex()
                     .flex_col()
+                    .children(
+                        (segment == 0 && state == Shown::Ready && count > 0)
+                            .then(|| self.blocked_header(theme, cx)),
+                    )
                     .child(list),
             )
             .child(
@@ -1134,5 +1396,32 @@ impl PhoneApp {
             "set-bk-grant" => self.blocked_grant(cx),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings_ui::Sub;
+
+    #[test]
+    fn ids_belong_to_the_blocked_page_and_sheet() {
+        assert!(SHARE_ID.starts_with(Sub::Blocked.prefix()));
+        assert!(UNALL_ID.starts_with(Sub::Blocked.prefix()));
+        assert!(UNALL_YES.starts_with("sheet-") && UNALL_NO.starts_with("sheet-"));
+        // The row ids keep their own prefixes, so the list never mistakes a pill for a row.
+        for id in [SHARE_ID, UNALL_ID] {
+            assert!(
+                !id.starts_with("set-bk-un-") && !id.starts_with("set-bk-call-"),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn confirm_copy_comes_from_core() {
+        let (title, text) = blocklist::unblock_all_text(2);
+        assert_eq!(title, "Unblock all numbers?");
+        assert!(text.contains('2'));
     }
 }

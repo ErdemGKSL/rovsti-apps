@@ -278,6 +278,24 @@ pub fn unblock_all_text(n: usize) -> (String, String) {
     ("Unblock all numbers?".to_owned(), message)
 }
 
+fn count_numbers(n: usize) -> String {
+    if n == 1 {
+        "1 number".to_owned()
+    } else {
+        format!("{n} numbers")
+    }
+}
+
+/// The pill after "Unblock all" (`n` numbers were unblocked).
+pub fn unblocked_all_text(n: usize) -> String {
+    format!("Unblocked {}", count_numbers(n))
+}
+
+/// The pill after Undo of "Unblock all" (`n` numbers were blocked again).
+pub fn blocked_again_text(n: usize) -> String {
+    format!("Blocked {}", count_numbers(n))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,6 +482,14 @@ mod tests {
         assert_eq!(line.aria, "Unknown number, Blocked by the system, Monday");
         let unknown = call_line(&CallLogEntry::default(), None, "9:41");
         assert_eq!(unknown.subtitle, "");
+    }
+
+    #[test]
+    fn unblock_all_pills_count_numbers() {
+        assert_eq!(unblocked_all_text(1), "Unblocked 1 number");
+        assert_eq!(unblocked_all_text(3), "Unblocked 3 numbers");
+        assert_eq!(blocked_again_text(1), "Blocked 1 number");
+        assert_eq!(blocked_again_text(12), "Blocked 12 numbers");
     }
 
     #[test]

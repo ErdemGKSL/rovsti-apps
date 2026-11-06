@@ -44,6 +44,7 @@ pub(crate) const CONTACT_LINE: &str = "sheet-chl-";
 
 const BACK: &str = "sheet-dt-back";
 const COPY: &str = "sheet-dt-copy";
+const SHARE: &str = "sheet-dt-share";
 const NOTE: &str = "sheet-dt-note";
 const DONE: &str = "sheet-dt-done";
 const DEL_NOTE: &str = "sheet-dt-delnote";
@@ -106,6 +107,8 @@ pub(crate) struct DetailsSheet {
     pub(crate) details: CallDetails,
     pub(crate) entry: EntryRef,
     pub(crate) number: SharedString,
+    /// The contact's name (or a saved name for the number), for Share.
+    who: Option<SharedString>,
     pub(crate) at_ms: i64,
     /// The sheet Back returns to: `Number` or `Contact`.
     pub(crate) back_to: SheetKind,
@@ -142,6 +145,15 @@ impl PhoneApp {
             backend::Load::Ready(log) => log.locale,
             _ => Default::default(),
         };
+        let who = if contact {
+            self.contact_sheet.as_ref().map(|s| s.contact.name.clone())
+        } else {
+            self.recents
+                .number
+                .as_ref()
+                .map(|r| r.title.clone())
+                .filter(|t| t.trim() != vm.number.trim())
+        };
         let details = call_notes::details(&vm.line, &vm.number, None, locale);
         let field = cx.new(|cx| SearchField::new(cx).with_action(TextInputAction::Done));
         let sub = cx.observe_in(&field, window, |this, _, window, cx| {
@@ -152,6 +164,7 @@ impl PhoneApp {
             details,
             entry: vm.entry.clone(),
             number: vm.number.clone(),
+            who,
             at_ms: vm.date_ms,
             back_to: if contact {
                 SheetKind::Contact
@@ -240,6 +253,21 @@ impl PhoneApp {
                 }
                 rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
                 self.show_notice_pill("Details copied", None, false, cx);
+            }
+            SHARE => {
+                let note = self.notes.get(&d.number, d.at_ms).map(|n| n.text.clone());
+                let who = d.who.clone();
+                let text = call_notes::share_text(&d.details, who.as_deref(), note.as_deref());
+                rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                let outcome = backend::share_text(&text);
+                if outcome != backend::Outcome::Done {
+                    self.show_notice_pill(
+                        outcome.why_not("Couldn't open the share sheet"),
+                        None,
+                        false,
+                        cx,
+                    );
+                }
             }
             NOTE => {
                 let current = self
@@ -562,6 +590,7 @@ impl PhoneApp {
         };
         let mut actions: Vec<AnyElement> = vec![
             action(COPY, Icon::LucideCopy, "Copy details", colors.accent, cx).into_any_element(),
+            action(SHARE, Icon::LucideShare2, "Share", colors.accent, cx).into_any_element(),
         ];
         if !d.editing {
             actions.push(
@@ -647,7 +676,7 @@ mod tests {
         assert!(!is_contact_id(&details_line_id(false, 3)));
         assert!(is_contact_id(&details_line_id(true, 3)));
         // The details sheet's own controls never reach either history router.
-        for id in [BACK, COPY, NOTE, DONE, DEL_NOTE, DEL_CALL, FIELD] {
+        for id in [BACK, COPY, SHARE, NOTE, DONE, DEL_NOTE, DEL_CALL, FIELD] {
             assert!(id.starts_with("sheet-dt-"));
             assert!(
                 !id.starts_with("sheet-c") && !id.starts_with("sheet-n"),

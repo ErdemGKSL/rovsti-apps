@@ -118,6 +118,8 @@ enum SheetKind {
     ResetReplies,
     /// "Clear speed dial?" (`speed_dial_ui::speed_dial_clear_sheet`).
     ClearSpeedDial,
+    /// "Unblock all numbers?" (`blocked_ui::blocked_unall_sheet`).
+    UnblockAll,
     /// "Delete calls with {who}?" / "Delete all call history?" (`history_ui`).
     ConfirmDelete,
     /// Every T9 match behind the keypad strip's "N more" (`keypad::t9_results_sheet`).
@@ -1476,6 +1478,7 @@ impl PhoneApp {
             SheetKind::AddCall | SheetKind::SimChooser | SheetKind::Reply => None,
             SheetKind::ResetReplies => self.replies_reset_sheet(theme, window, cx),
             SheetKind::ClearSpeedDial => self.speed_dial_clear_sheet(theme, window, cx),
+            SheetKind::UnblockAll => self.blocked_unall_sheet(theme, window, cx),
             SheetKind::ConfirmDelete => self.confirm_delete_sheet(theme, window, cx),
             SheetKind::T9Results => self.t9_results_sheet(theme, window, cx),
             SheetKind::CopyAs => self.copy_as_sheet(theme, window, cx),

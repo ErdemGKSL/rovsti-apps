@@ -84,6 +84,13 @@ pub fn clear_history(dir: &Path) {
     ));
 }
 
+/// Writes `history` back, for Undo after Clear. Holds the trip lock like
+/// `clear_history`.
+pub fn save_history(dir: &Path, history: &History) {
+    let _guard = store::lock();
+    log_save(storage::save_json(dir, store::HISTORY_FILE, history));
+}
+
 fn log_save(result: std::io::Result<()>) {
     if let Err(error) = result {
         log::warn!("could not save a Stops file: {error}");
@@ -452,6 +459,19 @@ mod tests {
         let (running, history) = reload_trip(&dir);
         assert!(history.records.is_empty());
         assert_eq!(running.unwrap().id, 4);
+    }
+
+    #[test]
+    fn saved_history_round_trips() {
+        let dir = tmp("backend-save-history");
+        let trip = trip_of(5, 1, None);
+        store::save_trip(&dir, &trip).unwrap();
+        store::end_trip(&dir, Outcome::Arrived, 9).unwrap();
+        let before = reload_trip(&dir).1;
+        clear_history(&dir);
+        assert!(reload_trip(&dir).1.records.is_empty());
+        save_history(&dir, &before);
+        assert_eq!(reload_trip(&dir).1, before);
     }
 
     #[test]

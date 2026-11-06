@@ -816,6 +816,7 @@ impl PhoneApp {
     /// Import: opens the file picker; `sync_documents` hands the answer back.
     fn blocked_import(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.backend.read(cx).can_block_here() {
+            self.show_notice_pill("Not available on this platform", None, false, cx);
             return;
         }
         rovsti_ui::haptics::perform(window, HapticFeedback::Selection);

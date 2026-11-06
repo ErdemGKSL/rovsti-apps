@@ -352,8 +352,9 @@ impl PhoneApp {
         if outcome.failed() || outcome == backend::Outcome::NotAvailable {
             self.show_notice_pill(outcome.why_not("Couldn't export"), None, false, cx);
         } else {
-            // The picker's result pill says "Call statistics exported".
-            rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Confirm);
+            // The picker's result pill says "Call statistics exported"; opening
+            // a system sheet is a Selection tick, like the other exports.
+            rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Selection);
         }
     }
 

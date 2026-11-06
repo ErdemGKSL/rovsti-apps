@@ -361,6 +361,25 @@ that accepts photo writes (the system Contacts app does).
 | R4-U34 | Blocked numbers, paste several numbers into the add field, Block. | All are blocked; pill "Blocked n numbers" (with "already blocked" count if any) with Undo that unblocks them. Emergency numbers are skipped; an emergency-only paste is refused inline. | | |
 | R4-fb | Run every utility above on a desktop preview. | Android-only ones show "Not available on this platform" rather than staying silent. | | |
 
+## Round 5 utilities (U35-U43)
+
+| ID | Steps | Expected | Result | Notes |
+|---|---|---|---|---|
+| R5-U35 | Recents, tap the Notes chip (sixth chip; check it fits at 360 dp). | Only calls with a note are listed; search still works inside it; with none the list says "No calls with notes". | | |
+| R5-U36a | Open a contact with 2+ numbers, tap Copy, then "All numbers". | Pill "Copied 3 numbers" (count matches); the clipboard holds one "Label: number" line per number. | | |
+| R5-U36b | Same, tap Share, then "All numbers". | Share sheet with the name and every number. The row is absent for a one-number contact and for other actions. | | |
+| R5-U37a | End a connected outgoing call of 4:32. | One pill "Call with <name>, 4:32" with "Add note"; tapping it opens Call details with the note field editing. | | |
+| R5-U37b | End a short incoming call, and a call that already has a note. | A short incoming call shows the Block offer only; a call with a note shows no pill. | | |
+| R5-U38a | Settings, Blocked numbers, tap Export (hidden when empty). | The picker saves `rovsti-blocked-numbers-<date>.csv`; pill "Blocked numbers exported". | | |
+| R5-U38b | Tap Unblock all, confirm. | List empty, pill with Undo. | | |
+| R5-U38c | Tap Import and pick the exported file. | Every number is blocked again; pill "Blocked n numbers" with Undo; Undo unblocks them. Importing again says "No new numbers to block"; emergency numbers are skipped. | | |
+| R5-U40 | Settings, Call statistics, Share. | Share sheet with "Call statistics, <range>", totals and up to 10 people. An empty range says "No calls in this range". | | |
+| R5-U41 | Export call history, a person's calls, statistics, blocked numbers, notes; cancel one. | Each pill names what was saved: "Call history exported", "Call statistics exported", "Blocked numbers exported", "Call notes exported"; cancel says "Export cancelled". | | |
+| R5-U42 | Settings, Call notes, Export (hidden when empty). | `rovsti-call-notes-<date>.csv` with columns date,time,name,number,note, newest first. | | |
+| R5-U43a | Settings, Data, Delete older calls. | A chooser lists 30 days / 90 days / 1 year, each with the count; a row with none is dimmed. | | |
+| R5-U43b | Pick a row, confirm. | Pill "n calls deleted" with Undo; Undo restores them. Cancel changes nothing. | | |
+| R5-fb | Run U36-U43 on a desktop preview. | Android-only ones show "Not available on this platform" rather than staying silent. | | |
+
 ## In-call note and copy number
 
 - On a connected or held call with a number, tap "Note" under the status line, type, press Done: the pill says "Note saved" and the capsule shows a check.

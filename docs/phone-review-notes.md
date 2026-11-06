@@ -38,3 +38,23 @@ desktop wording through `Outcome::why_not`.
 | U13, U14, U31, U32 | Pill or status text plus Confirm/Selection haptic present. | No change. |
 
 Test added: `Outcome::why_not` wording (`backend.rs`).
+
+## Utilities feedback audit (R5)
+
+Audit of U35-U43 for a pill on success and failure, the haptic (Confirm for completions, Selection
+tick for toggles and opening a system sheet), a confirm or Undo on destructive actions, and the
+desktop wording through `Outcome::why_not`.
+
+| Utility | Gap | Fix |
+|---|---|---|
+| U38 Blocked Import | On a phone that cannot block (desktop preview) the button did nothing. | Pill "Not available on this platform". A failing picker still uses `why_not("Couldn't open the file picker")`. |
+| U28 / U41 Stats CSV export | Fired a Confirm haptic when the picker opened, before anything was saved; the other exports use the Selection tick. | Selection tick; the result pill "Call statistics exported" follows. |
+| U41 Export pills | The result pill used to be "Call history exported" for every CSV. | Pill names what was saved (history, statistics, blocked numbers, call notes); cancel reads "Export cancelled", error "Couldn't export". |
+| U38 Import | Blocking from a file is bulk, so it has the same Undo pill as a pasted list ("Blocked n numbers ..." with Undo). A file with nothing new shows "No new numbers to block" without a haptic (the async step has no window handle). | Left alone; the pill is the feedback. |
+| U40 Stats Share, U36 All numbers, U42 Notes export | Selection tick, `why_not` on failure, "No calls in this range" for an empty range. | No change. |
+| U35 Notes chip, U37 After-call Add note | Non-destructive; U37 shows one pill ("Call with Anna, 4:32" + "Add note"), or the block offer instead. When the log has not caught up it says "The call isn't in Recents yet. Try again in a moment". | No change. |
+| U43 Delete older calls | Chooser row dimmed with "No calls older than ..." at 0, confirm sheet with the count, Undo pill through `delete_call_ids`; over `UNDO_CAP` the body says "This can't be undone." | No change. |
+| U39 Mark missed as seen | Automatic after `VIEW_DELAY`, no feedback needed. | No change. |
+
+Tests: pure texts and parsers have in-module tests in `rovsti_core`; `export_calls_pill` per kind
+and the new control ids are covered in `apps/phone`.

@@ -78,14 +78,14 @@ New gaps found in this audit:
 | U34 | Blocked page bulk block from a pasted list | done R4 |
 | U23 | Haptic and pill feedback audit | done R4 |
 | U39 | Mark missed calls as seen | done (pre-existing: auto after `VIEW_DELAY`) |
-| U35 | Recents filter chip "Notes" (calls with a note) | R5 S3 |
-| U40 | Stats page "Share" summary text for the chosen range | R5 S3 |
-| U36 | Contact chooser "All numbers": copy every number / share the contact as text | R5 S4 |
-| U37 | After a connected call: pill "Call with Anna, 4:32" with "Add note" | R5 S5 |
-| U41 | Export pills name what was exported (fixes "Call history exported" after a stats export) | R5 S6 |
-| U38 | Blocked page Export CSV and Import from a file (with Undo) | R5 S6 |
-| U42 | Notes page Export CSV | R5 S6 |
-| U43 | Settings > Data "Delete older calls" (30 days / 90 days / 1 year), confirm and Undo | R5 S7 |
+| U35 | Recents filter chip "Notes" (calls with a note) | done R5 |
+| U40 | Stats page "Share" summary text for the chosen range | done R5 |
+| U36 | Contact chooser "All numbers": copy every number / share the contact as text | done R5 |
+| U37 | After a connected call: pill "Call with Anna, 4:32" with "Add note" | done R5 |
+| U41 | Export pills name what was exported (fixes "Call history exported" after a stats export) | done R5 |
+| U38 | Blocked page Export CSV and Import from a file (with Undo) | done R5 |
+| U42 | Notes page Export CSV | done R5 |
+| U43 | Settings > Data "Delete older calls" (30 days / 90 days / 1 year), confirm and Undo | done R5 |
 | U44 | Call details: "Remind me" entry (reuse `remind_ui`) when the call was missed | backlog R6 |
 | U45 | Recents select mode: "Block selected" and "Share numbers" | backlog R6 |
 | U46 | Stats page: tap a day bar to list that day's calls | backlog R6 (check chart first) |

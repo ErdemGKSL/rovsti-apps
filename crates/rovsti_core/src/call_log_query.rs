@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 use crate::call_log::{CallType, EntryRef, RecentsRow, civil_from_days, format_duration};
 use crate::call_notes::Notes;
+use crate::phone_number::PhoneNumber;
 use crate::recents::{ExtraCall, number_in, wanted_numbers};
 use crate::search::fold;
 use crate::wire::{CallLogEntry, CallLogKind};
@@ -197,6 +198,30 @@ impl Selection {
             .collect()
     }
 
+    /// The `number_raw` of each selected callable row, in row order, one per
+    /// person (same-number rows are compared by [`PhoneNumber::matches`], or
+    /// as trimmed text when a number does not parse).
+    pub fn numbers(&self, rows: &[RecentsRow]) -> Vec<String> {
+        let mut seen: Vec<(Option<PhoneNumber>, String)> = Vec::new();
+        let mut out = Vec::new();
+        for r in rows.iter().filter(|r| r.callable && self.contains(r)) {
+            let text = r.number_raw.trim();
+            if text.is_empty() {
+                continue;
+            }
+            let parsed = PhoneNumber::parse(text).ok();
+            let dup = seen.iter().any(|(p, t)| match (p, &parsed) {
+                (Some(a), Some(b)) => a.matches(b),
+                _ => t == text,
+            });
+            if !dup {
+                seen.push((parsed, text.to_owned()));
+                out.push(r.number_raw.clone());
+            }
+        }
+        out
+    }
+
     /// Calls behind the selected rows.
     pub fn call_count(&self, rows: &[RecentsRow]) -> u32 {
         rows.iter()
@@ -204,6 +229,47 @@ impl Selection {
             .map(|r| r.count)
             .sum()
     }
+}
+
+/// One line per selected number: `Anna Smith: +90 532 111 22 33`, or just the
+/// grouped number. Empty when nothing callable is selected.
+pub fn select_share_text(
+    rows: &[RecentsRow],
+    sel: &Selection,
+    name_of: impl Fn(&str) -> Option<String>,
+) -> String {
+    sel.numbers(rows)
+        .iter()
+        .map(|raw| {
+            let shown = PhoneNumber::parse(raw).map_or_else(
+                |_| raw.trim().to_owned(),
+                |p| crate::call::format_number(&p),
+            );
+            match name_of(raw).filter(|n| !n.trim().is_empty()) {
+                Some(name) => format!("{}: {shown}", name.trim()),
+                None => shown,
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Title and message of the block confirmation for `n` numbers.
+pub fn select_block_text(n: usize) -> (String, String) {
+    let title = if n == 1 {
+        "Block this number?".to_owned()
+    } else {
+        format!("Block {n} numbers?")
+    };
+    (
+        title,
+        "Calls and messages from them will be blocked on this phone.".to_owned(),
+    )
+}
+
+/// Pill text when the selection has no number to block or share.
+pub const fn select_nothing_callable_text() -> &'static str {
+    "No numbers to block or share"
 }
 
 /// Title of the select-mode header.
@@ -1060,5 +1126,76 @@ mod tests {
             .and_then(|s| s.strip_suffix("-2026-11-06.csv"))
             .expect("slug");
         assert!(slug.len() <= 32 && !slug.ends_with('-'));
+    }
+
+    fn sel_of(rows: &[RecentsRow]) -> Selection {
+        let mut sel = Selection::default();
+        for r in rows {
+            sel.toggle(r);
+        }
+        sel
+    }
+
+    fn numbered(number: &str, id: i64) -> RecentsRow {
+        let mut r = row(number, None, CallType::Incoming, false);
+        r.refs = vec![EntryRef::Log(id)];
+        r
+    }
+
+    #[test]
+    fn numbers_skip_private_and_repeats_in_row_order() {
+        let mut private = numbered("", 1);
+        private.callable = false;
+        let rows = vec![
+            numbered("05321112233", 2),
+            private,
+            numbered("+4915112345678", 3),
+            numbered("+905321112233", 4),
+            numbered("05321112233", 5),
+            numbered("*123#", 6),
+            numbered(" *123# ", 7),
+            numbered("+905559998877", 8),
+        ];
+        let mut sel = sel_of(&rows);
+        assert_eq!(
+            sel.numbers(&rows),
+            ["05321112233", "+4915112345678", "*123#", "+905559998877"]
+        );
+        sel.toggle(&rows[2]);
+        assert_eq!(sel.numbers(&rows).len(), 3);
+    }
+
+    #[test]
+    fn share_text_named_unnamed_and_empty() {
+        let rows = vec![numbered("+905321112233", 1), numbered("+4915112345678", 2)];
+        let sel = sel_of(&rows[..1]);
+        let name = |n: &str| (n == "+905321112233").then(|| "Anna Smith".to_owned());
+        assert_eq!(
+            select_share_text(&rows, &sel, name),
+            "Anna Smith: +90 532 111 22 33"
+        );
+        let both = sel_of(&rows);
+        let text = select_share_text(&rows, &both, |_| None);
+        assert!(text.starts_with("+90 532 111 22 33\n"));
+        assert_eq!(text.lines().count(), 2);
+        let mut private = numbered("", 3);
+        private.callable = false;
+        let only = [private];
+        assert_eq!(select_share_text(&only, &sel_of(&only), |_| None), "");
+    }
+
+    #[test]
+    fn block_text_singular_and_plural() {
+        assert_eq!(select_block_text(1).0, "Block this number?");
+        let (t, m) = select_block_text(3);
+        assert_eq!(t, "Block 3 numbers?");
+        assert_eq!(
+            m,
+            "Calls and messages from them will be blocked on this phone."
+        );
+        assert_eq!(
+            select_nothing_callable_text(),
+            "No numbers to block or share"
+        );
     }
 }

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    call_log::civil_from_days,
+    call_log::{self, civil_from_days},
     phone_number::PhoneNumber,
     recents::ExtraCall,
     wire::{CallLogEntry, CallLogKind},
@@ -140,6 +140,8 @@ pub fn for_numbers(calls: &[StatCall], numbers: &[&str]) -> Totals {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DayBar {
     pub day_start_ms: i64,
+    /// Start of the next bucket; calls with `date_ms < end_ms` belong here.
+    pub end_ms: i64,
     pub label: String,
     pub talk_s: u64,
     pub calls: u32,
@@ -170,6 +172,7 @@ fn buckets(
             let start = first_start + i * span;
             DayBar {
                 day_start_ms: (start * DAY_S - i64::from(tz_offset_s)) * 1000,
+                end_ms: ((start + span) * DAY_S - i64::from(tz_offset_s)) * 1000,
                 label: label(start),
                 talk_s: 0,
                 calls: 0,
@@ -371,6 +374,72 @@ fn calls_text(n: u32) -> String {
 /// `12 calls · 1 h 05 min`.
 pub fn summary_line(t: &Totals) -> String {
     format!("{} · {}", calls_text(t.calls), talk_text(t.talk_s))
+}
+
+/// The most calls `calls_in` returns.
+const MAX_BUCKET_CALLS: usize = 200;
+
+/// Calls with `start_ms <= date < end_ms`, newest first, at most 200.
+pub fn calls_in(calls: &[StatCall], start_ms: i64, end_ms: i64) -> Vec<StatCall> {
+    let mut out: Vec<StatCall> = calls
+        .iter()
+        .filter(|c| c.date_ms >= start_ms && c.date_ms < end_ms)
+        .cloned()
+        .collect();
+    out.sort_by_key(|c| std::cmp::Reverse(c.date_ms));
+    out.truncate(MAX_BUCKET_CALLS);
+    out
+}
+
+/// `Tue 3 Nov`, or `Week of 2 Nov` for the weekly range.
+pub fn bucket_title(bar: &DayBar, range: Range, tz_offset_s: i32) -> String {
+    let day = local_day(bar.day_start_ms, tz_offset_s);
+    let (_, month, d) = civil_from_days(day);
+    let month = MONTHS[(month as usize - 1) % 12];
+    if range == Range::Weeks8 {
+        format!("Week of {d} {month}")
+    } else {
+        format!("{} {d} {month}", WEEKDAYS[weekday(day)])
+    }
+}
+
+/// `4 calls · 12 min` over the calls, `No calls` for none.
+pub fn bucket_summary(calls: &[StatCall]) -> String {
+    if calls.is_empty() {
+        return "No calls".to_owned();
+    }
+    summary_line(&totals_since(calls, i64::MIN))
+}
+
+/// Title (name or grouped number) and subtitle (`14:32 · Outgoing · 4:32`)
+/// of one call in a bucket list.
+pub fn call_line(c: &StatCall, tz_offset_s: i32, hour12: bool) -> (String, String) {
+    let title = c
+        .name
+        .clone()
+        .filter(|n| !n.trim().is_empty())
+        .unwrap_or_else(|| {
+            PhoneNumber::parse(&c.number).map_or_else(
+                |_| c.number.trim().to_owned(),
+                |p| crate::call::format_number(&p),
+            )
+        });
+    let dir = match c.dir {
+        StatDir::Incoming => "Incoming",
+        StatDir::Outgoing => "Outgoing",
+        StatDir::Missed => "Missed",
+    };
+    let mut sub = format!(
+        "{} · {dir}",
+        call_log::clock_text(c.date_ms, tz_offset_s, hour12)
+    );
+    if c.dir != StatDir::Missed {
+        sub.push_str(&format!(" · {}", call_log::format_duration(c.duration_s)));
+    }
+    if c.whatsapp {
+        sub.push_str(" · WhatsApp");
+    }
+    (title, sub)
 }
 
 /// Plain multi-line text for sharing one person's statistics.
@@ -783,5 +852,83 @@ mod tests {
         assert!(text.starts_with("Call statistics, 7 days\n12 calls · 12 min\n"));
         assert_eq!(text.lines().count(), 12);
         assert!(text.contains("P9:") && !text.contains("P10:"));
+    }
+
+    const H: i64 = 3_600_000;
+    const D: i64 = 86_400_000;
+
+    #[test]
+    fn end_ms_is_the_next_bar_start() {
+        let now = 20_000 * D + 5 * H;
+        for tz in [0, 3 * 3600, -5 * 3600] {
+            for bars in [last_days(&[], now, tz, 7), last_weeks(&[], now, tz, 8)] {
+                for w in bars.windows(2) {
+                    assert_eq!(w[0].end_ms, w[1].day_start_ms);
+                }
+            }
+        }
+        let days = last_days(&[], now, 0, 3);
+        assert_eq!(days[2].end_ms - days[2].day_start_ms, D);
+        let weeks = last_weeks(&[], now, 0, 2);
+        assert_eq!(weeks[1].end_ms - weeks[1].day_start_ms, 7 * D);
+    }
+
+    #[test]
+    fn calls_in_bounds_order_and_cap() {
+        let calls = vec![
+            call("1", 10, 1, StatDir::Incoming),
+            call("2", 30, 1, StatDir::Incoming),
+            call("3", 20, 1, StatDir::Incoming),
+            call("4", 40, 1, StatDir::Incoming),
+        ];
+        let got: Vec<i64> = calls_in(&calls, 10, 40).iter().map(|c| c.date_ms).collect();
+        assert_eq!(got, [30, 20, 10]);
+        let many: Vec<StatCall> = (0..300)
+            .map(|i| call("1", i, 1, StatDir::Incoming))
+            .collect();
+        let got = calls_in(&many, 0, 1000);
+        assert_eq!(got.len(), 200);
+        assert_eq!(got[0].date_ms, 299);
+    }
+
+    #[test]
+    fn bucket_titles_and_summary() {
+        // 2020-11-03 is a Tuesday, 2020-11-02 a Monday.
+        let tue = 18_569 * D;
+        let days = last_days(&[], tue + H, 0, 7);
+        assert_eq!(bucket_title(&days[6], Range::Days7, 0), "Tue 3 Nov");
+        let weeks = last_weeks(&[], tue + H, 0, 8);
+        assert_eq!(bucket_title(&weeks[7], Range::Weeks8, 0), "Week of 2 Nov");
+        assert_eq!(bucket_summary(&[]), "No calls");
+        let calls = [call("1", 1, 600, StatDir::Outgoing)];
+        assert_eq!(
+            bucket_summary(&calls),
+            summary_line(&totals_since(&calls, i64::MIN))
+        );
+    }
+
+    #[test]
+    fn call_line_missed_whatsapp_and_clocks() {
+        let at = 14 * H + 32 * 60_000;
+        let mut missed = call("+905321112233", at, 99, StatDir::Missed);
+        missed.whatsapp = true;
+        assert_eq!(
+            call_line(&missed, 0, false),
+            (
+                "+90 532 111 22 33".to_owned(),
+                "14:32 · Missed · WhatsApp".to_owned()
+            )
+        );
+        let mut out = call("05321112233", at, 272, StatDir::Outgoing);
+        out.name = Some("Anna".into());
+        assert_eq!(
+            call_line(&out, 0, false),
+            ("Anna".to_owned(), "14:32 · Outgoing · 4:32".to_owned())
+        );
+        let (_, sub) = call_line(&out, 0, true);
+        assert!(
+            sub.contains("pm") && sub.ends_with("Outgoing · 4:32"),
+            "{sub}"
+        );
     }
 }

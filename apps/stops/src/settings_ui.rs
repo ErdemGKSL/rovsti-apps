@@ -154,11 +154,10 @@ pub fn record_pair(record: &TripRecord) -> String {
     }
 }
 
-/// "A – B  ·  5 Nov  ·  18 min  ·  3.4 km" under a history row's title.
-pub fn record_subtitle(record: &TripRecord, now_ms: i64) -> String {
+/// "5 Nov  ·  18 min  ·  3.4 km" under a history row's title.
+pub fn record_details(record: &TripRecord, now_ms: i64) -> String {
     format!(
-        "{}  ·  {}  ·  {}  ·  {}",
-        record_pair(record),
+        "{}  ·  {}  ·  {}",
         date_text(record.ended_ms, now_ms),
         duration_text(record.duration_ms()),
         distance_text(record.travelled_m)
@@ -634,14 +633,42 @@ impl StopsApp {
             ix if ix - RECORDS_FROM < count => {
                 let i = ix - RECORDS_FROM;
                 let r = &self.history.records[i];
+                let pair = match (&r.a, &r.b) {
+                    (Some(a), Some(b)) => Some((a.clone(), b.clone())),
+                    _ => None,
+                };
                 let row = list_row(
                     theme,
                     None,
-                    "Trip",
-                    Some(record_subtitle(r, now_ms()).into()),
-                    Some(outcome_text(r.outcome).into()),
+                    record_pair(r),
+                    Some(record_details(r, now_ms()).into()),
+                    Some(
+                        if pair.is_some() {
+                            "Use"
+                        } else {
+                            outcome_text(r.outcome)
+                        }
+                        .into(),
+                    ),
                 );
-                lists::grouped(theme, lists::Place::of(i, count), row).into_any_element()
+                let place = lists::Place::of(i, count);
+                match pair {
+                    Some((a, b)) => {
+                        let row = row.id(("history-use", i)).on_click(cx.listener(
+                            move |this, _, _, cx| {
+                                let a = crate::picker::Destination::new(a.label.clone(), a.coord)
+                                    .named_from(&this.saved);
+                                let b = crate::picker::Destination::new(b.label.clone(), b.coord)
+                                    .named_from(&this.saved);
+                                this.choose_pair(a, b, cx);
+                                this.tabs.jump_to(0);
+                                this.open_settings(SettingsPage::Main, cx);
+                            },
+                        ));
+                        lists::grouped(theme, place, row).into_any_element()
+                    }
+                    None => lists::grouped(theme, place, row).into_any_element(),
+                }
             }
             _ => {
                 let colors = theme::colors(theme);
@@ -675,10 +702,25 @@ impl StopsApp {
             return;
         }
         self.confirm_clear = false;
-        self.history.records.clear();
+        let old = std::mem::take(&mut self.history);
         if let Some(dir) = self.dir.clone() {
             cx.background_executor()
                 .spawn(async move { backend::clear_history(&dir) })
+                .detach();
+        }
+        self.show_pill(
+            "History cleared",
+            Some(crate::PillAction::RestoreHistory(old)),
+            cx,
+        );
+    }
+
+    /// Undo on the pill: the old trips come back and are saved again.
+    pub(crate) fn restore_history(&mut self, history: rovsti_geo::History, cx: &mut Context<Self>) {
+        self.history = history.clone();
+        if let Some(dir) = self.dir.clone() {
+            cx.background_executor()
+                .spawn(async move { backend::save_history(&dir, &history) })
                 .detach();
         }
         cx.notify();
@@ -1202,9 +1244,10 @@ mod tests {
     fn a_legacy_record_row_shows_its_single_label() {
         // 14 Nov 2023, seen from 2023.
         assert_eq!(
-            record_subtitle(&legacy_record(), 1_700_100_000_000),
-            "Kadikoy  ·  14 Nov  ·  18 min  ·  3.4 km"
+            record_details(&legacy_record(), 1_700_100_000_000),
+            "14 Nov  ·  18 min  ·  3.4 km"
         );
+        assert_eq!(record_pair(&legacy_record()), "Kadikoy");
         let unnamed = TripRecord {
             label: String::new(),
             ..legacy_record()
@@ -1227,9 +1270,10 @@ mod tests {
             ..legacy_record()
         };
         assert_eq!(
-            record_subtitle(&r, 1_700_100_000_000),
-            "Home – Work  ·  14 Nov  ·  18 min  ·  3.4 km"
+            record_details(&r, 1_700_100_000_000),
+            "14 Nov  ·  18 min  ·  3.4 km"
         );
+        assert_eq!(record_pair(&r), "Home – Work");
     }
 
     #[test]

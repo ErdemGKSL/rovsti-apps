@@ -8,7 +8,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ListSizingBehavior, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, list, px,
 };
-use rovsti_geo::{Coord, Diameter, DiameterError, Feed, Place, dest::parse_location};
+use rovsti_geo::{Coord, Diameter, DiameterError, Feed, Place, SavedPlaces, dest::parse_location};
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
     field::field_box,
@@ -53,6 +53,18 @@ impl Destination {
             gtfs_stop: None,
             pattern: None,
         }
+    }
+
+    /// This point under the name the user gave a saved place within reach.
+    /// Coordinate and line stay; a missing GTFS stop is filled from the place.
+    pub fn named_from(mut self, saved: &SavedPlaces) -> Self {
+        if let Some(place) = saved.near(self.coord) {
+            self.label = place.name.clone();
+            if self.gtfs_stop.is_none() {
+                self.gtfs_stop = place.gtfs_stop.clone();
+            }
+        }
+        self
     }
 
     /// A raw point dropped on the map: it has no name.
@@ -189,6 +201,11 @@ pub enum SheetMode {
     Confirm(Destination),
     /// A new name for a saved place.
     Rename(u64),
+    /// A name for a point that is not saved yet; `slot` is the pin it came from.
+    SavePoint {
+        dest: Destination,
+        slot: Option<Slot>,
+    },
     /// A transit stop (index into the feed): its lines, Use as A / Use as B.
     Stop(u32),
 }
@@ -295,7 +312,10 @@ impl StopsApp {
     /// or say why not.
     pub(crate) fn offer_text(&mut self, text: &str, cx: &mut Context<Self>) {
         match offer(text) {
-            Offer::Confirm(dest) => self.confirm_destination(dest, cx),
+            Offer::Confirm(dest) => {
+                let dest = dest.named_from(&self.saved);
+                self.confirm_destination(dest, cx);
+            }
             Offer::Refused(why) => self.show_pill(why, None, cx),
         }
     }
@@ -318,6 +338,63 @@ impl StopsApp {
         self.sheet_mode = SheetMode::Rename(id);
         self.sheet.open();
         cx.notify();
+    }
+
+    /// Opens the Save sheet for `dest` with its name in the field.
+    pub(crate) fn open_save_point(
+        &mut self,
+        dest: Destination,
+        slot: Option<Slot>,
+        cx: &mut Context<Self>,
+    ) {
+        if matches!(self.sheet_mode, SheetMode::Stop(_)) {
+            // The line previewed on the stop sheet leaves the map again.
+            self.map.pattern = self
+                .pick
+                .ends
+                .get(self.pick.sheet_slot())
+                .and_then(|d| d.pattern);
+        }
+        let name = pick::save_prefill(&dest);
+        self.field.update(cx, |f, cx| f.set(&name, cx));
+        self.sheet_mode = SheetMode::SavePoint { dest, slot };
+        self.sheet.open();
+        cx.notify();
+    }
+
+    /// Saves the point of the Save sheet under the name in the field.
+    fn commit_save_point(&mut self, cx: &mut Context<Self>) {
+        let SheetMode::SavePoint { dest, .. } = self.sheet_mode.clone() else {
+            return;
+        };
+        let name = self.field.read(cx).text().to_owned();
+        if self.save_named(&name, &dest, cx) {
+            self.sheet.close();
+        }
+        cx.notify();
+    }
+
+    /// Saves `dest` as `name` and shows the pill. True when the place is now
+    /// in Saved (new or already there); false when the name was refused.
+    fn save_named(&mut self, name: &str, dest: &Destination, cx: &mut Context<Self>) -> bool {
+        let result = self.saved.save(name, dest.coord, dest.gtfs_stop.clone());
+        let text = pick::save_result_text(&result, &self.saved);
+        let id = match result {
+            Ok(id) => {
+                self.save_places(cx);
+                Some(id)
+            }
+            Err(rovsti_geo::PlaceError::Duplicate(id)) => Some(id),
+            Err(_) => None,
+        };
+        if let Some(id) = id
+            && let Some(place) = self.saved.get(id)
+        {
+            let (coord, label) = (place.coord, place.name.clone());
+            self.pick.relabel_near(coord, &label);
+        }
+        self.show_pill(text, None, cx);
+        id.is_some()
     }
 
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
@@ -349,7 +426,12 @@ impl StopsApp {
         cx: &mut Context<Self>,
     ) {
         if save {
-            self.save_point(&dest, cx);
+            let name = self.field.read(cx).text().to_owned();
+            if !self.save_named(&name, &dest, cx) {
+                // The sheet stays open so the name can be fixed.
+                cx.notify();
+                return;
+            }
         }
         self.map.pattern = dest.pattern;
         self.map.follow = true;
@@ -367,26 +449,18 @@ impl StopsApp {
         cx.notify();
     }
 
-    /// Keeps a point in Saved; a duplicate is fine.
-    fn save_point(&mut self, dest: &Destination, cx: &mut Context<Self>) {
-        match self.saved.add(&dest.label, dest.coord) {
-            Ok(id) => {
-                if let Some(place) = self.saved.get_mut(id) {
-                    place.gtfs_stop.clone_from(&dest.gtfs_stop);
-                }
-                self.save_places(cx);
-            }
-            Err(rovsti_geo::PlaceError::Duplicate(_)) => {}
-            Err(error) => self.show_pill(error.message(), None, cx),
-        }
-    }
-
     fn rename_place(&mut self, id: u64, cx: &mut Context<Self>) {
         let name = self.field.read(cx).text().to_owned();
+        let coord = self.saved.get(id).map(|p| p.coord);
         match self.saved.rename(id, &name) {
             Ok(()) => {
+                let new_name = self.saved.get(id).map_or(name, |p| p.name.clone());
+                if let Some(coord) = coord {
+                    self.pick.relabel_near(coord, &new_name);
+                }
                 self.save_places(cx);
                 self.sheet.close();
+                self.show_pill(format!("Renamed to {new_name}"), None, cx);
             }
             Err(error) => self.show_pill(error.message(), None, cx),
         }
@@ -418,8 +492,14 @@ impl StopsApp {
                 self.pick.sheet_slot().picker_title(),
                 self.pick_body(theme, window, cx),
             ),
-            SheetMode::Confirm(dest) => ("Use this point", self.confirm_body(theme, &dest, cx)),
+            SheetMode::Confirm(dest) => (
+                "Use this point",
+                self.confirm_body(theme, &dest, window, cx),
+            ),
             SheetMode::Rename(id) => ("Rename place", self.rename_body(theme, id, window, cx)),
+            SheetMode::SavePoint { dest, .. } => {
+                ("Save place", self.save_point_body(theme, &dest, window, cx))
+            }
             SheetMode::Stop(stop) => ("Transit stop", self.stop_body(theme, stop, cx)),
         };
         let body = div()
@@ -491,7 +571,7 @@ impl StopsApp {
                 theme,
                 "dest-field",
                 &self.field,
-                "Paste a link or coordinates",
+                "Search stops and saved places, or paste a link",
                 window,
                 cx,
             )));
@@ -526,7 +606,9 @@ impl StopsApp {
         let mut items = Vec::new();
         if !query.is_empty() {
             match offer(query) {
-                Offer::Confirm(dest) => items.push(PickItem::Offer(dest)),
+                Offer::Confirm(dest) => {
+                    items.push(PickItem::Offer(dest.named_from(&self.saved)));
+                }
                 // Typing a name searches Saved below: only a link or a pair of
                 // numbers that failed is worth an explanation.
                 Offer::Refused(why) if looks_like_link(query) => {
@@ -780,7 +862,7 @@ impl StopsApp {
                 list_row(theme, None, "Save this stop", None, None)
                     .id("stop-save")
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.save_stop(&save_dest, cx);
+                        this.open_save_point(save_dest.clone(), None, cx);
                     }))
                     .into_any_element(),
             ],
@@ -796,31 +878,15 @@ impl StopsApp {
         .into_any_element()
     }
 
-    /// Keeps a transit stop in Saved, remembering which stop of the feed it is.
-    fn save_stop(&mut self, dest: &Destination, cx: &mut Context<Self>) {
-        match self.saved.add(&dest.label, dest.coord) {
-            Ok(id) => {
-                if let Some(place) = self.saved.get_mut(id) {
-                    place.gtfs_stop.clone_from(&dest.gtfs_stop);
-                }
-                self.save_places(cx);
-                self.show_pill("Saved.", None, cx);
-            }
-            Err(rovsti_geo::PlaceError::Duplicate(_)) => {
-                self.show_pill("You already saved a place here.", None, cx);
-            }
-            Err(error) => self.show_pill(error.message(), None, cx),
-        }
-        cx.notify();
-    }
-
     fn confirm_body(
         &mut self,
         theme: Theme,
         dest: &Destination,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = theme::colors(theme);
+        let prefill = dest.clone();
         let save_row = list_row(
             theme,
             None,
@@ -829,8 +895,12 @@ impl StopsApp {
             Some(if self.save_place { "On" } else { "Off" }.into()),
         )
         .id("save-toggle")
-        .on_click(cx.listener(|this, _, _, cx| {
+        .on_click(cx.listener(move |this, _, _, cx| {
             this.save_place = !this.save_place;
+            if this.save_place {
+                let name = pick::save_prefill(&prefill);
+                this.field.update(cx, |f, cx| f.set(&name, cx));
+            }
             cx.notify();
         }));
         let as_a = dest.clone();
@@ -851,6 +921,16 @@ impl StopsApp {
             .child(Self::sheet_title(theme, dest.title()))
             .child(Self::footnote(theme, pick::details_text(dest)))
             .child(section(theme, None, [save_row.into_any_element()]))
+            .children(self.save_place.then(|| {
+                div().px(px(16.0)).child(field_box(
+                    theme,
+                    "confirm-save-field",
+                    &self.field,
+                    "Name",
+                    window,
+                    cx,
+                ))
+            }))
             .child(
                 div()
                     .flex()
@@ -886,6 +966,52 @@ impl StopsApp {
             .into_any_element()
     }
 
+    fn save_point_body(
+        &mut self,
+        theme: Theme,
+        dest: &Destination,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(Self::sheet_title(theme, "Save place"))
+            .child(Self::footnote(theme, pick::details_text(dest)))
+            .child(div().px(px(16.0)).child(field_box(
+                theme,
+                "save-field",
+                &self.field,
+                "Name",
+                window,
+                cx,
+            )))
+            .child(
+                div()
+                    .flex()
+                    .gap(px(12.0))
+                    .px(px(16.0))
+                    .pt(px(8.0))
+                    .child(
+                        glass_pill(theme, "Cancel")
+                            .id("save-cancel")
+                            .flex_1()
+                            .text_color(colors.secondary_label)
+                            .on_click(cx.listener(|this, _, _, cx| this.close_sheet(cx))),
+                    )
+                    .child(
+                        glass_pill(theme, "Save")
+                            .id("save-commit")
+                            .flex_1()
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(|this, _, _, cx| this.commit_save_point(cx))),
+                    ),
+            )
+            .into_any_element()
+    }
+
     fn rename_body(
         &mut self,
         theme: Theme,
@@ -908,12 +1034,26 @@ impl StopsApp {
                 cx,
             )))
             .child(
-                div().flex().justify_end().px(px(16.0)).pt(px(8.0)).child(
-                    glass_pill(theme, "Save")
-                        .id("rename-save")
-                        .text_color(colors.accent)
-                        .on_click(cx.listener(move |this, _, _, cx| this.rename_place(id, cx))),
-                ),
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap(px(10.0))
+                    .px(px(16.0))
+                    .pt(px(8.0))
+                    .child(
+                        glass_pill(theme, "Cancel")
+                            .id("rename-cancel")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.sheet.close();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        glass_pill(theme, "Save")
+                            .id("rename-save")
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| this.rename_place(id, cx))),
+                    ),
             )
             .into_any_element()
     }
@@ -942,6 +1082,41 @@ fn looks_like_link(text: &str) -> bool {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    fn saved_home() -> SavedPlaces {
+        let mut s = SavedPlaces::default();
+        s.save("Home", Coord::new(41.0, 29.0), Some("H1".into()))
+            .unwrap();
+        s
+    }
+
+    #[test]
+    fn a_raw_point_near_a_saved_place_takes_its_name() {
+        let d = Destination::dropped(Coord::new(41.0, 29.0002)).named_from(&saved_home());
+        assert_eq!(d.label, "Home");
+        assert_eq!(d.coord, Coord::new(41.0, 29.0002));
+        assert_eq!(d.gtfs_stop.as_deref(), Some("H1"));
+    }
+
+    #[test]
+    fn a_stop_near_a_saved_place_takes_the_user_name_and_keeps_its_id() {
+        let stop = Destination {
+            gtfs_stop: Some("S9".into()),
+            pattern: Some(3),
+            ..Destination::new("Kadikoy Iskele", Coord::new(41.0, 29.0001))
+        };
+        let d = stop.named_from(&saved_home());
+        assert_eq!(d.label, "Home");
+        assert_eq!(d.gtfs_stop.as_deref(), Some("S9"));
+        assert_eq!(d.pattern, Some(3));
+    }
+
+    #[test]
+    fn a_far_point_stays_unnamed() {
+        let d = Destination::dropped(Coord::new(41.0, 29.01)).named_from(&saved_home());
+        assert!(!d.is_named());
+        assert_eq!(d.gtfs_stop, None);
+    }
 
     fn confirm(text: &str) -> Destination {
         match offer(text) {
@@ -1149,5 +1324,21 @@ mod tests {
         assert!(looks_like_link("-3, 4"));
         assert!(!looks_like_link("home"));
         assert!(!looks_like_link("  kad"));
+    }
+
+    #[test]
+    fn a_saved_pin_takes_the_name_and_is_found_again() {
+        let mut saved = SavedPlaces::default();
+        let coord = Coord::new(41.0, 29.0);
+        let dest = Destination::new("Stop X", coord);
+        let name = pick::save_prefill(&dest);
+        let id = saved.save(&name, coord, None).unwrap();
+        assert_eq!(saved.near(coord).map(|p| p.id), Some(id));
+        let again = Destination::dropped(coord).named_from(&saved);
+        assert_eq!(again.label, "Stop X");
+        assert!(matches!(
+            saved.save("Other", coord, None),
+            Err(rovsti_geo::PlaceError::Duplicate(d)) if d == id
+        ));
     }
 }

@@ -134,6 +134,47 @@ impl SavedPlaces {
         self.places.len() != before
     }
 
+    /// The saved place nearest to `coord`, if one is within
+    /// [`DUPLICATE_RADIUS_M`].
+    pub fn near(&self, coord: Coord) -> Option<&Place> {
+        self.places
+            .iter()
+            .map(|p| (p, p.coord.distance_m(coord)))
+            .filter(|(_, d)| *d <= DUPLICATE_RADIUS_M)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(p, _)| p)
+    }
+
+    /// [`add`](Self::add), then remembers the GTFS stop the point snapped to.
+    pub fn save(
+        &mut self,
+        name: &str,
+        coord: Coord,
+        gtfs_stop: Option<String>,
+    ) -> Result<u64, PlaceError> {
+        let id = self.add(name, coord)?;
+        if let Some(p) = self.get_mut(id) {
+            p.gtfs_stop = gtfs_stop;
+        }
+        Ok(id)
+    }
+
+    /// Moves a place `delta` positions (negative is up), clamped to the list.
+    /// False when the id is missing or nothing moved.
+    pub fn move_by(&mut self, id: u64, delta: isize) -> bool {
+        let Some(from) = self.places.iter().position(|p| p.id == id) else {
+            return false;
+        };
+        let last = self.places.len() - 1;
+        let to = from.saturating_add_signed(delta).min(last);
+        if to == from {
+            return false;
+        }
+        let place = self.places.remove(from);
+        self.places.insert(to, place);
+        true
+    }
+
     /// Places whose name contains `query`, ignoring case and diacritics. An
     /// empty query lists everything. Saved order is kept.
     pub fn search(&self, query: &str) -> Vec<&Place> {
@@ -232,6 +273,77 @@ mod tests {
         assert_eq!(p.search("TAK").len(), 1);
         assert_eq!(p.search("").len(), 2);
         assert!(p.search("zzz").is_empty());
+    }
+
+    #[test]
+    fn near_picks_nearest_within_radius() {
+        let mut p = SavedPlaces::default();
+        // Saved places are at least 50 m apart, so use a looser pair via
+        // direct push to get two candidates inside the radius.
+        p.places.push(Place {
+            id: 1,
+            name: "Far".into(),
+            coord: Coord::new(TAKSIM.lat + 0.0004, TAKSIM.lon),
+            gtfs_stop: None,
+        });
+        p.places.push(Place {
+            id: 2,
+            name: "Close".into(),
+            coord: Coord::new(TAKSIM.lat + 0.0001, TAKSIM.lon),
+            gtfs_stop: None,
+        });
+        assert_eq!(p.near(TAKSIM).unwrap().id, 2);
+        assert!(p.near(KADIKOY).is_none());
+        // About 111 m away: outside the radius.
+        let mut q = SavedPlaces::default();
+        q.add("Home", TAKSIM).unwrap();
+        assert!(q.near(Coord::new(TAKSIM.lat + 0.001, TAKSIM.lon)).is_none());
+        assert!(
+            q.near(Coord::new(TAKSIM.lat + 0.0003, TAKSIM.lon))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn save_keeps_stop_and_passes_errors() {
+        let mut p = SavedPlaces::default();
+        let id = p.save("Stop", TAKSIM, Some("S1".into())).unwrap();
+        assert_eq!(p.get(id).unwrap().gtfs_stop.as_deref(), Some("S1"));
+        let id2 = p.save("Plain", KADIKOY, None).unwrap();
+        assert_eq!(p.get(id2).unwrap().gtfs_stop, None);
+        assert_eq!(
+            p.save("Dup", TAKSIM, Some("S2".into())),
+            Err(PlaceError::Duplicate(id))
+        );
+        assert_eq!(
+            p.save("", Coord::new(1.0, 1.0), None),
+            Err(PlaceError::InvalidName)
+        );
+        assert_eq!(p.places.len(), 2);
+    }
+
+    #[test]
+    fn move_by_reorders_and_clamps() {
+        let mut p = SavedPlaces::default();
+        for i in 0..4 {
+            p.add("P", Coord::new(i as f64 * 0.01, 10.0)).unwrap();
+        }
+        let order = |p: &SavedPlaces| p.places.iter().map(|x| x.id).collect::<Vec<_>>();
+        assert!(p.move_by(3, -1));
+        assert_eq!(order(&p), [1, 3, 2, 4]);
+        assert!(p.move_by(3, 1));
+        assert_eq!(order(&p), [1, 2, 3, 4]);
+        // Clamp at the end and at the start.
+        assert!(p.move_by(1, 10));
+        assert_eq!(order(&p), [2, 3, 4, 1]);
+        assert!(!p.move_by(1, 1));
+        assert!(p.move_by(1, -10));
+        assert_eq!(order(&p), [1, 2, 3, 4]);
+        assert!(!p.move_by(1, -1));
+        assert!(!p.move_by(2, 0));
+        assert!(!p.move_by(99, 1));
+        assert_eq!(order(&p), [1, 2, 3, 4]);
+        assert!(!SavedPlaces::default().move_by(1, 1));
     }
 
     #[test]

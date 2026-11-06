@@ -202,6 +202,11 @@ Delete rows need the call log write permission (spike S12).
 | R11 | Keypad: type a number that belongs to a contact, tap the name in the status line. | That contact's sheet opens. | | |
 | R12 | Setup: on a Xiaomi row confirmed with "I did it", look at the buttons. | One button "Mark as not done"; tapping it makes the row not done again. Rows read from the system have no such button. | | |
 | R13 | Revoke a permission in system settings, return to the app, open Setup. | The header reads "Something changed: {item}" until the item is fixed, then "Finish setup" or the done state. A plain app launch never shows it. | | |
+| R14 | Keypad: type digits that match more contacts than the strip shows, tap "N more". | A "Matches" sheet lists every match with the typed letters highlighted. Tapping a row fills the field with its number and closes the sheet; the call circle places the call. | | |
+| R15 | Recents: tap a WhatsApp row while no WhatsApp instance is linked. | The notice reads "WhatsApp is not connected" with "Connect"; tapping it opens Settings, WhatsApp. | | |
+| R16 | Deny the Contacts permission, then type a digit on the Keypad. | The status line reads "Allow Contacts to see matches" with "Grant access"; it asks for the permission (or opens app details when permanently denied) and is not shown again that session. | | |
+| R17 | Settings, Data: import a backup, then tap Undo in the pill. | The previous settings come back, the rows refresh and the pill reads "Import undone". | | |
+| R18 | Settings, Data: tap "Reset settings", then Undo. | Calls, sounds and display return to defaults with a "Settings reset" pill; Undo restores them. The row is dimmed ("Already the defaults") when nothing differs. | | |
 
 ## WhatsApp calls
 

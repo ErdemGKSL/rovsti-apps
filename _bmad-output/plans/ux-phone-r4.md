@@ -142,3 +142,14 @@ Acceptance: desktop preview without a gateway link: Recents > a WhatsApp row: th
 
 ## Next round (candidates)
 - Re-audit after S1 to S7. Expected to leave only U6 items (device spikes, gated or P3 by design).
+
+## Status
+
+Round 4 implemented (S7 closes the round). Commits, oldest first:
+- a16664d Pure logic: ImportPreview::restoring, NOT_CONNECTED notice action, keypad helpers (+tests) (S1)
+- f6bbbb8 Keypad T9 Results sheet behind "N more" (S2, U1)
+- 0209183 "Connect" on the WhatsApp not-connected notice (S3, U2)
+- 8f92c43 Keypad "Allow Contacts to see matches" hint (S4, U3)
+- 9fa4fca Undo for backup Import (S5, U4)
+- 827c5de Settings > Data: Reset settings with Undo (S6, U5)
+- S7 (this change): docs/phone-acceptance.md rows R14 to R18; story 20-1 stays `backlog` in sprint-status.yaml (S32 morph and 56 px strip slot still open).

@@ -373,6 +373,7 @@ impl StopsApp {
     pub(crate) fn open_settings(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         self.settings_page = page;
         self.confirm_clear = false;
+        self.history_open = None;
         self.confirm_remove_feed = false;
         self.page.restart();
         self.history_list.scroll_to_top();
@@ -615,7 +616,11 @@ impl StopsApp {
             lists::key(2, 0),
         ]
         .into_iter()
-        .chain(self.history.records.iter().map(|r| lists::key(3, r.id)))
+        .chain(self.history.records.iter().enumerate().map(|(i, r)| {
+            // An open row is taller: a new key makes the list measure it again.
+            let kind = if self.history_open == Some(i) { 5 } else { 3 };
+            lists::key(kind, r.id)
+        }))
         .chain([lists::key(4, 0)])
         .collect();
         let state = self.history_list.sync(keys);
@@ -646,6 +651,7 @@ impl StopsApp {
             ix if ix - RECORDS_FROM < count => {
                 let i = ix - RECORDS_FROM;
                 let r = &self.history.records[i];
+                let open = self.history_open == Some(i);
                 let pair = match (&r.a, &r.b) {
                     (Some(a), Some(b)) => Some((a.clone(), b.clone())),
                     _ => None,
@@ -656,30 +662,51 @@ impl StopsApp {
                     record_pair(r),
                     Some(record_details(r, now_ms()).into()),
                     Some(
-                        if pair.is_some() {
-                            "Use"
+                        if open {
+                            "Close"
                         } else {
                             outcome_text(r.outcome)
                         }
                         .into(),
                     ),
-                );
+                )
+                .id(("history-row", i))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.history_open = if this.history_open == Some(i) {
+                        None
+                    } else {
+                        Some(i)
+                    };
+                    cx.notify();
+                }));
                 let place = lists::Place::of(i, count);
-                match pair {
-                    Some((a, b)) => {
-                        let row = row.id(("history-use", i)).on_click(cx.listener(
-                            move |this, _, _, cx| {
+                let grouped = lists::grouped(theme, place, row);
+                if !open {
+                    return grouped.into_any_element();
+                }
+                let colors = theme::colors(theme);
+                let mut pills = div().px(px(16.0)).pt(px(8.0)).flex().gap(px(12.0));
+                if let Some((a, b)) = pair {
+                    pills = pills.child(
+                        glass_pill(theme, "Use")
+                            .id(("history-use", i))
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
                                 let a = crate::pick::dest_from_endpoint(&a, &this.saved);
                                 let b = crate::pick::dest_from_endpoint(&b, &this.saved);
                                 this.choose_pair(a, b, cx);
                                 this.tabs.jump_to(0);
                                 this.open_settings(SettingsPage::Main, cx);
-                            },
-                        ));
-                        lists::grouped(theme, place, row).into_any_element()
-                    }
-                    None => lists::grouped(theme, place, row).into_any_element(),
+                            })),
+                    );
                 }
+                pills = pills.child(
+                    glass_pill(theme, "Delete")
+                        .id(("history-delete", i))
+                        .text_color(colors.red)
+                        .on_click(cx.listener(move |this, _, _, cx| this.delete_record(i, cx))),
+                );
+                div().child(grouped).child(pills).into_any_element()
             }
             _ => {
                 let colors = theme::colors(theme);
@@ -713,6 +740,7 @@ impl StopsApp {
             return;
         }
         self.confirm_clear = false;
+        self.history_open = None;
         let old = std::mem::take(&mut self.history);
         if let Some(dir) = self.dir.clone() {
             cx.background_executor()
@@ -726,9 +754,44 @@ impl StopsApp {
         );
     }
 
+    /// Removes one trip; the pill offers Undo.
+    fn delete_record(&mut self, i: usize, cx: &mut Context<Self>) {
+        self.history_open = None;
+        let Some(r) = self.history.take(i) else {
+            cx.notify();
+            return;
+        };
+        self.save_history_in_background(cx);
+        let text = format!("Removed {}", record_pair(&r));
+        self.show_pill(text, Some(crate::PillAction::RestoreRecord(r, i)), cx);
+    }
+
+    /// Undo on the pill: the trip returns to its place and is saved.
+    pub(crate) fn restore_record(
+        &mut self,
+        record: rovsti_geo::TripRecord,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        self.history.put_back(index, record);
+        self.history_open = None;
+        self.save_history_in_background(cx);
+        cx.notify();
+    }
+
+    fn save_history_in_background(&self, cx: &mut Context<Self>) {
+        if let Some(dir) = self.dir.clone() {
+            let history = self.history.clone();
+            cx.background_executor()
+                .spawn(async move { backend::save_history(&dir, &history) })
+                .detach();
+        }
+    }
+
     /// Undo on the pill: the old trips come back and are saved again.
     pub(crate) fn restore_history(&mut self, history: rovsti_geo::History, cx: &mut Context<Self>) {
         self.history = history.clone();
+        self.history_open = None;
         if let Some(dir) = self.dir.clone() {
             cx.background_executor()
                 .spawn(async move { backend::save_history(&dir, &history) })

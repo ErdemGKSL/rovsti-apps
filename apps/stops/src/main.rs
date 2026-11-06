@@ -78,6 +78,7 @@ pub(crate) enum Page {
 pub(crate) enum PillAction {
     UndoDelete(Place, usize),
     RestoreHistory(History),
+    RestoreRecord(rovsti_geo::TripRecord, usize),
     RestoreEnds(picker::Ends),
     RestartTrip(Destination, Destination),
     RestoreTileUrl(Option<String>),
@@ -160,6 +161,8 @@ pub(crate) struct StopsApp {
     pub(crate) chats: ChatList,
     /// Clear history was tapped once.
     pub(crate) confirm_clear: bool,
+    /// The History row whose actions (Use, Delete) are showing.
+    pub(crate) history_open: Option<usize>,
     /// The first tap on "Remove transit data" has armed the second.
     pub(crate) confirm_remove_feed: bool,
 }
@@ -312,6 +315,7 @@ impl StopsApp {
             tile_testing: false,
             chats: ChatList::default(),
             confirm_clear: false,
+            history_open: None,
             confirm_remove_feed: false,
         };
         app.refresh_preflight_later(cx);
@@ -445,6 +449,12 @@ impl StopsApp {
             self.alarm_action(AlarmAction::Snooze, cx);
         } else if self.sheet.is_open() {
             self.close_sheet(cx);
+        } else if self.tabs.selected() == 2
+            && self.settings_page == SettingsPage::History
+            && self.history_open.is_some()
+        {
+            self.history_open = None;
+            cx.notify();
         } else if self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main {
             // The WhatsApp page steps back inside itself first.
             let stepped = self.settings_page == SettingsPage::WhatsApp
@@ -527,6 +537,7 @@ impl StopsApp {
         match action {
             PillAction::UndoDelete(place, index) => self.undo_delete(place, index, cx),
             PillAction::RestoreHistory(history) => self.restore_history(history, cx),
+            PillAction::RestoreRecord(record, index) => self.restore_record(record, index, cx),
             PillAction::RestartTrip(a, b) => self.request_start(a, b, cx),
             PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),

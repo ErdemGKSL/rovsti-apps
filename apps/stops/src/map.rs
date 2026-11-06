@@ -19,7 +19,7 @@ use gpui::{
     Window, canvas, div, point, px, quad,
 };
 use rovsti_geo::{
-    Coord, Diameter, EARTH_RADIUS_M, Feed, Side, Stop,
+    Coord, Diameter, EARTH_RADIUS_M, Feed, History, SavedPlaces, Side, Stop,
     tiles::{
         ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileGeometry, TileLayer,
         build_layer, line_width, tiles_for_view,
@@ -35,7 +35,7 @@ use rovsti_ui::{
 
 use crate::{
     StopsApp,
-    picker::{Destination, SheetMode, Slot, coord_text},
+    picker::{Destination, Ends, SheetMode, Slot, coord_text},
     store::now_ms,
 };
 
@@ -197,6 +197,86 @@ pub fn fit_view(
         fitted.center,
         fitted.metres_per_px.max(MIN_FIT_MPP),
     ))
+}
+
+/// Metres per pixel at street level: tiles show streets and names.
+pub const STREET_MPP: f64 = 1.5;
+/// Metres per pixel for the last-resort city view.
+pub const CITY_MPP: f64 = 12.0;
+/// Where the map opens with no position, no ends and nothing remembered.
+pub const DEFAULT_CENTRE: Coord = Coord::new(41.0082, 28.9784);
+
+/// Where the idle map opens: the pair if there is one, else the one end, else
+/// you, else somewhere you used before, else the default city.
+pub fn idle_view(
+    ends: &Ends,
+    position: Option<Coord>,
+    fallback: Option<Coord>,
+    size: (f32, f32),
+) -> Viewport {
+    let a = ends.a.as_ref().map(|d| d.coord);
+    let b = ends.b.as_ref().map(|d| d.coord);
+    match (a, b) {
+        (Some(a), Some(b)) => match Diameter::new(a, b) {
+            Ok(d) => fit_view(None, Some(&d), size).unwrap_or_else(|| Viewport::new(a, STREET_MPP)),
+            Err(_) => {
+                let fitted = Viewport::fit(&[a, b], size.0, size.1, FIT_PADDING_PX);
+                Viewport::new(fitted.center, fitted.metres_per_px.max(STREET_MPP))
+            }
+        },
+        (Some(end), None) | (None, Some(end)) => Viewport::new(end, STREET_MPP),
+        (None, None) => match position.or(fallback) {
+            Some(at) => Viewport::new(at, STREET_MPP),
+            None => Viewport::new(DEFAULT_CENTRE, CITY_MPP),
+        },
+    }
+}
+
+/// Where to open when there is no fix: the middle of the last trip, else the
+/// first saved place.
+pub fn fallback_centre(history: &History, saved: &SavedPlaces) -> Option<Coord> {
+    if let Some((a, b)) = history.recent_pairs(1).into_iter().next() {
+        return Some(Coord::new(
+            (a.coord.lat + b.coord.lat) / 2.0,
+            (a.coord.lon + b.coord.lon) / 2.0,
+        ));
+    }
+    saved.places.first().map(|p| p.coord)
+}
+
+/// Width and height of the small menu over a tapped pin.
+#[cfg_attr(not(test), expect(dead_code, reason = "wired in S5"))]
+pub const PIN_MENU_W: f32 = 180.0;
+#[cfg_attr(not(test), expect(dead_code, reason = "wired in S5"))]
+pub const PIN_MENU_H: f32 = 132.0;
+#[cfg_attr(not(test), expect(dead_code, reason = "wired in S5"))]
+const PIN_MENU_MARGIN: f32 = 8.0;
+/// Gap between the pin and its menu, and the pin's own height above its point.
+#[cfg_attr(not(test), expect(dead_code, reason = "wired in S5"))]
+const PIN_MENU_GAP: f32 = 14.0;
+
+/// The pin menu box `(x, y, w, h)` in map-local pixels from the top-left: above
+/// `pin`, below it where there is no room, kept inside `size` with a margin.
+#[cfg_attr(not(test), expect(dead_code, reason = "wired in S5"))]
+pub fn pin_menu_rect(pin: (f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) {
+    let (w, h) = (PIN_MENU_W, PIN_MENU_H);
+    let above = pin.1 - PIN_MENU_GAP - h;
+    let y = if above >= PIN_MENU_MARGIN {
+        above
+    } else {
+        pin.1 + PIN_MENU_GAP
+    };
+    let clamp = |v: f32, len: f32, bound: f32| {
+        let hi = (bound - len - PIN_MENU_MARGIN).max(PIN_MENU_MARGIN);
+        v.clamp(PIN_MENU_MARGIN, hi)
+    };
+    (clamp(pin.0 - w / 2.0, w, size.0), clamp(y, h, size.1), w, h)
+}
+
+/// Whether `at` is inside `rect` `(x, y, w, h)`.
+#[cfg_attr(not(test), expect(dead_code, reason = "wired in S5"))]
+pub fn over_rect(rect: (f32, f32, f32, f32), at: (f32, f32)) -> bool {
+    at.0 >= rect.0 && at.0 <= rect.0 + rect.2 && at.1 >= rect.1 && at.1 <= rect.1 + rect.3
 }
 
 /// A scale bar for `metres_per_px`: its length in pixels and its label.
@@ -533,11 +613,24 @@ pub struct Scene {
     pub position: Option<((f32, f32), f32)>,
     /// The circle on AB with its two halves.
     pub diameter: Option<DiameterScene>,
+    /// The pins of A and B, for every end that is set.
+    pub pins: Vec<PinScene>,
+    /// AB drawn as a plain warning line when both ends are set but make no valid circle.
+    pub segment: Option<((f32, f32), (f32, f32))>,
     pub trail: Vec<(f32, f32)>,
     pub stops: Vec<(f32, f32)>,
     pub line: Vec<(f32, f32)>,
     /// Map tiles under everything else; empty where none are loaded.
     pub tiles: TileLayer,
+}
+
+/// One pin, in pixels from the view centre.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PinScene {
+    pub slot: Slot,
+    pub at: (f32, f32),
+    /// The pin sits on a GTFS stop.
+    pub snapped: bool,
 }
 
 /// The circle with AB as its diameter, in pixels from the view centre.
@@ -593,6 +686,8 @@ pub struct SceneInput<'a> {
     pub size: (f32, f32),
     pub position: Option<(Coord, f64)>,
     pub diameter: Option<Diameter>,
+    /// A and B with whether each snapped to a stop.
+    pub pins: [Option<(Coord, bool)>; 2],
     pub trail: &'a Breadcrumb,
     pub feed: Option<&'a Feed>,
     pub pattern: Option<u32>,
@@ -615,6 +710,22 @@ impl Scene {
         let mpp = vp.metres_per_px;
         let metres = |m: f64| ((m / mpp) as f32).clamp(0.0, MAX_RADIUS_PX);
         let diameter = input.diameter.map(|d| DiameterScene::build(&d, vp));
+        let pins: Vec<PinScene> = [Slot::A, Slot::B]
+            .into_iter()
+            .zip(input.pins)
+            .filter_map(|(slot, pin)| {
+                let (coord, snapped) = pin?;
+                Some(PinScene {
+                    slot,
+                    at: vp.project(coord),
+                    snapped,
+                })
+            })
+            .collect();
+        let segment = match (input.pins[0], input.pins[1], &diameter) {
+            (Some((a, _)), Some((b, _)), None) => Some((vp.project(a), vp.project(b))),
+            _ => None,
+        };
         let trail: Vec<_> = input.trail.iter().map(|c| vp.project(c)).collect();
         let (stops, line) = match input.feed {
             Some(feed) => {
@@ -642,6 +753,8 @@ impl Scene {
                 .position
                 .map(|(c, accuracy)| (vp.project(c), metres(accuracy))),
             diameter,
+            pins,
+            segment,
             trail: thin_polyline(&trail, TRAIL_MIN_PX),
             stops,
             line: thin_polyline(&line, LINE_MIN_PX),
@@ -1005,6 +1118,9 @@ fn paint_scene(scene: &Scene, bounds: Bounds<Pixels>, pal: &Palette, window: &mu
     if let Some(d) = &scene.diameter {
         paint_diameter(d, &to_window, pal, window);
     }
+    if let Some((a, b)) = scene.segment {
+        stroke_line(window, &[to_window(a), to_window(b)], 3.5, pal.ring);
+    }
 
     stroke_line(window, &to_window_all(&scene.trail), 3.0, pal.trail);
 
@@ -1230,33 +1346,19 @@ impl StopsApp {
         }
     }
 
-    /// Something to show: a fix, a destination, or a feed to browse.
-    fn map_has_content(&self) -> bool {
-        self.map.position.is_some()
-            || self.trip.is_some()
-            || !self.pick.ends.is_empty()
-            || self.gtfs.is_some()
-    }
-
     /// The map card for the Trip tab, or `None` while there is nothing to show.
     pub(crate) fn map_card(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.map_has_content() {
-            return None;
-        }
         let size = self.map.size();
         let diameter = self.map_diameter();
         let position = self.map.position;
         if self.map.follow {
-            let fitted = fit_view(position.map(|p| p.0), diameter.as_ref(), size).or_else(|| {
-                // Browsing a feed with no fix and no destination: start at its first stop.
-                self.gtfs
-                    .as_ref()
-                    .and_then(|f| f.stops.first())
-                    .map(|s| Viewport::new(s.coord, 12.0))
-            });
-            if let Some(view) = fitted {
-                self.map.viewport = view;
-            }
+            self.map.viewport = if self.trip.is_some() {
+                fit_view(position.map(|p| p.0), diameter.as_ref(), size)
+                    .unwrap_or(self.map.viewport)
+            } else {
+                let fallback = fallback_centre(&self.history, &self.saved);
+                idle_view(&self.pick.ends, position.map(|p| p.0), fallback, size)
+            };
         }
         let viewport = self.map.viewport;
         let centre = self.map.bounds.get().center();
@@ -1277,6 +1379,12 @@ impl StopsApp {
             size,
             position,
             diameter,
+            pins: [Slot::A, Slot::B].map(|slot| {
+                self.pick
+                    .ends
+                    .get(slot)
+                    .map(|d| (d.coord, d.gtfs_stop.is_some()))
+            }),
             trail: &self.map.trail,
             feed: self.gtfs.as_deref(),
             pattern: self.map.pattern,
@@ -1951,6 +2059,7 @@ mod tests {
             size: (400.0, 300.0),
             position: None,
             diameter: None,
+            pins: [None, None],
             trail,
             feed,
             pattern: None,
@@ -2086,6 +2195,157 @@ mod tests {
         let scene = Scene::build(&input);
         assert_eq!(scene.position.unwrap().1, MAX_RADIUS_PX);
         assert_eq!(scene.diameter.unwrap().radius_px, MAX_RADIUS_PX);
+    }
+
+    // -- pins, segment, opening view, menu --
+
+    fn dest_at(coord: Coord) -> Destination {
+        Destination::dropped(coord)
+    }
+
+    fn ends_of(a: Option<Coord>, b: Option<Coord>) -> Ends {
+        Ends {
+            a: a.map(dest_at),
+            b: b.map(dest_at),
+        }
+    }
+
+    #[test]
+    fn a_pin_appears_for_every_end_that_is_set() {
+        let trail = Breadcrumb::default();
+        let mut input = scene_input(&trail, None);
+        input.pins = [None, Some((near(100.0, 0.0).coord, true))];
+        let scene = Scene::build(&input);
+        assert_eq!(scene.pins.len(), 1);
+        assert_eq!(scene.pins[0].slot, Slot::B);
+        assert!(scene.pins[0].snapped);
+        assert!(scene.segment.is_none());
+        assert!(scene.diameter.is_none());
+    }
+
+    #[test]
+    fn an_invalid_pair_shows_pins_and_a_segment_but_no_circle() {
+        let trail = Breadcrumb::default();
+        let mut input = scene_input(&trail, None);
+        let (a, b) = (near(0.0, 0.0).coord, near(5.0, 0.0).coord);
+        input.pins = [Some((a, false)), Some((b, false))];
+        let scene = Scene::build(&input);
+        assert_eq!(scene.pins.len(), 2);
+        assert_eq!(scene.pins[0].slot, Slot::A);
+        let (sa, sb) = scene.segment.unwrap();
+        assert_eq!(sa, scene.pins[0].at);
+        assert_eq!(sb, scene.pins[1].at);
+    }
+
+    #[test]
+    fn a_valid_pair_has_a_circle_and_no_segment() {
+        let trail = Breadcrumb::default();
+        let mut input = scene_input(&trail, None);
+        let d = diameter_600();
+        input.diameter = Some(d);
+        input.pins = [Some((d.a(), false)), Some((d.b(), false))];
+        let scene = Scene::build(&input);
+        assert!(scene.diameter.is_some());
+        assert_eq!(scene.pins.len(), 2);
+        assert!(scene.segment.is_none());
+    }
+
+    #[test]
+    fn the_idle_view_follows_its_priority_chain() {
+        let size = (370.0, 340.0);
+        let pos = near(50.0, 50.0).coord;
+        let fallback = near(900.0, 900.0).coord;
+        let a = near(-300.0, 0.0).coord;
+        let b = near(300.0, 0.0).coord;
+
+        // Both ends valid: the whole circle fits.
+        let both = ends_of(Some(a), Some(b));
+        let vp = idle_view(&both, Some(pos), Some(fallback), size);
+        let d = Diameter::new(a, b).unwrap();
+        assert_eq!(vp, fit_view(None, Some(&d), size).unwrap());
+
+        // Both ends invalid (5 m apart): the two points, never zoomed out past street level.
+        let close = ends_of(Some(a), Some(near(-295.0, 0.0).coord));
+        let vp = idle_view(&close, Some(pos), Some(fallback), size);
+        assert_eq!(vp.metres_per_px, STREET_MPP);
+        assert!(vp.project(a).0.abs() < 10.0);
+
+        // One end: that end at street level, wherever you are.
+        let one = ends_of(None, Some(b));
+        let vp = idle_view(&one, Some(pos), Some(fallback), size);
+        assert_eq!(vp.metres_per_px, STREET_MPP);
+        assert!(vp.project(b).0.abs() < 0.01);
+
+        // No ends: you, then the fallback, then the default city.
+        let none = Ends::default();
+        let vp = idle_view(&none, Some(pos), Some(fallback), size);
+        assert_eq!(vp.metres_per_px, STREET_MPP);
+        assert!(vp.project(pos).0.abs() < 0.01);
+        let vp = idle_view(&none, None, Some(fallback), size);
+        assert_eq!(vp.metres_per_px, STREET_MPP);
+        assert!(vp.project(fallback).0.abs() < 0.01);
+        let vp = idle_view(&none, None, None, size);
+        assert_eq!(vp.metres_per_px, CITY_MPP);
+        assert!(vp.project(DEFAULT_CENTRE).0.abs() < 0.01);
+    }
+
+    #[test]
+    fn the_fallback_is_the_last_trip_then_the_first_saved_place() {
+        let mut history = History::default();
+        let mut saved = SavedPlaces::default();
+        assert_eq!(fallback_centre(&history, &saved), None);
+
+        saved.add("Home", Coord::new(40.0, 30.0)).unwrap();
+        saved.add("Work", Coord::new(41.0, 31.0)).unwrap();
+        assert_eq!(
+            fallback_centre(&history, &saved),
+            Some(Coord::new(40.0, 30.0))
+        );
+
+        let ep = |lat, lon| rovsti_geo::Endpoint {
+            label: String::new(),
+            coord: Coord::new(lat, lon),
+        };
+        history.push(rovsti_geo::TripRecord {
+            a: Some(ep(41.0, 29.0)),
+            b: Some(ep(41.2, 29.2)),
+            ..Default::default()
+        });
+        let c = fallback_centre(&history, &saved).unwrap();
+        assert!((c.lat - 41.1).abs() < 1e-9 && (c.lon - 29.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_pin_menu_stays_inside_the_map() {
+        let size = (370.0, 340.0);
+        let inside = |r: (f32, f32, f32, f32)| {
+            r.0 >= 8.0 && r.1 >= 8.0 && r.0 + r.2 <= size.0 - 8.0 && r.1 + r.3 <= size.1 - 8.0
+        };
+        for pin in [
+            (0.0, 0.0),
+            (size.0, 0.0),
+            (0.0, size.1),
+            (size.0, size.1),
+            (185.0, 170.0),
+        ] {
+            let r = pin_menu_rect(pin, size);
+            assert!(inside(r), "{pin:?} -> {r:?}");
+            assert_eq!((r.2, r.3), (PIN_MENU_W, PIN_MENU_H));
+        }
+    }
+
+    #[test]
+    fn the_pin_menu_opens_above_and_flips_below_near_the_top() {
+        let size = (370.0, 340.0);
+        let pin = (185.0, 250.0);
+        let above = pin_menu_rect(pin, size);
+        assert!(above.1 + above.3 < pin.1);
+        let top = (185.0, 40.0);
+        let below = pin_menu_rect(top, size);
+        assert!(below.1 > top.1);
+        assert!(over_rect(below, (below.0 + 1.0, below.1 + 1.0)));
+        assert!(!over_rect(below, (below.0 - 1.0, below.1 + 1.0)));
+        assert!(!over_rect(below, (below.0 + 1.0, below.1 + below.3 + 1.0)));
     }
 
     // -- the view --

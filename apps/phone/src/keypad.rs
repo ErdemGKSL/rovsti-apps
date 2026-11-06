@@ -6,9 +6,9 @@
 use std::{ops::Range, sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, Context, FontWeight, HapticFeedback, HighlightStyle, InteractiveElement,
-    IntoElement, MouseButton, ParentElement, Role, SharedString, StatefulInteractiveElement,
-    Styled, StyledText, Window, div, prelude::*, px, svg,
+    AnyElement, ClipboardItem, Context, FontWeight, HapticFeedback, HighlightStyle,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Role, SharedString,
+    StatefulInteractiveElement, Styled, StyledText, Window, div, prelude::*, px, svg,
 };
 use rovsti_core::{
     dial::{self, Push},
@@ -352,6 +352,28 @@ pub const KEYS: [Key; 12] = [
     Key::new("#", "", "key-#", "ik-#", "pound"),
 ];
 
+/// The dialed-number field (a long press opens its menu).
+pub(crate) const FIELD_ID: &str = "kp-field";
+const FIELD_SCRIM_ID: &str = "fm-scrim";
+
+fn field_menu_id(action: dial::FieldAction) -> &'static str {
+    match action {
+        dial::FieldAction::Copy => "fm-copy",
+        dial::FieldAction::Paste => "fm-paste",
+        dial::FieldAction::Clear => "fm-clear",
+    }
+}
+
+fn field_action_of(id: &str) -> Option<dial::FieldAction> {
+    [
+        dial::FieldAction::Copy,
+        dial::FieldAction::Paste,
+        dial::FieldAction::Clear,
+    ]
+    .into_iter()
+    .find(|a| field_menu_id(*a) == id)
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum HoldAction {
     Plus,
@@ -382,6 +404,8 @@ pub(crate) enum HoldAction {
     },
     /// The caller block was held on the In-Call screen: copy the number.
     CopyCaller,
+    /// The dialed-number field was held: Copy / Paste / Clear popover.
+    FieldMenu,
 }
 
 impl PhoneApp {
@@ -420,7 +444,11 @@ impl PhoneApp {
         id.starts_with("key-")
             || id.starts_with("ik-")
             || id.starts_with("ic-")
-            || matches!(id, "delete" | "paste" | "grant" | "wa-call" | "kp-vm-set")
+            || id.starts_with("fm-")
+            || matches!(
+                id,
+                "delete" | "paste" | "grant" | "wa-call" | "kp-vm-set" | FIELD_ID
+            )
     }
 
     pub(crate) fn activate(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -428,6 +456,10 @@ impl PhoneApp {
             "delete" => self.delete_press(window, cx),
             "call" => self.call_press(window, cx),
             "paste" => self.paste_press(window, cx),
+            FIELD_ID => {
+                self.arm_hold(crate::sim_ui::HOLD_MS, HoldAction::FieldMenu, window, cx);
+            }
+            id if id.starts_with("fm-") => self.field_menu_act(id, window, cx),
             "wa-call" => self.whatsapp_press(window, cx),
             "kp-ct-grant" => {
                 self.t9_hint_dismissed = true;
@@ -551,6 +583,7 @@ impl PhoneApp {
             HoldAction::Reason(slot) => self.show_reason(usize::from(slot), window, cx),
             HoldAction::CopyAs { share } => self.open_copy_as(share, window, cx),
             HoldAction::CopyCaller => self.incall_copy_number(window, cx),
+            HoldAction::FieldMenu => self.open_field_menu(window, cx),
         }
         cx.notify();
     }
@@ -702,6 +735,148 @@ impl PhoneApp {
             .filter(|w| *w > 1.0);
         let width = measured.unwrap_or(self.font.value * 0.56);
         self.ghost.begin(digit, width);
+    }
+
+    /// What the field's menu offers right now.
+    fn field_menu_items(&self, cx: &mut Context<Self>) -> Vec<dial::FieldAction> {
+        let clip = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .is_some_and(|t| !dial::normalise_paste(&t).is_empty());
+        dial::field_menu(&self.dialed, clip)
+    }
+
+    fn open_field_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let items = self.field_menu_items(cx);
+        if items.is_empty() {
+            return;
+        }
+        rovsti_ui::haptics::perform(window, HapticFeedback::LongPress);
+        self.field_menu = Some(items);
+        self.presses.release_all();
+        cx.notify();
+    }
+
+    pub(crate) fn close_field_menu(&mut self) {
+        self.field_menu = None;
+    }
+
+    fn field_menu_act(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.field_menu = None;
+        match field_action_of(id) {
+            Some(dial::FieldAction::Copy) => {
+                let text = self.dialed.clone();
+                if backend::copy_text(&text) != backend::Outcome::Done {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                }
+                rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                self.show_notice_pill(
+                    dial::field_done_text(dial::FieldAction::Copy),
+                    None,
+                    false,
+                    cx,
+                );
+            }
+            Some(dial::FieldAction::Paste) => self.paste_press(window, cx),
+            Some(dial::FieldAction::Clear) => {
+                let old = std::mem::take(&mut self.dialed);
+                if !old.is_empty() {
+                    self.status = None;
+                    self.delete_shown.set_target(0.0);
+                    rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+                    self.show_pill_action(
+                        dial::field_done_text(dial::FieldAction::Clear),
+                        "Undo",
+                        crate::block_ui::PillAction::RestoreDialed(old.into()),
+                        cx,
+                    );
+                }
+            }
+            None => {}
+        }
+        cx.notify();
+    }
+
+    /// Undo of Clear: the typed number comes back.
+    pub(crate) fn restore_dialed(&mut self, old: &str) {
+        self.dialed = old.chars().take(dial::MAX_LEN).collect();
+        self.status = None;
+        self.digit_pop.snap(1.1);
+        self.digit_pop.set_target(1.0);
+        self.delete_shown.set_target(1.0);
+    }
+
+    /// The popover above the number field, over a scrim that closes it.
+    fn field_menu_overlay(
+        &self,
+        theme: Theme,
+        layout: &rovsti_core::keypad_layout::KeypadLayout,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let items = self.field_menu.as_ref()?;
+        let colors = theme::colors(theme);
+        let pills: Vec<_> = items
+            .iter()
+            .map(|&action| {
+                let id = field_menu_id(action);
+                let press = self.presses.value(id).clamp(0.0, 1.0);
+                let ink = if action == dial::FieldAction::Clear {
+                    theme::call_colors(theme).danger
+                } else {
+                    colors.accent
+                };
+                div()
+                    .id(id)
+                    .role(Role::Button)
+                    .aria_label(action.label())
+                    .relative()
+                    .opacity(1.0 - 0.3 * press)
+                    .child(rovsti_ui::components::glass_pill(theme, action.label()).text_color(ink))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| this.mouse_down(id, window, cx)),
+                    )
+                    .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
+            })
+            .collect();
+        let top = (layout.number.y - 52.0).max(8.0);
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .child(
+                    div()
+                        .id(FIELD_SCRIM_ID)
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, window, cx| {
+                                this.mouse_down(FIELD_SCRIM_ID, window, cx)
+                            }),
+                        )
+                        .child(touch_surface(Self::touch_listener(
+                            cx,
+                            Some(FIELD_SCRIM_ID.into()),
+                        ))),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(top))
+                        .left_0()
+                        .w_full()
+                        .flex()
+                        .justify_center()
+                        .gap(px(8.0))
+                        .children(pills),
+                )
+                .into_any_element(),
+        )
     }
 
     fn paste_press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1869,11 +2044,20 @@ impl PhoneApp {
 
         let number = section(layout.number).flex().justify_center().child(
             div()
+                .id(FIELD_ID)
                 .relative()
                 .w_full()
                 .flex()
                 .justify_center()
                 .child(self.number_display(theme, layout.number.h))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| this.mouse_down(FIELD_ID, window, cx)),
+                )
+                .child(touch_surface(Self::touch_listener(
+                    cx,
+                    Some(FIELD_ID.into()),
+                )))
                 .when(self.dialed.is_empty(), |el| {
                     el.child(self.paste_pill(theme, cx))
                 }),
@@ -2014,6 +2198,7 @@ impl PhoneApp {
             .child(actions)
             .child(pad)
             .child(call_row)
+            .children(self.field_menu_overlay(theme, layout, cx))
     }
 }
 
@@ -2064,6 +2249,21 @@ pub(crate) fn elided_head(dialed: &str, keep: Option<usize>) -> (String, String)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn field_menu_ids_round_trip() {
+        for a in [
+            dial::FieldAction::Copy,
+            dial::FieldAction::Paste,
+            dial::FieldAction::Clear,
+        ] {
+            assert_eq!(field_action_of(field_menu_id(a)), Some(a));
+            assert!(PhoneApp::acts_on_down(field_menu_id(a)));
+        }
+        assert_eq!(field_action_of(FIELD_SCRIM_ID), None);
+        assert!(PhoneApp::acts_on_down(FIELD_ID));
+        assert!(PhoneApp::acts_on_down(FIELD_SCRIM_ID));
+    }
 
     #[test]
     fn elided_head_without_elision_splits_off_the_last_char() {

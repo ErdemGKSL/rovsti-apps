@@ -39,6 +39,10 @@ const ROW_IDS: [&str; 9] = [
 const DIGITS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 const CHANGE_ID: &str = "set-sd-change";
 const REMOVE_ID: &str = "set-sd-remove";
+const SHARE_ID: &str = "set-sd-share";
+const CLEAR_ID: &str = "set-sd-clear";
+const CLEAR_YES: &str = "sheet-sd-yes";
+const CLEAR_NO: &str = "sheet-sd-no";
 
 /// What one digit does when held.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -117,6 +121,13 @@ pub(crate) fn rows(map: &BTreeMap<u8, SpeedDialEntry>) -> Vec<Row> {
     out
 }
 
+/// How many keys hold a number.
+pub(crate) fn assigned_count(map: &BTreeMap<u8, SpeedDialEntry>) -> usize {
+    map.values()
+        .filter(|e| !e.number_raw.trim().is_empty())
+        .count()
+}
+
 /// The digit a row id (`set-sd-N`) stands for.
 pub(crate) fn digit_of(id: &str) -> Option<u8> {
     ROW_IDS
@@ -188,6 +199,27 @@ impl PhoneApp {
     pub(crate) fn speed_dial_tap(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let map = self.backend.read(cx).prefs().speed_dial.clone();
         match id {
+            SHARE_ID => {
+                let text = speed_dial::list_text(&map);
+                if !text.is_empty() {
+                    let outcome = crate::backend::share_text(&text);
+                    if outcome != crate::backend::Outcome::Done {
+                        self.show_notice_pill(
+                            outcome.why_not("Couldn't open the share sheet"),
+                            None,
+                            false,
+                            cx,
+                        );
+                    }
+                }
+            }
+            CLEAR_ID => {
+                if assigned_count(&map) > 0 {
+                    self.speed_dial.menu = None;
+                    self.sheet_kind = crate::SheetKind::ClearSpeedDial;
+                    self.sheet.open();
+                }
+            }
             CHANGE_ID => {
                 if let Some(digit) = self.speed_dial.menu {
                     self.speed_dial_pick(digit, window, cx);
@@ -222,6 +254,124 @@ impl PhoneApp {
             }
         }
         cx.notify();
+    }
+
+    /// The confirm sheet's buttons.
+    pub(crate) fn speed_dial_sheet_act(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if id == CLEAR_YES {
+            let mut old = BTreeMap::new();
+            self.backend.update(cx, |backend, cx| {
+                backend.update_prefs(cx, |prefs| {
+                    old = speed_dial::clear_all(&mut prefs.speed_dial)
+                });
+            });
+            self.sync_settings_rows(cx, false);
+            rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+            if old.is_empty() {
+                self.show_notice_pill("Nothing to clear", None, false, cx);
+            } else {
+                self.show_pill_action(
+                    speed_dial::CLEARED_TEXT,
+                    "Undo",
+                    PillAction::RestoreSpeedDialAll(old),
+                    cx,
+                );
+            }
+        }
+        self.close_sheet(cx);
+    }
+
+    /// Undo of Clear all.
+    pub(crate) fn speed_dial_restore_all(
+        &mut self,
+        old: BTreeMap<u8, SpeedDialEntry>,
+        cx: &mut Context<Self>,
+    ) {
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| p.speed_dial = old)
+        });
+        self.sync_settings_rows(cx, false);
+        cx.notify();
+    }
+
+    /// The confirm sheet of Clear all.
+    pub(crate) fn speed_dial_clear_sheet(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.sheet.is_visible() {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        let (title, text) = speed_dial::clear_all_confirm(assigned_count(
+            &self.backend.read(cx).prefs().speed_dial,
+        ));
+        let button = |id: &'static str,
+                      label: &'static str,
+                      fill: Hsla,
+                      ink: Hsla,
+                      cx: &mut Context<Self>| {
+            let press = self.presses.value(id).clamp(0.0, 1.0);
+            div()
+                .id(id)
+                .role(Role::Button)
+                .aria_label(label)
+                .relative()
+                .h(px(52.0))
+                .rounded_full()
+                .bg(rovsti_ui::tokens::mix(fill, gpui::white(), 0.16 * press))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(typography::HEADLINE.size)
+                .font_weight(typography::HEADLINE.weight)
+                .text_color(ink)
+                .child(label)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.presses.down(id);
+                        this.speed_dial_sheet_act(id, window, cx);
+                    }),
+                )
+                .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
+        };
+        let body = div()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .px(px(18.0))
+            .pb(px(18.0))
+            .child(
+                div()
+                    .text_size(typography::TITLE3.size)
+                    .font_weight(typography::TITLE3.weight)
+                    .text_color(colors.label)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_size(typography::SUBHEADLINE.size)
+                    .text_color(colors.secondary_label)
+                    .child(text),
+            )
+            .child(button(
+                CLEAR_YES,
+                "Clear all",
+                call_colors(theme).danger,
+                gpui::white(),
+                cx,
+            ))
+            .child(button(CLEAR_NO, "Cancel", colors.fill, colors.label, cx))
+            .into_any_element();
+        self.modal_sheet(theme, window, "Clear speed dial", body, cx)
     }
 
     /// Leaves Settings for the Contacts tab, where the next number tapped in a
@@ -360,7 +510,8 @@ impl PhoneApp {
 
     pub(crate) fn speed_dial_body(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
-        let list = rows(&self.backend.read(cx).prefs().speed_dial);
+        let map = self.backend.read(cx).prefs().speed_dial.clone();
+        let list = rows(&map);
         let mut children: Vec<AnyElement> = Vec::new();
         for (i, row) in list.iter().enumerate() {
             let open = self.speed_dial.menu == Some(row.digit);
@@ -379,6 +530,20 @@ impl PhoneApp {
             .flex()
             .flex_col()
             .gap(px(8.0))
+            .children((assigned_count(&map) > 0).then(|| {
+                div()
+                    .mx(px(16.0))
+                    .flex()
+                    .gap(px(8.0))
+                    .child(self.speed_dial_action(theme, SHARE_ID, "Share", colors.accent, cx))
+                    .child(self.speed_dial_action(
+                        theme,
+                        CLEAR_ID,
+                        "Clear all",
+                        call_colors(theme).danger,
+                        cx,
+                    ))
+            }))
             .child(
                 div()
                     .mx(px(16.0))
@@ -399,6 +564,47 @@ impl PhoneApp {
                     .text_color(colors.secondary_label)
                     .child("Hold a number on the keypad to call it. Speed dial only works on an empty number field."),
             )
+            .into_any_element()
+    }
+
+    /// One of the header buttons (Share, Clear all).
+    fn speed_dial_action(
+        &self,
+        theme: Theme,
+        id: &'static str,
+        label: &'static str,
+        ink: Hsla,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        let press = self.presses.value(id).clamp(0.0, 1.0);
+        div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(label)
+            .relative()
+            .flex_1()
+            .h(px(40.0))
+            .rounded_full()
+            .bg(Hsla {
+                a: 0.7 + 0.2 * press,
+                ..colors.fill
+            })
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(typography::SUBHEADLINE.size)
+            .font_weight(typography::HEADLINE.weight)
+            .text_color(ink)
+            .child(label)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    this.presses.down(id);
+                    this.settings_tap(id, window, cx);
+                }),
+            )
+            .child(touch_surface(Self::touch_listener(cx, Some(id.into()))))
             .into_any_element()
     }
 
@@ -546,6 +752,17 @@ mod tests {
             number_raw: number.into(),
             name: name.into(),
         }
+    }
+
+    #[test]
+    fn assigned_count_ignores_blank_numbers() {
+        let mut map = BTreeMap::new();
+        assert_eq!(assigned_count(&map), 0);
+        map.insert(2, entry("Ann", "0301"));
+        map.insert(3, entry("Bob", "  "));
+        assert_eq!(assigned_count(&map), 1);
+        assert!(CLEAR_ID.starts_with(crate::settings_ui::Sub::SpeedDial.prefix()));
+        assert!(SHARE_ID.starts_with(crate::settings_ui::Sub::SpeedDial.prefix()));
     }
 
     #[test]

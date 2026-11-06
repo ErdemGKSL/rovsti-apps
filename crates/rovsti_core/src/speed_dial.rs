@@ -175,6 +175,18 @@ pub fn clear_all(map: &mut BTreeMap<u8, SpeedDialEntry>) -> BTreeMap<u8, SpeedDi
     std::mem::take(map)
 }
 
+/// The confirm sheet of Clear all: title and body for `count` assigned keys.
+pub fn clear_all_confirm(count: usize) -> (&'static str, String) {
+    let body = match count {
+        1 => "1 number will be removed from keys 2-9.".to_owned(),
+        n => format!("{n} numbers will be removed from keys 2-9."),
+    };
+    ("Clear speed dial?", body)
+}
+
+/// The pill after Clear all.
+pub const CLEARED_TEXT: &str = "Speed dial cleared";
+
 #[cfg(test)]
 mod tests {
     fn dial_entry(name: &str, number: &str) -> SpeedDialEntry {
@@ -200,6 +212,22 @@ mod tests {
     #[test]
     fn list_text_empty() {
         assert_eq!(list_text(&BTreeMap::new()), "");
+    }
+
+    #[test]
+    fn clear_all_confirm_copy() {
+        assert_eq!(
+            clear_all_confirm(1),
+            (
+                "Clear speed dial?",
+                "1 number will be removed from keys 2-9.".to_owned()
+            )
+        );
+        assert_eq!(
+            clear_all_confirm(3).1,
+            "3 numbers will be removed from keys 2-9."
+        );
+        assert_eq!(CLEARED_TEXT, "Speed dial cleared");
     }
 
     #[test]

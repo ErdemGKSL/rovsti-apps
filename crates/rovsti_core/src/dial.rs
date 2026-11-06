@@ -291,6 +291,16 @@ impl FieldAction {
     }
 }
 
+/// The pill after a field-menu action that has feedback of its own (Paste
+/// reports through `paste_press`).
+pub fn field_done_text(action: FieldAction) -> &'static str {
+    match action {
+        FieldAction::Copy => "Copied",
+        FieldAction::Clear => "Cleared",
+        FieldAction::Paste => "Pasted",
+    }
+}
+
 /// The menu for the number field: Copy and Clear need typed digits, Paste
 /// needs text on the clipboard.
 pub fn field_menu(dialed: &str, clipboard_has_text: bool) -> Vec<FieldAction> {
@@ -324,6 +334,13 @@ mod tests {
         assert_eq!(Copy.label(), "Copy");
         assert_eq!(Paste.label(), "Paste");
         assert_eq!(Clear.label(), "Clear");
+    }
+
+    #[test]
+    fn field_done_texts() {
+        assert_eq!(field_done_text(FieldAction::Copy), "Copied");
+        assert_eq!(field_done_text(FieldAction::Clear), "Cleared");
+        assert_eq!(field_done_text(FieldAction::Paste), "Pasted");
     }
 
     use super::*;

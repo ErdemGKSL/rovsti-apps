@@ -781,6 +781,7 @@ impl PhoneApp {
     /// The selected tab changed (or the app was reopened on one).
     pub(crate) fn recents_tab_changed(&mut self, cx: &mut Context<Self>) {
         self.recents.view_task = None;
+        self.close_field_menu();
         self.recents.marked = false;
         self.recents.touch = None;
         self.call_note = None;

@@ -116,6 +116,8 @@ enum SheetKind {
     Reply,
     /// "Reset quick replies?" (story 18.3).
     ResetReplies,
+    /// "Clear speed dial?" (`speed_dial_ui::speed_dial_clear_sheet`).
+    ClearSpeedDial,
     /// "Delete calls with {who}?" / "Delete all call history?" (`history_ui`).
     ConfirmDelete,
     /// Every T9 match behind the keypad strip's "N more" (`keypad::t9_results_sheet`).
@@ -162,6 +164,8 @@ struct PhoneApp {
     t9: keypad::T9Match,
     /// The open "Copy as" / "Share as" chooser.
     copy_as: Option<actions_ui::CopyAs>,
+    /// The keypad field's long-press menu (`keypad::field_menu_overlay`).
+    field_menu: Option<Vec<rovsti_core::dial::FieldAction>>,
     quick_reply: Option<person_ui::QuickReply>,
     remind_pick: Option<remind_ui::RemindPick>,
     /// The open in-call note card (`incall_note`).
@@ -549,6 +553,7 @@ impl PhoneApp {
             dial_match: keypad::DialMatch::default(),
             t9: keypad::T9Match::default(),
             copy_as: None,
+            field_menu: None,
             quick_reply: None,
             remind_pick: None,
             incall_note: None,
@@ -1470,6 +1475,7 @@ impl PhoneApp {
             // Drawn over the In-Call screen by `add_call_overlay`; the reply sheet by `reply_overlay`.
             SheetKind::AddCall | SheetKind::SimChooser | SheetKind::Reply => None,
             SheetKind::ResetReplies => self.replies_reset_sheet(theme, window, cx),
+            SheetKind::ClearSpeedDial => self.speed_dial_clear_sheet(theme, window, cx),
             SheetKind::ConfirmDelete => self.confirm_delete_sheet(theme, window, cx),
             SheetKind::T9Results => self.t9_results_sheet(theme, window, cx),
             SheetKind::CopyAs => self.copy_as_sheet(theme, window, cx),

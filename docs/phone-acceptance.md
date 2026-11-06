@@ -325,6 +325,23 @@ that accepts photo writes (the system Contacts app does).
 | R2-U10f | Pick something that is not an image. | Pill "That is not an image"; nothing changes. | | |
 | R2-U10g | With the menu open press Back. | The menu closes first; a second Back closes the viewer. | | |
 
+## Round 3 utilities (U12-U14, U16, U20-U22, U24)
+
+| ID | Steps | Expected | Result | Notes |
+|---|---|---|---|---|
+| R3-U12 | Recents, Select, tick rows (or Select all), Delete. | Title shows "n selected"; a confirm sheet; pill "Deleted n" with Undo restoring all rows. Back leaves select mode. | | |
+| R3-U13 | Row menu, Remind me, pick a time. | Pill with the time and Undo; a notification at that time; "Cancel reminder" in the menu removes it (Undo re-arms). | | |
+| R3-U14a | Type a number and hold the number field for half a second. | A haptic and a glass popover above the field with Copy, Paste (only if the clipboard has text) and Clear. A tap outside closes it. | | |
+| R3-U14b | Copy, then Paste into an empty field. | Pill "Copied"; Paste fills the field. | | |
+| R3-U14c | Clear. | Field empties, pill "Cleared" with Undo; Undo brings the number back. | | |
+| R3-U16 | Number or Contact sheet, Export calls. | The document picker saves a CSV; pill "Exported n calls" or "No calls to export". | | |
+| R3-U20 | Missed call row menu, Send a quick reply, choose a text. | The messages app opens with the text. | | |
+| R3-U21 | Recents search for a word from a note. | Calls whose note contains it are listed. | | |
+| R3-U22a | Settings, Speed dial, tap Share (visible only with assignments). | The share sheet opens with "Speed dial" and one line per key. | | |
+| R3-U22b | Tap Clear all. | Sheet "Clear speed dial?" with the count; Cancel changes nothing. | | |
+| R3-U22c | Confirm Clear all. | Keys 2-9 are free, pill "Speed dial cleared" with Undo; Undo restores every entry. | | |
+| R3-U24 | Recents, Delete all, confirm. | Pill with Undo; Undo restores the whole log. | | |
+
 ## In-call note and copy number
 
 - On a connected or held call with a number, tap "Note" under the status line, type, press Done: the pill says "Note saved" and the capsule shows a check.

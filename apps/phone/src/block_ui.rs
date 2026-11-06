@@ -76,6 +76,10 @@ pub(crate) enum PillAction {
     CancelReminder(i64),
     /// Undo of Cancel reminder: arm it again.
     RestoreReminder(Box<rovsti_core::reminder::Reminder>),
+    /// Undo of the keypad field's Clear: the typed number comes back.
+    RestoreDialed(SharedString),
+    /// Undo of Speed dial Clear all: every assignment comes back.
+    RestoreSpeedDialAll(std::collections::BTreeMap<u8, rovsti_core::settings::SpeedDialEntry>),
 }
 
 /// The menu's Delete label for a row that stands for `count` calls.
@@ -334,6 +338,11 @@ impl PhoneApp {
             PillAction::GrantMic => self.grant_mic(cx),
             PillAction::CancelReminder(id) => self.remind_undo(id, cx),
             PillAction::RestoreReminder(r) => self.remind_restore(*r, cx),
+            PillAction::RestoreDialed(old) => {
+                self.restore_dialed(&old);
+                cx.notify();
+            }
+            PillAction::RestoreSpeedDialAll(old) => self.speed_dial_restore_all(old, cx),
         }
     }
 

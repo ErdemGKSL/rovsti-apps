@@ -49,14 +49,14 @@ Still missing (checked by grep at baseSha):
 | U17 | In-call Note button, long-press caller number to copy | done R2 |
 | U18 | Share a person's call statistics as text | done R2 |
 | U19 | CSV export gains a `note` column | done R2 |
-| U21 | Notes search: the Recents search text also matches note text | planned R3 (S1, S4) |
-| U24 | Delete all call history gains Undo (snapshot, `RestoreCalls`) | planned R3 (S4) |
-| U12 | Recents select mode: multi-select, Select all, Delete n with a confirm and Undo | planned R3 (S1, S5) |
-| U20 | Missed-call row menu and Number sheet: "Send a quick reply" (composer opens with the text) | planned R3 (S2, S3, S6) |
-| U16 | Export one person's call history (CSV) from the Number/Contact sheet | planned R3 (S1, S6) |
-| U13 | "Call back later" reminder (15 min / 1 h / tonight / tomorrow) with Undo and Cancel | planned R3 (S2, S3, S7) |
-| U14 | Keypad field long-press menu: Copy / Paste / Clear (with Undo) | planned R3 (S2, S8) |
-| U22 | Speed dial page: Share the list as text, Clear all with a confirm and Undo | planned R3 (S2, S8) |
+| U21 | Notes search: the Recents search text also matches note text | done R3 (S1, S4) |
+| U24 | Delete all call history gains Undo (snapshot, `RestoreCalls`) | done R3 (S4) |
+| U12 | Recents select mode: multi-select, Select all, Delete n with a confirm and Undo | done R3 (S1, S5) |
+| U20 | Missed-call row menu and Number sheet: "Send a quick reply" (composer opens with the text) | done R3 (S2, S3, S6) |
+| U16 | Export one person's call history (CSV) from the Number/Contact sheet | done R3 (S1, S6) |
+| U13 | "Call back later" reminder (15 min / 1 h / tonight / tomorrow) with Undo and Cancel | done R3 (S2, S3, S7) |
+| U14 | Keypad field long-press menu: Copy / Paste / Clear (with Undo) | done R3 (S2, S8) |
+| U22 | Speed dial page: Share the list as text, Clear all with a confirm and Undo | done R3 (S2, S8) |
 | U15 | Recents sticky day capsule (Today, Yesterday, weekday, date) over the list | backlog R4 |
 | U23 | Haptic and pill feedback audit over every utility | backlog R4 |
 | U25 | Recents "Copy number" from a long-press on the row's name (no menu) | backlog R4 |

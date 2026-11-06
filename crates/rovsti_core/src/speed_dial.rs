@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use crate::avatar;
+use crate::call::format_number;
 use crate::phone_number::PhoneNumber;
 use crate::settings::{MAX_FIELD_CHARS, SPEED_DIAL_DIGITS, SpeedDialEntry};
 
@@ -146,8 +147,72 @@ pub fn assigned_text(digit: u8, name: &str, previous: Option<&SpeedDialEntry>) -
     }
 }
 
+/// The list as shareable text, one line per assigned digit in order. Empty
+/// when nothing is assigned.
+pub fn list_text(map: &BTreeMap<u8, SpeedDialEntry>) -> String {
+    let lines: Vec<String> = map
+        .iter()
+        .filter(|(_, e)| !e.number_raw.trim().is_empty())
+        .map(|(digit, e)| {
+            let raw = e.number_raw.trim();
+            let number =
+                PhoneNumber::parse(raw).map_or_else(|_| raw.to_owned(), |n| format_number(&n));
+            match e.name.trim() {
+                "" => format!("{digit}  {number}"),
+                name => format!("{digit}  {name}  {number}"),
+            }
+        })
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("Speed dial\n{}", lines.join("\n"))
+}
+
+/// Removes every assignment (digit 1 is voicemail and never stored) and
+/// returns the old map for Undo.
+pub fn clear_all(map: &mut BTreeMap<u8, SpeedDialEntry>) -> BTreeMap<u8, SpeedDialEntry> {
+    std::mem::take(map)
+}
+
 #[cfg(test)]
 mod tests {
+    fn dial_entry(name: &str, number: &str) -> SpeedDialEntry {
+        SpeedDialEntry {
+            lookup_key: String::new(),
+            number_raw: number.into(),
+            name: name.into(),
+        }
+    }
+
+    #[test]
+    fn list_text_orders_and_groups() {
+        let mut map = BTreeMap::new();
+        map.insert(5, dial_entry("", "weird"));
+        map.insert(2, dial_entry("Anna Smith", "+905321234567"));
+        map.insert(3, dial_entry("Gone", "  "));
+        assert_eq!(
+            list_text(&map),
+            "Speed dial\n2  Anna Smith  +90 532 123 45 67\n5  weird"
+        );
+    }
+
+    #[test]
+    fn list_text_empty() {
+        assert_eq!(list_text(&BTreeMap::new()), "");
+    }
+
+    #[test]
+    fn clear_all_returns_old_map() {
+        let mut map = BTreeMap::new();
+        map.insert(2, dial_entry("A", "123456"));
+        let old = clear_all(&mut map);
+        assert!(map.is_empty());
+        assert_eq!(old.len(), 1);
+        assert_eq!(old[&2].name, "A");
+        assert!(clear_all(&mut map).is_empty());
+    }
+
     use super::*;
 
     fn entry(number: &str) -> SpeedDialEntry {

@@ -273,8 +273,59 @@ pub fn is_emergency(typed: &str, list: &crate::wire::EmergencyList) -> bool {
     ALWAYS_EMERGENCY.iter().any(|n| same(n)) || list.numbers.iter().any(|n| same(n))
 }
 
+/// An action in the keypad number field's long-press menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldAction {
+    Copy,
+    Paste,
+    Clear,
+}
+
+impl FieldAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Copy => "Copy",
+            Self::Paste => "Paste",
+            Self::Clear => "Clear",
+        }
+    }
+}
+
+/// The menu for the number field: Copy and Clear need typed digits, Paste
+/// needs text on the clipboard.
+pub fn field_menu(dialed: &str, clipboard_has_text: bool) -> Vec<FieldAction> {
+    let mut out = Vec::new();
+    if !dialed.is_empty() {
+        out.push(FieldAction::Copy);
+    }
+    if clipboard_has_text {
+        out.push(FieldAction::Paste);
+    }
+    if !dialed.is_empty() {
+        out.push(FieldAction::Clear);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn field_menu_matrix() {
+        use FieldAction::{Clear, Copy, Paste};
+        let cases = [
+            ("", false, vec![]),
+            ("", true, vec![Paste]),
+            ("123", false, vec![Copy, Clear]),
+            ("123", true, vec![Copy, Paste, Clear]),
+        ];
+        for (dialed, clip, want) in cases {
+            assert_eq!(field_menu(dialed, clip), want, "{dialed:?} {clip}");
+        }
+        assert_eq!(Copy.label(), "Copy");
+        assert_eq!(Paste.label(), "Paste");
+        assert_eq!(Clear.label(), "Clear");
+    }
+
     use super::*;
 
     #[test]

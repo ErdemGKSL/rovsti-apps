@@ -32,6 +32,7 @@ pub mod otp;
 pub mod perf;
 pub mod phone_number;
 pub mod recents;
+pub mod reminder;
 pub mod scene;
 pub mod schedule;
 pub mod search;

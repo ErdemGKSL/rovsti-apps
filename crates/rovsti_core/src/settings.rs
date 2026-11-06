@@ -37,6 +37,22 @@ pub const DEFAULT_REPLIES: [&str; 3] = [
     "Can you text me instead?",
 ];
 
+/// The quick replies to offer: the non-empty trimmed ones, or
+/// [`DEFAULT_REPLIES`] when none are set.
+pub fn reply_choices(prefs_replies: &[String]) -> Vec<String> {
+    let set: Vec<String> = prefs_replies
+        .iter()
+        .map(|r| r.trim())
+        .filter(|r| !r.is_empty())
+        .map(str::to_owned)
+        .collect();
+    if set.is_empty() {
+        default_replies()
+    } else {
+        set
+    }
+}
+
 fn default_replies() -> Vec<String> {
     DEFAULT_REPLIES.iter().map(|s| (*s).to_owned()).collect()
 }
@@ -567,6 +583,19 @@ mod tone_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reply_choices_trims_and_falls_back() {
+        let set = vec![
+            "  Hi ".to_owned(),
+            String::new(),
+            " ".to_owned(),
+            "Bye".into(),
+        ];
+        assert_eq!(reply_choices(&set), ["Hi", "Bye"]);
+        assert_eq!(reply_choices(&[]), DEFAULT_REPLIES);
+        assert_eq!(reply_choices(&[" ".to_owned()]), DEFAULT_REPLIES);
+    }
+
     use super::*;
 
     fn entry(key: &str, number: &str) -> SpeedDialEntry {

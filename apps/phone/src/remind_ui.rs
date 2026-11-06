@@ -139,7 +139,13 @@ impl PhoneApp {
         if let Some(old) = old {
             backend::disarm_reminder(old.id);
         }
-        let text = reminder::set_text(&r, now, tz);
+        let mut text = reminder::set_text(&r, now, tz);
+        let backend_ref = self.backend.read(cx);
+        if backend_ref.permissions_known() && !backend_ref.permissions().notifications.is_granted()
+        {
+            // The alarm would fire into the void; say so instead of failing silently.
+            text.push_str(" (notifications are off)");
+        }
         let id = r.id;
         self.backend.update(cx, |b, cx| {
             let mut list: Vec<Reminder> = b

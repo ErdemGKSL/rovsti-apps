@@ -106,6 +106,7 @@ impl PhoneApp {
                 this.notes.dir = Some(dir);
                 if let Some(stored) = stored {
                     this.notes.loaded(stored);
+                    this.sync_recents_notes(cx);
                     cx.notify();
                 }
             })
@@ -116,6 +117,7 @@ impl PhoneApp {
 
     /// Writes the notes off the UI thread. Call it after every change.
     pub(crate) fn save_notes(&mut self, cx: &mut Context<Self>) {
+        self.sync_recents_notes(cx);
         let Some(dir) = self.notes.dir.clone() else {
             return;
         };

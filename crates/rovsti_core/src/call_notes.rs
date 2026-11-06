@@ -142,15 +142,25 @@ impl Notes {
     /// `folded_text` once folded with `search::fold`. False for empty text and
     /// for a private or unparsable number.
     pub fn mentions(&self, number: &str, first_ms: i64, last_ms: i64, folded_text: &str) -> bool {
+        self.matching(number, first_ms, last_ms, folded_text)
+            .is_some()
+    }
+
+    /// The first note [`Self::mentions`] would match, for showing a preview.
+    pub fn matching(
+        &self,
+        number: &str,
+        first_ms: i64,
+        last_ms: i64,
+        folded_text: &str,
+    ) -> Option<&CallNote> {
         if folded_text.is_empty() {
-            return false;
+            return None;
         }
-        let Some(wanted) = parse_number(number) else {
-            return false;
-        };
+        let wanted = parse_number(number)?;
         let lo = first_ms.saturating_sub(MATCH_WINDOW_MS);
         let hi = last_ms.saturating_add(MATCH_WINDOW_MS);
-        self.notes.iter().any(|n| {
+        self.notes.iter().find(|n| {
             (lo..=hi).contains(&n.at_ms)
                 && fold(&n.text).contains(folded_text)
                 && parse_number(&n.number).is_some_and(|p| p.matches(&wanted))
@@ -513,5 +523,15 @@ mod tests {
         );
         assert_eq!(w.channel, "WhatsApp");
         assert_eq!(w.title, "WhatsApp Incoming call");
+    }
+
+    #[test]
+    fn matching_returns_the_note_text() {
+        let mut notes = Notes::default();
+        notes.set("+905551112233", T, "Bring the Invoice", T);
+        let hit = notes.matching("0555 111 22 33", T, T, "invoice");
+        assert_eq!(hit.map(|n| n.text.as_str()), Some("Bring the Invoice"));
+        assert!(notes.matching("0555 111 22 33", T, T, "other").is_none());
+        assert!(notes.matching("0555 111 22 33", T, T, "").is_none());
     }
 }

@@ -25,6 +25,7 @@ use gpui::{
 use rovsti_core::{
     call_log::RecentsRow,
     call_log_query::{self, Query, RecentsFilter},
+    call_notes::{self, Notes},
     recents::{self, Direction, RowView},
     sim::SimInfo,
 };
@@ -224,6 +225,11 @@ pub(crate) struct RecentsView {
     /// every row lookup go through it; rebuilt on a new snapshot or a query
     /// change, never per frame.
     visible: Vec<usize>,
+    /// The call notes the search reads, and the store revision they came from.
+    notes: Notes,
+    notes_rev: u64,
+    /// Rows (indices into `rows`) that pass only through their note, with its preview.
+    note_hits: std::collections::HashMap<usize, SharedString>,
     /// The search field under the title.
     pub(crate) field: gpui::Entity<SearchField>,
     seen_edits: u64,
@@ -287,6 +293,9 @@ impl RecentsView {
             merged: Arc::from(Vec::new()),
             query: Query::default(),
             visible: Vec::new(),
+            notes: Notes::default(),
+            notes_rev: 0,
+            note_hits: std::collections::HashMap::new(),
             field: cx.new(SearchField::new),
             seen_edits: 0,
             field_text: SharedString::default(),
@@ -344,7 +353,13 @@ impl RecentsView {
 
     /// Recomputes `visible` from the current rows and query.
     fn reveal(&mut self) {
-        self.visible = call_log_query::apply(&self.merged, &self.query);
+        self.visible = call_log_query::apply_with_notes(&self.merged, &self.query, &self.notes);
+        self.note_hits = note_only_hits(&self.merged, &self.visible, &self.query, &self.notes);
+    }
+
+    /// The note preview of list position `index`, when the row matched only by its note.
+    pub(crate) fn note_hit(&self, index: usize) -> Option<&SharedString> {
+        self.note_hits.get(self.visible.get(index)?)
     }
 
     /// Applies a new query: recomputes the visible rows and puts the list back
@@ -397,6 +412,35 @@ impl RecentsView {
 #[cfg(test)]
 thread_local! {
     pub(crate) static ROWS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Rows in `visible` that fail the plain name/number match: they passed through
+/// a note, so the row shows `Note: <preview>`.
+fn note_only_hits(
+    merged: &[RecentsRow],
+    visible: &[usize],
+    query: &Query,
+    notes: &Notes,
+) -> std::collections::HashMap<usize, SharedString> {
+    let mut hits = std::collections::HashMap::new();
+    let text = query.text.trim();
+    if text.chars().count() < 2 {
+        return hits;
+    }
+    let folded = rovsti_core::search::fold(text);
+    for &i in visible {
+        let row = &merged[i];
+        if call_log_query::matches(row, &query.text) {
+            continue;
+        }
+        if let Some(note) = notes.matching(&row.number_raw, row.first_ms, row.last_ms, &folded) {
+            hits.insert(
+                i,
+                SharedString::from(format!("Note: {}", call_notes::preview(&note.text))),
+            );
+        }
+    }
+    hits
 }
 
 fn press_id(index: usize, zone: Zone) -> SharedString {
@@ -564,6 +608,20 @@ impl PhoneApp {
         }
     }
 
+    /// The call notes changed: the search reads the new ones.
+    pub(crate) fn sync_recents_notes(&mut self, cx: &mut Context<Self>) {
+        if self.recents.notes_rev == self.notes.rev() {
+            return;
+        }
+        self.recents.notes = self.notes.snapshot();
+        self.recents.notes_rev = self.notes.rev();
+        if self.recents.query.text.trim().is_empty() {
+            return;
+        }
+        self.recents.reveal();
+        cx.notify();
+    }
+
     /// The WhatsApp call history changed: its rows and the missed count follow.
     pub(crate) fn sync_wa_history(&mut self, cx: &mut Context<Self>) {
         if self.wa_call.read(cx).history_rev() == self.recents.wa_history_seen {
@@ -693,6 +751,8 @@ impl PhoneApp {
         );
         self.recents.rows = rows.into();
         self.recents.merged = merged.into();
+        self.recents.notes = self.notes.snapshot();
+        self.recents.notes_rev = self.notes.rev();
         self.recents.reveal();
         self.recents.built_at = Some(Instant::now());
         self.recents.log = Some(log);
@@ -1251,7 +1311,7 @@ impl PhoneApp {
             .child(if text.is_empty() && !typing {
                 div()
                     .text_color(colors.tertiary_label)
-                    .child("Search calls")
+                    .child("Search names, numbers, notes")
                     .into_any_element()
             } else {
                 div()
@@ -1481,7 +1541,7 @@ impl PhoneApp {
                         i,
                         vm,
                         (row_press, info_press),
-                        r.sims.visible(),
+                        (r.sims.visible(), r.note_hit(i)),
                         fx,
                         photo,
                     );
@@ -2340,7 +2400,7 @@ fn recents_row(
     index: usize,
     vm: &RowVm,
     (row_press, info_press): (f32, f32),
-    sim_slot: bool,
+    (sim_slot, note): (bool, Option<&SharedString>),
     fx: Option<crate::block_ui::RowFx>,
     photo: Option<(Arc<RenderImage>, f32)>,
 ) -> AnyElement {
@@ -2468,7 +2528,7 @@ fn recents_row(
                                         .min_w_0()
                                         .flex_1()
                                         .truncate()
-                                        .child(vm.subtitle.clone()),
+                                        .child(note.unwrap_or(&vm.subtitle).clone()),
                                 )
                                 // Reserved 36 px at the trailing end: only with two SIMs, and empty
                                 // when the log's key matches no account.
@@ -2719,5 +2779,36 @@ mod tests {
         );
         assert!(!"sheet-nhist-edit".starts_with("sheet-del-"));
         assert!(!"sheet-chist-edit".starts_with("sheet-del-"));
+    }
+
+    #[test]
+    fn note_only_matches_show_a_preview() {
+        let row = |name: Option<&str>| RecentsRow {
+            number_raw: "+905551112233".into(),
+            normalized: "+905551112233".into(),
+            call_type: rovsti_core::call_log::CallType::Incoming,
+            count: 1,
+            first_ms: 1_000,
+            last_ms: 1_000,
+            name: name.map(Into::into),
+            label: None,
+            contact_id: None,
+            callable: true,
+            account_key: None,
+            whatsapp: false,
+            refs: vec![],
+        };
+        let mut notes = Notes::default();
+        notes.set("+905551112233", 1_000, "Bring the invoice", 1_000);
+        let merged = [row(None), row(Some("Invoice Corp"))];
+        let query = Query {
+            text: "invoice".into(),
+            ..Query::default()
+        };
+        let visible = call_log_query::apply_with_notes(&merged, &query, &notes);
+        assert_eq!(visible, vec![0, 1]);
+        let hits = note_only_hits(&merged, &visible, &query, &notes);
+        assert_eq!(hits.len(), 1, "the name match shows no note");
+        assert_eq!(hits[&0].as_ref(), "Note: Bring the invoice");
     }
 }

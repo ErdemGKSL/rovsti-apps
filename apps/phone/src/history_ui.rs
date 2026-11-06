@@ -13,6 +13,7 @@ use gpui::{
 use rovsti_core::{
     call_log::{EntryRef, blocked_ids_for_numbers, ids_for_numbers},
     recents::extra_ids_for_numbers,
+    wire::CallLogEntry,
 };
 use rovsti_ui::{
     motion::press_scale,
@@ -43,6 +44,9 @@ pub(crate) const CONTACT_SHEET_DELETE: &str = "sheet-chist-del";
 const YES: &str = "sheet-del-yes";
 const NO: &str = "sheet-del-no";
 
+/// Above this many entries Delete all keeps no snapshot, so it has no Undo.
+pub(crate) const UNDO_CAP: usize = 5000;
+
 /// Title and body of the confirm sheet; `count` is how many calls go.
 pub(crate) fn confirm_text(scope: &DeleteScope, count: usize) -> (String, String) {
     match scope {
@@ -56,11 +60,15 @@ pub(crate) fn confirm_text(scope: &DeleteScope, count: usize) -> (String, String
             format!("Delete calls with {who}?"),
             format!("{count} calls will be removed from this phone's call log."),
         ),
-        DeleteScope::All => (
-            "Delete all call history?".to_owned(),
-            "This removes every entry from this phone's call log. Missed-call count goes to 0."
-                .to_owned(),
-        ),
+        DeleteScope::All => {
+            let mut body =
+                "This removes every entry from this phone's call log. Missed-call count goes to 0."
+                    .to_owned();
+            if count > UNDO_CAP {
+                body.push_str(" This can't be undone.");
+            }
+            ("Delete all call history?".to_owned(), body)
+        }
     }
 }
 
@@ -87,6 +95,15 @@ impl PhoneApp {
         };
         let wa = extra_ids_for_numbers(&self.wa_call.read(cx).recents_extras(), &numbers);
         (ids, wa)
+    }
+
+    /// Entries a delete-all would remove: the call log plus WhatsApp records.
+    fn all_calls_count(&self, cx: &gpui::App) -> usize {
+        let log = match self.backend.read(cx).call_log() {
+            backend::Load::Ready(log) => log.source.len(),
+            _ => 0,
+        };
+        log + self.wa_call.read(cx).all_records().len()
     }
 
     /// The person sheet's "Delete call history": swaps it for the confirm sheet.
@@ -127,6 +144,12 @@ impl PhoneApp {
     /// Settings > Data > Delete all call history, after the confirm sheet.
     fn delete_all_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         rovsti_ui::haptics::perform(window, HapticFeedback::Confirm);
+        let entries: Vec<CallLogEntry> = match self.backend.read(cx).call_log() {
+            backend::Load::Ready(log) => log.source.to_vec(),
+            _ => Vec::new(),
+        };
+        let records = self.wa_call.read(cx).all_records();
+        let undoable = entries.len() + records.len() <= UNDO_CAP;
         let task = self.backend.update(cx, |b, cx| b.delete_all_calls(cx));
         cx.spawn(async move |this, cx| {
             let outcome = task.await;
@@ -136,7 +159,19 @@ impl PhoneApp {
                         this.wa_call.update(cx, |ui, cx| {
                             ui.forget_all_calls(cx);
                         });
-                        this.show_notice_pill("Call history deleted", None, false, cx);
+                        if undoable {
+                            this.show_pill_action(
+                                "Call history deleted",
+                                "Undo",
+                                crate::block_ui::PillAction::RestoreCalls(
+                                    entries.into(),
+                                    records.into(),
+                                ),
+                                cx,
+                            );
+                        } else {
+                            this.show_notice_pill("Call history deleted", None, false, cx);
+                        }
                     }
                     backend::WriteOutcome::Permission => this.show_pill_action(
                         "Allow call log access",
@@ -165,7 +200,11 @@ impl PhoneApp {
         }
         let scope = self.confirm_delete.as_ref()?;
         let (ids, wa) = self.scope_ids(scope, cx);
-        let (title, text) = confirm_text(scope, ids.len() + wa.len());
+        let mut count = ids.len() + wa.len();
+        if matches!(scope, DeleteScope::All) {
+            count = self.all_calls_count(cx);
+        }
+        let (title, text) = confirm_text(scope, count);
         let colors = theme::colors(theme);
         let button = |id: &'static str,
                       label: &'static str,
@@ -331,9 +370,20 @@ mod tests {
     #[test]
     fn confirm_text_all() {
         let (t, b) = confirm_text(&DeleteScope::All, 99);
+        assert!(!b.contains("can't be undone"));
         assert_eq!(t, "Delete all call history?");
         assert!(b.starts_with("This removes every entry"));
         assert!(b.ends_with("Missed-call count goes to 0."));
+    }
+
+    #[test]
+    fn confirm_text_all_cap() {
+        let (_, at_cap) = confirm_text(&DeleteScope::All, UNDO_CAP);
+        assert!(!at_cap.contains("can't be undone"));
+        let (_, over) = confirm_text(&DeleteScope::All, 6000);
+        assert!(over.ends_with("This can't be undone."));
+        let (_, few) = confirm_text(&DeleteScope::All, 10);
+        assert!(!few.contains("can't be undone"));
     }
 
     #[test]

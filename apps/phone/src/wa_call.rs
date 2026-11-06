@@ -750,6 +750,11 @@ impl WaCallUi {
         self.history_changed(cx);
     }
 
+    /// Every WhatsApp call record (the snapshot Undo of a delete-all restores).
+    pub fn all_records(&self) -> Vec<WaCallRecord> {
+        self.history.iter().cloned().collect()
+    }
+
     /// Deletes the whole WhatsApp history. Returns how many calls went.
     pub fn forget_all_calls(&mut self, cx: &mut Context<Self>) -> usize {
         let count = self.history.forget_all();

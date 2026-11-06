@@ -156,8 +156,17 @@ TalkBack reads "5, speed dial Ayşe. Long press to call". Hold 7 (free): pill "N
   and asked on demand through `Group::Microphone` (Phone).
 - `apps/phone/_bmad-output/implementation-artifacts/sprint-status.yaml`: no status changes
   (20-2 keeps `backlog` until S33 ships).
-- Append a "Status" section to this file with the commits.
 
 ## Next round (candidates)
 - Re-audit after S1 to S5. Expected to leave only V5 items (device spikes, gated, P3 or release
   scripts by design).
+
+## Status
+
+Base `0d5213f`. All steps implemented and committed:
+
+- S1 `343992c` Pure logic and microphone permission seam (+tests)
+- S2 `a76b862` WhatsApp calls get a microphone (V1)
+- S3 `3ecf707` Call-outcome notices are transient (V2)
+- S4 `28c1ff4` Speed dial on the Keypad: badge, spoken name, Set picks the digit (V3, V4)
+- S5 Docs and plan status (acceptance rows R19 to R22, docs/android.md, this section); committed by the sync step

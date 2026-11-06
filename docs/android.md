@@ -204,7 +204,9 @@ The Kotlin side adds three small pieces to the bridge:
   (`USAGE_VOICE_COMMUNICATION`), 16 kHz mono PCM16, 960-sample frames passed as
   base64 through `waAudioStart`, `waAudioStop`, `waMicFrame` and `waPlayFrame`.
   `waAudioStart` sets `AudioManager.MODE_IN_COMMUNICATION` and returns `false`
-  without `RECORD_AUDIO`. Phone declares that permission in `gpuiforge.json`. The
+  without `RECORD_AUDIO`. Phone declares that permission in `gpuiforge.json` and in
+  the ejected manifest, and asks for it on demand through
+  `permissions::Group::Microphone` (first WhatsApp call, or the "Allow" pill). The
   speaker toggle is `rovsti_android::wa::call_audio_speaker`.
 - `WaIncoming`: the incoming WhatsApp call notification, `CallStyle.forIncomingCall`
   on channel `wa_calls` with a full-screen intent and Answer and Decline actions.

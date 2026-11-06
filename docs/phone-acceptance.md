@@ -207,6 +207,10 @@ Delete rows need the call log write permission (spike S12).
 | R16 | Deny the Contacts permission, then type a digit on the Keypad. | The status line reads "Allow Contacts to see matches" with "Grant access"; it asks for the permission (or opens app details when permanently denied) and is not shown again that session. | | |
 | R17 | Settings, Data: import a backup, then tap Undo in the pill. | The previous settings come back, the rows refresh and the pill reads "Import undone". | | |
 | R18 | Settings, Data: tap "Reset settings", then Undo. | Calls, sounds and display return to defaults with a "Settings reset" pill; Undo restores them. The row is dimmed ("Already the defaults") when nothing differs. | | |
+| R19 | Fresh install: place a WhatsApp call. Deny the microphone prompt; look at the pill; tap Allow. Repeat and deny with "Don't ask again", then tap Allow. | Android asks for the microphone on the first call. After a deny the pill reads "Allow the microphone so they can hear you" with Allow; allowing re-enables audio on the live call. When permanently denied, Allow opens App info. | | |
+| R20 | Place a call through the system phone app, or a WhatsApp call while another is in progress. | The outcome ("Placed through the system phone app", "Another call is in progress") shows as a 2 s pill and goes; rows behind stay tappable. "Connect" and "Grant" notices keep their banner. | | |
+| R21 | Settings, Speed dial: assign 5 to a contact; open the Keypad; use TalkBack on 5. | A coloured dot sits at the top-right of 5 only. TalkBack reads "5, speed dial {name}. Long press to call". | | |
+| R22 | Keypad: hold a free digit such as 7, tap Set in the "No speed dial on 7" pill. | Contacts opens with "Choose a contact for 7"; tapping a number assigns 7 without picking the digit again. | | |
 
 ## WhatsApp calls
 

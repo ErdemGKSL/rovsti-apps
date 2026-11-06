@@ -32,6 +32,8 @@ pub(crate) const CONTACT_SHARE: &str = "sheet-cst-share";
 /// Settings page ids (the page's prefix is `Sub::Stats.prefix()`).
 pub(crate) const SEGMENT_PREFIX: &str = "set-st-seg-";
 pub(crate) const PERSON_PREFIX: &str = "set-st-p-";
+/// The "Export CSV" pill of the page.
+pub(crate) const CSV_ID: &str = "set-st-csv";
 
 /// A non-zero value never draws thinner than this share of the chart height.
 const BAR_MIN: f32 = 0.04;
@@ -39,6 +41,16 @@ const SHEET_CHART_H: f32 = 56.0;
 const PAGE_CHART_H: f32 = 120.0;
 /// People listed on the page.
 const TOP_PEOPLE: usize = 10;
+
+/// The pill after an export started: how many people the file holds, or why
+/// nothing was exported.
+pub(crate) fn export_pill_text(people: usize) -> String {
+    match people {
+        0 => "No calls in this range".to_owned(),
+        1 => "Exported 1 person".to_owned(),
+        n => format!("Exported {n} people"),
+    }
+}
 
 /// Height of a bar as a share of the chart (0 to 1).
 pub(crate) fn bar_frac(v: u64, max: u64) -> f32 {
@@ -264,8 +276,15 @@ impl PhoneApp {
     }
 
     /// A control of the Settings page was pressed.
-    pub(crate) fn stats_tap(&mut self, id: &str, cx: &mut Context<Self>) {
-        if let Some(i) = id
+    pub(crate) fn stats_tap(
+        &mut self,
+        id: &str,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) {
+        if id == CSV_ID {
+            self.stats_export_csv(window, cx);
+        } else if let Some(i) = id
             .strip_prefix(SEGMENT_PREFIX)
             .and_then(|i| i.parse::<usize>().ok())
         {
@@ -282,6 +301,29 @@ impl PhoneApp {
             self.open_number_sheet_for(person.number, person.title, person.named, cx);
         }
         cx.notify();
+    }
+
+    /// Builds the per-person CSV of the chosen range and opens "save as".
+    fn stats_export_csv(&mut self, window: &mut gpui::Window, cx: &mut Context<Self>) {
+        let Some((calls, tz, _, _)) = self.stat_calls(cx) else {
+            self.show_notice_pill("Call history isn't loaded yet", None, false, cx);
+            return;
+        };
+        let range = self.stats.range;
+        let now = backend::now_ms();
+        let people = call_stats::top_people(&calls, range.since_ms(now, tz), usize::MAX);
+        if people.is_empty() {
+            self.show_notice_pill(export_pill_text(0), None, false, cx);
+            return;
+        }
+        let csv = call_stats::people_csv(&people, range);
+        let outcome = backend::export_calls(&call_stats::stats_csv_file_name(range, now, tz), &csv);
+        if outcome.failed() || outcome == backend::Outcome::NotAvailable {
+            self.show_notice_pill(outcome.why_not("Couldn't export"), None, false, cx);
+        } else {
+            rovsti_ui::haptics::perform(window, gpui::HapticFeedback::Confirm);
+            self.show_notice_pill(export_pill_text(people.len()), None, false, cx);
+        }
     }
 
     /// Opens the Number sheet of `number` (from a list that is not Recents).
@@ -640,7 +682,41 @@ impl PhoneApp {
                         .child(touch_surface(PhoneApp::touch_listener(cx, Some(id))))
                 })),
         )
+        .child(self.csv_pill(theme, cx))
         .into_any_element()
+    }
+
+    fn csv_pill(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let colors = theme::colors(theme);
+        let press = self.presses.value(CSV_ID).clamp(0.0, 1.0);
+        div()
+            .id(CSV_ID)
+            .role(Role::Button)
+            .aria_label("Export CSV")
+            .relative()
+            .mx(px(16.0))
+            .h(px(44.0))
+            .rounded_full()
+            .bg(mix(colors.fill, gpui::white(), 0.16 * press))
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_size(typography::SUBHEADLINE.size)
+            .font_weight(typography::HEADLINE.weight)
+            .text_color(colors.label)
+            .child("Export CSV")
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    this.presses.down(CSV_ID);
+                    this.settings_tap(CSV_ID, window, cx);
+                }),
+            )
+            .child(touch_surface(PhoneApp::touch_listener(
+                cx,
+                Some(CSV_ID.into()),
+            )))
+            .into_any_element()
     }
 }
 
@@ -671,6 +747,13 @@ mod tests {
             dir,
             whatsapp: false,
         }
+    }
+
+    #[test]
+    fn export_pill_texts() {
+        assert_eq!(export_pill_text(0), "No calls in this range");
+        assert_eq!(export_pill_text(1), "Exported 1 person");
+        assert_eq!(export_pill_text(12), "Exported 12 people");
     }
 
     #[test]
@@ -730,6 +813,8 @@ mod tests {
         use crate::settings_ui::Sub;
         assert!(SEGMENT_PREFIX.starts_with(Sub::Stats.prefix()));
         assert!(PERSON_PREFIX.starts_with(Sub::Stats.prefix()));
+        assert!(CSV_ID.starts_with(Sub::Stats.prefix()));
+        assert!(!CSV_ID.starts_with(SEGMENT_PREFIX) && !CSV_ID.starts_with(PERSON_PREFIX));
         assert!(!NUMBER_SHARE.starts_with("set-"));
         assert!(crate::details_ui::is_contact_id(CONTACT_SHARE));
         assert!(!crate::details_ui::is_contact_id(NUMBER_SHARE));

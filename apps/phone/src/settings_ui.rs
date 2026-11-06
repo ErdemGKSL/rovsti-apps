@@ -1019,7 +1019,7 @@ impl PhoneApp {
             } else if id.starts_with(Sub::SpeedDial.prefix()) {
                 self.speed_dial_tap(id, window, cx);
             } else if id.starts_with(Sub::Stats.prefix()) {
-                self.stats_tap(id, cx);
+                self.stats_tap(id, window, cx);
             }
             return;
         };

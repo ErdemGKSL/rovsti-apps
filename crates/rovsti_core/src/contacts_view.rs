@@ -203,6 +203,20 @@ pub fn clip_query(query: &str) -> String {
     format!("{head}…")
 }
 
+/// The number a search query stands for, when the query is a number: `None`
+/// if it has a letter or is not dialable, else the pasted form normalised.
+pub fn query_number(query: &str) -> Option<String> {
+    if query.chars().any(char::is_alphabetic) {
+        return None;
+    }
+    let number = crate::dial::normalise_paste(query);
+    if number.is_empty() {
+        return None;
+    }
+    crate::dial::validate(&number).ok()?;
+    Some(number)
+}
+
 /// Tile columns for a window `width_dp` wide: 2, or 3 from 440 dp.
 pub fn favorite_columns(width_dp: f32) -> usize {
     if width_dp >= 440.0 { 3 } else { 2 }
@@ -234,6 +248,24 @@ pub fn reordered_keys(shown: &[&WireContact], from: usize, to: usize) -> Vec<Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn query_number_accepts_numbers_only() {
+        use super::query_number;
+        assert_eq!(
+            query_number("0555 111 22 33").as_deref(),
+            Some("05551112233")
+        );
+        assert_eq!(
+            query_number(" +90 (555) 111-22-33 ").as_deref(),
+            Some("+905551112233")
+        );
+        assert_eq!(query_number("Ayse"), None);
+        assert_eq!(query_number("555 abc"), None);
+        assert_eq!(query_number(""), None);
+        assert_eq!(query_number("  "), None);
+        assert_eq!(query_number("-- ()"), None);
+    }
+
     use super::*;
 
     fn num(raw: &str, label: Option<&str>, default: bool) -> WireNumber {

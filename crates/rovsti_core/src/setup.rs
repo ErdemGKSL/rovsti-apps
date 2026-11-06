@@ -300,6 +300,29 @@ impl SetupChecklist {
     }
 }
 
+/// Banner text for reopened items; `None` when nothing reopened.
+pub fn changed_title(reopened: &[SetupItem]) -> Option<String> {
+    let (first, rest) = reopened.split_first()?;
+    Some(if rest.is_empty() {
+        format!("Something changed: {}", first.title())
+    } else {
+        format!(
+            "Something changed: {} and {} more",
+            first.title(),
+            rest.len()
+        )
+    })
+}
+
+/// The reopened items that are still not done in `now`.
+pub fn still_reopened(reopened: &[SetupItem], now: &SetupChecklist) -> Vec<SetupItem> {
+    reopened
+        .iter()
+        .copied()
+        .filter(|item| now.state_of(*item).is_some_and(|s| !s.is_done()))
+        .collect()
+}
+
 /// Builds the checklist. Xiaomi items appear only when `xiaomi` is true and
 /// are `Done` only when confirmed for exactly `app_version`; otherwise
 /// `Unverifiable`.
@@ -375,6 +398,30 @@ mod tests {
         lock_screen: Reading::Unknown,
         background_popups: Reading::Unknown,
     };
+
+    #[test]
+    fn changed_title_counts_items() {
+        assert_eq!(changed_title(&[]), None);
+        assert_eq!(
+            changed_title(&[Contacts]).as_deref(),
+            Some("Something changed: Contacts")
+        );
+        assert_eq!(
+            changed_title(&[Contacts, Notifications, DefaultPhoneApp]).as_deref(),
+            Some("Something changed: Contacts and 2 more")
+        );
+    }
+
+    #[test]
+    fn still_reopened_drops_fixed_items() {
+        let facts = SetupFacts {
+            contacts_granted: false,
+            ..ALL_GRANTED
+        };
+        let now = derive(facts, false, &XiaomiConfirmations::default(), "1");
+        assert_eq!(still_reopened(&[Contacts, Notifications], &now), [Contacts]);
+        assert!(still_reopened(&[], &now).is_empty());
+    }
 
     fn order(list: &SetupChecklist) -> Vec<SetupItem> {
         list.items().iter().map(|s| s.item).collect()

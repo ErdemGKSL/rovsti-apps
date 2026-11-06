@@ -199,6 +199,28 @@ pub fn ids_for_numbers(entries: &[CallLogEntry], numbers: &[&str]) -> Vec<i64> {
         .collect()
 }
 
+/// Ids of the blocked entries whose number is one of `numbers`: the mirror of
+/// [`ids_for_numbers`], which skips them.
+pub fn blocked_ids_for_numbers(entries: &[CallLogEntry], numbers: &[&str]) -> Vec<i64> {
+    let wanted = wanted_numbers(numbers);
+    if wanted.is_empty() {
+        return Vec::new();
+    }
+    entries
+        .iter()
+        .filter(|e| e.kind == CallLogKind::Blocked)
+        .filter(|e| {
+            let raw = if e.number_raw.trim().is_empty() {
+                e.normalized.as_str()
+            } else {
+                e.number_raw.as_str()
+            };
+            number_in(raw, &wanted)
+        })
+        .map(|e| e.id)
+        .collect()
+}
+
 /// Confirmation text after deleting `n` calls.
 pub fn deleted_text(n: usize) -> String {
     if n == 1 {
@@ -1001,6 +1023,20 @@ mod tests {
         ];
         assert_eq!(ids_for_numbers(&src, &["0555 111 22 33"]), [4]);
         assert!(ids_for_numbers(&src, &["", "  "]).is_empty());
+    }
+
+    #[test]
+    fn blocked_ids_mirror_ids_for_numbers() {
+        let src = [
+            e(5, "+905551112233", CallLogKind::Incoming, 50),
+            e(4, "05551112233", CallLogKind::Blocked, 40),
+            e(3, "+905551112233", CallLogKind::Blocked, 30),
+            e(2, "05559998877", CallLogKind::Blocked, 20),
+            e(1, "", CallLogKind::Blocked, 10),
+        ];
+        assert_eq!(blocked_ids_for_numbers(&src, &["0555 111 22 33"]), [4, 3]);
+        assert_eq!(ids_for_numbers(&src, &["0555 111 22 33"]), [5]);
+        assert!(blocked_ids_for_numbers(&src, &[" "]).is_empty());
     }
 
     #[test]

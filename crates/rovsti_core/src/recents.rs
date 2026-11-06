@@ -352,6 +352,10 @@ pub fn missed_extras(extras: &[ExtraCall], last_seen_ms: i64) -> u32 {
 /// One call in a contact's or number's history.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HistoryLine {
+    /// The log row or WhatsApp call this line comes from.
+    pub entry: EntryRef,
+    /// A call the phone blocked.
+    pub blocked: bool,
     pub call_type: CallType,
     pub whatsapp: bool,
     pub date_ms: i64,
@@ -435,6 +439,8 @@ pub fn history(
         };
         if number_in(raw, &wanted) {
             lines.push(HistoryLine {
+                entry: EntryRef::Log(entry.id),
+                blocked: false,
                 call_type,
                 whatsapp: false,
                 date_ms: entry.date_ms,
@@ -445,6 +451,8 @@ pub fn history(
     for extra in extras {
         if number_in(&extra.number_raw, &wanted) {
             lines.push(HistoryLine {
+                entry: EntryRef::WhatsApp(extra.call_id.clone()),
+                blocked: false,
                 call_type: if extra.missed {
                     CallType::Missed
                 } else {
@@ -461,15 +469,56 @@ pub fn history(
     lines
 }
 
+/// Blocked calls with any of `numbers`, newest first, at most `limit`. Only
+/// the newest [`MAX_ENTRIES`] log entries are read.
+pub fn blocked_history(
+    entries: &[CallLogEntry],
+    numbers: &[&str],
+    limit: usize,
+) -> Vec<HistoryLine> {
+    let wanted = wanted_numbers(numbers);
+    if wanted.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let mut lines: Vec<HistoryLine> = entries
+        .iter()
+        .take(MAX_ENTRIES)
+        .filter(|e| e.kind == CallLogKind::Blocked)
+        .filter(|e| {
+            let raw = if e.number_raw.trim().is_empty() {
+                e.normalized.as_str()
+            } else {
+                e.number_raw.as_str()
+            };
+            number_in(raw, &wanted)
+        })
+        .map(|e| HistoryLine {
+            entry: EntryRef::Log(e.id),
+            blocked: true,
+            call_type: CallType::Incoming,
+            whatsapp: false,
+            date_ms: e.date_ms,
+            duration_s: 0,
+        })
+        .collect();
+    lines.sort_by_key(|l| std::cmp::Reverse(l.date_ms));
+    lines.truncate(limit);
+    lines
+}
+
 /// Title and detail of one history line.
 pub fn history_text(line: &HistoryLine, now_ms: i64, locale: LocaleTime) -> (String, String) {
-    let base = match line.call_type {
-        CallType::Missed => "Missed call",
-        CallType::Incoming => "Incoming call",
-        CallType::Outgoing => "Outgoing call",
-        CallType::Declined => "Declined",
-        CallType::Voicemail => "Voicemail",
-        CallType::Unknown => "Call",
+    let base = if line.blocked {
+        "Blocked call"
+    } else {
+        match line.call_type {
+            CallType::Missed => "Missed call",
+            CallType::Incoming => "Incoming call",
+            CallType::Outgoing => "Outgoing call",
+            CallType::Declined => "Declined",
+            CallType::Voicemail => "Voicemail",
+            CallType::Unknown => "Call",
+        }
     };
     let title = if line.whatsapp {
         format!("WhatsApp {base}")
@@ -486,7 +535,10 @@ pub fn history_text(line: &HistoryLine, now_ms: i64, locale: LocaleTime) -> (Str
         detail
             .push_str(clock_text(line.date_ms, locale.tz_offset_s, locale.format.hour12).as_str());
     }
-    if line.duration_s > 0 && !matches!(line.call_type, CallType::Missed | CallType::Declined) {
+    if line.duration_s > 0
+        && !line.blocked
+        && !matches!(line.call_type, CallType::Missed | CallType::Declined)
+    {
         detail.push_str(" \u{b7} ");
         detail.push_str(format_duration(line.duration_s).as_str());
     }
@@ -555,6 +607,47 @@ mod tests {
         assert_eq!(h[0].call_type, CallType::Incoming);
         assert_eq!(h[1].duration_s, 20);
         assert!(!h[0].whatsapp);
+        assert_eq!(h[0].entry, EntryRef::Log(2));
+        assert!(h.iter().all(|l| !l.blocked));
+    }
+
+    #[test]
+    fn history_entry_refs_cover_both_kinds() {
+        let entries = [call(7, "05551112233", CallLogKind::Outgoing, MIN, 0)];
+        let extras = [wa_call("+905551112233", 2 * MIN, false)];
+        let h = history(&entries, &extras, &["05551112233"], 10);
+        assert_eq!(h[0].entry, EntryRef::Log(7));
+        assert_eq!(h[1].entry, EntryRef::WhatsApp(format!("wa-{}", 2 * MIN)));
+    }
+
+    #[test]
+    fn blocked_history_matches_forms_skips_others_and_limits() {
+        let entries = [
+            call(5, "+905551112233", CallLogKind::Blocked, MIN, 0),
+            call(4, "05551112233", CallLogKind::Incoming, 2 * MIN, 9),
+            call(3, "05551112233", CallLogKind::Blocked, 3 * MIN, 0),
+            call(2, "05559998877", CallLogKind::Blocked, 4 * MIN, 0),
+            call(1, "", CallLogKind::Blocked, 5 * MIN, 0),
+        ];
+        let h = blocked_history(&entries, &["0555 111 22 33"], 10);
+        let refs: Vec<EntryRef> = h.iter().map(|l| l.entry.clone()).collect();
+        assert_eq!(refs, [EntryRef::Log(5), EntryRef::Log(3)]);
+        assert!(h.iter().all(|l| l.blocked
+            && !l.whatsapp
+            && l.call_type == CallType::Incoming
+            && l.duration_s == 0));
+        assert_eq!(blocked_history(&entries, &["05551112233"], 1).len(), 1);
+        assert!(blocked_history(&entries, &["05551112233"], 0).is_empty());
+        assert!(blocked_history(&entries, &["", " "], 10).is_empty());
+    }
+
+    #[test]
+    fn history_text_blocked_has_its_own_title_and_no_duration() {
+        let mut l = line(CallType::Incoming, false, MIN, 40);
+        l.blocked = true;
+        let (title, detail) = history_text(&l, NOW, LocaleTime::default());
+        assert_eq!(title, "Blocked call");
+        assert!(!detail.contains('\u{b7}'));
     }
 
     #[test]
@@ -599,6 +692,8 @@ mod tests {
 
     fn line(call_type: CallType, whatsapp: bool, ago: i64, duration_s: u64) -> HistoryLine {
         HistoryLine {
+            entry: EntryRef::Log(1),
+            blocked: false,
             call_type,
             whatsapp,
             date_ms: NOW - ago,

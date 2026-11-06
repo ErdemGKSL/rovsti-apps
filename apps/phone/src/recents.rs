@@ -1974,6 +1974,8 @@ mod tests {
         duration_s: u64,
     ) -> recents::HistoryLine {
         recents::HistoryLine {
+            entry: rovsti_core::call_log::EntryRef::Log(1),
+            blocked: false,
             call_type,
             whatsapp,
             date_ms: 0,

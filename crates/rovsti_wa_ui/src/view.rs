@@ -47,8 +47,8 @@ const STORAGE_RETRY: Duration = Duration::from_millis(400);
 
 pub struct WhatsAppSettings {
     model: LinkModel,
-    /// The app's folder under `storage::data_dir` (asked again on a retry).
-    data_dir_name: &'static str,
+    /// Asks for the app's folder under `storage::data_dir`, also after startup (a retry).
+    data_dirs: storage::DataDirs,
     data_dir: Option<PathBuf>,
     /// A link made while the data folder was unreachable: written as soon as it is.
     unsaved_link: Option<StoredLink>,
@@ -112,10 +112,12 @@ impl WhatsAppSettings {
         let phone_field = field(TextInputPurpose::Phone, TextInputAction::Done, cx);
         let key_field = field(TextInputPurpose::Text, TextInputAction::Done, cx);
 
-        let pump = Self::open_storage(data_dir_name, cx);
+        // Made here, while the app is starting: `data_dir` may not run later on Android.
+        let data_dirs = storage::DataDirs::new(data_dir_name);
+        let pump = Self::open_storage(data_dirs.clone(), cx);
         Self {
             model: LinkModel::new(app, None),
-            data_dir_name,
+            data_dirs,
             data_dir: None,
             unsaved_link: None,
             skip_saved_link: false,
@@ -133,11 +135,11 @@ impl WhatsAppSettings {
 
     /// Asks for the app's data folder, again a few times when the platform refuses, then
     /// hands it to [`Self::storage_ready`]. Only the last failure is shown.
-    fn open_storage(name: &'static str, cx: &mut Context<Self>) -> gpui::Task<()> {
+    fn open_storage(dirs: storage::DataDirs, cx: &mut Context<Self>) -> gpui::Task<()> {
         cx.spawn(async move |this, cx| {
             let mut attempt = 1;
             let found = loop {
-                let Ok(request) = this.update(cx, |_, cx| storage::data_dir(name, cx)) else {
+                let Ok(request) = this.update(cx, |_, cx| dirs.request(cx)) else {
                     return;
                 };
                 match request.await {
@@ -291,7 +293,7 @@ impl WhatsAppSettings {
         // the model alone would only go back to the two options, with the saved link unread.
         if matches!(input, Input::Retry) && self.data_dir.is_none() {
             self.model.screen = Screen::Connecting;
-            self._pump = Some(Self::open_storage(self.data_dir_name, cx));
+            self._pump = Some(Self::open_storage(self.data_dirs.clone(), cx));
             cx.notify();
             return;
         }

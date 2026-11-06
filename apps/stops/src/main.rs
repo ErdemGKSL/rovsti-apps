@@ -50,6 +50,8 @@ mod pick;
 mod picker;
 mod saved_ui;
 mod settings_ui;
+#[allow(dead_code)] // wired into the map in a later step
+mod snap;
 mod store;
 mod tiles;
 mod transit;

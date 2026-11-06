@@ -4,7 +4,10 @@
 //! A card counts as already there when a contact with the same name (case and
 //! accents ignored) shares a phone number with it. Numbers are compared by
 //! their last ten digits, so `0555 111 22 33` and `+90 555 111 22 33` match.
-//! Cards repeated inside the file itself are added once.
+//! A card without any number is compared by name and email instead (email
+//! case ignored); with no email either, by name alone. A card that has a
+//! number never matches on its name alone, and neither does a contact that
+//! has one. Cards repeated inside the file itself are added once.
 
 use std::collections::HashSet;
 
@@ -41,6 +44,25 @@ fn keys<'a>(name: &str, numbers: impl IntoIterator<Item = &'a str>) -> Vec<(Stri
         .collect()
 }
 
+/// Keys for a contact without a usable number: one `(name, "@email")` per
+/// email, or a single `(name, "")` when it has none.
+fn fallback_keys<'a>(
+    name: &str,
+    emails: impl IntoIterator<Item = &'a str>,
+) -> Vec<(String, String)> {
+    let name = fold(name.trim());
+    let mut keys: Vec<(String, String)> = emails
+        .into_iter()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(|e| (name.clone(), format!("@{}", e.to_lowercase())))
+        .collect();
+    if keys.is_empty() {
+        keys.push((name, String::new()));
+    }
+    keys
+}
+
 /// Splits `incoming` into the cards to add and the duplicates.
 pub fn plan<'a>(
     existing: impl IntoIterator<Item = &'a WireContact>,
@@ -48,14 +70,22 @@ pub fn plan<'a>(
 ) -> Plan {
     let mut seen: HashSet<(String, String)> = existing
         .into_iter()
-        .flat_map(|c| keys(&c.display_name, c.numbers.iter().map(|n| n.raw.as_str())))
+        .flat_map(|c| {
+            let k = keys(&c.display_name, c.numbers.iter().map(|n| n.raw.as_str()));
+            if k.is_empty() {
+                fallback_keys(&c.display_name, c.email.as_deref())
+            } else {
+                k
+            }
+        })
         .collect();
     let mut plan = Plan::default();
     for card in incoming {
-        let card_keys = keys(
-            &card.display_name(),
-            card.numbers.iter().map(|n| n.value.as_str()),
-        );
+        let name = card.display_name();
+        let mut card_keys = keys(&name, card.numbers.iter().map(|n| n.value.as_str()));
+        if card_keys.is_empty() {
+            card_keys = fallback_keys(&name, card.emails.iter().map(|e| e.value.as_str()));
+        }
         if card_keys.iter().any(|k| seen.contains(k)) {
             plan.duplicates += 1;
         } else {
@@ -149,6 +179,92 @@ mod tests {
             .numbers
             .push(DraftField::new("0533 765 43 21", FieldKind::Mobile));
         assert_eq!(plan(&book, vec![incoming]).duplicates, 1);
+    }
+
+    fn bare(id: i64, name: &str, email: Option<&str>) -> WireContact {
+        WireContact {
+            id,
+            display_name: name.to_owned(),
+            email: email.map(str::to_owned),
+            ..WireContact::default()
+        }
+    }
+
+    fn email_card(given: &str, email: &str) -> ContactDraft {
+        ContactDraft {
+            given: given.to_owned(),
+            emails: if email.is_empty() {
+                Vec::new()
+            } else {
+                vec![DraftField::new(email, FieldKind::Home)]
+            },
+            ..ContactDraft::default()
+        }
+    }
+
+    #[test]
+    fn an_email_only_card_matches_the_same_contact_in_any_case() {
+        let book = [bare(1, "Ayşe", Some("Ayse@Example.com"))];
+        let p = plan(&book, vec![email_card("AYSE", "ayse@example.COM")]);
+        assert!(p.add.is_empty());
+        assert_eq!(p.duplicates, 1);
+    }
+
+    #[test]
+    fn the_same_name_with_another_email_is_added() {
+        let book = [bare(1, "Ayşe", Some("ayse@example.com"))];
+        let p = plan(&book, vec![email_card("Ayşe", "other@example.com")]);
+        assert_eq!(p.add.len(), 1);
+    }
+
+    #[test]
+    fn a_name_only_card_matches_a_name_only_contact() {
+        let book = [bare(1, "Ayşe", None)];
+        let p = plan(&book, vec![email_card("ayse", "")]);
+        assert_eq!(p.duplicates, 1);
+    }
+
+    #[test]
+    fn a_name_only_card_does_not_match_a_contact_with_a_number() {
+        let book = [existing(1, "Ayşe", "0555 111 22 33")];
+        let p = plan(&book, vec![email_card("Ayşe", "")]);
+        assert_eq!(p.add.len(), 1);
+    }
+
+    #[test]
+    fn a_card_with_a_number_does_not_match_a_name_only_contact() {
+        let book = [bare(1, "Ayşe", None)];
+        let p = plan(&book, vec![card("Ayşe", "", "0555 111 22 33")]);
+        assert_eq!(p.add.len(), 1);
+    }
+
+    #[test]
+    fn identical_email_only_cards_are_added_once() {
+        let two = vec![
+            email_card("Can", "can@example.com"),
+            email_card("Can", "CAN@example.com"),
+        ];
+        let p = plan(&[], two);
+        assert_eq!(p.add.len(), 1);
+        assert_eq!(p.duplicates, 1);
+    }
+
+    #[test]
+    fn number_less_contacts_survive_a_vcard_round_trip_without_duplicates() {
+        let mut cards = vec![
+            email_card("Ayşe", "ayse@example.com"),
+            email_card("Can", ""),
+        ];
+        cards.iter_mut().for_each(ContactDraft::clean);
+        let book = [
+            bare(1, "Ayşe", Some("ayse@example.com")),
+            bare(2, "Can", None),
+        ];
+        let parsed = crate::vcard::parse(&crate::vcard::write(&cards));
+        assert_eq!(parsed.contacts.len(), 2);
+        let p = plan(&book, parsed.contacts);
+        assert!(p.add.is_empty());
+        assert_eq!(p.duplicates, 2);
     }
 
     #[test]

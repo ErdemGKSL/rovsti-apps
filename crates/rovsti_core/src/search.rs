@@ -1,5 +1,8 @@
 //! Contact search: diacritic-, case- and format-insensitive (AD-14).
 //!
+//! A text query matches the name or the contact's email address (the one the
+//! provider reports); digit queries match numbers and names.
+//!
 //! [`ContactIndex`] is built once per contacts payload and then queried with
 //! `&self`, so typing never rebuilds anything.
 
@@ -45,7 +48,7 @@ pub fn fold(s: &str) -> String {
 enum Query {
     /// No text: matches everything.
     Empty,
-    /// Letters present: folded name match only.
+    /// Letters present: folded name or email match.
     Text(String),
     /// Digits and formatting only: digit substring against numbers, plus
     /// folded name match (names can contain digits).
@@ -100,6 +103,8 @@ fn after_country_code(digits: &str, rest: &str) -> bool {
 pub(crate) struct Entry {
     pub(crate) contact: WireContact,
     folded_name: String,
+    /// Folded, trimmed email; `None` when the contact has none.
+    folded_email: Option<String>,
     /// Digits only, per number.
     pub(crate) digits: Vec<String>,
     parsed: Vec<Option<PhoneNumber>>,
@@ -134,6 +139,12 @@ impl ContactIndex {
             .into_iter()
             .map(|contact| {
                 let folded_name = fold(&contact.display_name);
+                let folded_email = contact
+                    .email
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|e| !e.is_empty())
+                    .map(fold);
                 let t9 = crate::t9::NameCodes::build(&contact.display_name);
                 let t9_alt = contact
                     .display_name_alt
@@ -154,6 +165,7 @@ impl ContactIndex {
                 Entry {
                     contact,
                     folded_name,
+                    folded_email,
                     digits,
                     parsed,
                     t9,
@@ -212,7 +224,12 @@ impl ContactIndex {
             Query::Text(folded) => self
                 .entries
                 .iter()
-                .filter(|e| e.folded_name.contains(&folded))
+                .filter(|e| {
+                    e.folded_name.contains(&folded)
+                        || e.folded_email
+                            .as_deref()
+                            .is_some_and(|m| m.contains(&folded))
+                })
                 .map(|e| &e.contact)
                 .collect(),
             Query::Digits {
@@ -493,6 +510,18 @@ mod tests {
         assert!(!idx.search("5550").is_empty());
         assert!(start.elapsed() < std::time::Duration::from_millis(250));
         assert_eq!(idx.len(), 500, "index is untouched by queries");
+    }
+
+    #[test]
+    fn text_queries_find_a_contact_through_its_email() {
+        let mut c = contact(1, "Ayşe", &[]);
+        c.email = Some(" Ayse@Example.com ".to_owned());
+        let idx = ContactIndex::new(vec![c, contact(2, "Bo", &[])]);
+        for q in ["ayse@", "example.com", "EXAMPLE", "@example"] {
+            assert_eq!(names(&idx.search(q)), ["Ayşe"], "query {q:?}");
+        }
+        assert!(idx.search("@").len() == 1, "only the contact with an email");
+        assert!(idx.search("nobody@").is_empty());
     }
 
     #[test]

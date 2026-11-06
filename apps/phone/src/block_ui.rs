@@ -49,6 +49,12 @@ pub(crate) enum PillAction {
     Unblock(SharedString, SharedString),
     /// Undo of an Unblock, or the post-call "Block".
     Block(SharedString, SharedString),
+    /// After a call: open its details with the note field editing.
+    AddNote {
+        number: SharedString,
+        at_ms: i64,
+        who: SharedString,
+    },
     /// Open Settings on the Speed dial page.
     SpeedDial(u8),
     ViewSpeedDial,
@@ -307,6 +313,9 @@ impl PhoneApp {
         match action {
             PillAction::Unblock(raw, who) => self.run_unblock(raw, who, false, window, cx),
             PillAction::Block(raw, who) => self.start_block(raw, who, None, window, cx),
+            PillAction::AddNote { number, at_ms, who } => {
+                self.after_call_add_note(&number, at_ms, who, window, cx)
+            }
             PillAction::SpeedDial(digit) => self.speed_dial_pick(digit, window, cx),
             PillAction::ViewSpeedDial => self.speed_dial_open_page(window, cx),
             PillAction::CancelSpeedDialPick => {

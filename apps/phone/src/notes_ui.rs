@@ -221,12 +221,7 @@ impl PhoneApp {
         if self.sheet.is_visible() {
             return;
         }
-        let vm = self
-            .history_for(&[row.number.as_str()], cx)
-            .iter()
-            .filter(|vm| (vm.date_ms - row.at_ms).abs() <= call_notes::MATCH_WINDOW_MS)
-            .min_by_key(|vm| (vm.date_ms - row.at_ms).abs())
-            .cloned();
+        let vm = self.logged_call_near(&row.number, row.at_ms, cx);
         let Some(vm) = vm else {
             self.show_notice_pill("This call is no longer in the call log", None, false, cx);
             return;

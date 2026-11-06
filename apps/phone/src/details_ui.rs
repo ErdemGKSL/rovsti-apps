@@ -9,6 +9,7 @@
 //! The pure parts (line ids, routing, glyph flags, labels) are at the top with
 //! their tests; the drawing and the actions follow.
 
+use crate::recents::HistoryVm;
 use std::sync::Arc;
 
 use gpui::{
@@ -259,6 +260,64 @@ impl PhoneApp {
         cx.notify();
     }
 
+    /// Starts editing the open call's note.
+    pub(crate) fn details_start_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(d) = self.details.as_mut() else {
+            return;
+        };
+        let current = self
+            .notes
+            .get(&d.number, d.at_ms)
+            .map(|n| n.text.clone())
+            .unwrap_or_default();
+        d.editing = true;
+        d.seen_submits = d.field.read(cx).submits;
+        d.field.update(cx, |f, cx| f.set(&current, cx));
+        let focus = d.field.read(cx).focus_handle();
+        window.focus(&focus, cx);
+        window.show_soft_keyboard();
+    }
+
+    /// The logged call of `number` closest to `at_ms` (within the notes' match window).
+    pub(crate) fn logged_call_near(
+        &mut self,
+        number: &str,
+        at_ms: i64,
+        cx: &mut Context<Self>,
+    ) -> Option<HistoryVm> {
+        self.history_for(&[number], cx)
+            .iter()
+            .filter(|vm| (vm.date_ms - at_ms).abs() <= call_notes::MATCH_WINDOW_MS)
+            .min_by_key(|vm| (vm.date_ms - at_ms).abs())
+            .cloned()
+    }
+
+    /// The after-call pill: opens the call's details with the note field editing.
+    pub(crate) fn after_call_add_note(
+        &mut self,
+        number: &str,
+        at_ms: i64,
+        who: SharedString,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.sheet.is_visible() {
+            return;
+        }
+        let Some(vm) = self.logged_call_near(number, at_ms, cx) else {
+            self.show_notice_pill(
+                "The call isn't in Recents yet. Try again in a moment",
+                None,
+                false,
+                cx,
+            );
+            return;
+        };
+        self.open_details_for(&vm, Some(who), SheetKind::CallDetails, true, window, cx);
+        self.sheet.open();
+        self.details_start_note(window, cx);
+    }
+
     /// A control of the details sheet was pressed.
     pub(crate) fn details_act(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(d) = self.details.as_mut() else {
@@ -293,19 +352,7 @@ impl PhoneApp {
                     );
                 }
             }
-            NOTE => {
-                let current = self
-                    .notes
-                    .get(&d.number, d.at_ms)
-                    .map(|n| n.text.clone())
-                    .unwrap_or_default();
-                d.editing = true;
-                d.seen_submits = d.field.read(cx).submits;
-                d.field.update(cx, |f, cx| f.set(&current, cx));
-                let focus = d.field.read(cx).focus_handle();
-                window.focus(&focus, cx);
-                window.show_soft_keyboard();
-            }
+            NOTE => self.details_start_note(window, cx),
             DONE => {
                 self.details_commit(cx);
                 window.blur();

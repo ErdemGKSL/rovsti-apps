@@ -6,6 +6,7 @@
 //! the aura are their own views, so a once-a-second timer tick or a drifting
 //! blob never re-renders this screen.
 
+use crate::block_ui::PillAction;
 use std::{
     rc::Rc,
     sync::Arc,
@@ -142,6 +143,47 @@ pub(crate) fn note_allowed(view: &CallView) -> bool {
         && view.source.telecom_id().is_some()
         && callable_number(&view.number).is_some()
         && note_call_ms(view) > 0
+}
+
+/// Story 17.4: a short answered call from somebody calling in offers "Block".
+pub(crate) fn offers_block(view: &CallView, began_locked: bool, now_ms: i64) -> bool {
+    view.incoming
+        && view.source.telecom_id().is_some()
+        && !began_locked
+        && view.connect_time_ms > 0
+        && now_ms - view.connect_time_ms < SHORT_CALL_MS
+}
+
+/// A connected call that just ended and can still get a note.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct AfterCall {
+    pub(crate) number: SharedString,
+    pub(crate) at_ms: i64,
+    pub(crate) who: SharedString,
+    pub(crate) talk_s: u64,
+}
+
+/// The "Add note" offer after a call: a connected telecom call with a callable
+/// number, not on the lock screen, where the block offer does not apply.
+pub(crate) fn after_call_note(
+    view: &CallView,
+    began_locked: bool,
+    now_ms: i64,
+) -> Option<AfterCall> {
+    if began_locked
+        || view.connect_time_ms <= 0
+        || view.source.telecom_id().is_none()
+        || offers_block(view, began_locked, now_ms)
+    {
+        return None;
+    }
+    callable_number(&view.number)?;
+    Some(AfterCall {
+        number: view.number.clone(),
+        at_ms: note_call_ms(view),
+        who: view.name.clone(),
+        talk_s: u64::try_from((now_ms - view.connect_time_ms) / 1000).unwrap_or(0),
+    })
 }
 
 /// The call time a note is saved under: when it rang or was placed, else when it connected.
@@ -1510,18 +1552,16 @@ impl PhoneApp {
             return;
         }
         ic.done_id = ic.last_id.take();
-        // Story 17.4: a short answered call from somebody calling in offers "Block".
+        let now = backend::now_ms();
         let offer = ic
             .view
             .as_ref()
-            .filter(|v| {
-                v.incoming
-                    && v.source.telecom_id().is_some()
-                    && !ic.began_locked
-                    && v.connect_time_ms > 0
-                    && backend::now_ms() - v.connect_time_ms < SHORT_CALL_MS
-            })
+            .filter(|v| offers_block(v, ic.began_locked, now))
             .map(|v| (v.number.clone(), v.name.clone()));
+        let after = ic
+            .view
+            .as_ref()
+            .and_then(|v| after_call_note(v, ic.began_locked, now));
         ic.view = None;
         ic.last_id = None;
         ic.set_shown(false);
@@ -1537,6 +1577,19 @@ impl PhoneApp {
         self.presses.release_all();
         if let Some((number, who)) = offer {
             self.offer_block_after_call(&number, &who, false, cx);
+        } else if let Some(a) = after
+            && self.notes.get(&a.number, a.at_ms).is_none()
+        {
+            self.show_pill_action(
+                rovsti_core::call::after_call_text(&a.who, a.talk_s),
+                "Add note",
+                PillAction::AddNote {
+                    number: a.number,
+                    at_ms: a.at_ms,
+                    who: a.who,
+                },
+                cx,
+            );
         }
         cx.notify();
     }
@@ -2574,6 +2627,45 @@ mod tests {
     fn a_whatsapp_call_gets_no_note_capsule() {
         let view = CallView::from_wa_at(&wa_screen(WaScreenPhase::Active, false), 100_000);
         assert!(!note_allowed(&view));
+    }
+
+    #[test]
+    fn after_call_note_follows_the_connected_call() {
+        let view = CallView::from_model(&model_with(WireCallState::Active, Some("Ada"), false))
+            .expect("foreground call");
+        let now = 5 + 90_000;
+        let a = after_call_note(&view, false, now).expect("offer");
+        assert_eq!(a.number, "+905551112233");
+        assert_eq!((a.at_ms, a.talk_s), (2, 90));
+        assert_eq!(a.who, "Ada");
+        assert!(after_call_note(&view, true, now).is_none());
+        let never = CallView {
+            connect_time_ms: 0,
+            ..view.clone()
+        };
+        assert!(after_call_note(&never, false, now).is_none());
+        let private = CallView {
+            number: "".into(),
+            ..view
+        };
+        assert!(after_call_note(&private, false, now).is_none());
+    }
+
+    #[test]
+    fn a_short_incoming_call_offers_block_only() {
+        let out = CallView::from_model(&model_with(WireCallState::Active, None, false))
+            .expect("foreground call");
+        assert!(!offers_block(&out, false, 5 + 1_000));
+        let incoming = CallView {
+            incoming: true,
+            ..out
+        };
+        assert!(offers_block(&incoming, false, 5 + 1_000));
+        assert!(!offers_block(&incoming, true, 5 + 1_000));
+        assert!(!offers_block(&incoming, false, 5 + SHORT_CALL_MS));
+        assert!(after_call_note(&incoming, false, 5 + 1_000).is_none());
+        let a = after_call_note(&incoming, false, 5 + SHORT_CALL_MS).expect("long call");
+        assert_eq!(a.talk_s, 15);
     }
 
     #[test]

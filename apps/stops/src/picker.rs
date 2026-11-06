@@ -444,10 +444,16 @@ impl StopsApp {
 
     fn rename_place(&mut self, id: u64, cx: &mut Context<Self>) {
         let name = self.field.read(cx).text().to_owned();
+        let coord = self.saved.get(id).map(|p| p.coord);
         match self.saved.rename(id, &name) {
             Ok(()) => {
+                let new_name = self.saved.get(id).map_or(name, |p| p.name.clone());
+                if let Some(coord) = coord {
+                    self.pick.relabel_near(coord, &new_name);
+                }
                 self.save_places(cx);
                 self.sheet.close();
+                self.show_pill(format!("Renamed to {new_name}"), None, cx);
             }
             Err(error) => self.show_pill(error.message(), None, cx),
         }
@@ -1021,12 +1027,26 @@ impl StopsApp {
                 cx,
             )))
             .child(
-                div().flex().justify_end().px(px(16.0)).pt(px(8.0)).child(
-                    glass_pill(theme, "Save")
-                        .id("rename-save")
-                        .text_color(colors.accent)
-                        .on_click(cx.listener(move |this, _, _, cx| this.rename_place(id, cx))),
-                ),
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap(px(10.0))
+                    .px(px(16.0))
+                    .pt(px(8.0))
+                    .child(
+                        glass_pill(theme, "Cancel")
+                            .id("rename-cancel")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.sheet.close();
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        glass_pill(theme, "Save")
+                            .id("rename-save")
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| this.rename_place(id, cx))),
+                    ),
             )
             .into_any_element()
     }

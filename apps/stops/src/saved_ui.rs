@@ -1,11 +1,11 @@
 //! The Saved tab: places kept for one-tap trips. Tapping a row opens its
-//! actions (Use as A, Use as B, Rename, Delete); a delete can be undone from the pill.
+//! actions (Use as A, Use as B, Rename, Up, Down, Delete); a delete can be undone from the pill.
 
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
     StatefulInteractiveElement, Styled, div, list, px,
 };
-use rovsti_geo::{Place, SavedPlaces};
+use rovsti_geo::{Coord, Place, SavedPlaces};
 use rovsti_ui::{
     components::{empty_state, glass_pill, large_title, list_row},
     theme,
@@ -15,7 +15,21 @@ use rovsti_ui::{
 use crate::{
     Page, StopsApp, lists,
     picker::{Destination, Slot},
+    trip_ui::distance_text,
 };
+
+/// The row subtitle: what the place is, then how far it is when your position is known.
+pub fn place_detail(place: &Place, here: Option<Coord>) -> String {
+    let kind = if place.gtfs_stop.is_some() {
+        "Transit stop"
+    } else {
+        "Place"
+    };
+    match here {
+        Some(h) => format!("{kind}, {}", distance_text(h.distance_m(place.coord))),
+        None => kind.to_owned(),
+    }
+}
 
 /// Puts a deleted place back where it was (or at the end if the list shrank).
 pub fn restore(saved: &mut SavedPlaces, place: Place, index: usize) {
@@ -35,7 +49,7 @@ impl StopsApp {
                 empty_state(
                     theme,
                     "No Saved Stops",
-                    "Turn on Save this place when you pick a point, and it appears here for one-tap use as A or B.",
+                    "Tap a pin on the map and choose Save, or save a stop or a shared place. Saved places appear here for one-tap use as A or B.",
                 )
                 .into_any_element(),
             );
@@ -70,12 +84,13 @@ impl StopsApp {
         };
         let colors = theme::colors(theme);
         let id = place.id;
+        let detail = place_detail(place, self.map.position.map(|(c, _)| c));
         let open = self.expanded == Some(id);
         let row = list_row(
             theme,
             None,
             place.name.clone(),
-            None,
+            Some(detail.into()),
             Some(if open { "Close" } else { "" }.into()),
         )
         .id(("place", id as usize))
@@ -96,7 +111,8 @@ impl StopsApp {
                     .flex()
                     .gap(px(10.0))
                     .px(px(12.0))
-                    .py(px(10.0))
+                    .pt(px(10.0))
+                    .pb(px(6.0))
                     .child(
                         glass_pill(theme, "Use as A")
                             .id(("place-use-a", id as usize))
@@ -118,7 +134,35 @@ impl StopsApp {
                                 this.use_as(Slot::B, dest_b.clone(), false, cx);
                                 this.tabs.jump_to(0);
                             })),
-                    )
+                    ),
+            );
+            let pill_row = || div().flex().gap(px(10.0)).px(px(12.0)).pb(px(10.0));
+            let up: AnyElement = if i > 0 {
+                glass_pill(theme, "Up")
+                    .id(("place-up", id as usize))
+                    .flex_1()
+                    .on_click(cx.listener(move |this, _, _, cx| this.move_place(id, -1, cx)))
+                    .into_any_element()
+            } else {
+                glass_pill(theme, "Up")
+                    .flex_1()
+                    .text_color(colors.tertiary_label)
+                    .into_any_element()
+            };
+            let down: AnyElement = if i + 1 < count {
+                glass_pill(theme, "Down")
+                    .id(("place-down", id as usize))
+                    .flex_1()
+                    .on_click(cx.listener(move |this, _, _, cx| this.move_place(id, 1, cx)))
+                    .into_any_element()
+            } else {
+                glass_pill(theme, "Down")
+                    .flex_1()
+                    .text_color(colors.tertiary_label)
+                    .into_any_element()
+            };
+            item = item.child(
+                pill_row()
                     .child(
                         glass_pill(theme, "Rename")
                             .id(("place-rename", id as usize))
@@ -127,6 +171,8 @@ impl StopsApp {
                                 this.open_rename(id, cx);
                             })),
                     )
+                    .child(up)
+                    .child(down)
                     .child(
                         glass_pill(theme, "Delete")
                             .id(("place-delete", id as usize))
@@ -139,6 +185,13 @@ impl StopsApp {
             );
         }
         lists::grouped(theme, lists::Place::of(i, count), item).into_any_element()
+    }
+
+    fn move_place(&mut self, id: u64, delta: isize, cx: &mut Context<Self>) {
+        if self.saved.move_by(id, delta) {
+            self.save_places(cx);
+            cx.notify();
+        }
     }
 
     fn delete_place(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -166,6 +219,22 @@ impl StopsApp {
 mod tests {
     use super::*;
     use rovsti_geo::Coord;
+
+    #[test]
+    fn detail_names_the_kind_and_distance() {
+        let mut p = Place {
+            id: 1,
+            name: "Home".into(),
+            coord: Coord::new(41.0, 29.0),
+            gtfs_stop: None,
+        };
+        assert_eq!(place_detail(&p, None), "Place");
+        let here = Coord::new(41.0, 29.0);
+        assert_eq!(place_detail(&p, Some(here)), "Place, 0 m");
+        p.gtfs_stop = Some("S1".into());
+        assert_eq!(place_detail(&p, None), "Transit stop");
+        assert!(place_detail(&p, Some(Coord::new(41.1, 29.0))).starts_with("Transit stop, 11."));
+    }
 
     fn saved() -> SavedPlaces {
         let mut s = SavedPlaces::default();

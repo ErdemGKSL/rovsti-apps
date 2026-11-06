@@ -16,3 +16,8 @@ _bmad/render/
 *.jks
 *.keystore
 signing.env
+
+# Firebase: the client config and server keys stay on this machine
+google-services.json
+*firebase-adminsdk*.json
+service-account.json

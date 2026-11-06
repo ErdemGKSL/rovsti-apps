@@ -684,44 +684,82 @@ impl ContactsApp {
     /// Stars or unstars a contact: the list changes at once, then Android is
     /// asked. On desktop the change stays local to this run.
     fn toggle_star(&mut self, id: i64, cx: &mut Context<Self>) {
-        let Some(index) = self.index() else { return };
-        let mut all: Vec<WireContact> = index.all().cloned().collect();
-        let Some(contact) = all.iter_mut().find(|c| c.id == id) else {
+        let Some(contact) = self.index().and_then(|i| i.all().find(|c| c.id == id)) else {
             return;
         };
-        contact.starred = !contact.starred;
-        let starred = contact.starred;
-        self.book = Book::Ready(Arc::new(rovsti_core::search::ContactIndex::new(all)));
-        if let Some(draft) = self.open_draft.as_mut().filter(|d| d.id == Some(id)) {
-            draft.starred = starred;
-        }
+        let starred = !contact.starred;
+        self.set_starred_local(&[id], starred);
         self.rebuild(cx);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move { rovsti_android::providers::set_starred(id, starred) })
                 .await;
-            this.update(cx, |this, cx| match result {
-                Err(rovsti_android::Error::Unsupported) => {}
-                Ok(true) => this.reload(cx),
-                Ok(false) => {
-                    this.notice = Some("Android refused the change to Favorites.".into());
-                    this.reload(cx);
-                }
-                Err(error) => {
-                    this.notice = Some(
-                        format!(
-                            "Can't change Favorites: {}.",
-                            backend::android_words(&error)
-                        )
-                        .into(),
-                    );
-                    this.reload(cx);
+            this.update(cx, |this, cx| {
+                let done = if starred {
+                    "Added to Favorites."
+                } else {
+                    "Removed from Favorites."
+                };
+                match result {
+                    Err(rovsti_android::Error::Unsupported) => {
+                        this.notice = Some(done.into());
+                        cx.notify();
+                    }
+                    Ok(true) => {
+                        this.notice = Some(done.into());
+                        this.reload(cx);
+                    }
+                    Ok(false) => {
+                        this.notice = Some("Android refused the change to Favorites.".into());
+                        this.reload(cx);
+                    }
+                    Err(error) => {
+                        this.notice = Some(
+                            format!(
+                                "Can't change Favorites: {}.",
+                                backend::android_words(&error)
+                            )
+                            .into(),
+                        );
+                        this.reload(cx);
+                    }
                 }
             })
             .ok();
         })
         .detach();
+    }
+
+    /// Sets the star of `ids` in the book and in an open editor draft, without
+    /// asking Android. The caller rebuilds the rows.
+    fn set_starred_local(&mut self, ids: &[i64], starred: bool) {
+        let Some(index) = self.index() else { return };
+        let mut all: Vec<WireContact> = index.all().cloned().collect();
+        for contact in all.iter_mut().filter(|c| ids.contains(&c.id)) {
+            contact.starred = starred;
+        }
+        self.book = Book::Ready(Arc::new(rovsti_core::search::ContactIndex::new(all)));
+        if let Some(draft) = self
+            .open_draft
+            .as_mut()
+            .filter(|d| d.id.is_some_and(|id| ids.contains(&id)))
+        {
+            draft.starred = starred;
+        }
+    }
+
+    /// The ids of every starred contact in the book.
+    pub(crate) fn starred_ids(&self) -> Vec<i64> {
+        self.index()
+            .map(|i| i.all().filter(|c| c.starred).map(|c| c.id).collect())
+            .unwrap_or_default()
+    }
+
+    /// Opens the picker over the Favorites.
+    fn open_favorites_picker(&mut self, cx: &mut Context<Self>) {
+        let initial = self.starred_ids();
+        self.open_picker(picker::PickFor::Favorites, initial, cx);
     }
 
     /// Switches the name style without saving it (the saved one was read).
@@ -1143,15 +1181,21 @@ impl ContactsApp {
                 empty_state(
                     theme,
                     "No Favorites",
-                    "Open a contact and tap the star to keep them here.",
+                    "Tap + to choose favorites, or tap the star on a contact.",
                 )
                 .into_any_element()
             })
         });
+        let trailing = matches!(self.book, Book::Ready(_)).then(|| {
+            glass_icon_button(theme, Icon::LucidePlus, 0.0, false)
+                .id("favorites-add")
+                .on_click(cx.listener(|this, _, _, cx| this.open_favorites_picker(cx)))
+                .into_any_element()
+        });
         div()
             .flex()
             .flex_col()
-            .child(large_title(theme, TABS[FAVORITES_TAB], None))
+            .child(large_title(theme, TABS[FAVORITES_TAB], trailing))
             .children(body)
             .into_any_element()
     }

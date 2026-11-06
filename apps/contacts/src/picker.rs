@@ -23,7 +23,6 @@ use crate::{ContactsApp, Row, backend, field::TextField, photos::photo_avatar, r
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PickFor {
     Group(i64),
-    #[expect(dead_code, reason = "opened by the Favorites + button")]
     Favorites,
 }
 
@@ -44,6 +43,16 @@ pub(crate) fn selected_words(n: usize) -> String {
     match n {
         0 => "None selected".to_owned(),
         n => format!("{n} selected"),
+    }
+}
+
+/// One-line notice for a finished Favorites change.
+pub(crate) fn favorites_summary(added: usize, removed: usize) -> String {
+    match (added, removed) {
+        (0, 0) => "No changes.".to_owned(),
+        (a, 0) => format!("Added {a} to Favorites."),
+        (0, r) => format!("Removed {r} from Favorites."),
+        (a, r) => format!("Added {a} to Favorites and removed {r}."),
     }
 }
 
@@ -162,9 +171,12 @@ impl ContactsApp {
             self.close_picker(cx);
             return;
         }
-        let PickFor::Group(group_id) = picker.for_ else {
-            self.close_picker(cx);
-            return;
+        let group_id = match picker.for_ {
+            PickFor::Group(id) => id,
+            PickFor::Favorites => {
+                self.finish_favorites(change, cx);
+                return;
+            }
         };
         picker.saving = true;
         let title = self
@@ -190,6 +202,45 @@ impl ContactsApp {
                     this.notice = Some(format!("Can't change the group: {words}.").into());
                     cx.notify();
                 }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Done on the Favorites picker: stars and unstars at once, then tells Android.
+    fn finish_favorites(&mut self, change: contact_edit::SelectionChange, cx: &mut Context<Self>) {
+        self.set_starred_local(&change.add, true);
+        self.set_starred_local(&change.remove, false);
+        self.close_picker(cx);
+        self.rebuild(cx);
+        let (added, removed) = (change.add.len(), change.remove.len());
+        cx.spawn(async move |this, cx| {
+            let failures = cx
+                .background_executor()
+                .spawn(async move {
+                    let mut failures = 0usize;
+                    let steps = change
+                        .add
+                        .iter()
+                        .map(|id| (*id, true))
+                        .chain(change.remove.iter().map(|id| (*id, false)));
+                    for (id, starred) in steps {
+                        match rovsti_android::providers::set_starred(id, starred) {
+                            Ok(true) | Err(rovsti_android::Error::Unsupported) => {}
+                            Ok(false) | Err(_) => failures += 1,
+                        }
+                    }
+                    failures
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                let mut text = favorites_summary(added, removed);
+                if failures > 0 {
+                    text.push_str(&format!(" {failures} couldn't be saved to Android."));
+                }
+                this.notice = Some(text.into());
+                this.reload(cx);
             })
             .ok();
         })
@@ -341,6 +392,17 @@ mod tests {
         assert_eq!(selected_words(0), "None selected");
         assert_eq!(selected_words(1), "1 selected");
         assert_eq!(selected_words(3), "3 selected");
+    }
+
+    #[test]
+    fn favorites_summary_branches() {
+        assert_eq!(favorites_summary(2, 0), "Added 2 to Favorites.");
+        assert_eq!(favorites_summary(0, 1), "Removed 1 from Favorites.");
+        assert_eq!(
+            favorites_summary(1, 3),
+            "Added 1 to Favorites and removed 3."
+        );
+        assert_eq!(favorites_summary(0, 0), "No changes.");
     }
 
     #[test]

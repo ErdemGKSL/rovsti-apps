@@ -12,7 +12,9 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, px,
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
-use rovsti_geo::{ActiveTrip, Diameter, FixOut, Side, TripState, tiles::tiles_for_circle};
+use rovsti_geo::{
+    ActiveTrip, Diameter, FixOut, NoticeState, Side, TripState, tiles::tiles_for_circle,
+};
 use rovsti_ui::{
     components::{backdrop, flat_glass, glass_pill, list_row, section},
     theme,
@@ -71,6 +73,27 @@ pub struct Live {
     pub eta_min: Option<u32>,
     pub next_fix_ms: Option<u64>,
     pub notice_sent: bool,
+    pub notice_failed: bool,
+}
+
+/// The arrival-message line, if any. Sent wins over failed, failed over planned.
+#[allow(dead_code)] // wired up by a later step
+pub fn notice_line(sent: bool, failed: bool, planned: bool) -> Option<&'static str> {
+    if sent {
+        Some("Arrival message sent")
+    } else if failed {
+        Some("Arrival message not sent. Text them yourself.")
+    } else if planned {
+        Some("Will text when arriving")
+    } else {
+        None
+    }
+}
+
+/// The snooze button label; `None` when no snoozes are left.
+#[allow(dead_code)] // wired up by a later step
+pub fn snooze_label(minutes: u8, left: u8) -> Option<String> {
+    (left > 0).then(|| format!("Snooze {} min", minutes.clamp(1, 15)))
 }
 
 impl Live {
@@ -84,6 +107,7 @@ impl Live {
             eta_min: eta_from_text(&out.text),
             next_fix_ms: Some(out.next_fix_ms),
             notice_sent: out.notice_sent,
+            notice_failed: out.notice_failed,
         }
     }
 
@@ -98,6 +122,7 @@ impl Live {
             eta_min: None,
             next_fix_ms: None,
             notice_sent: trip.notice.as_ref().is_some_and(|n| n.sent),
+            notice_failed: trip.notice.as_ref().is_some_and(NoticeState::gave_up),
         })
     }
 }
@@ -967,7 +992,30 @@ mod tests {
             eta_min: None,
             next_fix_ms: None,
             notice_sent: false,
+            notice_failed: false,
         }
+    }
+
+    #[test]
+    fn notice_line_picks_the_first_that_applies() {
+        assert_eq!(notice_line(true, true, true), Some("Arrival message sent"));
+        assert_eq!(
+            notice_line(false, true, true),
+            Some("Arrival message not sent. Text them yourself.")
+        );
+        assert_eq!(
+            notice_line(false, false, true),
+            Some("Will text when arriving")
+        );
+        assert_eq!(notice_line(false, false, false), None);
+    }
+
+    #[test]
+    fn snooze_label_hides_at_zero_and_clamps() {
+        assert_eq!(snooze_label(5, 0), None);
+        assert_eq!(snooze_label(5, 1).as_deref(), Some("Snooze 5 min"));
+        assert_eq!(snooze_label(0, 2).as_deref(), Some("Snooze 1 min"));
+        assert_eq!(snooze_label(99, 2).as_deref(), Some("Snooze 15 min"));
     }
 
     #[test]

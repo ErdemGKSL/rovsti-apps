@@ -67,6 +67,13 @@ pub struct NoticeState {
     pub attempts: u8,
 }
 
+impl NoticeState {
+    /// True once delivery failed for good (not sent, attempts exhausted).
+    pub fn gave_up(&self) -> bool {
+        !self.sent && self.attempts >= MAX_NOTICE_ATTEMPTS
+    }
+}
+
 /// What the platform layer reports after trying to send the notice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoticeDelivery {
@@ -138,6 +145,9 @@ pub struct FixOut {
     pub title: String,
     pub text: String,
     pub notice_sent: bool,
+    /// The notice could not be delivered and will not be retried.
+    #[serde(default)]
+    pub notice_failed: bool,
     /// The side of the line the phone is on, when known.
     #[serde(default)]
     pub side: Option<Side>,
@@ -218,6 +228,11 @@ impl ActiveTrip {
         }
     }
 
+    /// Snoozes still available.
+    pub fn snoozes_left(&self) -> u8 {
+        MAX_SNOOZES.saturating_sub(self.snoozes)
+    }
+
     /// Silences the alarm for `minutes` (clamped to 1..=15) and returns when it
     /// should ring again, or `None` once snoozed [`MAX_SNOOZES`] times.
     pub fn snooze(&mut self, now_ms: i64, minutes: u8) -> Option<i64> {
@@ -289,6 +304,7 @@ impl ActiveTrip {
             },
             text,
             notice_sent: self.notice.as_ref().is_some_and(|n| n.sent),
+            notice_failed: self.notice.as_ref().is_some_and(NoticeState::gave_up),
             side: u.side,
             inside: u.inside,
             circle_m: Some(u.circle_m),
@@ -619,6 +635,54 @@ mod tests {
         assert!(json.as_object_mut().unwrap().remove("retry_ms").is_some());
         let old: FixOut = serde_json::from_value(json).unwrap();
         assert_eq!(old.retry_ms, 0);
+    }
+
+    #[test]
+    fn notice_failed_after_give_up_and_retries_but_not_after_sent() {
+        let mut t = trip();
+        let o = t.on_fix(fix(0.0, 700.0, 5.0, None), 0);
+        with_notice(&mut t, NoticeRule::WithAlarm);
+        assert!(!t.fix_out(&o).notice_failed);
+        t.notice_result(NoticeDelivery::GiveUp);
+        let out = t.fix_out(&o);
+        assert!(out.notice_failed && !out.notice_sent);
+
+        with_notice(&mut t, NoticeRule::WithAlarm);
+        for _ in 0..MAX_NOTICE_ATTEMPTS {
+            assert!(!t.fix_out(&o).notice_failed);
+            t.notice_result(NoticeDelivery::RetryLater);
+        }
+        assert!(t.fix_out(&o).notice_failed);
+
+        with_notice(&mut t, NoticeRule::WithAlarm);
+        t.notice_result(NoticeDelivery::Sent);
+        let out = t.fix_out(&o);
+        assert!(out.notice_sent && !out.notice_failed);
+    }
+
+    #[test]
+    fn snoozes_left_counts_down_and_saturates() {
+        let mut t = arrived();
+        assert_eq!(t.snoozes_left(), MAX_SNOOZES);
+        t.snooze(0, 5);
+        assert_eq!(t.snoozes_left(), MAX_SNOOZES - 1);
+        t.snoozes = MAX_SNOOZES + 3;
+        assert_eq!(t.snoozes_left(), 0);
+    }
+
+    #[test]
+    fn fix_out_without_notice_failed_still_parses() {
+        let mut t = trip();
+        let o = t.on_fix(fix(0.0, 700.0, 5.0, None), 0);
+        let mut json = serde_json::to_value(t.fix_out(&o)).unwrap();
+        assert!(
+            json.as_object_mut()
+                .unwrap()
+                .remove("notice_failed")
+                .is_some()
+        );
+        let old: FixOut = serde_json::from_value(json).unwrap();
+        assert!(!old.notice_failed);
     }
 
     fn arrived() -> ActiveTrip {

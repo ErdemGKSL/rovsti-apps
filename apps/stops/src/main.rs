@@ -83,6 +83,11 @@ pub(crate) enum PillAction {
     RestartTrip(Destination, Destination),
     RestoreTileUrl(Option<String>),
     RestoreNotice(rovsti_geo::NoticePrefs),
+    UndoRelocate {
+        id: u64,
+        coord: rovsti_geo::Coord,
+        gtfs_stop: Option<String>,
+    },
 }
 
 pub(crate) struct StopsApp {
@@ -139,6 +144,8 @@ pub(crate) struct StopsApp {
     pub(crate) back_enabled: bool,
     /// The saved place whose actions are open.
     pub(crate) expanded: Option<u64>,
+    /// The saved place being moved: the next map tap sets its new spot.
+    pub(crate) relocating: Option<u64>,
     /// The virtualised lists: the Saved tab, History, the chat picker and the
     /// destination search.
     pub(crate) saved_list: lists::KeyedList,
@@ -318,6 +325,7 @@ impl StopsApp {
             save_place: false,
             back_enabled: false,
             expanded: None,
+            relocating: None,
             saved_list: lists::KeyedList::default(),
             history_list: lists::KeyedList::default(),
             notice_list: lists::KeyedList::default(),
@@ -492,6 +500,7 @@ impl StopsApp {
             || self.sheet.is_open()
             || (self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main)
             || self.expanded.is_some()
+            || self.relocating.is_some()
             || self.tabs.selected() != 0
     }
 
@@ -500,10 +509,12 @@ impl StopsApp {
         if self.pick.menu().is_some() {
             self.pick.close_menu();
             cx.notify();
+        } else if self.relocating.is_some() {
+            self.relocating = None;
+            cx.notify();
         } else if self.alarm.is_some() {
-            // Back snoozes; with no snooze left a stray Back must not end the
-            // alarm, only Dismiss does.
-            if self.snoozes_left() {
+            // With no snoozes left Back does nothing; the alarm stays.
+            if self.trip.as_ref().is_none_or(|t| t.snoozes_left() > 0) {
                 self.alarm_action(AlarmAction::Snooze, cx);
             }
         } else if self.pick.moving().is_some() {
@@ -618,6 +629,16 @@ impl StopsApp {
             PillAction::RestartTrip(a, b) => self.request_start(a, b, cx),
             PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
+            PillAction::UndoRelocate {
+                id,
+                coord,
+                gtfs_stop,
+            } => {
+                // An error means the old spot got taken meanwhile; nothing to undo then.
+                self.saved.relocate(id, coord, gtfs_stop).ok();
+                self.save_places(cx);
+                cx.notify();
+            }
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);
                 self.map.follow = true;
@@ -750,6 +771,7 @@ impl Render for StopsApp {
                             this.confirm_clear = false;
                             this.confirm_remove_feed = false;
                             this.pick.close_menu();
+                            this.relocating = None;
                             this.page.restart();
                             this.saved_list.scroll_to_top();
                             if index == 2 {

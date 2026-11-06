@@ -79,15 +79,18 @@ fn valid_name(name: &str) -> Option<String> {
     (1..=MAX_NAME_CHARS).contains(&n).then(|| name.to_owned())
 }
 
+fn valid_coord(coord: Coord) -> bool {
+    coord.lat.is_finite()
+        && coord.lon.is_finite()
+        && coord.lat.abs() <= 90.0
+        && coord.lon.abs() <= 180.0
+}
+
 impl SavedPlaces {
     /// Saves a place and returns its id.
     pub fn add(&mut self, name: &str, coord: Coord) -> Result<u64, PlaceError> {
         let name = valid_name(name).ok_or(PlaceError::InvalidName)?;
-        if !coord.lat.is_finite()
-            || !coord.lon.is_finite()
-            || coord.lat.abs() > 90.0
-            || coord.lon.abs() > 180.0
-        {
+        if !valid_coord(coord) {
             return Err(PlaceError::InvalidCoord);
         }
         if let Some(p) = self
@@ -125,6 +128,35 @@ impl SavedPlaces {
         let name = valid_name(name).ok_or(PlaceError::InvalidName)?;
         self.get_mut(id).ok_or(PlaceError::NotFound)?.name = name;
         Ok(())
+    }
+
+    /// Moves a place to a new point, keeping its name, id and list position.
+    /// Returns the old `(coord, gtfs_stop)` so the caller can undo.
+    pub fn relocate(
+        &mut self,
+        id: u64,
+        coord: Coord,
+        gtfs_stop: Option<String>,
+    ) -> Result<(Coord, Option<String>), PlaceError> {
+        if !valid_coord(coord) {
+            return Err(PlaceError::InvalidCoord);
+        }
+        if self.get(id).is_none() {
+            return Err(PlaceError::NotFound);
+        }
+        if let Some(other) = self
+            .places
+            .iter()
+            .find(|p| p.id != id && p.coord.distance_m(coord) <= DUPLICATE_RADIUS_M)
+        {
+            return Err(PlaceError::Duplicate(other.id));
+        }
+        let place = self.get_mut(id).ok_or(PlaceError::NotFound)?;
+        let old = (
+            std::mem::replace(&mut place.coord, coord),
+            std::mem::replace(&mut place.gtfs_stop, gtfs_stop),
+        );
+        Ok(old)
     }
 
     /// Removes a place; false when it did not exist.
@@ -193,6 +225,72 @@ mod tests {
 
     const TAKSIM: Coord = Coord::new(41.0370, 28.9850);
     const KADIKOY: Coord = Coord::new(40.9917, 29.0233);
+
+    fn three() -> (SavedPlaces, u64, u64, u64) {
+        let mut s = SavedPlaces::default();
+        let a = s.add("A", Coord::new(41.0, 29.0)).unwrap();
+        let b = s.add("B", TAKSIM).unwrap();
+        let c = s.add("C", KADIKOY).unwrap();
+        (s, a, b, c)
+    }
+
+    #[test]
+    fn relocate_moves_and_keeps_name_id_and_position() {
+        let (mut s, _, b, _) = three();
+        let to = Coord::new(40.0, 30.0);
+        s.relocate(b, to, Some("S1".into())).unwrap();
+        assert_eq!(s.places[1].id, b);
+        assert_eq!(s.places[1].name, "B");
+        assert_eq!(s.places[1].coord, to);
+        assert_eq!(s.places[1].gtfs_stop.as_deref(), Some("S1"));
+    }
+
+    #[test]
+    fn relocate_returns_the_old_point_for_undo() {
+        let (mut s, _, b, _) = three();
+        s.get_mut(b).unwrap().gtfs_stop = Some("OLD".into());
+        let old = s.relocate(b, Coord::new(40.0, 30.0), None).unwrap();
+        assert_eq!(old, (TAKSIM, Some("OLD".to_owned())));
+        s.relocate(b, old.0, old.1).unwrap();
+        assert_eq!(s.get(b).unwrap().coord, TAKSIM);
+        assert_eq!(s.get(b).unwrap().gtfs_stop.as_deref(), Some("OLD"));
+    }
+
+    #[test]
+    fn relocate_refuses_a_spot_taken_by_another_place() {
+        let (mut s, a, b, _) = three();
+        assert_eq!(
+            s.relocate(b, Coord::new(41.0, 29.0), None),
+            Err(PlaceError::Duplicate(a))
+        );
+        assert_eq!(s.get(b).unwrap().coord, TAKSIM);
+        // A 20 m nudge of itself is fine.
+        let nudge = Coord::new(TAKSIM.lat + 0.00018, TAKSIM.lon);
+        assert!(TAKSIM.distance_m(nudge) < DUPLICATE_RADIUS_M);
+        assert!(s.relocate(b, nudge, None).is_ok());
+    }
+
+    #[test]
+    fn relocate_refuses_bad_coords_and_unknown_ids() {
+        let (mut s, _, b, _) = three();
+        assert_eq!(
+            s.relocate(b, Coord::new(91.0, 0.0), None),
+            Err(PlaceError::InvalidCoord)
+        );
+        assert_eq!(
+            s.relocate(b, Coord::new(f64::NAN, 0.0), None),
+            Err(PlaceError::InvalidCoord)
+        );
+        assert_eq!(
+            s.relocate(999, Coord::new(10.0, 10.0), None),
+            Err(PlaceError::NotFound)
+        );
+        // Order: bad coordinates win over an unknown id.
+        assert_eq!(
+            s.relocate(999, Coord::new(91.0, 0.0), None),
+            Err(PlaceError::InvalidCoord)
+        );
+    }
 
     #[test]
     fn old_saved_place_with_a_rule_still_loads() {

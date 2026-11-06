@@ -102,6 +102,31 @@ pub fn save_result_text(result: &Result<u64, PlaceError>, saved: &SavedPlaces) -
     }
 }
 
+/// The hint while a saved place is being moved.
+pub fn relocate_hint(name: &str) -> String {
+    if name.is_empty() {
+        "Tap the map to move the place".to_owned()
+    } else {
+        format!("Tap the map to move {name}")
+    }
+}
+
+/// The toast after trying to move a saved place.
+pub fn relocate_result_text(
+    result: &Result<(Coord, Option<String>), PlaceError>,
+    name: &str,
+    saved: &SavedPlaces,
+) -> String {
+    match result {
+        Ok(_) => format!("Moved {name}"),
+        Err(PlaceError::Duplicate(id)) => {
+            let other = saved.get(*id).map(|p| p.name.clone()).unwrap_or_default();
+            format!("{other} is already saved there")
+        }
+        Err(error) => error.message().to_owned(),
+    }
+}
+
 /// The pair being picked, with the transient state of the pin gestures.
 #[derive(Debug, Default)]
 pub struct Picking {
@@ -766,6 +791,28 @@ mod tests {
         assert_eq!(
             save_result_text(&Err(PlaceError::InvalidName), &saved),
             PlaceError::InvalidName.message()
+        );
+    }
+
+    #[test]
+    fn relocate_hint_names_the_place_or_falls_back() {
+        assert_eq!(relocate_hint("Home"), "Tap the map to move Home");
+        assert_eq!(relocate_hint(""), "Tap the map to move the place");
+    }
+
+    #[test]
+    fn relocate_result_text_covers_ok_duplicate_and_errors() {
+        let mut saved = SavedPlaces::default();
+        let id = saved.add("Work", Coord::new(41.0, 29.0)).unwrap();
+        let ok = Ok((Coord::new(41.1, 29.1), None));
+        assert_eq!(relocate_result_text(&ok, "Home", &saved), "Moved Home");
+        assert_eq!(
+            relocate_result_text(&Err(PlaceError::Duplicate(id)), "Home", &saved),
+            "Work is already saved there"
+        );
+        assert_eq!(
+            relocate_result_text(&Err(PlaceError::InvalidCoord), "Home", &saved),
+            PlaceError::InvalidCoord.message()
         );
     }
 

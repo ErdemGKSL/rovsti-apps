@@ -2089,6 +2089,8 @@ impl StopsApp {
                 let at = self.map.to_view(at);
                 self.map.viewport.zoom_about(2.0, at);
             }
+            // While a saved place is being moved, A/B pins stay quiet: a tap sets its spot.
+            Gesture::PinTap { .. } if self.relocating.is_some() => {}
             Gesture::PinTap { slot } => self.pick.open_menu(slot),
             Gesture::PinDrag { slot, at } => {
                 // The auto view would chase the pin under the finger.
@@ -2131,6 +2133,10 @@ impl StopsApp {
         // Keep the view where the user tapped: the idle fit would otherwise
         // recentre on the new pin and move it from under the finger.
         self.map.take_over();
+        if let Some(id) = self.relocating {
+            self.relocate_tap(id, at, cx);
+            return;
+        }
         let dest = snap_destination(
             self.gtfs.as_deref(),
             &self.saved,
@@ -2143,6 +2149,55 @@ impl StopsApp {
             TapOutcome::Full => {
                 self.show_pill("Drag a pin to adjust it, or tap Clear.", None, cx);
             }
+        }
+    }
+
+    /// Starts moving saved place `id`: centres the map on it; the next tap sets its new spot.
+    pub(crate) fn begin_relocate(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(place) = self.saved.get(id) else {
+            return;
+        };
+        let at = place.coord;
+        self.expanded = None;
+        self.relocating = Some(id);
+        self.pick.close_menu();
+        self.map.take_over();
+        self.map.viewport = Viewport::new(at, STREET_MPP);
+        self.tabs.jump_to(0);
+        cx.notify();
+    }
+
+    /// A map tap while moving place `id`: snaps to stops only, never to saved places.
+    fn relocate_tap(&mut self, id: u64, at: (f32, f32), cx: &mut Context<Self>) {
+        let dest = snap_destination(
+            self.gtfs.as_deref(),
+            &SavedPlaces::default(),
+            &self.map.viewport,
+            self.map.size(),
+            at,
+        );
+        let result = self.saved.relocate(id, dest.coord, dest.gtfs_stop.clone());
+        let name = self
+            .saved
+            .get(id)
+            .map(|p| p.name.clone())
+            .unwrap_or_default();
+        let text = pick::relocate_result_text(&result, &name, &self.saved);
+        match result {
+            Ok((coord, gtfs_stop)) => {
+                self.save_places(cx);
+                self.relocating = None;
+                self.show_pill(
+                    text,
+                    Some(crate::PillAction::UndoRelocate {
+                        id,
+                        coord,
+                        gtfs_stop,
+                    }),
+                    cx,
+                );
+            }
+            Err(_) => self.show_pill(text, None, cx),
         }
     }
 

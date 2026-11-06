@@ -12,7 +12,9 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, px,
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
-use rovsti_geo::{ActiveTrip, Diameter, FixOut, Side, TripState, tiles::tiles_for_circle};
+use rovsti_geo::{
+    ActiveTrip, Diameter, FixOut, NoticeState, Side, TripState, tiles::tiles_for_circle,
+};
 use rovsti_ui::{
     components::{backdrop, flat_glass, glass_pill, list_row, section},
     theme,
@@ -30,10 +32,6 @@ use crate::{
 };
 
 // ---- pure ------------------------------------------------------------------------
-
-/// Snoozes a trip allows; mirrors `rovsti_geo`'s private `MAX_SNOOZES`
-/// (checked by a test against `ActiveTrip::snooze`).
-pub const MAX_SNOOZES: u8 = 5;
 
 /// "450 m", "1.2 km": metres to the nearest 10 below a kilometre.
 pub fn distance_text(metres: f64) -> String {
@@ -77,6 +75,30 @@ pub struct Live {
     pub eta_min: Option<u32>,
     pub next_fix_ms: Option<u64>,
     pub notice_sent: bool,
+    pub notice_failed: bool,
+}
+
+/// The arrival-message line, if any. Sent wins over failed, failed over planned.
+pub fn notice_line(sent: bool, failed: bool, planned: bool) -> Option<&'static str> {
+    if sent {
+        Some("Arrival message sent")
+    } else if failed {
+        Some("Arrival message not sent. Text them yourself.")
+    } else if planned {
+        Some("Will text when arriving")
+    } else {
+        None
+    }
+}
+
+/// True once, when the failed flag flips from false to true.
+pub fn pill_on_failure(was_failed: bool, now_failed: bool) -> bool {
+    !was_failed && now_failed
+}
+
+/// The snooze button label; `None` when no snoozes are left.
+pub fn snooze_label(minutes: u8, left: u8) -> Option<String> {
+    (left > 0).then(|| format!("Snooze {} min", minutes.clamp(1, 15)))
 }
 
 impl Live {
@@ -90,6 +112,7 @@ impl Live {
             eta_min: eta_from_text(&out.text),
             next_fix_ms: Some(out.next_fix_ms),
             notice_sent: out.notice_sent,
+            notice_failed: out.notice_failed,
         }
     }
 
@@ -104,6 +127,7 @@ impl Live {
             eta_min: None,
             next_fix_ms: None,
             notice_sent: trip.notice.as_ref().is_some_and(|n| n.sent),
+            notice_failed: trip.notice.as_ref().is_some_and(NoticeState::gave_up),
         })
     }
 }
@@ -283,35 +307,60 @@ impl StopsApp {
             })),
             _ => start,
         };
+        let moving = match self.relocating {
+            Some(id) => match self.saved.get(id) {
+                Some(p) => Some(pick::relocate_hint(&p.name)),
+                None => {
+                    self.relocating = None;
+                    None
+                }
+            },
+            None => None,
+        };
         let mut buttons = div().flex().items_center().gap(px(8.0));
-        if any_end {
+        if moving.is_some() {
             buttons = buttons.child(
-                glass_pill(theme, "Clear")
-                    .id("clear-ends")
+                glass_pill(theme, "Cancel")
+                    .id("relocate-cancel")
+                    .flex_1()
                     .h(px(52.0))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        let ends = this.pick.ends.clone();
-                        this.pick.clear();
-                        this.map.follow = true;
-                        this.show_pill(
-                            "Points cleared",
-                            Some(crate::PillAction::RestoreEnds(ends)),
-                            cx,
-                        );
-                    })),
-            );
-        }
-        buttons = buttons
-            .child(
-                glass_pill(theme, "Swap")
-                    .id("swap-ends")
-                    .h(px(52.0))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.pick.swap();
+                        this.relocating = None;
+                        this.tabs.jump_to(1);
                         cx.notify();
                     })),
-            )
-            .child(start);
+            );
+        } else {
+            if any_end {
+                buttons = buttons.child(
+                    glass_pill(theme, "Clear")
+                        .id("clear-ends")
+                        .h(px(52.0))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let ends = this.pick.ends.clone();
+                            this.pick.clear();
+                            this.map.follow = true;
+                            this.show_pill(
+                                "Points cleared",
+                                Some(crate::PillAction::RestoreEnds(ends)),
+                                cx,
+                            );
+                        })),
+                );
+            }
+            if any_end {
+                buttons = buttons.child(
+                    glass_pill(theme, "Swap")
+                        .id("swap-ends")
+                        .h(px(52.0))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.pick.swap();
+                            cx.notify();
+                        })),
+                );
+            }
+            buttons = buttons.child(start);
+        }
         let mut bar = div()
             .px(px(16.0))
             .flex()
@@ -325,7 +374,7 @@ impl StopsApp {
                         pick::Hint::Invalid(_) => colors.red,
                         _ => colors.label,
                     })
-                    .child(hint.text()),
+                    .child(moving.clone().unwrap_or_else(|| hint.text())),
             )
             .child(buttons);
         if let Some(Ok(d)) = self.pick.ends.diameter() {
@@ -418,10 +467,14 @@ impl StopsApp {
         if let Some(ms) = live.as_ref().and_then(|l| l.next_fix_ms) {
             details.push(format!("Next check in {}", wait_text(ms)));
         }
-        if live.as_ref().is_some_and(|l| l.notice_sent) {
-            details.push("Arrival message sent".to_owned());
-        } else if trip.notice.is_some() {
-            details.push("Will text when arriving".to_owned());
+        let failed = live
+            .as_ref()
+            .is_some_and(|l| l.notice_failed && !l.notice_sent);
+        let (sent, gave_up) = live
+            .as_ref()
+            .map_or((false, false), |l| (l.notice_sent, l.notice_failed));
+        if let Some(line) = notice_line(sent, gave_up, trip.notice.is_some()) {
+            details.push(line.to_owned());
         }
         let busy = self.busy;
         div()
@@ -467,9 +520,14 @@ impl StopsApp {
                             .child(rule),
                     )
                     .children(details.into_iter().map(|d| {
+                        let color = if failed && d.starts_with("Arrival message not sent") {
+                            colors.red
+                        } else {
+                            colors.tertiary_label
+                        };
                         div()
                             .text_size(typography::FOOTNOTE.size)
-                            .text_color(colors.tertiary_label)
+                            .text_color(color)
                             .child(d)
                     }))
                     .child(
@@ -492,28 +550,14 @@ impl StopsApp {
     ) -> Option<AnyElement> {
         let alarm = self.alarm.clone()?;
         let colors = theme::colors(theme);
-        let snooze = format!("Snooze {} min", self.prefs.snooze_min.clamp(1, 15));
-        // With every snooze used, "Snooze" would end the trip: say so instead.
-        let snooze_button = if self.snoozes_left() {
-            glass_pill(theme, snooze)
-                .id("alarm-snooze")
-                .w_full()
-                .h(px(64.0))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.alarm_action(AlarmAction::Snooze, cx);
-                }))
-                .into_any_element()
-        } else {
-            div()
-                .w_full()
-                .text_center()
-                .text_size(typography::HEADLINE.size)
-                .text_color(colors.secondary_label)
-                .child("No snoozes left")
-                .into_any_element()
-        };
+        let left = self.trip.as_ref().map_or(1, ActiveTrip::snoozes_left);
+        let snooze = snooze_label(self.prefs.snooze_min, left);
         let distance = alarm.distance_m.map(distance_text);
         let crossed_to = crossed_to_text(alarm.side);
+        let notice_failed = self
+            .live
+            .as_ref()
+            .is_some_and(|l| l.notice_failed && !l.notice_sent);
         Some(
             div()
                 .id("alarm-screen")
@@ -558,6 +602,13 @@ impl StopsApp {
                                 .text_color(colors.label)
                                 .child(d)
                         }))
+                        .children(notice_failed.then(|| {
+                            div()
+                                .text_size(typography::TITLE2.size)
+                                .text_color(colors.red)
+                                .text_center()
+                                .child("Arrival message not sent")
+                        }))
                         .child(
                             div()
                                 .pt(px(32.0))
@@ -575,7 +626,27 @@ impl StopsApp {
                                             this.alarm_action(AlarmAction::Dismiss, cx);
                                         })),
                                 )
-                                .child(snooze_button),
+                                .children(match snooze {
+                                    Some(label) => Some(
+                                        glass_pill(theme, label)
+                                            .id("alarm-snooze")
+                                            .w_full()
+                                            .h(px(64.0))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.alarm_action(AlarmAction::Snooze, cx);
+                                            }))
+                                            .into_any_element(),
+                                    ),
+                                    None => Some(
+                                        div()
+                                            .w_full()
+                                            .text_center()
+                                            .text_size(typography::FOOTNOTE.size)
+                                            .text_color(colors.secondary_label)
+                                            .child("No snoozes left")
+                                            .into_any_element(),
+                                    ),
+                                }),
                         ),
                 )
                 .into_any_element(),
@@ -583,12 +654,6 @@ impl StopsApp {
     }
 
     // ---- controller --------------------------------------------------------------
-
-    /// The trip can still be snoozed (the headless handler ends it once
-    /// [`MAX_SNOOZES`] are used). True without a trip: nothing to protect.
-    pub(crate) fn snoozes_left(&self) -> bool {
-        self.trip.as_ref().is_none_or(|t| t.snoozes < MAX_SNOOZES)
-    }
 
     /// An arriving-soon message is set up and WhatsApp is linked.
     pub(crate) fn notice_available(&self, cx: &Context<Self>) -> bool {
@@ -609,6 +674,7 @@ impl StopsApp {
             return;
         }
         self.pick.close_menu();
+        self.relocating = None;
         self.busy = true;
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -855,7 +921,11 @@ impl StopsApp {
                 if self.loaded && self.trip.is_none() {
                     return;
                 }
+                let was_failed = self.live.as_ref().is_some_and(|l| l.notice_failed);
                 self.live = Some(Live::from_out(&out));
+                if pill_on_failure(was_failed, out.notice_failed) {
+                    self.show_pill("Arrival message not sent. Text them yourself.", None, cx);
+                }
                 if let Some(at) = out.at {
                     self.map_fix(at);
                 }
@@ -931,9 +1001,23 @@ impl StopsApp {
     /// Hides the alarm until `at_ms`, then rings again if the trip is still on.
     fn on_snoozed(&mut self, at_ms: i64, cx: &mut Context<Self>) {
         self.alarm = None;
-        // The handler counted the snooze in `trip.json`: read it, so the alarm
-        // screen knows when the last one is used.
-        self.refresh_trip(cx);
+        if let Some(dir) = self.dir.clone() {
+            // Only the snooze count changes; the rest of the trip stays as is.
+            cx.spawn(async move |this, cx| {
+                let (trip, _) = cx
+                    .background_executor()
+                    .spawn(async move { backend::reload_trip(&dir) })
+                    .await;
+                this.update(cx, |this, cx| {
+                    if let (Some(t), Some(new)) = (this.trip.as_mut(), trip) {
+                        t.snoozes = new.snoozes;
+                        cx.notify();
+                    }
+                })
+                .ok();
+            })
+            .detach();
+        }
         let now = now_ms();
         self.show_pill(snooze_text(at_ms, now), None, cx);
         let wait = Duration::from_millis((at_ms - now).max(0) as u64);
@@ -996,7 +1080,38 @@ mod tests {
             eta_min: None,
             next_fix_ms: None,
             notice_sent: false,
+            notice_failed: false,
         }
+    }
+
+    #[test]
+    fn pill_shows_only_on_the_flip() {
+        assert!(pill_on_failure(false, true));
+        assert!(!pill_on_failure(true, true));
+        assert!(!pill_on_failure(false, false));
+        assert!(!pill_on_failure(true, false));
+    }
+
+    #[test]
+    fn notice_line_picks_the_first_that_applies() {
+        assert_eq!(notice_line(true, true, true), Some("Arrival message sent"));
+        assert_eq!(
+            notice_line(false, true, true),
+            Some("Arrival message not sent. Text them yourself.")
+        );
+        assert_eq!(
+            notice_line(false, false, true),
+            Some("Will text when arriving")
+        );
+        assert_eq!(notice_line(false, false, false), None);
+    }
+
+    #[test]
+    fn snooze_label_hides_at_zero_and_clamps() {
+        assert_eq!(snooze_label(5, 0), None);
+        assert_eq!(snooze_label(5, 1).as_deref(), Some("Snooze 5 min"));
+        assert_eq!(snooze_label(0, 2).as_deref(), Some("Snooze 1 min"));
+        assert_eq!(snooze_label(99, 2).as_deref(), Some("Snooze 15 min"));
     }
 
     #[test]
@@ -1181,22 +1296,6 @@ mod tests {
         let live = Live::from_out(&out);
         assert_eq!(live.circle_m, Some(640.0));
         assert_eq!(circle_text(&live).as_deref(), Some("640 m to the circle"));
-    }
-
-    #[test]
-    fn max_snoozes_matches_the_session() {
-        let end = |lon: f64| rovsti_geo::Endpoint {
-            label: String::new(),
-            coord: Coord::new(41.0, lon),
-        };
-        let mut trip = ActiveTrip::new(1, end(28.994), end(29.006), 0).unwrap();
-        let mut used = 0;
-        while trip.snooze(0, 5).is_some() {
-            used += 1;
-            assert!(used <= 100, "snoozes never run out");
-        }
-        assert_eq!(used, MAX_SNOOZES);
-        assert_eq!(trip.snoozes, MAX_SNOOZES);
     }
 
     #[test]

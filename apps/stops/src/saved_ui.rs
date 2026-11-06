@@ -106,14 +106,14 @@ impl StopsApp {
                     .into_any_element(),
             );
         }
-        // An opened stop is taller: its key changes so it is measured again.
+        // Its key changes when its height does, so it is measured again.
         let keys = std::iter::once(lists::key(0, 0))
-            .chain(
-                self.saved
-                    .stops
-                    .iter()
-                    .map(|st| lists::key(1 + u8::from(self.expanded == Some(st.id)), st.id)),
-            )
+            .chain(self.saved.stops.iter().map(|st| {
+                // An opened stop is taller, and taller again with the Cancel row.
+                let open = self.expanded == Some(st.id);
+                let armed = open && self.confirm_delete == Some(st.id);
+                lists::key(1 + u8::from(open) + u8::from(armed), st.id)
+            }))
             .collect();
         let state = self.saved_list.sync(keys);
         Page::List(Box::new(list(

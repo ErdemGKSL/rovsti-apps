@@ -2231,7 +2231,10 @@ impl StopsApp {
                 );
                 let settle =
                     settle_for_drop(slot, released, &dest, window.prefers_reduced_motion());
-                if dest.gtfs_stop.is_some() {
+                // Only a new snap buzzes, not a nudge that stays on its stop.
+                let newly_snapped = dest.gtfs_stop.is_some()
+                    && dest.gtfs_stop != origin.as_ref().and_then(|o| o.gtfs_stop.clone());
+                if newly_snapped {
                     haptics::perform(window, HapticFeedback::Selection);
                 }
                 self.map.settle = settle;

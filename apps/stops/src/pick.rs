@@ -250,6 +250,14 @@ impl Picking {
         }
     }
 
+    /// The grabbed pin's value before the drag began.
+    pub fn drag_origin(&self, slot: Slot) -> Option<&Destination> {
+        self.drag
+            .as_ref()
+            .filter(|(s, _)| *s == slot)
+            .map(|(_, original)| original)
+    }
+
     pub fn dragging(&self) -> Option<Slot> {
         self.drag.as_ref().map(|(slot, _)| *slot)
     }

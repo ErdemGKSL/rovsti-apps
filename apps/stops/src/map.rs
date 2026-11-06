@@ -46,6 +46,7 @@ use crate::{
     backend::{Preflight, Step},
     pick::{self, TapOutcome},
     picker::{Destination, Ends, SheetMode, Slot},
+    snap,
     store::now_ms,
 };
 
@@ -217,6 +218,42 @@ pub fn snap_destination(
         },
         None => Destination::dropped(viewport.unproject(at)),
     }
+}
+
+/// Where a pin let go at `at` ends up. `input` carries the release speed, peak
+/// speed and travel; its candidate fields are filled in here from the nearest
+/// GTFS stop within [`snap::FAST_RADIUS_PX`]. `origin` is the pin's value
+/// before the drag, so a snapped pin nudged slowly stays on its stop.
+pub fn drop_destination(
+    feed: Option<&Feed>,
+    viewport: &Viewport,
+    size: (f32, f32),
+    at: (f32, f32),
+    input: &snap::DropInput,
+    origin: Option<&Destination>,
+) -> Destination {
+    let stop = feed.and_then(|feed| {
+        let index = pick_stop(feed, viewport, size, at, snap::FAST_RADIUS_PX)?;
+        feed.stops.get(index as usize)
+    });
+    if let Some(stop) = stop {
+        let decision = snap::decide(&snap::DropInput {
+            candidate_px: Some(dist(viewport.project(stop.coord), at)),
+            started_on_candidate: origin
+                .and_then(|o| o.gtfs_stop.as_deref())
+                .is_some_and(|id| id == stop.id),
+            ..*input
+        });
+        if decision == snap::DropSnap::Snap {
+            return Destination {
+                label: stop.name.clone(),
+                coord: stop.coord,
+                gtfs_stop: Some(stop.id.clone()),
+                pattern: None,
+            };
+        }
+    }
+    Destination::dropped(viewport.unproject(at))
 }
 
 /// Index of the GTFS stop `id` in the feed, for the pin menu's "Lines" row.
@@ -464,6 +501,12 @@ pub enum Gesture {
     PinDrop {
         slot: Slot,
         at: (f32, f32),
+        /// Finger speed at release (px/s, smoothed over the last ~90 ms).
+        release_px_s: f32,
+        /// Highest smoothed speed in the last 300 ms before release.
+        peak_px_s: f32,
+        /// Finger travel since the grab.
+        travel_px: f32,
     },
     /// The grab was interrupted: the pin goes back.
     PinCancel {
@@ -472,9 +515,12 @@ pub enum Gesture {
 }
 
 /// A pin held by the first finger.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct Grab {
     slot: Slot,
+    tracker: snap::VelocityTracker,
+    /// Where the finger touched down.
+    start_at: (f32, f32),
     /// Finger minus pin at the start, so the pin does not jump.
     offset: (f32, f32),
     moved: bool,
@@ -533,6 +579,13 @@ impl Gestures {
                         .min_by(|a, b| a.2.total_cmp(&b.2))
                         .map(|(slot, h, _)| Grab {
                             slot,
+                            tracker: {
+                                let mut tracker = snap::VelocityTracker::default();
+                                tracker.reset();
+                                tracker.push(now_ms, at);
+                                tracker
+                            },
+                            start_at: at,
                             offset: (at.0 - h.0, at.1 - h.1),
                             moved: false,
                         });
@@ -549,6 +602,7 @@ impl Gestures {
                 let i = self.touches.iter().position(|t| t.0 == id)?;
                 if let Some(grab) = &mut self.grab {
                     self.touches[i].1 = at;
+                    grab.tracker.push(now_ms, at);
                     if !grab.moved && dist(at, self.start) > TAP_SLOP {
                         grab.moved = true;
                     }
@@ -589,12 +643,17 @@ impl Gestures {
                         .take()
                         .map(|grab| Gesture::PinCancel { slot: grab.slot });
                 }
-                if let Some(grab) = self.grab.take() {
+                if let Some(mut grab) = self.grab.take() {
                     self.touches.remove(i);
+                    // The lift itself is a sample: a pause before it reads as slow.
+                    grab.tracker.push(now_ms, at);
                     return Some(if grab.moved {
                         Gesture::PinDrop {
                             slot: grab.slot,
                             at: (at.0 - grab.offset.0, at.1 - grab.offset.1),
+                            release_px_s: grab.tracker.speed_px_s(now_ms),
+                            peak_px_s: grab.tracker.peak_px_s(now_ms),
+                            travel_px: dist(at, grab.start_at),
                         }
                     } else {
                         Gesture::PinTap { slot: grab.slot }
@@ -2067,14 +2126,30 @@ impl StopsApp {
                 let coord = self.map.viewport.unproject(self.map.to_view(at));
                 self.pick.drag_to(slot, coord);
             }
-            Gesture::PinDrop { slot, at } => {
+            Gesture::PinDrop {
+                slot,
+                at,
+                release_px_s,
+                peak_px_s,
+                travel_px,
+            } => {
                 self.map.take_over();
                 let at = self.map.to_view(at);
-                let dest = snap_destination(
+                let input = snap::DropInput {
+                    release_px_s,
+                    peak_px_s,
+                    candidate_px: None,
+                    travel_px,
+                    started_on_candidate: false,
+                };
+                let origin = self.pick.drag_origin(slot).cloned();
+                let dest = drop_destination(
                     self.gtfs.as_deref(),
                     &self.map.viewport,
                     self.map.size(),
                     at,
+                    &input,
+                    origin.as_ref(),
                 );
                 self.pick.drag_end(slot, dest);
             }
@@ -2098,12 +2173,18 @@ impl StopsApp {
         // Keep the view where the user tapped: the idle fit would otherwise
         // recentre on the new pin and move it from under the finger.
         self.map.take_over();
-        let dest = snap_destination(
-            self.gtfs.as_deref(),
-            &self.map.viewport,
-            self.map.size(),
-            at,
-        );
+        let feed = self.gtfs.as_deref();
+        let size = self.map.size();
+        let near = feed.and_then(|feed| {
+            let index = pick_stop(feed, &self.map.viewport, size, at, snap::TAP_RADIUS_PX)?;
+            let stop = feed.stops.get(index as usize)?;
+            Some(dist(self.map.viewport.project(stop.coord), at))
+        });
+        let dest = if snap::tap_snaps(near) {
+            snap_destination(feed, &self.map.viewport, size, at)
+        } else {
+            Destination::dropped(self.map.viewport.unproject(at))
+        };
         match self.pick.tap(dest) {
             TapOutcome::Placed(_) | TapOutcome::MenuClosed => cx.notify(),
             TapOutcome::Full => {
@@ -2732,7 +2813,11 @@ mod tests {
             g.mouse(Phase::End, (92.0, 50.0), 5_020),
             Some(Gesture::PinDrop {
                 slot: Slot::A,
-                at: (90.0, 50.0)
+                at: (90.0, 50.0),
+                // 40 px from the grab sample (t=5000) to the release (t=5020).
+                release_px_s: 2_000.0,
+                peak_px_s: 4_000.0,
+                travel_px: 40.0,
             })
         );
     }
@@ -2766,10 +2851,147 @@ mod tests {
             g.touch(1, Phase::End, (150.0, 120.0), 40),
             Some(Gesture::PinDrop {
                 slot: Slot::A,
-                at: (140.0, 125.0)
+                at: (140.0, 125.0),
+                // Straight-line (40, 25) from the grab point over the 40 ms window.
+                release_px_s: 1179.2477,
+                peak_px_s: 2_000.0,
+                travel_px: 47.169907,
             })
         );
         assert_eq!(g.due_tap(10_000), None);
+    }
+
+    fn drop_of(g: &mut Gestures, moves: &[((f32, f32), u64)], end: ((f32, f32), u64)) -> Gesture {
+        g.touch(1, Phase::Start, (100.0, 100.0), 0);
+        for &(at, t) in moves {
+            g.touch(1, Phase::Move, at, t);
+        }
+        g.touch(1, Phase::End, end.0, end.1).expect("a drop")
+    }
+
+    #[test]
+    fn a_fast_drag_reports_a_release_speed_above_the_fast_threshold() {
+        let mut g = with_pin();
+        let drop = drop_of(
+            &mut g,
+            &[
+                ((140.0, 100.0), 20),
+                ((180.0, 100.0), 40),
+                ((220.0, 100.0), 60),
+            ],
+            ((220.0, 100.0), 62),
+        );
+        let Gesture::PinDrop {
+            release_px_s,
+            peak_px_s,
+            travel_px,
+            ..
+        } = drop
+        else {
+            panic!("expected a drop, got {drop:?}");
+        };
+        assert!(release_px_s > snap::FAST_PX_S, "{release_px_s}");
+        assert!(peak_px_s >= release_px_s);
+        assert!((travel_px - 120.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_drag_that_pauses_before_lifting_reports_about_zero() {
+        let mut g = with_pin();
+        let drop = drop_of(
+            &mut g,
+            &[
+                ((140.0, 100.0), 20),
+                ((180.0, 100.0), 40),
+                ((220.0, 100.0), 60),
+            ],
+            ((220.0, 100.0), 210),
+        );
+        let Gesture::PinDrop { release_px_s, .. } = drop else {
+            panic!("expected a drop, got {drop:?}");
+        };
+        assert!(release_px_s < 1.0, "{release_px_s}");
+    }
+
+    fn drop_input(release: f32, peak: f32, travel: f32) -> snap::DropInput {
+        snap::DropInput {
+            release_px_s: release,
+            peak_px_s: peak,
+            candidate_px: None,
+            travel_px: travel,
+            started_on_candidate: false,
+        }
+    }
+
+    fn drop_feed() -> Feed {
+        Feed::new(vec![named_stop("S1", "Moda", 0.0)], vec![], vec![], 0)
+    }
+
+    #[test]
+    fn a_slow_drop_near_a_stop_stays_raw_and_a_fast_one_snaps() {
+        let feed = drop_feed();
+        // 10 m/px: the stop sits at the centre; the drop is 30 px right.
+        let vp = Viewport::new(IST, 10.0);
+        let size = (400.0, 300.0);
+        let at = (30.0, 0.0);
+        let slow = drop_destination(
+            Some(&feed),
+            &vp,
+            size,
+            at,
+            &drop_input(50.0, 80.0, 200.0),
+            None,
+        );
+        assert_eq!(slow.gtfs_stop, None);
+        assert!(!slow.is_named());
+        let fast = drop_destination(
+            Some(&feed),
+            &vp,
+            size,
+            at,
+            &drop_input(1_200.0, 1_200.0, 200.0),
+            None,
+        );
+        assert_eq!(fast.gtfs_stop.as_deref(), Some("S1"));
+        assert_eq!(fast.coord, feed.stops[0].coord);
+        // Without a feed there is nothing to snap to.
+        let none = drop_destination(
+            None,
+            &vp,
+            size,
+            at,
+            &drop_input(1_200.0, 1_200.0, 200.0),
+            None,
+        );
+        assert_eq!(none.gtfs_stop, None);
+    }
+
+    #[test]
+    fn a_small_slow_nudge_of_a_snapped_pin_stays_snapped() {
+        let feed = drop_feed();
+        let vp = Viewport::new(IST, 10.0);
+        let size = (400.0, 300.0);
+        let origin = snap_destination(Some(&feed), &vp, size, (0.0, 0.0));
+        assert_eq!(origin.gtfs_stop.as_deref(), Some("S1"));
+        let nudged = drop_destination(
+            Some(&feed),
+            &vp,
+            size,
+            (6.0, 0.0),
+            &drop_input(20.0, 30.0, 6.0),
+            Some(&origin),
+        );
+        assert_eq!(nudged.gtfs_stop.as_deref(), Some("S1"));
+        // A slow drag away beyond the hold travel unsnaps.
+        let away = drop_destination(
+            Some(&feed),
+            &vp,
+            size,
+            (30.0, 0.0),
+            &drop_input(20.0, 30.0, 30.0),
+            Some(&origin),
+        );
+        assert_eq!(away.gtfs_stop, None);
     }
 
     #[test]

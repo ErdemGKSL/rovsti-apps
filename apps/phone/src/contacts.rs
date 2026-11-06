@@ -1156,7 +1156,8 @@ impl PhoneApp {
         let row = &sheet.contact;
         let thumb = self.row_photo(row, cx).map(|(image, _)| image);
         let (title, uri) = (row.name.clone(), row.photo.clone());
-        self.open_photo_viewer(title, thumb, uri, cx);
+        let owner = Some((row.id, uri.is_some()));
+        self.open_photo_viewer(title, thumb, uri, owner, cx);
     }
 
     /// Opens the Contact sheet (or, with `chooser`, the number chooser).
@@ -1474,6 +1475,18 @@ impl PhoneApp {
                     {
                         sheet.fav_index = Some(to);
                     }
+                }
+            }
+            "sheet-c-qr" => {
+                let numbers: Vec<(String, String)> = sheet
+                    .contact
+                    .numbers
+                    .iter()
+                    .map(|n| (n.raw.clone(), n.label.clone()))
+                    .collect();
+                let name = sheet.contact.name.clone();
+                if !numbers.is_empty() {
+                    self.open_qr_viewer(name, numbers, cx);
                 }
             }
             "sheet-cedit" => {
@@ -2263,6 +2276,22 @@ impl PhoneApp {
                     cx.listener(|this, _, _, cx| this.open_contact_photo(cx)),
                 )
                 .into_any_element()
+        } else if contact.id > 0 && !sheet.chooser {
+            // U10: no photo yet, so the avatar opens the Add photo menu.
+            avatar_slot
+                .id("sheet-photo")
+                .role(Role::Button)
+                .aria_label("Add photo")
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, _, cx| {
+                        if let Some(sheet) = &this.contact_sheet {
+                            let (id, name) = (sheet.contact.id, sheet.contact.name.clone());
+                            this.open_photo_menu(id, name, false, cx);
+                        }
+                    }),
+                )
+                .into_any_element()
         } else {
             avatar_slot.into_any_element()
         };
@@ -2480,6 +2509,21 @@ impl PhoneApp {
                     self.stats_section(theme, &vm, crate::stats_ui::CONTACT_SHARE, cx),
                 ));
             }
+        }
+        if !sheet.chooser && !sheet.contact.numbers.is_empty() {
+            children.push(reveal(
+                5,
+                crate::recents::sheet_pill(
+                    self,
+                    "sheet-c-qr",
+                    Icon::LucideQrCode,
+                    "Share as QR code",
+                    colors.fill,
+                    colors.label,
+                    cx,
+                )
+                .into_any_element(),
+            ));
         }
         if !sheet.chooser {
             children.push(reveal(

@@ -287,6 +287,44 @@ outgoing and WhatsApp calls. Save needs Android 10 or newer (no storage permissi
 | U16 | Hold * as the very first key. | It stays a *. | | |
 | U17 | Dial 5551234,1 and place the call. | The call starts and, after the pause, the dialer sends 1 as a tone; a ; asks to confirm before sending. | | |
 
+## Utilities round 2: statistics, notes, call details, QR and photo edit
+
+Needs a call log with several calls (answered, missed, WhatsApp), a contact with a photo and one
+without, and a second phone or app that can scan a QR code. Photo edit needs a Contacts provider
+that accepts photo writes (the system Contacts app does).
+
+| # | Step | Expected | Pass / Fail | Notes |
+|---|---|---|---|---|
+| **Call statistics (U7, U18)** | | | | |
+| R2-U7a | Open the Contact sheet of someone you called. | A "Call statistics" block shows calls, talk time, longest call and a last-7-days bar chart. A person with no calls has no block. | | |
+| R2-U7b | Open the Number sheet of an unsaved number. | The same block shows for that number only. | | |
+| R2-U7c | Settings, Call statistics. | This week, last 7 days per day, last 8 weeks and top people by talk time are listed; missed calls add no talk time. | | |
+| R2-U18 | In a sheet's statistics block tap Share. | The share sheet opens with a short text summary of that person's calls and talk time. | | |
+| **Call details and notes (U8, U11, U19)** | | | | |
+| R2-U11 | Tap a line in a sheet's "Recent calls". | The Call details sheet shows date, time, direction, duration, SIM and WhatsApp. Back returns to the sheet. | | |
+| R2-U11b | Tap Copy details. | Pill that the details were copied; pasting gives the same lines. | | |
+| R2-U8a | Tap Note, type, then Done. | Pill "Note saved"; the history line now has a note glyph. | | |
+| R2-U8b | Delete the note. | Pill "Note deleted" with Undo; Undo brings the text back ("Note restored"). | | |
+| R2-U11c | Tap Delete this call. | The call goes from the log with the usual Undo pill. | | |
+| R2-U19 | Settings, Backup, Export call log (CSV), open the file. | There is a `note` column holding the text of each call's note (empty without one). | | |
+| **In-call note (U17)** | | | | |
+| R2-U17a | During a call tap Note, type, Done. | Pill "Note saved". After the call the note is on that call in the Call details sheet. | | |
+| R2-U17b | Hold the caller's name or number for half a second. | Pill "Number copied". A private caller says there is no number to copy. | | |
+| **QR code (U9)** | | | | |
+| R2-U9a | Contact sheet, tap "Share as QR code". | The viewer opens with the contact's name as title and a QR on a white card. Pinch and double-tap do nothing; swipe down closes. | | |
+| R2-U9b | Scan the QR with another phone. | It offers to add a contact with that name and the numbers. | | |
+| R2-U9c | Tap Save, then Share. | Save: pill "Saved to Photos", file `rovsti-<name>-qr.png` under Pictures/Rovsti. Share: the share sheet opens with the image. | | |
+| R2-U9d | Try a contact with very many numbers. | The QR opens and a pill says "N numbers left out to fit". | | |
+| R2-U9e | Number sheet of an unsaved number, tap "Share as QR code". | A QR of that single number opens, titled with the number. | | |
+| **Photo set, replace, remove (U10)** | | | | |
+| R2-U10a | Open a contact's photo in the viewer and tap Edit. | A menu offers "Choose new photo" and "Remove photo" (red). | | |
+| R2-U10b | Choose new photo and pick an image. | Pill "Photo updated"; the viewer closes and the sheet and lists show the new photo. Cancelling the picker changes nothing. | | |
+| R2-U10c | Edit, Remove photo. | The sheet "Remove photo of <name>?" asks first; Cancel changes nothing. | | |
+| R2-U10d | Confirm Remove. | Pill "Photo removed"; the viewer closes and the contact shows the monogram. | | |
+| R2-U10e | Open the Contact sheet of someone without a photo and tap the avatar. | The menu offers only "Add photo". | | |
+| R2-U10f | Pick something that is not an image. | Pill "That is not an image"; nothing changes. | | |
+| R2-U10g | With the menu open press Back. | The menu closes first; a second Back closes the viewer. | | |
+
 ## In-call note and copy number
 
 - On a connected or held call with a number, tap "Note" under the status line, type, press Done: the pill says "Note saved" and the capsule shows a check.

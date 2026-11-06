@@ -45,14 +45,14 @@ Android layer is not needed for them.
 | U4 | Copy as / Share as: display, E.164, national, tel: link, vCard | done R1 |
 | U5 | Export call log as CSV | done R1 |
 | U6 | Keypad pause/wait long-press on `*`/`#` | done R1 |
-| U7 | Call statistics: per person in the Number/Contact sheet; a Settings "Call statistics" page (this week, last 7 days per day, last 8 weeks, top people by talk time) | R2 S1, S7 |
-| U8 | Per-call notes: add/edit/delete on a call (Call details sheet), note glyph on history lines, confirm on delete with Undo | R2 S2, S4, S5 |
-| U11 | Call details sheet: tap a history line to see date, time, direction, duration, SIM and WhatsApp, with Copy details, Note and Delete this call | R2 S2, S5 |
-| U17 | In-call: Note button (saved and matched to the logged call afterwards), long-press the caller's number to copy it | R2 S6 |
-| U9 | Share contact as QR (vCard), with Save/Share of the QR image | R2 S3, S8 |
-| U10 | Set/replace/remove the contact photo from the viewer (confirm remove) | R2 S4, S8 |
-| U18 | Share a person's call statistics as text (from the stats block) | R2 S7 |
-| U19 | CSV export gains a `note` column | R2 S2, S5 |
+| U7 | Call statistics: per person in the Number/Contact sheet; a Settings "Call statistics" page (this week, last 7 days per day, last 8 weeks, top people by talk time) | done R2 |
+| U8 | Per-call notes: add/edit/delete on a call (Call details sheet), note glyph on history lines, confirm on delete with Undo | done R2 |
+| U11 | Call details sheet: tap a history line to see date, time, direction, duration, SIM and WhatsApp, with Copy details, Note and Delete this call | done R2 |
+| U17 | In-call: Note button (saved and matched to the logged call afterwards), long-press the caller's number to copy it | done R2 |
+| U9 | Share contact as QR (vCard), with Save/Share of the QR image | done R2 |
+| U10 | Set/replace/remove the contact photo from the viewer (confirm remove) | done R2 |
+| U18 | Share a person's call statistics as text (from the stats block) | done R2 |
+| U19 | CSV export gains a `note` column | done R2 |
 | U12 | Recents select mode with multi-delete and Undo | backlog R3 |
 | U13 | "Call back later" reminder on a missed call (local notification `notify::show`, 15 min / 1 h / tonight) | backlog R3 |
 | U14 | Keypad field long-press menu: Copy / Paste / Clear (with Undo) | backlog R3 |

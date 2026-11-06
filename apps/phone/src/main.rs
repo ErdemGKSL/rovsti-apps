@@ -37,6 +37,7 @@ mod notice;
 mod perf_harness;
 #[cfg(any(feature = "perf", test))]
 mod perf_run;
+mod photo_edit;
 mod photo_viewer;
 mod photos;
 mod recents;
@@ -267,6 +268,8 @@ struct PhoneApp {
     contact_sheet: Option<ContactSheet>,
     /// The full-screen photo viewer, drawn above the sheets (U1, U2).
     viewer: Option<photo_viewer::PhotoViewer>,
+    /// The photo menu (choose, add, remove) over the viewer or the Contact sheet (U10).
+    photo_edit: Option<photo_edit::PhotoEdit>,
     /// What the confirm-delete sheet will remove.
     confirm_delete: Option<history_ui::DeleteScope>,
     /// 0 = Tab Bar in place, 1 = slid away under the keyboard.
@@ -598,6 +601,7 @@ impl PhoneApp {
             favorites: FavoritesView::new(),
             contact_sheet: None,
             viewer: None,
+            photo_edit: None,
             confirm_delete: None,
             tabs_away: Spring::new(0.0, motion_tokens::select()).with_epsilon(0.002),
             safe_bottom: 0.0,
@@ -797,7 +801,10 @@ impl PhoneApp {
         // While the In-Call screen shows, what is open on the tabs under it (a menu,
         // a tab sheet, Settings, the keyboard) stays put: Back acts on the call.
         let on_call = self.incall.shown;
-        if self.viewer.as_ref().is_some_and(|v| !v.is_closing()) {
+        if self.photo_edit.is_some() {
+            // The photo menu is above the viewer: Back puts it away first.
+            self.close_photo_menu(cx);
+        } else if self.viewer.as_ref().is_some_and(|v| !v.is_closing()) {
             // The photo viewer is the top layer: Back closes it first.
             self.close_photo_viewer(window, cx);
         } else if self.reply_is_open() {
@@ -884,6 +891,7 @@ impl PhoneApp {
                 || self.tabs.selected() != KEYPAD_TAB);
         let want = self.incoming.wants_back()
             || self.viewer.is_some()
+            || self.photo_edit.is_some()
             || self.reply_is_open()
             || self.route.is_open()
             || (self.sheet.is_open() && self.sheet_kind_over_call())
@@ -959,8 +967,11 @@ impl PhoneApp {
         match phase {
             TouchPhase::Started => {
                 // The photo viewer owns the screen: only its own buttons react.
-                if self.viewer.is_some() {
-                    if let Some(id) = id.as_deref().filter(|i| i.starts_with("pv-")) {
+                if self.viewer.is_some() || self.photo_edit.is_some() {
+                    if let Some(id) = id
+                        .as_deref()
+                        .filter(|i| i.starts_with("pv-") || i.starts_with(photo_edit::PREFIX))
+                    {
                         self.presses.touch_down(id.to_owned());
                         cx.notify();
                     }
@@ -1597,6 +1608,7 @@ impl Render for PhoneApp {
             .children(sim_sheet)
             .children(route)
             .children(self.photo_viewer_overlay(theme, window, cx))
+            .children(self.photo_edit_overlay(theme, window, cx))
             .children(pill)
             .children(incoming)
             .child(self.wa_call.clone())

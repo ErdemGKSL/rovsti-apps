@@ -29,3 +29,15 @@ write logs only the error kind and sets `Backend::prefs_save_failed()`.
 
 Settings that do not exist in the UI yet (haptics, quick replies, ...) keep
 their v0.1 behaviour; the Diagnostics page is unchanged.
+
+## Call notes (`call-notes.json`)
+
+Per-call notes (U8, U17) are kept in `call-notes.json`, next to `prefs.json` in the no-backup data
+dir. The file is read and written off the UI thread (`apps/phone/src/notes.rs`); the matching and
+cleaning rules are in `rovsti_core::call_notes` (a note is keyed by number and the time the call
+rang or was placed, matched with a 2 minute window; text is clipped to 1000 characters and at most
+2000 notes are kept).
+
+It is not part of `prefs.json`, so it is **not in the prefs backup** (Settings, Backup export and
+import carry preferences only). A note therefore stays on the phone and is lost on uninstall or
+"clear data". The call log CSV export does include each note in its `note` column.

@@ -270,6 +270,15 @@ Rust (`backend::contact_photo`, background executor only) reads and decodes the 
 decode while painting. A photo edited in Contacts shows after the cached file is older than
 10 minutes and the LRU entry was evicted or the app restarted.
 
+### Changing a contact photo (Phone)
+
+Phone now uses the contact-photo picker hand-back. "Choose new photo" in the photo viewer calls
+`rovsti_android::documents::pick_contact_photo`; the system picker answers with a `document_result`
+of `DocumentOp::ContactPhoto`, and Phone applies it only when it asked for it itself
+(`pending_photo_for`). The image is then written with `contacts_edit::set_photo` from a crop plan
+made by `rovsti_core::contact_photo`, and "Remove photo" uses `contacts_edit::remove_photo`. Both
+return `Error::Unsupported` on desktop, where the pill says the action is not available.
+
 ## Gallery save and image share (MediaShare.kt)
 
 `MediaShare.kt` (`crates/rovsti_android/kotlin/dev/rovsti/bridge/`) backs

@@ -47,6 +47,10 @@ const DOUBLE_TAP: Duration = Duration::from_millis(300);
 const DOUBLE_TAP_SLOP: f32 = 48.0;
 /// A pause this long before the lift forgets the flick speed.
 const STALE_SAMPLE: Duration = Duration::from_millis(80);
+/// A QR's white card extends this far past the code.
+const QR_PAD: f32 = 16.0;
+/// Space kept free around a QR card, on each side.
+const QR_MARGIN: f32 = 32.0;
 
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
@@ -71,6 +75,31 @@ pub(crate) fn photo_file_name(title: &str) -> String {
     }
 }
 
+/// What the viewer shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ViewerKind {
+    /// A contact's or caller's picture: zoom, pan, and Edit for a contact.
+    Photo,
+    /// A share QR code (U9): shown at fit on a white card, no zoom or pan.
+    Qr,
+}
+
+impl ViewerKind {
+    /// Pinch and double-tap zoom only apply to a photo.
+    pub(crate) fn zooms(self) -> bool {
+        self == Self::Photo
+    }
+}
+
+/// The pill after a QR was built without some numbers, if any were left out.
+pub(crate) fn dropped_pill(dropped: usize) -> Option<String> {
+    match dropped {
+        0 => None,
+        1 => Some("1 number left out to fit".to_owned()),
+        n => Some(format!("{n} numbers left out to fit")),
+    }
+}
+
 /// What a finger lifting did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Release {
@@ -90,6 +119,11 @@ struct Drag {
 }
 
 pub(crate) struct PhotoViewer {
+    pub kind: ViewerKind,
+    /// The contact whose photo this is (the Edit button needs one).
+    pub contact_id: Option<i64>,
+    /// The picture is the contact's own photo (not a WhatsApp picture).
+    pub own_photo: bool,
     pub title: SharedString,
     /// The picture drawn: the thumbnail first, the full photo once it is read.
     pub image: Option<Arc<RenderImage>>,
@@ -132,6 +166,14 @@ fn size_of(image: &RenderImage) -> Size {
 impl PhotoViewer {
     /// Opens on `image`; without a picture there is nothing to view.
     pub(crate) fn open(title: SharedString, image: Option<Arc<RenderImage>>) -> Option<Self> {
+        Self::open_kind(ViewerKind::Photo, title, image)
+    }
+
+    pub(crate) fn open_kind(
+        kind: ViewerKind,
+        title: SharedString,
+        image: Option<Arc<RenderImage>>,
+    ) -> Option<Self> {
         let image = image?;
         let natural = size_of(&image);
         if natural.w <= 0.0 || natural.h <= 0.0 {
@@ -142,6 +184,9 @@ impl PhotoViewer {
         let mut enter = tween(0.0);
         enter.set_target(1.0);
         Some(Self {
+            kind,
+            contact_id: None,
+            own_photo: false,
             title,
             image: Some(image),
             file: None,
@@ -188,7 +233,24 @@ impl PhotoViewer {
     }
 
     pub(crate) fn rect(&self, viewport: Size) -> (f32, f32, f32, f32) {
-        image_rect(self.shown(), self.natural, viewport)
+        let space = match self.kind {
+            ViewerKind::Photo => viewport,
+            // Room for the card around the code, same centre.
+            ViewerKind::Qr => {
+                let inset = 2.0 * (QR_MARGIN + QR_PAD);
+                Size {
+                    w: (viewport.w - inset).max(1.0),
+                    h: (viewport.h - inset).max(1.0),
+                }
+            }
+        };
+        let (x, y, w, h) = image_rect(self.shown(), self.natural, space);
+        (
+            (x + (viewport.w - space.w) / 2.0),
+            y + (viewport.h - space.h) / 2.0,
+            w,
+            h,
+        )
     }
 
     pub(crate) fn chrome_visible(&self) -> bool {
@@ -250,6 +312,9 @@ impl PhotoViewer {
     }
 
     pub(crate) fn pinch(&mut self, delta: f32, focus: Point, viewport: Size) {
+        if !self.kind.zooms() {
+            return;
+        }
         if !self.pinching {
             self.adopt();
             self.pinching = true;
@@ -358,6 +423,9 @@ impl PhotoViewer {
             if self.last_tap.take().is_some() {
                 self.toggle_chrome(reduced);
             }
+            if !self.kind.zooms() {
+                return;
+            }
             self.adopt();
             let target = self
                 .view
@@ -397,6 +465,19 @@ impl PhotoViewer {
                 .retarget(viewport.h * 0.25, motion_tokens::appear());
             self.chrome.set_target(0.0);
         }
+    }
+
+    /// Closes without animating (the photo it shows is gone or out of date).
+    pub(crate) fn close_now(&mut self) {
+        self.closing = true;
+        self.drag = None;
+        self.enter.snap(0.0);
+        self.chrome.snap(0.0);
+    }
+
+    /// Whether the bottom bar offers Edit (a photo of a contact).
+    pub(crate) fn can_edit(&self) -> bool {
+        self.kind == ViewerKind::Photo && self.contact_id.is_some()
     }
 
     pub(crate) fn tick(&mut self, dt: Duration) -> bool {
@@ -459,11 +540,16 @@ impl PhoneApp {
         title: SharedString,
         thumb: Option<Arc<RenderImage>>,
         uri: Option<SharedString>,
+        owner: Option<(i64, bool)>,
         cx: &mut Context<Self>,
     ) {
-        let Some(viewer) = PhotoViewer::open(title, thumb) else {
+        let Some(mut viewer) = PhotoViewer::open(title, thumb) else {
             return;
         };
+        if let Some((id, own)) = owner {
+            viewer.contact_id = Some(id);
+            viewer.own_photo = own;
+        }
         let token = viewer.token;
         self.viewer = Some(viewer);
         self.presses.release_all();
@@ -493,6 +579,68 @@ impl PhoneApp {
         cx.notify();
     }
 
+    /// Opens a QR code with `name` and `numbers` (raw text and label) in the
+    /// viewer (U9). Numbers that do not fit are left out and a pill says so.
+    pub(crate) fn open_qr_viewer(
+        &mut self,
+        name: SharedString,
+        numbers: Vec<(String, String)>,
+        cx: &mut Context<Self>,
+    ) {
+        let home_cc = match self.backend.read(cx).call_log() {
+            backend::Load::Ready(log) => log.home_cc.clone(),
+            _ => None,
+        };
+        let refs: Vec<(&str, Option<&str>)> = numbers
+            .iter()
+            .map(|(raw, label)| (raw.as_str(), Some(label.as_str())))
+            .collect();
+        let Ok(qr) = rovsti_core::number_format::contact_qr(&name, &refs, home_cc.as_deref())
+        else {
+            self.show_notice_pill("Too much to fit in a QR code", None, false, cx);
+            return;
+        };
+        let dropped = qr.dropped;
+        let payload = qr.payload;
+        cx.spawn(async move |this, cx| {
+            let made = cx
+                .background_executor()
+                .spawn(async move { backend::qr_image(&payload) })
+                .await;
+            this.update(cx, |this, cx| {
+                let opened = made.and_then(|(image, path)| {
+                    let mut viewer = PhotoViewer::open_kind(ViewerKind::Qr, name, Some(image))?;
+                    viewer.file = Some(path);
+                    Some(viewer)
+                });
+                match opened {
+                    Some(viewer) => {
+                        this.viewer = Some(viewer);
+                        this.presses.release_all();
+                        if let Some(text) = dropped_pill(dropped) {
+                            this.show_notice_pill(text, None, false, cx);
+                        }
+                    }
+                    None => this.show_notice_pill("Couldn't make the QR code", None, false, cx),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The viewer's Edit button: the photo menu for its contact.
+    fn viewer_edit(&mut self, cx: &mut Context<Self>) {
+        let Some(viewer) = self.viewer.as_ref().filter(|v| v.can_edit()) else {
+            return;
+        };
+        if let Some(id) = viewer.contact_id {
+            let (name, own) = (viewer.title.clone(), viewer.own_photo);
+            self.open_photo_menu(id, name, own, cx);
+        }
+    }
+
     pub(crate) fn close_photo_viewer(&mut self, window: &Window, cx: &mut Context<Self>) {
         let (viewport, reduced) = (viewport_of(window), window.prefers_reduced_motion());
         if let Some(viewer) = &mut self.viewer {
@@ -516,7 +664,10 @@ impl PhoneApp {
         let name = self
             .viewer
             .as_ref()
-            .map(|v| photo_file_name(&v.title))
+            .map(|v| match v.kind {
+                ViewerKind::Photo => photo_file_name(&v.title),
+                ViewerKind::Qr => rovsti_core::number_format::qr_file_name(&v.title),
+            })
             .unwrap_or_default();
         let outcome = self
             .viewer_file()
@@ -700,6 +851,7 @@ impl PhoneApp {
                     match id {
                         "pv-close" => this.close_photo_viewer(window, cx),
                         "pv-save" => this.viewer_save(cx),
+                        "pv-edit" => this.viewer_edit(cx),
                         _ => this.viewer_share(cx),
                     }
                     cx.notify();
@@ -813,6 +965,16 @@ impl PhoneApp {
                         .flex()
                         .items_center()
                         .gap(px(4.0))
+                        .children(viewer.can_edit().then(|| {
+                            self.viewer_button(
+                                theme,
+                                "pv-edit",
+                                "Edit",
+                                Icon::LucidePencil,
+                                true,
+                                cx,
+                            )
+                        }))
                         .child(self.viewer_button(
                             theme,
                             "pv-save",
@@ -838,17 +1000,38 @@ impl PhoneApp {
                 .child(bottom_bar)
         });
 
+        let is_qr = viewer.kind == ViewerKind::Qr;
         let photo = (w > 0.0 && h > 0.0)
             .then(|| viewer.image.clone())
             .flatten()
             .map(|image| {
-                gpui::img(image)
+                let picture = gpui::img(image)
                     .absolute()
                     .left(px(x))
                     .top(px(y + dy))
                     .w(px(w))
                     .h(px(h))
-                    .object_fit(ObjectFit::Fill)
+                    .object_fit(ObjectFit::Fill);
+                if is_qr {
+                    // A QR sits on a white rounded card so it scans on a dark backdrop.
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .child(
+                            div()
+                                .absolute()
+                                .left(px(x - QR_PAD))
+                                .top(px(y + dy - QR_PAD))
+                                .w(px(w + 2.0 * QR_PAD))
+                                .h(px(h + 2.0 * QR_PAD))
+                                .rounded(px(28.0))
+                                .bg(gpui::white()),
+                        )
+                        .child(picture)
+                        .into_any_element()
+                } else {
+                    picture.into_any_element()
+                }
             });
         Some(
             div()
@@ -901,6 +1084,76 @@ mod tests {
         assert!(PhotoViewer::open("Ada".into(), None).is_none());
         assert!(PhotoViewer::open("Ada".into(), Some(picture(0, 0))).is_none());
         assert!(PhotoViewer::open("Ada".into(), Some(picture(8, 8))).is_some());
+    }
+
+    fn qr_viewer() -> PhotoViewer {
+        PhotoViewer::open_kind(ViewerKind::Qr, "Ada".into(), Some(picture(64, 64)))
+            .expect("a viewer")
+    }
+
+    #[test]
+    fn a_qr_blocks_pinch_and_double_tap() {
+        let now = Instant::now();
+        let mut v = qr_viewer();
+        assert!(!v.kind.zooms() && ViewerKind::Photo.zooms());
+        v.pinch(1.0, pt(200.0, 400.0), VP);
+        v.pinch_end(VP, true);
+        assert_eq!(v.shown(), ZoomView::IDENTITY);
+        // A first tap hides the chrome, the quick second one puts it back and
+        // does not zoom, with the host's count at 1 or 2.
+        v.tap(pt(200.0, 400.0), 1, now, VP, true);
+        assert!(!v.chrome_visible());
+        v.tap(
+            pt(204.0, 402.0),
+            1,
+            now + Duration::from_millis(100),
+            VP,
+            true,
+        );
+        assert!(v.chrome_visible());
+        assert_eq!(v.shown(), ZoomView::IDENTITY);
+        v.tap(pt(200.0, 400.0), 2, now + Duration::from_secs(2), VP, true);
+        assert_eq!(v.shown(), ZoomView::IDENTITY);
+        assert!(!v.shown().is_zoomed());
+    }
+
+    #[test]
+    fn a_qr_card_stays_inside_the_viewport_and_is_centred() {
+        let v = qr_viewer();
+        let (x, y, w, h) = v.rect(VP);
+        assert!(x - QR_PAD >= 0.0 && x + w + QR_PAD <= VP.w, "{x} {w}");
+        assert!(y - QR_PAD >= 0.0 && y + h + QR_PAD <= VP.h);
+        assert!(((x + w / 2.0) - VP.w / 2.0).abs() < 0.001);
+        assert!(((y + h / 2.0) - VP.h / 2.0).abs() < 0.001);
+        assert_eq!(w, h);
+    }
+
+    #[test]
+    fn edit_is_for_the_photo_of_a_contact_only() {
+        let mut v = viewer(8, 8);
+        assert!(!v.can_edit(), "a number without a contact");
+        v.contact_id = Some(7);
+        assert!(v.can_edit());
+        let mut q = qr_viewer();
+        q.contact_id = Some(7);
+        assert!(!q.can_edit());
+    }
+
+    #[test]
+    fn close_now_finishes_at_once() {
+        let mut v = viewer(8, 8);
+        v.close_now();
+        assert!(v.is_closing() && v.finished());
+    }
+
+    #[test]
+    fn the_dropped_numbers_pill() {
+        assert_eq!(dropped_pill(0), None);
+        assert_eq!(dropped_pill(1).as_deref(), Some("1 number left out to fit"));
+        assert_eq!(
+            dropped_pill(2).as_deref(),
+            Some("2 numbers left out to fit")
+        );
     }
 
     #[test]

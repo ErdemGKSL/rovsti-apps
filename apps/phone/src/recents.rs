@@ -1547,7 +1547,12 @@ impl PhoneApp {
             .filter(|(id, _)| self.photos.get(*id).is_some())
             .map(|(_, uri)| uri.clone());
         let title = row.title.clone();
-        self.open_photo_viewer(title, thumb, uri, cx);
+        let owner = row
+            .photo
+            .contact
+            .as_ref()
+            .map(|(id, _)| (*id, uri.is_some()));
+        self.open_photo_viewer(title, thumb, uri, owner, cx);
     }
 
     /// Info on a row: the number, "Call" and "Add to contacts" (UX-DR9).
@@ -1680,6 +1685,21 @@ impl PhoneApp {
                 self.stats_section(theme, &vm, crate::stats_ui::NUMBER_SHARE, cx),
             ));
         }
+        if !row.number.is_empty() {
+            children.push(reveal(
+                5,
+                sheet_pill(
+                    self,
+                    "sheet-n-qr",
+                    Icon::LucideQrCode,
+                    "Share as QR code",
+                    colors.fill,
+                    colors.label,
+                    cx,
+                )
+                .into_any_element(),
+            ));
+        }
         if !row.named && !row.number.is_empty() {
             children.push(reveal(
                 5,
@@ -1760,6 +1780,12 @@ impl PhoneApp {
             "sheet-nwa" => {
                 self.close_sheet(cx);
                 self.place_whatsapp(&row.number, cx);
+            }
+            "sheet-n-qr" => {
+                if !row.number.is_empty() {
+                    let numbers = vec![(row.number.to_string(), "Mobile".to_owned())];
+                    self.open_qr_viewer(row.title.clone(), numbers, cx);
+                }
             }
             "sheet-nadd" => {
                 let outcome = backend::add_contact(&row.number);

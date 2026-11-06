@@ -292,14 +292,15 @@ impl PhoneApp {
     }
 }
 
-// The photo viewer's set/replace/remove buttons (S8) call the two entry points.
-#[allow(dead_code)]
+// The photo menu (`photo_edit`) calls the two entry points.
 impl PhoneApp {
     /// Starts the picker for a new photo of `contact_id`. Only the answer to
     /// this request is applied (see [`Self::photo_picked`]).
     pub(crate) fn pick_photo_for(&mut self, contact_id: i64, cx: &mut Context<Self>) {
-        if crate::backend::pick_contact_photo().failed() {
-            self.show_notice_pill("Couldn't open the photo picker", None, false, cx);
+        let outcome = crate::backend::pick_contact_photo();
+        if outcome != Outcome::Done {
+            let text = outcome.why_not("Couldn't open the photo picker");
+            self.show_notice_pill(text, None, false, cx);
             return;
         }
         self.pending_photo_for = Some(contact_id);
@@ -361,6 +362,12 @@ impl PhoneApp {
     /// again, and pull the address book (the next pull carries the new URI).
     fn photo_changed(&mut self, id: i64, said: &'static str, cx: &mut Context<Self>) {
         self.photos.forget(id);
+        // The viewer would still show the old picture.
+        if let Some(viewer) = &mut self.viewer
+            && viewer.contact_id == Some(id)
+        {
+            viewer.close_now();
+        }
         self.backend.update(cx, |b, cx| b.reload_contacts(cx));
         self.show_notice_pill(said, None, false, cx);
         cx.notify();

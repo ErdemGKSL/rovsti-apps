@@ -338,6 +338,14 @@ impl StopsApp {
             return;
         };
         let name = place.name.clone();
+        if matches!(self.sheet_mode, SheetMode::Stop(_)) {
+            // The line previewed on the stop sheet leaves the map again.
+            self.map.pattern = self
+                .pick
+                .ends
+                .get(self.pick.sheet_slot())
+                .and_then(|d| d.pattern);
+        }
         self.field.update(cx, |f, cx| f.set(&name, cx));
         self.sheet_mode = SheetMode::Rename(id);
         self.sheet.open();

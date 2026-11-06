@@ -72,7 +72,6 @@ pub fn save_prefill(dest: &Destination) -> String {
 
 /// A stored endpoint as a destination: generic labels ("Point A") mean no
 /// name, and a saved place within reach gives its current name.
-#[allow(dead_code, reason = "wired to the UI in a later step")]
 pub fn dest_from_endpoint(ep: &Endpoint, saved: &SavedPlaces) -> Destination {
     let dest = match ep.label.trim() {
         "" | "Point" | "Point A" | "Point B" => Destination::dropped(ep.coord),

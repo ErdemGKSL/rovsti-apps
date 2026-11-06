@@ -130,8 +130,10 @@ list in `docs/phone-acceptance.md`.
 - [x] Save and manage places from map pins, links and stops (name, rename, reorder, delete with
       undo); share a place or any pin; paste links into the picker; the chosen A/B survive a
       restart; Stop and settings resets can be undone; reuse trips from History; downloaded map
-      size and Clear in Settings > Map tiles; default arriving-soon text (done without a device)
+      size and Clear in Settings > Map tiles; default arriving-soon text; search every WhatsApp chat
+      for the arriving-soon message; the chat list refreshes (done without a device)
 - [x] Delete single History trips, with undo (done without a device)
-- [ ] Idea (open, T7): draw saved places on the map
+- [x] Saved places drawn on the map; a tap on one picks it exactly (done without a device)
+- [ ] Idea (open, U5): move a saved place to a new location
 - [ ] Check map picking one-handed on a phone
 - [ ] Check the trip, alarm and Doze on a phone: written without a device

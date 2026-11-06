@@ -217,3 +217,12 @@ cargo check -p rovsti_tiles --target aarch64-linux-android
 Disk: 9.5 GB free at audit time. Under 6 GB, run `rm -rf target/debug/incremental` first.
 Other people push to main in parallel, so keep one focused commit per step, with the prefix
 "Rovsti stops:".
+
+## Status
+
+- Fixed: U1 (search every chat in the arriving-soon picker), U2 (the chat list refreshes, no
+  empty dead end), U3 (saved places drawn on the map, a tap picks one exactly), U4 (picker empty
+  state for no matches).
+- Deferred: U5 (move a saved place to a new location). Open idea in `docs/roadmap.md`.
+- By design or covered: U6 (Exact alarms row is informational), U7 (the trip is in History and
+  Recent trips), U8 (the picker field already searches saved places).

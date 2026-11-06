@@ -146,8 +146,8 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   beyond 14) from a VersaTiles-compatible server that the user sets (default
   `https://tiles.versatiles.org/tiles/osm/{z}/{x}/{y}`). `rovsti_geo::tiles` decodes and styles them
   (colorful in the light theme, eclipse in the dark one). `rovsti_tiles` fetches them and keeps the
-  disk cache. The app paints them with `canvas` and `PathBuilder` under the radar layers (A and B,
-  the circle with the diameter line and its halves, position, breadcrumb, GTFS stops and line) over
+  disk cache. The app paints them with `canvas` and `PathBuilder` under the radar layers (saved places,
+  A and B, the circle with the diameter line and its halves, position, breadcrumb, GTFS stops and line) over
   `rovsti_geo::view`. Where a tile is missing, the radar look shows. Tiles around the trip circle
   are prefetched when a trip starts. Text labels are not drawn. The map shows
   "(c) OpenStreetMap contributors".

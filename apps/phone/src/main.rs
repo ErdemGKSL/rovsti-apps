@@ -177,6 +177,12 @@ struct PhoneApp {
 
     /// S14: the setup shield's check pop and the wash brightening.
     celebrate: signature::Celebrate,
+    /// The checklist last seen once Android's answers were in.
+    setup_seen: Option<SetupChecklist>,
+    /// Items that were done earlier in this run and are open again.
+    setup_reopened: Vec<rovsti_core::setup::SetupItem>,
+    /// The "Something changed" sheet title for `setup_reopened`, built once.
+    setup_changed_title: Option<SharedString>,
     /// S15: the old theme's veil fading out over a theme change.
     melt: signature::Melt,
 
@@ -483,6 +489,9 @@ impl PhoneApp {
             tab_dir: 0.0,
             status_in: Entrance::default(),
             celebrate: signature::Celebrate::default(),
+            setup_seen: None,
+            setup_reopened: Vec::new(),
+            setup_changed_title: None,
             melt: signature::Melt::default(),
             digit_pop: Spring::new(1.0, motion_tokens::release()).with_epsilon(0.002),
             shake: Spring::new(0.0, motion_tokens::glow()).with_epsilon(0.1),
@@ -1082,8 +1091,26 @@ impl PhoneApp {
         if !(backend.permissions_known() && backend.prefs_ready()) {
             return;
         }
-        let complete = self.checklist(cx).complete();
-        if self.celebrate.observe(complete, reduced) {
+        let now = self.checklist(cx);
+        if self.setup_seen != Some(now) {
+            if let Some(seen) = self.setup_seen {
+                let mut reopened = std::mem::take(&mut self.setup_reopened);
+                for item in now.reopened_since(&seen) {
+                    if !reopened.contains(&item) {
+                        reopened.push(item);
+                    }
+                }
+                reopened = rovsti_core::setup::still_reopened(&reopened, &now);
+                if reopened != self.setup_reopened {
+                    self.setup_changed_title =
+                        rovsti_core::setup::changed_title(&reopened).map(SharedString::from);
+                    self.setup_reopened = reopened;
+                }
+                cx.notify();
+            }
+            self.setup_seen = Some(now);
+        }
+        if self.celebrate.observe(now.complete(), reduced) {
             cx.notify();
         }
     }

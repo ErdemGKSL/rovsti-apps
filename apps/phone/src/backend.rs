@@ -650,6 +650,15 @@ impl Backend {
         setup::derive(facts, xiaomi, &confirmations, APP_VERSION)
     }
 
+    /// Whether the owner confirmed this Xiaomi item by hand for this version.
+    pub fn xiaomi_confirmed(&self, item: SetupItem) -> bool {
+        self.prefs
+            .ui
+            .xiaomi_confirmed
+            .get(item.key())
+            .is_some_and(|v| v == APP_VERSION)
+    }
+
     /// Stores (or clears) the owner's manual confirmation of a Xiaomi item
     /// for this app version.
     pub fn set_xiaomi_confirmed(

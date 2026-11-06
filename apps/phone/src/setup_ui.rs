@@ -38,6 +38,8 @@ enum Act {
     Xiaomi(XiaomiSetting),
     BatteryDialog,
     Confirm,
+    /// Takes back a hand confirmation of a Xiaomi row.
+    Unconfirm,
 }
 
 struct Button {
@@ -62,6 +64,16 @@ const fn secondary(label: &'static str, act: Act) -> Button {
     }
 }
 
+/// Buttons on a done row: only a Xiaomi row the owner confirmed by hand can be
+/// taken back (Autostart is read from the system, so there is nothing to undo).
+fn done_buttons(item: SetupItem, confirmed_by_hand: bool) -> Vec<Button> {
+    if item.is_xiaomi() && item != SetupItem::Autostart && confirmed_by_hand {
+        vec![secondary("Mark as not done", Act::Unconfirm)]
+    } else {
+        Vec::new()
+    }
+}
+
 const RESTRICTED_STEPS: &str = "Android 15 and later blocks apps installed from a file from becoming the default phone app. \
 Open App info, tap the three-dot menu, then Allow restricted settings (Kısıtlı ayarlara izin ver), and come back. \
 The menu item shows up only after one blocked attempt, so tap Set as default once first if you do not see it.";
@@ -74,7 +86,7 @@ fn setup_note(act: Act, outcome: Outcome) -> Option<&'static str> {
         Outcome::Done => None,
         Outcome::NotAvailable => Some("Not available on this platform"),
         Outcome::Declined => match act {
-            Act::RequestRole | Act::Xiaomi(_) | Act::Confirm => None,
+            Act::RequestRole | Act::Xiaomi(_) | Act::Confirm | Act::Unconfirm => None,
             _ => Some("Couldn't open settings"),
         },
     }
@@ -166,6 +178,10 @@ impl PhoneApp {
 
     /// Buttons for one row, derived from its state and what was opened.
     fn buttons(&self, status: ItemStatus, cx: &App) -> Vec<Button> {
+        if status.state.is_done() {
+            let by_hand = self.backend.read(cx).xiaomi_confirmed(status.item);
+            return done_buttons(status.item, by_hand);
+        }
         let permissions = self.backend.read(cx).permissions();
         let access_button = |access: Access, group| {
             let label = if access == Access::PermanentlyDenied {
@@ -298,9 +314,10 @@ impl PhoneApp {
                 outcome
             }
             Act::BatteryDialog => backend::request_battery_exemption(),
-            Act::Confirm => {
+            Act::Confirm | Act::Unconfirm => {
+                let confirmed = act == Act::Confirm;
                 self.backend.update(cx, |backend, cx| {
-                    backend.set_xiaomi_confirmed(item, true, cx)
+                    backend.set_xiaomi_confirmed(item, confirmed, cx)
                 });
                 Outcome::Done
             }
@@ -376,18 +393,15 @@ impl PhoneApp {
             ItemState::Unverifiable => (Icon::LucideCircle, colors.orange),
         };
         let steps = (!done).then(|| self.steps(status)).flatten();
-        let buttons: Vec<AnyElement> = if done {
-            Vec::new()
-        } else {
-            self.buttons(status, cx)
-                .iter()
-                .enumerate()
-                .map(|(i, b)| {
-                    self.sheet_button(theme, status.item, i, b, cx)
-                        .into_any_element()
-                })
-                .collect()
-        };
+        let buttons: Vec<AnyElement> = self
+            .buttons(status, cx)
+            .iter()
+            .enumerate()
+            .map(|(i, b)| {
+                self.sheet_button(theme, status.item, i, b, cx)
+                    .into_any_element()
+            })
+            .collect();
         let state_word = match status.state {
             ItemState::Done => "done",
             ItemState::NotDone => "not done",
@@ -471,9 +485,13 @@ impl PhoneApp {
             progress.done as f32 / progress.total as f32
         };
         let (title, tint) = if progress.complete {
-            ("You're all set", colors.green)
+            (SharedString::new_static("You're all set"), colors.green)
         } else {
-            ("Finish setup", colors.accent)
+            let title = self
+                .setup_changed_title
+                .clone()
+                .unwrap_or_else(|| SharedString::new_static("Finish setup"));
+            (title, colors.accent)
         };
         div()
             .flex()
@@ -630,5 +648,17 @@ mod tests {
             setup_note(Act::Xiaomi(XiaomiSetting::Autostart), Outcome::Declined),
             None
         );
+    }
+
+    #[test]
+    fn done_rows_offer_undo_only_for_hand_confirmed_xiaomi() {
+        let b = done_buttons(SetupItem::BatterySaver, true);
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].label, "Mark as not done");
+        assert_eq!(b[0].act, Act::Unconfirm);
+        assert!(!b[0].primary);
+        assert!(done_buttons(SetupItem::BatterySaver, false).is_empty());
+        assert!(done_buttons(SetupItem::Contacts, false).is_empty());
+        assert!(done_buttons(SetupItem::Contacts, true).is_empty());
     }
 }

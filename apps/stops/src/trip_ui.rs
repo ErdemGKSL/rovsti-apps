@@ -336,6 +336,15 @@ impl StopsApp {
                     })),
             );
         }
+        let offer = pick::save_offer(&self.pick.ends, &self.saved);
+        if offer == pick::SaveOffer::Save {
+            buttons = buttons.child(
+                glass_pill(theme, "Save stop")
+                    .id("save-stop")
+                    .h(px(52.0))
+                    .on_click(cx.listener(|this, _, _, cx| this.open_save_stop(cx))),
+            );
+        }
         buttons = buttons.child(start);
         let mut bar = div()
             .px(px(16.0))
@@ -359,6 +368,15 @@ impl StopsApp {
                     .text_size(typography::FOOTNOTE.size)
                     .text_color(colors.secondary_label)
                     .child(trigger_text(&d)),
+            );
+        }
+
+        if let pick::SaveOffer::Saved { name, .. } = offer {
+            bar = bar.child(
+                div()
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.secondary_label)
+                    .child(format!("Saved as {name}")),
             );
         }
 

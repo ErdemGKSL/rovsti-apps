@@ -182,6 +182,8 @@ pub enum SheetMode {
     Confirm(Destination),
     /// A new name for a saved stop.
     Rename(u64),
+    /// Naming the pair of points about to be saved as one stop.
+    SaveStop { a: Destination, b: Destination },
     /// A transit stop (index into the feed): its lines, Use as A / Use as B.
     Stop(u32),
 }
@@ -335,6 +337,54 @@ impl StopsApp {
         cx.notify();
     }
 
+    /// Opens the Save stop sheet for the current pair, the name prefilled from
+    /// the transit stop nearest the gate (empty when none is close).
+    pub(crate) fn open_save_stop(&mut self, cx: &mut Context<Self>) {
+        let (Some(a), Some(b)) = (self.pick.ends.a.clone(), self.pick.ends.b.clone()) else {
+            return;
+        };
+        if !matches!(
+            pick::save_offer(&self.pick.ends, &self.saved),
+            pick::SaveOffer::Save
+        ) {
+            return;
+        }
+        let name = rovsti_geo::saved_stops::suggest_name(
+            self.gtfs.as_deref(),
+            &pick::trip_endpoint(Slot::A, &a),
+            &pick::trip_endpoint(Slot::B, &b),
+        );
+        self.field.update(cx, |f, cx| f.set(&name, cx));
+        self.sheet_mode = SheetMode::SaveStop { a, b };
+        self.sheet.open();
+        cx.notify();
+    }
+
+    /// Saves the pair as a stop under the name in the field.
+    fn save_stop(&mut self, a: &Destination, b: &Destination, cx: &mut Context<Self>) {
+        let name = self.field.read(cx).text().to_owned();
+        let result = self.saved.add(
+            &name,
+            pick::trip_endpoint(Slot::A, a),
+            pick::trip_endpoint(Slot::B, b),
+            crate::store::now_ms(),
+        );
+        match result {
+            Ok(id) => {
+                let saved_name = self.saved.get(id).map_or(name, |s| s.name.clone());
+                self.save_stops(cx);
+                self.sheet.close();
+                self.show_pill(format!("Saved stop {saved_name}"), None, cx);
+            }
+            Err(rovsti_geo::SavedStopError::Duplicate(id)) => {
+                let existing = self.saved.get(id).map_or(String::new(), |s| s.name.clone());
+                self.show_pill(format!("Already saved as {existing}"), None, cx);
+            }
+            Err(error) => self.show_pill(error.message(), None, cx),
+        }
+        cx.notify();
+    }
+
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // A line looked at but not chosen leaves the map again.
@@ -440,6 +490,9 @@ impl StopsApp {
             ),
             SheetMode::Confirm(dest) => ("Use this point", self.confirm_body(theme, &dest, cx)),
             SheetMode::Rename(id) => ("Rename stop", self.rename_body(theme, id, window, cx)),
+            SheetMode::SaveStop { a, b } => {
+                ("Save stop", self.save_stop_body(theme, a, b, window, cx))
+            }
             SheetMode::Stop(stop) => ("Transit stop", self.stop_body(theme, stop, cx)),
         };
         let body = div()
@@ -906,6 +959,52 @@ impl StopsApp {
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.use_as(Slot::B, as_b.clone(), cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn save_stop_body(
+        &mut self,
+        theme: Theme,
+        a: Destination,
+        b: Destination,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(Self::sheet_title(theme, "Save stop"))
+            .child(div().px(px(16.0)).child(field_box(
+                theme,
+                "save-stop-field",
+                &self.field,
+                "Stop name",
+                window,
+                cx,
+            )))
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap(px(10.0))
+                    .px(px(16.0))
+                    .pt(px(8.0))
+                    .child(
+                        glass_pill(theme, "Cancel")
+                            .id("save-stop-cancel")
+                            .on_click(cx.listener(|this, _, _, cx| this.close_sheet(cx))),
+                    )
+                    .child(
+                        glass_pill(theme, "Save")
+                            .id("save-stop-save")
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.save_stop(&a, &b, cx);
                             })),
                     ),
             )

@@ -4,7 +4,7 @@
 //! reads the stage, the hint and the labels out. Points are shown by name or
 //! as "Point A" / "Point B"; a coordinate is only ever a details line.
 
-use rovsti_geo::{Coord, DiameterError, Endpoint, MAX_DIAMETER_M, MIN_DIAMETER_M};
+use rovsti_geo::{Coord, DiameterError, Endpoint, MAX_DIAMETER_M, MIN_DIAMETER_M, SavedStops};
 
 use crate::{
     picker::{Destination, Ends, Slot, coord_text},
@@ -346,6 +346,34 @@ pub fn trip_endpoint(slot: Slot, dest: &Destination) -> Endpoint {
     Endpoint {
         label: point_label(slot, Some(dest)),
         coord: dest.coord,
+    }
+}
+
+/// What the pick bar offers for saving the current pair as a stop.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SaveOffer {
+    /// Nothing to save: a point is missing or the gate is invalid.
+    None,
+    /// A new stop: offer "Save stop".
+    Save,
+    /// This gate is already saved (in either order).
+    Saved { id: u64, name: String },
+}
+
+/// Whether the pair can be saved, and whether it already is.
+pub fn save_offer(ends: &Ends, saved: &SavedStops) -> SaveOffer {
+    let (Some(a), Some(b)) = (ends.a.as_ref(), ends.b.as_ref()) else {
+        return SaveOffer::None;
+    };
+    if !matches!(ends.diameter(), Some(Ok(_))) {
+        return SaveOffer::None;
+    }
+    match saved.find_gate(a.coord, b.coord) {
+        Some(s) => SaveOffer::Saved {
+            id: s.id,
+            name: s.name.clone(),
+        },
+        None => SaveOffer::Save,
     }
 }
 
@@ -724,5 +752,40 @@ mod tests {
         assert!(!d.draft_due(&Ends::default()));
         d.drag_cancel();
         assert!(d.draft_due(&Ends::default()));
+    }
+
+    #[test]
+    fn save_offer_needs_two_valid_points() {
+        let saved = SavedStops::default();
+        let mut ends = Ends::default();
+        assert_eq!(save_offer(&ends, &saved), SaveOffer::None);
+        ends.set(Slot::A, at(0.0));
+        assert_eq!(save_offer(&ends, &saved), SaveOffer::None);
+        // Too short to be a gate.
+        ends.set(Slot::B, at(1.0));
+        assert_eq!(save_offer(&ends, &saved), SaveOffer::None);
+        ends.set(Slot::B, at(400.0));
+        assert_eq!(save_offer(&ends, &saved), SaveOffer::Save);
+    }
+
+    #[test]
+    fn save_offer_finds_a_stop_saved_in_reverse() {
+        let mut saved = SavedStops::default();
+        let (a, b) = (at(0.0), at(400.0));
+        let ep = |d: &Destination| Endpoint {
+            label: "Point".into(),
+            coord: d.coord,
+        };
+        let id = saved.add("Gate", ep(&a), ep(&b), 1).unwrap();
+        let mut ends = Ends::default();
+        ends.set(Slot::A, b);
+        ends.set(Slot::B, a);
+        assert_eq!(
+            save_offer(&ends, &saved),
+            SaveOffer::Saved {
+                id,
+                name: "Gate".into()
+            }
+        );
     }
 }

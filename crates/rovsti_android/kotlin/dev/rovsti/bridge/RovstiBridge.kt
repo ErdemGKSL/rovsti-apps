@@ -222,6 +222,9 @@ object RovstiBridge {
     // ---- Provider pulls (blocking; Rust calls them off the UI thread) --
 
     @JvmStatic fun pullCallLog(limit: Int): String = CallLogQuery.json(app, limit)
+    @JvmStatic fun deleteCallLog(ids: String): String = CallLogWrite.delete(app, ids)
+    @JvmStatic fun restoreCallLog(json: String): String = CallLogWrite.restore(app, json)
+    @JvmStatic fun deleteAllCallLog(): String = CallLogWrite.deleteAll(app)
     @JvmStatic fun pullContacts(): String = ContactsQuery.contactsJson(app)
     @JvmStatic fun pullContactsAll(): String = ContactsQuery.allContactsJson(app)
     @JvmStatic fun pullFavorites(): String = ContactsQuery.favoritesJson(app)

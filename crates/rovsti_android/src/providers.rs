@@ -17,6 +17,22 @@ pub fn call_log(limit: usize) -> Result<String> {
     bridge::call_string("pullCallLog", &[Arg::Int(limit)])
 }
 
+/// Deletes the call-log rows with these `_id`s; `{count}` on success.
+pub fn delete_call_log(ids: &[i64]) -> Result<String> {
+    let joined = ids.iter().map(i64::to_string).collect::<Vec<_>>().join(",");
+    bridge::call_string("deleteCallLog", &[Arg::Str(&joined)])
+}
+
+/// Re-inserts call-log rows from a `{entries}` envelope (undo of a delete).
+pub fn restore_call_log(entries_json: &str) -> Result<String> {
+    bridge::call_string("restoreCallLog", &[Arg::Str(entries_json)])
+}
+
+/// Deletes the whole call log; `{count}` on success.
+pub fn delete_all_call_log() -> Result<String> {
+    bridge::call_string("deleteAllCallLog", &[])
+}
+
 /// Every contact that has a phone number.
 pub fn contacts() -> Result<String> {
     bridge::call_string("pullContacts", &[])
@@ -74,6 +90,9 @@ mod tests {
     #[test]
     fn desktop_is_unsupported() {
         assert!(matches!(call_log(500), Err(Error::Unsupported)));
+        assert!(matches!(delete_call_log(&[1, 2]), Err(Error::Unsupported)));
+        assert!(matches!(restore_call_log("{}"), Err(Error::Unsupported)));
+        assert!(matches!(delete_all_call_log(), Err(Error::Unsupported)));
         assert!(matches!(contacts(), Err(Error::Unsupported)));
         assert!(matches!(contacts_all(), Err(Error::Unsupported)));
         assert!(matches!(favorites(), Err(Error::Unsupported)));

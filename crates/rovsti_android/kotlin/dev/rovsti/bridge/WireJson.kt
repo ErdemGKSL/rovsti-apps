@@ -371,6 +371,16 @@ object ProviderJson {
         else -> "unknown"
     }
 
+    /** The wire kind back to `CallLog.Calls.TYPE`, the inverse of [kindName]; unknown kinds map to incoming. */
+    fun kindCode(name: String): Int = when (name) {
+        "outgoing" -> 2
+        "missed" -> 3
+        "voicemail" -> 4
+        "rejected" -> 5
+        "blocked" -> 6
+        else -> 1
+    }
+
     /**
      * Digits with an optional leading `+`, like `rovsti_core` reads a number: direction and other
      * format marks are dropped, a `;ext=` style URI parameter is cut, and the `(0)` after a

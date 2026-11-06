@@ -530,6 +530,8 @@ impl Conversation {
         self.editing = None;
         self.composer.update(cx, |field, cx| field.clear(cx));
         self.last_text.clear();
+        let sent = text.clone();
+        let sent_id = id.clone();
         let request = EditMessage {
             chat: self.chat.clone(),
             message_id: id,
@@ -543,7 +545,20 @@ impl Conversation {
             if let Err(error) = task.await {
                 log::warn!("editing a WhatsApp message failed: {error}");
                 this.update(cx, |this, cx| {
-                    this.notice = Some("Couldn't edit the message".into());
+                    let composer_empty = this.composer.read(cx).text().trim().is_empty();
+                    if can_restore_edit(
+                        composer_empty,
+                        this.editing.is_some(),
+                        this.reply_to.is_some(),
+                    ) {
+                        this.composer.update(cx, |field, cx| field.set(&sent, cx));
+                        this.last_text = sent;
+                        this.editing = Some(sent_id);
+                        this.rows_dirty = true;
+                        this.notice = Some("Couldn't edit the message. Send to try again.".into());
+                    } else {
+                        this.notice = Some("Couldn't edit the message".into());
+                    }
                     cx.notify();
                 })
                 .ok();
@@ -843,8 +858,14 @@ impl Conversation {
         cx: &mut Context<Self>,
     ) {
         self.strip = None;
+        let previous = self
+            .timeline
+            .own_reaction(&message_id)
+            .map(str::to_owned)
+            .unwrap_or_default();
         self.timeline.set_own_reaction(&message_id, &emoji);
         self.rows_dirty = true;
+        let restore_id = message_id.clone();
         let request = SendReaction {
             chat: self.chat.clone(),
             message_id,
@@ -860,7 +881,9 @@ impl Conversation {
             if let Err(error) = task.await {
                 log::warn!("sending a WhatsApp reaction failed: {error}");
                 this.update(cx, |this, cx| {
-                    this.error = Some(format!("Couldn't send the reaction: {error}").into());
+                    this.timeline.set_own_reaction(&restore_id, &previous);
+                    this.rows_dirty = true;
+                    this.notice = Some("Couldn't send the reaction".into());
                     cx.notify();
                 })
                 .ok();
@@ -3251,6 +3274,11 @@ enum Plan {
     },
 }
 
+/// Whether a failed edit may put its text back: only into an idle composer.
+fn can_restore_edit(composer_empty: bool, editing: bool, replying: bool) -> bool {
+    composer_empty && !editing && !replying
+}
+
 fn send_plan(text: &str, has_chip: bool) -> Plan {
     let text = text.trim();
     match (has_chip, text.is_empty()) {
@@ -3341,6 +3369,14 @@ fn body_text(body: &MessageBody) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failed_edit_restores_only_into_an_idle_composer() {
+        assert!(super::can_restore_edit(true, false, false));
+        assert!(!super::can_restore_edit(false, false, false));
+        assert!(!super::can_restore_edit(true, true, false));
+        assert!(!super::can_restore_edit(true, false, true));
+    }
+
     #[test]
     fn load_error_invites_a_retry() {
         assert!(super::LOAD_ERROR.ends_with("Tap to try again."));

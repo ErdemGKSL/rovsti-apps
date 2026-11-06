@@ -173,6 +173,8 @@ enum PillAction {
     SmsMute(i64, bool),
     /// Reopens a failed scheduled SMS in the composer (to, body).
     ReopenScheduled { to: String, body: String },
+    /// Tries loading the WhatsApp chats again.
+    ReloadChats,
 }
 
 /// The page pushed over the tabs.
@@ -812,7 +814,12 @@ impl MessagesApp {
                         log::warn!("loading WhatsApp chats failed: {error}");
                         // The next gateway event (or reconnect) tries again.
                         this.chats = ChatsState::Needed;
-                        this.show_pill("Couldn't load WhatsApp chats");
+                        this.show_pill_action(
+                            "Couldn't load WhatsApp chats",
+                            "Retry",
+                            PillAction::ReloadChats,
+                            cx,
+                        );
                     }
                 }
                 cx.notify();
@@ -1558,6 +1565,7 @@ impl MessagesApp {
             PillAction::Settings(undo) => self.undo_settings(undo, cx),
             PillAction::Chat(jid, undo) => self.chat_action(&jid, undo, true, cx),
             PillAction::SmsMute(id, mute) => self.set_sms_mute(id, mute, cx),
+            PillAction::ReloadChats => self.load_chats(cx),
             PillAction::ReopenScheduled { to, body } => {
                 let title = self
                     .backend

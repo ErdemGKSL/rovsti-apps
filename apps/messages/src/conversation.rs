@@ -100,6 +100,12 @@ pub enum ConversationEvent {
     Menu,
     /// The Copy pill of a message: the page puts the text on the clipboard.
     Copy(String),
+    /// The Call pill of a contact card.
+    Call(String),
+    /// The Message pill of a contact card: start a chat with the number.
+    Message { name: String, number: String },
+    /// The Add to contacts pill of a contact card.
+    AddContact(String),
     /// The Share pill of a message: the page opens the system share sheet.
     Share(String),
     /// A short message for the page's pill (save results).
@@ -1890,10 +1896,15 @@ impl Conversation {
                 }));
         } else if confirmed {
             let id = message.id.clone();
+            let map_url = (!revoked)
+                .then(|| meta.and_then(|m| m.location.as_ref()).map(geo_url))
+                .flatten();
             bubble = bubble.on_click(cx.listener(move |this, _, _, cx| {
                 if this.strip.take().is_some() {
                     this.rows_dirty = true;
                     cx.notify();
+                } else if let Some(url) = &map_url {
+                    cx.open_url(url);
                 }
             }));
             bubble = bubble.on_long_press(cx.listener(move |this, _, _, cx| {
@@ -2260,6 +2271,33 @@ impl Conversation {
                     cx.listener(move |this, _, _, cx| this.discard_failed(local_id, cx)),
                 ));
             return row.into_any_element();
+        }
+        for (n, action) in card_actions(meta).into_iter().enumerate() {
+            let (icon, label) = match &action {
+                CardAction::OpenMap { .. } => (Icon::LucideMapPin, "Open in Maps"),
+                CardAction::Call(_) => (Icon::LucidePhone, "Call"),
+                CardAction::Message { .. } => (Icon::LucideMessageCircle, "Message"),
+                CardAction::AddContact(_) => (Icon::LucideUserPlus, "Add to contacts"),
+                CardAction::Copy(_) => (Icon::LucideCopy, "Copy"),
+            };
+            row = row.child(
+                pill(&format!("card{n}"), icon, label, false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        match action.clone() {
+                            CardAction::OpenMap { url } => cx.open_url(&url),
+                            CardAction::Call(n) => cx.emit(ConversationEvent::Call(n)),
+                            CardAction::Message { name, number } => {
+                                cx.emit(ConversationEvent::Message { name, number });
+                            }
+                            CardAction::AddContact(n) => cx.emit(ConversationEvent::AddContact(n)),
+                            CardAction::Copy(t) => cx.emit(ConversationEvent::Copy(t)),
+                        }
+                        cx.notify();
+                    },
+                )),
+            );
         }
         if !revoked {
             let target = id.clone();
@@ -2994,7 +3032,6 @@ fn vcard_phone(vcard: &str) -> Option<String> {
 
 /// What a location or contact card offers besides reading it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub enum CardAction {
     OpenMap { url: String },
     Call(String),
@@ -3004,7 +3041,6 @@ pub enum CardAction {
 }
 
 /// Percent-encodes everything but ASCII alphanumerics and `-._~`.
-#[cfg_attr(not(test), allow(dead_code))]
 fn encode_query(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
@@ -3018,7 +3054,6 @@ fn encode_query(s: &str) -> String {
 }
 
 /// `geo:41.008200,28.978400?q=41.008200,28.978400(Name)` for a maps app.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn geo_url(location: &Location) -> String {
     let point = format!("{:.6},{:.6}", location.latitude, location.longitude);
     let mut url = format!("geo:{point}?q={point}");
@@ -3033,7 +3068,6 @@ pub fn geo_url(location: &Location) -> String {
 }
 
 /// The actions under a location or contact card; none for deleted messages.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn card_actions(meta: Option<&MessageMeta>) -> Vec<CardAction> {
     let Some(meta) = meta.filter(|m| !m.revoked) else {
         return Vec::new();

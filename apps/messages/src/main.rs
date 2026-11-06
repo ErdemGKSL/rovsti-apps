@@ -877,6 +877,18 @@ impl MessagesApp {
             ConversationEvent::Menu => this.open_wa_page_menu(cx),
             ConversationEvent::Copy(text) => this.copy_text(text.clone().into(), false, cx),
             ConversationEvent::Share(text) => this.share_text(text.clone(), cx),
+            ConversationEvent::Call(n) => {
+                this.telecom_action(sms_actions::SmsAction::Call, n.clone(), cx);
+            }
+            ConversationEvent::AddContact(n) => this.add_or_open_contact(n.clone(), cx),
+            ConversationEvent::Message { name, number } => this.open_recipient(
+                &Recipient {
+                    title: name.clone(),
+                    number: number.clone(),
+                    detail: None,
+                },
+                cx,
+            ),
             ConversationEvent::Notice(text) => {
                 this.show_pill(text.clone());
                 cx.notify();
@@ -1339,6 +1351,38 @@ impl MessagesApp {
             contact_id: None,
         });
         cx.notify();
+    }
+
+    /// Add to contacts, or open the contact when the number already matches one.
+    fn add_or_open_contact(&mut self, number: String, cx: &mut Context<Self>) {
+        let contact_id = self
+            .backend
+            .read(cx)
+            .contacts()
+            .match_number(&number)
+            .map(|c| c.id);
+        let Some(contact_id) = contact_id else {
+            self.telecom_action(sms_actions::SmsAction::AddContact, number, cx);
+            return;
+        };
+        let task = cx
+            .background_executor()
+            .spawn(async move { rovsti_android::telecom::edit_contact(contact_id) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(true) => {}
+                    Err(rovsti_android::Error::Unsupported) => {
+                        this.show_pill("Contacts need an Android phone.");
+                    }
+                    Ok(false) | Err(_) => this.show_pill("Couldn't open that contact."),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Call or Add to contacts from the page menu, asked of Android off the UI thread.

@@ -30,7 +30,7 @@ Run these checks after every step:
 If `df` shows under 6 GB free, run `rm -rf target/debug/incremental` first.
 Commit each step on its own, with a focused message ("Rovsti contacts: ...").
 
-### W1. The Undo notice survives navigation and never goes stale (S1, S2)
+### W1. The Undo notice survives navigation and never goes stale (S1, S2) (done, 516c0cf)
 
 Pure helper in `apps/contacts/src/main.rs` (it is app-local state, so it stays next to
 `NoticeAction`):
@@ -74,7 +74,7 @@ Glue:
 Acceptance: the `keeps_undo` tests pass. `grep -n "notice = None" apps/contacts/src` lists only
 `clear_notice`, the notice timer, `undo_delete` and `keep_notice_timer`. All checks are green.
 
-### W2. Export handles an empty book and a pending delete (S3)
+### W2. Export handles an empty book and a pending delete (S3) (done, 3b0b97d)
 
 - `backend.rs::export_text(hidden: Option<i64>) -> Result<(String, usize), String>`: after
   `retain(validate)`, also `retain(|c| hidden.is_none() || c.id != hidden)`. The doc
@@ -94,7 +94,7 @@ Acceptance: the `keeps_undo` tests pass. `grep -n "notice = None" apps/contacts/
   test can reach the sample book, `export_text(Some(id))` of a sample id has one contact
   fewer than `export_text(None)`. Otherwise skip that test and say so in the commit.
 
-### W3. Docs and plan status
+### W3. Docs and plan status (done, this commit)
 
 - `docs/roadmap.md` (Rovsti Contacts): add a ticked line "UX completeness pass, round 3: the
   Undo of a delete survives navigation and goes away when the delete commits; export says

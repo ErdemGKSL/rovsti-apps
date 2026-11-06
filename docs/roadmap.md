@@ -136,6 +136,9 @@ list in `docs/phone-acceptance.md`.
 - [x] UX completeness pass, round 2: import dedup for contacts without a number (done
       without a device), search by email (done without a device), groups show and choose
       their account (done without a device), Undo for Delete Contact (done without a device)
+- [x] UX completeness pass, round 3: the Undo of a delete survives navigation and goes away
+      when the delete commits; export says when there is nothing to export (done without a
+      device)
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
 - [ ] Check the group member write and the mailto handoff on a phone; a delete commits after 5 s or when leaving the app
 

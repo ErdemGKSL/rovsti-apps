@@ -25,6 +25,10 @@ pub const DOUBLE_TAP_SCALE: f32 = 2.5;
 pub const RUBBER: f32 = 0.35;
 /// Downward drag distance that closes the viewer.
 pub const DISMISS_PX: f32 = 120.0;
+/// Fraction of the width a horizontal drag must cover to turn the page.
+pub const PAGE_SWIPE_FRACTION: f32 = 0.25;
+/// Horizontal fling speed that turns the page after a short drag.
+pub const PAGE_FLING_PX_S: f32 = 800.0;
 
 const GESTURE_MIN: f32 = MIN_SCALE * 0.8;
 const GESTURE_MAX: f32 = MAX_SCALE * 1.2;
@@ -146,6 +150,45 @@ pub fn should_dismiss(dy: f32, velocity_px_s: f32) -> bool {
     dy >= DISMISS_PX || (velocity_px_s > FLING_PX_S && dy >= FLING_MIN_PX)
 }
 
+/// Horizontal shift to show while dragging page `index` of `count`; rubber-banded
+/// when pulling past the first or last page.
+pub fn page_drag(dx: f32, index: usize, count: usize) -> f32 {
+    let at_first = index == 0 && dx > 0.0;
+    let at_last = index + 1 >= count && dx < 0.0;
+    if at_first || at_last { dx * RUBBER } else { dx }
+}
+
+/// Page to settle on after releasing a horizontal drag of `dx` px at `velocity_px_s`
+/// (negative `dx` swipes towards the next page). Moves at most one page.
+pub fn page_after_release(
+    index: usize,
+    count: usize,
+    dx: f32,
+    velocity_px_s: f32,
+    width: f32,
+) -> usize {
+    if count == 0 {
+        return 0;
+    }
+    let index = index.min(count - 1);
+    let far = dx.abs() >= width * PAGE_SWIPE_FRACTION;
+    let fling = velocity_px_s.abs() > PAGE_FLING_PX_S
+        && dx.abs() >= FLING_MIN_PX
+        && velocity_px_s.signum() == dx.signum();
+    if dx == 0.0 || !(far || fling) {
+        index
+    } else if dx < 0.0 {
+        (index + 1).min(count - 1)
+    } else {
+        index.saturating_sub(1)
+    }
+}
+
+/// "3 of 7" for the viewer header; `None` when there is nothing to page.
+pub fn page_caption(index: usize, count: usize) -> Option<String> {
+    (count > 1).then(|| format!("{} of {}", index.min(count - 1) + 1, count))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,5 +305,46 @@ mod tests {
         assert!(near(dismiss_progress(60.0), 0.5));
         assert!(near(dismiss_progress(500.0), 1.0));
         assert!(near(dismiss_progress(-5.0), 0.0));
+    }
+
+    #[test]
+    fn page_moves_past_a_quarter() {
+        assert_eq!(page_after_release(2, 5, -100.0, 0.0, 400.0), 3);
+        assert_eq!(page_after_release(2, 5, 100.0, 0.0, 400.0), 1);
+        assert_eq!(page_after_release(2, 5, -99.0, 0.0, 400.0), 2);
+        assert_eq!(page_after_release(0, 0, -300.0, 0.0, 400.0), 0);
+    }
+
+    #[test]
+    fn page_flings_move_short_drags() {
+        assert_eq!(page_after_release(2, 5, -40.0, -900.0, 400.0), 3);
+        assert_eq!(page_after_release(2, 5, 40.0, 900.0, 400.0), 1);
+        assert_eq!(page_after_release(2, 5, -40.0, 900.0, 400.0), 2); // wrong way
+        assert_eq!(page_after_release(2, 5, -10.0, -3000.0, 400.0), 2); // twitch
+        assert_eq!(page_after_release(2, 5, -40.0, -700.0, 400.0), 2); // too slow
+    }
+
+    #[test]
+    fn page_stays_at_the_ends() {
+        assert_eq!(page_after_release(0, 3, 300.0, 0.0, 400.0), 0);
+        assert_eq!(page_after_release(2, 3, -300.0, 0.0, 400.0), 2);
+        assert_eq!(page_after_release(0, 1, -300.0, 0.0, 400.0), 0);
+    }
+
+    #[test]
+    fn page_drag_rubber_bands_at_the_ends() {
+        assert!(near(page_drag(100.0, 0, 3), 100.0 * RUBBER));
+        assert!(near(page_drag(-100.0, 2, 3), -100.0 * RUBBER));
+        assert!(near(page_drag(-100.0, 0, 3), -100.0));
+        assert!(near(page_drag(100.0, 2, 3), 100.0));
+        assert!(near(page_drag(100.0, 1, 3), 100.0));
+        assert!(near(page_drag(100.0, 0, 1), 100.0 * RUBBER));
+    }
+
+    #[test]
+    fn page_caption_hides_for_one() {
+        assert_eq!(page_caption(0, 0), None);
+        assert_eq!(page_caption(0, 1), None);
+        assert_eq!(page_caption(2, 7).as_deref(), Some("3 of 7"));
     }
 }

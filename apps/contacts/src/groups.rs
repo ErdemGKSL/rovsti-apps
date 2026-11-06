@@ -12,7 +12,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px, svg,
 };
 use rovsti_core::{
-    contact_edit::{Group, group_title},
+    contact_edit::{Group, account_label, group_join_hint, group_subtitle, group_title},
     contacts_view,
 };
 use rovsti_ui::{
@@ -44,14 +44,8 @@ pub(crate) struct GroupEdit {
     field: Entity<TextField>,
     error: Option<SharedString>,
     saving: bool,
-}
-
-fn count_words(count: usize) -> String {
-    match count {
-        0 => "No contacts".to_owned(),
-        1 => "1 contact".to_owned(),
-        n => format!("{n} contacts"),
-    }
+    /// The account key a new group is made in ("" is the phone).
+    account: String,
 }
 
 impl ContactsApp {
@@ -92,7 +86,11 @@ impl ContactsApp {
                 GroupItem {
                     id: group.id,
                     title: group.title.clone().into(),
-                    count: count_words(count).into(),
+                    count: group_subtitle(
+                        count,
+                        (self.accounts.len() > 1).then_some(group.account.as_str()),
+                    )
+                    .into(),
                 }
             })
             .collect()
@@ -144,11 +142,16 @@ impl ContactsApp {
             .map(|g| g.title.clone())
             .unwrap_or_default();
         let field = cx.new(|cx| TextField::configured(Config::TEXT, &title, cx));
+        let account = match id.and_then(|id| self.group(id)) {
+            Some(group) => group.account.clone(),
+            None => editor::default_account(&self.accounts, &self.save_to),
+        };
         self.group_edit = Some(GroupEdit {
             id,
             field,
             error: None,
             saving: false,
+            account,
         });
         self.notice = None;
         // The title box sits in the header: keep it drawn while it has focus.
@@ -169,8 +172,7 @@ impl ContactsApp {
             return;
         }
         let id = edit.id;
-        // A new group goes where a new contact does.
-        let account = editor::default_account(&self.accounts, &self.save_to);
+        let account = edit.account.clone();
         let text = edit.field.read(cx).text().to_owned();
         let title = match group_title(&text, &self.groups, id) {
             Ok(title) => title,
@@ -255,6 +257,29 @@ impl ContactsApp {
         } else {
             "New group"
         };
+        let save_to = (edit.id.is_none() && self.accounts.len() > 1).then(|| {
+            section(
+                theme,
+                None,
+                [
+                    tap_row(theme, "group-save-to", None, "Save to", Tone::Plain)
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_size(typography::FOOTNOTE.size)
+                                .text_color(colors.accent)
+                                .child(SharedString::from(account_label(&edit.account))),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(edit) = this.group_edit.as_mut() {
+                                edit.account = editor::next_account(&this.accounts, &edit.account);
+                            }
+                            cx.notify();
+                        }))
+                        .into_any_element(),
+                ],
+            )
+        });
         Some(
             div()
                 .flex()
@@ -275,6 +300,7 @@ impl ContactsApp {
                         ))
                         .into_any_element()],
                 ))
+                .children(save_to)
                 .children(edit.error.clone().map(|error| {
                     div()
                         .px(px(32.0))
@@ -409,6 +435,9 @@ impl ContactsApp {
             return div().into_any_element();
         };
         let title = SharedString::from(group.title.clone());
+        let join_hint =
+            (self.accounts.len() > 1).then(|| SharedString::from(group_join_hint(&group.account)));
+        let colors = theme::colors(theme);
         let delete_title = title.clone();
         let top = div()
             .flex()
@@ -475,6 +504,13 @@ impl ContactsApp {
                 .on_click(cx.listener(move |this, _, _, cx| this.open_group_picker(id, cx)))
                 .into_any_element()],
             ))
+            .children(join_hint.map(|hint| {
+                div()
+                    .px(px(32.0))
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.secondary_label)
+                    .child(hint)
+            }))
             .children(self.group_edit_section(theme, window, cx))
             .children(empty)
             .into_any_element()

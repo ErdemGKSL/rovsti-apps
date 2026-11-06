@@ -254,6 +254,32 @@ pub fn account_label(key: &str) -> String {
     }
 }
 
+/// A group row's second line: "3 contacts", or with an account
+/// "3 contacts · Google, a@b.com".
+pub fn group_subtitle(members: usize, account: Option<&str>) -> String {
+    let count = match members {
+        0 => "No contacts".to_owned(),
+        1 => "1 contact".to_owned(),
+        n => format!("{n} contacts"),
+    };
+    match account {
+        Some(key) => format!("{count} · {}", account_label(key)),
+        None => count,
+    }
+}
+
+/// Tells the owner which contacts can join a group of `account`.
+pub fn group_join_hint(account: &str) -> String {
+    if account.is_empty() {
+        "Only contacts saved on this phone can join this group.".to_owned()
+    } else {
+        format!(
+            "Only contacts saved in {} can join this group.",
+            account_label(account)
+        )
+    }
+}
+
 /// The groups that belong to `account` (a contact can only join those).
 pub fn groups_of<'a>(groups: &'a [Group], account: &str) -> impl Iterator<Item = &'a Group> {
     let account = account.to_owned();
@@ -605,6 +631,31 @@ mod tests {
     fn an_unknown_kind_reads_as_other() {
         let f: DraftField = serde_json::from_str(r#"{"value":"1","kind":"pager"}"#).expect("ok");
         assert_eq!(f.kind, FieldKind::Other);
+    }
+
+    #[test]
+    fn group_subtitle_counts_and_account() {
+        assert_eq!(group_subtitle(0, None), "No contacts");
+        assert_eq!(group_subtitle(1, None), "1 contact");
+        assert_eq!(group_subtitle(3, None), "3 contacts");
+        assert_eq!(group_subtitle(0, Some("")), "No contacts · On this phone");
+        assert_eq!(
+            group_subtitle(3, Some("com.google|a@b.com")),
+            "3 contacts · Google, a@b.com"
+        );
+        assert_eq!(group_subtitle(1, Some("")), "1 contact · On this phone");
+    }
+
+    #[test]
+    fn group_join_hint_names_the_account() {
+        assert_eq!(
+            group_join_hint(""),
+            "Only contacts saved on this phone can join this group."
+        );
+        assert_eq!(
+            group_join_hint("com.google|a@b.com"),
+            "Only contacts saved in Google, a@b.com can join this group."
+        );
     }
 
     #[test]

@@ -326,6 +326,12 @@ impl ContactsApp {
         let title = self.picker_title(picker.for_);
         let selected = selected_words(picker.chosen.len());
         let field = picker.field.clone();
+        let join_hint = match picker.for_ {
+            PickFor::Group(id) if self.accounts.len() > 1 => self
+                .group(id)
+                .map(|g| SharedString::from(contact_edit::group_join_hint(&g.account))),
+            _ => None,
+        };
         let empty = self.picker_rows.is_empty().then(|| {
             let query = field.read(cx).text();
             if query.trim().is_empty() {
@@ -378,6 +384,14 @@ impl ContactsApp {
                     .text_color(colors.secondary_label)
                     .child(selected),
             )
+            .children(join_hint.map(|hint| {
+                div()
+                    .px(metrics::ROW_INSET)
+                    .pb(px(4.0))
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.secondary_label)
+                    .child(hint)
+            }))
             .children(empty)
             .into_any_element()
     }

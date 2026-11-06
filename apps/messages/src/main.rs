@@ -346,6 +346,8 @@ struct ChatLayout {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ChatItem {
     Title,
+    /// An archived chat that matches the search query.
+    ArchivedMatch(usize),
     /// The search field and its Cancel pill.
     Search,
     /// Nothing matches the query.
@@ -905,6 +907,9 @@ impl MessagesApp {
         let page = cx.new(|cx| StatusPage::new(feed, gateway, backend, avatars, active, cx));
         cx.subscribe(&page, |this, _, event, cx| match event {
             StatusPageEvent::Back => this.close_page(cx),
+            StatusPageEvent::Message { jid, title } => {
+                this.open_chat(jid.clone(), title.clone(), cx)
+            }
         })
         .detach();
         self.open = Open::Status(page);
@@ -3336,15 +3341,21 @@ impl MessagesApp {
         }
         let rows = self.shown_rows();
         let mut no_match_empty = false;
+        let mut archived_matches = Vec::new();
         if self.show_scheduled {
             // The overview lists its own entries, not chats.
         } else if !query.is_empty() {
             let matches = inbox::filter_rows(rows, &query);
             no_match_empty = matches.is_empty();
             items.extend(matches.into_iter().map(ChatItem::Row));
+            if !self.show_spam && !self.show_archived {
+                archived_matches = inbox::filter_rows(&self.view.archived, &query);
+            }
         } else {
             items.extend((0..rows.len()).map(ChatItem::Row));
         }
+        no_match_empty = no_match_empty && archived_matches.is_empty();
+        items.extend(archived_matches.into_iter().map(ChatItem::ArchivedMatch));
         if no_match_empty {
             items.push(ChatItem::NoResults);
         }
@@ -3364,6 +3375,7 @@ impl MessagesApp {
                 ChatItem::Row(index) => {
                     key_of((1u8, self.show_spam, self.show_archived, &rows[index]))
                 }
+                ChatItem::ArchivedMatch(index) => key_of((17u8, &self.view.archived[index])),
                 ChatItem::SpamFilter => {
                     key_of((2u8, self.view.spam.len(), self.view.spam_unread()))
                 }
@@ -3749,6 +3761,12 @@ impl MessagesApp {
                     row
                 };
                 self.inbox_row(theme, id, view, cx)
+            }
+            ChatItem::ArchivedMatch(row) => {
+                let Some(view) = self.view.archived.get(row) else {
+                    return div().into_any_element();
+                };
+                self.inbox_row(theme, 2000 + row, view, cx)
             }
             ChatItem::Empty => match self.backend.read(cx).threads_state() {
                 Access::Denied => {

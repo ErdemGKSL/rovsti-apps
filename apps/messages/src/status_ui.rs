@@ -20,7 +20,7 @@ use gpui::{
 use rovsti_core::{call_log::relative_time, recents::LocaleTime};
 use rovsti_ui::{
     Icon,
-    components::{empty_state, glass_icon_button},
+    components::{empty_state, glass_icon_button, glass_pill},
     current_theme, theme,
     tokens::{Theme, metrics, typography},
 };
@@ -169,7 +169,6 @@ impl StatusFeed {
 /// the push name their update carried, then the number.
 /// The chat to open from someone's status: only another person's phone JID
 /// (own updates and LIDs have no chat to open).
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn message_target(author: &str, from_me: bool) -> Option<String> {
     let author = author.trim();
     (!from_me && author.ends_with("@s.whatsapp.net") && author != "@s.whatsapp.net")
@@ -290,6 +289,11 @@ pub(crate) fn entry_avatars(
 
 pub enum StatusPageEvent {
     Back,
+    /// Open the chat with the author of the update being viewed.
+    Message {
+        jid: String,
+        title: String,
+    },
 }
 
 /// One item of the page's list.
@@ -887,6 +891,30 @@ impl StatusPage {
                     .child(text)
             });
 
+        let message = message_target(&person.author, item.from_me).map(|jid| {
+            let title = person.title.clone();
+            div()
+                .absolute()
+                .bottom(px(110.0))
+                .left_0()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(
+                    glass_pill(theme, "Message")
+                        .id("status-message")
+                        .occlude()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.viewer = None;
+                            cx.emit(StatusPageEvent::Message {
+                                jid: jid.clone(),
+                                title: title.to_string(),
+                            });
+                            cx.notify();
+                        })),
+                )
+        });
+
         Some(
             div()
                 .id("status-viewer")
@@ -908,6 +936,7 @@ impl StatusPage {
                 )
                 .child(body)
                 .children(caption)
+                .children(message)
                 .child(
                     div()
                         .absolute()

@@ -8,6 +8,7 @@ pub mod avatar;
 pub mod blocklist;
 pub mod call;
 pub mod call_log;
+pub mod call_log_query;
 pub mod contact;
 pub mod contact_card;
 pub mod contact_edit;

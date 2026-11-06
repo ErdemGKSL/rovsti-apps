@@ -1,9 +1,9 @@
 //! Contact groups: the Groups tab, a group's page, and creating, renaming and
 //! deleting a group.
 //!
-//! Groups are labels like "Family". A contact joins a group in its edit form;
-//! here the owner sees who is in each group and manages the groups
-//! themselves. New groups live on the phone only (no account).
+//! Groups are labels like "Family". A contact joins a group in its edit form or from the
+//! group's page; here the owner sees who is in each group and manages the
+//! groups themselves. New groups live on the phone only (no account).
 
 use std::collections::HashSet;
 
@@ -359,7 +359,7 @@ impl ContactsApp {
             empty_state(
                 theme,
                 "No Groups",
-                "Make a group, then add contacts to it from their Edit screen.",
+                "Make a group, then add people to it from the group's page.",
             )
         });
         div()

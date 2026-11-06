@@ -36,7 +36,7 @@ use rovsti_android::{
 };
 use rovsti_core::{
     contact_card::{self, ContactCard},
-    contact_edit::{Account, ContactDraft, Group},
+    contact_edit::{Account, ContactDraft, Group, account_label},
     contacts_prefs::ContactsPrefs,
     contacts_view::{self, ContactVm, NameStyle},
     settings::SortBy,
@@ -789,6 +789,16 @@ impl ContactsApp {
         }
     }
 
+    /// Moves the account new contacts start in to the next one, and keeps it.
+    fn cycle_save_to(&mut self, cx: &mut Context<Self>) {
+        let current = editor::default_account(&self.accounts, &self.save_to);
+        self.save_to = editor::next_account(&self.accounts, &current);
+        self.save_prefs(cx);
+        let label = account_label(&editor::default_account(&self.accounts, &self.save_to));
+        self.notice = Some(format!("New contacts go to {label}.").into());
+        cx.notify();
+    }
+
     fn save_prefs(&self, cx: &mut Context<Self>) {
         let Some(dir) = self.prefs_dir.clone() else {
             return;
@@ -1152,7 +1162,7 @@ impl ContactsApp {
                 empty_state(
                     theme,
                     "No Contacts",
-                    "Contacts with a phone number appear here.",
+                    "Tap + to add someone, or import a .vcf file in Settings.",
                 )
                 .into_any_element()
             } else {
@@ -1302,6 +1312,26 @@ impl ContactsApp {
                     ),
                 ],
             ))
+            .children((self.accounts.len() > 1).then(|| {
+                let label = SharedString::from(account_label(&editor::default_account(
+                    &self.accounts,
+                    &self.save_to,
+                )));
+                section(
+                    theme,
+                    Some("New contacts".into()),
+                    [tap_row(theme, "save-to", None, "Save to", Tone::Plain)
+                        .justify_between()
+                        .child(
+                            div()
+                                .text_size(typography::FOOTNOTE.size)
+                                .text_color(colors.accent)
+                                .child(label),
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.cycle_save_to(cx)))
+                        .into_any_element()],
+                )
+            }))
             .child(section(
                 theme,
                 Some("Contacts file".into()),

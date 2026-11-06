@@ -747,7 +747,24 @@ impl ContactsApp {
             .child(save_to)
             .child(numbers)
             .child(emails)
-            .children((!groups.is_empty()).then(|| section(theme, Some("Groups".into()), groups)))
+            .child(section(
+                theme,
+                Some("Groups".into()),
+                if groups.is_empty() {
+                    vec![
+                        div()
+                            .min_h(metrics::MIN_HIT)
+                            .px(metrics::ROW_INSET)
+                            .py(px(10.0))
+                            .text_size(typography::FOOTNOTE.size)
+                            .text_color(colors.secondary_label)
+                            .child("No groups in this account yet. Make one in the Groups tab.")
+                            .into_any_element(),
+                    ]
+                } else {
+                    groups
+                },
+            ))
             .child(note)
             .children(delete)
             .into_any_element()

@@ -1706,12 +1706,16 @@ impl PhoneApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if id.starts_with("sheet-c") {
+        if crate::details_ui::is_contact_id(id) {
             return self.contact_sheet_act(id, window, cx);
         }
         let Some(row) = self.recents.number.clone() else {
             return;
         };
+        if let Some((false, i)) = crate::details_ui::details_line_index(id) {
+            self.open_call_details(false, i, window, cx);
+            return;
+        }
         if id == "sheet-nhist-edit" {
             self.recents.number_history_edit = !self.recents.number_history_edit;
             cx.notify();
@@ -1850,11 +1854,23 @@ pub(crate) struct HistoryVm {
     pub(crate) entry: rovsti_core::call_log::EntryRef,
     /// A call the phone blocked.
     pub(crate) blocked: bool,
+    /// The number as stored, and when the call started (the key of its note).
+    pub(crate) number: SharedString,
+    pub(crate) date_ms: i64,
+    /// The call has a note: the line shows a small note glyph.
+    pub(crate) note: bool,
+    /// What the details sheet is built from.
+    pub(crate) line: recents::HistoryLine,
 }
 
 impl HistoryVm {
     /// Built once when a sheet opens, never per frame.
-    fn new(line: &recents::HistoryLine, now_ms: i64, locale: recents::LocaleTime) -> Self {
+    fn new(
+        line: &recents::HistoryLine,
+        now_ms: i64,
+        locale: recents::LocaleTime,
+        note: bool,
+    ) -> Self {
         let (title, detail) = recents::history_text(line, now_ms, locale);
         let direction = Direction::of(line.call_type);
         Self {
@@ -1865,6 +1881,10 @@ impl HistoryVm {
             whatsapp: line.whatsapp,
             entry: line.entry.clone(),
             blocked: line.blocked,
+            number: line.number.clone().into(),
+            date_ms: line.date_ms,
+            note,
+            line: line.clone(),
         }
     }
 
@@ -1894,10 +1914,8 @@ impl PhoneApp {
             _ => recents::LocaleTime::default(),
         };
         let now = backend::now_ms();
-        recents::blocked_history(&blocked, numbers, HISTORY_LIMIT)
-            .iter()
-            .map(|line| HistoryVm::new(line, now, locale))
-            .collect()
+        let lines = recents::blocked_history(&blocked, numbers, HISTORY_LIMIT);
+        self.history_vms(&lines, now, locale)
     }
 
     /// The newest calls (cellular and WhatsApp) with any of `numbers`. Empty
@@ -1908,9 +1926,22 @@ impl PhoneApp {
         };
         let extras = self.wa_call.read(cx).recents_extras();
         let now = backend::now_ms();
-        recents::history(&log.source, &extras, numbers, HISTORY_LIMIT)
+        let lines = recents::history(&log.source, &extras, numbers, HISTORY_LIMIT);
+        self.history_vms(&lines, now, log.locale)
+    }
+
+    /// The lines as view-models, with their note glyphs read in one pass.
+    fn history_vms(
+        &self,
+        lines: &[recents::HistoryLine],
+        now: i64,
+        locale: recents::LocaleTime,
+    ) -> Arc<[HistoryVm]> {
+        let flags = crate::details_ui::note_flags(&self.notes, lines);
+        lines
             .iter()
-            .map(|line| HistoryVm::new(line, now, log.locale))
+            .zip(flags)
+            .map(|(line, note)| HistoryVm::new(line, now, locale, note))
             .collect()
     }
 }
@@ -1927,12 +1958,17 @@ impl PhoneApp {
     /// A history Edit/Delete control was pressed: the Contact sheet's ids start with
     /// `sheet-c`, the Number sheet's with `sheet-n`.
     fn history_edit_act(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if id.starts_with("sheet-c") {
+        if crate::details_ui::is_contact_id(id) {
             self.contact_sheet_act(id, window, cx);
         } else {
             self.number_sheet_act(id, window, cx);
         }
     }
+}
+
+/// Fill opacity of a tappable history line while pressed.
+fn line_press(press: f32) -> f32 {
+    0.9 * press.clamp(0.0, 1.0)
 }
 
 /// The line index a delete button id `{prefix}{i}` stands for.
@@ -1987,43 +2023,75 @@ pub(crate) fn history_section(
                     })
                     .child(touch_surface(PhoneApp::touch_listener(cx, Some(id))))
             });
-            div()
+            // Outside Edit mode a line opens the call details; in Edit mode only the
+            // trash button acts, so a miss never opens a sheet by accident.
+            let tap = edit.filter(|e| !e.editing).map(|e| {
+                let id: SharedString =
+                    crate::details_ui::details_line_id(e.line_prefix == CONTACT_HISTORY_DELETE, i)
+                        .into();
+                (id.clone(), line_press(app.presses.value(&id)))
+            });
+            let mut row = div()
                 .id(SharedString::from(format!("sheet-hist-{i}")))
                 .aria_label(line.aria())
+                .relative()
                 .h(px(HISTORY_ROW_H))
                 .w_full()
                 .flex()
                 .items_center()
                 .gap(px(10.0))
                 .px(px(16.0))
-                .child(if line.whatsapp {
-                    whatsapp_badge(theme)
-                } else {
-                    svg()
-                        .path(line.icon.path())
-                        .size(px(16.0))
-                        .flex_none()
-                        .text_color(ink)
-                        .into_any_element()
-                })
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(typography::BODY.size)
-                        .text_color(ink)
-                        .child(line.title.clone()),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_size(typography::FOOTNOTE.size)
-                        .text_color(colors.secondary_label)
-                        .child(line.detail.clone()),
-                )
-                .children(trash)
-                .into_any_element()
+                .bg(gpui::Hsla {
+                    a: tap.as_ref().map_or(0.0, |t| t.1),
+                    ..colors.fill
+                });
+            if let Some((id, _)) = tap.clone() {
+                row = row
+                    .role(Role::Button)
+                    .on_mouse_down(MouseButton::Left, {
+                        let id = id.clone();
+                        cx.listener(move |this, _, window, cx| {
+                            this.presses.down(id.clone());
+                            this.history_edit_act(&id, window, cx);
+                        })
+                    })
+                    .child(touch_surface(PhoneApp::touch_listener(cx, Some(id))));
+            }
+            row.child(if line.whatsapp {
+                whatsapp_badge(theme)
+            } else {
+                svg()
+                    .path(line.icon.path())
+                    .size(px(16.0))
+                    .flex_none()
+                    .text_color(ink)
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(typography::BODY.size)
+                    .text_color(ink)
+                    .child(line.title.clone()),
+            )
+            .children(line.note.then(|| {
+                svg()
+                    .path(Icon::LucideStickyNote.path())
+                    .size(px(14.0))
+                    .flex_none()
+                    .text_color(colors.secondary_label)
+            }))
+            .child(
+                div()
+                    .flex_none()
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.secondary_label)
+                    .child(line.detail.clone()),
+            )
+            .children(trash)
+            .into_any_element()
         })
         .collect();
     let toggle = edit.map(|e| {
@@ -2561,6 +2629,7 @@ mod tests {
             whatsapp,
             date_ms: 0,
             duration_s,
+            number: String::new(),
         }
     }
 
@@ -2568,7 +2637,12 @@ mod tests {
     fn history_vm_marks_missed_and_keeps_the_duration_out_of_missed_calls() {
         use rovsti_core::call_log::CallType;
         let now = 3_600_000;
-        let missed = HistoryVm::new(&line(CallType::Missed, true, 0), now, Default::default());
+        let missed = HistoryVm::new(
+            &line(CallType::Missed, true, 0),
+            now,
+            Default::default(),
+            false,
+        );
         assert!(missed.missed && missed.whatsapp);
         assert_eq!(missed.icon, Icon::LucidePhoneMissed);
         assert!(!missed.detail.contains('\u{b7}'));
@@ -2580,7 +2654,9 @@ mod tests {
             &line(CallType::Incoming, false, 65),
             now,
             Default::default(),
+            true,
         );
+        assert!(answered.note && !missed.note);
         assert!(!answered.missed && !answered.whatsapp);
         assert!(answered.detail.ends_with("1:05"), "{}", answered.detail);
     }

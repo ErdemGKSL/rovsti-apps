@@ -795,6 +795,44 @@ mod tests {
         assert_eq!(held, crate::photos::CAPACITY);
     }
 
+    /// U11: a tap on a history line of the Number sheet opens the call details
+    /// sheet with that call's date and time.
+    #[test]
+    fn tapping_a_history_line_opens_the_call_details() {
+        use crate::details_ui::details_line_id;
+        let mut rig = Rig::new();
+        rig.settle();
+        rig.apply(Action::Tab(1));
+        rig.settle();
+        let (kind, when, opened) = rig.with_app(|app, window, cx| {
+            let row = app.recents.row(0).cloned().expect("a sample row");
+            assert!(!row.number.is_empty(), "the first sample row has a number");
+            app.recents.number_history = app.history_for(&[row.number.as_ref()], cx);
+            assert!(!app.recents.number_history.is_empty(), "no history");
+            let vm = app.recents.number_history[0].clone();
+            let locale = match app.backend.read(cx).call_log() {
+                crate::backend::Load::Ready(log) => log.locale,
+                _ => Default::default(),
+            };
+            let expected =
+                rovsti_core::call_notes::details(&vm.line, &vm.number, None, locale).when;
+            app.recents.number = Some(row);
+            app.sheet_kind = crate::SheetKind::Number;
+            app.sheet.open();
+            app.number_sheet_act(&details_line_id(false, 0), window, cx);
+            let shown = app.details.as_ref().map(|d| d.details.when.clone());
+            (app.sheet_kind, expected, shown)
+        });
+        assert_eq!(kind, crate::SheetKind::CallDetails);
+        assert_eq!(opened.as_deref(), Some(when.as_str()));
+        rig.advance(FRAME);
+        rig.draw();
+        // Back returns to the Number sheet.
+        rig.with_app(|app, window, cx| app.details_back(window, cx));
+        let kind = rig.with_app(|app, _, _| app.sheet_kind);
+        assert_eq!(kind, crate::SheetKind::Number);
+    }
+
     /// U1: tapping the Contact sheet's avatar opens the viewer on the contact's
     /// photo; at scale 1 the drawn image sits inside the viewport, and the full
     /// photo replaces the thumbnail without moving it.

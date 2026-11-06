@@ -1306,6 +1306,10 @@ impl PhoneApp {
             return;
         };
         let contact_id = sheet.contact.id;
+        if let Some((true, i)) = crate::details_ui::details_line_index(id) {
+            self.open_call_details(true, i, window, cx);
+            return;
+        }
         if id == "sheet-chist-edit" {
             sheet.history_edit = !sheet.history_edit;
             cx.notify();

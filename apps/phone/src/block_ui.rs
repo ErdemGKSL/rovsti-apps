@@ -68,6 +68,8 @@ pub(crate) enum PillAction {
     RestoreSettings(Box<rovsti_core::settings::Settings>),
     /// Open the system prompt for call log access.
     GrantCallLog,
+    /// Undo of Delete note on the call details sheet.
+    RestoreNote(Box<rovsti_core::call_notes::CallNote>),
     /// Ask for the microphone, or open App info when Android won't ask again.
     GrantMic,
 }
@@ -304,6 +306,7 @@ impl PhoneApp {
                 self.show_notice_pill("Settings restored", None, false, cx);
             }
             PillAction::GrantCallLog => self.recents_grant(cx),
+            PillAction::RestoreNote(note) => self.details_restore_note(*note, cx),
             PillAction::GrantMic => self.grant_mic(cx),
         }
     }

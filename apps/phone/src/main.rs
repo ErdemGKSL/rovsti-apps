@@ -19,6 +19,7 @@ mod backup_ui;
 mod block_ui;
 mod blocked_ui;
 mod contacts;
+mod details_ui;
 #[cfg(not(target_os = "android"))]
 mod devtools;
 mod diagnostics;
@@ -116,6 +117,8 @@ enum SheetKind {
     T9Results,
     /// "Copy as" / "Share as": the number in each format (`actions_ui::copy_as_sheet`).
     CopyAs,
+    /// One call's details and note (`details_ui`), over the Number or Contact sheet.
+    CallDetails,
 }
 
 /// The line under the number field.
@@ -281,6 +284,8 @@ struct PhoneApp {
     photos: Photos,
     /// Per-call notes (U8), persisted next to the preferences.
     notes: notes::NotesStore,
+    /// The open call details sheet (`SheetKind::CallDetails`).
+    details: Option<details_ui::DetailsSheet>,
     /// The contact whose photo the phone itself asked the picker for: only
     /// then is a `ContactPhoto` answer applied.
     pending_photo_for: Option<i64>,
@@ -598,6 +603,7 @@ impl PhoneApp {
             window_active: true,
             photos: Photos::new(),
             notes: notes::NotesStore::default(),
+            details: None,
             pending_photo_for: None,
             restored,
             _restore_timeout: None,
@@ -767,6 +773,10 @@ impl PhoneApp {
 
     /// Closes the Setup sheet (scrim tap, Back, drag).
     fn close_sheet(&mut self, cx: &mut Context<Self>) {
+        if self.sheet_kind == SheetKind::CallDetails {
+            // A note still being typed is kept.
+            self.details_commit(cx);
+        }
         self.sheet.close();
         self.presses.release_all();
         cx.notify();
@@ -792,7 +802,10 @@ impl PhoneApp {
             self.route_close(window, cx);
         } else if self.sheet.is_open() && (!on_call || self.sheet_kind_over_call()) {
             // The Add call sheet's number chooser steps back to its list first.
-            if !self.add_call_back(cx) {
+            if self.sheet_kind == SheetKind::CallDetails {
+                // Back from the call details shows the sheet it came from.
+                self.details_back(window, cx);
+            } else if !self.add_call_back(cx) {
                 self.close_sheet(cx);
             }
         } else if on_call {
@@ -1416,6 +1429,7 @@ impl PhoneApp {
             SheetKind::ConfirmDelete => self.confirm_delete_sheet(theme, window, cx),
             SheetKind::T9Results => self.t9_results_sheet(theme, window, cx),
             SheetKind::CopyAs => self.copy_as_sheet(theme, window, cx),
+            SheetKind::CallDetails => self.details_sheet(theme, window, cx),
             SheetKind::ImportPreview => {
                 if !self.sheet.is_visible() {
                     return None;

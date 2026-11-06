@@ -324,6 +324,7 @@ mod tests {
             whatsapp,
             date_ms: 1_793_889_120_000, // Thu 5 Nov 2026 14:32:00 UTC
             duration_s: dur,
+            number: String::new(),
         }
     }
 

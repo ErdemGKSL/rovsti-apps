@@ -362,6 +362,8 @@ pub struct HistoryLine {
     pub whatsapp: bool,
     pub date_ms: i64,
     pub duration_s: u64,
+    /// The number as the log or the WhatsApp record stores it (may be empty).
+    pub number: String,
 }
 
 /// Whether `raw` is one of `numbers` (parsed match, or exact trimmed text for
@@ -447,6 +449,7 @@ pub fn history(
                 whatsapp: false,
                 date_ms: entry.date_ms,
                 duration_s: u64::try_from(entry.duration_s).unwrap_or(0),
+                number: raw.to_owned(),
             });
         }
     }
@@ -463,6 +466,7 @@ pub fn history(
                 whatsapp: true,
                 date_ms: extra.started_ms,
                 duration_s: extra.duration_s,
+                number: extra.number_raw.clone(),
             });
         }
     }
@@ -501,6 +505,11 @@ pub fn blocked_history(
             whatsapp: false,
             date_ms: e.date_ms,
             duration_s: 0,
+            number: if e.number_raw.trim().is_empty() {
+                e.normalized.clone()
+            } else {
+                e.number_raw.clone()
+            },
         })
         .collect();
     lines.sort_by_key(|l| std::cmp::Reverse(l.date_ms));
@@ -701,6 +710,7 @@ mod tests {
             whatsapp,
             date_ms: NOW - ago,
             duration_s,
+            number: String::new(),
         }
     }
 

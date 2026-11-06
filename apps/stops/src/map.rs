@@ -17,7 +17,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Task, TouchEvent, TouchPhase, Window, canvas, div, point,
     px, quad,
 };
-use rovsti_geo::{Coord, Diameter, EARTH_RADIUS_M, Feed, Stop, view::Viewport};
+use rovsti_geo::{Coord, Diameter, EARTH_RADIUS_M, Feed, Side, Stop, view::Viewport};
 use rovsti_ui::{
     components::flat_glass,
     theme,
@@ -433,13 +433,59 @@ pub fn over_controls(size: (f32, f32), (x, y): (f32, f32)) -> bool {
 pub struct Scene {
     /// Your position and the radius of its accuracy disc.
     pub position: Option<((f32, f32), f32)>,
-    /// A and B.
-    pub ends: Option<((f32, f32), (f32, f32))>,
-    /// The circle on AB: centre and radius.
-    pub ring: Option<((f32, f32), f32)>,
+    /// The circle on AB with its two halves.
+    pub diameter: Option<DiameterScene>,
     pub trail: Vec<(f32, f32)>,
     pub stops: Vec<(f32, f32)>,
     pub line: Vec<(f32, f32)>,
+}
+
+/// The circle with AB as its diameter, in pixels from the view centre.
+#[derive(Debug, Default, PartialEq)]
+pub struct DiameterScene {
+    pub a: (f32, f32),
+    pub b: (f32, f32),
+    pub centre: (f32, f32),
+    pub radius_px: f32,
+    /// The left half-disc (facing A -> B) as a polygon.
+    pub left: Vec<(f32, f32)>,
+    /// The right half-disc as a polygon.
+    pub right: Vec<(f32, f32)>,
+    /// Where the "L" and "R" labels sit: halfway out in each half.
+    pub left_label: (f32, f32),
+    pub right_label: (f32, f32),
+}
+
+/// Segments in the arc of each half-disc polygon.
+const HALF_DISC_SEGMENTS: usize = 48;
+
+impl DiameterScene {
+    pub fn build(d: &Diameter, vp: &Viewport) -> Self {
+        let project_all = |side: Side| -> Vec<(f32, f32)> {
+            d.half_disc(side, HALF_DISC_SEGMENTS)
+                .into_iter()
+                .map(|c| vp.project(c))
+                .collect()
+        };
+        // Local metres are east/north around the centre; "left" of A -> B is
+        // the direction turned a quarter turn counter-clockwise.
+        let (ax, ay) = d.local(d.a());
+        let (bx, by) = d.local(d.b());
+        let len = (bx - ax).hypot(by - ay);
+        let left = (-(by - ay) / len, (bx - ax) / len);
+        let half = d.radius_m() / 2.0;
+        let label = |s: f64| vp.project(d.from_local((left.0 * half * s, left.1 * half * s)));
+        Self {
+            a: vp.project(d.a()),
+            b: vp.project(d.b()),
+            centre: vp.project(d.center()),
+            radius_px: ((d.radius_m() / vp.metres_per_px) as f32).clamp(0.0, MAX_RADIUS_PX),
+            left: project_all(Side::Left),
+            right: project_all(Side::Right),
+            left_label: label(1.0),
+            right_label: label(-1.0),
+        }
+    }
 }
 
 pub struct SceneInput<'a> {
@@ -457,12 +503,7 @@ impl Scene {
         let vp = &input.viewport;
         let mpp = vp.metres_per_px;
         let metres = |m: f64| ((m / mpp) as f32).clamp(0.0, MAX_RADIUS_PX);
-        let ring = input
-            .diameter
-            .map(|d| (vp.project(d.center()), metres(d.radius_m())));
-        let ends = input
-            .diameter
-            .map(|d| (vp.project(d.a()), vp.project(d.b())));
+        let diameter = input.diameter.map(|d| DiameterScene::build(&d, vp));
         let trail: Vec<_> = input.trail.iter().map(|c| vp.project(c)).collect();
         let (stops, line) = match input.feed {
             Some(feed) => {
@@ -489,8 +530,7 @@ impl Scene {
             position: input
                 .position
                 .map(|(c, accuracy)| (vp.project(c), metres(accuracy))),
-            ends,
-            ring,
+            diameter,
             trail: thin_polyline(&trail, TRAIL_MIN_PX),
             stops,
             line: thin_polyline(&line, LINE_MIN_PX),
@@ -510,8 +550,11 @@ pub struct Palette {
     trail: Hsla,
     line: Hsla,
     stop: Hsla,
-    destination: Hsla,
     ring: Hsla,
+    left: Hsla,
+    right: Hsla,
+    left_wash: Hsla,
+    right_wash: Hsla,
     halo: Hsla,
 }
 
@@ -530,8 +573,11 @@ impl Palette {
             trail: with_alpha(c.accent, 0.6),
             line: c.orange,
             stop: with_alpha(c.secondary_label, 0.85),
-            destination: c.red,
             ring: c.red,
+            left: c.accent,
+            right: c.green,
+            left_wash: with_alpha(c.accent, 0.18),
+            right_wash: with_alpha(c.green, 0.18),
             halo: gpui::white(),
         }
     }
@@ -576,23 +622,43 @@ fn stroke_line(window: &mut Window, points: &[(f32, f32)], width: f32, color: Hs
     }
 }
 
-/// A teardrop pin whose tip is at `tip`.
-fn paint_pin(window: &mut Window, tip: (f32, f32), pal: &Palette) {
-    let head = (tip.0, tip.1 - 17.0);
-    let mut spike = PathBuilder::fill();
-    spike.add_polygon(
-        &[
-            point(px(head.0 - 7.0), px(head.1 + 4.0)),
-            point(px(tip.0), px(tip.1)),
-            point(px(head.0 + 7.0), px(head.1 + 4.0)),
-        ],
-        true,
-    );
-    if let Ok(path) = spike.build() {
-        window.paint_path(path, pal.destination);
+fn fill_polygon(window: &mut Window, points: &[(f32, f32)], color: Hsla) {
+    if points.len() < 3 {
+        return;
     }
-    fill_circle(window, head, 9.0, pal.destination);
-    fill_circle(window, head, 3.5, pal.halo);
+    let pts: Vec<_> = points.iter().map(|&(x, y)| point(px(x), px(y))).collect();
+    let mut path = PathBuilder::fill();
+    path.add_polygon(&pts, true);
+    if let Ok(path) = path.build() {
+        window.paint_path(path, color);
+    }
+}
+
+/// The half-discs, the circle, the diameter and its two ends.
+fn paint_diameter(
+    d: &DiameterScene,
+    to_window: &impl Fn((f32, f32)) -> (f32, f32),
+    pal: &Palette,
+    window: &mut Window,
+) {
+    let all = |points: &[(f32, f32)]| -> Vec<(f32, f32)> {
+        points.iter().map(|&p| to_window(p)).collect()
+    };
+    fill_polygon(window, &all(&d.left), pal.left_wash);
+    fill_polygon(window, &all(&d.right), pal.right_wash);
+    if d.radius_px >= 2.0 {
+        let mut ring = PathBuilder::stroke(px(2.0)).dash_array(&[px(8.0), px(6.0)]);
+        add_circle(&mut ring, to_window(d.centre), d.radius_px, false);
+        if let Ok(path) = ring.build() {
+            window.paint_path(path, pal.ring);
+        }
+    }
+    let (a, b) = (to_window(d.a), to_window(d.b));
+    stroke_line(window, &[a, b], 4.5, pal.ring);
+    for end in [a, b] {
+        fill_circle(window, end, 8.0, pal.halo);
+        fill_circle(window, end, 5.5, pal.ring);
+    }
 }
 
 /// Paints `scene` into `bounds`. Scene points are from the view centre.
@@ -624,26 +690,11 @@ fn paint_scene(scene: &Scene, bounds: Bounds<Pixels>, pal: &Palette, window: &mu
         }
     }
 
-    if let Some((at, r)) = scene.ring
-        && r >= 2.0
-    {
-        let (x, y) = to_window(at);
-        let dash = px(8.0);
-        let mut ring = PathBuilder::stroke(px(2.0)).dash_array(&[dash, px(6.0)]);
-        add_circle(&mut ring, (x, y), r, false);
-        if let Ok(path) = ring.build() {
-            window.paint_path(path, pal.ring);
-        }
+    if let Some(d) = &scene.diameter {
+        paint_diameter(d, &to_window, pal, window);
     }
 
     stroke_line(window, &to_window_all(&scene.trail), 3.0, pal.trail);
-
-    if let Some((a, b)) = scene.ends {
-        let (a, b) = (to_window(a), to_window(b));
-        stroke_line(window, &[a, b], 3.0, pal.ring);
-        paint_pin(window, a, pal);
-        paint_pin(window, b, pal);
-    }
 
     if let Some((at, accuracy)) = scene.position {
         let at = to_window(at);
@@ -793,6 +844,25 @@ fn input_surface(
     .size_full()
 }
 
+/// A one-letter label at `at` (pixels from the view centre) on a map of `size`.
+fn map_label(
+    text: &'static str,
+    at: (f32, f32),
+    size: (f32, f32),
+    color: Hsla,
+    (dx, dy): (f32, f32),
+) -> AnyElement {
+    div()
+        .absolute()
+        .left(px(size.0 / 2.0 + at.0 + dx))
+        .top(px(size.1 / 2.0 + at.1 + dy))
+        .text_size(typography::FOOTNOTE.size)
+        .font_weight(typography::HEADLINE.weight)
+        .text_color(color)
+        .child(text)
+        .into_any_element()
+}
+
 fn control_button(theme: Theme, label: &'static str) -> gpui::Div {
     let colors = theme::colors(theme);
     flat_glass(theme, None)
@@ -858,6 +928,21 @@ impl StopsApp {
         let palette = Palette::new(theme);
         let colors = theme::colors(theme);
         let (bar_px, bar_label) = scale_bar(viewport.metres_per_px);
+        let labels: Vec<AnyElement> = scene
+            .diameter
+            .as_ref()
+            .map(|d| {
+                [
+                    ("A", d.a, colors.label, (-18.0, -22.0)),
+                    ("B", d.b, colors.label, (6.0, -22.0)),
+                    ("L", d.left_label, palette.left, (-6.0, -9.0)),
+                    ("R", d.right_label, palette.right, (-6.0, -9.0)),
+                ]
+                .into_iter()
+                .map(|(text, at, color, (dx, dy))| map_label(text, at, size, color, (dx, dy)))
+                .collect()
+            })
+            .unwrap_or_default();
 
         let entity = cx.entity();
         let input = entity.clone();
@@ -936,6 +1021,7 @@ impl StopsApp {
                             )
                             .size_full(),
                         )
+                        .children(labels)
                         .child(surface)
                         .child(scale)
                         .child(controls),
@@ -1377,16 +1463,65 @@ mod tests {
         assert!((x - 10.0).abs() < 0.01 && y.abs() < 0.01, "{x} {y}");
         assert!((r - 2.5).abs() < 1e-4);
         // 10 m per pixel: the centre is 30 px up, the radius 30 px.
-        let ((cx, cy), ring_r) = scene.ring.unwrap();
+        let d = scene.diameter.as_ref().unwrap();
+        let ((cx, cy), ring_r) = (d.centre, d.radius_px);
         assert!(cx.abs() < 0.05 && (cy + 30.0).abs() < 0.05, "{cx} {cy}");
         assert!((ring_r - 30.0).abs() < 0.1, "{ring_r}");
         // A west, B east, on the circle's horizontal diameter.
-        let ((ax, ay), (bx, by)) = scene.ends.unwrap();
+        let ((ax, ay), (bx, by)) = (d.a, d.b);
         assert!((ax + 30.0).abs() < 0.1 && (bx - 30.0).abs() < 0.1);
         assert!((ay + 30.0).abs() < 0.1 && (by + 30.0).abs() < 0.1);
         assert_eq!(scene.trail.len(), 2);
         assert!(scene.stops.is_empty() && scene.line.is_empty());
-        assert!(Scene::build(&scene_input(&trail, None)).ring.is_none());
+        assert!(Scene::build(&scene_input(&trail, None)).diameter.is_none());
+    }
+
+    /// Which side of the screen vector `a -> b` the point `p` is on, in pixel
+    /// space where y points down: positive is the viewer's left.
+    fn screen_left(a: (f32, f32), b: (f32, f32), p: (f32, f32)) -> f32 {
+        // With y down, the cross product's sign flips against the maths one.
+        -((b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0))
+    }
+
+    #[test]
+    fn the_left_half_is_on_the_left_of_a_to_b_on_screen() {
+        let trail = Breadcrumb::default();
+        // West to east: left is north, which is up on screen (negative y).
+        let mut input = scene_input(&trail, None);
+        input.diameter = Some(diameter_600());
+        let scene = Scene::build(&input);
+        let d = scene.diameter.unwrap();
+        assert!(d.left_label.1 < d.centre.1 && d.right_label.1 > d.centre.1);
+        // Half a radius out: 15 px.
+        assert!((d.centre.1 - d.left_label.1 - 15.0).abs() < 0.2, "{d:?}");
+        assert!((d.left_label.0 - d.centre.0).abs() < 0.2);
+        for p in &d.left[1..d.left.len() - 1] {
+            assert!(screen_left(d.a, d.b, *p) > 0.0, "{p:?}");
+        }
+        for p in &d.right[1..d.right.len() - 1] {
+            assert!(screen_left(d.a, d.b, *p) < 0.0, "{p:?}");
+        }
+        assert!(screen_left(d.a, d.b, d.left_label) > 0.0);
+        assert!(screen_left(d.a, d.b, d.right_label) < 0.0);
+        // Both polygons run from A to B.
+        for half in [&d.left, &d.right] {
+            assert_eq!(half.len(), HALF_DISC_SEGMENTS + 1);
+            assert_eq!(half[0], d.a);
+            assert_eq!(*half.last().unwrap(), d.b);
+        }
+
+        // Swapping A and B swaps the halves; a north-south AB works too.
+        let swapped = Diameter::new(near(300.0, 300.0).coord, near(-300.0, 300.0).coord).unwrap();
+        input.diameter = Some(swapped);
+        let d = Scene::build(&input).diameter.unwrap();
+        assert!(d.left_label.1 > d.centre.1);
+        assert!(screen_left(d.a, d.b, d.left_label) > 0.0);
+        let ns = Diameter::new(near(0.0, 0.0).coord, near(0.0, 600.0).coord).unwrap();
+        input.diameter = Some(ns);
+        let d = Scene::build(&input).diameter.unwrap();
+        // South to north: left is west, so the left label is at smaller x.
+        assert!(d.left_label.0 < d.centre.0 && d.right_label.0 > d.centre.0);
+        assert!(screen_left(d.a, d.b, d.left_label) > 0.0);
     }
 
     #[test]
@@ -1436,7 +1571,7 @@ mod tests {
         input.viewport = Viewport::new(IST, 0.001);
         let scene = Scene::build(&input);
         assert_eq!(scene.position.unwrap().1, MAX_RADIUS_PX);
-        assert_eq!(scene.ring.unwrap().1, MAX_RADIUS_PX);
+        assert_eq!(scene.diameter.unwrap().radius_px, MAX_RADIUS_PX);
     }
 
     // -- the view --

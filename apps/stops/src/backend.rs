@@ -99,6 +99,9 @@ pub struct Preflight {
     pub location: Option<Access>,
     pub notifications: Option<Access>,
     pub full_screen: Option<bool>,
+    /// "Allow all the time" location: lets a restarted service keep tracking.
+    /// Recommended, never a blocker.
+    pub background_location: Option<Access>,
     /// The app may run in the background without battery limits.
     pub unrestricted_battery: Option<bool>,
     /// The system lets the app set exact alarms (snooze, watchdog).
@@ -162,6 +165,7 @@ impl Preflight {
             location: answer(permissions::state(Group::Location)),
             notifications: answer(permissions::state(Group::Notifications)),
             full_screen: answer(permissions::can_use_full_screen_intent()),
+            background_location: answer(permissions::state(Group::BackgroundLocation)),
             unrestricted_battery: answer(xiaomi::is_ignoring_battery_optimizations()),
             exact_alarms: answer(trip::can_schedule_exact_alarms()),
             xiaomi_os: xiaomi::detect().is_some(),
@@ -194,6 +198,30 @@ impl Preflight {
 pub fn full_screen_notice(pre: &Preflight) -> Option<&'static str> {
     pre.full_screen_missing()
         .then_some("Allow full-screen alerts so it shows over the lock screen.")
+}
+
+/// The hint under the background-location row: only once foreground location
+/// is granted and "all the time" is known to be missing.
+pub fn background_location_notice(pre: &Preflight) -> Option<&'static str> {
+    let missing = matches!(
+        pre.background_location,
+        Some(Access::Denied | Access::PermanentlyDenied)
+    );
+    (pre.location == Some(Access::Granted) && missing)
+        .then_some("Allow location all the time so tracking survives Android closing Stops.")
+}
+
+/// Asks for "Allow all the time", or opens the app's page when Android will no
+/// longer show the dialog. Blocking (JNI).
+pub fn request_background_location(pre: &Preflight) {
+    let result = match pre.background_location {
+        Some(Access::Denied) => permissions::request(Group::BackgroundLocation),
+        Some(Access::PermanentlyDenied) => permissions::open_app_details(),
+        _ => return,
+    };
+    if let Err(error) = result {
+        log::warn!("could not open the background location prompt: {error}");
+    }
 }
 
 /// Opens the system page where full-screen alarms are allowed.
@@ -453,6 +481,36 @@ mod tests {
         assert!(full_screen_notice(&with(Some(false))).is_some());
         assert_eq!(full_screen_notice(&with(Some(true))), None);
         assert_eq!(full_screen_notice(&with(None)), None);
+    }
+
+    #[test]
+    fn background_notice_needs_location_and_a_known_missing_grant() {
+        let with = |location, background_location| Preflight {
+            location,
+            background_location,
+            ..Preflight::default()
+        };
+        let g = Some(Access::Granted);
+        let d = Some(Access::Denied);
+        let p = Some(Access::PermanentlyDenied);
+        assert!(background_location_notice(&with(g, d)).is_some());
+        assert!(background_location_notice(&with(g, p)).is_some());
+        assert_eq!(background_location_notice(&with(g, g)), None);
+        assert_eq!(background_location_notice(&with(g, None)), None);
+        assert_eq!(background_location_notice(&with(d, d)), None);
+        assert_eq!(background_location_notice(&with(p, p)), None);
+        assert_eq!(background_location_notice(&with(None, d)), None);
+    }
+
+    #[test]
+    fn next_step_ignores_background_location() {
+        let p = Preflight {
+            location: Some(Access::Granted),
+            notifications: Some(Access::Granted),
+            background_location: Some(Access::PermanentlyDenied),
+            ..Preflight::default()
+        };
+        assert_eq!(p.next_step(), None);
     }
 
     #[test]

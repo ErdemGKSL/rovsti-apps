@@ -148,6 +148,8 @@ pub enum Status {
     Ended,
     /// The service was stopped from its notification.
     Stopped,
+    /// The service has no fix yet and is looking for one.
+    Searching,
     Error(&'static str),
 }
 
@@ -156,6 +158,7 @@ pub fn parse_status(json: &str) -> Option<Status> {
     match value.get("state").and_then(Value::as_str)? {
         "ended" => Some(Status::Ended),
         "stopped" => Some(Status::Stopped),
+        "searching" => Some(Status::Searching),
         "error" => Some(Status::Error(error_message(
             value.get("error").and_then(Value::as_str).unwrap_or(""),
         ))),
@@ -168,6 +171,9 @@ fn error_message(code: &str) -> &'static str {
         "permission" => "Location was turned off for Stops. Allow it in Settings to keep tracking.",
         "full_screen" => {
             "The alarm cannot cover the lock screen. Allow full-screen alerts in Settings."
+        }
+        "restart" => {
+            "Android closed Stops and tracking paused. It resumes when Stops is open; allow location all the time to avoid this."
         }
         "foreground" => "Android would not keep the tracking service running.",
         _ => "Tracking hit a problem.",
@@ -224,6 +230,25 @@ impl StopsApp {
             .on_click(cx.listener(|_, _, _, cx| {
                 cx.background_executor()
                     .spawn(async { backend::open_full_screen_settings() })
+                    .detach();
+                // The window-activation refresh re-reads the grant on return.
+                cx.notify();
+            }));
+            page = page.child(section(theme, None, [row.into_any_element()]));
+        }
+        if let Some(hint) = backend::background_location_notice(&self.preflight) {
+            let row = list_row(
+                theme,
+                None,
+                "Keep tracking in the background",
+                Some(hint.into()),
+                Some("Allow".into()),
+            )
+            .id("background-location-row")
+            .on_click(cx.listener(|this, _, _, cx| {
+                let pre = this.preflight;
+                cx.background_executor()
+                    .spawn(async move { backend::request_background_location(&pre) })
                     .detach();
                 // The window-activation refresh re-reads the grant on return.
                 cx.notify();
@@ -699,6 +724,9 @@ impl StopsApp {
             this.update(cx, |this, cx| {
                 this.history = history;
                 this.set_saved_trip(trip, cx);
+                if this.trip.is_some() {
+                    this.resume_service(cx);
+                }
             })
             .ok();
         })
@@ -787,6 +815,11 @@ impl StopsApp {
                     this.update(cx, |this, cx| this.trip_over(cx)).ok();
                 })
                 .detach();
+            }
+            Status::Searching => {
+                if self.trip.is_some() {
+                    self.show_pill("Looking for your location...", None, cx);
+                }
             }
             Status::Error(why) => {
                 // A refused full-screen intent shows up as the settings row on the Trip tab.
@@ -1008,6 +1041,16 @@ mod tests {
             parse_status(r#"{"state":"error"}"#),
             Some(Status::Error(_))
         ));
+        assert_eq!(
+            parse_status(r#"{"state":"searching"}"#),
+            Some(Status::Searching)
+        );
+        let Some(Status::Error(restart)) = parse_status(r#"{"state":"error","error":"restart"}"#)
+        else {
+            panic!("expected an error");
+        };
+        assert!(restart.contains("allow location all the time"));
+        assert_ne!(restart, error_message(""));
         assert_eq!(parse_status(r#"{"state":"Tracking"}"#), None);
         assert_eq!(parse_status("nope"), None);
         assert_eq!(parse_status("{}"), None);

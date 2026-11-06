@@ -48,6 +48,10 @@ list in `docs/phone-acceptance.md`.
       history" in the sheets, Settings > Data "Delete all call history", Speed dial row on the
       Contact sheet (done without a device; the S12 device check is pending,
       `docs/spikes/s12-calllog.md`)
+- [x] Per-call delete in the sheets (Edit, trash on a line, Undo, live refresh) and blocked calls
+      history and delete in the Number sheet (done without a device; S12 device check pending)
+- [x] Voicemail: glyph on the Keypad `1` key and "No voicemail number set" with Open call
+      settings when none is configured (done without a device; the S9 device check is PENDING)
 
 ## Rovsti Messages
 

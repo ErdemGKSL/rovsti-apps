@@ -181,6 +181,28 @@ that is not on a speed dial digit. The delete rows need the call log write permi
 | D11 | On a contact with two numbers and no default, pick a digit. | The sheet asks "Speed dial which number?" and assigns the chosen one. | | |
 | D12 | Tap Remove. | The pill "Removed speed dial {d}" shows with Undo; Undo restores it. Holding the digit on the empty Keypad calls the person while assigned. | | |
 
+## Single-call delete, blocked calls, voicemail, search actions, Setup (UX pass, round 3)
+
+Needs a person with three calls (grouped as "Ayşe (3)"), a blocked number with at least two
+blocked calls, and for V2 a phone with no voicemail number set (or a SIM without voicemail).
+Delete rows need the call log write permission (spike S12).
+
+| # | Step | Expected | Pass / Fail | Notes |
+|---|---|---|---|---|
+| R1 | Recents: open the "i" sheet of "Ayşe (3)", tap Edit above "Recent calls". | A trash button appears on each call line; Edit reads Done. | | |
+| R2 | Tap the trash on the middle call. | Pill "Deleted 1 call" with Undo; the sheet shows two lines and Recents shows "Ayşe (2)". The sheet stays open. | | |
+| R3 | Tap Undo with the sheet still open. | The third call is back in the open sheet and in Recents. | | |
+| R4 | End a new call while the sheet is open (or delete one on the Contact sheet). | The sheet list updates without closing and reopening it. | | |
+| R5 | Settings, Blocked numbers, Blocked calls, tap a row. | The Number sheet lists "Blocked call" lines with time and no duration. | | |
+| R6 | Edit, delete one blocked call. | Pill with Undo; the Blocked calls list updates; Undo restores it. | | |
+| R7 | Tap "Delete call history", confirm. | Confirm text reads "Delete blocked calls from {who}?"; afterwards that number has no blocked calls and Undo restores them. | | |
+| R8 | Keypad: look at the 1 key. | A small voicemail glyph sits under the 1; the screen reader says "1, hold for voicemail". | | |
+| R9 | V2 (no voicemail number): hold 1. | The status reads "No voicemail number set" with "Open call settings"; no call is placed; the button opens the system call settings. Device check of S9 is PENDING. | | |
+| R10 | Contacts search: type or paste an unsaved number such as 0555 111 22 33. | "No contact has {number}." with Call, Message and Add to contacts, each working. | | |
+| R11 | Keypad: type a number that belongs to a contact, tap the name in the status line. | That contact's sheet opens. | | |
+| R12 | Setup: on a Xiaomi row confirmed with "I did it", look at the buttons. | One button "Mark as not done"; tapping it makes the row not done again. Rows read from the system have no such button. | | |
+| R13 | Revoke a permission in system settings, return to the app, open Setup. | The header reads "Something changed: {item}" until the item is fixed, then "Finish setup" or the done state. A plain app launch never shows it. | | |
+
 ## WhatsApp calls
 
 Needs the gateway running (`docs/whatsapp-gateway.md`), WhatsApp linked or connected under

@@ -195,3 +195,21 @@ Blocked calls list updates (desktop preview included).
 
 ## Next round (candidates)
 - Re-audit after S1 to S8. Expected to leave only T9 items (device spikes, gated or P3 by design).
+
+## Status
+
+Implemented on main after base `da3614b`:
+
+| Step | Commit |
+|------|--------|
+| S1 pure logic in rovsti_core (+tests) | `3d4929d` |
+| S2 sheet history per-call delete, live refresh | `5335462` |
+| S3 delete path with caller snapshot, blocked refresh | `4e808e9` |
+| S4 blocked calls history and delete | `a901c5a` |
+| S5 voicemail seam, glyph, "No voicemail number set" | `0c4c31d` |
+| S6 search number actions, Keypad name opens contact | `cbc034f` |
+| S7 Mark as not done, Something changed | `d5bdcdc` |
+| S8 docs and plan status | pending commit (this change) |
+
+Open: S9 voicemail device check and S12 call-log device check stay PENDING. Sprint-status 20-3 and
+21-1 stay `backlog` (only parts are done). Remaining gaps are the T9 items (device spikes, gated or P3).

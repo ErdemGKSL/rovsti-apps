@@ -765,12 +765,7 @@ impl PhoneApp {
         self.place_whatsapp(&raw, cx);
     }
 
-    fn whatsapp_chip(
-        &self,
-        theme: Theme,
-        inline: bool,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    fn whatsapp_chip(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let press = self.presses.value("wa-call").clamp(0.0, 1.0);
         let pill = rovsti_ui::components::glass_pill(theme, "WhatsApp")
             .text_color(call_colors(theme).answer)
@@ -780,7 +775,8 @@ impl PhoneApp {
             .role(Role::Button)
             .aria_label("Call over WhatsApp")
             .relative()
-            .when(!inline, |el| el.absolute().top_full().mt(px(4.0)))
+            .flex_none()
+            .whitespace_nowrap()
             .child(pill)
             .on_mouse_down(
                 MouseButton::Left,
@@ -1617,20 +1613,35 @@ impl PhoneApp {
             })
     }
 
-    fn status_line(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    fn status_line(
+        &self,
+        theme: Theme,
+        layout: &rovsti_core::keypad_layout::KeypadLayout,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let colors = theme::colors(theme);
+        let name_max = (layout.actions.w - 32.0).max(0.0);
+        // Content is centred while it fits: the two empty spacers grow to
+        // share the free space and shrink to nothing once it overflows, and
+        // then the row scrolls sideways.
+        let spacer = || div().flex_1().min_w_0();
         let area = div()
-            .h(px(36.0))
+            .h(px(layout.actions.h))
+            .w(px(layout.actions.w))
             .flex()
             .items_center()
+            .id("status")
+            .overflow_x_scroll()
+            .child(spacer())
             .gap(px(8.0))
             .opacity(self.status_in.progress())
             .text_size(typography::FOOTNOTE.size)
             .text_color(colors.secondary_label)
-            .id("status")
             .role(Role::Status);
         match &self.status {
-            Some(Status::Text(text)) => area.aria_label(text.clone()).child(text.clone()),
+            Some(Status::Text(text)) => area
+                .aria_label(text.clone())
+                .child(div().flex_none().whitespace_nowrap().child(text.clone())),
             Some(Status::NeedsPhone) => {
                 let press = self.presses.value("grant");
                 // The sentence gives way (ellipsis) so "Grant access" always fits on screen.
@@ -1671,7 +1682,12 @@ impl PhoneApp {
             }
             Some(Status::NoVoicemail) => area
                 .aria_label("No voicemail number set")
-                .child("No voicemail number set")
+                .child(
+                    div()
+                        .flex_none()
+                        .whitespace_nowrap()
+                        .child("No voicemail number set"),
+                )
                 .child(self.status_button(theme, "kp-vm-set", "Open call settings", cx)),
             // The status line is 36 px tall whether or not it speaks, so a
             // name appearing never moves the keys.
@@ -1681,19 +1697,28 @@ impl PhoneApp {
                 self.t9_hint_dismissed,
             ) =>
             {
+                let wa = self.whatsapp_chip_shown(cx);
                 area.aria_label("Allow Contacts to see matches")
-                    .child("Allow Contacts to see matches")
+                    .child(
+                        div()
+                            .flex_none()
+                            .whitespace_nowrap()
+                            .child("Allow Contacts to see matches"),
+                    )
                     .child(self.status_button(theme, "kp-ct-grant", "Grant access", cx))
+                    .when(wa, |el| el.child(self.whatsapp_chip(theme, cx)))
             }
             None => match &self.dial_match.found {
                 Some(found) => {
                     let press = self.presses.value("kp-name").clamp(0.0, 1.0);
+                    let wa = self.whatsapp_chip_shown(cx);
                     area.child(
                         div()
                             .id("kp-name")
                             .role(Role::Button)
                             .aria_label(SharedString::from(format!("{}, open contact", found.name)))
                             .relative()
+                            .flex_none()
                             .h(px(36.0))
                             .flex()
                             .items_center()
@@ -1708,7 +1733,7 @@ impl PhoneApp {
                             ))
                             .child(
                                 div()
-                                    .max_w(px(260.0))
+                                    .max_w(px(name_max))
                                     .truncate()
                                     .text_size(typography::SUBHEADLINE.size)
                                     .font_weight(typography::HEADLINE.weight)
@@ -1726,16 +1751,19 @@ impl PhoneApp {
                                 Some("kp-name".into()),
                             ))),
                     )
+                    .when(wa, |el| el.child(self.whatsapp_chip(theme, cx)))
                 }
                 None if self.add_offered() => {
                     let wa = self.whatsapp_chip_shown(cx);
                     area.child(self.status_button(theme, "kp-add", "Add to contacts", cx))
                         .child(self.status_button(theme, "kp-msg", "Message", cx))
-                        .when(wa, |el| el.child(self.whatsapp_chip(theme, true, cx)))
+                        .when(wa, |el| el.child(self.whatsapp_chip(theme, cx)))
                 }
+                None if self.whatsapp_chip_shown(cx) => area.child(self.whatsapp_chip(theme, cx)),
                 None => area,
             },
         }
+        .child(spacer())
     }
 
     /// A text button in the status line; acts on finger-up (the mouse press
@@ -1754,6 +1782,8 @@ impl PhoneApp {
             .role(Role::Button)
             .aria_label(label)
             .relative()
+            .flex_none()
+            .whitespace_nowrap()
             .h(px(36.0))
             .flex()
             .items_center()
@@ -1819,10 +1849,7 @@ impl PhoneApp {
         let actions = section(layout.actions)
             .flex()
             .justify_center()
-            .child(self.status_line(theme, cx))
-            .when(self.whatsapp_chip_shown(cx) && !self.add_offered(), |el| {
-                el.child(self.whatsapp_chip(theme, false, cx))
-            });
+            .child(self.status_line(theme, layout, cx));
         let pad = section(layout.grid).child(self.dial_pad(
             theme,
             key,

@@ -605,8 +605,6 @@ impl PhoneApp {
         }
     }
 
-    /// Whether the WhatsApp chip is offered: WhatsApp is connected, a number
-    /// that validates is typed, and no status line is in the way.
     /// Whether the status line shows "Add to contacts" and "Message".
     fn add_offered(&self) -> bool {
         offer_add(
@@ -617,6 +615,8 @@ impl PhoneApp {
         )
     }
 
+    /// Whether the WhatsApp chip is offered: WhatsApp is connected, a number
+    /// that validates is typed, and no status line is in the way.
     fn whatsapp_chip_shown(&self, cx: &Context<Self>) -> bool {
         self.status.is_none()
             && self.whatsapp.read(cx).is_connected()

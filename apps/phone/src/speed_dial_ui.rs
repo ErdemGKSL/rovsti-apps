@@ -195,8 +195,17 @@ impl PhoneApp {
             }
             REMOVE_ID => {
                 if let Some(digit) = self.speed_dial.menu.take() {
+                    let old = map.get(&digit).cloned();
                     self.speed_dial_write(digit, None, cx);
                     rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                    if let Some(old) = old {
+                        self.show_pill_action(
+                            format!("Removed speed dial {digit}"),
+                            "Undo",
+                            PillAction::RestoreSpeedDial(digit, old),
+                            cx,
+                        );
+                    }
                 }
             }
             _ => {
@@ -261,7 +270,7 @@ impl PhoneApp {
     }
 
     /// Assigns (`Some`) or clears (`None`) a digit. Whether it went through.
-    fn speed_dial_write(
+    pub(crate) fn speed_dial_write(
         &mut self,
         digit: u8,
         entry: Option<SpeedDialEntry>,
@@ -471,6 +480,19 @@ mod tests {
             number_raw: number.into(),
             name: name.into(),
         }
+    }
+
+    #[test]
+    fn remove_then_reassign_restores_the_map() {
+        let mut map = BTreeMap::new();
+        speed_dial::assign(&mut map, 4, entry("Ana", "0555")).expect("assign");
+        speed_dial::assign(&mut map, 7, entry("Bo", "0666")).expect("assign");
+        let before = map.clone();
+        let old = map.get(&4).cloned().expect("entry");
+        assert!(speed_dial::unassign(&mut map, 4));
+        assert_ne!(map, before);
+        speed_dial::assign(&mut map, 4, old).expect("restore");
+        assert_eq!(map, before);
     }
 
     #[test]

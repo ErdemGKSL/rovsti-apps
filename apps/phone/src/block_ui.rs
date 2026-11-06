@@ -46,6 +46,10 @@ pub(crate) enum PillAction {
     SpeedDial,
     /// Stop choosing a contact for a speed-dial digit.
     CancelSpeedDialPick,
+    /// Undo of a speed-dial Remove: put the entry back on its digit.
+    RestoreSpeedDial(u8, rovsti_core::settings::SpeedDialEntry),
+    /// Undo of a quick-reply Clear: put the old text back in its slot.
+    RestoreReply(usize, SharedString),
 }
 
 /// The number as a person reads it (grouped when it parses).
@@ -241,6 +245,11 @@ impl PhoneApp {
                 self.speed_dial.pick = None;
                 cx.notify();
             }
+            PillAction::RestoreSpeedDial(digit, entry) => {
+                self.speed_dial_write(digit, Some(entry), cx);
+                cx.notify();
+            }
+            PillAction::RestoreReply(slot, text) => self.replies_restore(slot, &text, window, cx),
         }
     }
 

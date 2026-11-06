@@ -634,6 +634,21 @@ impl PhoneApp {
         ed.confirm_reset = false;
     }
 
+    /// Undo of Clear: puts `text` back in the field at `slot`.
+    pub(crate) fn replies_restore(
+        &mut self,
+        slot: usize,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(&f) = self.replies_ed.order.get(slot) {
+            self.replies_ed.fields[f].update(cx, |f, cx| f.set(text, cx));
+            self.replies_field_changed(window, cx);
+            cx.notify();
+        }
+    }
+
     /// One of the fields changed: clip it at 100 characters and autosave.
     pub(crate) fn replies_field_changed(&mut self, _window: &Window, cx: &mut Context<Self>) {
         if !self.settings.sub_open() || self.settings.sub != Some(crate::settings_ui::Sub::Replies)
@@ -693,8 +708,17 @@ impl PhoneApp {
                     self.replies_focus(slot, window, cx);
                 } else if let Some(slot) = slot_of(&CLEAR_IDS) {
                     if let Some(&f) = self.replies_ed.order.get(slot) {
+                        let old = self.replies_ed.fields[f].read(cx).text().to_owned();
                         self.replies_ed.fields[f].update(cx, |f, cx| f.set("", cx));
                         self.replies_field_changed(window, cx);
+                        if !old.trim().is_empty() {
+                            self.show_pill_action(
+                                "Reply cleared",
+                                "Undo",
+                                crate::block_ui::PillAction::RestoreReply(slot, old.into()),
+                                cx,
+                            );
+                        }
                     }
                 } else if let Some(slot) = slot_of(&UP_IDS) {
                     self.replies_move(slot, slot.saturating_sub(1), window, cx);

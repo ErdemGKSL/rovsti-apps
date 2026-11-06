@@ -151,9 +151,14 @@ object WaIncoming {
     fun cancel(context: Context, callId: String): Boolean {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         val id = notificationId(callId)
-        val shown = manager.activeNotifications.any { it.id == id }
-        manager.cancel(id)
-        return shown
+        // Called from an FCM push and from Rust over JNI: never throws.
+        return try {
+            val shown = manager.activeNotifications.any { it.id == id }
+            manager.cancel(id)
+            shown
+        } catch (_: RuntimeException) {
+            false
+        }
     }
 
     private fun pending(context: Context, callId: String, action: String?, slot: Int): PendingIntent {

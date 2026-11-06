@@ -13,6 +13,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.Handler
 import android.os.Looper
+import android.os.Message
 import android.os.SystemClock
 import android.os.OutcomeReceiver
 import android.telecom.Call
@@ -92,7 +93,29 @@ object CallRegistry : CallsApi {
     /** What the any-thread reject path needs about a ringing call, from the last rebuild. */
     private class RingInfo(val number: String, val respondViaText: Boolean)
 
-    private val main = Handler(Looper.getMainLooper())
+    /**
+     * The main Looper. Telecom delivers every `Call.Callback` through it and every command is posted
+     * to it, so it is the one place a failure is caught: an exception escaping here would kill the
+     * process, and Telecom would hand the call to the system dialer.
+     */
+    private val main = object : Handler(Looper.getMainLooper()) {
+        override fun dispatchMessage(msg: Message) {
+            try {
+                super.dispatchMessage(msg)
+            } catch (e: RuntimeException) {
+                Log.e("Rovsti", "call registry task failed; the call goes on", e)
+            }
+        }
+    }
+
+    /** Runs [block], logging instead of throwing; for calls out to the activity and the snapshot build. */
+    private inline fun safely(what: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: RuntimeException) {
+            Log.e("Rovsti", "$what failed; the call goes on", e)
+        }
+    }
     private val lookupExecutor: Executor by lazy { Executors.newSingleThreadExecutor() }
 
     // Read from any thread.
@@ -138,7 +161,7 @@ object CallRegistry : CallsApi {
     private val coalescer = RebuildCoalescer(
         post = { r, delay -> main.postDelayed(r, delay) },
         cancel = { r -> main.removeCallbacks(r) },
-        rebuild = { rebuildNow() },
+        rebuild = { safely("rebuild") { rebuildNow() } },
     )
     private val audioDeadline = Runnable {
         if (audio.onFallbackDeadline()) {
@@ -360,7 +383,8 @@ object CallRegistry : CallsApi {
     }
 
     private fun requestEndpoint(target: CallEndpoint) {
-        service?.requestCallEndpointChange(target, Executor { it.run() }, object : OutcomeReceiver<Void, CallEndpointException> {
+        // The answer comes back on the main Looper: rebuild touches main-thread state only.
+        service?.requestCallEndpointChange(target, Executor { main.post(it) }, object : OutcomeReceiver<Void, CallEndpointException> {
             override fun onResult(result: Void?) {}
             override fun onError(error: CallEndpointException) {
                 // The route did not change: tell the UI at once so it reverts its pending look.
@@ -387,7 +411,7 @@ object CallRegistry : CallsApi {
     override fun incomingFrame(callId: Int): Boolean {
         main.post {
             IncomingPerf.frame(callId)
-            surface?.onIncomingFrame(callId)
+            safely("onIncomingFrame") { surface?.onIncomingFrame(callId) }
         }
         return true
     }
@@ -1040,7 +1064,7 @@ object CallRegistry : CallsApi {
     private fun syncLiveCall(live: Boolean) {
         if (live == liveCall) return
         liveCall = live
-        surface?.onLiveCallChanged(live)
+        safely("onLiveCallChanged") { surface?.onLiveCallChanged(live) }
     }
 
     /**
@@ -1051,7 +1075,7 @@ object CallRegistry : CallsApi {
     private fun syncIncoming(call: IncomingCall?) {
         val changed = incomingNow?.key != call?.key
         incomingNow = call
-        if (changed) surface?.onIncomingChanged(call)
+        if (changed) safely("onIncomingChanged") { surface?.onIncomingChanged(call) }
         val context = app ?: return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
         if (call == null) {

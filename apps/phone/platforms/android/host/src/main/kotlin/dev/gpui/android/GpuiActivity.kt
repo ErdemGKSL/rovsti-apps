@@ -184,7 +184,15 @@ abstract class GpuiActivity : Activity() {
         fullscreen.setEnabled(false)
         session.setOnCloseRequested(null)
         session.setOnError(null)
-        if (!isChangingConfigurations) session.close()
+        // Releasing the Rust application runs its drop code; a failure there must not kill the
+        // process, which may still host a service (an InCallService during a call).
+        if (!isChangingConfigurations) {
+            try {
+                session.close()
+            } catch (error: RuntimeException) {
+                Log.e("GPUI", "Closing the GPUI session failed", error)
+            }
+        }
         super.onDestroy()
     }
 

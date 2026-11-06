@@ -87,8 +87,17 @@ object RovstiBridge {
      */
     fun install(application: Application) {
         app = application
-        SettingsMirror.restore(application)
-        TripAlarm.recover(application)
+        // Runs at every process start, also one for a call or a push with no UI: neither may stop it.
+        try {
+            SettingsMirror.restore(application)
+        } catch (e: RuntimeException) {
+            android.util.Log.w("Rovsti", "settings restore failed", e)
+        }
+        try {
+            TripAlarm.recover(application)
+        } catch (e: RuntimeException) {
+            android.util.Log.w("Rovsti", "alarm recovery failed", e)
+        }
         application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) { foreground = activity }
             override fun onActivityPaused(activity: Activity) { if (foreground === activity) foreground = null }

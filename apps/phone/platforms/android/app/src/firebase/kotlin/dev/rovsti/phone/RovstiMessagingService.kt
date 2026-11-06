@@ -11,6 +11,12 @@ import dev.rovsti.bridge.WaPush
  */
 class RovstiMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        WaPush.onMessage(message.data)
+        // Runs in a process that may have no UI at all: a throw here is a "keeps stopping" dialog
+        // on every push.
+        try {
+            WaPush.onMessage(message.data)
+        } catch (e: RuntimeException) {
+            android.util.Log.e("Rovsti", "WhatsApp push failed", e)
+        }
     }
 }

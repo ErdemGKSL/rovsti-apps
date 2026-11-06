@@ -11,7 +11,10 @@ pub use android::*;
 
 #[cfg(target_os = "android")]
 mod android {
-    use std::sync::OnceLock;
+    use std::{
+        panic::{AssertUnwindSafe, catch_unwind},
+        sync::OnceLock,
+    };
 
     use jni::{
         JNIEnv, JavaVM,
@@ -30,21 +33,36 @@ mod android {
 
     static BRIDGE: OnceLock<Bridge> = OnceLock::new();
 
-    /// `RovstiBridge.nativeInit()`; runs once per process on the main thread.
+    /// Runs a JNI entry point's body. A panic cannot unwind across `extern "system"`:
+    /// it would abort the whole process (every service in it, an InCallService
+    /// included), so it is caught and logged here.
+    fn guarded(entry: &str, f: impl FnOnce()) {
+        if catch_unwind(AssertUnwindSafe(f)).is_err() {
+            log::error!("{entry} panicked");
+        }
+    }
+
+    /// `RovstiBridge.nativeInit()`; called on the main thread by every new activity.
+    /// Only the first call keeps its VM and class (both are process-wide).
     #[unsafe(no_mangle)]
     pub extern "system" fn Java_dev_rovsti_bridge_RovstiBridge_nativeInit(
         env: JNIEnv<'_>,
         class: JClass<'_>,
     ) {
-        let result = (|| -> Result<()> {
-            let vm = env.get_java_vm()?;
-            let class = env.new_global_ref(class)?;
-            let _ = BRIDGE.set(Bridge { vm, class });
-            Ok(())
-        })();
-        if let Err(error) = result {
-            log::error!("RovstiBridge.nativeInit failed: {error}");
-        }
+        guarded("RovstiBridge.nativeInit", || {
+            if BRIDGE.get().is_some() {
+                return;
+            }
+            let result = (|| -> Result<()> {
+                let vm = env.get_java_vm()?;
+                let class = env.new_global_ref(class)?;
+                let _ = BRIDGE.set(Bridge { vm, class });
+                Ok(())
+            })();
+            if let Err(error) = result {
+                log::error!("RovstiBridge.nativeInit failed: {error}");
+            }
+        });
     }
 
     /// `RovstiBridge.nativeOnEvent(kind, json)`; only enqueues (AD-5). No GPUI
@@ -56,12 +74,14 @@ mod android {
         kind: JString<'_>,
         json: JString<'_>,
     ) {
-        let read = |env: &mut JNIEnv<'_>, s: &JString<'_>| -> String {
-            env.get_string(s).map(String::from).unwrap_or_default()
-        };
-        let kind = read(&mut env, &kind);
-        let json = read(&mut env, &json);
-        crate::events::dispatch(kind, json);
+        guarded("RovstiBridge.nativeOnEvent", || {
+            let read = |env: &mut JNIEnv<'_>, s: &JString<'_>| -> String {
+                env.get_string(s).map(String::from).unwrap_or_default()
+            };
+            let kind = read(&mut env, &kind);
+            let json = read(&mut env, &json);
+            crate::events::dispatch(kind, json);
+        });
     }
 
     /// Runs `f` with an attached `JNIEnv` and the bridge class. Local

@@ -123,6 +123,11 @@ impl KeyedList {
         self.state.scroll_to_end();
     }
 
+    /// Scrolls just far enough that item `ix` is fully on screen.
+    pub(crate) fn reveal(&self, ix: usize) {
+        self.state.scroll_to_reveal_item(ix);
+    }
+
     /// Shows the start of the list.
     pub(crate) fn scroll_to_top(&self) {
         self.state.scroll_to(ListOffset::default());

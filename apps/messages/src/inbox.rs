@@ -5,11 +5,11 @@
 //! filtering) and draws one row. The mapping is pure and tested here, the
 //! drawing is a thin GPUI shell.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use gpui::{
-    AnyElement, App, ClickEvent, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    AnyElement, App, ClickEvent, InteractiveElement, IntoElement, LongPressEvent, ParentElement,
+    RenderImage, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 use rovsti_core::{
     Channel, PhoneNumber, ThreadId,
@@ -22,11 +22,14 @@ use rovsti_core::{
     spam::{self, SpamRules},
 };
 use rovsti_ui::{
-    components::avatar,
-    theme,
+    Icon, theme,
     tokens::{Theme, typography},
 };
-use rovsti_wa_proto::{ChatSummary, WaMessage, to_rovsti};
+use rovsti_wa_proto::{
+    ChatActionKind, ChatMeta, MUTED_FOREVER, MessageBody, MessageMeta, RichChat, WaMessage,
+    jid_user, meta::body_preview, to_rovsti,
+};
+use rovsti_wa_ui::{display_name, photo_avatar};
 
 use crate::conversation::civil_from_days;
 
@@ -70,6 +73,28 @@ pub struct RowView {
     pub initials: SharedString,
     /// Avatar colour follows the newest thread's channel.
     pub channel: Channel,
+    /// Where the avatar's picture comes from.
+    pub avatar: RowAvatar,
+    /// The row's WhatsApp chat, for the long-press menu.
+    pub wa_chat: Option<SharedString>,
+    /// Pinned in WhatsApp: shown at the top.
+    pub pinned: bool,
+    /// Notifications of the WhatsApp chat are silenced.
+    pub muted: bool,
+    /// Marked unread by hand: the dot without a count.
+    pub marked_unread: bool,
+}
+
+/// The pictures an avatar may show, best first: the address book's photo,
+/// then the WhatsApp profile picture. Initials when neither loads.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct RowAvatar {
+    /// `Contacts.PHOTO_THUMBNAIL_URI` of the matched contact.
+    pub photo_uri: Option<SharedString>,
+    /// The WhatsApp JID whose profile picture stands in.
+    pub wa_jid: Option<SharedString>,
+    /// Its current picture id, when the gateway told one.
+    pub picture_id: Option<SharedString>,
 }
 
 impl RowView {
@@ -79,11 +104,13 @@ impl RowView {
     }
 }
 
-/// The inbox, split into the normal rows and the Spam filter's rows.
+/// The inbox, split into the normal rows, the Spam filter's rows and the
+/// archived WhatsApp chats.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct InboxView {
     pub rows: Vec<RowView>,
     pub spam: Vec<RowView>,
+    pub archived: Vec<RowView>,
 }
 
 impl InboxView {
@@ -91,11 +118,211 @@ impl InboxView {
     pub fn spam_unread(&self) -> u32 {
         self.spam.iter().map(|r| r.unread).sum()
     }
+
+    /// Unread messages in archived chats.
+    pub fn archived_unread(&self) -> u32 {
+        self.archived.iter().map(|r| r.unread).sum()
+    }
+
+    /// Every row, wherever it is shown.
+    pub fn all_rows(&self) -> impl Iterator<Item = &RowView> {
+        self.rows.iter().chain(&self.spam).chain(&self.archived)
+    }
+}
+
+/// The newest message of a WhatsApp chat as the inbox previews it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LastMessage {
+    pub id: String,
+    pub from_me: bool,
+    pub sender: Option<String>,
+    pub timestamp_ms: i64,
+    pub body: MessageBody,
+    pub meta: MessageMeta,
+}
+
+/// What the inbox keeps about a WhatsApp chat beyond its [`InboxThread`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WaChatInfo {
+    pub meta: ChatMeta,
+    pub last: Option<LastMessage>,
+    pub is_group: bool,
+}
+
+/// The chat meta of the gateway's chat list, by JID.
+pub fn chat_infos(chats: &[RichChat]) -> HashMap<String, WaChatInfo> {
+    chats
+        .iter()
+        .map(|chat| {
+            let last = chat.chat.last.as_ref().map(|m| LastMessage {
+                id: m.id.clone(),
+                from_me: m.from_me,
+                sender: m.sender.clone(),
+                timestamp_ms: m.timestamp_ms,
+                body: m.body.clone(),
+                meta: chat.last_meta.clone().unwrap_or_default(),
+            });
+            let info = WaChatInfo {
+                meta: chat.meta.clone(),
+                last,
+                is_group: chat.chat.is_group || chat.chat.jid.ends_with("@g.us"),
+            };
+            (chat.chat.jid.clone(), info)
+        })
+        .collect()
+}
+
+/// A live message becomes the chat's preview when it is the newest.
+pub fn note_last(infos: &mut HashMap<String, WaChatInfo>, message: &WaMessage) {
+    let info = infos
+        .entry(message.chat.clone())
+        .or_insert_with(|| WaChatInfo {
+            is_group: message.chat.ends_with("@g.us"),
+            ..WaChatInfo::default()
+        });
+    if info
+        .last
+        .as_ref()
+        .is_some_and(|last| last.timestamp_ms > message.timestamp_ms)
+    {
+        return;
+    }
+    let meta = match &info.last {
+        Some(last) if last.id == message.id => last.meta.clone(),
+        _ => MessageMeta::default(),
+    };
+    info.last = Some(LastMessage {
+        id: message.id.clone(),
+        from_me: message.from_me,
+        sender: message.sender.clone(),
+        timestamp_ms: message.timestamp_ms,
+        body: message.body.clone(),
+        meta,
+    });
+}
+
+/// A `message_meta` event: an edit, a delete for everyone or a star of the
+/// chat's newest message changes its preview. Returns `true` on change.
+pub fn note_meta(
+    infos: &mut HashMap<String, WaChatInfo>,
+    chat: &str,
+    id: &str,
+    body: Option<&MessageBody>,
+    meta: &MessageMeta,
+) -> bool {
+    let Some(last) = infos
+        .get_mut(chat)
+        .and_then(|info| info.last.as_mut())
+        .filter(|last| last.id == id)
+    else {
+        return false;
+    };
+    let mut changed = false;
+    if let Some(body) = body
+        && last.body != *body
+    {
+        last.body = body.clone();
+        changed = true;
+    }
+    if last.meta != *meta {
+        last.meta = meta.clone();
+        changed = true;
+    }
+    changed
+}
+
+/// What a chat action does to the chat before the gateway confirms it (its
+/// `chat_meta` event overwrites this). `unread` is the chat's counter.
+pub fn apply_action(meta: &mut ChatMeta, unread: &mut u32, action: &ChatActionKind) {
+    match *action {
+        ChatActionKind::Archive { archived } => meta.archived = archived,
+        ChatActionKind::Pin { pinned } => meta.pinned = pinned,
+        ChatActionKind::Mute { until_ms } => {
+            meta.muted_until_ms = Some(until_ms.unwrap_or(MUTED_FOREVER));
+        }
+        ChatActionKind::Unmute => meta.muted_until_ms = None,
+        ChatActionKind::MarkRead { read } => {
+            meta.marked_unread = !read;
+            if read {
+                *unread = 0;
+            }
+        }
+    }
+}
+
+/// `0:42`, `12:05`, `1:02:03`.
+pub fn duration_label(seconds: u32) -> String {
+    let (h, m, s) = (seconds / 3600, seconds % 3600 / 60, seconds % 60);
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
+}
+
+/// The one-line preview of a WhatsApp chat's newest message: deletes and
+/// edits said so, shared locations and contacts named, voice notes timed,
+/// and in groups the sender in front (contact, push name, number). `None`
+/// when nothing better than the plain body is known.
+pub fn wa_snippet(info: &WaChatInfo, contacts: &ContactIndex) -> Option<String> {
+    let last = info.last.as_ref()?;
+    let meta = &last.meta;
+    if meta.revoked {
+        return Some(if last.from_me {
+            "You deleted this message".to_owned()
+        } else {
+            "This message was deleted".to_owned()
+        });
+    }
+    let text = if let Some(location) = &meta.location {
+        let place = location
+            .name
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| "Location".to_owned());
+        if location.live {
+            format!("Live location · {place}")
+        } else {
+            format!("Location · {place}")
+        }
+    } else if let Some(contact) = &meta.contact {
+        format!("Contact · {}", contact.display_name)
+    } else if let (MessageBody::Media { .. }, Some(media)) = (&last.body, &meta.media)
+        && media.voice_note
+    {
+        match media.seconds {
+            Some(s) => format!("Voice message ({})", duration_label(s)),
+            None => "Voice message".to_owned(),
+        }
+    } else {
+        body_preview(&last.body, 120)?
+    };
+    let text = if meta.edited_ms.is_some() {
+        format!("{text} · Edited")
+    } else {
+        text
+    };
+    if last.from_me {
+        return Some(format!("You: {text}"));
+    }
+    if info.is_group {
+        let sender = last.sender.as_deref().unwrap_or("");
+        let contact = contacts
+            .match_number(&format!("+{}", jid_user(sender)))
+            .map(|c| c.display_name.as_str());
+        let name = display_name(contact, meta.sender_name.as_deref(), sender);
+        if !name.is_empty() {
+            return Some(format!("{name}: {text}"));
+        }
+    }
+    Some(text)
 }
 
 /// What a build needs besides the threads.
 pub struct Inputs<'a> {
     pub contacts: &'a ContactIndex,
+    /// What the gateway says about each WhatsApp chat.
+    pub wa: &'a HashMap<String, WaChatInfo>,
     pub rules: &'a SpamRules,
     pub blocked: &'a BlockSet,
     pub locale: LocaleTime,
@@ -129,14 +356,28 @@ pub fn build(sms: &[SmsThreadRow], wa: &[InboxThread], inputs: &Inputs<'_>) -> I
     let mut view = InboxView::default();
     for row in merge(sms, wa, inputs.contacts) {
         let spam = is_spam(&row, &index, inputs);
+        let archived = is_archived(&row, inputs.wa);
         let shown = row_view(&row, &index, inputs);
         if spam {
             view.spam.push(shown);
+        } else if archived {
+            view.archived.push(shown);
         } else {
             view.rows.push(shown);
         }
     }
+    // Pinned chats lead, each part keeping its newest-first order.
+    view.rows.sort_by_key(|row| !row.pinned);
     view
+}
+
+/// A row is archived when every thread of it is an archived WhatsApp chat:
+/// an SMS thread of the same person keeps it in the inbox.
+fn is_archived(row: &InboxRow, wa: &HashMap<String, WaChatInfo>) -> bool {
+    row.threads.iter().all(|t| match &t.id {
+        ThreadId::WhatsApp(jid) => wa.get(jid).is_some_and(|i| i.meta.archived),
+        ThreadId::Sms(_) => false,
+    })
 }
 
 /// Only a one-to-one conversation that lives purely in SMS can be spam:
@@ -188,11 +429,14 @@ fn row_title(row: &InboxRow, sms: &SmsIndex<'_>) -> String {
 
 /// The gateway's chat list as inbox threads. A chat the app already holds
 /// keeps its newer message (a live one can beat the fetch); chats with no
-/// message yet are left out.
-pub fn chat_threads(chats: &[ChatSummary], have: &[InboxThread]) -> Vec<InboxThread> {
+/// message yet are left out. A one-to-one chat without a name takes the
+/// person's push name (the contact name still wins in the merge).
+pub fn chat_threads(chats: &[RichChat], have: &[InboxThread]) -> Vec<InboxThread> {
     chats
         .iter()
-        .filter_map(|chat| {
+        .filter_map(|rich| {
+            let chat = &rich.chat;
+            let is_group = chat.is_group || chat.jid.ends_with("@g.us");
             let mut last = to_rovsti(chat.last.as_ref()?);
             let id = ThreadId::WhatsApp(chat.jid.clone());
             if let Some(held) = have.iter().find(|t| t.id == id)
@@ -200,12 +444,18 @@ pub fn chat_threads(chats: &[ChatSummary], have: &[InboxThread]) -> Vec<InboxThr
             {
                 last = held.last.clone();
             }
+            let push_name = (!is_group).then(|| rich.meta.push_name.clone()).flatten();
             Some(InboxThread {
                 id,
                 last,
                 unread: chat.unread,
-                title: chat.name.clone().filter(|n| !n.trim().is_empty()),
-                is_group: chat.is_group || chat.jid.ends_with("@g.us"),
+                title: chat
+                    .name
+                    .clone()
+                    .filter(|n| !n.trim().is_empty())
+                    .or(push_name)
+                    .filter(|n| !n.trim().is_empty()),
+                is_group,
             })
         })
         .collect()
@@ -251,17 +501,58 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
         .then(|| otp::detect(&newest.last.body))
         .flatten()
         .map(|o| SharedString::from(o.code));
+    // The row's WhatsApp chat (a merged person has at most one).
+    let wa_chat = row.threads.iter().find_map(|t| match &t.id {
+        ThreadId::WhatsApp(jid) => Some(jid.as_str()),
+        ThreadId::Sms(_) => None,
+    });
+    let info = wa_chat.and_then(|jid| inputs.wa.get(jid));
+    let snippet = match (&newest.id, info) {
+        (ThreadId::WhatsApp(_), Some(info)) => wa_snippet(info, inputs.contacts),
+        _ => None,
+    }
+    .unwrap_or_else(|| row.last.body.clone());
+    let meta = info.map(|i| &i.meta);
+    let photo_uri = match &row.key {
+        PersonKey::Contact(_) => contact_photo(row, sms, inputs.contacts),
+        _ => None,
+    };
     RowView {
         initials: initials(&title).into(),
         title: title.into(),
-        snippet: row.last.body.as_str().into(),
+        snippet: snippet.into(),
         badges: badges(row),
         unread: row.unread,
         otp,
         time: row_time(row.last.timestamp_ms, inputs.now_ms, inputs.locale).into(),
         threads: row.threads.iter().map(|t| t.id.clone()).collect(),
         channel: newest.id.channel(),
+        avatar: RowAvatar {
+            photo_uri: photo_uri.map(SharedString::from),
+            wa_jid: wa_chat.map(|jid| SharedString::from(jid.to_owned())),
+            picture_id: meta
+                .and_then(|m| m.picture_id.clone())
+                .map(SharedString::from),
+        },
+        wa_chat: wa_chat.map(|jid| SharedString::from(jid.to_owned())),
+        pinned: meta.is_some_and(|m| m.pinned),
+        muted: meta.is_some_and(|m| m.is_muted(inputs.now_ms)),
+        marked_unread: meta.is_some_and(|m| m.marked_unread),
     }
+}
+
+/// The photo of the contact a row belongs to, found through its number.
+fn contact_photo(row: &InboxRow, sms: &SmsIndex<'_>, contacts: &ContactIndex) -> Option<String> {
+    row.threads.iter().find_map(|thread| {
+        let number = match &thread.id {
+            ThreadId::Sms(_) => sms.get(&thread.id)?.addresses.first()?.clone(),
+            ThreadId::WhatsApp(jid) => format!("+{}", jid_user(jid)),
+        };
+        contacts
+            .match_number(&number)
+            .and_then(|c| c.photo_uri.clone())
+            .filter(|uri| !uri.is_empty())
+    })
 }
 
 /// Up to two initials; `#` for a number or an empty name.
@@ -348,25 +639,45 @@ fn clock(ms: i64, locale: LocaleTime) -> String {
 // ---- drawing --------------------------------------------------------------
 
 type Handler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+type PressHandler = Box<dyn Fn(&LongPressEvent, &mut Window, &mut App)>;
+
+/// What a row is drawn with besides its view.
+pub struct RowExtras {
+    /// The picture to fade in over the initials, and its opacity.
+    pub photo: Option<(Arc<RenderImage>, f32)>,
+    pub copied: bool,
+    pub open: Handler,
+    pub copy_code: Handler,
+    /// Long press: the chat menu (WhatsApp rows only).
+    pub menu: Option<PressHandler>,
+}
+
+fn small_icon(icon: Icon, color: gpui::Hsla) -> impl IntoElement {
+    gpui::svg()
+        .flex_none()
+        .path(icon.path())
+        .size(px(14.0))
+        .text_color(color)
+}
 
 /// One inbox row: avatar, title and time, badges and snippet, unread dot, and
 /// under it the OTP chip when there is one. The chip is a sibling of the
 /// tappable row, so copying a code never opens the conversation. Only rows
 /// on screen are built (the inbox is a virtualised `list`).
-pub fn row_element(
-    theme: Theme,
-    index: usize,
-    view: &RowView,
-    copied: bool,
-    open: Handler,
-    copy_code: Handler,
-) -> AnyElement {
+pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras) -> AnyElement {
+    let RowExtras {
+        photo,
+        copied,
+        open,
+        copy_code,
+        menu,
+    } = extras;
     let colors = theme::colors(theme);
     let tint = match view.channel {
         Channel::Sms => colors.accent,
         Channel::WhatsApp => colors.green,
     };
-    let unread = view.unread > 0;
+    let unread = view.unread > 0 || view.marked_unread;
     let weight = if unread {
         typography::HEADLINE.weight
     } else {
@@ -388,12 +699,18 @@ pub fn row_element(
             .child(badge.label())
     });
 
-    let main = div()
+    let mut main = div()
         .id(("inbox-row", index))
         .flex()
         .items_center()
         .gap(px(12.0))
-        .child(avatar(theme, view.initials.clone(), 44.0, tint))
+        .child(photo_avatar(
+            theme,
+            view.initials.clone(),
+            44.0,
+            tint,
+            photo,
+        ))
         .child(
             div()
                 .flex_1()
@@ -415,6 +732,14 @@ pub fn row_element(
                                 .font_weight(typography::HEADLINE.weight)
                                 .text_color(colors.label)
                                 .child(view.title.clone()),
+                        )
+                        .children(
+                            view.muted
+                                .then(|| small_icon(Icon::LucideBellOff, colors.tertiary_label)),
+                        )
+                        .children(
+                            view.pinned
+                                .then(|| small_icon(Icon::LucidePin, colors.tertiary_label)),
                         )
                         .child(
                             div()
@@ -445,23 +770,36 @@ pub fn row_element(
                                 .child(view.snippet.clone()),
                         )
                         .children(unread.then(|| {
-                            div()
+                            // Marked unread by hand: a dot without a count.
+                            let badge = div()
                                 .flex_none()
-                                .min_w(px(20.0))
-                                .h(px(20.0))
-                                .px(px(6.0))
                                 .rounded_full()
-                                .bg(colors.accent)
+                                .bg(if view.muted {
+                                    colors.tertiary_label
+                                } else {
+                                    colors.accent
+                                })
                                 .flex()
                                 .items_center()
-                                .justify_center()
-                                .text_size(typography::CAPTION.size)
-                                .text_color(colors.background)
-                                .child(view.unread.to_string())
+                                .justify_center();
+                            if view.unread > 0 {
+                                badge
+                                    .min_w(px(20.0))
+                                    .h(px(20.0))
+                                    .px(px(6.0))
+                                    .text_size(typography::CAPTION.size)
+                                    .text_color(colors.background)
+                                    .child(view.unread.to_string())
+                            } else {
+                                badge.size(px(12.0))
+                            }
                         })),
                 ),
         )
         .on_click(open);
+    if let Some(menu) = menu {
+        main = main.on_long_press(menu);
+    }
 
     let chip = view.otp.as_ref().map(|code| {
         div()
@@ -556,12 +894,24 @@ mod tests {
         rules: &SpamRules,
         blocked: &BlockSet,
     ) -> InboxView {
+        build_meta(sms, wa, contacts, rules, blocked, &HashMap::new())
+    }
+
+    fn build_meta(
+        sms: &[SmsThreadRow],
+        wa: &[InboxThread],
+        contacts: Vec<WireContact>,
+        rules: &SpamRules,
+        blocked: &BlockSet,
+        infos: &HashMap<String, WaChatInfo>,
+    ) -> InboxView {
         let index = ContactIndex::new(contacts);
         build(
             sms,
             wa,
             &Inputs {
                 contacts: &index,
+                wa: infos,
                 rules,
                 blocked,
                 locale: LocaleTime::default(),
@@ -807,14 +1157,24 @@ mod tests {
         }
     }
 
+    fn rich(chat: rovsti_wa_proto::ChatSummary) -> RichChat {
+        RichChat {
+            chat,
+            meta: ChatMeta::default(),
+            last_meta: None,
+        }
+    }
+
     #[test]
     fn the_chat_list_becomes_threads_and_keeps_newer_live_messages() {
-        let chat = |jid: &str, name: Option<&str>, last: Option<WaMessage>, unread| ChatSummary {
-            jid: jid.into(),
-            name: name.map(Into::into),
-            last,
-            unread,
-            is_group: false,
+        let chat = |jid: &str, name: Option<&str>, last: Option<WaMessage>, unread| {
+            rich(rovsti_wa_proto::ChatSummary {
+                jid: jid.into(),
+                name: name.map(Into::into),
+                last,
+                unread,
+                is_group: false,
+            })
         };
         let jid = "905321234567@s.whatsapp.net";
         let live = vec![InboxThread {
@@ -848,6 +1208,358 @@ mod tests {
         assert_eq!(threads[0].title.as_deref(), Some("Ayse"));
         assert!(threads[1].is_group);
         assert_eq!(threads[1].title, None);
+    }
+
+    #[test]
+    fn a_nameless_chat_takes_the_push_name_but_a_group_does_not() {
+        let jid = "905321234567@s.whatsapp.net";
+        let mut one = rich(rovsti_wa_proto::ChatSummary {
+            jid: jid.into(),
+            name: None,
+            last: Some(wa_message(jid, "a", false, 10)),
+            unread: 0,
+            is_group: false,
+        });
+        one.meta.push_name = Some("ayse".into());
+        let mut group = rich(rovsti_wa_proto::ChatSummary {
+            jid: "1@g.us".into(),
+            name: None,
+            last: Some(wa_message("1@g.us", "g", false, 5)),
+            unread: 0,
+            is_group: true,
+        });
+        group.meta.push_name = Some("someone".into());
+        let threads = chat_threads(&[one, group], &[]);
+        assert_eq!(threads[0].title.as_deref(), Some("ayse"));
+        assert_eq!(threads[1].title, None);
+    }
+
+    fn info(meta: ChatMeta, last: Option<LastMessage>, is_group: bool) -> WaChatInfo {
+        WaChatInfo {
+            meta,
+            last,
+            is_group,
+        }
+    }
+
+    fn last(from_me: bool, sender: Option<&str>, body: &str, meta: MessageMeta) -> LastMessage {
+        LastMessage {
+            id: "L".into(),
+            from_me,
+            sender: sender.map(Into::into),
+            timestamp_ms: 1,
+            body: MessageBody::Text(body.into()),
+            meta,
+        }
+    }
+
+    #[test]
+    fn pinned_rows_lead_and_archived_ones_leave_the_inbox() {
+        let a = "905321111111@s.whatsapp.net";
+        let b = "905322222222@s.whatsapp.net";
+        let c = "905323333333@s.whatsapp.net";
+        let mut infos = HashMap::new();
+        infos.insert(
+            b.to_owned(),
+            info(
+                ChatMeta {
+                    pinned: true,
+                    muted_until_ms: Some(rovsti_wa_proto::MUTED_FOREVER),
+                    picture_id: Some("pic".into()),
+                    ..ChatMeta::default()
+                },
+                None,
+                false,
+            ),
+        );
+        infos.insert(
+            c.to_owned(),
+            info(
+                ChatMeta {
+                    archived: true,
+                    marked_unread: true,
+                    ..ChatMeta::default()
+                },
+                None,
+                false,
+            ),
+        );
+        let view = build_meta(
+            &[],
+            &[
+                wa(a, "A", MIN, 0),
+                wa(b, "B", 5 * MIN, 0),
+                wa(c, "C", 2 * MIN, 0),
+            ],
+            vec![],
+            &rules(),
+            &BlockSet::default(),
+            &infos,
+        );
+        let titles: Vec<&str> = view.rows.iter().map(|r| r.title.as_ref()).collect();
+        assert_eq!(titles, ["B", "A"]);
+        assert!(view.rows[0].pinned && view.rows[0].muted);
+        assert_eq!(view.rows[0].avatar.picture_id.as_deref(), Some("pic"));
+        assert_eq!(view.rows[0].wa_chat.as_deref(), Some(b));
+        assert_eq!(view.archived.len(), 1);
+        assert!(view.archived[0].marked_unread);
+    }
+
+    #[test]
+    fn an_sms_thread_keeps_an_archived_person_in_the_inbox() {
+        let jid = "905321234567@s.whatsapp.net";
+        let mut infos = HashMap::new();
+        infos.insert(
+            jid.to_owned(),
+            info(
+                ChatMeta {
+                    archived: true,
+                    ..ChatMeta::default()
+                },
+                None,
+                false,
+            ),
+        );
+        let view = build_meta(
+            &[sms(1, &["+905321234567"], "sms", MIN, 0)],
+            &[wa(jid, "Ayse", 5 * MIN, 0)],
+            vec![],
+            &rules(),
+            &BlockSet::default(),
+            &infos,
+        );
+        assert_eq!(view.rows.len(), 1);
+        assert!(view.archived.is_empty());
+    }
+
+    #[test]
+    fn snippets_say_deleted_edited_and_who_wrote() {
+        let contacts = ContactIndex::new(vec![contact(1, "Mert", "+905559876543")]);
+        let revoked = MessageMeta {
+            revoked: true,
+            ..MessageMeta::default()
+        };
+        let edited = MessageMeta {
+            edited_ms: Some(5),
+            ..MessageMeta::default()
+        };
+        let one = |l| info(ChatMeta::default(), Some(l), false);
+        assert_eq!(
+            wa_snippet(&one(last(false, None, "x", revoked.clone())), &contacts).as_deref(),
+            Some("This message was deleted")
+        );
+        assert_eq!(
+            wa_snippet(&one(last(true, None, "x", revoked)), &contacts).as_deref(),
+            Some("You deleted this message")
+        );
+        assert_eq!(
+            wa_snippet(&one(last(false, None, "fixed", edited)), &contacts).as_deref(),
+            Some("fixed · Edited")
+        );
+        let group = |l| info(ChatMeta::default(), Some(l), true);
+        let named = MessageMeta {
+            sender_name: Some("ada".into()),
+            ..MessageMeta::default()
+        };
+        assert_eq!(
+            wa_snippet(
+                &group(last(
+                    false,
+                    Some("905559876543@s.whatsapp.net"),
+                    "hi",
+                    named.clone()
+                )),
+                &contacts
+            )
+            .as_deref(),
+            Some("Mert: hi"),
+            "the contact name wins"
+        );
+        assert_eq!(
+            wa_snippet(
+                &group(last(
+                    false,
+                    Some("905550000000@s.whatsapp.net"),
+                    "hi",
+                    named
+                )),
+                &contacts
+            )
+            .as_deref(),
+            Some("ada: hi")
+        );
+        assert_eq!(
+            wa_snippet(
+                &group(last(
+                    false,
+                    Some("905550000000@s.whatsapp.net"),
+                    "hi",
+                    MessageMeta::default()
+                )),
+                &contacts
+            )
+            .as_deref(),
+            Some("+905550000000: hi")
+        );
+        assert_eq!(
+            wa_snippet(
+                &group(last(true, None, "mine", MessageMeta::default())),
+                &contacts
+            )
+            .as_deref(),
+            Some("You: mine")
+        );
+        assert_eq!(
+            wa_snippet(&info(ChatMeta::default(), None, false), &contacts),
+            None
+        );
+    }
+
+    #[test]
+    fn locations_contacts_and_voice_notes_get_their_own_snippets() {
+        let contacts = ContactIndex::new(vec![]);
+        let one = |meta, body: MessageBody| {
+            let mut l = last(false, None, "", meta);
+            l.body = body;
+            info(ChatMeta::default(), Some(l), false)
+        };
+        let location = MessageMeta {
+            location: Some(rovsti_wa_proto::Location {
+                latitude: 41.0,
+                longitude: 29.0,
+                name: Some("Kadıköy".into()),
+                ..Default::default()
+            }),
+            ..MessageMeta::default()
+        };
+        assert_eq!(
+            wa_snippet(&one(location, MessageBody::Unsupported), &contacts).as_deref(),
+            Some("Location · Kadıköy")
+        );
+        let card = MessageMeta {
+            contact: Some(rovsti_wa_proto::SharedContact {
+                display_name: "Ada".into(),
+                vcard: String::new(),
+            }),
+            ..MessageMeta::default()
+        };
+        assert_eq!(
+            wa_snippet(&one(card, MessageBody::Unsupported), &contacts).as_deref(),
+            Some("Contact · Ada")
+        );
+        let voice = MessageMeta {
+            media: Some(rovsti_wa_proto::MediaMeta {
+                voice_note: true,
+                seconds: Some(75),
+                ..Default::default()
+            }),
+            ..MessageMeta::default()
+        };
+        let audio = MessageBody::Media {
+            kind: rovsti_wa_proto::MediaKind::Audio,
+            caption: None,
+            mime: "audio/ogg".into(),
+            size: 1,
+        };
+        assert_eq!(
+            wa_snippet(&one(voice, audio), &contacts).as_deref(),
+            Some("Voice message (1:15)")
+        );
+        assert_eq!(duration_label(3_725), "1:02:05");
+    }
+
+    #[test]
+    fn live_messages_and_meta_events_update_the_preview() {
+        let jid = "905321234567@s.whatsapp.net";
+        let mut infos = HashMap::new();
+        note_last(&mut infos, &wa_message(jid, "a", false, 10));
+        note_last(&mut infos, &wa_message(jid, "old", false, 5));
+        assert_eq!(infos[jid].last.as_ref().expect("a preview").id, "a");
+        let meta = MessageMeta {
+            revoked: true,
+            ..MessageMeta::default()
+        };
+        assert!(note_meta(
+            &mut infos,
+            jid,
+            "a",
+            Some(&MessageBody::Unsupported),
+            &meta
+        ));
+        assert!(!note_meta(
+            &mut infos,
+            jid,
+            "a",
+            Some(&MessageBody::Unsupported),
+            &meta
+        ));
+        assert!(!note_meta(&mut infos, jid, "other", None, &meta));
+        assert!(infos[jid].last.as_ref().expect("a preview").meta.revoked);
+        // The same message again keeps its meta.
+        note_last(&mut infos, &wa_message(jid, "a", false, 10));
+        assert!(infos[jid].last.as_ref().expect("a preview").meta.revoked);
+    }
+
+    #[test]
+    fn chat_actions_apply_at_once() {
+        let mut meta = ChatMeta::default();
+        let mut unread = 3;
+        apply_action(
+            &mut meta,
+            &mut unread,
+            &ChatActionKind::Pin { pinned: true },
+        );
+        apply_action(
+            &mut meta,
+            &mut unread,
+            &ChatActionKind::Archive { archived: true },
+        );
+        apply_action(
+            &mut meta,
+            &mut unread,
+            &ChatActionKind::Mute { until_ms: None },
+        );
+        assert!(meta.pinned && meta.archived);
+        assert_eq!(meta.muted_until_ms, Some(MUTED_FOREVER));
+        apply_action(
+            &mut meta,
+            &mut unread,
+            &ChatActionKind::Mute { until_ms: Some(99) },
+        );
+        assert_eq!(meta.muted_until_ms, Some(99));
+        apply_action(&mut meta, &mut unread, &ChatActionKind::Unmute);
+        assert_eq!(meta.muted_until_ms, None);
+        apply_action(
+            &mut meta,
+            &mut unread,
+            &ChatActionKind::MarkRead { read: false },
+        );
+        assert!(meta.marked_unread);
+        assert_eq!(unread, 3, "marking unread keeps the count");
+        apply_action(
+            &mut meta,
+            &mut unread,
+            &ChatActionKind::MarkRead { read: true },
+        );
+        assert!(!meta.marked_unread);
+        assert_eq!(unread, 0);
+    }
+
+    #[test]
+    fn a_contact_row_finds_its_photo() {
+        let mut ayse = contact(7, "Ayşe", "+905321234567");
+        ayse.photo_uri = Some("content://photo/7".into());
+        let view = build_with(
+            &[sms(1, &["+905321234567"], "hi", MIN, 0)],
+            &[],
+            vec![ayse],
+            &rules(),
+            &BlockSet::default(),
+        );
+        assert_eq!(
+            view.rows[0].avatar.photo_uri.as_deref(),
+            Some("content://photo/7")
+        );
     }
 
     #[test]

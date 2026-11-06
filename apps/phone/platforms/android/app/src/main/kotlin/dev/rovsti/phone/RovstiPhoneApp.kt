@@ -14,11 +14,21 @@ class RovstiPhoneApp : Application() {
     override fun onCreate() {
         super.onCreate()
         watchMainThread()
-        RovstiBridge.install(this)
-        CallRegistry.init(this)
-        RovstiBridge.observeProviders()
+        // Each step on its own: this runs for every process start, including the ones for an
+        // incoming call or a push, and a throw here would stop the app before it could ring.
+        step("install") { RovstiBridge.install(this) }
+        step("calls") { CallRegistry.init(this) }
+        step("observers") { RovstiBridge.observeProviders() }
         // Old contact photos go, off the main thread.
-        Thread({ ContactPhotos.prune(this) }, "photo-prune").start()
+        step("prune") { Thread({ ContactPhotos.prune(this) }, "photo-prune").start() }
+    }
+
+    private inline fun step(name: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (e: RuntimeException) {
+            android.util.Log.e("Rovsti", "start-up step $name failed", e)
+        }
     }
 
     /**

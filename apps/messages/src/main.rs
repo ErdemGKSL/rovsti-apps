@@ -15,17 +15,19 @@ mod inbox;
 mod keyed_list;
 mod new_conversation;
 mod notifications;
+mod photos;
 mod prefs;
 mod schedule_ui;
 mod settings_ui;
 mod sms_conversation;
 
-use std::{borrow::Cow, time::Duration};
+use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClipboardItem, Context, Entity, InteractiveElement,
-    IntoElement, ListAlignment, ParentElement, Render, SharedString, StatefulInteractiveElement,
-    Styled, Subscription, Window, WindowBounds, WindowOptions, div, list, px, size,
+    AnyElement, App, AppContext as _, Bounds, ClipboardItem, Context, Entity, Hsla,
+    InteractiveElement, IntoElement, ListAlignment, ParentElement, Render, RenderImage,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, WindowBounds,
+    WindowOptions, div, list, px, size,
 };
 use rovsti_core::{
     Message, MessageDirection, PhoneNumber, ThreadId,
@@ -39,23 +41,26 @@ use rovsti_ui::{
     Icon, IconAssets,
     components::{avatar, empty_state, glass_icon_button, glass_pill, large_title, list_row},
     current_theme,
+    glass::{GlassSpec, glass},
     notice_pill::NoticePill,
     tab_bar::{Tab, TabBar, content_bottom_inset},
     theme,
-    tokens::{Theme, metrics, typography},
+    tokens::{Theme, metrics, shadow, typography},
 };
 
 use backend::{Access, Backend, BackendEvent, now_ms};
-use conversation::{Conversation, ConversationEvent};
-use inbox::{InboxView, RowView};
+use conversation::{Conversation, ConversationEvent, Peer};
+use inbox::{InboxView, RowExtras, RowView, WaChatInfo};
 use keyed_list::{KeyedList, key_of};
 use new_conversation::{NewConversation, NewConversationEvent, Recipient};
 use notifications::{Arrival, Digests, Reply, SmsReceived, Switches};
+use photos::ContactPhotos;
 use rovsti_wa_client::ClientError;
 use rovsti_wa_proto::{
-    GatewayEvent, ScheduleText, ScheduledText, SendText, WaMessage, jid_user, to_rovsti,
+    ChatAction, ChatActionKind, ChatMeta, GatewayEvent, ScheduleText, ScheduledText, SendText,
+    WaMessage, jid_user, to_rovsti,
 };
-use rovsti_wa_ui::{AppId, WhatsAppSettings};
+use rovsti_wa_ui::{AppId, WaAvatars, WhatsAppSettings, display_name};
 use schedule_ui::{Dest, Draft, ScheduleSheet, StripKey, StripTarget};
 use settings_ui::{SettingsEvent, SettingsView};
 use sms_conversation::{SmsConversation, SmsConversationEvent};
@@ -71,6 +76,22 @@ const TAB_ICONS: [Icon; 3] = [
 
 /// How long a tapped OTP chip says "Copied".
 const COPIED_FOR: Duration = Duration::from_secs(3);
+
+const HOUR_MS: i64 = 3_600_000;
+/// The mute lengths the chat menu offers ("Always" is the third).
+const MUTE_8H_MS: i64 = 8 * HOUR_MS;
+const MUTE_WEEK_MS: i64 = 7 * 24 * HOUR_MS;
+
+/// The long-press menu of a WhatsApp row.
+#[derive(Clone, Debug)]
+struct RowMenu {
+    jid: String,
+    title: SharedString,
+    meta: ChatMeta,
+    unread: u32,
+    /// The mute lengths show instead of the main actions.
+    mute_choices: bool,
+}
 
 /// The page pushed over the tabs.
 enum Open {
@@ -101,6 +122,19 @@ struct MessagesApp {
     /// The gateway's chats as inbox threads (SMS comes from the backend).
     /// Change it through [`Self::wa_threads_mut`], which marks the inbox stale.
     wa_threads: Vec<InboxThread>,
+    /// Archive, pin, mute and preview details of each chat, by JID. Change it
+    /// through [`Self::wa_info_mut`].
+    wa_info: HashMap<String, WaChatInfo>,
+    /// WhatsApp profile pictures (shared with the conversation).
+    avatars: Entity<WaAvatars>,
+    /// Address-book photos (shared with the conversation).
+    photos: Entity<ContactPhotos>,
+    /// The address book the photo misses were recorded against.
+    contacts_seen: usize,
+    /// The archived chats are showing instead of the inbox.
+    show_archived: bool,
+    /// The long-press menu of a WhatsApp row.
+    row_menu: Option<RowMenu>,
     /// Bumped on every change of `wa_threads`.
     wa_rev: u64,
     /// Bumped on every backend notification (threads, contacts, rules, clock).
@@ -142,6 +176,7 @@ struct InboxKey {
 struct ChatLayout {
     view_gen: u64,
     show_spam: bool,
+    show_archived: bool,
     role_held: bool,
     state: Access,
 }
@@ -156,6 +191,10 @@ enum ChatItem {
     SpamBack,
     /// The Spam filter's entry row.
     SpamFilter,
+    /// Back from the archived chats to the inbox.
+    ArchivedBack,
+    /// The "Archived" entry row.
+    ArchivedFilter,
     /// A row of the inbox (or of the Spam filter while it shows).
     Row(usize),
     Empty,
@@ -176,6 +215,8 @@ impl MessagesApp {
         let whatsapp = cx.new(|cx| WhatsAppSettings::new(AppId::Messages, "messages", cx));
         let settings = cx.new(|cx| SettingsView::new(backend.clone(), cx));
         let schedule = ScheduleSheet::new(cx);
+        let avatars = cx.new(|cx| WaAvatars::new(&whatsapp, cx));
+        let photos = cx.new(|_| ContactPhotos::new());
         // The backend owns the one event sink: it hands WhatsApp pushes over
         // here, and SMS, contact and role changes rebuild the inbox.
         let subscriptions = vec![
@@ -186,11 +227,19 @@ impl MessagesApp {
                 this.on_gateway_events(events, connected, cx);
                 cx.notify();
             }),
-            cx.observe(&backend, |this, _, cx| {
+            cx.observe(&backend, |this, backend, cx| {
                 this.backend_epoch += 1;
+                // A new address book may hold photos that were missing.
+                let contacts = Arc::as_ptr(backend.read(cx).contacts()) as usize;
+                if contacts != this.contacts_seen {
+                    this.contacts_seen = contacts;
+                    this.photos.update(cx, |photos, _| photos.forget_misses());
+                }
                 this.rebuild(cx);
                 cx.notify();
             }),
+            cx.observe(&avatars, |_, _, cx| cx.notify()),
+            cx.observe(&photos, |_, _, cx| cx.notify()),
             cx.subscribe(&backend, |this, _, event, cx| match event {
                 BackendEvent::WaPush => {
                     this.whatsapp.update(cx, |settings, cx| settings.wake(cx));
@@ -228,6 +277,12 @@ impl MessagesApp {
             remote_scheduled: Vec::new(),
             back_enabled: false,
             wa_threads: Vec::new(),
+            wa_info: HashMap::new(),
+            avatars,
+            photos,
+            contacts_seen: 0,
+            show_archived: false,
+            row_menu: None,
             wa_rev: 0,
             backend_epoch: 0,
             inbox_key: None,
@@ -267,6 +322,12 @@ impl MessagesApp {
         &mut self.wa_threads
     }
 
+    /// The chats' meta, for a change: the inbox merges again next rebuild.
+    fn wa_info_mut(&mut self) -> &mut HashMap<String, WaChatInfo> {
+        self.wa_rev += 1;
+        &mut self.wa_info
+    }
+
     /// Merges SMS and WhatsApp into the rows again (only when a source
     /// changed) and keeps an open conversation's channel switch and clock in
     /// step.
@@ -288,6 +349,7 @@ impl MessagesApp {
                     &wa,
                     &inbox::Inputs {
                         contacts: backend.contacts(),
+                        wa: &self.wa_info,
                         rules: backend.spam_rules(),
                         blocked: backend.blocked(),
                         locale,
@@ -303,6 +365,9 @@ impl MessagesApp {
         }
         if self.view.spam.is_empty() {
             self.show_spam = false;
+        }
+        if self.view.archived.is_empty() {
+            self.show_archived = false;
         }
         if let Open::WhatsApp(_, conversation) = &self.open {
             conversation.update(cx, |c, cx| c.set_locale(locale, cx));
@@ -337,6 +402,8 @@ impl MessagesApp {
         cx: &mut Context<Self>,
     ) {
         for event in events {
+            self.avatars
+                .update(cx, |avatars, cx| avatars.on_event(&event, cx));
             if let Open::WhatsApp(_, conversation) = &self.open {
                 conversation.update(cx, |conversation, cx| conversation.on_event(&event, cx));
             }
@@ -345,7 +412,48 @@ impl MessagesApp {
                     let viewing =
                         matches!(&self.open, Open::WhatsApp(jid, _) if *jid == message.chat);
                     inbox::fold_message(self.wa_threads_mut(), &message, viewing);
+                    inbox::note_last(self.wa_info_mut(), &message);
                     self.notify_whatsapp(&message, cx);
+                }
+                GatewayEvent::MessageMeta {
+                    chat,
+                    id,
+                    body,
+                    meta,
+                } => {
+                    if inbox::note_meta(&mut self.wa_info, &chat, &id, body.as_ref(), &meta) {
+                        self.wa_rev += 1;
+                    }
+                }
+                GatewayEvent::MessageDeleted { chat, id } => {
+                    let was_last = self
+                        .wa_info
+                        .get(&chat)
+                        .and_then(|info| info.last.as_ref())
+                        .is_some_and(|last| last.id == id);
+                    if was_last {
+                        self.clear_preview(&chat);
+                    }
+                }
+                GatewayEvent::ChatMeta { jid, meta } => {
+                    let info = self.wa_info_mut().entry(jid.clone()).or_default();
+                    info.meta = meta;
+                    if self.row_menu.as_ref().is_some_and(|m| m.jid == jid) {
+                        self.row_menu = None;
+                    }
+                }
+                GatewayEvent::ChatCleared { jid } => self.clear_preview(&jid),
+                GatewayEvent::ChatDeleted { jid } => {
+                    let id = ThreadId::WhatsApp(jid.clone());
+                    self.wa_threads_mut().retain(|t| t.id != id);
+                    self.wa_info_mut().remove(&jid);
+                    if matches!(&self.open, Open::WhatsApp(open, _) if *open == jid) {
+                        self.open = Open::None;
+                        self.page.restart();
+                    }
+                    if self.row_menu.as_ref().is_some_and(|m| m.jid == jid) {
+                        self.row_menu = None;
+                    }
                 }
                 GatewayEvent::Scheduled(item) => {
                     schedule_ui::upsert_remote(&mut self.remote_scheduled, item);
@@ -359,6 +467,8 @@ impl MessagesApp {
         if !connected && self.whatsapp.read(cx).link().is_none() {
             // Unlinked: WhatsApp chats leave the inbox.
             self.wa_threads_mut().clear();
+            self.wa_info_mut().clear();
+            self.row_menu = None;
             if matches!(self.open, Open::WhatsApp(..)) {
                 self.open = Open::None;
             }
@@ -369,7 +479,20 @@ impl MessagesApp {
         self.rebuild(cx);
     }
 
-    /// Fills the inbox with each chat's last message, off the UI thread.
+    /// A chat lost its messages (cleared, or its newest deleted for me): it
+    /// stays in the list with an empty preview.
+    fn clear_preview(&mut self, jid: &str) {
+        let id = ThreadId::WhatsApp(jid.to_owned());
+        for thread in self.wa_threads_mut().iter_mut().filter(|t| t.id == id) {
+            thread.last.body.clear();
+        }
+        if let Some(info) = self.wa_info_mut().get_mut(jid) {
+            info.last = None;
+        }
+    }
+
+    /// Fills the inbox with each chat's last message and meta, off the UI
+    /// thread.
     fn load_chats(&mut self, cx: &mut Context<Self>) {
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             return;
@@ -377,7 +500,7 @@ impl MessagesApp {
         self.chats = ChatsState::Loading;
         let task = cx
             .background_executor()
-            .spawn(async move { gateway.chats() });
+            .spawn(async move { gateway.chats_with_meta() });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             this.update(cx, |this, cx| {
@@ -385,7 +508,22 @@ impl MessagesApp {
                 match result {
                     Ok(chats) => {
                         let threads = inbox::chat_threads(&chats, &this.wa_threads);
+                        let mut infos = inbox::chat_infos(&chats);
+                        // A live message newer than the fetch keeps its preview.
+                        for thread in &threads {
+                            if let ThreadId::WhatsApp(jid) = &thread.id
+                                && let Some(held) = this.wa_info.get(jid)
+                                && let Some(last) = &held.last
+                                && infos
+                                    .get(jid)
+                                    .and_then(|i| i.last.as_ref())
+                                    .is_none_or(|fetched| fetched.timestamp_ms < last.timestamp_ms)
+                            {
+                                infos.entry(jid.clone()).or_default().last = Some(last.clone());
+                            }
+                        }
                         *this.wa_threads_mut() = threads;
+                        *this.wa_info_mut() = infos;
                         this.rebuild(cx);
                     }
                     Err(ClientError::Unauthorized) => {}
@@ -422,16 +560,52 @@ impl MessagesApp {
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             return;
         };
+        self.row_menu = None;
         let is_group = self
             .wa_threads
             .iter()
             .find(|t| t.id == ThreadId::WhatsApp(jid.clone()))
             .map_or_else(|| jid.ends_with("@g.us"), |t| t.is_group);
         let locale = self.backend.read(cx).locale();
+        let meta = self
+            .wa_info
+            .get(&jid)
+            .map(|info| info.meta.clone())
+            .unwrap_or_default();
+        // Contact name, then WhatsApp's name, then the number.
+        let title = display_name(Some(&title), meta.push_name.as_deref(), &jid);
+        let row = self
+            .view
+            .all_rows()
+            .find(|row| row.threads.contains(&ThreadId::WhatsApp(jid.clone())));
+        let peer = Peer {
+            initials: row.map_or_else(
+                || inbox::initials(&title).into(),
+                |row| row.initials.clone(),
+            ),
+            photo_uri: row.and_then(|row| row.avatar.photo_uri.clone()),
+            picture_id: meta.picture_id.clone().map(SharedString::from),
+        };
         let chat = jid.clone();
         let backend = self.backend.clone();
-        let conversation =
-            cx.new(|cx| Conversation::new(chat, title, is_group, gateway, locale, backend, cx));
+        let avatars = self.avatars.clone();
+        let photos = self.photos.clone();
+        let conversation = cx.new(|cx| {
+            Conversation::new(
+                conversation::Setup {
+                    chat,
+                    title: title.into(),
+                    is_group,
+                    gateway,
+                    locale,
+                    backend,
+                    avatars,
+                    photos,
+                    peer,
+                },
+                cx,
+            )
+        });
         cx.subscribe(&conversation, |this, _, event, cx| match event {
             ConversationEvent::Back => this.close_page(cx),
             ConversationEvent::Switch(thread) => this.switch_to(thread.clone(), cx),
@@ -446,6 +620,10 @@ impl MessagesApp {
         self.load_remote_scheduled(cx);
         for thread in self.wa_threads_mut().iter_mut().filter(|t| t.id == id) {
             thread.unread = 0;
+        }
+        // Opening a chat marked unread by hand takes the mark away everywhere.
+        if meta.marked_unread {
+            self.chat_action(&jid, ChatActionKind::MarkRead { read: true }, cx);
         }
         self.open = Open::WhatsApp(jid, conversation);
         self.rebuild(cx);
@@ -538,11 +716,212 @@ impl MessagesApp {
         cx.notify();
     }
 
+    // ---- WhatsApp chat actions -------------------------------------------------
+
+    /// Long press on a WhatsApp row: its menu.
+    fn open_row_menu(&mut self, jid: String, title: SharedString, cx: &mut Context<Self>) {
+        let id = ThreadId::WhatsApp(jid.clone());
+        let unread = self
+            .wa_threads
+            .iter()
+            .find(|t| t.id == id)
+            .map_or(0, |t| t.unread);
+        let meta = self
+            .wa_info
+            .get(&jid)
+            .map(|info| info.meta.clone())
+            .unwrap_or_default();
+        self.row_menu = Some(RowMenu {
+            jid,
+            title,
+            meta,
+            unread,
+            mute_choices: false,
+        });
+        cx.notify();
+    }
+
+    /// Archive, pin, mute or mark a chat: shown at once, then sent to the
+    /// gateway (its `chat_meta` event confirms it on every device).
+    fn chat_action(&mut self, jid: &str, action: ChatActionKind, cx: &mut Context<Self>) {
+        self.row_menu = None;
+        let Some(gateway) = self.whatsapp.read(cx).gateway() else {
+            self.show_pill("WhatsApp is not connected");
+            cx.notify();
+            return;
+        };
+        let id = ThreadId::WhatsApp(jid.to_owned());
+        let mut unread = self
+            .wa_threads
+            .iter()
+            .find(|t| t.id == id)
+            .map_or(0, |t| t.unread);
+        let info = self.wa_info_mut().entry(jid.to_owned()).or_default();
+        inbox::apply_action(&mut info.meta, &mut unread, &action);
+        for thread in self.wa_threads_mut().iter_mut().filter(|t| t.id == id) {
+            thread.unread = unread;
+        }
+        self.rebuild(cx);
+        let request = ChatAction {
+            chat: jid.to_owned(),
+            action,
+        };
+        let task = cx
+            .background_executor()
+            .spawn(async move { gateway.chat_action(&request) });
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = task.await {
+                log::warn!("a WhatsApp chat action failed: {error}");
+                this.update(cx, |this, cx| {
+                    this.show_pill("Couldn't change that chat");
+                    // The list shows what the gateway really has.
+                    this.load_chats(cx);
+                    cx.notify();
+                })
+                .ok();
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The row menu over the inbox: a dimmed screen and a glass card of actions.
+    fn row_menu_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu = self.row_menu.as_ref()?;
+        let colors = theme::colors(theme);
+        let now = now_ms();
+        let jid = menu.jid.clone();
+        let action = |id: &'static str, icon: Icon, label: String, kind: ChatActionKind| {
+            let jid = jid.clone();
+            menu_item(theme, id, icon, label.into(), colors.label).on_click(
+                cx.listener(move |this, _, _, cx| this.chat_action(&jid, kind.clone(), cx)),
+            )
+        };
+        let mut items: Vec<AnyElement> = Vec::new();
+        if menu.mute_choices {
+            items.push(
+                action(
+                    "menu-mute-8h",
+                    Icon::LucideBellOff,
+                    "8 hours".into(),
+                    ChatActionKind::Mute {
+                        until_ms: Some(now + MUTE_8H_MS),
+                    },
+                )
+                .into_any_element(),
+            );
+            items.push(
+                action(
+                    "menu-mute-week",
+                    Icon::LucideBellOff,
+                    "1 week".into(),
+                    ChatActionKind::Mute {
+                        until_ms: Some(now + MUTE_WEEK_MS),
+                    },
+                )
+                .into_any_element(),
+            );
+            items.push(
+                action(
+                    "menu-mute-always",
+                    Icon::LucideBellOff,
+                    "Always".into(),
+                    ChatActionKind::Mute { until_ms: None },
+                )
+                .into_any_element(),
+            );
+        } else {
+            let meta = &menu.meta;
+            items.push(
+                action(
+                    "menu-pin",
+                    Icon::LucidePin,
+                    if meta.pinned { "Unpin" } else { "Pin" }.into(),
+                    ChatActionKind::Pin {
+                        pinned: !meta.pinned,
+                    },
+                )
+                .into_any_element(),
+            );
+            items.push(
+                action(
+                    "menu-archive",
+                    Icon::LucideArchive,
+                    if meta.archived {
+                        "Unarchive"
+                    } else {
+                        "Archive"
+                    }
+                    .into(),
+                    ChatActionKind::Archive {
+                        archived: !meta.archived,
+                    },
+                )
+                .into_any_element(),
+            );
+            if meta.is_muted(now) {
+                items.push(
+                    action(
+                        "menu-unmute",
+                        Icon::LucideBell,
+                        "Unmute".into(),
+                        ChatActionKind::Unmute,
+                    )
+                    .into_any_element(),
+                );
+            } else {
+                items.push(
+                    menu_item(
+                        theme,
+                        "menu-mute",
+                        Icon::LucideBellOff,
+                        "Mute…".into(),
+                        colors.label,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(menu) = &mut this.row_menu {
+                            menu.mute_choices = true;
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+                );
+            }
+            let unread = menu.unread > 0 || meta.marked_unread;
+            items.push(
+                action(
+                    "menu-unread",
+                    Icon::LucideMailOpen,
+                    if unread {
+                        "Mark as read"
+                    } else {
+                        "Mark as unread"
+                    }
+                    .into(),
+                    ChatActionKind::MarkRead { read: unread },
+                )
+                .into_any_element(),
+            );
+        }
+        Some(menu_card(
+            theme,
+            "row-menu",
+            menu.title.clone(),
+            items,
+            cx.listener(|this, _, _, cx| {
+                this.row_menu = None;
+                cx.notify();
+            }),
+        ))
+    }
+
     /// Whether System Back has a layer to close: the "Send later" sheet, an open chat or the new
     /// message page, a step inside the WhatsApp settings, or any tab but the first (Chats). When
     /// it has not, Back leaves the app.
     fn can_go_back(&self, cx: &App) -> bool {
         self.schedule.is_open()
+            || self.row_menu.is_some()
+            || self.show_archived
             || !matches!(self.open, Open::None)
             || (self.tabs.selected() == WHATSAPP_TAB && self.whatsapp.read(cx).can_go_back())
             || self.tabs.selected() != CHATS_TAB
@@ -552,8 +931,24 @@ impl MessagesApp {
     fn go_back(&mut self, cx: &mut Context<Self>) {
         if self.schedule.is_open() {
             self.close_schedule(cx);
+        } else if let Some(menu) = &mut self.row_menu {
+            // The mute lengths step back to the menu, the menu closes.
+            if menu.mute_choices {
+                menu.mute_choices = false;
+            } else {
+                self.row_menu = None;
+            }
+            cx.notify();
+        } else if let Open::WhatsApp(_, conversation) = &self.open
+            && conversation.update(cx, |c, cx| c.go_back(cx))
+        {
+            // The conversation closed one of its own layers (menu, reply, edit).
         } else if !matches!(self.open, Open::None) {
             self.close_page(cx);
+        } else if self.show_archived && self.tabs.selected() == CHATS_TAB {
+            self.show_archived = false;
+            self.chat_list.scroll_to_top();
+            cx.notify();
         } else if self.tabs.selected() == WHATSAPP_TAB
             && self
                 .whatsapp
@@ -632,6 +1027,14 @@ impl MessagesApp {
         if !notifications::should_notify(open.as_ref(), &incoming) {
             return;
         }
+        // Muted in WhatsApp (here or on another device): stay quiet.
+        if self
+            .wa_info
+            .get(&message.chat)
+            .is_some_and(|info| info.meta.is_muted(now_ms()))
+        {
+            return;
+        }
         let thread = incoming.thread.clone();
         let known = self.wa_threads.iter().find(|t| t.id == thread);
         let is_group = known.map_or_else(|| message.chat.ends_with("@g.us"), |t| t.is_group);
@@ -639,10 +1042,17 @@ impl MessagesApp {
             .and_then(|t| t.title.clone())
             .or_else(|| self.title_of(&thread))
             .unwrap_or_else(|| jid_user(&message.chat).to_owned());
-        let sender_title = message
-            .sender
-            .as_deref()
-            .map_or_else(String::new, |jid| jid_user(jid).to_owned());
+        // The sender in a group: the contact, WhatsApp's name, the number.
+        let sender_title = message.sender.as_deref().map_or_else(String::new, |jid| {
+            let contact = self
+                .backend
+                .read(cx)
+                .contacts()
+                .match_number(&format!("+{}", jid_user(jid)))
+                .map(|c| c.display_name.clone());
+            let wa_name = self.avatars.read(cx).name(jid).map(str::to_owned);
+            display_name(contact.as_deref(), wa_name.as_deref(), jid)
+        });
         let arrival = Arrival {
             tag: notifications::thread_tag(&thread),
             title,
@@ -1077,6 +1487,9 @@ impl MessagesApp {
             }
         }));
         out.extend(self.schedule.render(theme, window, now_ms(), offset, cx));
+        if matches!(self.open, Open::None) {
+            out.extend(self.row_menu_overlay(theme, cx));
+        }
         out
     }
 
@@ -1120,6 +1533,22 @@ impl MessagesApp {
         .detach();
     }
 
+    /// The picture a row's avatar shows: the contact photo, else the
+    /// WhatsApp picture (both fetched only for rows on screen).
+    fn row_photo(&self, row: &RowView, cx: &mut Context<Self>) -> Option<(Arc<RenderImage>, f32)> {
+        if let Some(uri) = &row.avatar.photo_uri {
+            self.photos.update(cx, |photos, cx| photos.want(uri, cx));
+            if let Some(photo) = self.photos.read(cx).photo(uri) {
+                return Some(photo);
+            }
+        }
+        let jid = row.avatar.wa_jid.as_ref()?;
+        let picture_id = row.avatar.picture_id.as_deref();
+        self.avatars
+            .update(cx, |avatars, cx| avatars.want(jid, picture_id, cx));
+        self.avatars.read(cx).picture(jid)
+    }
+
     fn inbox_row(
         &self,
         theme: Theme,
@@ -1131,21 +1560,33 @@ impl MessagesApp {
         let title = row.title.clone();
         let code = row.otp.clone();
         let copied = code.is_some() && self.copied == code;
+        let photo = self.row_photo(row, cx);
+        let menu = row.wa_chat.clone().map(|jid| {
+            let title = row.title.clone();
+            Box::new(cx.listener(move |this, _, _, cx| {
+                this.open_row_menu(jid.to_string(), title.clone(), cx);
+            })) as Box<dyn Fn(&gpui::LongPressEvent, &mut Window, &mut App)>
+        });
+        let open_title = title.clone();
         inbox::row_element(
             theme,
             index,
             row,
-            copied,
-            Box::new(cx.listener(move |this, _, _, cx| {
-                if let Some(thread) = thread.clone() {
-                    this.open_thread(thread, title.to_string(), cx);
-                }
-            })),
-            Box::new(cx.listener(move |this, _, _, cx| {
-                if let Some(code) = code.clone() {
-                    this.copy_code(code, cx);
-                }
-            })),
+            RowExtras {
+                photo,
+                copied,
+                open: Box::new(cx.listener(move |this, _, _, cx| {
+                    if let Some(thread) = thread.clone() {
+                        this.open_thread(thread, open_title.to_string(), cx);
+                    }
+                })),
+                copy_code: Box::new(cx.listener(move |this, _, _, cx| {
+                    if let Some(code) = code.clone() {
+                        this.copy_code(code, cx);
+                    }
+                })),
+                menu,
+            },
         )
     }
 
@@ -1181,10 +1622,13 @@ impl MessagesApp {
             .into_any_element()
     }
 
-    /// The rows the Chats list shows now: the Spam filter's or the inbox's.
+    /// The rows the Chats list shows now: the Spam filter's, the archived
+    /// chats or the inbox's.
     fn shown_rows(&self) -> &[RowView] {
         if self.show_spam {
             &self.view.spam
+        } else if self.show_archived {
+            &self.view.archived
         } else {
             &self.view.rows
         }
@@ -1201,6 +1645,7 @@ impl MessagesApp {
         let layout = ChatLayout {
             view_gen: self.view_gen,
             show_spam: self.show_spam,
+            show_archived: self.show_archived,
             role_held,
             state,
         };
@@ -1214,22 +1659,40 @@ impl MessagesApp {
         }
         if self.show_spam {
             items.push(ChatItem::SpamBack);
-        } else if !self.view.spam.is_empty() {
-            items.push(ChatItem::SpamFilter);
+        } else if self.show_archived {
+            items.push(ChatItem::ArchivedBack);
+        } else {
+            if !self.view.archived.is_empty() {
+                items.push(ChatItem::ArchivedFilter);
+            }
+            if !self.view.spam.is_empty() {
+                items.push(ChatItem::SpamFilter);
+            }
         }
         let rows = self.shown_rows();
         items.extend((0..rows.len()).map(ChatItem::Row));
-        if !self.show_spam && self.view.rows.is_empty() && self.view.spam.is_empty() {
+        if !self.show_spam
+            && !self.show_archived
+            && self.view.rows.is_empty()
+            && self.view.spam.is_empty()
+            && self.view.archived.is_empty()
+        {
             items.push(ChatItem::Empty);
         }
         items.push(ChatItem::Tail);
         let keys = items
             .iter()
             .map(|item| match *item {
-                ChatItem::Row(index) => key_of((1u8, self.show_spam, &rows[index])),
+                ChatItem::Row(index) => {
+                    key_of((1u8, self.show_spam, self.show_archived, &rows[index]))
+                }
                 ChatItem::SpamFilter => {
                     key_of((2u8, self.view.spam.len(), self.view.spam_unread()))
                 }
+                ChatItem::ArchivedFilter => {
+                    key_of((7u8, self.view.archived.len(), self.view.archived_unread()))
+                }
+                ChatItem::ArchivedBack => key_of(8u8),
                 ChatItem::Empty => key_of((3u8, state)),
                 ChatItem::Title => key_of(0u8),
                 ChatItem::RoleBanner => key_of(4u8),
@@ -1291,6 +1754,47 @@ impl MessagesApp {
                 cx.notify();
             }))
             .into_any_element(),
+            ChatItem::ArchivedBack => list_row(theme, None, "Inbox", Some("Archived".into()), None)
+                .id("archived-back")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.show_archived = false;
+                    this.chat_list.scroll_to_top();
+                    cx.notify();
+                }))
+                .into_any_element(),
+            ChatItem::ArchivedFilter => {
+                let unread = self.view.archived_unread();
+                let count = self.view.archived.len();
+                let icon = div()
+                    .size(px(44.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        gpui::svg()
+                            .path(Icon::LucideArchive.path())
+                            .size(px(22.0))
+                            .text_color(colors.secondary_label),
+                    )
+                    .into_any_element();
+                list_row(
+                    theme,
+                    Some(icon),
+                    "Archived",
+                    Some(
+                        format!("{count} chat{}", if count == 1 { "" } else { "s" }).into(),
+                    ),
+                    (unread > 0).then(|| unread.to_string().into()),
+                )
+                .id("archived-filter")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.show_archived = true;
+                    this.chat_list.scroll_to_top();
+                    cx.notify();
+                }))
+                .into_any_element()
+            }
             ChatItem::SpamFilter => {
                 let unread = self.view.spam_unread();
                 let count = self.view.spam.len();
@@ -1316,8 +1820,14 @@ impl MessagesApp {
                 let Some(view) = self.shown_rows().get(row) else {
                     return div().into_any_element();
                 };
-                // Spam rows keep ids apart from the inbox's.
-                let id = if self.show_spam { 1000 + row } else { row };
+                // Spam and archived rows keep ids apart from the inbox's.
+                let id = if self.show_spam {
+                    1000 + row
+                } else if self.show_archived {
+                    2000 + row
+                } else {
+                    row
+                };
                 self.inbox_row(theme, id, view, cx)
             }
             ChatItem::Empty => match self.backend.read(cx).threads_state() {
@@ -1346,12 +1856,14 @@ impl Render for MessagesApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = current_theme(window);
         let mut motion = std::mem::take(&mut self.motion);
+        let fading = self.avatars.read(cx).fading() || self.photos.read(cx).fading();
         motion.frame_timed(window, |dt, real| {
             self.tabs.tick(dt)
                 | self.page.tick(dt)
                 | self.schedule.sheet.tick(dt)
                 | self.schedule.sheet.tick_real(real)
                 | self.pill.tick(dt)
+                | fading
         });
         self.motion = motion;
         let overlays = self.overlays(theme, window, cx);
@@ -1456,6 +1968,93 @@ impl Render for MessagesApp {
             .children(overlays)
             .into_any_element()
     }
+}
+
+/// One action of a menu card: an icon and a label, the whole width.
+pub(crate) fn menu_item(
+    theme: Theme,
+    id: impl Into<gpui::ElementId>,
+    icon: Icon,
+    label: SharedString,
+    color: Hsla,
+) -> gpui::Stateful<gpui::Div> {
+    let colors = theme::colors(theme);
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(px(12.0))
+        .px(px(16.0))
+        .min_h(metrics::MIN_HIT)
+        .rounded(px(14.0))
+        .hover(|s| s.bg(colors.label.opacity(0.06)))
+        .child(
+            gpui::svg()
+                .flex_none()
+                .path(icon.path())
+                .size(px(20.0))
+                .text_color(color),
+        )
+        .child(
+            div()
+                .text_size(typography::BODY.size)
+                .text_color(color)
+                .child(label),
+        )
+}
+
+/// A dimmed screen with a glass card of actions near the bottom. Tapping
+/// outside the card calls `dismiss`; the card itself swallows touches so the
+/// page under it never reacts.
+pub(crate) fn menu_card(
+    theme: Theme,
+    id: &'static str,
+    title: SharedString,
+    items: Vec<AnyElement>,
+    dismiss: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let colors = theme::colors(theme);
+    div()
+        .id(id)
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .flex()
+        .flex_col()
+        .justify_end()
+        .px(px(12.0))
+        .pb(px(28.0))
+        .bg(Hsla {
+            a: 0.4,
+            ..gpui::black()
+        })
+        .occlude()
+        .on_click(dismiss)
+        .child(
+            glass(GlassSpec::control(theme))
+                .occlude()
+                .w_full()
+                .rounded(px(26.0))
+                .shadow(shadow::glass(theme.is_dark()))
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .p(px(8.0))
+                .child(
+                    div()
+                        .px(px(16.0))
+                        .pt(px(8.0))
+                        .pb(px(4.0))
+                        .truncate()
+                        .text_size(typography::FOOTNOTE.size)
+                        .font_weight(typography::HEADLINE.weight)
+                        .text_color(colors.secondary_label)
+                        .child(title),
+                )
+                .children(items),
+        )
+        .into_any_element()
 }
 
 // Cold receivers (SMS, inline reply, FCM digest) ask Rust for decisions here (AD-MSG4).

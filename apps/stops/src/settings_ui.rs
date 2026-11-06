@@ -77,9 +77,12 @@ enum NoticeItem {
     Header,
     Intro,
     SendTo,
+    /// The search box, shown for long chat lists.
+    Search,
     /// Loading, failed or no chats: one row in place of the chats.
     Status,
-    Chat(usize),
+    /// Index into `chat_view`, and the chat's key.
+    Chat(usize, u64),
     /// The template field, its hint and the preview.
     Message {
         refused: bool,
@@ -105,7 +108,8 @@ impl NoticeItem {
                     ChatList::Failed(_) => 2,
                 },
             ),
-            Self::Chat(i) => lists::key(4, i as u64),
+            Self::Search => lists::key(8, 0),
+            Self::Chat(_, k) => lists::key(4, k),
             Self::Message { refused, custom } => {
                 lists::key(5, u64::from(refused) | (u64::from(custom) << 1))
             }
@@ -114,6 +118,17 @@ impl NoticeItem {
         }
     }
 }
+
+/// A stable key for a chat row, so a filtered list re-measures.
+fn chat_key(jid: &str) -> u64 {
+    // FNV-1a: deterministic across runs.
+    jid.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+/// Chats from this count on get a search box.
+const SEARCH_FROM: usize = 8;
 
 // ---- pure --------------------------------------------------------------------------
 
@@ -294,7 +309,6 @@ pub fn visible_chats(
 
 /// The single status row of the chat list, as (title, subtitle, trailing
 /// action), or `None` when chat rows show.
-#[allow(dead_code)] // wired up by a later step of the UX pass
 pub fn chat_status_text(
     list: &ChatList,
     query: &str,
@@ -472,6 +486,7 @@ impl StopsApp {
         match page {
             SettingsPage::Notice => {
                 self.sync_template_field(cx);
+                self.chat_query.update(cx, |f, cx| f.set("", cx));
                 self.load_chats(false, cx);
             }
             SettingsPage::MapTiles => {
@@ -909,11 +924,28 @@ impl StopsApp {
             .as_ref()
             .is_some_and(|n| !n.chat.is_empty());
         let mut items = vec![NoticeItem::Header, NoticeItem::Intro, NoticeItem::SendTo];
-        match &self.chats {
-            ChatList::Ready(rows) if !rows.is_empty() => {
-                items.extend((0..rows.len()).map(NoticeItem::Chat));
+        let query = self.chat_query.read(cx).text().to_owned();
+        self.chat_view.clear();
+        if let ChatList::Ready(rows) = &self.chats {
+            if rows.len() > SEARCH_FROM {
+                items.push(NoticeItem::Search);
             }
-            _ => items.push(NoticeItem::Status),
+            let selected = self
+                .prefs
+                .notice
+                .as_ref()
+                .filter(|n| !n.chat.is_empty())
+                .map(|n| (n.chat.as_str(), n.chat_name.as_str()));
+            self.chat_view = visible_chats(rows, &query, selected, MAX_CHATS);
+        }
+        items.extend(
+            self.chat_view
+                .iter()
+                .enumerate()
+                .map(|(i, r)| NoticeItem::Chat(i, chat_key(&r.jid))),
+        );
+        if chat_status_text(&self.chats, &query).is_some() {
+            items.push(NoticeItem::Status);
         }
         if chosen {
             // A refused template adds an error line under the field.
@@ -986,36 +1018,42 @@ impl StopsApp {
                 false,
             ),
             NoticeItem::SendTo => lists::section_header(theme, "Send to", 20.0),
+            NoticeItem::Search => div()
+                .px(px(16.0))
+                .pb(px(6.0))
+                .child(field_box(
+                    theme,
+                    "chat-search",
+                    &self.chat_query,
+                    "Search chats",
+                    window,
+                    cx,
+                ))
+                .into_any_element(),
             NoticeItem::Status => {
-                let row = match &self.chats {
-                    ChatList::Failed(reason) => list_row(
-                        theme,
-                        None,
-                        "Could not load your chats",
-                        Some(reason.clone().into()),
-                        Some("Retry".into()),
-                    )
-                    .id("chats-retry")
-                    .on_click(cx.listener(|this, _, _, cx| this.load_chats(true, cx)))
-                    .into_any_element(),
-                    ChatList::Ready(_) => list_row(
-                        theme,
-                        None,
-                        "No chats yet",
-                        Some("Chats appear after history sync.".into()),
-                        None,
-                    )
-                    .into_any_element(),
-                    ChatList::Idle | ChatList::Loading => {
-                        list_row(theme, None, "Loading chats...", None, None).into_any_element()
-                    }
+                let query = self.chat_query.read(cx).text().to_owned();
+                let Some((title, subtitle, action)) = chat_status_text(&self.chats, &query) else {
+                    return div().into_any_element();
+                };
+                let retry = action.is_some();
+                let row = list_row(
+                    theme,
+                    None,
+                    title,
+                    subtitle.map(Into::into),
+                    action.map(Into::into),
+                );
+                let row = if retry {
+                    row.id("chats-retry")
+                        .on_click(cx.listener(|this, _, _, cx| this.load_chats(true, cx)))
+                        .into_any_element()
+                } else {
+                    row.into_any_element()
                 };
                 lists::grouped(theme, lists::Place::ALONE, row).into_any_element()
             }
-            NoticeItem::Chat(i) => {
-                let ChatList::Ready(rows) = &self.chats else {
-                    return div().into_any_element();
-                };
+            NoticeItem::Chat(i, _) => {
+                let rows = &self.chat_view;
                 let Some(chat) = rows.get(i) else {
                     return div().into_any_element();
                 };
@@ -1438,9 +1476,7 @@ impl StopsApp {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.chats = match result {
-                    Ok(chats) => {
-                        ChatList::Ready(visible_chats(&chat_rows(&chats), "", None, MAX_CHATS))
-                    }
+                    Ok(chats) => ChatList::Ready(chat_rows(&chats)),
                     Err(error) => ChatList::Failed(error.to_string()),
                 };
                 cx.notify();
@@ -1503,9 +1539,19 @@ mod tests {
         assert_ne!(message(false, false), message(false, true));
         assert_ne!(message(true, false), message(false, true));
         assert_ne!(
-            NoticeItem::Chat(0).key(&ChatList::Idle),
-            NoticeItem::Chat(1).key(&ChatList::Idle)
+            NoticeItem::Chat(0, chat_key("a@s.whatsapp.net")).key(&ChatList::Idle),
+            NoticeItem::Chat(0, chat_key("b@s.whatsapp.net")).key(&ChatList::Idle)
         );
+        assert_ne!(
+            NoticeItem::Search.key(&ChatList::Idle),
+            NoticeItem::SendTo.key(&ChatList::Idle)
+        );
+    }
+
+    #[test]
+    fn chat_key_is_stable_and_distinct() {
+        assert_eq!(chat_key("a@g.us"), chat_key("a@g.us"));
+        assert_ne!(chat_key("a@g.us"), chat_key("b@g.us"));
     }
 
     #[test]

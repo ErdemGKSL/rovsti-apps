@@ -57,7 +57,7 @@ mod trip_ui;
 
 use backend::Preflight;
 use picker::{Destination, SheetMode};
-use settings_ui::{ChatList, SettingsPage};
+use settings_ui::{ChatList, ChatRow, SettingsPage};
 use trip_ui::{AlarmView, Live};
 
 const TABS: [&str; 3] = ["Trip", "Saved", "Settings"];
@@ -159,6 +159,10 @@ pub(crate) struct StopsApp {
     pub(crate) tile_testing: bool,
     /// The chats the message can go to.
     pub(crate) chats: ChatList,
+    /// The search box of the chat picker.
+    pub(crate) chat_query: Entity<TextField>,
+    /// The chat rows the picker shows now (filtered, capped).
+    pub(crate) chat_view: Vec<ChatRow>,
     /// Clear history was tapped once.
     pub(crate) confirm_clear: bool,
     /// The History row whose actions (Use, Delete) are showing.
@@ -185,6 +189,8 @@ impl StopsApp {
         let template_field = cx.new(TextField::new);
         let tile_field = cx.new(TextField::new);
         cx.observe(&tile_field, |_, _, cx| cx.notify()).detach();
+        let chat_query = cx.new(TextField::new);
+        cx.observe(&chat_query, |_, _, cx| cx.notify()).detach();
         cx.observe(&template_field, |this, _, cx| this.on_template_edited(cx))
             .detach();
 
@@ -318,6 +324,8 @@ impl StopsApp {
             tile_field,
             tile_testing: false,
             chats: ChatList::default(),
+            chat_query,
+            chat_view: Vec::new(),
             confirm_clear: false,
             history_open: None,
             confirm_remove_feed: false,

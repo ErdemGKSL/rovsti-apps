@@ -175,4 +175,4 @@ If `df` shows under 6 GB free (it shows 6.5 GB at planning time), `rm -rf target
 
 ## Status
 
-Planned; not started.
+Step 8 done (restore asks for the role first with Make default and keeps the opened archive; Reset settings with confirm and Undo; acceptance rows 64 to 72 and roadmap line added). Checks run by the implement agent.

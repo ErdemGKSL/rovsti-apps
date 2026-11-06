@@ -253,7 +253,6 @@ pub const RESTORE_NEEDS_ROLE: &str =
 
 /// Whether a restore must wait for the role: it is not held and this is not
 /// just the preview (which reads the archive without writing).
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn restore_blocked(role_held: bool, preview: bool) -> bool {
     !role_held && !preview
 }

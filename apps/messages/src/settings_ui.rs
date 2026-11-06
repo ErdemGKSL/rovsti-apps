@@ -40,7 +40,11 @@ use crate::{
     backend::{Backend, BackendEvent, now_ms},
     backup_ui::{self, BackupState, Busy, Issue},
     notifications::parse_tag,
+    prefs::MessagesPrefs,
 };
+
+/// Said before "Reset settings" does anything.
+pub const RESET_CONFIRM: &str = "Spam rules, notification switches and mutes go back to the defaults. Blocked numbers and the WhatsApp link stay.";
 
 /// The largest archive the picker may hand over.
 const IMPORT_MAX_BYTES: u64 = 64 * 1024 * 1024;
@@ -67,6 +71,8 @@ pub enum SettingsUndo {
     Allow(String),
     Block(String),
     Mute(String),
+    /// The settings as they were before "Reset settings".
+    Prefs(Box<MessagesPrefs>),
 }
 
 impl EventEmitter<SettingsEvent> for SettingsView {}
@@ -182,6 +188,8 @@ pub struct SettingsView {
     /// The archive the picker copied into the app's cache.
     picked: Option<String>,
     restore: Option<Restore>,
+    /// "Reset settings" was tapped and waits for "Reset".
+    reset_confirm: bool,
     /// WhatsApp chat titles by JID, for the names in Muted.
     wa_titles: HashMap<String, String>,
     _subscriptions: Vec<gpui::Subscription>,
@@ -237,6 +245,7 @@ impl SettingsView {
             export_path: None,
             picked: None,
             restore: None,
+            reset_confirm: false,
             wa_titles: HashMap::new(),
             _subscriptions: subscriptions,
         }
@@ -610,6 +619,58 @@ impl SettingsView {
             .gap(px(8.0))
             .child(inner)
             .into_any_element()
+    }
+
+    fn reset_section(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        if self.backend.read(cx).prefs().is_reset() {
+            return div().into_any_element();
+        }
+        let rows = if self.reset_confirm {
+            vec![
+                Self::text_line(theme, RESET_CONFIRM, true),
+                Self::form_row(
+                    div()
+                        .flex()
+                        .gap(px(8.0))
+                        .child(
+                            glass_pill(theme, "Reset")
+                                .id("reset-confirm")
+                                .on_click(cx.listener(|this, _, _, cx| this.reset_settings(cx))),
+                        )
+                        .child(glass_pill(theme, "Cancel").id("reset-cancel").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.reset_confirm = false;
+                                cx.notify();
+                            }),
+                        )),
+                ),
+            ]
+        } else {
+            vec![
+                list_row(theme, None, "Reset settings", None, None)
+                    .id("set-reset")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.reset_confirm = true;
+                        cx.notify();
+                    }))
+                    .into_any_element(),
+            ]
+        };
+        section(theme, Some("Reset".into()), rows).into_any_element()
+    }
+
+    /// Back to the defaults (SIM choices stay); Undo puts the old settings back.
+    fn reset_settings(&mut self, cx: &mut Context<Self>) {
+        self.reset_confirm = false;
+        let old = self.backend.read(cx).prefs().clone();
+        let fresh = old.reset();
+        self.backend
+            .update(cx, |backend, cx| backend.update_prefs(cx, |p| *p = fresh));
+        cx.emit(SettingsEvent::Undoable {
+            text: "Settings reset".into(),
+            undo: SettingsUndo::Prefs(Box::new(old)),
+        });
+        cx.notify();
     }
 
     fn default_app(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -1020,14 +1081,26 @@ impl SettingsView {
                     line.push_str(&format!(", {} scheduled to send", preview.scheduled));
                 }
                 rows.push(Self::text_line(theme, format!("{line}."), false));
+                let blocked =
+                    backup_ui::restore_blocked(self.backend.read(cx).sms_role_held(), false);
+                if blocked {
+                    rows.push(Self::text_line(theme, backup_ui::RESTORE_NEEDS_ROLE, true));
+                }
                 rows.push(Self::form_row(
                     div()
                         .flex()
                         .gap(px(8.0))
-                        .child(
+                        .child(if blocked {
+                            pill("Make default", "backup-make-default").on_click(cx.listener(
+                                |this, _, _, cx| {
+                                    this.backend
+                                        .update(cx, |backend, cx| backend.request_sms_role(cx));
+                                },
+                            ))
+                        } else {
                             pill("Restore", "backup-restore")
-                                .on_click(cx.listener(|this, _, _, cx| this.confirm_restore(cx))),
-                        )
+                                .on_click(cx.listener(|this, _, _, cx| this.confirm_restore(cx)))
+                        })
                         .child(
                             pill("Cancel", "backup-cancel")
                                 .on_click(cx.listener(|this, _, _, cx| this.cancel_backup(cx))),
@@ -1083,6 +1156,7 @@ impl Render for SettingsView {
             .child(self.spam(theme, window, cx))
             .child(self.backup_section(theme, window, cx))
             .child(whatsapp)
+            .child(self.reset_section(theme, cx))
     }
 }
 

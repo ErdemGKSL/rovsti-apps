@@ -1557,6 +1557,11 @@ impl MessagesApp {
                 });
                 self.show_pill("Muted again");
             }
+            SettingsUndo::Prefs(old) => {
+                self.backend
+                    .update(cx, |backend, cx| backend.update_prefs(cx, |p| *p = *old));
+                self.show_pill("Settings restored");
+            }
             SettingsUndo::Block(raw) => self.reblock(raw, cx),
         }
         cx.notify();

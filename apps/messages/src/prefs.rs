@@ -65,7 +65,6 @@ impl Default for MessagesPrefs {
 impl MessagesPrefs {
     /// The defaults, except that the SIM choices stay: they are not a
     /// setting the user can see.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn reset(&self) -> MessagesPrefs {
         MessagesPrefs {
             sim_choices: self.sim_choices.clone(),
@@ -74,7 +73,6 @@ impl MessagesPrefs {
     }
 
     /// Whether the settings already equal [`MessagesPrefs::reset`].
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_reset(&self) -> bool {
         self.reset() == *self
     }
@@ -193,6 +191,21 @@ mod tests {
         assert_eq!(reset.sim_choices.get(&4), Some(&2));
         assert!(reset.notifications && reset.otp_copy && reset.muted.is_empty());
         assert_eq!(reset.spam, MessagesPrefs::default().spam);
+    }
+
+    #[test]
+    fn undoing_a_reset_brings_everything_back() {
+        let mut prefs = MessagesPrefs::default();
+        prefs.sim_choices.insert(4, 2);
+        prefs.muted.insert("wa:x".into());
+        prefs.otp_copy = false;
+        let old = prefs.clone();
+        prefs = prefs.reset();
+        assert!(prefs.is_reset());
+        assert_ne!(prefs, old);
+        prefs = old.clone();
+        assert_eq!(prefs, old);
+        assert!(!prefs.is_reset());
     }
 
     #[test]

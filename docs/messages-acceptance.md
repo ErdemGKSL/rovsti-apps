@@ -86,3 +86,12 @@ APK: build with `gpuiforge build android` in `apps/messages`. Put `google-servic
 | 61 | Leave a chat with a half-written message. | The inbox row reads Draft: followed by the first line. | | |
 | 62 | Mute a few chats and open Settings. | Muted entries show contact or chat names, not raw numbers. | | |
 | 63 | Long press Send, use the - and + rows for the day and the time, tap Schedule. | The time moves in 15-minute steps (wrapping at midnight), the day up to 30 days ahead; the message is scheduled for the shown time. A past time is refused. The typed field still works. | | |
+| 64 | In a WhatsApp chat type text and press the keyboard Send key. | The message is sent, same as the Send button. | | |
+| 65 | Make a message fail (airplane mode), then long press the failed bubble. | Copy and Delete are offered next to Retry; Delete removes it. | | |
+| 66 | Open a received MMS picture or file in an SMS conversation. | A Save pill saves it through the system Save as dialog. | | |
+| 67 | Receive a message containing a link and long press it. | An Open link pill opens the link in the browser. | | |
+| 68 | Archive a WhatsApp chat; mute an SMS conversation. | A pill confirms each and offers Undo. | | |
+| 69 | Log the WhatsApp gateway out or go offline, open the inbox. | A banner says WhatsApp is offline or logged out; tapping it opens the WhatsApp tab. | | |
+| 70 | Open a conversation whose load failed. | The error text is tappable and retries the load. | | |
+| 71 | Without the default SMS role, open a backup in Settings and reach the preview. | The preview says the role is needed and shows Make default instead of Restore; after granting it, Restore appears without typing the passphrase again. | | |
+| 72 | Change spam rules and switches, then Settings, Reset settings, confirm with Reset. | Settings go back to the defaults (SIM choices stay, blocked numbers stay) and an Undo pill brings everything back. The Reset section is hidden when nothing differs. | | |

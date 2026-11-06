@@ -57,6 +57,7 @@ impl Notice {
         match self {
             Self::Preview => Some("Fix"),
             Self::NeedsPhone => Some("Grant"),
+            Self::WhatsApp(why) if why == crate::wa_call::NOT_CONNECTED => Some("Connect"),
             Self::System | Self::Failed | Self::WhatsApp(_) => None,
         }
     }
@@ -352,5 +353,29 @@ impl PhoneApp {
             _ => {}
         }
         cx.notify();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn not_connected_offers_connect() {
+        assert_eq!(
+            Notice::WhatsApp(crate::wa_call::NOT_CONNECTED).action(),
+            Some("Connect")
+        );
+    }
+
+    #[test]
+    fn other_whatsapp_reasons_have_no_action() {
+        assert_eq!(Notice::WhatsApp("Gateway unreachable").action(), None);
+    }
+
+    #[test]
+    fn preview_and_permission_actions() {
+        assert_eq!(Notice::Preview.action(), Some("Fix"));
+        assert_eq!(Notice::NeedsPhone.action(), Some("Grant"));
     }
 }

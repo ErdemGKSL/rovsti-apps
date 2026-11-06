@@ -125,6 +125,35 @@ struct T9Rows {
 
 /// The digits worth a T9 lookup: at least one, and nothing but digits (`+`,
 /// `*` and `#` are not T9).
+/// Title of the T9 results list.
+#[allow(dead_code)] // wired up by a later step
+pub(crate) fn results_title(digits: &str, count: usize) -> String {
+    if count == 1 {
+        format!("1 match for {digits}")
+    } else {
+        format!("{count} matches for {digits}")
+    }
+}
+
+/// Whether the "allow contacts" hint shows under the keypad.
+#[allow(dead_code)] // wired up by a later step
+pub(crate) fn contacts_hint_shown(denied: bool, digits_typed: bool, dismissed: bool) -> bool {
+    denied && digits_typed && !dismissed
+}
+
+/// Parses a T9 result row id: `sheet-t9-{i}` is (i, false), `sheet-t9c-{i}` is (i, true).
+#[allow(dead_code)] // wired up by a later step
+pub(crate) fn t9_result_index(id: &str) -> Option<(usize, bool)> {
+    if let Some(i) = id.strip_prefix("sheet-t9c-") {
+        i.parse().ok().map(|i| (i, true))
+    } else {
+        id.strip_prefix("sheet-t9-")?
+            .parse()
+            .ok()
+            .map(|i| (i, false))
+    }
+}
+
 fn t9_digits(dialed: &str) -> Option<&str> {
     (!dialed.is_empty() && dialed.bytes().all(|b| b.is_ascii_digit())).then_some(dialed)
 }
@@ -1478,6 +1507,30 @@ impl PhoneApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn results_title_pluralises() {
+        assert_eq!(results_title("52", 1), "1 match for 52");
+        assert_eq!(results_title("52", 0), "0 matches for 52");
+        assert_eq!(results_title("52", 3), "3 matches for 52");
+    }
+
+    #[test]
+    fn contacts_hint_needs_denied_digits_and_not_dismissed() {
+        assert!(contacts_hint_shown(true, true, false));
+        assert!(!contacts_hint_shown(false, true, false));
+        assert!(!contacts_hint_shown(true, false, false));
+        assert!(!contacts_hint_shown(true, true, true));
+    }
+
+    #[test]
+    fn t9_result_ids_parse() {
+        assert_eq!(t9_result_index("sheet-t9-3"), Some((3, false)));
+        assert_eq!(t9_result_index("sheet-t9c-12"), Some((12, true)));
+        assert_eq!(t9_result_index("sheet-t9-x"), None);
+        assert_eq!(t9_result_index("sheet-t9c-"), None);
+        assert_eq!(t9_result_index("other-1"), None);
+    }
 
     /// The static table must agree with the spoken-label rule of UX-DR22.
     fn expected_label(digit: &str, letters: &str) -> String {

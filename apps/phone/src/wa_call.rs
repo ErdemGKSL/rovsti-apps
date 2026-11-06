@@ -43,6 +43,9 @@ use rovsti_wa_proto::{
 };
 use rovsti_wa_ui::{StoredLink, WaAvatars, WhatsAppSettings};
 
+/// Shown when a WhatsApp call is wanted but no gateway link exists.
+pub(crate) const NOT_CONNECTED: &str = "WhatsApp is not connected";
+
 /// An ended call stays on screen this long, so "Call ended" can be read.
 const ENDED_HOLD: Duration = Duration::from_millis(2000);
 /// How often the pump asks Kotlin for microphone frames (a frame is 60 ms).
@@ -162,7 +165,7 @@ pub fn can_place(connected: bool, busy: bool, number: &str) -> Result<(), &'stat
     if number.trim().is_empty() {
         Err("No number to call")
     } else if !connected {
-        Err("WhatsApp is not connected")
+        Err(NOT_CONNECTED)
     } else if busy {
         Err("Another call is in progress")
     } else {
@@ -897,7 +900,7 @@ impl WaCallUi {
         }
         let settings = self.settings.read(cx);
         let (Some(gateway), Some(link)) = (settings.gateway(), settings.link().cloned()) else {
-            self.fail("WhatsApp is not connected", "no gateway link", cx);
+            self.fail(NOT_CONNECTED, "no gateway link", cx);
             return false;
         };
         self.answering = true;
@@ -960,7 +963,7 @@ impl WaCallUi {
         can_place(connected, busy, number)?;
         let settings = self.settings.read(cx);
         let (Some(gateway), Some(link)) = (settings.gateway(), settings.link().cloned()) else {
-            return Err("WhatsApp is not connected");
+            return Err(NOT_CONNECTED);
         };
         self.placing = true;
         self.error = None;
@@ -1040,7 +1043,7 @@ impl WaCallUi {
             return false;
         };
         let Some(gateway) = self.settings.read(cx).gateway() else {
-            self.fail("WhatsApp is not connected", "no gateway link", cx);
+            self.fail(NOT_CONNECTED, "no gateway link", cx);
             return false;
         };
         self.finish(cx);
@@ -1338,10 +1341,7 @@ mod tests {
     fn can_place_gives_a_reason() {
         assert_eq!(can_place(true, false, "+905551234567"), Ok(()));
         assert_eq!(can_place(true, false, "  "), Err("No number to call"));
-        assert_eq!(
-            can_place(false, false, "1"),
-            Err("WhatsApp is not connected")
-        );
+        assert_eq!(can_place(false, false, "1"), Err(NOT_CONNECTED));
         assert_eq!(
             can_place(true, true, "1"),
             Err("Another call is in progress")

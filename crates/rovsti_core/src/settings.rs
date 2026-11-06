@@ -436,6 +436,24 @@ fn changed_settings(a: &Settings, b: &Settings) -> usize {
 }
 
 impl ImportPreview {
+    /// A preview that restores `prefs` as they are (undo of an import or reset).
+    pub fn restoring(prefs: &PrefsV2) -> Self {
+        Self {
+            settings_changed: 0,
+            quick_replies: 0,
+            speed_dial: 0,
+            favorites: 0,
+            moved: Vec::new(),
+            clamped: false,
+            clean: Sections {
+                settings: prefs.settings.clone(),
+                quick_replies: prefs.quick_replies.clone(),
+                speed_dial: prefs.speed_dial.clone(),
+                favorites_order: prefs.favorites_order.clone(),
+            },
+        }
+    }
+
     /// Validates `file` (kind, version, bounds) against the `current` prefs.
     pub fn from(file: &BackupFile, current: &PrefsV2) -> Result<Self, ImportError> {
         if file.kind != BACKUP_KIND || file.v == 0 {
@@ -719,6 +737,42 @@ mod tests {
         p.speed_dial.insert(3, entry("k2", "0555 222"));
         p.favorites_order = vec!["k2".into(), "k1".into()];
         BackupFile::from_prefs(&p, 123, "0.2.0")
+    }
+
+    #[test]
+    fn restoring_a_snapshot_keeps_ui_state() {
+        let mut p = PrefsV2::default();
+        p.settings.haptics = HapticsLevel::Light;
+        p.quick_replies = vec!["Later".into()];
+        p.speed_dial.insert(2, entry("k1", "0555 111"));
+        p.favorites_order = vec!["k1".into()];
+        let snapshot = p.clone();
+        let restore = ImportPreview::restoring(&snapshot);
+
+        p.settings = Settings::default();
+        p.quick_replies.clear();
+        p.speed_dial.clear();
+        p.favorites_order.clear();
+        p.ui.last_tab = Some(2);
+        restore.apply_to(&mut p);
+
+        assert_eq!(p.settings, snapshot.settings);
+        assert_eq!(p.quick_replies, snapshot.quick_replies);
+        assert_eq!(p.speed_dial, snapshot.speed_dial);
+        assert_eq!(p.favorites_order, snapshot.favorites_order);
+        assert_eq!(p.ui.last_tab, Some(2));
+    }
+
+    #[test]
+    fn restoring_default_prefs_applies_cleanly() {
+        let snapshot = PrefsV2::default();
+        let restore = ImportPreview::restoring(&snapshot);
+        assert!(restore.moved.is_empty() && !restore.clamped);
+        let mut p = current();
+        restore.apply_to(&mut p);
+        assert_eq!(p.settings, snapshot.settings);
+        assert_eq!(p.quick_replies, snapshot.quick_replies);
+        assert!(p.speed_dial.is_empty() && p.favorites_order.is_empty());
     }
 
     #[test]

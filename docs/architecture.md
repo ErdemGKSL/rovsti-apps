@@ -64,7 +64,7 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 | Contacts | none | contacts provider (`READ_CONTACTS`, `WRITE_CONTACTS`); `INTERNET` for the gateway (WhatsApp only); Photo Picker for contact photos (no permission); handoff to Phone and Messages (`dev.rovsti.permission.HANDOFF`, signature); call, SMS, share and edit go through the same `RovstiBridge` intents as Phone |
 | Stops | none | foreground service of type `location` (`TripService`) feeding fixes to `rovsti_geo::ActiveTrip` through the headless call, `AlarmActivity` (native Views over the lock screen, full-screen intent), `USE_EXACT_ALARM` for snooze and the watchdog (`setAlarmClock`, `setExactAndAllowWhileIdle` as fallback), boot receiver that ends a stale trip; `INTERNET` for the gateway (the arriving-soon message only); `geo:` and maps-link `VIEW` filters and `SEND text/plain` |
 
-### Stops: decisions (AD-ST1 to AD-ST8)
+### Stops: decisions (AD-ST1 to AD-ST8, AD-SX1 to AD-SX8)
 
 - **AD-ST1 Pure first.** The trip session, destination parsing, saved places, history and
   statistics, prefs, the arriving-soon template, GTFS parsing and the map projection are
@@ -81,16 +81,16 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   its own alarm screen only while the app is open.
 - **AD-ST4 Map: no tiles.** A bundled region bloats the APK and goes stale, and there is no tile
   renderer for GPUI here. The map is a vector radar drawn with `canvas` and `PathBuilder`
-  (destination, alarm ring, position, breadcrumb, GTFS stops and the chosen line) over
+  (A and B, the circle with the diameter line and its left and right halves, position, breadcrumb, GTFS stops and the chosen line) over
   `rovsti_geo::view`.
-- **AD-ST5 Destinations are local.** Sources are `geo:` URIs and maps links (shared, opened or
+- **AD-ST5 Points are local.** A and B each come from the same sources: are `geo:` URIs and maps links (shared, opened or
   pasted), saved places, recent trips and GTFS stops. No geocoding: a link without coordinates is
   refused and nothing is fetched to resolve it.
 - **AD-ST6 GTFS is optional and local.** A `.zip` picked with the file picker is parsed on the
-  background executor into `gtfs.json` (caps on stops, patterns and rows). It enables the rule
-  "N stops before" (`AlarmRule::BeforeStop`) and the stops on the map.
+  background executor into `gtfs.json` (caps on stops, patterns and rows). It names stops
+  (a point source for A or B) and draws them and their lines on the map; it has no alarm rule.
 - **AD-ST7 The arriving-soon message is opt-in and goes through the gateway.** Settings picks one
-  chat (`Gateway::chats()`, groups allowed), a template (`{stop}`, `{min}`, at most 500 characters,
+  chat (`Gateway::chats()`, groups allowed), a template (`{stop}` is B, `{min}`, at most 500 characters,
   validated by `notice::validate`, previewed with `notice::render`) and when: with the alarm, or
   5, 10 or 15 minutes before. The page shows only while WhatsApp is connected, otherwise a row points
   to Settings > WhatsApp. It is saved in `stops-prefs.json` and can be switched off per trip on the
@@ -99,6 +99,31 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
 - **AD-ST8 History is local.** `history.json` (cap 500, newest first) holds each ended trip. The
   Settings > History page lists the latest 100 and shows `History::stats` (trips, arrived share,
   total distance, average length, last 30 days, top three places). Clear takes two taps.
+
+The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius, ETA and
+"N stops before" rules are gone.
+
+- **AD-SX1 Geometry is local metres.** Equirectangular projection around the midpoint of AB
+  (`EARTH_RADIUS_M`, longitude wrapped); fine for city-scale circles, so the diameter is capped.
+- **AD-SX2 Side.** The signed offset from the line A to B decides: positive is left (facing B),
+  negative right. Within max(10 m, fix accuracy) of the line the side is unknown and the last
+  confident side is kept.
+- **AD-SX3 Detection by segment test.** When a confident fix lands on the other side (either
+  direction), the alarm fires only if the path from the last confident fix to this one intersects
+  the segment AB. Sparse fixes still fire; going round the circle never does. Fixes worse than
+  150 m are ignored. One fire per trip, then Arrived.
+- **AD-SX4 Input limits.** A and B must be 20 m to 50 km apart and valid coordinates;
+  `DiameterError::message` gives the user sentence, and a stored `Diameter` that breaks it is
+  refused on load.
+- **AD-SX5 Polling.** Slack is the distance to AB minus accuracy and dead band; next fix in
+  `(slack / 60 m/s / 2)` clamped to 3..300 s, high accuracy at 15 s or less (as the old trip).
+- **AD-SX6 Notice.** "With the alarm" sends with the crossing; "N min before" sends when the
+  time to the circle edge is within N minutes, or when the fix is already inside the circle.
+- **AD-SX7 Superseded code is removed.** `AlarmRule`, `RuleChoice`, the "Wake me" chips,
+  per-place and per-trip rules, the line-aware stop-wake helpers. GTFS import stays.
+- **AD-SX8 Old state.** A `trip.json` of the old shape does not parse; `store::load_trip` renames
+  it to `trip.legacy.json` and answers "ended". Old history records still load and appear as
+  single recent points, never as pairs; unknown `rule` keys in places and prefs are ignored.
 
 ### Contacts: decisions (AD-CT1 to AD-CT6)
 

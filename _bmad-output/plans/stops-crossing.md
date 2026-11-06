@@ -247,3 +247,17 @@ The breaking step; it removes the old rule and keeps the app compiling with a mi
 
 All seven steps landed with checks green, `rg -n "AlarmRule|RuleChoice|BeforeStop|stop_wake"`
 over `crates/ apps/` finds nothing, and the roadmap describes the crossing trigger.
+
+## Status
+
+| Step | What | Status |
+| --- | --- | --- |
+| 1 | Diameter geometry and crossing watcher | done |
+| 2 | Crossing trip machine | done |
+| 3 | Session, stored data and non-GPUI app switch | done |
+| 4 | Picking UI: A, B, swap | done |
+| 5 | Map preview: circle, diameter, halves | done |
+| 6 | Live status, alarm and history texts | done |
+| 7 | Docs | done |
+
+The device check in `docs/roadmap.md` stays open (no device).

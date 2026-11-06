@@ -103,14 +103,19 @@ list in `docs/phone-acceptance.md`.
 
 ## Rovsti Stops
 
-- [x] Foreground location service → `Trip::update`, using `next_fix_in` for battery
+- [x] Foreground location service → `CrossingTrip::update`, using `next_fix_in` for battery
       (done without a device)
 - [x] Full-screen alarm with sound, vibration and snooze, which survives Doze
       (done without a device)
-- [x] Pick destination: from shared `geo:` URIs and maps links, saved stops, and the last trips
-      (done without a device)
+- [x] Diameter-crossing trigger: pick two points A and B (shared `geo:` URIs and maps links, saved
+      places, recent trips, GTFS stops). The circle has AB as its diameter; the line AB splits it
+      into a left and a right half (facing A to B), both shown on the map. Crossing from one half
+      to the other inside the circle fires the alarm in either direction. A dead band of
+      max(10 m, fix accuracy) around the line keeps GPS jitter quiet, and a crossing counts only
+      when the path between the last confident fixes cuts the segment AB, so sparse fixes still
+      fire and passing outside the circle never does (done without a device)
 - [x] Offline map tiles or a minimal vector map (decided: vector radar map, no tiles)
-- [x] Optional GTFS import for stop names and line-aware alarms ("2 stops before")
+- [x] Optional GTFS import: stop names and lines on the map; a stop is a point source for A or B
       (done without a device)
 - [x] Trip history and statistics, all local (done without a device)
 - [x] Arriving-soon WhatsApp message: one chat, a template, with the alarm or 5/10/15 min

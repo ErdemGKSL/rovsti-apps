@@ -148,8 +148,16 @@ finds MIUI or HyperOS, and the exact-alarm status.
 HyperOS can still delay location for a foreground service; the battery and autostart rows are the
 mitigation. None of this has run on a phone: the open item is in [roadmap.md](roadmap.md#rovsti-stops).
 
+**Trigger and `FixOut`.** The service is trigger-agnostic: it reads `state`, `ring`, `next_fix_ms`,
+`high_accuracy`, `title` and `text`. `distance_m` is now the distance to the line A-B. New fields,
+all optional so older answers still parse: `side` (`"left"`, `"right"` or absent when on the line),
+`inside` (bool, in the circle) and `circle_m` (metres to the circle, 0 inside). A `trip.json` of the
+old single-destination shape is moved to `trip.legacy.json` and the service is answered
+`{"state":"ended"}`.
+
 Desktop: `ROVSTI_STOPS_SIMULATE=1 cargo run -p rovsti_stops` feeds synthetic fixes through the same
-headless handler. Build on Android: `gpuiforge build android` in `apps/stops`.
+headless handler; the simulator starts 2 km left of the midpoint and walks across the diameter to
+the right side, so the alarm rings once. Build on Android: `gpuiforge build android` in `apps/stops`.
 
 ## WhatsApp push and call audio
 

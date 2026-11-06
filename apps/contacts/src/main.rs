@@ -971,7 +971,14 @@ impl ContactsApp {
     ) -> AnyElement {
         list(
             list_state.clone(),
-            cx.processor(move |this, ix: usize, window, cx| item(this, ix, window, cx)),
+            // A list item is sized to its content unless told otherwise: a flex header or row
+            // would shrink to its text and leave the rest of the screen empty.
+            cx.processor(move |this, ix: usize, window, cx| {
+                div()
+                    .w_full()
+                    .child(item(this, ix, window, cx))
+                    .into_any_element()
+            }),
         )
         .size_full()
         .pb(bottom)

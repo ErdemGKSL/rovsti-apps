@@ -27,7 +27,7 @@ pub use crossing::{
     Crossing, CrossingTrip, CrossingUpdate, CrossingWatch, DEAD_BAND_M, Diameter, DiameterError,
     Endpoint, MAX_DIAMETER_M, MIN_DIAMETER_M, NoticeRule, Side, SideReading,
 };
-pub use dest::{DestError, SharedPlace, parse_location};
+pub use dest::{DestError, SharedPlace, parse_location, share_text};
 pub use gtfs::{Feed, FeedBuilder, FeedReport, GtfsError, Pattern, Route, Stop, read_zip};
 pub use history::{History, Outcome, Stats, TripRecord};
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};

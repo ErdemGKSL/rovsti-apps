@@ -26,13 +26,15 @@ use crate::{
 const MAX_STOP_HITS: usize = 20;
 
 /// Where a trip is headed.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Destination {
     pub label: String,
     pub coord: Coord,
     /// The transit stop this is, when it came from an imported feed.
+    #[serde(default)]
     pub gtfs_stop: Option<String>,
     /// The line it was chosen on in the stop sheet, drawn on the map.
+    #[serde(default)]
     pub pattern: Option<u32>,
 }
 
@@ -113,7 +115,7 @@ impl Slot {
 }
 
 /// The two points chosen so far.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Ends {
     pub a: Option<Destination>,
     pub b: Option<Destination>,

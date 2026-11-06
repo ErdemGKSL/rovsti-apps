@@ -21,7 +21,10 @@ use rovsti_geo::{
 use rovsti_ui::storage;
 use serde_json::json;
 
-use crate::store::{self, now_ms};
+use crate::{
+    picker::Ends,
+    store::{self, now_ms},
+};
 
 /// The speed of the simulated vehicle, metres per second.
 const SIM_SPEED_MPS: f64 = 50.0;
@@ -37,6 +40,8 @@ pub struct Data {
     pub saved: SavedPlaces,
     pub history: History,
     pub trip: Option<ActiveTrip>,
+    #[allow(dead_code, reason = "wired to the UI in a later step")]
+    pub draft: Ends,
     pub gtfs: Option<Arc<Feed>>,
 }
 
@@ -47,6 +52,7 @@ pub fn load(dir: &Path) -> Data {
         saved: storage::load_json(dir, store::SAVED_FILE).unwrap_or_default(),
         history: storage::load_json(dir, store::HISTORY_FILE).unwrap_or_default(),
         trip: store::load_trip(dir),
+        draft: storage::load_json(dir, store::DRAFT_FILE).unwrap_or_default(),
         gtfs: storage::load_json::<Feed>(dir, store::GTFS_FILE).map(|feed| {
             // Build the lookup index here, off the UI thread, not on the first search.
             let _ = feed.patterns_through(0);
@@ -71,6 +77,12 @@ pub fn save_prefs(dir: &Path, prefs: &StopsPrefs) {
 
 pub fn save_places(dir: &Path, saved: &SavedPlaces) {
     log_save(storage::save_json(dir, store::SAVED_FILE, saved));
+}
+
+/// Writes the A and B being picked.
+#[allow(dead_code, reason = "wired to the UI in a later step")]
+pub fn save_draft(dir: &Path, ends: &Ends) {
+    log_save(storage::save_json(dir, store::DRAFT_FILE, ends));
 }
 
 /// Empties the history. Holds the trip lock like `store::end_trip`, which
@@ -444,6 +456,28 @@ mod tests {
             notifications: n,
             ..Preflight::default()
         }
+    }
+
+    #[test]
+    fn the_draft_round_trips() {
+        let dir = tmp("draft-rt");
+        let ends = Ends {
+            a: Some(crate::picker::Destination {
+                gtfs_stop: Some("S1".into()),
+                pattern: Some(7),
+                ..crate::picker::Destination::new("Home", Coord::new(41.0, 29.0))
+            }),
+            b: None,
+        };
+        save_draft(&dir, &ends);
+        assert_eq!(load(&dir).draft, ends);
+    }
+
+    #[test]
+    fn a_corrupt_draft_reads_as_empty() {
+        let dir = tmp("draft-bad");
+        std::fs::write(dir.join(store::DRAFT_FILE), "{nope").unwrap();
+        assert_eq!(load(&dir).draft, Ends::default());
     }
 
     #[test]

@@ -45,6 +45,20 @@ impl std::fmt::Display for DestError {
 
 impl std::error::Error for DestError {}
 
+/// Text to share a place: the name (if any) on its own line, then an
+/// OpenStreetMap link that `parse_location` reads back.
+pub fn share_text(label: &str, coord: Coord) -> String {
+    let link = format!(
+        "https://www.openstreetmap.org/?mlat={lat:.5}&mlon={lon:.5}#map=17/{lat:.5}/{lon:.5}",
+        lat = coord.lat,
+        lon = coord.lon
+    );
+    match label.trim() {
+        "" => link,
+        name => format!("{name}\n{link}"),
+    }
+}
+
 /// Finds a destination in free text. The first location link wins; a plain
 /// `lat, lon` line is the fallback.
 pub fn parse_location(text: &str) -> Result<SharedPlace, DestError> {
@@ -469,6 +483,16 @@ mod tests {
         assert!((a.0 - lat).abs() < 1e-6, "lat {a:?}");
         assert!((a.1 - lon).abs() < 1e-6, "lon {a:?}");
         assert_eq!(a.2.as_deref(), label, "label {a:?}");
+    }
+
+    #[test]
+    fn share_text_round_trips() {
+        let c = Coord::new(41.02567, 28.97413);
+        let text = share_text(" Home ", c);
+        assert!(text.starts_with("Home\nhttps://"));
+        let back = parse_location(&text).unwrap().coord;
+        assert!((back.lat - c.lat).abs() < 1e-5 && (back.lon - c.lon).abs() < 1e-5);
+        assert!(share_text("  ", c).starts_with("https://"));
     }
 
     #[test]

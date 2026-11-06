@@ -70,6 +70,17 @@ pub fn save_prefill(dest: &Destination) -> String {
     dest.label.trim().to_owned()
 }
 
+/// A stored endpoint as a destination: generic labels ("Point A") mean no
+/// name, and a saved place within reach gives its current name.
+#[allow(dead_code, reason = "wired to the UI in a later step")]
+pub fn dest_from_endpoint(ep: &Endpoint, saved: &SavedPlaces) -> Destination {
+    let dest = match ep.label.trim() {
+        "" | "Point" | "Point A" | "Point B" => Destination::dropped(ep.coord),
+        label => Destination::new(label, ep.coord),
+    };
+    dest.named_from(saved)
+}
+
 /// The toast after trying to save a place.
 pub fn save_result_text(result: &Result<u64, PlaceError>, saved: &SavedPlaces) -> String {
     let name = |id: &u64| saved.get(*id).map(|p| p.name.clone()).unwrap_or_default();
@@ -358,6 +369,43 @@ mod tests {
         b.windows(5)
             .any(|w| w[0].is_ascii_digit() && w[1] == b'.' && w[2..].iter().all(u8::is_ascii_digit))
             || text.contains(", ") && text.split(", ").all(|p| p.parse::<f64>().is_ok())
+    }
+
+    #[test]
+    fn endpoint_labelled_point_a_is_unnamed_as_b() {
+        let ep = Endpoint {
+            label: "Point A".into(),
+            coord: Coord::new(41.0, 29.0),
+        };
+        let d = dest_from_endpoint(&ep, &SavedPlaces::default());
+        assert!(!d.is_named());
+        assert_eq!(point_label(Slot::B, Some(&d)), "Point B");
+    }
+
+    #[test]
+    fn endpoint_near_a_renamed_place_takes_the_new_name() {
+        let mut saved = SavedPlaces::default();
+        saved
+            .save("Work", Coord::new(41.0, 29.0), Some("W1".into()))
+            .unwrap();
+        let ep = Endpoint {
+            label: "Old name".into(),
+            coord: Coord::new(41.0, 29.0001),
+        };
+        let d = dest_from_endpoint(&ep, &saved);
+        assert_eq!(d.label, "Work");
+        assert_eq!(d.gtfs_stop.as_deref(), Some("W1"));
+    }
+
+    #[test]
+    fn a_named_far_endpoint_keeps_its_label() {
+        let mut saved = SavedPlaces::default();
+        saved.save("Work", Coord::new(41.0, 29.0), None).unwrap();
+        let ep = Endpoint {
+            label: " Pier ".into(),
+            coord: Coord::new(41.0, 29.1),
+        };
+        assert_eq!(dest_from_endpoint(&ep, &saved).label, "Pier");
     }
 
     #[test]

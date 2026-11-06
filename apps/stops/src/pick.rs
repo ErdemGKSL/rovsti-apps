@@ -103,7 +103,6 @@ pub fn save_result_text(result: &Result<u64, PlaceError>, saved: &SavedPlaces) -
 }
 
 /// The hint while a saved place is being moved.
-#[allow(dead_code)] // wired up by a later step
 pub fn relocate_hint(name: &str) -> String {
     if name.is_empty() {
         "Tap the map to move the place".to_owned()
@@ -113,7 +112,6 @@ pub fn relocate_hint(name: &str) -> String {
 }
 
 /// The toast after trying to move a saved place.
-#[allow(dead_code)] // wired up by a later step
 pub fn relocate_result_text(
     result: &Result<(Coord, Option<String>), PlaceError>,
     name: &str,

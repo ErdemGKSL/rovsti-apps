@@ -306,35 +306,59 @@ impl StopsApp {
             })),
             _ => start,
         };
+        let moving = match self.relocating {
+            Some(id) => match self.saved.get(id) {
+                Some(p) => Some(pick::relocate_hint(&p.name)),
+                None => {
+                    self.relocating = None;
+                    None
+                }
+            },
+            None => None,
+        };
         let mut buttons = div().flex().items_center().gap(px(8.0));
-        if any_end {
+        if moving.is_some() {
             buttons = buttons.child(
-                glass_pill(theme, "Clear")
-                    .id("clear-ends")
+                glass_pill(theme, "Cancel")
+                    .id("relocate-cancel")
+                    .flex_1()
                     .h(px(52.0))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        let ends = this.pick.ends.clone();
-                        this.pick.clear();
-                        this.map.follow = true;
-                        this.show_pill(
-                            "Points cleared",
-                            Some(crate::PillAction::RestoreEnds(ends)),
-                            cx,
-                        );
-                    })),
-            );
-        }
-        buttons = buttons
-            .child(
-                glass_pill(theme, "Swap")
-                    .id("swap-ends")
-                    .h(px(52.0))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.pick.swap();
+                        this.relocating = None;
+                        this.tabs.jump_to(1);
                         cx.notify();
                     })),
-            )
-            .child(start);
+            );
+        } else {
+            if any_end {
+                buttons = buttons.child(
+                    glass_pill(theme, "Clear")
+                        .id("clear-ends")
+                        .h(px(52.0))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let ends = this.pick.ends.clone();
+                            this.pick.clear();
+                            this.map.follow = true;
+                            this.show_pill(
+                                "Points cleared",
+                                Some(crate::PillAction::RestoreEnds(ends)),
+                                cx,
+                            );
+                        })),
+                );
+            }
+            buttons = buttons
+                .child(
+                    glass_pill(theme, "Swap")
+                        .id("swap-ends")
+                        .h(px(52.0))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.pick.swap();
+                            cx.notify();
+                        })),
+                )
+                .child(start);
+        }
         let mut bar = div()
             .px(px(16.0))
             .flex()
@@ -348,7 +372,7 @@ impl StopsApp {
                         pick::Hint::Invalid(_) => colors.red,
                         _ => colors.label,
                     })
-                    .child(hint.text()),
+                    .child(moving.clone().unwrap_or_else(|| hint.text())),
             )
             .child(buttons);
         if let Some(Ok(d)) = self.pick.ends.diameter() {
@@ -634,6 +658,7 @@ impl StopsApp {
             return;
         }
         self.pick.close_menu();
+        self.relocating = None;
         self.busy = true;
         cx.notify();
         cx.spawn(async move |this, cx| {

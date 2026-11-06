@@ -1,5 +1,5 @@
 //! The Saved tab: places kept for one-tap trips. Tapping a row opens its
-//! actions (Use as A, Use as B, Share, Rename, Up, Down, Delete); a delete can be undone from the
+//! actions (Use as A, Use as B, Share, Rename, Move, Up, Down, Delete); a delete can be undone from the
 //! pill. Share opens the system share sheet (`telecom::share_text`) and falls back to the
 //! clipboard when there is no sheet (desktop, or no app answered).
 
@@ -209,6 +209,18 @@ impl StopsApp {
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_rename(id, cx);
+                            })),
+                    )
+                    .child(
+                        glass_pill(theme, "Move")
+                            .id(("place-move", id as usize))
+                            .flex_1()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if this.trip.is_some() {
+                                    this.show_pill("Not while a trip is running", None, cx);
+                                } else {
+                                    this.begin_relocate(id, cx);
+                                }
                             })),
                     )
                     .child(up)

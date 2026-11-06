@@ -116,6 +116,7 @@ pub struct SmsConversation {
     switch: Option<(ThreadId, Badge)>,
     /// Waiting scheduled sends of this thread, set by the page.
     scheduled: Vec<StripItem>,
+    strip_expanded: bool,
     muted: bool,
     /// The bubble (by `message_key`) whose copy pills are showing.
     selected: Option<u64>,
@@ -176,6 +177,7 @@ impl SmsConversation {
             mms_sends: HashMap::new(),
             switch: None,
             scheduled: Vec::new(),
+            strip_expanded: false,
             muted: false,
             selected: None,
             _subscriptions: subscriptions,
@@ -207,8 +209,28 @@ impl SmsConversation {
     pub fn set_scheduled(&mut self, scheduled: Vec<StripItem>, cx: &mut Context<Self>) {
         if self.scheduled != scheduled {
             self.scheduled = scheduled;
+            if self.scheduled.is_empty() {
+                self.strip_expanded = false;
+            }
             cx.notify();
         }
+    }
+
+    /// Cancel on the Scheduled strip: the text goes back into an empty
+    /// composer so nothing is lost.
+    fn cancel_scheduled(&mut self, key: StripKey, cx: &mut Context<Self>) {
+        let body = self
+            .scheduled
+            .iter()
+            .find(|i| i.key == key)
+            .map(|i| i.body.clone());
+        if let Some(body) = body {
+            let current = self.composer.read(cx).text().to_owned();
+            if let Some(text) = schedule_ui::text_after_cancel(&current, &body) {
+                self.composer.update(cx, |field, cx| field.set(&text, cx));
+            }
+        }
+        cx.emit(SmsConversationEvent::CancelScheduled(key));
     }
 
     pub fn set_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
@@ -897,10 +919,14 @@ impl Render for SmsConversation {
         let strip = schedule_ui::strip(
             theme,
             &self.scheduled,
-            now,
-            offset,
+            self.strip_expanded,
+            (now, offset),
             cx,
-            |_: &mut Self, key, cx| cx.emit(SmsConversationEvent::CancelScheduled(key)),
+            |this: &mut Self, key, cx| this.cancel_scheduled(key, cx),
+            |this: &mut Self, cx| {
+                this.strip_expanded = true;
+                cx.notify();
+            },
         );
 
         let current_sim = self.current_sim(cx);

@@ -251,7 +251,6 @@ pub fn strip_items(
 }
 
 /// The rows the strip shows: the first few, or all when expanded.
-#[allow(dead_code)]
 pub fn visible_items(items: &[StripItem], expanded: bool) -> &[StripItem] {
     if expanded {
         items
@@ -261,14 +260,12 @@ pub fn visible_items(items: &[StripItem], expanded: bool) -> &[StripItem] {
 }
 
 /// The expander's label for `hidden` more rows.
-#[allow(dead_code)]
 pub fn more_label(hidden: usize) -> String {
     format!("Show {hidden} more")
 }
 
 /// The text to put in the composer after cancelling a scheduled message: its
 /// body, but never over what the user is typing.
-#[allow(dead_code)]
 pub fn text_after_cancel(composer: &str, body: &str) -> Option<String> {
     composer.trim().is_empty().then(|| body.to_owned())
 }
@@ -447,10 +444,11 @@ impl ScheduleSheet {
 pub fn strip<V: 'static>(
     theme: Theme,
     items: &[StripItem],
-    now_ms: i64,
-    tz_offset_s: i32,
+    expanded: bool,
+    (now_ms, tz_offset_s): (i64, i32),
     cx: &mut Context<V>,
     on_cancel: fn(&mut V, StripKey, &mut Context<V>),
+    on_more: fn(&mut V, &mut Context<V>),
 ) -> Option<AnyElement> {
     if items.is_empty() {
         return None;
@@ -469,7 +467,7 @@ pub fn strip<V: 'static>(
                 .text_color(colors.secondary_label)
                 .child("Scheduled"),
         );
-    for (index, item) in items.iter().take(STRIP_ROWS).enumerate() {
+    for (index, item) in visible_items(items, expanded).iter().enumerate() {
         let key = item.key.clone();
         let when = when_label(item.at_ms, now_ms, tz_offset_s);
         let line = if item.failed {
@@ -507,12 +505,14 @@ pub fn strip<V: 'static>(
                 ),
         );
     }
-    if items.len() > STRIP_ROWS {
+    if !expanded && items.len() > STRIP_ROWS {
         out = out.child(
             div()
+                .id("sched-more")
                 .text_size(typography::CAPTION.size)
-                .text_color(colors.tertiary_label)
-                .child(format!("and {} more", items.len() - STRIP_ROWS)),
+                .text_color(colors.accent)
+                .child(more_label(items.len() - STRIP_ROWS))
+                .on_click(cx.listener(move |this, _, _, cx| on_more(this, cx))),
         );
     }
     Some(out.into_any_element())

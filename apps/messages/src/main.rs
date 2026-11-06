@@ -2434,6 +2434,7 @@ impl MessagesApp {
             StripKey::Local(id) => {
                 self.backend
                     .update(cx, |backend, cx| backend.cancel_scheduled(id, cx));
+                self.show_pill("Scheduled message cancelled");
             }
             StripKey::Gateway(id) => {
                 let Some(gateway) = self.whatsapp.read(cx).gateway() else {
@@ -2448,11 +2449,15 @@ impl MessagesApp {
                     this.update(cx, |this, cx| {
                         match result {
                             // Gone already (sent meanwhile): the list is stale either way.
-                            Ok(()) => this.remote_scheduled.retain(|t| t.id != id),
+                            Ok(()) => {
+                                this.remote_scheduled.retain(|t| t.id != id);
+                                this.show_pill("Scheduled message cancelled");
+                            }
                             Err(ClientError::Api(api))
                                 if api.code == rovsti_wa_proto::ErrorCode::NotFound =>
                             {
                                 this.remote_scheduled.retain(|t| t.id != id);
+                                this.show_pill("Scheduled message cancelled");
                                 this.load_remote_scheduled(cx);
                             }
                             Err(error) => {

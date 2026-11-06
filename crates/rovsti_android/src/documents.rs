@@ -28,6 +28,12 @@ pub fn export_contacts(name: &str, text: &str) -> Result<bool> {
     bridge::call_bool("exportContactsDocument", &[Arg::Str(name), Arg::Str(text)])
 }
 
+/// Opens "save as" for a `.csv` holding the call log under the suggested
+/// `name`. The answer is a `document_result` with op `export_calls`.
+pub fn export_calls(name: &str, csv: &str) -> Result<bool> {
+    bridge::call_bool("exportCallsDocument", &[Arg::Str(name), Arg::Str(csv)])
+}
+
 /// Opens the file picker for a `.vcf` (at most 8 MB is read). The answer is a
 /// `document_result` with op `import_contacts`.
 pub fn import_contacts() -> Result<bool> {
@@ -87,6 +93,10 @@ mod tests {
         assert!(matches!(import(), Err(Error::Unsupported)));
         assert!(matches!(
             export_contacts("c.vcf", ""),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(
+            export_calls("calls.csv", ""),
             Err(Error::Unsupported)
         ));
         assert!(matches!(import_contacts(), Err(Error::Unsupported)));

@@ -329,6 +329,14 @@ object RovstiBridge {
         return true
     }
 
+    /** Opens "save as" for a call log CSV; the answer is a `document_result` with op `export_calls`. */
+    @JvmStatic
+    fun exportCallsDocument(name: String, csv: String): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startCalls(activity, name, csv) }
+        return true
+    }
+
     /** Opens the file picker for a `.vcf`; the answer is a `document_result` with op `import_contacts`. */
     @JvmStatic
     fun importContactsDocument(): Boolean {
@@ -733,6 +741,22 @@ object RovstiBridge {
     fun shareText(text: String): Boolean = start(
         Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), null)
     )
+
+    /** Saves the image at [path] to Pictures/Rovsti through MediaStore; false on failure. */
+    @JvmStatic
+    fun saveImageToGallery(path: String, displayName: String, mime: String): Boolean =
+        MediaShare.saveToGallery(app, path, displayName, mime)
+
+    /** Shares the image at [path] through the system share sheet (a `cache/share` copy behind [RovstiShareProvider]). */
+    @JvmStatic
+    fun shareImage(path: String, mime: String, title: String): Boolean {
+        val uri = MediaShare.stageForShare(app, path) ?: return false
+        val send = Intent(Intent.ACTION_SEND).setType(mime.ifEmpty { "image/*" })
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (title.isNotEmpty()) send.putExtra(Intent.EXTRA_TITLE, title)
+        return start(Intent.createChooser(send, title.ifEmpty { null }).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    }
 
     /** Story 14.8: `TelephonyManager.isHearingAidCompatibilitySupported()` (API 23). */
     @JvmStatic

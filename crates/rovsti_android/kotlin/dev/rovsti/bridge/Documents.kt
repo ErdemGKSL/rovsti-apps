@@ -19,6 +19,7 @@ object Documents {
     const val REQUEST_IMPORT = 0x494D // "IM"
     const val REQUEST_EXPORT_CONTACTS = 0x4543 // "EC"
     const val REQUEST_IMPORT_CONTACTS = 0x4943 // "IC"
+    const val REQUEST_EXPORT_CALLS = 0x4544 // "ED"
 
     /** At most 256 KB is read from an import (a backup is a few KB). */
     const val MAX_BYTES = 256 * 1024
@@ -60,6 +61,16 @@ object Documents {
             .addCategory(Intent.CATEGORY_OPENABLE)
             .setType("text/x-vcard")
             .putExtra(Intent.EXTRA_TITLE, name)
+
+    fun exportCallsIntent(name: String): Intent =
+        Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("text/csv")
+            .putExtra(Intent.EXTRA_TITLE, name)
+
+    /** "Save as" for a call log CSV; the answer is `document_result` op `export_calls`. */
+    fun startCalls(activity: Activity, name: String, csv: String): Boolean =
+        launch(activity, true, csv, exportCallsIntent(name), REQUEST_EXPORT_CALLS)
 
     fun importContactsIntent(): Intent =
         Intent(Intent.ACTION_OPEN_DOCUMENT)
@@ -305,10 +316,12 @@ object Documents {
             handlePhoto(context, resultCode, data, worker, emit)
             return true
         }
-        val export = requestCode == REQUEST_EXPORT || requestCode == REQUEST_EXPORT_CONTACTS
+        val calls = requestCode == REQUEST_EXPORT_CALLS
+        val export = requestCode == REQUEST_EXPORT || requestCode == REQUEST_EXPORT_CONTACTS || calls
         val contacts = requestCode == REQUEST_EXPORT_CONTACTS || requestCode == REQUEST_IMPORT_CONTACTS
         if (!export && requestCode != REQUEST_IMPORT && requestCode != REQUEST_IMPORT_CONTACTS) return false
         val op = when {
+            calls -> "export_calls"
             contacts -> if (export) "export_contacts" else "import_contacts"
             else -> if (export) "export_backup" else "import_backup"
         }

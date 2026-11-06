@@ -24,9 +24,9 @@ use std::{
 use futures::StreamExt;
 use gpui::{App, AppContext as _, Context, Entity, Task};
 use rovsti_android::{
-    Error, calls,
+    Error, calls, documents,
     events::{self, RawEvent, kind},
-    permissions, providers, roles, telecom, xiaomi,
+    media, permissions, providers, roles, telecom, xiaomi,
 };
 use rovsti_core::{
     blocklist::BlockSet,
@@ -1312,6 +1312,62 @@ pub fn send_sms_to(number: &str) -> Outcome {
 /// Opens the system share sheet with `text`.
 pub fn share_text(text: &str) -> Outcome {
     Outcome::from(telecom::share_text(text), "sharing")
+}
+
+/// Side length of the photo shown in the full-screen viewer.
+pub const FULL_PHOTO_SIZE: u32 = 1080;
+
+/// Saves the image file at `path` to the gallery (Pictures/Rovsti) as `name`.
+pub fn save_to_gallery(path: &std::path::Path, name: &str) -> Outcome {
+    Outcome::from(
+        media::save_image_to_gallery(&path.to_string_lossy(), name, "image/png"),
+        "saving the photo",
+    )
+}
+
+/// Opens the share sheet with the image file at `path`.
+pub fn share_image(path: &std::path::Path) -> Outcome {
+    Outcome::from(
+        media::share_image(&path.to_string_lossy(), "image/png", ""),
+        "sharing the photo",
+    )
+}
+
+/// Opens "save as" for the call log CSV; the answer is a `document_result`.
+pub fn export_calls(name: &str, csv: &str) -> Outcome {
+    Outcome::from(documents::export_calls(name, csv), "exporting calls")
+}
+
+/// A contact's photo at up to [`FULL_PHOTO_SIZE`] px with the PNG file it was
+/// read from, so save and share have a path. Blocks: only call it on the
+/// background executor. Desktop paints the sample portrait into a temp PNG
+/// (save and share then answer not available).
+pub fn full_photo(uri: &str) -> Option<(image::RgbaImage, std::path::PathBuf)> {
+    match providers::contact_photo(uri, FULL_PHOTO_SIZE) {
+        Ok(path) if path.is_empty() => None,
+        Ok(path) => {
+            let bytes = std::fs::read(&path).ok()?;
+            let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+                .map_err(|error| log::debug!("photo {path}: {error}"))
+                .ok()?
+                .into_rgba8();
+            Some((image, path.into()))
+        }
+        #[cfg(not(target_os = "android"))]
+        Err(Error::Unsupported) => {
+            let image = sample::photo(uri, FULL_PHOTO_SIZE)?;
+            let name: String = uri.chars().filter(char::is_ascii_alphanumeric).collect();
+            let path = std::env::temp_dir().join(format!("rovsti-phone-photo-{name}.png"));
+            image
+                .save_with_format(&path, image::ImageFormat::Png)
+                .ok()?;
+            Some((image, path))
+        }
+        Err(error) => {
+            log::debug!("full photo failed: {error}");
+            None
+        }
+    }
 }
 
 /// Opens the system Contacts app.

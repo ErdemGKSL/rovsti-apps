@@ -155,7 +155,6 @@ pub(crate) fn results_title(digits: &str, count: usize) -> String {
 }
 
 /// Whether the "allow contacts" hint shows under the keypad.
-#[allow(dead_code)] // wired up by a later step
 pub(crate) fn contacts_hint_shown(denied: bool, digits_typed: bool, dismissed: bool) -> bool {
     denied && digits_typed && !dismissed
 }
@@ -400,6 +399,11 @@ impl PhoneApp {
             "call" => self.call_press(window, cx),
             "paste" => self.paste_press(window, cx),
             "wa-call" => self.whatsapp_press(window, cx),
+            "kp-ct-grant" => {
+                self.t9_hint_dismissed = true;
+                self.contacts_pill("cs-grant", window, cx);
+                cx.notify();
+            }
             "kp-vm-set" => {
                 let outcome =
                     backend::open_system(rovsti_android::telecom::SystemPage::CallSettings);
@@ -1540,6 +1544,16 @@ impl PhoneApp {
                 .child(self.status_button(theme, "kp-vm-set", "Open call settings", cx)),
             // The status line is 36 px tall whether or not it speaks, so a
             // name appearing never moves the keys.
+            None if contacts_hint_shown(
+                matches!(self.backend.read(cx).contacts(), Load::PermissionDenied),
+                !self.dialed.is_empty(),
+                self.t9_hint_dismissed,
+            ) =>
+            {
+                area.aria_label("Allow Contacts to see matches")
+                    .child("Allow Contacts to see matches")
+                    .child(self.status_button(theme, "kp-ct-grant", "Grant access", cx))
+            }
             None => match &self.dial_match.found {
                 Some(found) => {
                     let press = self.presses.value("kp-name").clamp(0.0, 1.0);

@@ -128,6 +128,8 @@ struct PhoneApp {
     /// The Tab Bar's own cached view (it re-renders only when the bar changes).
     tab_view: Entity<TabBarView>,
     dialed: String,
+    /// The keypad's "Allow Contacts" hint was used this session (not persisted).
+    t9_hint_dismissed: bool,
     /// `dialed` split into the settled digits and the newest one, as text
     /// ready to draw; rebuilt only when `dialed` changes.
     shown_digits: (String, SharedString, SharedString),
@@ -478,6 +480,7 @@ impl PhoneApp {
                 SharedString::default(),
             ),
             status: None,
+            t9_hint_dismissed: false,
             dial_match: keypad::DialMatch::default(),
             t9: keypad::T9Match::default(),
             _subscriptions: subscriptions,

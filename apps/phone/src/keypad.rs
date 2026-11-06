@@ -1496,7 +1496,7 @@ impl PhoneApp {
 
     pub(crate) fn number_display(&self, theme: Theme) -> impl IntoElement {
         let colors = theme::colors(theme);
-        let (_, head, last) = &self.shown_digits;
+        let (_, _, head, last) = &self.shown_digits;
         let font = self.font.value;
         let ghost = self.ghost.digit.map(|digit| {
             let t = self.ghost.t.value.clamp(0.0, 1.0);
@@ -1515,6 +1515,9 @@ impl PhoneApp {
                 )
         });
         div()
+            .id("number")
+            .role(Role::Group)
+            .aria_label(SharedString::from(self.dialed.clone()))
             .relative()
             .left(px(self.shake.value * 0.02))
             .h(px(52.0))
@@ -1523,12 +1526,15 @@ impl PhoneApp {
             .flex()
             .items_center()
             .justify_center()
+            .whitespace_nowrap()
+            .overflow_hidden()
             .text_color(colors.label)
             .font_weight(gpui::FontWeight(300.0))
             .child(self.marks.probe(A_FIELD))
-            .child(div().text_size(px(font)).child(head.clone()))
+            .child(div().flex_none().text_size(px(font)).child(head.clone()))
             .child(
                 div()
+                    .flex_none()
                     .relative()
                     .text_size(px(font * self.digit_pop.value))
                     .child(last.clone())
@@ -1548,8 +1554,7 @@ impl PhoneApp {
             .id("paste")
             .role(Role::Button)
             .aria_label("Paste a number")
-            .absolute()
-            .top(px(4.0))
+            .flex_none()
             .child(pill)
             .when(self.dialed.is_empty(), |el| {
                 el.on_mouse_down(
@@ -1880,9 +1885,62 @@ pub(crate) fn speed_dial_aria(digit: &str, name: Option<&str>) -> Option<String>
     Some(format!("{digit}, speed dial {name}. Long press to call"))
 }
 
+/// Split `dialed` into the text before the newest digit and the newest
+/// digit. With `keep = Some(n)` the head is a leading `…` plus the `n - 1`
+/// chars before the last, so the end of the number stays visible.
+pub(crate) fn elided_head(dialed: &str, keep: Option<usize>) -> (String, String) {
+    let split = dialed.char_indices().last().map_or(0, |(i, _)| i);
+    let (head, last) = dialed.split_at(split);
+    let Some(n) = keep else {
+        return (head.to_owned(), last.to_owned());
+    };
+    let before = n.saturating_sub(1);
+    let total = head.chars().count();
+    if total <= before {
+        return (head.to_owned(), last.to_owned());
+    }
+    let tail: String = head.chars().skip(total - before).collect();
+    (format!("\u{2026}{tail}"), last.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn elided_head_without_elision_splits_off_the_last_char() {
+        assert_eq!(elided_head("0555", None), ("055".into(), "5".into()));
+        assert_eq!(elided_head("", None), (String::new(), String::new()));
+        assert_eq!(elided_head("12", Some(5)), ("1".into(), "2".into()));
+    }
+
+    #[test]
+    fn elided_head_keeps_the_last_n_chars() {
+        let (head, last) = elided_head("0123456789", Some(4));
+        assert_eq!((head.as_str(), last.as_str()), ("\u{2026}678", "9"));
+        assert_eq!(format!("{head}{last}"), "\u{2026}6789");
+        assert_eq!(
+            elided_head("0123456789", Some(1)),
+            ("\u{2026}".into(), "9".into())
+        );
+        assert_eq!(
+            elided_head("0123456789", Some(0)),
+            ("\u{2026}".into(), "9".into())
+        );
+    }
+
+    #[test]
+    fn elided_head_handles_dial_symbols() {
+        assert_eq!(
+            elided_head("+905551234567", Some(3)),
+            ("\u{2026}56".into(), "7".into())
+        );
+        assert_eq!(
+            elided_head("*#06#12*#", Some(3)),
+            ("\u{2026}2*".into(), "#".into())
+        );
+        assert_eq!(elided_head("+9055", Some(5)), ("+905".into(), "5".into()));
+    }
 
     #[test]
     fn aria_labels_follow_the_map() {

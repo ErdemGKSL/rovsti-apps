@@ -137,8 +137,8 @@ struct PhoneApp {
     /// The keypad's "Allow Contacts" hint was used this session (not persisted).
     t9_hint_dismissed: bool,
     /// `dialed` split into the settled digits and the newest one, as text
-    /// ready to draw; rebuilt only when `dialed` changes.
-    shown_digits: (String, SharedString, SharedString),
+    /// ready to draw; rebuilt only when `dialed` or the elision changes.
+    shown_digits: (String, Option<usize>, SharedString, SharedString),
     kp_layout: rovsti_core::keypad_layout::KeypadLayout,
     status: Option<Status>,
     /// Whose number is typed (story 10.1); shown in the status line.
@@ -497,6 +497,7 @@ impl PhoneApp {
             kp_layout: rovsti_core::keypad_layout::keypad_layout(&keypad::default_input()),
             shown_digits: (
                 String::new(),
+                None,
                 SharedString::default(),
                 SharedString::default(),
             ),
@@ -1414,20 +1415,16 @@ impl Render for PhoneApp {
         #[cfg(any(feature = "perf", test))]
         self.perf_observe(window);
 
-        if self.shown_digits.0 != self.dialed {
-            let split = self.dialed.char_indices().last().map_or(0, |(i, _)| i);
-            let (head, last) = self.dialed.split_at(split);
-            self.shown_digits = (
-                self.dialed.clone(),
-                head.to_owned().into(),
-                last.to_owned().into(),
-            );
-        }
         self.sheet.set_viewport(window.viewport_size());
         self.update_back(window);
         self.reduced = window.prefers_reduced_motion();
         self.kp_layout = rovsti_core::keypad_layout::keypad_layout(&self.keypad_input(window));
         self.font.set_target(self.field_font());
+        let keep = self.kp_layout.number_fit.keep;
+        if self.shown_digits.0 != self.dialed || self.shown_digits.1 != keep {
+            let (head, last) = keypad::elided_head(&self.dialed, keep);
+            self.shown_digits = (self.dialed.clone(), keep, head.into(), last.into());
+        }
 
         let tabs = &self.tabs;
         self.tab_view

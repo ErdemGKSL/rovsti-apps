@@ -27,7 +27,7 @@ use rovsti_ui::{
 };
 use rovsti_wa_proto::{
     ChatActionKind, ChatMeta, DeliveryStatus, MUTED_FOREVER, MessageBody, MessageMeta, RichChat,
-    WaMessage, event::ReceiptKind, jid_user, meta::body_preview, to_rovsti,
+    WaMessage, event::ReceiptKind, is_status_chat, jid_user, meta::body_preview, to_rovsti,
 };
 use rovsti_wa_ui::{display_name, photo_avatar};
 
@@ -475,6 +475,9 @@ fn row_title(row: &InboxRow, sms: &SmsIndex<'_>) -> String {
 pub fn chat_threads(chats: &[RichChat], have: &[InboxThread]) -> Vec<InboxThread> {
     chats
         .iter()
+        // An older gateway listed status updates as a chat; they have their
+        // own page now.
+        .filter(|rich| !is_status_chat(&rich.chat.jid))
         .filter_map(|rich| {
             let chat = &rich.chat;
             let is_group = chat.is_group || chat.jid.ends_with("@g.us");

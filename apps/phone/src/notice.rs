@@ -286,15 +286,16 @@ impl PhoneApp {
                 .flex()
                 .justify_center()
                 .opacity(v)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.presses.down("rp-pill");
-                        this.app_activated(cx);
-                    }),
-                )
                 .child(
+                    // Only the capsule takes the tap, not the full-width strip around it.
                     glass_interactive(spec, move || GlassInteraction { press, focus: None })
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                this.presses.down("rp-pill");
+                                this.app_activated(cx);
+                            }),
+                        )
                         .relative()
                         .h(px(BANNER_H * k))
                         .px(px(20.0))
@@ -324,12 +325,12 @@ impl PhoneApp {
                                 .font_weight(typography::HEADLINE.weight)
                                 .text_color(colors.label)
                                 .child(self.pill_text.clone()),
-                        ),
+                        )
+                        .child(touch_surface(Self::touch_listener(
+                            cx,
+                            Some("rp-pill".into()),
+                        ))),
                 )
-                .child(touch_surface(Self::touch_listener(
-                    cx,
-                    Some("rp-pill".into()),
-                )))
                 .into_any_element(),
         )
     }

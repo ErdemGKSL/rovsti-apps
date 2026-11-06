@@ -91,6 +91,8 @@ pub(crate) struct AddCall {
     tap: TapGuard,
     /// The keyguard dismissal this sheet waits for (the backend's generation at the tap).
     pub awaiting_keyguard: Option<u64>,
+    /// The sheet was open at the last render (its close is noticed once).
+    was_open: bool,
 }
 
 impl AddCall {
@@ -106,6 +108,7 @@ impl AddCall {
             bounds: Rc::new(Cell::new(Bounds::default())),
             tap: TapGuard::default(),
             awaiting_keyguard: None,
+            was_open: false,
         }
     }
 
@@ -168,7 +171,11 @@ impl PhoneApp {
                 (v.name.clone(), v.connect_time_ms)
             });
         let locked = self.backend.read(cx).calls().keyguard_locked();
+        // The sheet's keypad starts empty (it shares the Keypad tab's number).
+        self.dialed.clear();
+        self.delete_shown.snap(0.0);
         let add = &mut self.add;
+        add.was_open = true;
         add.pill_name = name;
         add.failed = None;
         add.chooser = None;
@@ -181,6 +188,37 @@ impl PhoneApp {
         self.sheet.open();
         let _ = window;
         cx.notify();
+    }
+
+    /// Once per render: when the sheet has closed (any way: a placed call, Back, the
+    /// scrim, a drag), its pill timer stops and digits typed in it leave the Keypad tab.
+    pub(crate) fn sync_add_call_closed(&mut self, cx: &mut Context<Self>) {
+        if !self.add.was_open || self.add_call_open() {
+            return;
+        }
+        self.add.was_open = false;
+        self.add.chooser = None;
+        self.dialed.clear();
+        self.delete_shown.set_target(0.0);
+        self.add.line.update(cx, |l, cx| l.set(0, false, cx));
+    }
+
+    /// The call ended with no other call left: the Add call sheet has nothing to add to.
+    pub(crate) fn close_add_call(&mut self, cx: &mut Context<Self>) {
+        self.add.awaiting_keyguard = None;
+        if self.add_call_open() {
+            self.close_sheet(cx);
+        }
+    }
+
+    /// Back with the number chooser open returns to the list. Whether it did.
+    pub(crate) fn add_call_back(&mut self, cx: &mut Context<Self>) -> bool {
+        if !self.add_call_open() || self.add.chooser.take().is_none() {
+            return false;
+        }
+        self.add.scroll_to_top();
+        cx.notify();
+        true
     }
 
     /// Desktop preview: the next segment of the Add call sheet.
@@ -1006,10 +1044,14 @@ impl PhoneApp {
                         svg()
                             .path(Icon::LucideChevronLeft.path())
                             .size(px(20.0))
+                            .flex_none()
                             .text_color(colors.accent),
                     )
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
                             .text_size(typography::HEADLINE.size)
                             .font_weight(typography::HEADLINE.weight)
                             .text_color(colors.accent)

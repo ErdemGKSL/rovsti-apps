@@ -1055,7 +1055,11 @@ impl PhoneApp {
                 }
             }
             "cs-open" => {
-                backend::open_contacts_app();
+                let outcome = backend::open_contacts_app();
+                if outcome != backend::Outcome::Done {
+                    let text = outcome.why_not("Couldn't open the Contacts app");
+                    self.show_notice_pill(text, None, false, cx);
+                }
             }
             "fv-go" => self.select_tab(CONTACTS_TAB, cx),
             "cs-retry" | "fv-retry" => self.backend.update(cx, |b, cx| b.retry_contacts(cx)),
@@ -1152,6 +1156,16 @@ impl PhoneApp {
                 div()
                     .text_color(colors.tertiary_label)
                     .child("Search name or number")
+                    .into_any_element()
+            } else if typing {
+                // While typing the end of the query is what matters (the caret
+                // follows it): the ellipsis cuts the start, never the end.
+                div()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
+                    .text_color(colors.label)
+                    .child(text.clone())
                     .into_any_element()
             } else {
                 div()

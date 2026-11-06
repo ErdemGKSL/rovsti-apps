@@ -1,9 +1,12 @@
 //! Small pieces the Contacts pages share: a form field box, a tappable row
 //! and the confirmation card.
 
+use std::cell::Cell;
+
 use gpui::{
-    AnyElement, App, Div, ElementId, Entity, Hsla, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, SharedString, Stateful, Styled, Window, div, prelude::*, px, svg,
+    AnyElement, App, Bounds, Div, ElementId, Entity, Hsla, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, Pixels, SharedString, Stateful, Styled, Window, canvas, div,
+    prelude::*, px, svg,
 };
 use rovsti_ui::{
     Icon,
@@ -121,6 +124,7 @@ pub(crate) fn field_box(
         .when(multiline, |d| d.min_h(px(96.0)).items_start().py(px(12.0)))
         .when(!multiline, |d| d.overflow_hidden())
         .child(input_layer(field.clone(), cx))
+        .children(typing.then(focused_bounds_probe))
         .child(shown)
         .children(caret);
     let tap_focus = focus.clone();
@@ -138,6 +142,29 @@ pub(crate) fn field_box(
         .items_center()
         .min_h(metrics::MIN_HIT)
         .child(content)
+}
+
+thread_local! {
+    /// Where the focused [`field_box`] was last painted, in window
+    /// coordinates (UI thread only).
+    static FOCUSED_FIELD: Cell<Option<Bounds<Pixels>>> = const { Cell::new(None) };
+}
+
+/// Takes the bounds the focused field reported in the last paint, if one
+/// was painted. The page reads it each render to keep that field above the
+/// keyboard.
+pub(crate) fn take_focused_field_bounds() -> Option<Bounds<Pixels>> {
+    FOCUSED_FIELD.with(Cell::take)
+}
+
+/// An invisible layer that reports the focused field's painted bounds.
+fn focused_bounds_probe() -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        |bounds, (), _, _| FOCUSED_FIELD.with(|cell| cell.set(Some(bounds))),
+    )
+    .absolute()
+    .size_full()
 }
 
 /// A dimmed screen with a centred glass card: a title, a sentence and the

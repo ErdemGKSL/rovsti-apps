@@ -14,7 +14,7 @@ use rovsti_core::{
     ThreadId,
     sms::{DeliveryState, SmsSend, SmsSimsPayload, SmsStatus, segments},
     sms_timeline::{SmsItem, SmsKey, SmsTimeline},
-    wire::DocumentOp,
+    wire::{DocumentOp, DocumentResult},
 };
 use rovsti_ui::{
     Icon,
@@ -76,6 +76,8 @@ pub struct SmsConversation {
     recipients: Vec<String>,
     timeline: SmsTimeline,
     composer: Entity<TextField>,
+    /// The composer's action-key count already acted on.
+    seen_actions: u64,
     /// The virtualised, bottom-aligned timeline: item 0 is the "Load earlier"
     /// slot, then one item per [`Entry`].
     list: KeyedList,
@@ -88,6 +90,8 @@ pub struct SmsConversation {
     /// "Now" and the offset for the frame being drawn (rows are built after `render`).
     frame_now: i64,
     loading: bool,
+    /// The provider changed while a page was loading: read the newest again.
+    reload_due: bool,
     error: Option<SharedString>,
     /// A line above the composer ("Couldn't attach that file").
     notice: Option<SharedString>,
@@ -95,6 +99,8 @@ pub struct SmsConversation {
     chosen_sim: Option<i32>,
     /// A picture picked for the next send (a path in the app's cache).
     attachment: Option<String>,
+    /// The picked file's own name, for the chip (the cache copy has none).
+    attachment_name: Option<String>,
     awaiting_attachment: bool,
     /// `local_id -> (text, image path)` of MMS sends, so a retry resends the picture.
     mms_sends: HashMap<u64, (String, String)>,
@@ -113,13 +119,24 @@ impl SmsConversation {
         recipients: Vec<String>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let composer =
-            cx.new(|cx| TextField::with_input(TextInputPurpose::Text, TextInputAction::Send, cx));
+        let composer = cx.new(|cx| {
+            let mut field =
+                TextField::with_input(TextInputPurpose::Text, TextInputAction::Send, cx);
+            field.set_keep_focus_on_action(true);
+            field
+        });
         let mut timeline = SmsTimeline::new(thread_id);
         timeline.set_recipients(recipients.clone());
         let subscriptions = vec![
-            // Typing re-renders the counter.
-            cx.observe(&composer, |_, _, cx| cx.notify()),
+            // Typing re-renders the counter; the keyboard's Send key sends.
+            cx.observe(&composer, |this: &mut Self, composer, cx| {
+                let actions = composer.read(cx).actions();
+                if actions != this.seen_actions {
+                    this.seen_actions = actions;
+                    this.send(cx);
+                }
+                cx.notify();
+            }),
             // Role, SIMs and the clock live in the backend.
             cx.observe(&backend, |_, _, cx| cx.notify()),
             cx.subscribe(&backend, |this, _, event, cx| this.on_backend(event, cx)),
@@ -131,16 +148,19 @@ impl SmsConversation {
             recipients,
             timeline,
             composer,
+            seen_actions: 0,
             list: KeyedList::new(ListAlignment::Bottom, 1),
             entries: Vec::new(),
             rows_dirty: true,
             rows_offset: 0,
             frame_now: 0,
             loading: false,
+            reload_due: false,
             error: None,
             notice: None,
             chosen_sim: None,
             attachment: None,
+            attachment_name: None,
             awaiting_attachment: false,
             mms_sends: HashMap::new(),
             switch: None,
@@ -148,6 +168,7 @@ impl SmsConversation {
             muted: false,
             _subscriptions: subscriptions,
         };
+        this.fill_from_thread(cx);
         this.load(None, cx);
         this
     }
@@ -208,12 +229,77 @@ impl SmsConversation {
         match event {
             BackendEvent::Status(status) => self.on_status(status, cx),
             // New messages may have arrived: read the newest page again.
-            BackendEvent::SmsChanged => self.load(None, cx),
+            BackendEvent::SmsChanged => {
+                self.adopt_thread(cx);
+                self.fill_from_thread(cx);
+                self.load(None, cx);
+            }
             BackendEvent::Document(result) if result.op == DocumentOp::Attachment => {
-                self.on_attachment(result.ok, result.path.clone(), cx);
+                self.on_attachment(result, cx);
             }
             _ => {}
         }
+    }
+
+    /// A draft whose first send created the provider thread becomes that
+    /// thread, so replies show here and it reads like any other.
+    fn adopt_thread(&mut self, cx: &mut Context<Self>) {
+        if !self.is_draft() {
+            return;
+        }
+        let [number] = self.recipients.as_slice() else {
+            return;
+        };
+        let found = crate::inbox::thread_for_number(self.backend.read(cx).threads(), number)
+            .map(|t| t.thread_id);
+        if let Some(thread_id) = found {
+            self.thread_id = thread_id;
+            self.timeline.adopt_thread(thread_id);
+            self.rows_dirty = true;
+            // The SIM picked while drafting belongs to the thread now.
+            if let Some(sub_id) = self.chosen_sim {
+                self.backend.update(cx, |backend, cx| {
+                    backend.remember_sim(thread_id, sub_id, cx)
+                });
+            }
+        }
+    }
+
+    /// A thread opened before the thread list knew it (a notification tapped
+    /// at start) gets its addresses, and a title, once the list has it.
+    fn fill_from_thread(&mut self, cx: &mut Context<Self>) {
+        if !self.recipients.is_empty() || self.is_draft() {
+            return;
+        }
+        let Some(addresses) = self
+            .backend
+            .read(cx)
+            .threads()
+            .iter()
+            .find(|t| t.thread_id == self.thread_id)
+            .map(|t| t.addresses.clone())
+            .filter(|a| !a.is_empty())
+        else {
+            return;
+        };
+        if self.title.trim().is_empty() {
+            let backend = self.backend.read(cx);
+            let names: Vec<String> = addresses
+                .iter()
+                .map(|a| {
+                    backend
+                        .contacts()
+                        .match_number(a)
+                        .map(|c| c.display_name.clone())
+                        .filter(|n| !n.trim().is_empty())
+                        .unwrap_or_else(|| a.clone())
+                })
+                .collect();
+            self.title = names.join(", ").into();
+        }
+        self.timeline.set_recipients(addresses.clone());
+        self.recipients = addresses;
+        cx.notify();
     }
 
     /// `sms_status` for this thread's sends; other threads' are ignored by the timeline.
@@ -224,20 +310,26 @@ impl SmsConversation {
         }
     }
 
-    fn on_attachment(&mut self, ok: bool, path: Option<String>, cx: &mut Context<Self>) {
+    fn on_attachment(&mut self, result: &DocumentResult, cx: &mut Context<Self>) {
         if !std::mem::take(&mut self.awaiting_attachment) {
             return;
         }
-        match path.filter(|_| ok) {
+        let path = result.path.clone().filter(|_| result.ok);
+        match path {
+            // SMS carries pictures only; the provider's type says early.
+            Some(_) if result.mime.as_deref().is_some_and(|m| !is_image(m)) => {
+                self.notice = Some("Only pictures can be sent by SMS".into());
+            }
             Some(path) => {
                 self.attachment = Some(path);
+                self.attachment_name = result.name.clone().filter(|n| !n.trim().is_empty());
                 self.notice = None;
             }
             None => {
                 let words = if self.backend.read(cx).is_preview() {
                     "Pictures need an Android phone"
                 } else {
-                    "Couldn't attach that file"
+                    "Couldn't attach that picture (up to 4 MB)"
                 };
                 self.notice = Some(words.into());
             }
@@ -247,7 +339,12 @@ impl SmsConversation {
 
     /// Fetches one page (the newest, or the one before `before_ms`) off the UI thread.
     fn load(&mut self, before_ms: Option<i64>, cx: &mut Context<Self>) {
-        if self.loading || self.is_draft() {
+        if self.is_draft() {
+            return;
+        }
+        if self.loading {
+            // A change while a page is on its way: read the newest page after it.
+            self.reload_due |= before_ms.is_none();
             return;
         }
         self.loading = true;
@@ -269,15 +366,21 @@ impl SmsConversation {
                         if before_ms.is_none() {
                             this.list.scroll_to_end();
                         }
-                        if first || before_ms.is_none() {
+                        // Read only while someone looks: the app in the
+                        // background leaves new messages unread.
+                        if (first || before_ms.is_none()) && this.backend.read(cx).ui_active() {
                             this.backend
                                 .update(cx, |backend, cx| backend.mark_read(thread_id, cx));
                         }
                     }
                     Err(error) => {
                         log::warn!("loading SMS messages failed: {error}");
-                        this.error = Some(format!("Couldn't load messages: {error}").into());
+                        // The detail is for the log; the screen says it plainly.
+                        this.error = Some(load_error_text(&error).into());
                     }
+                }
+                if std::mem::take(&mut this.reload_due) {
+                    this.load(None, cx);
                 }
                 cx.notify();
             })
@@ -319,6 +422,12 @@ impl SmsConversation {
         ) {
             return;
         }
+        if self.recipients.is_empty() {
+            // Opened before the thread list knew it: wait for its addresses.
+            self.notice = Some("This conversation is still loading".into());
+            cx.notify();
+            return;
+        }
         self.composer.update(cx, |field, cx| field.clear(cx));
         self.attachment = None;
         self.notice = None;
@@ -326,11 +435,15 @@ impl SmsConversation {
     }
 
     /// Sends text typed into a notification as if it came from the composer.
-    pub fn send_reply(&mut self, text: String, cx: &mut Context<Self>) {
+    /// `false` when it could not go (not the default SMS app, no addresses).
+    pub fn send_reply(&mut self, text: String, cx: &mut Context<Self>) -> bool {
         let text = text.trim().to_owned();
-        if can_send(&text, false, self.backend.read(cx).sms_role_held()) {
+        let sendable = can_send(&text, false, self.backend.read(cx).sms_role_held())
+            && !self.recipients.is_empty();
+        if sendable {
             self.dispatch(text, None, cx);
         }
+        sendable
     }
 
     /// Puts the bubble in the timeline and hands the send to the backend.
@@ -698,8 +811,12 @@ impl Render for SmsConversation {
         }
         if let Some(path) = self.attachment.as_deref() {
             has_info = true;
+            let label = self
+                .attachment_name
+                .clone()
+                .unwrap_or_else(|| attachment_label(path));
             info = info.child(
-                glass_pill(theme, format!("{} ✕", attachment_label(path)))
+                glass_pill(theme, format!("{label} ✕"))
                     .id("sms-attached")
                     .h(px(30.0))
                     .px(px(12.0))
@@ -853,6 +970,17 @@ pub fn tick(outgoing: bool, state: DeliveryState) -> &'static str {
         DeliveryState::Delivered => "✓✓",
         DeliveryState::Failed => "Not sent",
         DeliveryState::None => "",
+    }
+}
+
+/// What a failed page load says on screen. The backend's own sentences
+/// (access off, desktop) are kept; provider internals are not shown.
+pub fn load_error_text(error: &str) -> String {
+    match error {
+        "SMS access is off" | "this needs an Android phone" => {
+            format!("Couldn't load messages: {error}.")
+        }
+        _ => "Couldn't load messages. Leave and open the conversation to try again.".to_owned(),
     }
 }
 
@@ -1031,6 +1159,15 @@ mod tests {
         assert!(!can_send("   ", false, true));
         assert!(!can_send("hi", false, false));
         assert!(!can_send("", true, false));
+    }
+
+    #[test]
+    fn load_errors_read_plainly() {
+        assert_eq!(
+            load_error_text("SMS access is off"),
+            "Couldn't load messages: SMS access is off."
+        );
+        assert!(!load_error_text("Internal(\"cursor\")").contains("Internal"));
     }
 
     #[test]

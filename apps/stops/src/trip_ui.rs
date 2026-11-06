@@ -31,10 +31,16 @@ use crate::{
 
 // ---- pure ------------------------------------------------------------------------
 
+/// Snoozes a trip allows; mirrors `rovsti_geo`'s private `MAX_SNOOZES`
+/// (checked by a test against `ActiveTrip::snooze`).
+pub const MAX_SNOOZES: u8 = 5;
+
 /// "450 m", "1.2 km": metres to the nearest 10 below a kilometre.
 pub fn distance_text(metres: f64) -> String {
-    if metres < 1_000.0 {
-        format!("{} m", (metres.max(0.0) / 10.0).round() as i64 * 10)
+    // Rounded first, so 995 m reads "1.0 km", never "1000 m".
+    let tens = (metres.max(0.0) / 10.0).round() as i64 * 10;
+    if tens < 1_000 {
+        format!("{tens} m")
     } else {
         format!("{:.1} km", metres / 1_000.0)
     }
@@ -379,6 +385,7 @@ impl StopsApp {
                 .id("notice-toggle")
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.notice_on = !this.notice_on;
+                    this.save_next_trip(cx);
                     cx.notify();
                 }))
                 .into_any_element()],
@@ -486,6 +493,25 @@ impl StopsApp {
         let alarm = self.alarm.clone()?;
         let colors = theme::colors(theme);
         let snooze = format!("Snooze {} min", self.prefs.snooze_min.clamp(1, 15));
+        // With every snooze used, "Snooze" would end the trip: say so instead.
+        let snooze_button = if self.snoozes_left() {
+            glass_pill(theme, snooze)
+                .id("alarm-snooze")
+                .w_full()
+                .h(px(64.0))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.alarm_action(AlarmAction::Snooze, cx);
+                }))
+                .into_any_element()
+        } else {
+            div()
+                .w_full()
+                .text_center()
+                .text_size(typography::HEADLINE.size)
+                .text_color(colors.secondary_label)
+                .child("No snoozes left")
+                .into_any_element()
+        };
         let distance = alarm.distance_m.map(distance_text);
         let crossed_to = crossed_to_text(alarm.side);
         Some(
@@ -549,15 +575,7 @@ impl StopsApp {
                                             this.alarm_action(AlarmAction::Dismiss, cx);
                                         })),
                                 )
-                                .child(
-                                    glass_pill(theme, snooze)
-                                        .id("alarm-snooze")
-                                        .w_full()
-                                        .h(px(64.0))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.alarm_action(AlarmAction::Snooze, cx);
-                                        })),
-                                ),
+                                .child(snooze_button),
                         ),
                 )
                 .into_any_element(),
@@ -565,6 +583,12 @@ impl StopsApp {
     }
 
     // ---- controller --------------------------------------------------------------
+
+    /// The trip can still be snoozed (the headless handler ends it once
+    /// [`MAX_SNOOZES`] are used). True without a trip: nothing to protect.
+    pub(crate) fn snoozes_left(&self) -> bool {
+        self.trip.as_ref().is_none_or(|t| t.snoozes < MAX_SNOOZES)
+    }
 
     /// An arriving-soon message is set up and WhatsApp is linked.
     pub(crate) fn notice_available(&self, cx: &Context<Self>) -> bool {
@@ -728,7 +752,7 @@ impl StopsApp {
                             cx,
                         );
                     }
-                    None => this.show_pill("Trip stopped.", None, cx),
+                    None => this.show_pill("Trip stopped", None, cx),
                 }
             })
             .ok();
@@ -854,7 +878,9 @@ impl StopsApp {
                 .detach();
             }
             Status::Searching => {
-                if self.trip.is_some() {
+                // Only before the first fix: later the card already says where
+                // you are, and a repeat would push away an Undo or a snooze pill.
+                if self.trip.is_some() && self.live.is_none() {
                     self.show_pill("Looking for your location...", None, cx);
                 }
             }
@@ -905,6 +931,9 @@ impl StopsApp {
     /// Hides the alarm until `at_ms`, then rings again if the trip is still on.
     fn on_snoozed(&mut self, at_ms: i64, cx: &mut Context<Self>) {
         self.alarm = None;
+        // The handler counted the snooze in `trip.json`: read it, so the alarm
+        // screen knows when the last one is used.
+        self.refresh_trip(cx);
         let now = now_ms();
         self.show_pill(snooze_text(at_ms, now), None, cx);
         let wait = Duration::from_millis((at_ms - now).max(0) as u64);
@@ -1025,7 +1054,10 @@ mod tests {
     fn distances_and_waits_round_for_reading() {
         assert_eq!(distance_text(0.0), "0 m");
         assert_eq!(distance_text(487.0), "490 m");
-        assert_eq!(distance_text(999.0), "1000 m");
+        assert_eq!(distance_text(994.0), "990 m");
+        assert_eq!(distance_text(995.0), "1.0 km");
+        assert_eq!(distance_text(999.0), "1.0 km");
+        assert_eq!(distance_text(f64::NAN), "0 m");
         assert_eq!(distance_text(1_240.0), "1.2 km");
         assert_eq!(distance_text(-5.0), "0 m");
         assert_eq!(wait_text(3_000), "3 s");
@@ -1149,6 +1181,22 @@ mod tests {
         let live = Live::from_out(&out);
         assert_eq!(live.circle_m, Some(640.0));
         assert_eq!(circle_text(&live).as_deref(), Some("640 m to the circle"));
+    }
+
+    #[test]
+    fn max_snoozes_matches_the_session() {
+        let end = |lon: f64| rovsti_geo::Endpoint {
+            label: String::new(),
+            coord: Coord::new(41.0, lon),
+        };
+        let mut trip = ActiveTrip::new(1, end(28.994), end(29.006), 0).unwrap();
+        let mut used = 0;
+        while trip.snooze(0, 5).is_some() {
+            used += 1;
+            assert!(used <= 100, "snoozes never run out");
+        }
+        assert_eq!(used, MAX_SNOOZES);
+        assert_eq!(trip.snoozes, MAX_SNOOZES);
     }
 
     #[test]

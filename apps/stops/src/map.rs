@@ -19,10 +19,10 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, BorderStyle, Bounds, Context, Corners, Edges, Hsla, InteractiveElement,
-    IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Path,
-    PathBuilder, Pixels, Point, StatefulInteractiveElement, Styled, Task, TouchEvent, TouchPhase,
-    Window, canvas, div, point, px, quad,
+    AnyElement, App, BorderStyle, Bounds, Context, Corners, Edges, HitboxBehavior, Hsla,
+    InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ParentElement, Path, PathBuilder, Pixels, Point, StatefulInteractiveElement, Styled, Task,
+    TouchEvent, TouchPhase, Window, canvas, div, point, px, quad,
 };
 use rovsti_android::location;
 use rovsti_geo::{
@@ -1320,8 +1320,10 @@ pub struct MapState {
     /// Where the surface was last painted, in window coordinates.
     pub bounds: Rc<Cell<Bounds<Pixels>>>,
     tap_timer: Option<Task<()>>,
-    /// The my-location button was pressed and its fix has not arrived yet.
-    locate_pending: bool,
+    /// When the my-location button was pressed, while its fix has not arrived.
+    locate_pending: Option<i64>,
+    /// "Me" opened the location prompt: try again once it is answered.
+    locate_after_grant: bool,
     /// The last scene and what it was built from: a render with the same
     /// inputs (a sheet sliding over the map, the pill, a keystroke) reuses it.
     scene: Option<CachedScene>,
@@ -1354,6 +1356,9 @@ struct CachedScene {
     scene: Rc<Scene>,
 }
 
+/// How long after "Me" its fix still moves the view.
+pub const LOCATE_WAIT_MS: i64 = 60_000;
+
 /// How old a device fix may be and still centre the idle map.
 pub const FIX_MAX_AGE_MS: i64 = 10 * 60 * 1000;
 
@@ -1374,7 +1379,8 @@ impl Default for MapState {
             pattern: None,
             bounds: Rc::default(),
             tap_timer: None,
-            locate_pending: false,
+            locate_pending: None,
+            locate_after_grant: false,
             scene: None,
             scene_serial: 0,
             paint: Rc::default(),
@@ -1383,25 +1389,29 @@ impl Default for MapState {
 }
 
 impl MapState {
-    /// The next device fix should recentre the view (the my-location button).
-    pub fn ask_locate(&mut self) {
-        self.locate_pending = true;
+    /// The next device fix, within [`LOCATE_WAIT_MS`] of `now_ms`, should
+    /// recentre the view (the my-location button).
+    pub fn ask_locate(&mut self, now_ms: i64) {
+        self.locate_pending = Some(now_ms);
     }
 
     /// The asked-for fix will not come (no permission, location off, error).
     pub fn cancel_locate(&mut self) {
-        self.locate_pending = false;
+        self.locate_pending = None;
     }
 
-    /// Records a device fix. The view moves to it at street level only when the
-    /// my-location button asked for it; otherwise the view is left alone (a
-    /// following idle view already centres on `position`). The trail is left alone.
-    pub fn set_device_fix(&mut self, at: Coord, accuracy_m: f64) {
+    /// Records a device fix at `now_ms`. The view moves to it at street level
+    /// only when the my-location button asked for it recently; otherwise the
+    /// view is left alone (a following idle view already centres on
+    /// `position`), so a fix long after the press does not yank the map. The
+    /// trail is left alone.
+    pub fn set_device_fix(&mut self, at: Coord, accuracy_m: f64, now_ms: i64) {
         self.position = Some((at, accuracy_m));
-        if self.locate_pending {
+        if let Some(asked) = self.locate_pending.take()
+            && now_ms.saturating_sub(asked) <= LOCATE_WAIT_MS
+        {
             self.viewport = Viewport::new(at, STREET_MPP);
             self.follow = false;
-            self.locate_pending = false;
         }
     }
 
@@ -1471,32 +1481,45 @@ enum MapInput {
 
 /// The invisible layer that reports touches (with their ids, for pinch) and
 /// mouse clicks, and keeps the page from scrolling under a finger on the map.
+///
+/// The listeners are window-wide, so a gesture only starts where the map's own
+/// hitbox is hovered: the sheet, the tab bar, the pill and the alarm screen
+/// occlude it (a touch moves the hit test before it is dispatched). `blocked`
+/// (a sheet or the alarm is up) refuses every start as well.
 fn input_surface(
     bounds_out: Rc<Cell<Bounds<Pixels>>>,
     menu_rect: Option<(f32, f32, f32, f32)>,
+    blocked: bool,
     on_input: impl Fn(MapInput, &mut App) + 'static,
 ) -> impl IntoElement {
     let on_input = Rc::new(on_input);
     canvas(
-        |_, _, _| (),
-        move |bounds, (), window, _| {
+        |bounds, window, _| window.insert_hitbox(bounds, HitboxBehavior::Normal),
+        move |bounds, hitbox, window, _| {
             bounds_out.set(bounds);
             let size = (f32::from(bounds.size.width), f32::from(bounds.size.height));
-            // The controls and the pin menu are not the map's.
-            let on_controls = move |p: Point<Pixels>| {
+            // The controls and the pin menu are not the map's; neither is
+            // anything drawn over the map.
+            let refuses = move |p: Point<Pixels>, window: &Window| {
                 let local = (
                     f32::from(p.x - bounds.origin.x),
                     f32::from(p.y - bounds.origin.y),
                 );
-                over_controls(size, local) || menu_rect.is_some_and(|r| over_rect(r, local))
+                blocked
+                    || !bounds.contains(&p)
+                    || !hitbox.is_hovered(window)
+                    || over_controls(size, local)
+                    || menu_rect.is_some_and(|r| over_rect(r, local))
             };
+            let refuses = Rc::new(refuses);
             let touch = Rc::clone(&on_input);
+            let touch_refuses = Rc::clone(&refuses);
             window.on_mouse_event(move |event: &TouchEvent, phase, window, cx| {
                 if !phase.bubble() {
                     return;
                 }
                 if event.phase == TouchPhase::Started {
-                    if !bounds.contains(&event.position) || on_controls(event.position) {
+                    if touch_refuses(event.position, window) {
                         return;
                     }
                     // The finger is the map's, not the page's.
@@ -1515,11 +1538,10 @@ fn input_surface(
             let pressed = Rc::new(Cell::new(false));
             let down = Rc::clone(&pressed);
             let down_input = Rc::clone(&mouse);
-            window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
+            window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
                 if phase.bubble()
                     && event.button == MouseButton::Left
-                    && bounds.contains(&event.position)
-                    && !on_controls(event.position)
+                    && !refuses(event.position, window)
                 {
                     down.set(true);
                     down_input(
@@ -1639,10 +1661,13 @@ impl StopsApp {
         self.map.gestures.set_handles(&handles);
         let cover = tiles_for_view(&viewport, size, VIEW_TILE_CAP);
         self.map_tiles.request_view(&cover, cx);
+        // A pair picked for the next trip (Saved, History, a shared link) is
+        // not drawn over the running one.
         let pins = [Slot::A, Slot::B].map(|slot| {
             self.pick
                 .ends
                 .get(slot)
+                .filter(|_| self.trip.is_none())
                 .map(|d| (d.coord, d.gtfs_stop.is_some()))
         });
         let key = SceneKey {
@@ -1703,9 +1728,15 @@ impl StopsApp {
         let input = entity.clone();
         let menu = self.pin_menu(theme, &scene, size, cx);
         let menu_rect = menu.as_ref().map(|(rect, _)| *rect);
-        let surface = input_surface(self.map.bounds.clone(), menu_rect, move |event, cx| {
-            input.update(cx, |this, cx| this.map_input(event, cx));
-        });
+        let blocked = self.sheet.is_visible() || self.alarm.is_some();
+        let surface = input_surface(
+            self.map.bounds.clone(),
+            menu_rect,
+            blocked,
+            move |event, cx| {
+                input.update(cx, |this, cx| this.map_input(event, cx));
+            },
+        );
         let pinch = entity;
         let last_control = if idle {
             control_button(theme, "Me")
@@ -2004,7 +2035,13 @@ impl StopsApp {
     /// next pin: on the stop under it when there is one, else on the point
     /// itself. The view does not move. The map only looks while a trip runs.
     fn map_tap(&mut self, at: (f32, f32), cx: &mut Context<Self>) {
-        if self.trip.is_some() || self.sheet.is_open() || self.alarm.is_some() {
+        // The tap is judged when it lands, after the double-tap window: by then
+        // a sheet may have opened or another tab been chosen.
+        if self.trip.is_some()
+            || self.sheet.is_visible()
+            || self.alarm.is_some()
+            || self.tabs.selected() != 0
+        {
             return;
         }
         // Keep the view where the user tapped: the idle fit would otherwise
@@ -2028,7 +2065,7 @@ impl StopsApp {
     /// The my-location button: centre on the last known position at once, then
     /// ask for a fresh fix (the permission first when it is missing).
     pub(crate) fn locate_me(&mut self, cx: &mut Context<Self>) {
-        self.map.ask_locate();
+        self.map.ask_locate(now_ms());
         if let Some((at, _)) = self.map.position {
             self.map.take_over();
             self.map.viewport = Viewport::new(at, STREET_MPP);
@@ -2052,6 +2089,8 @@ impl StopsApp {
                 if step.is_some() || matches!(asked, Some(Ok(false) | Err(_))) {
                     this.map.cancel_locate();
                 }
+                // Granted in the dialog: carry on without a second tap on "Me".
+                this.map.locate_after_grant = step == Some(Step::RequestLocation);
                 let text = match (step, asked) {
                     (Some(step), _) => step.message(),
                     (None, Some(Ok(true))) => "Looking for your location...",
@@ -2064,6 +2103,24 @@ impl StopsApp {
                 this.show_pill(text, None, cx);
             })
             .ok();
+        })
+        .detach();
+    }
+
+    /// The permissions changed (the app is back from a prompt): when "Me"
+    /// asked for location and it is granted now, look for the fix.
+    pub(crate) fn locate_after_permission(&mut self, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.map.locate_after_grant) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let pre = cx
+                .background_executor()
+                .spawn(async { Preflight::gather() })
+                .await;
+            if pre.location == Some(rovsti_android::permissions::Access::Granted) {
+                this.update(cx, |this, cx| this.locate_me(cx)).ok();
+            }
         })
         .detach();
     }
@@ -2108,7 +2165,7 @@ mod tests {
             viewport: Viewport::new(IST, 40.0),
             ..MapState::default()
         };
-        m.set_device_fix(Coord::new(40.0, 30.0), 12.0);
+        m.set_device_fix(Coord::new(40.0, 30.0), 12.0, 1_000);
         assert_eq!(m.viewport.center, IST);
         assert_eq!(m.viewport.metres_per_px, 40.0);
         assert_eq!(m.position, Some((Coord::new(40.0, 30.0), 12.0)));
@@ -2117,14 +2174,29 @@ mod tests {
     #[test]
     fn an_asked_for_fix_centres_at_street_level_once() {
         let mut m = MapState::default();
-        m.ask_locate();
+        m.ask_locate(1_000);
         let fix = Coord::new(40.0, 30.0);
-        m.set_device_fix(fix, 5.0);
+        m.set_device_fix(fix, 5.0, 1_000);
         assert_eq!(m.viewport.center, fix);
         assert_eq!(m.viewport.metres_per_px, STREET_MPP);
         assert!(!m.follow);
-        m.set_device_fix(Coord::new(40.5, 30.5), 5.0);
+        m.set_device_fix(Coord::new(40.5, 30.5), 5.0, 1_000);
         assert_eq!(m.viewport.center, fix);
+    }
+
+    #[test]
+    fn a_fix_long_after_the_press_leaves_the_view_alone() {
+        let mut m = MapState {
+            follow: false,
+            viewport: Viewport::new(IST, 40.0),
+            ..MapState::default()
+        };
+        m.ask_locate(1_000);
+        m.set_device_fix(Coord::new(40.0, 30.0), 5.0, 1_000 + LOCATE_WAIT_MS + 1);
+        assert_eq!(m.viewport.center, IST);
+        // The stale request is spent: a later fix does not move it either.
+        m.set_device_fix(Coord::new(40.0, 30.0), 5.0, 1_000 + LOCATE_WAIT_MS + 2);
+        assert_eq!(m.viewport.center, IST);
     }
 
     #[test]
@@ -2134,7 +2206,7 @@ mod tests {
             ..MapState::default()
         };
         let fix = Coord::new(40.0, 30.0);
-        m.set_device_fix(fix, 5.0);
+        m.set_device_fix(fix, 5.0, 1_000);
         let vp = idle_view(
             &Ends::default(),
             m.position.map(|p| p.0),

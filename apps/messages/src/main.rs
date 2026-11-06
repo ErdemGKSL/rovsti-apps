@@ -20,6 +20,7 @@ mod prefs;
 mod schedule_ui;
 mod settings_ui;
 mod sms_conversation;
+mod status_ui;
 mod ticks;
 
 use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
@@ -59,12 +60,13 @@ use photos::ContactPhotos;
 use rovsti_wa_client::ClientError;
 use rovsti_wa_proto::{
     ChatAction, ChatActionKind, ChatMeta, GatewayEvent, ScheduleText, ScheduledText, SendText,
-    WaMessage, jid_user, to_rovsti,
+    WaMessage, is_status_chat, jid_user, to_rovsti,
 };
 use rovsti_wa_ui::{AppId, WaAvatars, WhatsAppSettings, display_name};
 use schedule_ui::{Dest, Draft, ScheduleSheet, StripKey, StripTarget};
 use settings_ui::{SettingsEvent, SettingsView};
 use sms_conversation::{SmsConversation, SmsConversationEvent};
+use status_ui::{StatusFeed, StatusPage, StatusPageEvent};
 
 const TABS: [&str; 3] = ["Chats", "WhatsApp", "Settings"];
 const CHATS_TAB: usize = 0;
@@ -101,6 +103,8 @@ enum Open {
     WhatsApp(String, Entity<Conversation>),
     Sms(Entity<SmsConversation>),
     New(Entity<NewConversation>),
+    /// WhatsApp Status updates (stories).
+    Status(Entity<StatusPage>),
 }
 
 struct MessagesApp {
@@ -128,6 +132,8 @@ struct MessagesApp {
     wa_info: HashMap<String, WaChatInfo>,
     /// WhatsApp profile pictures (shared with the conversation).
     avatars: Entity<WaAvatars>,
+    /// WhatsApp Status updates (shared with the Status page).
+    statuses: Entity<StatusFeed>,
     /// Address-book photos (shared with the conversation).
     photos: Entity<ContactPhotos>,
     /// The address book the photo misses were recorded against.
@@ -183,6 +189,8 @@ struct ChatLayout {
     show_archived: bool,
     role_held: bool,
     state: Access,
+    /// The Status row's people and unseen count.
+    statuses: (usize, usize),
 }
 
 /// One item of the Chats list.
@@ -199,6 +207,8 @@ enum ChatItem {
     ArchivedBack,
     /// The "Archived" entry row.
     ArchivedFilter,
+    /// WhatsApp Status updates.
+    Status,
     /// A row of the inbox (or of the Spam filter while it shows).
     Row(usize),
     Empty,
@@ -221,6 +231,7 @@ impl MessagesApp {
         let schedule = ScheduleSheet::new(cx);
         let avatars = cx.new(|cx| WaAvatars::new(&whatsapp, cx));
         let photos = cx.new(|_| ContactPhotos::new());
+        let statuses = cx.new(|_| StatusFeed::default());
         // The backend owns the one event sink: it hands WhatsApp pushes over
         // here, and SMS, contact and role changes rebuild the inbox.
         let subscriptions = vec![
@@ -244,6 +255,7 @@ impl MessagesApp {
             }),
             cx.observe(&avatars, |_, _, cx| cx.notify()),
             cx.observe(&photos, |_, _, cx| cx.notify()),
+            cx.observe(&statuses, |_, _, cx| cx.notify()),
             cx.subscribe(&backend, |this, _, event, cx| match event {
                 BackendEvent::WaPush => {
                     this.whatsapp.update(cx, |settings, cx| settings.wake(cx));
@@ -252,7 +264,10 @@ impl MessagesApp {
                 BackendEvent::Reply(reply) => this.on_reply(reply, cx),
                 BackendEvent::OpenThread(tag) => this.on_open_tag(tag, None, cx),
                 BackendEvent::Handoff(handoff) => this.on_handoff(handoff, cx),
-                BackendEvent::Notice(text) => this.show_pill(text.clone()),
+                BackendEvent::Notice(text) => {
+                    this.show_pill(text.clone());
+                    cx.notify();
+                }
                 BackendEvent::SmsChanged | BackendEvent::Status(_) | BackendEvent::Document(_) => {}
             }),
             cx.subscribe(&settings, |this, _, event, cx| match event {
@@ -284,6 +299,7 @@ impl MessagesApp {
             wa_info: HashMap::new(),
             avatars,
             photos,
+            statuses,
             contacts_seen: 0,
             show_archived: false,
             row_menu: None,
@@ -340,6 +356,9 @@ impl MessagesApp {
         }
         self.window_active = active;
         self.sms_window_active(active, cx);
+        if let Open::Status(page) = &self.open {
+            page.update(cx, |page, cx| page.set_active(active, cx));
+        }
         if let Open::WhatsApp(jid, conversation) = &self.open {
             let (jid, conversation) = (jid.clone(), conversation.clone());
             conversation.update(cx, |c, cx| c.set_active(active, cx));
@@ -432,7 +451,7 @@ impl MessagesApp {
                     .map(|(thread, badge)| (thread.clone(), badge));
                 conversation.update(cx, |c, cx| c.set_switch(target, cx));
             }
-            Open::New(_) | Open::None => {}
+            Open::New(_) | Open::Status(_) | Open::None => {}
         }
     }
 
@@ -449,6 +468,9 @@ impl MessagesApp {
                 conversation.update(cx, |conversation, cx| conversation.on_event(&event, cx));
             }
             match event {
+                // An older gateway sends status updates as messages: they
+                // belong on the Status page, never in the inbox.
+                GatewayEvent::Message(message) if is_status_chat(&message.chat) => {}
                 GatewayEvent::Message(message) => {
                     // An open chat in a window the user can't see is not read.
                     let viewing = self.window_active
@@ -506,8 +528,12 @@ impl MessagesApp {
                     schedule_ui::upsert_remote(&mut self.remote_scheduled, item);
                     self.sync_open_page(cx);
                 }
+                GatewayEvent::StatusChanged { .. } => self.reload_statuses(cx),
                 // The stream missed events: fetch the chat list again.
-                GatewayEvent::Resync => self.chats = ChatsState::Needed,
+                GatewayEvent::Resync => {
+                    self.chats = ChatsState::Needed;
+                    self.reload_statuses(cx);
+                }
                 _ => {}
             }
         }
@@ -516,14 +542,46 @@ impl MessagesApp {
             self.wa_threads_mut().clear();
             self.wa_info_mut().clear();
             self.row_menu = None;
-            if matches!(self.open, Open::WhatsApp(..)) {
+            if matches!(self.open, Open::WhatsApp(..) | Open::Status(_)) {
                 self.open = Open::None;
             }
             self.chats = ChatsState::Needed;
+            self.statuses.update(cx, |feed, cx| feed.clear(cx));
         } else if connected && self.chats == ChatsState::Needed {
             self.load_chats(cx);
+            self.reload_statuses(cx);
         }
         self.rebuild(cx);
+    }
+
+    /// Fetches the Status updates again (after a `status_changed` event).
+    fn reload_statuses(&mut self, cx: &mut Context<Self>) {
+        if let Some(gateway) = self.whatsapp.read(cx).gateway() {
+            self.statuses
+                .update(cx, |feed, cx| feed.reload(gateway, cx));
+        }
+    }
+
+    /// Opens the Status page.
+    fn open_status(&mut self, cx: &mut Context<Self>) {
+        let Some(gateway) = self.whatsapp.read(cx).gateway() else {
+            return;
+        };
+        self.leave_page();
+        let (feed, backend, avatars) = (
+            self.statuses.clone(),
+            self.backend.clone(),
+            self.avatars.clone(),
+        );
+        let active = self.window_active;
+        let page = cx.new(|cx| StatusPage::new(feed, gateway, backend, avatars, active, cx));
+        cx.subscribe(&page, |this, _, event, cx| match event {
+            StatusPageEvent::Back => this.close_page(cx),
+        })
+        .detach();
+        self.open = Open::Status(page);
+        self.page.restart();
+        cx.notify();
     }
 
     /// A chat lost its messages (cleared, or its newest deleted for me): it
@@ -612,7 +670,7 @@ impl MessagesApp {
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             return;
         };
-        self.row_menu = None;
+        self.leave_page();
         let is_group = self
             .wa_threads
             .iter()
@@ -691,6 +749,7 @@ impl MessagesApp {
         recipients: Vec<String>,
         cx: &mut Context<Self>,
     ) {
+        self.leave_page();
         let backend = self.backend.clone();
         let conversation =
             cx.new(|cx| SmsConversation::new(backend, thread_id, title, recipients, cx));
@@ -731,6 +790,7 @@ impl MessagesApp {
     }
 
     fn open_new(&mut self, cx: &mut Context<Self>) {
+        self.leave_page();
         let backend = self.backend.clone();
         let entry = cx.new(|cx| NewConversation::new(backend, cx));
         cx.subscribe(&entry, |this, _, event, cx| match event {
@@ -763,7 +823,15 @@ impl MessagesApp {
         }
     }
 
+    /// A page is about to replace the open one (a notification, the channel
+    /// switch): layers that belonged to the old page go with it.
+    fn leave_page(&mut self) {
+        self.schedule.close();
+        self.row_menu = None;
+    }
+
     fn close_page(&mut self, cx: &mut Context<Self>) {
+        self.leave_page();
         self.open = Open::None;
         self.page.restart();
         cx.notify();
@@ -997,6 +1065,10 @@ impl MessagesApp {
             && conversation.update(cx, |c, cx| c.go_back(cx))
         {
             // The conversation closed one of its own layers (menu, reply, edit).
+        } else if let Open::Status(page) = &self.open
+            && page.update(cx, |page, cx| page.go_back(cx))
+        {
+            // The Status viewer closed; the page stays.
         } else if !matches!(self.open, Open::None) {
             self.close_page(cx);
         } else if (self.show_archived || self.show_spam) && self.tabs.selected() == CHATS_TAB {
@@ -1026,7 +1098,7 @@ impl MessagesApp {
             Open::Sms(conversation) => {
                 Some(conversation.read(cx).thread()).filter(|t| *t != ThreadId::Sms(-1))
             }
-            Open::New(_) | Open::None => None,
+            Open::New(_) | Open::Status(_) | Open::None => None,
         }
     }
 
@@ -1217,7 +1289,10 @@ impl MessagesApp {
             (ThreadId::Sms(_), Open::Sms(conversation))
                 if conversation.read(cx).thread() == thread =>
             {
-                conversation.update(cx, |c, cx| c.send_reply(text, cx));
+                if !conversation.update(cx, |c, cx| c.send_reply(text, cx)) {
+                    self.show_pill("The reply was not sent");
+                    cx.notify();
+                }
             }
             (ThreadId::WhatsApp(jid), Open::WhatsApp(open, conversation)) if open == jid => {
                 conversation.update(cx, |c, cx| c.send_text(text, cx));
@@ -1235,6 +1310,7 @@ impl MessagesApp {
     fn reply_whatsapp(&mut self, chat: String, text: String, cx: &mut Context<Self>) {
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             self.show_pill("WhatsApp is not connected, the reply was not sent");
+            cx.notify();
             return;
         };
         let request = SendText {
@@ -1248,8 +1324,11 @@ impl MessagesApp {
         cx.spawn(async move |this, cx| {
             if let Err(error) = task.await {
                 log::warn!("a WhatsApp reply failed: {error}");
-                this.update(cx, |this, _| this.show_pill("The reply was not sent"))
-                    .ok();
+                this.update(cx, |this, cx| {
+                    this.show_pill("The reply was not sent");
+                    cx.notify();
+                })
+                .ok();
             }
         })
         .detach();
@@ -1328,7 +1407,7 @@ impl MessagesApp {
                     c.set_scheduled(items, cx);
                 });
             }
-            Open::New(_) | Open::None => {}
+            Open::New(_) | Open::Status(_) | Open::None => {}
         }
     }
 
@@ -1438,6 +1517,7 @@ impl MessagesApp {
                     cx.notify();
                     return;
                 };
+                let scheduled_for = chat.clone();
                 let request = ScheduleText {
                     chat,
                     text: draft.body,
@@ -1452,7 +1532,10 @@ impl MessagesApp {
                         match result {
                             Ok(item) => {
                                 schedule_ui::upsert_remote(&mut this.remote_scheduled, item);
-                                if let Open::WhatsApp(_, conversation) = &this.open {
+                                // Only the chat it was typed in: another may be open by now.
+                                if let Open::WhatsApp(open, conversation) = &this.open
+                                    && *open == scheduled_for
+                                {
                                     conversation.update(cx, |c, cx| c.clear_draft(cx));
                                 }
                                 this.sync_open_page(cx);
@@ -1736,12 +1819,18 @@ impl MessagesApp {
             let backend = self.backend.read(cx);
             (backend.sms_role_held(), backend.threads_state())
         };
+        let statuses = {
+            let list = self.statuses.read(cx).list();
+            let shown = list.authors.len() + usize::from(!list.mine.is_empty());
+            (shown, list.unviewed())
+        };
         let layout = ChatLayout {
             view_gen: self.view_gen,
             show_spam: self.show_spam,
             show_archived: self.show_archived,
             role_held,
             state,
+            statuses,
         };
         if self.chat_layout == Some(layout) {
             return;
@@ -1756,6 +1845,9 @@ impl MessagesApp {
         } else if self.show_archived {
             items.push(ChatItem::ArchivedBack);
         } else {
+            if statuses.0 > 0 {
+                items.push(ChatItem::Status);
+            }
             if !self.view.archived.is_empty() {
                 items.push(ChatItem::ArchivedFilter);
             }
@@ -1787,6 +1879,7 @@ impl MessagesApp {
                     key_of((7u8, self.view.archived.len(), self.view.archived_unread()))
                 }
                 ChatItem::ArchivedBack => key_of(8u8),
+                ChatItem::Status => key_of((9u8, statuses)),
                 ChatItem::Empty => key_of((3u8, state)),
                 ChatItem::Title => key_of(0u8),
                 ChatItem::RoleBanner => key_of(4u8),
@@ -1876,9 +1969,7 @@ impl MessagesApp {
                     theme,
                     Some(icon),
                     "Archived",
-                    Some(
-                        format!("{count} chat{}", if count == 1 { "" } else { "s" }).into(),
-                    ),
+                    Some(format!("{count} chat{}", if count == 1 { "" } else { "s" }).into()),
                     (unread > 0).then(|| unread.to_string().into()),
                 )
                 .id("archived-filter")
@@ -1889,6 +1980,25 @@ impl MessagesApp {
                 }))
                 .into_any_element()
             }
+            ChatItem::Status => {
+                let (leading, subtitle, unseen) = {
+                    let feed = self.statuses.read(cx);
+                    let list = feed.list().clone();
+                    let leading =
+                        status_ui::entry_avatars(theme, &list, &self.backend, &self.avatars, cx);
+                    (leading, status_ui::entry_subtitle(&list), list.unviewed())
+                };
+                list_row(
+                    theme,
+                    Some(leading),
+                    "Status",
+                    Some(subtitle.into()),
+                    (unseen > 0).then(|| unseen.to_string().into()),
+                )
+                .id("status-entry")
+                .on_click(cx.listener(|this, _, _, cx| this.open_status(cx)))
+                .into_any_element()
+            }
             ChatItem::SpamFilter => {
                 let unread = self.view.spam_unread();
                 let count = self.view.spam.len();
@@ -1897,8 +2007,7 @@ impl MessagesApp {
                     Some(avatar(theme, "!", 44.0, colors.orange).into_any_element()),
                     "Spam",
                     Some(
-                        format!("{count} conversation{}", if count == 1 { "" } else { "s" })
-                            .into(),
+                        format!("{count} conversation{}", if count == 1 { "" } else { "s" }).into(),
                     ),
                     (unread > 0).then(|| unread.to_string().into()),
                 )
@@ -1925,12 +2034,35 @@ impl MessagesApp {
                 self.inbox_row(theme, id, view, cx)
             }
             ChatItem::Empty => match self.backend.read(cx).threads_state() {
-                Access::Denied => empty_state(
-                    theme,
-                    "SMS Access Is Off",
-                    "Allow SMS access for Rovsti Messages in the system settings to see your messages.",
-                )
-                .into_any_element(),
+                Access::Denied => {
+                    // The default SMS app gets the access with the role; the
+                    // default without it turns it on in the app's settings.
+                    let held = self.backend.read(cx).sms_role_held();
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(12.0))
+                        .child(empty_state(
+                            theme,
+                            "SMS Access Is Off",
+                            "Allow SMS access for Rovsti Messages in the system settings to see your messages.",
+                        ))
+                        .child(
+                            glass_pill(theme, if held { "Open settings" } else { "Make default" })
+                                .id("sms-access")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.backend.update(cx, |backend, cx| {
+                                        if held {
+                                            backend.open_app_settings(cx);
+                                        } else {
+                                            backend.request_sms_role(cx);
+                                        }
+                                    });
+                                })),
+                        )
+                        .into_any_element()
+                }
                 Access::Loading => {
                     empty_state(theme, "Loading", "Reading your messages…").into_any_element()
                 }
@@ -1975,6 +2107,7 @@ impl Render for MessagesApp {
                 Some(entry.clone().into_any_element()),
                 theme.colors().accent,
             ),
+            Open::Status(page) => (Some(page.clone().into_any_element()), theme.colors().green),
         };
         if let Some(page) = page {
             return div()
@@ -2010,11 +2143,15 @@ impl Render for MessagesApp {
             } else {
                 self.settings.clone().into_any_element()
             };
+            // The keyboard covers the page's bottom: room to scroll a form
+            // field (passphrase, spam rule) above it.
+            let insets = window.insets();
+            let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
             div()
                 .id("page")
                 .size_full()
                 .overflow_y_scroll()
-                .pb(content_bottom_inset())
+                .pb(content_bottom_inset() + keyboard)
                 .opacity(self.page.progress())
                 .child(
                     div()

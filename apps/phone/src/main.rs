@@ -372,10 +372,15 @@ impl PhoneApp {
             cx.observe_in(&wa_call, window, |this, _, window, cx| {
                 this.sync_calls(window, cx);
                 this.sync_wa_history(cx);
-                if this.wa_call.update(cx, |ui, _| ui.take_error()).is_some() {
-                    this.call_note = Some(notice::Notice::WhatsApp(
-                        "The WhatsApp call could not be placed",
-                    ));
+                if let Some(what) = this.wa_call.update(cx, |ui, _| ui.take_error()) {
+                    // A failed Answer or Decline gives the ringing screen its buttons back.
+                    this.incoming_rearm(cx);
+                    if this.incall.covers() || this.incoming.covers() {
+                        // Over a call screen the pill says it; the tab notice would be hidden.
+                        this.show_notice_pill(what, None, false, cx);
+                    } else {
+                        this.call_note = Some(notice::Notice::WhatsApp(what));
+                    }
                 }
             }),
             // A WhatsApp picture or name arrived: the call screens and Recents follow.
@@ -698,19 +703,30 @@ impl PhoneApp {
     /// In-Call screen. On the other tabs it goes to the Keypad; on the Keypad
     /// the OS decides (Activity moves to back).
     fn on_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // While the In-Call screen shows, what is open on the tabs under it (a menu,
+        // a tab sheet, Settings, the keyboard) stays put: Back acts on the call.
+        let on_call = self.incall.shown;
         if self.reply_is_open() {
             // Back puts the reply sheet away and returns to the ringing card.
             self.reply_close(window, cx);
         } else if self.incoming.covers() {
             // Back does nothing while a call rings: it must not look like a decline.
-        } else if self.row_menu.is_open() {
-            self.row_menu_close(window, cx);
         } else if self.route.is_open() {
             // The route list closes first.
             self.route_close(window, cx);
-        } else if self.sheet.is_open() {
-            self.close_sheet(cx);
-        } else if self.settings.sub_open() {
+        } else if self.sheet.is_open() && (!on_call || self.sheet_kind_over_call()) {
+            // The Add call sheet's number chooser steps back to its list first.
+            if !self.add_call_back(cx) {
+                self.close_sheet(cx);
+            }
+        } else if on_call {
+            // The keypad closes, else the screen goes; locked, the OS decides (no tab step).
+            if self.incall.wants_back(self.incall.call_only) {
+                self.incall_back(cx);
+            }
+        } else if self.row_menu.is_open() {
+            self.row_menu_close(window, cx);
+        } else if self.settings.sub_shown() {
             // The WhatsApp page steps back inside itself first.
             let stepped = self.settings.sub == Some(settings_ui::Sub::WhatsApp)
                 && self
@@ -724,8 +740,11 @@ impl PhoneApp {
         } else if self.contacts.typing {
             // First Back puts the keyboard away; the next one is the OS's.
             window.blur();
-        } else if self.incall.wants_back(self.incall.call_only) {
-            self.incall_back(cx);
+        } else if self.tabs.selected() == CONTACTS_TAB
+            && !self.contacts.field.read(cx).text().is_empty()
+        {
+            // A search is cleared before Back leaves Contacts.
+            self.contacts.field.update(cx, |field, cx| field.clear(cx));
         } else if self.tabs.selected() != KEYPAD_TAB {
             // From any other tab Back goes home, to the Keypad; there the OS decides.
             self.select_tab(KEYPAD_TAB, cx);
@@ -735,18 +754,38 @@ impl PhoneApp {
         self.update_back(window);
     }
 
+    /// The sheet is one drawn over the call screens (Add call, SIM chooser, reply).
+    /// Any other sheet belongs to the tabs and is hidden while a call screen covers them.
+    fn sheet_kind_over_call(&self) -> bool {
+        matches!(
+            self.sheet_kind,
+            SheetKind::AddCall | SheetKind::SimChooser | SheetKind::Reply
+        )
+    }
+
+    /// A visible sheet that owns the screen it sits on: a tab sheet only while no
+    /// call screen covers it, a call sheet always.
+    fn sheet_blocks(&self) -> bool {
+        let call_covers = self.incall.covers() || self.incoming.covers();
+        self.sheet.is_visible() && (!call_covers || self.sheet_kind_over_call())
+    }
+
     /// Tells the host whether GPUI wants Back (only when something can close).
     fn update_back(&mut self, window: &mut Window) {
         let call_only = self.incall.call_only;
+        // Over the In-Call screen only the call's own layers count (see `on_back`).
+        let tabs_layer = !self.incall.shown
+            && (self.row_menu.is_open()
+                || self.sheet.is_open()
+                || self.settings.is_open()
+                || self.contacts.typing
+                || self.tabs.selected() != KEYPAD_TAB);
         let want = self.incoming.wants_back()
             || self.reply_is_open()
-            || self.row_menu.is_open()
             || self.route.is_open()
-            || self.sheet.is_open()
-            || self.settings.is_open()
-            || self.contacts.typing
+            || (self.sheet.is_open() && self.sheet_kind_over_call())
             || self.incall.wants_back(call_only)
-            || self.tabs.selected() != KEYPAD_TAB;
+            || tabs_layer;
         if want != self.back_enabled {
             self.back_enabled = want;
             window.set_back_enabled(want);
@@ -819,8 +858,10 @@ impl PhoneApp {
                 // Under the open sheet only the sheet's own buttons react, and
                 // under the In-Call screen only its own controls.
                 // The Settings page owns the screen: only its own controls (and sheets) react.
+                // A call screen over Settings owns the screen instead (End must always work).
                 let on_settings = id.as_deref().is_some_and(|i| self.settings.owns(i));
-                if self.settings.covers() && !on_settings {
+                let call_covers = self.incall.covers() || self.incoming.covers();
+                if self.settings.covers() && !on_settings && !call_covers {
                     return;
                 }
                 let on_incoming = id.as_deref().is_some_and(|i| i.starts_with("in-"));
@@ -831,7 +872,9 @@ impl PhoneApp {
                 let owned = id.as_deref().is_some_and(|i| {
                     self.add_call_owns(i) || self.sim_owns(i) || self.reply_owns(i)
                 });
-                let blocked_by_sheet = self.sheet.is_visible()
+                // A tab sheet left open under a call screen blocks nothing there.
+                let sheet_blocks = self.sheet_blocks();
+                let blocked_by_sheet = sheet_blocks
                     && !owned
                     && !id.as_deref().is_some_and(|i| i.starts_with("sheet-"));
                 let is_call_id = |i: &str| {
@@ -850,7 +893,7 @@ impl PhoneApp {
                 let blocked_by_tabs =
                     !self.incall.covers() && id.as_deref().is_some_and(is_call_id);
                 // Over a sheet only the sheet's own controls react; the call controls under it do not.
-                let call_under_sheet = self.sheet.is_visible()
+                let call_under_sheet = sheet_blocks
                     && id
                         .as_deref()
                         .is_some_and(|i| is_call_id(i) && i != "ic-end");
@@ -1293,6 +1336,8 @@ impl Render for PhoneApp {
         self.sync_pill(cx);
         self.sync_row_menu(cx);
         self.sync_reply(window, cx);
+        self.sync_add_call_closed(cx);
+        self.sync_sim_dismissed(cx);
         self.sync_settings_frame(window, cx);
         self.sync_dial_match(cx);
         self.sync_t9_match(cx);

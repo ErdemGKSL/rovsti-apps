@@ -83,6 +83,7 @@ pub(crate) struct BlockedUi {
     seg: Spring,
     pub field: Entity<SearchField>,
     seen_edits: u64,
+    seen_submits: u64,
     typing: bool,
     error: Option<&'static str>,
     numbers: Arc<[NumRow]>,
@@ -106,8 +107,10 @@ impl BlockedUi {
         Self {
             segment: 0,
             seg: Spring::new(0.0, motion_tokens::select()).with_epsilon(0.002),
-            field: cx.new(SearchField::new),
+            // The keyboard's action key blocks the typed number, like the Block button.
+            field: cx.new(|cx| SearchField::new(cx).with_action(gpui::TextInputAction::Go)),
             seen_edits: 0,
+            seen_submits: 0,
             typing: false,
             error: None,
             numbers: Arc::from(Vec::new()),
@@ -198,11 +201,22 @@ impl PhoneApp {
     }
 
     /// The add field's text or focus changed.
-    pub(crate) fn blocked_field_changed(&mut self, window: &Window, cx: &mut Context<Self>) {
-        let (edits, focused) = {
+    pub(crate) fn blocked_field_changed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (edits, submits, focused) = {
             let field = self.blocked.field.read(cx);
-            (field.edits, field.focus_handle().is_focused(window))
+            (
+                field.edits,
+                field.submits,
+                field.focus_handle().is_focused(window),
+            )
         };
+        if submits != self.blocked.seen_submits {
+            self.blocked.seen_submits = submits;
+            let typed = !self.blocked.field.read(cx).text().trim().is_empty();
+            if typed && self.settings.sub == Some(crate::settings_ui::Sub::Blocked) {
+                self.blocked_add(window, cx);
+            }
+        }
         let mut changed = false;
         if edits != self.blocked.seen_edits {
             self.blocked.seen_edits = edits;
@@ -566,6 +580,15 @@ impl PhoneApp {
                 div()
                     .text_color(colors.tertiary_label)
                     .child("Add a number to block")
+                    .into_any_element()
+            } else if typing && enabled {
+                // While typing the ellipsis cuts the start, never the digits just typed.
+                div()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
+                    .text_color(colors.label)
+                    .child(text.clone())
                     .into_any_element()
             } else {
                 div()

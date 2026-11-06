@@ -55,11 +55,15 @@ use preview::Preview;
 /// How many threads the inbox pulls.
 const THREAD_LIMIT: usize = 500;
 
-/// The largest picture the attach button copies into the cache.
-const ATTACH_MAX_BYTES: u64 = 8 * 1024 * 1024;
+/// The largest picture the attach button copies into the cache: no more than
+/// the MMS send (`headless::mms_send_req`) will read.
+const ATTACH_MAX_BYTES: u64 = crate::headless::MAX_ATTACHMENT_BYTES;
 
 /// The local scheduled-SMS queue, next to the preferences.
 const QUEUE_FILE: &str = "scheduled.json";
+
+/// How many threads a backup (and a restore comparison) reads: every one.
+const BACKUP_THREAD_LIMIT: usize = 1_000_000;
 
 /// Rows per provider page while a backup reads whole threads.
 const SNAPSHOT_PAGE: usize = 500;
@@ -177,6 +181,9 @@ pub struct Backend {
     data_dir: Option<PathBuf>,
     next_local: u64,
     pulls: Pulls,
+    /// The window is in front: Kotlin leaves notifications to the app, and
+    /// what the open conversation shows counts as read.
+    ui_active: bool,
     _tasks: Vec<Task<()>>,
 }
 
@@ -210,6 +217,7 @@ impl Backend {
                 data_dir: None,
                 next_local: 1,
                 pulls: Pulls::default(),
+                ui_active: true,
                 _tasks: Vec::new(),
             };
             let drain = cx.spawn(async move |this, cx| {
@@ -332,6 +340,31 @@ impl Backend {
 
     pub fn is_preview(&self) -> bool {
         self.preview.is_some()
+    }
+
+    /// Whether the window is in front (see [`Self::set_ui_active`]).
+    pub fn ui_active(&self) -> bool {
+        self.ui_active
+    }
+
+    /// The window came to the front or went to the background. Kotlin is told
+    /// (`uiAttached`), so in the background it posts its own WhatsApp digests
+    /// and answers notification replies itself.
+    pub fn set_ui_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if self.ui_active == active {
+            return;
+        }
+        self.ui_active = active;
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(error) = rovsti_android::window::ui_attached(active)
+                    && !matches!(error, Error::Unsupported)
+                {
+                    log::debug!("uiAttached failed: {error}");
+                }
+            })
+            .detach();
+        cx.notify();
     }
 
     pub fn sim_choice(&self, thread_id: i64) -> Option<i32> {
@@ -633,6 +666,19 @@ impl Backend {
         }
     }
 
+    /// Opens this app's page in the system settings (to turn a permission on).
+    pub fn open_app_settings(&mut self, cx: &mut Context<Self>) {
+        cx.background_executor()
+            .spawn(async {
+                if let Err(error) = permissions::open_app_details()
+                    && !matches!(error, Error::Unsupported)
+                {
+                    log::warn!("opening the app settings failed: {error}");
+                }
+            })
+            .detach();
+    }
+
     /// Marks a thread read, now in the list and then in the provider.
     pub fn mark_read(&mut self, thread_id: i64, cx: &mut Context<Self>) {
         if let Some(thread) = self.threads.iter_mut().find(|t| t.thread_id == thread_id) {
@@ -813,6 +859,12 @@ impl Backend {
             return Task::ready(result);
         }
         cx.background_executor().spawn(async move {
+            // The inbox holds only the newest THREAD_LIMIT threads: a backup reads them all.
+            let ids = match decode::<SmsThreadsPayload>(sms::threads(BACKUP_THREAD_LIMIT)) {
+                Pull::Ready(payload) => payload.threads.iter().map(|t| t.thread_id).collect(),
+                Pull::Denied => return Err("SMS access is off".to_owned()),
+                Pull::Unsupported | Pull::Failed(_) => ids,
+            };
             collect_all(&ids, |thread, before| {
                 match decode::<SmsMessagesPayload>(sms::messages(thread, before, SNAPSHOT_PAGE)) {
                     Pull::Ready(page) => Ok(page),

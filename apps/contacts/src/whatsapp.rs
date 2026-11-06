@@ -13,7 +13,7 @@ use std::{
 };
 
 use gpui::{Context, SharedString};
-use rovsti_core::{PhoneNumber, recents::LocaleTime, wire::WireContact};
+use rovsti_core::{PhoneNumber, recents::LocaleTime, search::fold, wire::WireContact};
 use rovsti_wa_client::{Gateway, Picture};
 use rovsti_wa_proto::{
     ChatSummary, GatewayEvent, PresenceBook, WaProfile, WaTarget, WaUser, chat_users,
@@ -204,8 +204,9 @@ pub(crate) fn profile_lines(
             .map(str::to_owned)
     };
     let mut lines = Vec::new();
+    // Folded, so "AYŞE" and "Ayşe" (or "İ" and "i") count as the same name.
     if let Some(push) = text(&profile.push_name)
-        && !push.eq_ignore_ascii_case(contact_name.trim())
+        && fold(&push) != fold(contact_name.trim())
     {
         lines.push(("WhatsApp name", push));
     }
@@ -232,10 +233,16 @@ fn fetch_wa_photo(gateway: &Gateway, jid: &str, dir: &Path, id: i64) -> Result<S
         Ok(Picture::None | Picture::Unchanged) => {
             return Err("they have no WhatsApp photo you can see".to_owned());
         }
-        Err(error) => return Err(error.to_string()),
+        Err(error) => {
+            log::warn!("fetching the WhatsApp photo failed: {error}");
+            return Err("WhatsApp can't be reached right now".to_owned());
+        }
     };
     let path = wa_photo_path(dir, id);
-    std::fs::write(&path, &bytes).map_err(|error| error.to_string())?;
+    std::fs::write(&path, &bytes).map_err(|error| {
+        log::warn!("writing the WhatsApp photo failed: {:?}", error.kind());
+        "the photo can't be stored on this phone".to_owned()
+    })?;
     path.into_os_string()
         .into_string()
         .map_err(|_| "the data folder has an unusual name".to_owned())
@@ -372,6 +379,10 @@ impl ContactsApp {
     /// large picture is fetched, written to the data folder and handed to
     /// the same path a picked photo takes (Android deletes the file after).
     pub(crate) fn use_wa_photo(&mut self, id: i64, jid: String, cx: &mut Context<Self>) {
+        // A second tap while the first is fetching or saving does nothing.
+        if self.wa_photo_busy {
+            return;
+        }
         let Some(gateway) = self.whatsapp.read(cx).gateway() else {
             self.notice = Some("Connect WhatsApp to use the photo.".into());
             cx.notify();
@@ -382,6 +393,7 @@ impl ContactsApp {
             cx.notify();
             return;
         };
+        self.wa_photo_busy = true;
         self.notice = Some("Getting the WhatsApp photo…".into());
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -390,8 +402,10 @@ impl ContactsApp {
                 .spawn(async move { fetch_wa_photo(&gateway, &jid, &dir, id) })
                 .await;
             this.update(cx, |this, cx| match saved {
+                // `photo_changed` ends the busy state once Android answers.
                 Ok(path) => this.apply_photo(id, path, cx),
                 Err(words) => {
+                    this.wa_photo_busy = false;
                     this.notice = Some(format!("Can't use the WhatsApp photo: {words}.").into());
                     cx.notify();
                 }
@@ -495,7 +509,8 @@ impl ContactsApp {
                 Ok(false) => Some("Install Rovsti Messages to chat on WhatsApp".into()),
                 Err(error) => {
                     let what = if call { "call" } else { "chat" };
-                    Some(format!("Can't {what} on WhatsApp: {error}.").into())
+                    let words = crate::backend::android_words(&error);
+                    Some(format!("Can't {what} on WhatsApp: {words}.").into())
                 }
             };
             this.update(cx, |this, cx| {
@@ -694,6 +709,15 @@ mod tests {
         // The same name as the contact is not repeated.
         assert_eq!(
             profile_lines(&profile, "AYSE"),
+            vec![("About", "Hey there".to_owned())]
+        );
+        // Turkish capitals are the same name too.
+        let turkish = WaProfile {
+            push_name: Some("AYŞE İNCE".into()),
+            ..profile.clone()
+        };
+        assert_eq!(
+            profile_lines(&turkish, "Ayşe ince"),
             vec![("About", "Hey there".to_owned())]
         );
         let business = WaProfile {

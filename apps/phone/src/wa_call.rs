@@ -455,7 +455,8 @@ pub struct WaCallUi {
     history_dir: Option<PathBuf>,
     /// Latest write wins: an older queued write skips itself.
     write_gen: Arc<AtomicU64>,
-    error: Option<SharedString>,
+    /// The last failure, said the way the user should read it.
+    error: Option<&'static str>,
     /// A snapshot fetch is running; another request only sets `resync`.
     syncing: bool,
     resync: bool,
@@ -776,7 +777,9 @@ impl WaCallUi {
             return;
         };
         match action {
-            WaCallAction::Answer => self.answer(cx),
+            WaCallAction::Answer => {
+                self.answer(cx);
+            }
             // A stale Decline must not end a call that is already answered.
             WaCallAction::Decline if shown.is_some_and(|(id, _)| id == call_id) => {
                 if shown.is_some_and(|(_, ringing)| ringing) {
@@ -837,30 +840,39 @@ impl WaCallUi {
         }
     }
 
-    fn fail(&mut self, what: &str, error: impl std::fmt::Display, cx: &mut Context<Self>) {
+    /// Logs the cause; the user sees `what` only (never the technical error).
+    fn fail(&mut self, what: &'static str, error: impl std::fmt::Display, cx: &mut Context<Self>) {
         log::warn!("{what}: {error}");
-        self.error = Some(format!("{what}.").into());
+        self.error = Some(what);
         cx.notify();
     }
 
-    pub(crate) fn answer(&mut self, cx: &mut Context<Self>) {
+    /// Answers the ringing call. `false` when it cannot even start (no ringing call,
+    /// WhatsApp not connected); a later failure shows up in [`Self::take_error`].
+    pub(crate) fn answer(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(view) = self.tracker.view(now_ms()) else {
-            return;
+            return false;
         };
-        if !view.is_ringing_in() || self.answering {
-            return;
+        if !view.is_ringing_in() {
+            return false;
+        }
+        if self.answering {
+            return true;
         }
         let settings = self.settings.read(cx);
         let (Some(gateway), Some(link)) = (settings.gateway(), settings.link().cloned()) else {
-            return;
+            self.fail("WhatsApp is not connected", "no gateway link", cx);
+            return false;
         };
         self.answering = true;
         self.error = None;
         let call_id = view.call_id;
         self.cancel_notice(&call_id, cx);
         let task = cx.background_executor().spawn(async move {
-            gateway.accept_call(&call_id)?;
-            open_call_audio(&link, &call_id)
+            gateway
+                .accept_call(&call_id)
+                .map_err(|e| ("Could not answer the call", e))?;
+            open_call_audio(&link, &call_id).map_err(|e| ("Could not open the call audio", e))
         });
         cx.spawn(async move |this, cx| {
             let result = task.await;
@@ -868,7 +880,7 @@ impl WaCallUi {
                 this.answering = false;
                 match result {
                     Ok(audio) => this.attach_audio(audio, cx),
-                    Err(error) => this.fail("Could not answer the call", error, cx),
+                    Err((what, error)) => this.fail(what, error, cx),
                 }
                 cx.notify();
             })
@@ -876,6 +888,7 @@ impl WaCallUi {
         })
         .detach();
         cx.notify();
+        true
     }
 
     /// Starts the pump for an opened call audio socket.
@@ -980,17 +993,19 @@ impl WaCallUi {
     }
 
     /// The last failure, once: the app shows it as a notice.
-    pub fn take_error(&mut self) -> Option<SharedString> {
+    pub fn take_error(&mut self) -> Option<&'static str> {
         self.error.take()
     }
 
-    /// Decline, or End: the gateway answers with a phase update.
-    pub(crate) fn hang_up(&mut self, decline: bool, cx: &mut Context<Self>) {
+    /// Decline, or End: the gateway answers with a phase update. `false` when it
+    /// cannot even be asked (no call, WhatsApp not connected).
+    pub(crate) fn hang_up(&mut self, decline: bool, cx: &mut Context<Self>) -> bool {
         let Some(view) = self.tracker.view(now_ms()) else {
-            return;
+            return false;
         };
         let Some(gateway) = self.settings.read(cx).gateway() else {
-            return;
+            self.fail("WhatsApp is not connected", "no gateway link", cx);
+            return false;
         };
         self.finish(cx);
         let call_id = view.call_id;
@@ -1005,12 +1020,18 @@ impl WaCallUi {
         cx.spawn(async move |this, cx| {
             if let Err(error) = task.await {
                 this.update(cx, |this, cx| {
-                    this.fail("The gateway did not end the call", error, cx);
+                    let what = if decline {
+                        "Could not decline the WhatsApp call"
+                    } else {
+                        "Could not end the WhatsApp call"
+                    };
+                    this.fail(what, error, cx);
                 })
                 .ok();
             }
         })
         .detach();
+        true
     }
 
     pub(crate) fn toggle_mute(&mut self, cx: &mut Context<Self>) {
@@ -1107,7 +1128,9 @@ impl Render for WaCallUi {
                     },
                     calls.answer,
                     cx,
-                    Self::answer,
+                    |this, cx| {
+                        this.answer(cx);
+                    },
                 ),
             ]
         } else if view.phase.is_ended() {
@@ -1158,7 +1181,7 @@ impl Render for WaCallUi {
                 div()
                     .text_size(typography::SUBHEADLINE.size)
                     .text_color(calls.warning)
-                    .child(error.clone()),
+                    .child(*error),
             );
         }
         if !buttons.is_empty() {

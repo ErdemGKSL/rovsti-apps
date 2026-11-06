@@ -81,6 +81,14 @@ const FIELD_H: f32 = 44.0;
 const ROW_PX: f32 = 58.0;
 /// Rows measured (and their photos asked for) beyond the screen's edges.
 const LIST_OVERDRAW_PX: f32 = 600.0;
+/// Requests for the data folder before giving up, and the pause between them.
+const DATA_DIR_ATTEMPTS: u32 = 5;
+const DATA_DIR_RETRY: std::time::Duration = std::time::Duration::from_millis(400);
+/// A notice goes away after this long (one that ends in "…" stays: it is
+/// replaced by the outcome).
+const NOTICE_LIFE: std::time::Duration = std::time::Duration::from_secs(4);
+/// Space kept between a focused editor field and the keyboard.
+const REVEAL_MARGIN: f32 = 16.0;
 
 /// A virtualised page: item 0 is the header (title, search, notes), the rows
 /// follow. Only the items on screen are built and laid out.
@@ -197,7 +205,19 @@ struct ContactsApp {
     transfer_busy: bool,
     /// How many contacts the export in flight holds.
     exported: Option<usize>,
+    /// An import was added: the file buttons stay busy until this pull (or a
+    /// newer one) lands, so a second import is planned against the new book.
+    import_settle: Option<u64>,
+    /// "Use as Contact Photo" is fetching or saving.
+    wa_photo_busy: bool,
     notice: Option<SharedString>,
+    /// The timer that clears `notice` (the text it was started for).
+    notice_timer: Option<(SharedString, gpui::Task<()>)>,
+    /// Bring the focused editor field above the keyboard: the focus and the
+    /// keyboard height last seen, and whether a reveal is still due.
+    reveal_focus: Option<FocusHandle>,
+    reveal_keyboard: Pixels,
+    reveal_pending: bool,
     photos: Photos,
     /// The "Contact photo" sheet over the editor.
     photo_sheet: Sheet,
@@ -253,14 +273,28 @@ impl ContactsApp {
             })
             .detach();
 
-        // The saved name format and sort order.
-        let data_dir = rovsti_ui::storage::data_dir("contacts", cx);
+        // The saved name format and sort order. The platform sometimes refuses
+        // the first request for the data folder; asking again works.
+        let data_dirs = rovsti_ui::storage::DataDirs::new("contacts");
         cx.spawn(async move |this, cx| {
-            let dir = match data_dir.await {
-                Ok(dir) => dir,
-                Err(error) => {
-                    log::warn!("no data directory for the preferences: {error}");
+            let mut attempt = 1;
+            let dir = loop {
+                let Ok(request) = this.update(cx, |_, cx| data_dirs.request(cx)) else {
                     return;
+                };
+                match request.await {
+                    Ok(dir) => break dir,
+                    Err(error) if attempt < DATA_DIR_ATTEMPTS => {
+                        log::warn!(
+                            "data folder request failed ({attempt}/{DATA_DIR_ATTEMPTS}): {error}"
+                        );
+                        attempt += 1;
+                        cx.background_executor().timer(DATA_DIR_RETRY).await;
+                    }
+                    Err(error) => {
+                        log::warn!("no data directory for the preferences: {error}");
+                        return;
+                    }
                 }
             };
             let read_from = dir.clone();
@@ -327,7 +361,13 @@ impl ContactsApp {
             pending_open: None,
             transfer_busy: false,
             exported: None,
+            import_settle: None,
+            wa_photo_busy: false,
             notice: None,
+            notice_timer: None,
+            reveal_focus: None,
+            reveal_keyboard: px(0.0),
+            reveal_pending: false,
             photos: Photos::new(),
             photo_sheet: Sheet::new(),
             back_enabled: false,
@@ -363,6 +403,9 @@ impl ContactsApp {
                     this.book = book;
                     this.groups = groups;
                     this.accounts = accounts;
+                    if this.import_settle.take_if(|id| *id <= pull_id).is_some() {
+                        this.transfer_busy = false;
+                    }
                     this.photos.forget_misses();
                     this.refresh_marks();
                     this.rebuild(cx);
@@ -540,8 +583,9 @@ impl ContactsApp {
     }
 
     /// Whether System Back has a layer to close: the confirm card, the photo sheet, the editor,
-    /// a card or group page, the WhatsApp page, or any tab but the first. When it has not,
-    /// Back leaves the app.
+    /// a card or group page, the WhatsApp page, any tab but the first, or a search. When it
+    /// has not, Back leaves the app. (The WhatsApp settings' own steps count only while their
+    /// page is open: `whatsapp_open`.)
     fn can_go_back(&self, cx: &App) -> bool {
         self.confirm.is_some()
             || self.photo_sheet.is_open()
@@ -550,8 +594,8 @@ impl ContactsApp {
             || self.open.is_some()
             || self.group_page.is_some()
             || self.whatsapp_open
-            || self.whatsapp.read(cx).can_go_back()
             || self.tabs.selected() != CONTACTS_TAB
+            || !self.field.read(cx).text().is_empty()
     }
 
     /// System Back: one step out of the top-most layer.
@@ -561,7 +605,7 @@ impl ContactsApp {
         } else if self.photo_sheet.is_open() {
             self.close_photo_sheet(cx);
         } else if self.editor.is_some() {
-            self.close_editor(cx);
+            self.leave_editor(cx);
         } else if self.group_edit.is_some() {
             self.cancel_group_edit(cx);
         } else if self.open.is_some() {
@@ -580,6 +624,9 @@ impl ContactsApp {
             self.notice = None;
             self.page.restart();
             cx.notify();
+        } else {
+            // On the Contacts tab with a search: Back clears it first.
+            self.field.update(cx, |field, cx| field.clear(cx));
         }
     }
 
@@ -600,7 +647,9 @@ impl ContactsApp {
             let notice: Option<SharedString> = match result {
                 Ok(true) => None,
                 Ok(false) => Some(format!("Can't {what}: no app answered.").into()),
-                Err(error) => Some(format!("Can't {what}: {error}.").into()),
+                Err(error) => {
+                    Some(format!("Can't {what}: {}.", backend::android_words(&error)).into())
+                }
             };
             this.update(cx, |this, cx| {
                 this.notice = notice;
@@ -639,7 +688,13 @@ impl ContactsApp {
                     this.reload(cx);
                 }
                 Err(error) => {
-                    this.notice = Some(format!("Can't change Favorites: {error}.").into());
+                    this.notice = Some(
+                        format!(
+                            "Can't change Favorites: {}.",
+                            backend::android_words(&error)
+                        )
+                        .into(),
+                    );
                     this.reload(cx);
                 }
             })
@@ -925,15 +980,21 @@ impl ContactsApp {
                     .child(empty_state(
                         theme,
                         "Allow Access to Contacts",
-                        "Rovsti Contacts reads your address book on this phone. Nothing is uploaded.",
+                        "Rovsti Contacts reads your address book on this phone. Nothing is uploaded. \
+                         If Android no longer asks, allow Contacts in the app's settings.",
                     ))
                     .child(
                         glass_pill(theme, "Allow Access")
                             .id("allow")
                             .on_click(cx.listener(|this, _, _, cx| {
+                                // Android no longer shows the dialog once access was
+                                // refused for good: the app's settings page is the way.
                                 this.act(
                                     "ask for access",
-                                    || permissions::request(AccessGroup::Contacts),
+                                    || match permissions::request(AccessGroup::Contacts) {
+                                        Ok(false) => permissions::open_app_details(),
+                                        other => other,
+                                    },
                                     cx,
                                 );
                             })),
@@ -1205,6 +1266,77 @@ impl ContactsApp {
             .into_any_element()
     }
 
+    /// Keeps the focused editor field above the keyboard. Runs when the focus
+    /// or the keyboard height changes, and scrolls (at most) until the field
+    /// is clear of the keyboard; after that the owner scrolls freely.
+    /// `field` is where the focused field was painted last frame.
+    fn reveal_focused_field(
+        &mut self,
+        field: Option<Bounds<Pixels>>,
+        keyboard: Pixels,
+        window: &mut Window,
+        cx: &App,
+    ) {
+        let focus = window.focused(cx);
+        if focus != self.reveal_focus || keyboard != self.reveal_keyboard {
+            self.reveal_focus = focus;
+            self.reveal_keyboard = keyboard;
+            self.reveal_pending = true;
+        }
+        if !self.reveal_pending || keyboard <= px(0.0) {
+            return;
+        }
+        let Some(field) = field else {
+            return;
+        };
+        let visible_bottom = window.viewport_size().height - keyboard - px(REVEAL_MARGIN);
+        let covered = field.bottom() - visible_bottom;
+        if covered <= px(0.0) {
+            self.reveal_pending = false;
+            return;
+        }
+        let offset = self.scroll.offset();
+        // The page's padding already grew by the keyboard (`bottom`), so the
+        // range is there; the offset is negative as the page scrolls down.
+        let y = (offset.y - covered).max(-self.scroll.max_offset().y);
+        if y < offset.y {
+            self.scroll.set_offset(gpui::point(offset.x, y));
+            window.request_animation_frame();
+        }
+    }
+
+    /// Starts the timer that takes the notice away, once per new text. A
+    /// notice ending in "…" says work is under way and stays until replaced.
+    fn keep_notice_timer(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.notice.clone() else {
+            self.notice_timer = None;
+            return;
+        };
+        if text.ends_with('…') {
+            self.notice_timer = None;
+            return;
+        }
+        if self
+            .notice_timer
+            .as_ref()
+            .is_some_and(|(timed, _)| *timed == text)
+        {
+            return;
+        }
+        let timed = text.clone();
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(NOTICE_LIFE).await;
+            this.update(cx, |this, cx| {
+                if this.notice.as_ref() == Some(&timed) {
+                    this.notice = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        });
+        self.notice_timer = Some((text, task));
+    }
+
     fn notice(&self, theme: Theme) -> Option<AnyElement> {
         let colors = theme::colors(theme);
         let text = self.notice.clone()?;
@@ -1262,6 +1394,11 @@ impl Render for ContactsApp {
         let insets = window.insets();
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
         let bottom = content_bottom_inset() + keyboard;
+        let focused_field = ui::take_focused_field_bounds();
+        if editing {
+            self.reveal_focused_field(focused_field, keyboard, window, cx);
+        }
+        self.keep_notice_timer(cx);
 
         // Lists that grow with the address book are virtualised and scroll
         // themselves; the other pages scroll as one block.

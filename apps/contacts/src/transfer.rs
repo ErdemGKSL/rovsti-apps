@@ -17,6 +17,7 @@ impl ContactsApp {
     /// Reads every contact with a number and offers it as `contacts.vcf`.
     pub(crate) fn export_contacts(&mut self, cx: &mut Context<Self>) {
         if self.transfer_busy {
+            self.say_busy(cx);
             return;
         }
         self.transfer_busy = true;
@@ -48,6 +49,7 @@ impl ContactsApp {
     /// Opens the picker for a `.vcf` to add.
     pub(crate) fn import_contacts(&mut self, cx: &mut Context<Self>) {
         if self.transfer_busy {
+            self.say_busy(cx);
             return;
         }
         self.transfer_busy = true;
@@ -68,6 +70,14 @@ impl ContactsApp {
             .ok();
         })
         .detach();
+    }
+
+    /// A file button was tapped while another file job runs (the rows are dimmed).
+    fn say_busy(&mut self, cx: &mut Context<Self>) {
+        if self.notice.is_none() {
+            self.notice = Some("Wait for the file being saved or read to finish.".into());
+            cx.notify();
+        }
     }
 
     /// One event from Kotlin.
@@ -106,14 +116,15 @@ impl ContactsApp {
                 cx.notify();
             }
             DocumentOp::ImportContacts => {
-                self.transfer_busy = false;
                 if !result.ok {
+                    self.transfer_busy = false;
                     if result.error.is_some() {
                         self.notice = Some("Can't read that file.".into());
                     }
                     cx.notify();
                     return;
                 }
+                // Still busy while the file is read; the card that follows ends it.
                 self.plan_import(result.text.unwrap_or_default(), cx);
             }
             DocumentOp::ContactPhoto => {
@@ -184,6 +195,7 @@ impl ContactsApp {
         result: Result<&'static str, String>,
         cx: &mut Context<Self>,
     ) {
+        self.wa_photo_busy = false;
         match result {
             Ok(done) => {
                 self.photos.forget(id);
@@ -218,6 +230,7 @@ impl ContactsApp {
                 .await;
             this.update(cx, |this, cx| {
                 this.notice = None;
+                this.transfer_busy = false;
                 this.confirm = Some(Confirm::Import {
                     cards: plan.add,
                     duplicates: plan.duplicates,

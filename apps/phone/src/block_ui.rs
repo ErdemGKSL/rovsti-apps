@@ -197,7 +197,8 @@ impl RowMenu {
             s.t += dt.as_secs_f32();
             moving = true;
         }
-        moving || self.target.is_some()
+        // An open, settled menu needs no frames; closing finishes on the spring.
+        moving || self.closing
     }
 
     fn progress(&self) -> f32 {
@@ -731,7 +732,12 @@ mod tests {
         for _ in 0..60 {
             menu.tick(Duration::from_millis(16));
         }
+        assert!(
+            !menu.tick(Duration::from_millis(16)),
+            "a settled open menu asks for no frames"
+        );
         menu.close();
+        assert!(menu.tick(Duration::from_millis(16)));
         assert!(!menu.is_open() && menu.is_visible());
         for _ in 0..200 {
             menu.tick(Duration::from_millis(16));

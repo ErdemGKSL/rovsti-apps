@@ -1,6 +1,6 @@
 //! The confirmation card: "Delete this contact?", "Delete this group?",
-//! "Replace the photo?" (with the WhatsApp one) and
-//! "Add these contacts?" after a vCard was read.
+//! "Replace the photo?" (with the WhatsApp one), "Discard changes?" on a
+//! dirty edit form and "Add these contacts?" after a vCard was read.
 
 use gpui::{AnyElement, Context, IntoElement, SharedString, StatefulInteractiveElement};
 use rovsti_core::contact_edit::ContactDraft;
@@ -27,6 +27,8 @@ pub(crate) enum Confirm {
         jid: String,
         name: SharedString,
     },
+    /// Cancel or Back on an edit form with unsaved changes.
+    DiscardEdits,
     /// A vCard file was read: these cards would be added.
     Import {
         cards: Vec<ContactDraft>,
@@ -112,6 +114,7 @@ impl ContactsApp {
             Confirm::DeleteContact { id, .. } => self.delete_contact(id, cx),
             Confirm::DeleteGroup { id, .. } => self.delete_group(id, cx),
             Confirm::UseWaPhoto { id, jid, .. } => self.use_wa_photo(id, jid, cx),
+            Confirm::DiscardEdits => self.close_editor(cx),
             Confirm::Import { cards, .. } => self.add_imported(cards, cx),
         }
     }
@@ -146,6 +149,9 @@ impl ContactsApp {
         if cards.is_empty() {
             return;
         }
+        // No second import until the added cards are in the book: it would
+        // be planned against the old one and add them again.
+        self.transfer_busy = true;
         self.notice = Some("Adding contacts…".into());
         cx.notify();
         cx.spawn(async move |this, cx| {
@@ -159,6 +165,7 @@ impl ContactsApp {
                     Err(words) => format!("Can't add the contacts: {words}.").into(),
                 });
                 this.reload(cx);
+                this.import_settle = Some(this.pulls);
             })
             .ok();
         })
@@ -195,6 +202,17 @@ impl ContactsApp {
                 format!("{name}'s photo is replaced with their WhatsApp photo."),
                 vec![cancel, yes("Replace", false, cx)],
             ),
+            Confirm::DiscardEdits => {
+                let keep = pill(theme, "confirm-no", "Keep Editing", false)
+                    .on_click(cx.listener(|this, _, _, cx| this.answer(false, cx)))
+                    .into_any_element();
+                confirm_card(
+                    theme,
+                    "Discard changes?",
+                    "Your changes to this contact are not saved.",
+                    vec![keep, yes("Discard", true, cx)],
+                )
+            }
             Confirm::Import {
                 cards,
                 duplicates,
@@ -202,7 +220,10 @@ impl ContactsApp {
             } => {
                 let summary = import_summary(cards.len(), *duplicates, *unreadable);
                 if cards.is_empty() {
-                    confirm_card(theme, "Nothing to add", summary, vec![cancel])
+                    let ok = pill(theme, "confirm-no", "OK", false)
+                        .on_click(cx.listener(|this, _, _, cx| this.answer(false, cx)))
+                        .into_any_element();
+                    confirm_card(theme, "Nothing to add", summary, vec![ok])
                 } else {
                     confirm_card(
                         theme,

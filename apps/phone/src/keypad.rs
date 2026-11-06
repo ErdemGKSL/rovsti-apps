@@ -1162,12 +1162,21 @@ impl PhoneApp {
             Some(Status::Text(text)) => area.aria_label(text.clone()).child(text.clone()),
             Some(Status::NeedsPhone) => {
                 let press = self.presses.value("grant");
-                area.child("Allow Phone access so Rovsti Phone can place calls.")
+                // The sentence gives way (ellipsis) so "Grant access" always fits on screen.
+                area.max_w_full()
+                    .px(px(16.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .child("Allow Phone access to place calls."),
+                    )
                     .child(
                         div()
                             .id("grant")
                             .role(Role::Button)
                             .aria_label("Grant access")
+                            .flex_none()
                             .relative()
                             .h(px(36.0))
                             .flex()

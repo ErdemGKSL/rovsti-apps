@@ -87,6 +87,9 @@ struct ChipFlight {
 pub(crate) struct SimUi {
     pub chooser: Option<Chooser>,
     flight: Option<ChipFlight>,
+    /// The call whose system chooser was dismissed (it is being cancelled):
+    /// the chooser does not reopen for it while the snapshot catches up.
+    dismissed: Option<i32>,
 }
 
 impl SimUi {
@@ -308,7 +311,17 @@ impl PhoneApp {
     }
 
     fn sim_change_default(&mut self, cx: &mut Context<Self>) {
-        self.close_sheet(cx);
+        // Another app's call still waits for a SIM: its chooser stays up for the
+        // return from Settings (closing it would cancel the call).
+        let waiting = self
+            .sim
+            .chooser
+            .as_ref()
+            .is_some_and(|c| matches!(c.kind, ChooserFor::System(_)));
+        if !waiting {
+            self.sim.chooser = None;
+            self.close_sheet(cx);
+        }
         if let Some(text) =
             crate::backend::open_system(rovsti_android::telecom::SystemPage::ChangePhoneAccounts)
                 .notice()
@@ -345,8 +358,11 @@ impl PhoneApp {
             .chooser
             .as_ref()
             .is_some_and(|c| matches!(c.kind, ChooserFor::System(_)));
+        if !selecting {
+            self.sim.dismissed = None;
+        }
         if selecting && !system_open {
-            if let Some(id) = call_id {
+            if let Some(id) = call_id.filter(|id| self.sim.dismissed != Some(*id)) {
                 self.open_sim_chooser(
                     ChooserFor::System(id),
                     SharedString::default(),
@@ -359,6 +375,32 @@ impl PhoneApp {
             self.sheet.close();
             cx.notify();
         }
+    }
+
+    /// Once per frame: the chooser was put away without a choice (scrim, drag,
+    /// Back). For another app's picker that cancels the call, as Android's own
+    /// picker does; a call left waiting for a SIM would have no way forward.
+    /// A chooser replaced by another sheet is only forgotten, so it can reopen.
+    pub(crate) fn sync_sim_dismissed(&mut self, cx: &mut Context<Self>) {
+        let Some(chooser) = &self.sim.chooser else {
+            return;
+        };
+        let replaced = self.sheet_kind != SheetKind::SimChooser;
+        if !replaced && self.sheet.is_open() {
+            return;
+        }
+        let kind = chooser.kind.clone();
+        self.sim.chooser = None;
+        if let (ChooserFor::System(call_id), false) = (kind, replaced) {
+            self.sim.dismissed = Some(call_id);
+            let outcome = self
+                .backend
+                .update(cx, |backend, cx| backend.disconnect(call_id, cx));
+            if outcome.failed() {
+                self.show_notice_pill("Couldn't cancel the call", None, false, cx);
+            }
+        }
+        cx.notify();
     }
 
     // ---- S26: the chip flight ----------------------------------------------------

@@ -239,9 +239,11 @@ pub fn merge_spam(current: &mut SpamRules, backup: &SpamRules) -> usize {
     added
 }
 
-/// `rovsti-messages-20261105.rmb` for the given day.
-pub fn backup_file_name(now_ms: i64) -> String {
-    let (year, month, day) = civil_from_days(now_ms.div_euclid(86_400_000));
+/// `rovsti-messages-20261105.rmb` for the local day of `now_ms` (the phone's
+/// offset from UTC is `tz_offset_s`).
+pub fn backup_file_name(now_ms: i64, tz_offset_s: i32) -> String {
+    let local_s = now_ms.div_euclid(1000) + i64::from(tz_offset_s);
+    let (year, month, day) = civil_from_days(local_s.div_euclid(86_400));
     format!("rovsti-messages-{year:04}{month:02}{day:02}.rmb")
 }
 
@@ -417,10 +419,15 @@ mod tests {
     fn file_names_carry_the_day() {
         // 2026-11-05 12:00 UTC.
         assert_eq!(
-            backup_file_name(1_793_880_000_000),
+            backup_file_name(1_793_880_000_000, 0),
             "rovsti-messages-20261105.rmb"
         );
-        assert_eq!(backup_file_name(0), "rovsti-messages-19700101.rmb");
+        assert_eq!(backup_file_name(0, 0), "rovsti-messages-19700101.rmb");
+        // 22:30 UTC is already the next day in Turkey (+03:00).
+        assert_eq!(
+            backup_file_name(1_793_880_000_000 + 37_800_000, 3 * 3600),
+            "rovsti-messages-20261106.rmb"
+        );
     }
 
     #[test]

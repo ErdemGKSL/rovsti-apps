@@ -36,7 +36,8 @@ use serde_json::{Value, json};
 pub const PREFS_FILE: &str = "messages-prefs.json";
 
 /// Largest attachment `mms_send_req` reads from disk. Carriers refuse far less.
-const MAX_ATTACHMENT_BYTES: u64 = 4 * 1024 * 1024;
+/// The attach button picks no larger file (`backend::ATTACH_MAX_BYTES`).
+pub(crate) const MAX_ATTACHMENT_BYTES: u64 = 4 * 1024 * 1024;
 
 /// Handles one headless request; `""` for an unknown kind.
 pub fn handle(kind: &str, json: &str) -> String {
@@ -283,6 +284,22 @@ fn image_type(name: &str) -> Option<&'static str> {
     }
 }
 
+/// The picture type read from the first bytes, for files whose name says
+/// nothing (the picker's copy is `import-<ms>.bin`).
+fn sniff_image(data: &[u8]) -> Option<(&'static str, &'static str)> {
+    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some(("image/jpeg", "jpg"))
+    } else if data.starts_with(&[0x89, b'P', b'N', b'G']) {
+        Some(("image/png", "png"))
+    } else if data.starts_with(b"GIF8") {
+        Some(("image/gif", "gif"))
+    } else if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
+        Some(("image/webp", "webp"))
+    } else {
+        None
+    }
+}
+
 /// Builds the `m-send-req`. `read` loads the attachment, so tests need no files.
 fn build_send_req(
     input: &SendReqIn,
@@ -301,11 +318,25 @@ fn build_send_req(
     }
     if let Some(path) = input.image_path.as_deref().filter(|p| !p.is_empty()) {
         let name = path.rsplit('/').next().unwrap_or(path);
-        let content_type = image_type(name).ok_or("unsupported_attachment")?;
-        let data = read(path).map_err(|_| "attachment_unreadable")?;
+        // The picker's copy is `import-<ms>.bin`: then the bytes say what it is.
+        let opaque = name
+            .rsplit_once('.')
+            .is_none_or(|(_, ext)| ext.eq_ignore_ascii_case("bin"));
+        let (content_type, name, data) = match image_type(name) {
+            Some(content_type) => {
+                let data = read(path).map_err(|_| "attachment_unreadable")?;
+                (content_type, name.to_owned(), data)
+            }
+            None if opaque => {
+                let data = read(path).map_err(|_| "attachment_unreadable")?;
+                let (content_type, ext) = sniff_image(&data).ok_or("unsupported_attachment")?;
+                (content_type, format!("image.{ext}"), data)
+            }
+            None => return Err("unsupported_attachment"),
+        };
         parts.push(PduPart {
             content_type: content_type.into(),
-            name: Some(name.to_owned()),
+            name: Some(name),
             data,
         });
     }
@@ -560,6 +591,32 @@ mod tests {
         );
         assert_eq!(handle("mms_send_req", "x"), failure("bad_request"));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn send_req_reads_the_picture_type_of_a_picker_copy() {
+        // The picker copies to `import-<ms>.bin`: the bytes decide the type.
+        let jpeg = SendReqIn {
+            local_id: 1,
+            to: vec!["+905551112233".into()],
+            text: String::new(),
+            image_path: Some("/cache/import-17.bin".into()),
+        };
+        let pdu = build_send_req(&jpeg, |_| Ok(vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2])).expect("ok");
+        assert!(pdu.windows(10).any(|w| w == b"image/jpeg"));
+        assert!(pdu.windows(9).any(|w| w == b"image.jpg"));
+        let webp = build_send_req(&jpeg, |_| Ok(b"RIFF\0\0\0\0WEBPVP8 ".to_vec())).expect("ok");
+        assert!(webp.windows(10).any(|w| w == b"image/webp"));
+        // A copy that is not a picture is refused, not sent as a broken MMS.
+        assert_eq!(
+            build_send_req(&jpeg, |_| Ok(b"%PDF-1.7".to_vec())),
+            Err("unsupported_attachment")
+        );
+        let bare = SendReqIn {
+            image_path: Some("/cache/photo".into()),
+            ..jpeg
+        };
+        assert!(build_send_req(&bare, |_| Ok(b"GIF89a".to_vec())).is_ok());
     }
 
     #[test]

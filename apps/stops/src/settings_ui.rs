@@ -141,11 +141,11 @@ pub fn outcome_text(outcome: Outcome) -> &'static str {
     }
 }
 
-/// "A – B" for a trip with two points, the single label of a legacy record.
+/// "A â€“ B" for a trip with two points, the single label of a legacy record.
 pub fn record_pair(record: &TripRecord) -> String {
     match (&record.a, &record.b) {
         (Some(a), Some(b)) => format!(
-            "{} – {}",
+            "{} â€“ {}",
             crate::pick::row_label(&a.label),
             crate::pick::row_label(&b.label)
         ),
@@ -154,11 +154,11 @@ pub fn record_pair(record: &TripRecord) -> String {
     }
 }
 
-/// "5 Nov  ·  18 min  ·  3.4 km" under a history row's title.
-pub fn record_details(record: &TripRecord, now_ms: i64) -> String {
+/// "5 Nov  Â·  18 min  Â·  3.4 km" under a history row's title.
+pub fn record_details(record: &TripRecord, now_ms: i64, tz_offset_s: i32) -> String {
     format!(
-        "{}  ·  {}  ·  {}",
-        date_text(record.ended_ms, now_ms),
+        "{}  Â·  {}  Â·  {}",
+        date_text(record.ended_ms, now_ms, tz_offset_s),
         duration_text(record.duration_ms()),
         distance_text(record.travelled_m)
     )
@@ -178,7 +178,7 @@ pub fn stats_rows(stats: &Stats) -> Vec<(String, String)> {
     ];
     for (i, (label, count)) in stats.top.iter().enumerate() {
         let name = if i == 0 { "Top places" } else { "" };
-        rows.push((name.to_owned(), format!("{label}  ·  {count}")));
+        rows.push((name.to_owned(), format!("{label}  Â·  {count}")));
     }
     rows
 }
@@ -232,7 +232,7 @@ pub fn notice_summary(prefs: &StopsPrefs, connected: bool) -> String {
             } else {
                 &n.chat_name
             };
-            format!("{name}  ·  {}", n.when.label().to_lowercase())
+            format!("{name}  Â·  {}", n.when.label().to_lowercase())
         }
         _ => "Off".to_owned(),
     }
@@ -261,19 +261,43 @@ pub fn tile_url_error_text(error: &TileUrlError) -> &'static str {
     }
 }
 
-/// The pill after "Test and save".
+/// The pill after "Test and save". The technical detail goes to the log.
 pub fn tile_test_text(result: &Result<usize, TileError>) -> String {
-    match result {
-        Ok(1) => "Map server works (1 layer)".to_owned(),
-        Ok(n) => format!("Map server works ({n} layers)"),
-        Err(error) => format!("Map server not saved: {error}"),
+    let why = match result {
+        Ok(1) => return "Map server works (1 layer)".to_owned(),
+        Ok(n) => return format!("Map server works ({n} layers)"),
+        Err(TileError::Http(_)) => "it could not be reached. Check the URL and the connection.",
+        Err(TileError::Status(404)) => "it has no tile there (404). Check the URL.",
+        Err(TileError::Status(401 | 403)) => "it refused access. Check the URL.",
+        Err(TileError::Status(code)) => {
+            return format!("Map server not saved: it answered with error {code}.");
+        }
+        Err(TileError::TooLarge) => "its tile is too large.",
+        Err(TileError::Decode(_)) => "it does not send vector tiles.",
+        Err(TileError::Io(_)) => "the tile could not be stored on the phone.",
+    };
+    format!("Map server not saved: {why}")
+}
+
+/// Why the chat list did not load, for the user. The detail goes to the log.
+pub fn chats_error_text(error: &rovsti_wa_client::ClientError) -> &'static str {
+    use rovsti_wa_client::ClientError;
+    match error {
+        ClientError::Unauthorized | ClientError::Key(_) => {
+            "The gateway refused this phone's connect key. Link WhatsApp again."
+        }
+        ClientError::Url(_) => "The gateway address is not valid. Check it in WhatsApp settings.",
+        ClientError::Http(_) | ClientError::Ws(_) | ClientError::Tls(_) | ClientError::Closed => {
+            "The gateway could not be reached. Check that it is running and online."
+        }
+        ClientError::Api(_) | ClientError::Decode(_) => "The gateway gave an unexpected answer.",
     }
 }
 
 pub fn exact_alarm_text(allowed: Option<bool>) -> &'static str {
     match allowed {
         Some(true) => "Allowed",
-        Some(false) => "Not allowed: a snooze may ring late",
+        Some(false) => "Not allowed: a snooze may ring late. Allow it under Alarms & reminders.",
         None => "Checked on the phone",
     }
 }
@@ -292,7 +316,10 @@ pub fn android_notice(what: &str, result: &Result<bool, AndroidError>) -> Option
         Ok(true) => None,
         Ok(false) => Some(format!("{what}: no app answered.")),
         Err(AndroidError::Unsupported) => Some(format!("{what} works on the phone only.")),
-        Err(error) => Some(format!("{what} failed: {error}.")),
+        Err(error) => {
+            log::warn!("{what} failed: {error}");
+            Some(format!("{what} did not work. Try again."))
+        }
     }
 }
 
@@ -484,16 +511,30 @@ impl StopsApp {
                 .into_any_element(),
             );
         }
-        reliability.push(
-            list_row(
-                theme,
-                None,
-                "Exact alarms",
-                Some(exact_alarm_text(pre.exact_alarms).into()),
-                None,
-            )
-            .into_any_element(),
+        let exact_missing = pre.exact_alarms == Some(false);
+        let exact = list_row(
+            theme,
+            None,
+            "Exact alarms",
+            Some(exact_alarm_text(pre.exact_alarms).into()),
+            exact_missing.then(|| "Open".into()),
         );
+        reliability.push(if exact_missing {
+            // The app's page leads to "Alarms & reminders"; the activation
+            // refresh reads the grant again on return.
+            exact
+                .id("set-exact-alarms")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.run_android(
+                        "App settings",
+                        rovsti_android::permissions::open_app_details,
+                        cx,
+                    );
+                }))
+                .into_any_element()
+        } else {
+            exact.into_any_element()
+        });
 
         let history_summary = match self.history.records.len() {
             0 => "No trips yet".to_owned(),
@@ -642,7 +683,7 @@ impl StopsApp {
                     theme,
                     None,
                     record_pair(r),
-                    Some(record_details(r, now_ms()).into()),
+                    Some(record_details(r, now_ms(), self.tz_offset_s).into()),
                     Some(
                         if pair.is_some() {
                             "Use"
@@ -1030,6 +1071,9 @@ impl StopsApp {
             let result = task.await;
             this.update(cx, |this, cx| {
                 this.tile_testing = false;
+                if let Err(error) = &result {
+                    log::warn!("tile server test failed: {error}");
+                }
                 if result.is_ok() {
                     this.use_tile_source(source, cx);
                 }
@@ -1158,7 +1202,10 @@ impl StopsApp {
             this.update(cx, |this, cx| {
                 this.chats = match result {
                     Ok(chats) => ChatList::Ready(chat_rows(&chats)),
-                    Err(error) => ChatList::Failed(error.to_string()),
+                    Err(error) => {
+                        log::warn!("could not load the chats: {error}");
+                        ChatList::Failed(chats_error_text(&error).to_owned())
+                    }
                 };
                 cx.notify();
             })
@@ -1235,6 +1282,20 @@ mod tests {
         assert_eq!(tile_test_text(&Ok(12)), "Map server works (12 layers)");
         assert_eq!(tile_test_text(&Ok(1)), "Map server works (1 layer)");
         assert!(tile_test_text(&Err(TileError::Status(404))).contains("404"));
+        let offline = tile_test_text(&Err(TileError::Http("io: os error 111".into())));
+        assert!(offline.contains("could not be reached"), "{offline}");
+        assert!(!offline.contains("os error"));
+        assert!(tile_test_text(&Err(TileError::Status(503))).contains("503"));
+    }
+
+    #[test]
+    fn chat_errors_read_as_sentences() {
+        use rovsti_wa_client::ClientError;
+        let raw = ClientError::Tls("handshake failure: alert 40".into());
+        let text = chats_error_text(&raw);
+        assert!(text.contains("could not be reached"));
+        assert!(!text.contains("handshake"));
+        assert!(chats_error_text(&ClientError::Unauthorized).contains("connect key"));
     }
 
     #[test]
@@ -1269,8 +1330,8 @@ mod tests {
     fn a_legacy_record_row_shows_its_single_label() {
         // 14 Nov 2023, seen from 2023.
         assert_eq!(
-            record_details(&legacy_record(), 1_700_100_000_000),
-            "14 Nov  ·  18 min  ·  3.4 km"
+            record_details(&legacy_record(), 1_700_100_000_000, 0),
+            "14 Nov  Â·  18 min  Â·  3.4 km"
         );
         assert_eq!(record_pair(&legacy_record()), "Kadikoy");
         let unnamed = TripRecord {
@@ -1288,17 +1349,17 @@ mod tests {
             coord: Coord::new(41.0, lon),
         };
         let r = TripRecord {
-            label: "Home – Work".into(),
+            label: "Home â€“ Work".into(),
             a: Some(end("Home", 29.0)),
             b: Some(end("Work", 29.01)),
             destination: None,
             ..legacy_record()
         };
         assert_eq!(
-            record_details(&r, 1_700_100_000_000),
-            "14 Nov  ·  18 min  ·  3.4 km"
+            record_details(&r, 1_700_100_000_000, 0),
+            "14 Nov  Â·  18 min  Â·  3.4 km"
         );
-        assert_eq!(record_pair(&r), "Home – Work");
+        assert_eq!(record_pair(&r), "Home â€“ Work");
     }
 
     #[test]
@@ -1319,8 +1380,8 @@ mod tests {
         assert_eq!(rows[2].1, "12.3 km");
         assert_eq!(rows[3].1, "10 min");
         assert_eq!(rows[4].1, "2");
-        assert_eq!(rows[5], ("Top places".into(), "Home  ·  3".into()));
-        assert_eq!(rows[6], (String::new(), "Work  ·  1".into()));
+        assert_eq!(rows[5], ("Top places".into(), "Home  Â·  3".into()));
+        assert_eq!(rows[6], (String::new(), "Work  Â·  1".into()));
     }
 
     #[test]
@@ -1370,7 +1431,7 @@ mod tests {
         });
         assert_eq!(
             notice_summary(&prefs, true),
-            "Family  ·  10 min before the circle"
+            "Family  Â·  10 min before the circle"
         );
         assert_eq!(notice_summary(&prefs, false), "Needs WhatsApp");
     }
@@ -1387,6 +1448,8 @@ mod tests {
                 .unwrap()
                 .contains("no app")
         );
+        let text = android_notice("Test alarm", &Err(AndroidError::NotInitialized)).unwrap();
+        assert_eq!(text, "Test alarm did not work. Try again.");
     }
 
     #[test]

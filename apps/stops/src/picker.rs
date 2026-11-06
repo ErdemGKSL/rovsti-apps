@@ -326,10 +326,38 @@ impl StopsApp {
 
     pub(crate) fn confirm_destination(&mut self, dest: Destination, cx: &mut Context<Self>) {
         self.tabs.jump_to(0);
-        self.alarm = None;
+        // A ringing alarm stays on top: the confirmation waits under it until
+        // the alarm is dismissed or snoozed.
         self.sheet_mode = SheetMode::Confirm(dest);
         self.save_place = false;
         self.sheet.open();
+        cx.notify();
+    }
+
+    /// Remembers the open confirmation or stop sheet so a Rename or Save
+    /// opened from it goes back to it afterwards; anything else has nothing to
+    /// go back to.
+    fn remember_return(&mut self) {
+        self.sheet_return = match &self.sheet_mode {
+            SheetMode::Confirm(_) | SheetMode::Stop(_) if self.sheet.is_open() => {
+                Some(self.sheet_mode.clone())
+            }
+            _ => None,
+        };
+    }
+
+    /// Leaves a Rename or Save sheet: back to the sheet it came from, else closed.
+    fn finish_sub_sheet(&mut self, cx: &mut Context<Self>) {
+        match self.sheet_return.take() {
+            Some(mode) => {
+                if matches!(mode, SheetMode::Stop(_)) {
+                    // The line previewed there is drawn again.
+                    self.map.pattern = self.stop_pattern;
+                }
+                self.sheet_mode = mode;
+            }
+            None => self.sheet.close(),
+        }
         cx.notify();
     }
 
@@ -338,6 +366,7 @@ impl StopsApp {
             return;
         };
         let name = place.name.clone();
+        self.remember_return();
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // The line previewed on the stop sheet leaves the map again.
             self.map.pattern = self
@@ -359,6 +388,7 @@ impl StopsApp {
         slot: Option<Slot>,
         cx: &mut Context<Self>,
     ) {
+        self.remember_return();
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // The line previewed on the stop sheet leaves the map again.
             self.map.pattern = self
@@ -381,7 +411,7 @@ impl StopsApp {
         };
         let name = self.field.read(cx).text().to_owned();
         if self.save_named(&name, &dest, cx) {
-            self.sheet.close();
+            self.finish_sub_sheet(cx);
         }
         cx.notify();
     }
@@ -410,6 +440,15 @@ impl StopsApp {
     }
 
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
+        if matches!(
+            self.sheet_mode,
+            SheetMode::Rename(_) | SheetMode::SavePoint { .. }
+        ) {
+            // Cancel, Back or the scrim: one step back, to the sheet it came from.
+            self.finish_sub_sheet(cx);
+            return;
+        }
+        self.sheet_return = None;
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // A line looked at but not chosen leaves the map again.
             self.map.pattern = self
@@ -445,6 +484,17 @@ impl StopsApp {
                 return;
             }
         }
+        if self.trip.is_some() {
+            // The running trip keeps its line and view; the point waits.
+            self.pick.place(slot, dest);
+            self.sheet.close();
+            self.show_pill(
+                format!("Set as {} for your next trip", slot.label()),
+                None,
+                cx,
+            );
+            return;
+        }
         self.map.pattern = dest.pattern;
         self.map.follow = true;
         self.pick.place(slot, dest);
@@ -455,9 +505,13 @@ impl StopsApp {
     /// Both ends at once, from a recent trip.
     pub(crate) fn choose_pair(&mut self, a: Destination, b: Destination, cx: &mut Context<Self>) {
         self.pick.set_pair(a, b);
+        self.sheet.close();
+        if self.trip.is_some() {
+            self.show_pill("Set for your next trip", None, cx);
+            return;
+        }
         self.map.pattern = None;
         self.map.follow = true;
-        self.sheet.close();
         cx.notify();
     }
 
@@ -471,7 +525,7 @@ impl StopsApp {
                     self.pick.relabel_near(coord, &new_name);
                 }
                 self.save_places(cx);
-                self.sheet.close();
+                self.finish_sub_sheet(cx);
                 self.show_pill(format!("Renamed to {new_name}"), None, cx);
             }
             Err(error) => self.show_pill(error.message(), None, cx),
@@ -1105,10 +1159,7 @@ impl StopsApp {
                     .child(
                         glass_pill(theme, "Cancel")
                             .id("rename-cancel")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.sheet.close();
-                                cx.notify();
-                            })),
+                            .on_click(cx.listener(|this, _, _, cx| this.close_sheet(cx))),
                     )
                     .child(
                         glass_pill(theme, "Save")

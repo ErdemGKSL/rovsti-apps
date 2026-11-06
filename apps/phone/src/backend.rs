@@ -313,6 +313,8 @@ pub struct Backend {
     /// Bumped by every setting change; a late save check ignores older ones.
     change_gen: u64,
     setting_failed_gen: u64,
+    /// No data directory: preferences live for this session only.
+    prefs_unsaved: bool,
     document: Option<rovsti_core::wire::DocumentResult>,
     document_gen: u64,
     /// The system blocklist (AD-27) and whether this user may use it.
@@ -399,6 +401,7 @@ impl Backend {
                 last_sync: String::new(),
                 change_gen: 0,
                 setting_failed_gen: 0,
+                prefs_unsaved: false,
                 document: None,
                 document_gen: 0,
                 blocklist: Load::Loading,
@@ -434,6 +437,7 @@ impl Backend {
                     log::warn!("no data directory; preferences will not persist");
                     this.update(cx, |this: &mut Backend, cx| {
                         this.prefs_ready = true;
+                        this.prefs_unsaved = true;
                         cx.notify();
                     })
                     .ok();
@@ -700,6 +704,11 @@ impl Backend {
     /// stays in effect for this session.
     pub fn prefs_save_failed(&self) -> bool {
         self.writer.as_ref().is_some_and(PrefsWriter::failed)
+    }
+
+    /// There is no data directory: changes last until the app closes.
+    pub fn prefs_unsaved(&self) -> bool {
+        self.prefs_unsaved
     }
 
     /// Writes any unsaved preference now. Called when the app goes to the

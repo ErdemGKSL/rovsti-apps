@@ -33,6 +33,25 @@ const SIM_START_M: f64 = 2_000.0;
 /// How far right of the line it parks, metres.
 const SIM_END_M: f64 = 200.0;
 
+/// Choices for the next trip besides A and B, kept so a restart does not undo
+/// them (a switched-off arrival text must stay off).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NextTrip {
+    /// Text the chat when arriving.
+    #[serde(default = "notice_on_default")]
+    pub notice_on: bool,
+}
+
+fn notice_on_default() -> bool {
+    true
+}
+
+impl Default for NextTrip {
+    fn default() -> Self {
+        Self { notice_on: true }
+    }
+}
+
 /// What the app keeps on disk, read once at launch.
 #[derive(Default)]
 pub struct Data {
@@ -41,6 +60,7 @@ pub struct Data {
     pub history: History,
     pub trip: Option<ActiveTrip>,
     pub draft: Ends,
+    pub next: NextTrip,
     pub gtfs: Option<Arc<Feed>>,
 }
 
@@ -52,6 +72,7 @@ pub fn load(dir: &Path) -> Data {
         history: storage::load_json(dir, store::HISTORY_FILE).unwrap_or_default(),
         trip: store::load_trip(dir),
         draft: storage::load_json(dir, store::DRAFT_FILE).unwrap_or_default(),
+        next: storage::load_json(dir, store::NEXT_TRIP_FILE).unwrap_or_default(),
         gtfs: storage::load_json::<Feed>(dir, store::GTFS_FILE).map(|feed| {
             // Build the lookup index here, off the UI thread, not on the first search.
             let _ = feed.patterns_through(0);
@@ -81,6 +102,11 @@ pub fn save_places(dir: &Path, saved: &SavedPlaces) {
 /// Writes the A and B being picked.
 pub fn save_draft(dir: &Path, ends: &Ends) {
     log_save(storage::save_json(dir, store::DRAFT_FILE, ends));
+}
+
+/// Writes the next trip's choices.
+pub fn save_next_trip(dir: &Path, next: &NextTrip) {
+    log_save(storage::save_json(dir, store::NEXT_TRIP_FILE, next));
 }
 
 /// Empties the history. Holds the trip lock like `store::end_trip`, which
@@ -287,16 +313,24 @@ pub fn start_spec(dir: &Path, label: &str) -> String {
 pub fn start_trip(dir: &Path, trip: &ActiveTrip) -> Result<(), String> {
     {
         let _guard = store::lock();
+        // The pill gets a sentence; the detail goes to the log.
+        let storage_failed = |error: std::io::Error| {
+            log::warn!("could not write the trip files: {error}");
+            "Could not save the trip on the phone. Free some space and try again.".to_owned()
+        };
         if store::load_trip(dir).is_some() {
             let _ = trip::stop();
-            store::end_trip(dir, Outcome::Cancelled, now_ms()).map_err(|e| e.to_string())?;
+            store::end_trip(dir, Outcome::Cancelled, now_ms()).map_err(storage_failed)?;
         }
-        store::save_trip(dir, trip).map_err(|e| format!("Could not save the trip: {e}"))?;
+        store::save_trip(dir, trip).map_err(storage_failed)?;
     }
     let started = match trip::start(&start_spec(dir, &trip.label())) {
         Ok(true) | Err(AndroidError::Unsupported) => Ok(()),
         Ok(false) => Err("Android did not start the tracking service.".to_owned()),
-        Err(error) => Err(format!("Could not start tracking: {error}")),
+        Err(error) => {
+            log::warn!("could not start the trip service: {error}");
+            Err("Could not start tracking. Try again.".to_owned())
+        }
     };
     if started.is_err() {
         let _guard = store::lock();
@@ -469,6 +503,16 @@ mod tests {
         };
         save_draft(&dir, &ends);
         assert_eq!(load(&dir).draft, ends);
+    }
+
+    #[test]
+    fn the_next_trip_choices_round_trip_and_default_to_on() {
+        let dir = tmp("next-trip-rt");
+        assert!(load(&dir).next.notice_on);
+        save_next_trip(&dir, &NextTrip { notice_on: false });
+        assert!(!load(&dir).next.notice_on);
+        std::fs::write(dir.join(store::NEXT_TRIP_FILE), "{}").unwrap();
+        assert!(load(&dir).next.notice_on);
     }
 
     #[test]

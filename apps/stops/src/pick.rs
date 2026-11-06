@@ -223,9 +223,14 @@ impl Picking {
     pub fn menu(&self) -> Option<Slot> {
         self.menu
     }
-    #[cfg(test)]
+    /// The pin armed by "Move", if any.
     pub fn moving(&self) -> Option<Slot> {
         self.moving
+    }
+
+    /// Disarms "Move" (System Back): the pin stays where it is.
+    pub fn cancel_move(&mut self) {
+        self.moving = None;
     }
 
     /// Grabs the pin in `slot`. `false` when that end is empty.
@@ -475,6 +480,18 @@ mod tests {
         assert_eq!(p.moving(), None);
         assert_eq!(pair_text(&p.ends).unwrap(), "A-B 400 m");
         assert_eq!(p.tap(at(1.0)), TapOutcome::Full);
+    }
+
+    #[test]
+    fn cancelling_a_move_keeps_the_pin_and_disarms() {
+        let mut p = two();
+        let before = p.ends.clone();
+        p.begin_move(Slot::A);
+        p.cancel_move();
+        assert_eq!(p.moving(), None);
+        assert_eq!(p.ends, before);
+        assert_eq!(p.hint(), two().hint());
+        assert_eq!(p.tap(at(400.0)), TapOutcome::Full);
     }
 
     #[test]

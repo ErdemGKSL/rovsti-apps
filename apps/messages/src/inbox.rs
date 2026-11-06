@@ -138,7 +138,6 @@ impl InboxView {
     }
 
     /// True when `thread` sits in the Spam filter.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn in_spam(&self, thread: &ThreadId) -> bool {
         self.spam.iter().any(|r| r.threads.contains(thread))
     }

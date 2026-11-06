@@ -948,6 +948,7 @@ impl MessagesApp {
             }
             SmsConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             SmsConversationEvent::Menu => this.open_page_menu(cx),
+            SmsConversationEvent::NotSpam => this.open_page_not_spam(cx),
             SmsConversationEvent::Notice(text) => {
                 this.show_pill(*text);
                 cx.notify();
@@ -1319,6 +1320,18 @@ impl MessagesApp {
         cx.notify();
     }
 
+    /// The Spam banner's "Not spam" on the open SMS page; the page stays open.
+    fn open_page_not_spam(&mut self, cx: &mut Context<Self>) {
+        let Open::Sms(conversation) = &self.open else {
+            return;
+        };
+        let sender = sms_actions::sender_of(conversation.read(cx).recipients()).map(str::to_owned);
+        if let Some(sender) = sender {
+            self.not_spam(sender, cx);
+            cx.notify();
+        }
+    }
+
     /// The open SMS page's more button: its menu (Call, Add to contacts, Block, Delete).
     fn open_page_menu(&mut self, cx: &mut Context<Self>) {
         let Open::Sms(conversation) = &self.open else {
@@ -1332,6 +1345,7 @@ impl MessagesApp {
             (id, c.title(), c.recipients().to_vec())
         };
         let sender = sms_actions::sender_of(&recipients).map(str::to_owned);
+        let in_spam = self.view.in_spam(&ThreadId::Sms(thread_id));
         let (contact_id, blocked, muted) = {
             let backend = self.backend.read(cx);
             (
@@ -1358,7 +1372,7 @@ impl MessagesApp {
                 sender,
                 unread: false,
                 muted,
-                in_spam: false,
+                in_spam,
                 on_page: true,
                 contact_id,
                 blocked,
@@ -2409,8 +2423,11 @@ impl MessagesApp {
 
     /// Mute state and the Scheduled strip of the open conversation.
     fn sync_open_page(&mut self, cx: &mut Context<Self>) {
-        let (muted, queue) = {
+        let (muted, in_spam, queue) = {
             let backend = self.backend.read(cx);
+            let in_spam = self
+                .open_thread_id(cx)
+                .is_some_and(|t| self.view.in_spam(&t));
             let muted = self.open_thread_id(cx).is_some_and(|t| {
                 let local = backend.prefs().is_muted(&notifications::thread_tag(&t));
                 match &t {
@@ -2422,7 +2439,7 @@ impl MessagesApp {
                     ThreadId::Sms(_) => local,
                 }
             });
-            (muted, backend.queue().items().to_vec())
+            (muted, in_spam, backend.queue().items().to_vec())
         };
         match &self.open {
             Open::WhatsApp(jid, conversation) => {
@@ -2445,6 +2462,7 @@ impl MessagesApp {
                 );
                 conversation.update(cx, |c, cx| {
                     c.set_muted(muted, cx);
+                    c.set_in_spam(in_spam, cx);
                     c.set_scheduled(items, cx);
                 });
             }
@@ -3636,6 +3654,18 @@ mod tests {
         assert_eq!(
             row_sms_actions(&menu(false, true, true)),
             vec![Unmute, NotSpam, Block, Delete]
+        );
+    }
+
+    #[test]
+    fn spam_page_menu_offers_not_spam() {
+        let page = SmsRowMenu {
+            on_page: true,
+            ..menu(false, false, true)
+        };
+        assert_eq!(
+            row_sms_actions(&page),
+            vec![NotSpam, Call, AddContact, Block, Delete]
         );
     }
 

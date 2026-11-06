@@ -40,6 +40,11 @@ const PAGE: usize = 50;
 /// The counter shows once a message is this close to a part boundary.
 const COUNTER_FROM: u32 = 30;
 
+/// The Spam banner shows for a spam thread with exactly one sender.
+fn spam_banner_visible(in_spam: bool, recipients: &[String]) -> bool {
+    in_spam && crate::sms_actions::sender_of(recipients).is_some()
+}
+
 /// What the conversation tells the page that hosts it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SmsConversationEvent {
@@ -65,6 +70,8 @@ pub enum SmsConversationEvent {
     Share(String),
     /// The header's more button: the conversation menu.
     Menu,
+    /// The Spam banner's "Not spam": allow this sender.
+    NotSpam,
     /// A short confirmation for the page's pill, such as "Message deleted".
     Notice(&'static str),
 }
@@ -102,6 +109,8 @@ pub struct SmsConversation {
     /// "Now" and the offset for the frame being drawn (rows are built after `render`).
     frame_now: i64,
     loading: bool,
+    /// The thread sits in the Spam filter.
+    in_spam: bool,
     /// The provider changed while a page was loading: read the newest again.
     reload_due: bool,
     error: Option<SharedString>,
@@ -184,6 +193,7 @@ impl SmsConversation {
             scheduled: Vec::new(),
             strip_expanded: false,
             muted: false,
+            in_spam: false,
             selected: None,
             saving: false,
             _subscriptions: subscriptions,
@@ -237,6 +247,13 @@ impl SmsConversation {
             }
         }
         cx.emit(SmsConversationEvent::CancelScheduled(key));
+    }
+
+    pub fn set_in_spam(&mut self, in_spam: bool, cx: &mut Context<Self>) {
+        if self.in_spam != in_spam {
+            self.in_spam = in_spam;
+            cx.notify();
+        }
     }
 
     pub fn set_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
@@ -769,10 +786,29 @@ impl SmsConversation {
                 .text_color(colors.secondary_label)
                 .child("No messages yet")
         });
+        let spam =
+            spam_banner_visible(self.in_spam, &self.recipients).then(|| {
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8.0))
+                    .py(px(8.0))
+                    .child(
+                        div()
+                            .text_size(typography::FOOTNOTE.size)
+                            .text_color(colors.secondary_label)
+                            .child("This conversation is in Spam."),
+                    )
+                    .child(glass_pill(theme, "Not spam").id("sms-not-spam").on_click(
+                        cx.listener(|_, _, _, cx| cx.emit(SmsConversationEvent::NotSpam)),
+                    ))
+            });
         div()
             .flex()
             .flex_col()
             .gap(px(4.0))
+            .children(spam)
             .children(older)
             .children(error)
             .children(empty)
@@ -1406,6 +1442,15 @@ pub fn copy_code(item: &SmsItem) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn spam_banner_needs_spam_and_one_sender() {
+        let v = |a: &[&str]| a.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert!(super::spam_banner_visible(true, &v(&["+90555"])));
+        assert!(!super::spam_banner_visible(false, &v(&["+90555"])));
+        assert!(!super::spam_banner_visible(true, &v(&["+90555", "+90556"])));
+        assert!(!super::spam_banner_visible(true, &[]));
+    }
+
     use rovsti_core::sms::{MmsPart, SmsSim};
 
     use super::*;

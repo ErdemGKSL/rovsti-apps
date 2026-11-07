@@ -150,6 +150,38 @@ pub fn primary_number(card: &CardView) -> Option<&str> {
     card.numbers.first().map(|n| n.value.as_str())
 }
 
+/// The largest vCard file that is read for a card (bytes).
+pub const MAX_VCARD_BYTES: u64 = 64 * 1024;
+
+/// Whether an MMS part type is a vCard.
+pub fn is_vcard_mime(mime: &str) -> bool {
+    let t = mime.trim().to_ascii_lowercase();
+    let t = t.split(';').next().unwrap_or("").trim();
+    matches!(t, "text/x-vcard" | "text/vcard" | "text/directory")
+}
+
+/// The numbers a card bubble lists: at most `max`, then "+N more".
+pub fn number_lines(card: &CardView, max: usize) -> Vec<String> {
+    let mut lines: Vec<String> = card
+        .numbers
+        .iter()
+        .take(max)
+        .map(|n| n.value.clone())
+        .collect();
+    if card.numbers.len() > max {
+        lines.push(format!("+{} more", card.numbers.len() - max));
+    }
+    lines
+}
+
+/// "card-Ada-Lovelace.vcf": the cache file a Save .vcf writes.
+pub fn cache_file_name(name: &str) -> String {
+    format!(
+        "card-{}.vcf",
+        file_slug_opt(name).unwrap_or_else(|| "contact".to_owned())
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,5 +302,33 @@ END:VCARD\r\n";
         );
         assert_eq!(v["emails"][1]["label"], "Work");
         assert_eq!(v["phones"].as_array().expect("array").len(), 2);
+    }
+
+    #[test]
+    fn vcard_mimes() {
+        assert!(is_vcard_mime("text/x-vcard"));
+        assert!(is_vcard_mime(" Text/VCard; charset=utf-8"));
+        assert!(!is_vcard_mime("text/plain"));
+    }
+
+    #[test]
+    fn number_lines_cap_with_more() {
+        let f = |v: &str| CardField {
+            value: v.into(),
+            label: "Mobile".into(),
+        };
+        let card = CardView {
+            numbers: vec![f("1"), f("2"), f("3"), f("4"), f("5")],
+            ..CardView::default()
+        };
+        assert_eq!(number_lines(&card, 3), vec!["1", "2", "3", "+2 more"]);
+        assert_eq!(number_lines(&card, 5).len(), 5);
+        assert!(number_lines(&CardView::default(), 3).is_empty());
+    }
+
+    #[test]
+    fn cache_names() {
+        assert_eq!(cache_file_name("Ada Lovelace"), "card-Ada-Lovelace.vcf");
+        assert_eq!(cache_file_name("  "), "card-contact.vcf");
     }
 }

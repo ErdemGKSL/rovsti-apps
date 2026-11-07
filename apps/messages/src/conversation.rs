@@ -24,6 +24,7 @@ use rovsti_core::{
     multi_select::{self, Selection},
     quick_replies,
     recents::LocaleTime,
+    shared_card::{self, CardView},
     starred::{self, StarCandidate, StarredRow},
     unread_jump::{self, JumpState},
     wire::DocumentOp,
@@ -45,6 +46,7 @@ use rovsti_wa_ui::{WaAvatars, display_name, photo_avatar};
 
 use crate::{
     backend::{Backend, BackendEvent},
+    contact_ui::SheetAction,
     find_ui::{FindActions, FindState, find_bar},
     inbox::duration_label,
     keyed_list::{KeyedList, key_of},
@@ -56,9 +58,9 @@ use crate::{
 use rovsti_wa_proto::{
     ChatState, DeleteForMe, EditMessage, GatewayEvent, Item, ItemState, Location, MarkRead,
     MediaKind, MediaMeta, MediaOptions, MessageBody, MessageMeta, Quoted, RevokeMessage,
-    SendReaction, SendText, Sent, SharedContact, StarMessage, Timeline, TypingState,
-    TypingThrottle, WaMessage, check_size, classify, day_breaks, is_pn_jid, jid_user,
-    meta::body_preview, reaction_chips, read_requests,
+    SendReaction, SendText, Sent, StarMessage, Timeline, TypingState, TypingThrottle, WaMessage,
+    check_size, classify, day_breaks, is_pn_jid, jid_user, meta::body_preview, reaction_chips,
+    read_requests,
 };
 
 /// The text "Copy" puts on the clipboard: the text or a media caption. Nothing
@@ -133,8 +135,8 @@ pub enum ConversationEvent {
     Call(String),
     /// The Message pill of a contact card: start a chat with the number.
     Message { name: String, number: String },
-    /// The Add to contacts pill of a contact card.
-    AddContact(String),
+    /// The Add to contacts pill of a shared contact card: the page inserts it or opens the match.
+    AddContactCard(CardView),
     /// The Email pill of an address found in a message.
     Email(String),
     /// The Copy link pill: the page copies the URL and says "Link copied".
@@ -361,6 +363,8 @@ pub struct Conversation {
     select_delete: bool,
     /// The open Info or Select text sheet.
     info_sheet: Option<crate::info_ui::InfoSheet>,
+    /// The "View contact" sheet of a shared card.
+    card_sheet: Option<CardView>,
     /// The message a quote tap jumped to (it glows for a moment).
     highlight: Option<String>,
     /// The "Search in chat" bar.
@@ -516,6 +520,7 @@ impl Conversation {
             select: None,
             select_delete: false,
             info_sheet: None,
+            card_sheet: None,
             starred_open: false,
             date_sheet: None,
             date_goto: None,
@@ -612,6 +617,8 @@ impl Conversation {
             self.end_select();
         } else if self.gallery.is_some() {
             self.gallery = None;
+        } else if self.card_sheet.is_some() {
+            self.card_sheet = None;
         } else if self.info_sheet.is_some() {
             self.info_sheet = None;
         } else if self.date_sheet.is_some() {
@@ -2056,16 +2063,13 @@ impl Conversation {
             cx.notify();
             return;
         };
-        let path = dir.join(format!("wa-save-{}", cache_stem(&id)));
+        let path = media_cache_path(&dir, &id);
         self.saving = Some(path.clone());
         self.media_failed.remove(&id);
         self.media_loading.insert(id.clone());
-        let gateway = self.gateway.clone();
-        let wanted = id.clone();
+        let download = self.download_media(&dir, &id, cx);
         let task = cx.background_executor().spawn(async move {
-            let bytes = gateway.media(&wanted).map_err(|e| e.to_string())?;
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+            let path = download.await?;
             Ok::<_, String>(
                 documents::export_file(&name, &mime, &path.to_string_lossy())
                     .map_err(|e| matches!(e, AndroidError::Unsupported)),
@@ -2081,6 +2085,70 @@ impl Conversation {
                     this.finish_saving();
                 }
                 if let Some(notice) = notice {
+                    cx.emit(ConversationEvent::Notice(notice.to_owned()));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Downloads a received file into `dir` (the cache) off the UI thread and
+    /// answers with its path.
+    fn download_media(
+        &self,
+        dir: &std::path::Path,
+        id: &str,
+        cx: &Context<Self>,
+    ) -> gpui::Task<Result<std::path::PathBuf, String>> {
+        let gateway = self.gateway.clone();
+        let wanted = id.to_owned();
+        let dir = dir.to_path_buf();
+        let path = media_cache_path(&dir, id);
+        cx.background_executor().spawn(async move {
+            let bytes = gateway.media(&wanted).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+            Ok(path)
+        })
+    }
+
+    /// Downloads a received file and offers it to the share sheet.
+    fn share_media(&mut self, id: String, mime: String, name: String, cx: &mut Context<Self>) {
+        self.strip = None;
+        self.rows_dirty = true;
+        if self.media_loading.contains(&id) {
+            cx.emit(ConversationEvent::Notice(
+                "Already working on that file".to_owned(),
+            ));
+            cx.notify();
+            return;
+        }
+        let Some(dir) = self.backend.read(cx).data_dir().map(|d| d.join("cache")) else {
+            cx.emit(ConversationEvent::Notice(
+                "The app's storage is not ready yet.".to_owned(),
+            ));
+            cx.notify();
+            return;
+        };
+        self.media_failed.remove(&id);
+        self.media_loading.insert(id.clone());
+        let download = self.download_media(&dir, &id, cx);
+        let task = cx.background_executor().spawn(async move {
+            let path = download.await?;
+            Ok::<_, String>(
+                rovsti_android::media::share_file(&path.to_string_lossy(), &mime, &name)
+                    .map_err(|e| matches!(e, AndroidError::Unsupported)),
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                this.media_loading.remove(&id);
+                this.rows_dirty = true;
+                if let Some(notice) = share_outcome(result) {
                     cx.emit(ConversationEvent::Notice(notice.to_owned()));
                 }
                 cx.notify();
@@ -3211,7 +3279,12 @@ impl Conversation {
         } else if let Some(location) = meta.and_then(|m| m.location.as_ref()) {
             location_card(theme, location, text, quiet)
         } else if let Some(contact) = meta.and_then(|m| m.contact.as_ref()) {
-            contact_card(theme, contact, text, quiet)
+            contact_card(
+                theme,
+                &shared_card::from_vcard(&contact.display_name, &contact.vcard),
+                text,
+                quiet,
+            )
         } else {
             self.body(theme, message, meta, text, quiet, cx)
         };
@@ -3685,6 +3758,7 @@ impl Conversation {
         for (n, action) in card_actions(meta).into_iter().enumerate() {
             let (icon, label) = match &action {
                 CardAction::OpenMap { .. } => (Icon::LucideMapPin, "Open in Maps"),
+                CardAction::View(_) => (Icon::LucideContact, "View contact"),
                 CardAction::Call(_) => (Icon::LucidePhone, "Call"),
                 CardAction::Message { .. } => (Icon::LucideMessageCircle, "Message"),
                 CardAction::AddContact(_) => (Icon::LucideUserPlus, "Add to contacts"),
@@ -3701,7 +3775,10 @@ impl Conversation {
                             CardAction::Message { name, number } => {
                                 cx.emit(ConversationEvent::Message { name, number });
                             }
-                            CardAction::AddContact(n) => cx.emit(ConversationEvent::AddContact(n)),
+                            CardAction::View(card) => this.card_sheet = Some(card),
+                            CardAction::AddContact(card) => {
+                                cx.emit(ConversationEvent::AddContactCard(card));
+                            }
                             CardAction::Copy(t) => cx.emit(ConversationEvent::Copy(t)),
                         }
                         cx.notify();
@@ -3938,6 +4015,21 @@ impl Conversation {
                 }),
             ));
         }
+        if let MessageBody::Media { kind, mime, .. } = &message.body
+            && shareable(*kind)
+            && !revoked
+        {
+            let mime = mime.clone();
+            let name = save_name(*kind, meta.and_then(|m| m.media.as_ref()), &mime, &id);
+            let target = id.clone();
+            row = row.child(
+                pill("share-file", Icon::LucideShare, "Share", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.share_media(target.clone(), mime.clone(), name.clone(), cx);
+                    },
+                )),
+            );
+        }
         if can_edit(item, meta, now) {
             let target = id.clone();
             row = row.child(
@@ -4009,6 +4101,87 @@ impl Conversation {
             media: media.as_deref(),
         };
         rows(&input, self.locale)
+    }
+
+    /// The "View contact" sheet over the conversation.
+    fn card_card_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let card = self.card_sheet.as_ref()?;
+        Some(crate::contact_ui::card_overlay(
+            theme,
+            card,
+            cx,
+            Self::card_sheet_action,
+        ))
+    }
+
+    /// A tap inside the "View contact" sheet.
+    fn card_sheet_action(&mut self, action: SheetAction, cx: &mut Context<Self>) {
+        let Some(card) = self.card_sheet.clone() else {
+            return;
+        };
+        match action {
+            SheetAction::Close => self.card_sheet = None,
+            SheetAction::Call(n) => cx.emit(ConversationEvent::Call(n)),
+            SheetAction::Message(number) => cx.emit(ConversationEvent::Message {
+                name: card.name,
+                number,
+            }),
+            SheetAction::Email(a) => cx.emit(ConversationEvent::Email(a)),
+            SheetAction::Copy(t) => cx.emit(ConversationEvent::Copy(t)),
+            SheetAction::Add => cx.emit(ConversationEvent::AddContactCard(card)),
+            SheetAction::Share => cx.emit(ConversationEvent::Share(shared_card::share_text(&card))),
+            SheetAction::SaveVcf => {
+                self.card_sheet = None;
+                self.save_card(&card, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Writes the card to a .vcf in the cache and hands it to "Save as".
+    fn save_card(&mut self, card: &CardView, cx: &mut Context<Self>) {
+        if self.saving.is_some() {
+            cx.emit(ConversationEvent::Notice(
+                "Already saving a file".to_owned(),
+            ));
+            return;
+        }
+        let Some(dir) = self.backend.read(cx).data_dir().map(|d| d.join("cache")) else {
+            cx.emit(ConversationEvent::Notice(
+                "The app's storage is not ready yet.".to_owned(),
+            ));
+            return;
+        };
+        let card = card.clone();
+        let path = dir.join(shared_card::cache_file_name(&card.name));
+        self.saving = Some(path.clone());
+        self.exporting = None;
+        let task = cx.background_executor().spawn(async move {
+            crate::contact_ui::write_vcf(&dir, &path, &card)?;
+            Ok::<_, String>(
+                documents::export_file(
+                    &shared_card::vcf_file_name(&card.name),
+                    "text/x-vcard",
+                    &path.to_string_lossy(),
+                )
+                .map_err(|e| matches!(e, AndroidError::Unsupported)),
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let (notice, started) = save_outcome(result);
+                if !started {
+                    this.finish_saving();
+                }
+                if let Some(notice) = notice {
+                    cx.emit(ConversationEvent::Notice(notice.to_owned()));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// The Info or Select text sheet over the conversation.
@@ -4564,6 +4737,7 @@ impl Render for Conversation {
         let date_sheet = self.date_overlay(theme, cx);
         let gallery_sheet = self.gallery_overlay(theme, cx);
         let info_sheet = self.info_overlay(theme, cx);
+        let card_sheet = self.card_card_overlay(theme, cx);
 
         div()
             .size_full()
@@ -4582,6 +4756,7 @@ impl Render for Conversation {
             .children(starred_sheet)
             .children(date_sheet)
             .children(info_sheet)
+            .children(card_sheet)
             .children(gallery_sheet)
     }
 }
@@ -5011,30 +5186,20 @@ fn media_details(size: u64, media: Option<&MediaMeta>, status: &str) -> String {
     parts.join(" · ")
 }
 
-/// The first phone number of a vCard (`TEL;TYPE=CELL:+90 532 …`).
-fn vcard_phone(vcard: &str) -> Option<String> {
-    vcard.lines().find_map(|line| {
-        let (key, value) = line.split_once(':')?;
-        // `TEL`, `TEL;TYPE=CELL` or a grouped `item1.TEL;waid=…`.
-        let name = key
-            .split(';')
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_ascii_uppercase();
-        let is_tel = name == "TEL" || name.ends_with(".TEL");
-        let value = value.trim();
-        (is_tel && !value.is_empty()).then(|| value.to_owned())
-    })
-}
-
 /// What a location or contact card offers besides reading it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CardAction {
-    OpenMap { url: String },
+    OpenMap {
+        url: String,
+    },
+    /// Opens the "View contact" sheet.
+    View(CardView),
     Call(String),
-    Message { name: String, number: String },
-    AddContact(String),
+    Message {
+        name: String,
+        number: String,
+    },
+    AddContact(CardView),
     Copy(String),
 }
 
@@ -5087,18 +5252,26 @@ pub fn card_actions(meta: Option<&MessageMeta>) -> Vec<CardAction> {
         ];
     }
     if let Some(contact) = &meta.contact {
-        return match vcard_phone(&contact.vcard) {
-            Some(number) => vec![
-                CardAction::Call(number.clone()),
-                CardAction::Message {
-                    name: contact.display_name.clone(),
+        let card = shared_card::from_vcard(&contact.display_name, &contact.vcard);
+        let mut actions = vec![CardAction::View(card.clone())];
+        match shared_card::primary_number(&card).map(str::to_owned) {
+            Some(number) => {
+                actions.push(CardAction::Call(number.clone()));
+                actions.push(CardAction::Message {
+                    name: card.name.clone(),
                     number: number.clone(),
-                },
-                CardAction::AddContact(number.clone()),
-                CardAction::Copy(number),
-            ],
-            None => vec![CardAction::Copy(contact.display_name.clone())],
-        };
+                });
+                actions.push(CardAction::AddContact(card));
+                actions.push(CardAction::Copy(number));
+            }
+            None => {
+                if !card.emails.is_empty() {
+                    actions.push(CardAction::AddContact(card.clone()));
+                }
+                actions.push(CardAction::Copy(card.name));
+            }
+        }
+        return actions;
     }
     Vec::new()
 }
@@ -5145,22 +5318,19 @@ fn location_card(
     )
 }
 
-/// A shared contact card: the name and its first number.
-fn contact_card(
+/// A shared contact card: the name, up to three numbers and "+N more".
+pub(crate) fn contact_card(
     theme: Theme,
-    contact: &SharedContact,
+    card: &CardView,
     text: gpui::Hsla,
     quiet: gpui::Hsla,
 ) -> gpui::AnyElement {
     let colors = theme::colors(theme);
-    let mut lines = vec![];
-    if let Some(phone) = vcard_phone(&contact.vcard) {
-        lines.push(phone);
-    }
+    let mut lines = shared_card::number_lines(card, 3);
     lines.push("Contact card".to_owned());
     info_card(
         Icon::LucideContact,
-        contact.display_name.clone(),
+        card.name.clone(),
         lines,
         colors.label.opacity(0.08),
         text,
@@ -5168,7 +5338,7 @@ fn contact_card(
     )
 }
 
-fn info_card(
+pub(crate) fn info_card(
     icon: Icon,
     title: String,
     lines: Vec<String>,
@@ -5306,6 +5476,30 @@ pub(crate) fn save_outcome(
     }
 }
 
+/// The cache file a downloaded WhatsApp file is written to.
+fn media_cache_path(dir: &std::path::Path, id: &str) -> std::path::PathBuf {
+    dir.join(format!("wa-save-{}", cache_stem(id)))
+}
+
+/// The pill text for the end of a share hand-off; `None` when the sheet opened.
+/// `Err(true)` in the inner result means the seam is unsupported (desktop).
+pub(crate) fn share_outcome(result: Result<Result<bool, bool>, String>) -> Option<&'static str> {
+    match result {
+        Ok(Ok(true)) => None,
+        Ok(Err(true)) => Some("Sharing needs an Android phone."),
+        Ok(Ok(false) | Err(false)) | Err(_) => Some("Couldn't open the share sheet"),
+    }
+}
+
+/// Whether a received file can be handed to the share sheet from the strip
+/// (pictures have their own viewer).
+fn shareable(kind: MediaKind) -> bool {
+    matches!(
+        kind,
+        MediaKind::Document | MediaKind::Audio | MediaKind::Video
+    )
+}
+
 /// The file name a saved media message gets.
 fn save_name(kind: MediaKind, media: Option<&MediaMeta>, mime: &str, message_id: &str) -> String {
     if let Some(name) = media
@@ -5434,28 +5628,41 @@ mod tests {
         assert_eq!(acts[1], CardAction::Copy("Cafe\n41.00820, 28.97840".into()));
 
         let card = |vcard: &str| MessageMeta {
-            contact: Some(SharedContact {
+            contact: Some(rovsti_wa_proto::SharedContact {
                 display_name: "Ada".into(),
                 vcard: vcard.into(),
             }),
             ..MessageMeta::default()
         };
+        let view = shared_card::from_vcard(
+            "Ada",
+            "BEGIN:VCARD\nVERSION:3.0\nFN:Ada\nN:;Ada;;;\nTEL:+90 532\nEND:VCARD",
+        );
         assert_eq!(
-            card_actions(Some(&card("BEGIN:VCARD\nTEL:+90 532\nEND:VCARD"))),
+            card_actions(Some(&card(
+                "BEGIN:VCARD\nVERSION:3.0\nFN:Ada\nN:;Ada;;;\nTEL:+90 532\nEND:VCARD"
+            ))),
             vec![
+                CardAction::View(view.clone()),
                 CardAction::Call("+90 532".into()),
                 CardAction::Message {
                     name: "Ada".into(),
                     number: "+90 532".into()
                 },
-                CardAction::AddContact("+90 532".into()),
+                CardAction::AddContact(view),
                 CardAction::Copy("+90 532".into()),
             ]
         );
+        let bare = shared_card::from_vcard("Ada", "BEGIN:VCARD\nEND:VCARD");
         assert_eq!(
             card_actions(Some(&card("BEGIN:VCARD\nEND:VCARD"))),
-            vec![CardAction::Copy("Ada".into())]
+            vec![CardAction::View(bare), CardAction::Copy("Ada".into())]
         );
+        let mail = card_actions(Some(&card(
+            "BEGIN:VCARD\nVERSION:3.0\nFN:Ada\nN:;Ada;;;\nEMAIL:a@b.org\nEND:VCARD",
+        )));
+        assert_eq!(mail.len(), 3);
+        assert!(matches!(mail[1], CardAction::AddContact(_)));
     }
 
     #[test]
@@ -5694,12 +5901,6 @@ mod tests {
         assert_eq!(media_title(MediaKind::Audio, Some(&voice)), "Voice message");
         assert_eq!(media_title(MediaKind::Audio, None), "Audio");
         assert_eq!(media_details(12, Some(&voice), ""), "0:42 · 12 B");
-        assert_eq!(
-            vcard_phone("BEGIN:VCARD\nFN:Ada\nitem1.TEL;waid=90:+90 532 123 45 67\nEND:VCARD"),
-            Some("+90 532 123 45 67".into())
-        );
-        assert_eq!(vcard_phone("TEL;TYPE=CELL:+1 555"), Some("+1 555".into()));
-        assert_eq!(vcard_phone("FN:Ada"), None);
         let location = Location {
             latitude: 41.0082,
             longitude: 28.9784,
@@ -5807,6 +6008,25 @@ mod tests {
             save_name(MediaKind::Video, None, "application/x-weird", "ab"),
             "WhatsApp video ab.bin"
         );
+    }
+
+    #[test]
+    fn share_outcome_tells_what_happened() {
+        assert_eq!(share_outcome(Ok(Ok(true))), None);
+        assert_eq!(
+            share_outcome(Ok(Err(true))),
+            Some("Sharing needs an Android phone.")
+        );
+        assert_eq!(
+            share_outcome(Ok(Ok(false))),
+            Some("Couldn't open the share sheet")
+        );
+        assert_eq!(
+            share_outcome(Err("disk".to_owned())),
+            Some("Couldn't open the share sheet")
+        );
+        assert!(shareable(MediaKind::Document) && shareable(MediaKind::Audio));
+        assert!(!shareable(MediaKind::Image) && !shareable(MediaKind::Sticker));
     }
 
     #[test]

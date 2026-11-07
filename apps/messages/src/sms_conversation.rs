@@ -23,6 +23,7 @@ use rovsti_core::{
     chat_find::{self, FindCursor},
     multi_select::{self, Selection},
     pending_delete::PendingDeletes,
+    shared_card::{self, CardView},
     sms::{DeliveryState, SmsSend, SmsSimsPayload, SmsStatus, segments},
     sms_timeline::{SmsItem, SmsKey, SmsTimeline},
     starred::{self, LocalStar, StarredRow},
@@ -41,6 +42,7 @@ use rovsti_wa_ui::photo_avatar;
 
 use crate::{
     backend::{Backend, BackendEvent, now_ms, sim_for},
+    contact_ui::SheetAction,
     conversation::{
         HIGHLIGHT_FOR, clock, composer_bar, day_label, day_start_ms, header_bar_with, jump_button,
         quick_reply_row, replies_at, unread_divider_row,
@@ -95,6 +97,8 @@ pub enum SmsConversationEvent {
     Message(String),
     /// An Email pill of an address found in a bubble.
     Email(String),
+    /// Add to contacts for a shared contact card.
+    AddContactCard(rovsti_core::shared_card::CardView),
     /// The header's more button: the conversation menu.
     Menu,
     /// The Spam banner's "Not spam": allow this sender.
@@ -214,6 +218,12 @@ pub struct SmsConversation {
     info_sheet: Option<crate::info_ui::InfoSheet>,
     /// The "Media, links and docs" sheet.
     gallery: Option<crate::gallery_ui::GallerySheet>,
+    /// The "View contact" sheet of a shared card.
+    card_sheet: Option<CardView>,
+    /// vCard parts by file path: `None` while read or when unreadable.
+    cards: std::rc::Rc<std::cell::RefCell<HashMap<String, Option<CardView>>>>,
+    /// Bumped when a vCard has been read, so its row is measured again.
+    cards_rev: u32,
     /// A picture or file is being handed to the "Save as" sheet.
     saving: bool,
     /// An exported chat is at the "Save as" sheet; true when only part of it was loaded.
@@ -327,6 +337,9 @@ impl SmsConversation {
             star_ids: HashSet::new(),
             info_sheet: None,
             gallery: None,
+            card_sheet: None,
+            cards: Default::default(),
+            cards_rev: 0,
             saving: false,
             exporting: None,
             peer_photo: None,
@@ -502,7 +515,10 @@ impl SmsConversation {
             cx.notify();
             return true;
         }
-        if self.gallery.take().is_some() || self.info_sheet.take().is_some() {
+        if self.gallery.take().is_some()
+            || self.info_sheet.take().is_some()
+            || self.card_sheet.take().is_some()
+        {
             cx.notify();
             return true;
         }
@@ -1904,6 +1920,127 @@ impl SmsConversation {
         cx.notify();
     }
 
+    /// Hands one file of a message to the share sheet.
+    fn share_part(&mut self, part: SavePart, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.select = None;
+        self.rows_dirty = true;
+        let task = cx.background_executor().spawn(async move {
+            rovsti_android::media::share_file(&part.path, &part.mime, &part.name)
+                .map_err(|e| matches!(e, AndroidError::Unsupported))
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |_, cx| {
+                if let Some(notice) = crate::conversation::share_outcome(Ok(result)) {
+                    cx.emit(SmsConversationEvent::Notice(notice));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// The card of a received vCard part, once read. The first call starts
+    /// reading the file (at most 64 KB) in the background.
+    fn card_of(&self, path: &str, cx: &mut Context<Self>) -> Option<CardView> {
+        if let Some(entry) = self.cards.borrow().get(path) {
+            return entry.clone();
+        }
+        self.cards.borrow_mut().insert(path.to_owned(), None);
+        let owned = path.to_owned();
+        let task = cx.background_executor().spawn({
+            let owned = owned.clone();
+            async move { crate::contact_ui::read_vcf(&owned) }
+        });
+        cx.spawn(async move |this, cx| {
+            let card = task.await;
+            this.update(cx, |this, cx| {
+                if card.is_some() {
+                    this.cards.borrow_mut().insert(owned, card);
+                    this.cards_rev = this.cards_rev.wrapping_add(1);
+                    this.rows_dirty = true;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+        None
+    }
+
+    /// A tap inside the "View contact" sheet.
+    fn card_sheet_action(&mut self, action: SheetAction, cx: &mut Context<Self>) {
+        let Some(card) = self.card_sheet.clone() else {
+            return;
+        };
+        match action {
+            SheetAction::Close => self.card_sheet = None,
+            SheetAction::Call(n) => cx.emit(SmsConversationEvent::Call(n)),
+            SheetAction::Message(n) => cx.emit(SmsConversationEvent::Message(n)),
+            SheetAction::Email(a) => cx.emit(SmsConversationEvent::Email(a)),
+            SheetAction::Copy(text) => cx.emit(SmsConversationEvent::Copy {
+                text,
+                sensitive: false,
+            }),
+            SheetAction::Add => cx.emit(SmsConversationEvent::AddContactCard(card)),
+            SheetAction::Share => {
+                cx.emit(SmsConversationEvent::Share(shared_card::share_text(&card)));
+            }
+            SheetAction::SaveVcf => {
+                self.card_sheet = None;
+                self.save_card(&card, cx);
+            }
+        }
+        cx.notify();
+    }
+
+    /// Writes the card to a .vcf in the cache and hands it to "Save as".
+    fn save_card(&mut self, card: &CardView, cx: &mut Context<Self>) {
+        if self.saving {
+            cx.emit(SmsConversationEvent::Notice("Already saving a file"));
+            return;
+        }
+        let Some(dir) = self.backend.read(cx).data_dir().map(|d| d.join("cache")) else {
+            cx.emit(SmsConversationEvent::Notice(
+                "The app's storage is not ready yet.",
+            ));
+            return;
+        };
+        self.saving = true;
+        self.exporting = None;
+        let card = card.clone();
+        let path = dir.join(shared_card::cache_file_name(&card.name));
+        let task = cx.background_executor().spawn(async move {
+            crate::contact_ui::write_vcf(&dir, &path, &card)?;
+            Ok::<_, String>(
+                documents::export_file(
+                    &shared_card::vcf_file_name(&card.name),
+                    "text/x-vcard",
+                    &path.to_string_lossy(),
+                )
+                .map_err(|e| matches!(e, AndroidError::Unsupported)),
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let (notice, started) = crate::conversation::save_outcome(result);
+                if !started {
+                    this.saving = false;
+                }
+                if let Some(notice) = notice {
+                    cx.emit(SmsConversationEvent::Notice(notice));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn pick_attachment(&mut self, cx: &mut Context<Self>) {
         self.awaiting_attachment = true;
         self.notice = None;
@@ -1942,7 +2079,13 @@ impl SmsConversation {
                     let base = message_key(&items[index]);
                     let picked = self.select.as_ref().map(|s| s.contains(&items[index].key));
                     let starred = self.is_starred(items[index].key);
-                    key_of((base, self.selected == Some(base), picked, starred))
+                    key_of((
+                        base,
+                        self.selected == Some(base),
+                        picked,
+                        starred,
+                        self.cards_rev,
+                    ))
                 }
             }))
             .collect();
@@ -2559,6 +2702,37 @@ impl SmsConversation {
                     quiet,
                     cx,
                 ));
+            } else if let Some(path) = part
+                .path
+                .as_deref()
+                .filter(|_| shared_card::is_vcard_mime(&part.content_type))
+            {
+                match self.card_of(path, cx) {
+                    Some(card) => {
+                        let tapped = card.clone();
+                        bubble = bubble.child(
+                            div()
+                                .id(("sms-card", index * 64 + part_index))
+                                .child(crate::conversation::contact_card(theme, &card, text, quiet))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if this.selected.is_some() || this.select.is_some() {
+                                        return;
+                                    }
+                                    cx.stop_propagation();
+                                    this.card_sheet = Some(tapped.clone());
+                                    cx.notify();
+                                })),
+                        );
+                    }
+                    None => {
+                        bubble = bubble.child(
+                            div()
+                                .text_size(typography::SUBHEADLINE.size)
+                                .text_color(quiet)
+                                .child("Contact card"),
+                        );
+                    }
+                }
             } else if part.text.is_none() {
                 bubble = bubble.child(
                     div()
@@ -2753,6 +2927,46 @@ impl SmsConversation {
                         .id(("sms-save", index * 100 + n))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.save_part(part.clone(), cx);
+                        })),
+                );
+            }
+            let files = saveable_parts(item);
+            for (n, part) in files.iter().cloned().enumerate() {
+                let label = share_label(total, n + 1);
+                pills = pills.child(
+                    glass_pill(theme, label)
+                        .id(("sms-share-file", index * 100 + n))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.share_part(part.clone(), cx);
+                        })),
+                );
+            }
+            for (n, part) in files.iter().enumerate() {
+                if !shared_card::is_vcard_mime(&part.mime) {
+                    continue;
+                }
+                let Some(card) = self.card_of(&part.path, cx) else {
+                    continue;
+                };
+                let view = card.clone();
+                pills = pills.child(
+                    glass_pill(theme, "View contact")
+                        .id(("sms-view-card", index * 100 + n))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            this.card_sheet = Some(view.clone());
+                            cx.notify();
+                        })),
+                );
+                pills = pills.child(
+                    glass_pill(theme, "Add to contacts")
+                        .id(("sms-add-card", index * 100 + n))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            cx.emit(SmsConversationEvent::AddContactCard(card.clone()));
+                            cx.notify();
                         })),
                 );
             }
@@ -3150,6 +3364,10 @@ impl Render for SmsConversation {
         };
 
         let info_sheet = self.info_overlay(theme, cx);
+        let card_sheet = self
+            .card_sheet
+            .as_ref()
+            .map(|card| crate::contact_ui::card_overlay(theme, card, cx, Self::card_sheet_action));
         let gallery_sheet = self.gallery_overlay(theme, cx);
         let delete_sheet = self.delete_overlay(theme, cx);
         let select_delete_sheet = self.select_delete_overlay(theme, cx);
@@ -3167,6 +3385,7 @@ impl Render for SmsConversation {
             .children(has_info.then_some(info))
             .child(bottom)
             .children(info_sheet)
+            .children(card_sheet)
             .children(gallery_sheet)
             .children(delete_sheet)
             .children(select_delete_sheet)
@@ -3435,6 +3654,15 @@ pub fn save_label(mime: &str, total: usize, number: usize) -> String {
     }
 }
 
+/// The Share pill text: "Share file" for a lone file, else "Share 1", "Share 2".
+pub fn share_label(total: usize, number: usize) -> String {
+    if total == 1 {
+        "Share file".to_owned()
+    } else {
+        format!("Share {number}")
+    }
+}
+
 /// `mms-20261105-140500-1.jpg`: the UTC time of the message, the part number
 /// and the extension of the type.
 pub fn mms_save_name(content_type: &str, at_ms: i64, number: usize) -> String {
@@ -3510,6 +3738,12 @@ mod tests {
     }
 
     use rovsti_core::sms::{MmsPart, SmsSim};
+
+    #[test]
+    fn share_labels() {
+        assert_eq!(share_label(1, 1), "Share file");
+        assert_eq!(share_label(3, 2), "Share 2");
+    }
 
     use super::*;
 

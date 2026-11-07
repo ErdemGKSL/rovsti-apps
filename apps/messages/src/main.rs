@@ -8,6 +8,7 @@
 mod access;
 mod backend;
 mod backup_ui;
+mod contact_ui;
 mod conversation;
 mod date_jump_ui;
 mod drafts;
@@ -1185,7 +1186,7 @@ impl MessagesApp {
             ConversationEvent::Call(n) => {
                 this.telecom_action(sms_actions::SmsAction::Call, n.clone(), cx);
             }
-            ConversationEvent::AddContact(n) => this.add_or_open_contact(n.clone(), cx),
+            ConversationEvent::AddContactCard(card) => this.add_card_contact(card.clone(), cx),
             ConversationEvent::Email(a) => this.email_to(a.clone(), cx),
             ConversationEvent::Message { name, number } => this.open_recipient(
                 &Recipient {
@@ -1301,6 +1302,7 @@ impl MessagesApp {
                 cx,
             ),
             SmsConversationEvent::Email(a) => this.email_to(a.clone(), cx),
+            SmsConversationEvent::AddContactCard(card) => this.add_card_contact(card.clone(), cx),
             SmsConversationEvent::Menu => this.open_page_menu(cx),
             SmsConversationEvent::OpenSettings => this.open_settings_tab(cx),
             SmsConversationEvent::NotSpam => this.open_page_not_spam(cx),
@@ -2017,6 +2019,45 @@ impl MessagesApp {
                         this.show_pill("Contacts need an Android phone.");
                     }
                     Ok(false) | Err(_) => this.show_pill("Couldn't open that contact."),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Add a shared contact card to the phone's contacts with every field, or
+    /// open the contact when its first number already matches one.
+    fn add_card_contact(
+        &mut self,
+        card: rovsti_core::shared_card::CardView,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(number) = rovsti_core::shared_card::primary_number(&card)
+            && self
+                .backend
+                .read(cx)
+                .contacts()
+                .match_number(number)
+                .is_some()
+        {
+            self.add_or_open_contact(number.to_owned(), cx);
+            return;
+        }
+        let json = rovsti_core::shared_card::insert_json(&card);
+        let task = cx
+            .background_executor()
+            .spawn(async move { rovsti_android::telecom::insert_contact(&json) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(true) => {}
+                    Err(rovsti_android::Error::Unsupported) => {
+                        this.show_pill("Contacts need an Android phone.");
+                    }
+                    Ok(false) | Err(_) => this.show_pill("Couldn't open Contacts"),
                 }
                 cx.notify();
             })

@@ -10,7 +10,7 @@ use rovsti_core::{
     contact_edit::ContactDraft,
     contact_photo::{self, CropView},
     contact_scan::{self, Scanned},
-    import_plan, vcard,
+    import_plan,
     wire::{DocumentOp, DocumentResult, WireContact},
 };
 
@@ -374,11 +374,8 @@ impl ContactsApp {
             let (plan, unreadable) = cx
                 .background_executor()
                 .spawn(async move {
-                    let parsed = vcard::parse(&text);
-                    (
-                        import_plan::plan(&existing, parsed.contacts),
-                        parsed.skipped,
-                    )
+                    let (cards, skipped) = backend::cards_of(&text);
+                    (import_plan::plan(&existing, cards), skipped)
                 })
                 .await;
             this.update(cx, |this, cx| {

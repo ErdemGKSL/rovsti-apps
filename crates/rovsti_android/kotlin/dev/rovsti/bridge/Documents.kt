@@ -81,7 +81,7 @@ object Documents {
             .setType("*/*")
             .putExtra(
                 Intent.EXTRA_MIME_TYPES,
-                arrayOf("text/x-vcard", "text/vcard", "text/directory", "text/plain", "application/octet-stream"),
+                arrayOf("text/x-vcard", "text/vcard", "text/directory", "text/plain", "text/csv", "text/comma-separated-values", "application/octet-stream"),
             )
 
     fun start(activity: Activity, export: Boolean, name: String, json: String): Boolean =

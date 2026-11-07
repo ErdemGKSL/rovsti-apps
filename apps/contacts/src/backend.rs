@@ -16,12 +16,15 @@ use rovsti_android::{
 };
 use rovsti_core::{
     birthday_reminder::{self, BirthdayAlarm},
+    call_stats, contact_csv,
     contact_dates::Upcoming,
     contact_edit,
     contact_edit::{
         Account, AccountsPayload, ContactDraft, DetailPayload, FullPayload, Group, GroupsPayload,
         ImportPayload, MembersPayload, SavedPayload, SelectionChange,
     },
+    contact_find::DeepIndex,
+    contact_frequent::{self, Frequent},
     contact_history::PULL_LIMIT,
     contact_intake::{self, Intake},
     contact_options::{self, ContactOptions, PinShortcut},
@@ -32,8 +35,8 @@ use rovsti_core::{
     contacts_prefs::ContactsPrefs,
     recents::{self, HistoryLine},
     search::{ContactIndex, fold},
-    vcard,
-    wire::{CallLogPayload, ContactsPayload, Envelope, WireError},
+    vcard::{self, CardPhoto, PhotoFormat},
+    wire::{CallLogPayload, ContactsPayload, Envelope, WireContact, WireError},
 };
 use serde::de::DeserializeOwned;
 
@@ -205,6 +208,63 @@ pub(crate) fn export_text(hidden: &[i64]) -> Result<(String, usize), String> {
     Ok((vcard::write(&contacts), contacts.len()))
 }
 
+/// Every contact as a Google-style CSV, and how many that is. `hidden` are
+/// contacts in their Undo window: they are left out of the file.
+#[allow(dead_code)] // used by plan steps S5 and S6
+pub(crate) fn csv_text(hidden: &[i64]) -> Result<(String, usize), String> {
+    let mut contacts = pull_full()?;
+    contacts.retain(|c| c.id.is_none_or(|id| !hidden.contains(&id)));
+    Ok((contact_csv::write(&contacts), contacts.len()))
+}
+
+/// The detail index for "In details" search over every contact.
+#[allow(dead_code)] // used by plan steps S5 and S6
+pub(crate) fn deep_index() -> Result<DeepIndex, String> {
+    Ok(DeepIndex::new(&pull_full()?))
+}
+
+/// Most called unstarred contacts of the last 30 days, from the local call
+/// log. Without the permission this is an error in words; desktop answers from
+/// the sample calls.
+#[allow(dead_code)] // used by plan steps S5 and S6
+pub(crate) fn frequent(contacts: &[WireContact], now_ms: i64) -> Result<Vec<Frequent>, String> {
+    let entries = match decode::<CallLogPayload>(providers::call_log(PULL_LIMIT)) {
+        Ok(payload) => payload.entries,
+        Err(Failed::Unsupported) => sample::calls(now_ms),
+        Err(error) => return Err(error.words()),
+    };
+    let calls = call_stats::from_sources(&entries, &[]);
+    Ok(contact_frequent::rank(
+        &calls,
+        contacts,
+        now_ms,
+        contact_frequent::MAX_SHOWN,
+    ))
+}
+
+/// Cards of an opened file: a contacts CSV or vCard text, and how many cards
+/// were unusable.
+#[allow(dead_code)] // used by plan steps S5 and S6
+pub(crate) fn cards_of(text: &str) -> (Vec<ContactDraft>, usize) {
+    let parsed = if contact_csv::looks_like_csv(None, "", text.as_bytes()) {
+        contact_csv::parse(text)
+    } else {
+        vcard::parse(text)
+    };
+    (parsed.contacts, parsed.skipped)
+}
+
+/// The photo of a text holding exactly one vCard.
+#[allow(dead_code)] // used by plan steps S5 and S6
+pub(crate) fn single_photo(text: &str) -> Option<CardPhoto> {
+    let mut photos = vcard::photos(text);
+    if photos.len() == 1 {
+        photos.remove(0)
+    } else {
+        None
+    }
+}
+
 /// Every contact as an editable, cleaned and valid draft, sorted by folded
 /// name. Desktop answers from the sample.
 pub(crate) fn pull_full() -> Result<Vec<ContactDraft>, String> {
@@ -334,6 +394,13 @@ pub(crate) fn start_export(text: &str) -> Result<(), String> {
 /// Opens "save as" for a `.vcf` under the suggested `name`.
 pub(crate) fn start_export_named(name: &str, text: &str) -> Result<(), String> {
     done(documents::export_contacts(name, text))
+}
+
+/// Opens "save as" for a `.csv` under the suggested `name`. The answer is a
+/// `document_result` with op `export_calls`.
+#[allow(dead_code)] // used by plan steps S5 and S6
+pub(crate) fn start_export_csv(name: &str, csv: &str) -> Result<(), String> {
+    done(documents::export_calls(name, csv))
 }
 
 /// Opens the file picker for a `.vcf`. The answer is a `document_result`.
@@ -540,6 +607,48 @@ mod hand_off {
         Some((image, path))
     }
 
+    /// The contact photo as a card photo: JPEG, long side at most 512 px, under
+    /// the vCard cap (retried smaller when over). Blocks.
+    pub(crate) fn card_photo(uri: &str) -> Option<CardPhoto> {
+        let (image, _) = full_photo(uri)?;
+        [(512, 85), (384, 70)]
+            .into_iter()
+            .find_map(|(side, quality)| {
+                let bytes = encode_jpeg(&image, side, quality)?;
+                (bytes.len() <= vcard::MAX_PHOTO_BYTES).then_some(CardPhoto {
+                    format: PhotoFormat::Jpeg,
+                    bytes,
+                })
+            })
+    }
+
+    /// `image` with its long side at most `side`, as JPEG.
+    pub(super) fn encode_jpeg(image: &image::RgbaImage, side: u32, quality: u8) -> Option<Vec<u8>> {
+        let mut dynamic = image::DynamicImage::ImageRgb8(
+            image::DynamicImage::ImageRgba8(image.clone()).to_rgb8(),
+        );
+        if dynamic.width().max(dynamic.height()) > side {
+            dynamic = dynamic.resize(side, side, image::imageops::FilterType::Triangle);
+        }
+        let rgb = dynamic.to_rgb8();
+        let mut out = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality)
+            .encode_image(&rgb)
+            .ok()?;
+        Some(out)
+    }
+
+    /// Writes the card photo to a temp file; its path.
+    pub(crate) fn photo_file(photo: &CardPhoto) -> Result<PathBuf, String> {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let ext = match photo.format {
+            PhotoFormat::Jpeg => "jpg",
+            PhotoFormat::Png => "png",
+        };
+        write_temp(&format!("import-photo-{n}.{ext}"), &photo.bytes)
+    }
+
     pub(super) fn contact_photo_at(path: &str) -> Option<image::RgbaImage> {
         let bytes = std::fs::read(path).ok()?;
         image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
@@ -708,6 +817,82 @@ mod tests {
             Intake::Unreadable
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn card_photo_on_the_sample_is_a_small_jpeg() {
+        let photo = card_photo("content://x/1").expect("sample photo");
+        assert_eq!(photo.format, PhotoFormat::Jpeg);
+        assert!(photo.bytes.len() <= vcard::MAX_PHOTO_BYTES);
+        let decoded = image::load_from_memory(&photo.bytes).expect("ok");
+        assert!(decoded.width().max(decoded.height()) <= 512);
+    }
+
+    #[test]
+    fn photo_file_writes_the_bytes() {
+        let photo = card_photo("content://x/2").expect("ok");
+        let path = photo_file(&photo).expect("ok");
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("jpg"));
+        assert_eq!(std::fs::read(&path).expect("ok"), photo.bytes);
+        let other = photo_file(&photo).expect("ok");
+        assert_ne!(path, other);
+    }
+
+    #[test]
+    fn csv_text_has_the_header_and_every_sample_row() {
+        let (csv, count) = csv_text(&[]).expect("ok");
+        assert!(csv.to_lowercase().starts_with("first name") || csv.contains("First Name"));
+        assert_eq!(count, pull_full().expect("ok").len());
+        let (_, fewer) = csv_text(&[1]).expect("ok");
+        assert_eq!(fewer, count - 1);
+        assert_eq!(cards_of(&csv).0.len(), count);
+    }
+
+    #[test]
+    fn cards_of_reads_csv_and_vcf() {
+        let (vcf, n) = export_text(&[]).expect("ok");
+        assert_eq!(cards_of(&vcf).0.len(), n);
+        assert!(cards_of("nothing here").0.is_empty());
+    }
+
+    #[test]
+    fn deep_index_finds_a_sample_company() {
+        let index = deep_index().expect("ok");
+        let hits = index.search("acme", &[], 5);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, 1);
+    }
+
+    #[test]
+    fn frequent_on_desktop_ranks_unstarred_sample_callers() {
+        let now = 1_770_000_000_000;
+        let list = frequent(&sample::contacts(), now).expect("ok");
+        assert!(!list.is_empty() && list.len() <= contact_frequent::MAX_SHOWN);
+        assert!(list.iter().all(|f| f.calls >= 2 && f.last_ms <= now));
+        let starred: Vec<i64> = sample::contacts()
+            .iter()
+            .filter(|c| c.starred)
+            .map(|c| c.id)
+            .collect();
+        assert!(list.iter().all(|f| !starred.contains(&f.contact_id)));
+    }
+
+    #[test]
+    fn single_photo_needs_exactly_one_card_with_a_photo() {
+        let photo = card_photo("content://x/3").expect("ok");
+        let card = |n: &str| {
+            let draft = ContactDraft {
+                given: n.to_owned(),
+                ..sample::draft(2).expect("ok")
+            };
+            vcard::write_one(&draft, Some(&photo))
+        };
+        assert_eq!(single_photo(&card("Ada")).as_ref(), Some(&photo));
+        assert_eq!(
+            single_photo(&format!("{}{}", card("Ada"), card("Bob"))),
+            None
+        );
+        assert_eq!(single_photo("BEGIN:VCARD\r\nFN:X\r\nEND:VCARD\r\n"), None);
     }
 
     #[test]

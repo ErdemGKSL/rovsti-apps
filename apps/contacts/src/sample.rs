@@ -2,7 +2,7 @@
 
 use rovsti_core::{
     contact_edit::{Account, ContactDraft, DraftEvent, DraftField, EventKind, FieldKind, Group},
-    wire::{WireContact, WireNumber},
+    wire::{CallLogEntry, CallLogKind, WireContact, WireNumber},
 };
 
 /// The key of the sample Google account (`type|name`).
@@ -188,6 +188,28 @@ pub(crate) fn photo(size: u32) -> image::RgbaImage {
     })
 }
 
+/// Sample call log for desktop runs, relative to `now_ms`: Burak Demir (2)
+/// and Mehmet Öz (4) are called often, Ayşe (starred) too.
+pub(crate) fn calls(now_ms: i64) -> Vec<CallLogEntry> {
+    let day = 24 * 60 * 60 * 1000;
+    let call = |number: &str, kind: CallLogKind, days_ago: i64| CallLogEntry {
+        number_raw: number.to_owned(),
+        kind,
+        date_ms: now_ms - days_ago * day,
+        duration_s: 60,
+        ..Default::default()
+    };
+    vec![
+        call("0532 123 45 67", CallLogKind::Outgoing, 1),
+        call("0532 123 45 67", CallLogKind::Incoming, 3),
+        call("0532 123 45 67", CallLogKind::Missed, 9),
+        call("0216 555 01 02", CallLogKind::Outgoing, 2),
+        call("0216 555 01 02", CallLogKind::Incoming, 12),
+        call("+90 555 111 22 33", CallLogKind::Outgoing, 1),
+        call("+90 555 111 22 33", CallLogKind::Outgoing, 2),
+    ]
+}
+
 /// The editable form of a sample contact, as the provider would return it.
 pub(crate) fn draft(id: i64) -> Option<ContactDraft> {
     let wire = contacts().into_iter().find(|c| c.id == id)?;
@@ -206,6 +228,11 @@ pub(crate) fn draft(id: i64) -> Option<ContactDraft> {
         id: Some(wire.id),
         events,
         addresses,
+        org: if id == 1 {
+            "Acme Yazılım".to_owned()
+        } else {
+            String::new()
+        },
         nickname: if id == 1 {
             "Ayşecik".to_owned()
         } else {

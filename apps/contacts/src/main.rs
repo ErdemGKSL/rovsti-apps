@@ -24,6 +24,7 @@ mod recent;
 mod sample;
 mod select;
 mod transfer;
+mod trash_store;
 mod ui;
 mod upcoming;
 mod whatsapp;

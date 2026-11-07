@@ -56,6 +56,29 @@ pub fn rearm_messages() -> Result<bool> {
     bridge::call_bool("rearmMessageReminders", &[])
 }
 
+/// Birthday reminders (`BirthdayReminders.kt`): the same alarm scheme on the
+/// `birthdays` channel; a tap queues the one-shot `open_contact` `{id}`. The
+/// payload is `{id, contact_id, at_ms, title, body}`. Stores it and sets the
+/// alarm. `false` for a malformed payload.
+pub fn arm_birthday(reminder_json: &str) -> Result<bool> {
+    bridge::call_bool("armBirthday", &[Arg::Str(reminder_json)])
+}
+
+/// Cancels the birthday alarm and forgets it. `false` when it was not armed.
+pub fn disarm_birthday(id: i64) -> Result<bool> {
+    bridge::call_bool("disarmBirthday", &[Arg::Str(&id.to_string())])
+}
+
+/// The armed birthday reminders as a JSON array.
+pub fn armed_birthdays() -> Result<String> {
+    bridge::call_string("armedBirthdays", &[])
+}
+
+/// Sets every stored birthday alarm again (due ones fire at once).
+pub fn rearm_birthdays() -> Result<bool> {
+    bridge::call_bool("rearmBirthdays", &[])
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -71,5 +94,9 @@ mod tests {
         assert!(matches!(disarm_message(1), Err(Error::Unsupported)));
         assert!(matches!(armed_messages(), Err(Error::Unsupported)));
         assert!(matches!(rearm_messages(), Err(Error::Unsupported)));
+        assert!(matches!(arm_birthday("{}"), Err(Error::Unsupported)));
+        assert!(matches!(disarm_birthday(1), Err(Error::Unsupported)));
+        assert!(matches!(armed_birthdays(), Err(Error::Unsupported)));
+        assert!(matches!(rearm_birthdays(), Err(Error::Unsupported)));
     }
 }

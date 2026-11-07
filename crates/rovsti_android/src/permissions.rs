@@ -29,6 +29,9 @@ pub enum Group {
     /// `RECORD_AUDIO`, asked on demand by Phone for WhatsApp calls; not in
     /// [`Group::ALL`].
     Microphone,
+    /// `READ_CALL_LOG`, asked on demand by Contacts for the card's recent calls;
+    /// not in [`Group::ALL`].
+    CallLog,
 }
 
 impl Group {
@@ -45,6 +48,7 @@ impl Group {
             Self::Location => "location",
             Self::BackgroundLocation => "background_location",
             Self::Microphone => "microphone",
+            Self::CallLog => "call_log",
         }
     }
 }
@@ -142,6 +146,7 @@ mod tests {
             Group::Location,
             Group::BackgroundLocation,
             Group::Microphone,
+            Group::CallLog,
         ];
         let keys: std::collections::HashSet<_> = every.iter().map(|g| g.key()).collect();
         assert_eq!(keys.len(), every.len());
@@ -150,6 +155,8 @@ mod tests {
         assert!(!Group::ALL.contains(&Group::BackgroundLocation));
         assert!(!Group::ALL.contains(&Group::Microphone));
         assert_eq!(Group::Microphone.key(), "microphone");
+        assert_eq!(Group::CallLog.key(), "call_log");
+        assert!(!Group::ALL.contains(&Group::CallLog));
     }
 
     #[cfg(not(target_os = "android"))]

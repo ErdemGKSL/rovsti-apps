@@ -11,17 +11,24 @@ use std::{
     sync::Arc,
 };
 
-use rovsti_android::{Error, contacts_edit, documents, media, providers};
+use rovsti_android::{Error, contacts_edit, documents, media, providers, reminders, telecom};
 use rovsti_core::{
+    birthday_reminder::{self, BirthdayAlarm},
+    contact_dates::Upcoming,
+    contact_edit,
     contact_edit::{
         Account, AccountsPayload, ContactDraft, DetailPayload, FullPayload, Group, GroupsPayload,
         ImportPayload, MembersPayload, SavedPayload, SelectionChange,
     },
+    contact_history::PULL_LIMIT,
     contact_photo::{self, CropView, PhotoError},
+    contact_scan::{self, Scanned},
     contact_select,
+    contacts_prefs::ContactsPrefs,
+    recents::{self, HistoryLine},
     search::{ContactIndex, fold},
     vcard,
-    wire::{ContactsPayload, Envelope, WireError},
+    wire::{CallLogPayload, ContactsPayload, Envelope, WireError},
 };
 use serde::de::DeserializeOwned;
 
@@ -219,6 +226,106 @@ pub(crate) fn export_selection(ids: &[i64], hidden: &[i64]) -> Result<(String, u
     let mut cards = contact_select::pick_drafts(&all, ids);
     cards.retain(|c| c.id.is_none_or(|id| !hidden.contains(&id)));
     Ok((vcard::write(&cards), cards.len()))
+}
+
+/// The editable drafts of the contacts with these ids, in address-book order.
+#[allow(dead_code, reason = "wired to Trash in a later step")]
+pub(crate) fn drafts_of(ids: &[i64]) -> Result<Vec<ContactDraft>, String> {
+    Ok(contact_select::pick_drafts(&pull_full()?, ids))
+}
+
+/// Calls with any of `numbers`, newest first (cellular only; local call log).
+/// Without the call-log permission or on desktop this is an error in words.
+#[allow(dead_code, reason = "wired to the card in a later step")]
+pub(crate) fn call_history(numbers: &[String]) -> Result<Vec<HistoryLine>, String> {
+    let payload: CallLogPayload =
+        decode(providers::call_log(PULL_LIMIT)).map_err(|error| error.words())?;
+    let wanted: Vec<&str> = numbers.iter().map(String::as_str).collect();
+    Ok(recents::history(&payload.entries, &[], &wanted, PULL_LIMIT))
+}
+
+/// Makes entry `index` of the contact's numbers (or e-mails, when `emails`) its
+/// default, or clears the default when `index` is `None`, and saves.
+#[allow(dead_code, reason = "wired to the field sheet in a later step")]
+pub(crate) fn set_default(
+    draft: &ContactDraft,
+    emails: bool,
+    index: Option<usize>,
+) -> Result<i64, String> {
+    let mut edited = draft.clone();
+    let list = if emails {
+        &mut edited.emails
+    } else {
+        &mut edited.numbers
+    };
+    contact_edit::set_primary(list, index);
+    save(&edited)
+}
+
+/// What a scanned picture holds, or why it could not be read.
+#[allow(dead_code, reason = "wired to Scan to add in a later step")]
+pub(crate) fn scan_image(path: &str) -> Result<Scanned, String> {
+    let bytes = std::fs::read(path).map_err(|_| Failed::Unreadable.words())?;
+    let decoded = image::load_from_memory(&bytes).map_err(|_| Failed::Unreadable.words())?;
+    let side = contact_scan::MAX_SIDE;
+    let luma = if decoded.width().max(decoded.height()) > side {
+        decoded.resize(side, side, image::imageops::FilterType::Triangle)
+    } else {
+        decoded
+    }
+    .to_luma8();
+    for text in contact_scan::decode_luma(luma.width(), luma.height(), luma.as_raw()) {
+        let scanned = contact_scan::parse_payload(&text);
+        if scanned != Scanned::Nothing {
+            return Ok(scanned);
+        }
+    }
+    Ok(Scanned::Nothing)
+}
+
+/// Opens one SMS composer for all `numbers`.
+#[allow(dead_code, reason = "wired to groups in a later step")]
+pub(crate) fn group_sms(numbers: &[String], body: &str) -> Result<(), String> {
+    done(telecom::compose_group_sms(numbers, body))
+}
+
+/// Opens the e-mail composer for all `addresses`.
+#[allow(dead_code, reason = "wired to groups in a later step")]
+pub(crate) fn group_email(addresses: &[String]) -> Result<(), String> {
+    done(telecom::email_group(addresses))
+}
+
+/// Brings the armed birthday alarms in line with `upcoming`: arms the missing
+/// ones and disarms the stale ones. With reminders off, disarms them all.
+#[allow(dead_code, reason = "wired to Settings in a later step")]
+pub(crate) fn sync_birthdays(
+    prefs: &ContactsPrefs,
+    upcoming: &[Upcoming],
+    now_ms: i64,
+    tz_offset_s: i32,
+) -> Result<(), String> {
+    let armed: Vec<i64> = serde_json::from_str::<Vec<serde_json::Value>>(
+        &reminders::armed_birthdays().map_err(|error| android_words(&error))?,
+    )
+    .map_err(|error| Failed::Other(error.to_string()).words())?
+    .iter()
+    .filter_map(|v| v.get("id").and_then(serde_json::Value::as_i64))
+    .collect();
+    let wanted: Vec<BirthdayAlarm> = if prefs.birthday_reminders {
+        birthday_reminder::plan(upcoming, now_ms, tz_offset_s, prefs.hour())
+    } else {
+        Vec::new()
+    };
+    let (stale, missing) = birthday_reminder::diff(&armed, &wanted);
+    for id in stale {
+        reminders::disarm_birthday(id).map_err(|error| android_words(&error))?;
+    }
+    for alarm in missing {
+        let json = serde_json::to_string(alarm)
+            .map_err(|error| Failed::Other(error.to_string()).words())?;
+        done(reminders::arm_birthday(&json))?;
+    }
+    Ok(())
 }
 
 /// Opens "save as" for the `.vcf`. The answer is a `document_result`.
@@ -714,5 +821,85 @@ mod tests {
         assert_eq!(none, 0);
         let (_, left) = export_selection(&[1, 3], &[1]).expect("sample");
         assert_eq!(left, 1);
+    }
+
+    #[test]
+    fn desktop_android_wrappers_are_unsupported() {
+        let list = vec!["+90 555 111 22 33".to_owned()];
+        assert_eq!(call_history(&list).expect_err("no log"), NEEDS_PHONE);
+        assert_eq!(group_sms(&list, "hi").expect_err("no sms"), NEEDS_PHONE);
+        assert_eq!(group_email(&list).expect_err("no mail"), NEEDS_PHONE);
+        let draft = pull_detail(4).expect("sample");
+        assert_eq!(
+            set_default(&draft, false, Some(0)).expect_err("no provider"),
+            NEEDS_PHONE
+        );
+        assert_eq!(
+            sync_birthdays(&ContactsPrefs::default(), &[], 0, 0).expect_err("no alarms"),
+            NEEDS_PHONE
+        );
+    }
+
+    #[test]
+    fn drafts_of_picks_the_chosen_sample_contacts() {
+        let got = drafts_of(&[3, 1, 999]).expect("sample");
+        let ids: Vec<_> = got.iter().filter_map(|d| d.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&1) && ids.contains(&3));
+        assert!(drafts_of(&[]).expect("sample").is_empty());
+    }
+
+    /// Writes `text` as a QR code PNG (a quiet zone and a scale the decoder likes).
+    fn qr_png(name: &str, text: &str) -> PathBuf {
+        let code = qrcode::QrCode::new(text.as_bytes()).expect("encodes");
+        let img = code
+            .render::<image::Luma<u8>>()
+            .quiet_zone(true)
+            .module_dimensions(6, 6)
+            .build();
+        let dir = std::env::temp_dir().join("rovsti-contacts-scan-test");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join(name);
+        img.save_with_format(&path, image::ImageFormat::Png)
+            .expect("png");
+        path
+    }
+
+    #[test]
+    fn scan_image_reads_a_generated_qr_png() {
+        let card = "BEGIN:VCARD\nVERSION:3.0\nFN:Ayşe Yılmaz\nN:Yılmaz;Ayşe;;;\nTEL:+905551112233\nEND:VCARD\n";
+        match scan_image(&qr_png("card.png", card).to_string_lossy()).expect("scans") {
+            Scanned::Cards(cards) => {
+                assert_eq!(cards.len(), 1);
+                assert_eq!(cards[0].numbers[0].value, "+905551112233");
+            }
+            other => panic!("expected a card, got {other:?}"),
+        }
+        let number = qr_png("number.png", "tel:+905551112233");
+        assert_eq!(
+            scan_image(&number.to_string_lossy()).expect("scans"),
+            Scanned::Number("+905551112233".to_owned())
+        );
+    }
+
+    #[test]
+    fn scan_image_with_no_code_or_a_bad_file_says_so() {
+        let dir = std::env::temp_dir().join("rovsti-contacts-scan-test");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let blank = dir.join("blank.png");
+        image::GrayImage::from_pixel(64, 64, image::Luma([255]))
+            .save_with_format(&blank, image::ImageFormat::Png)
+            .expect("png");
+        assert_eq!(
+            scan_image(&blank.to_string_lossy()).expect("scans"),
+            Scanned::Nothing
+        );
+        let junk = dir.join("junk.png");
+        std::fs::write(&junk, b"not an image").expect("writes");
+        assert_eq!(
+            scan_image(&junk.to_string_lossy()).expect_err("unreadable"),
+            "that image can't be read"
+        );
+        assert!(scan_image("/definitely/not/here.png").is_err());
     }
 }

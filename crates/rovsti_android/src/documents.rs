@@ -82,6 +82,13 @@ pub fn pick_contact_photo() -> Result<bool> {
     bridge::call_bool0("pickContactPhoto")
 }
 
+/// Opens the system Photo Picker (images only) for a picture to scan for a QR
+/// code. Like [`pick_contact_photo`], but the `document_result` op is
+/// `scan_image`.
+pub fn pick_scan_image() -> Result<bool> {
+    bridge::call_bool0("pickScanImage")
+}
+
 /// Opens the camera app for one photo (no `CAMERA` permission is used). The
 /// picture is written to the app cache; the `document_result` (op
 /// `contact_photo`) carries its `path` and `mime` `image/jpeg`, like the picker.
@@ -116,5 +123,6 @@ mod tests {
         assert!(matches!(pick_attachment(1024), Err(Error::Unsupported)));
         assert!(matches!(pick_contact_photo(), Err(Error::Unsupported)));
         assert!(matches!(capture_photo(), Err(Error::Unsupported)));
+        assert!(matches!(pick_scan_image(), Err(Error::Unsupported)));
     }
 }

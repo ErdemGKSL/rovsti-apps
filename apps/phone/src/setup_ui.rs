@@ -290,7 +290,8 @@ impl PhoneApp {
                         Group::Bluetooth
                         | Group::Location
                         | Group::BackgroundLocation
-                        | Group::Microphone => Access::Denied,
+                        | Group::Microphone
+                        | Group::CallLog => Access::Denied,
                     }
                 };
                 let requested = if access == Access::PermanentlyDenied {

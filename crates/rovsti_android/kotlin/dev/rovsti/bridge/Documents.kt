@@ -31,6 +31,7 @@ object Documents {
 
     const val REQUEST_CONTACT_PHOTO = 0x4350 // "CP"
     const val REQUEST_CAMERA_PHOTO = 0x4350 + 1 // "CQ"
+    const val REQUEST_SCAN_IMAGE = 0x4353 // "CS"
 
     /** A picked contact photo larger than this (20 MiB) is refused. */
     const val MAX_PHOTO_BYTES = 20 * 1024 * 1024
@@ -106,6 +107,15 @@ object Documents {
         false
     }
 
+    /** Photo Picker for an image to scan for a QR code; the answer is `document_result` op `scan_image` with `path` and `mime`. */
+    fun startScanPick(activity: Activity): Boolean = try {
+        @Suppress("DEPRECATION")
+        activity.startActivityForResult(photoPickIntent(), REQUEST_SCAN_IMAGE)
+        true
+    } catch (_: android.content.ActivityNotFoundException) {
+        false
+    }
+
     /** Pure: the file name the camera writes, `camera-<ms>.jpg` (the only name the share provider lets it write). */
     fun cameraName(nowMs: Long): String = "camera-${nowMs.coerceAtLeast(0)}.jpg"
 
@@ -153,8 +163,8 @@ object Documents {
 
     private fun handlePhoto(
         context: Context, resultCode: Int, data: Intent?, worker: java.util.concurrent.Executor, emit: (String) -> Unit,
+        op: String = "contact_photo",
     ) {
-        val op = "contact_photo"
         val uri = data?.data
         if (resultCode != Activity.RESULT_OK || uri == null) {
             emit(resultJson(op, false))
@@ -364,6 +374,10 @@ object Documents {
         }
         if (requestCode == REQUEST_CONTACT_PHOTO) {
             handlePhoto(context, resultCode, data, worker, emit)
+            return true
+        }
+        if (requestCode == REQUEST_SCAN_IMAGE) {
+            handlePhoto(context, resultCode, data, worker, emit, op = "scan_image")
             return true
         }
         val calls = requestCode == REQUEST_EXPORT_CALLS

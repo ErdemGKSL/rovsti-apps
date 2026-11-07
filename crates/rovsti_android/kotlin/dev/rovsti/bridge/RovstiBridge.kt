@@ -296,6 +296,14 @@ object RovstiBridge {
         return true
     }
 
+    /** Photo Picker for an image to scan; the answer is `document_result` op `scan_image` with `path` and `mime`. */
+    @JvmStatic
+    fun pickScanImage(): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startScanPick(activity) }
+        return true
+    }
+
     /** Camera for a contact photo; the answer is `document_result` op `contact_photo` with `path` and `mime` `image/jpeg`. */
     @JvmStatic
     fun capturePhoto(): Boolean {
@@ -442,6 +450,14 @@ object RovstiBridge {
 
     @JvmStatic fun rearmMessageReminders(): Boolean = MessageReminders.rearmAll(app)
 
+    @JvmStatic fun armBirthday(json: String): Boolean = BirthdayReminders.arm(app, json)
+
+    @JvmStatic fun disarmBirthday(id: String): Boolean = id.toLongOrNull()?.let { BirthdayReminders.disarm(app, it) } ?: false
+
+    @JvmStatic fun armedBirthdays(): String = BirthdayReminders.armedJson(app)
+
+    @JvmStatic fun rearmBirthdays(): Boolean = BirthdayReminders.rearmAll(app)
+
     @JvmStatic fun showMessageNotification(specJson: String): Boolean = MessageNotifications.show(app, specJson)
 
     @JvmStatic fun cancelMessageNotification(tag: String): Boolean = MessageNotifications.cancel(app, tag)
@@ -496,6 +512,19 @@ object RovstiBridge {
         intent.removeExtra(MessageReminders.EXTRA_MESSAGE_AT)
         postOneShot("open_thread", json.toString())
         MessageNotifications.cancel(app, tag)
+        return true
+    }
+
+    /**
+     * Call from the Contacts activity's `onCreate` and `onNewIntent`: a tap on a birthday notification
+     * queues `open_contact` `{id}` (through the mailbox, so it survives a cold start). True when it did.
+     */
+    fun deliverOpenContact(intent: Intent?): Boolean {
+        if (intent == null || !intent.hasExtra(BirthdayReminders.EXTRA_CONTACT_ID)) return false
+        val id = intent.getLongExtra(BirthdayReminders.EXTRA_CONTACT_ID, 0)
+        intent.removeExtra(BirthdayReminders.EXTRA_CONTACT_ID)
+        if (id <= 0) return false
+        postOneShot("open_contact", JSONObject().put("id", id).toString())
         return true
     }
 
@@ -564,6 +593,7 @@ object RovstiBridge {
             android.Manifest.permission.WRITE_CONTACTS,
         ),
         "notifications" to listOf(android.Manifest.permission.POST_NOTIFICATIONS),
+        "call_log" to listOf(android.Manifest.permission.READ_CALL_LOG),
         "bluetooth" to listOf(android.Manifest.permission.BLUETOOTH_CONNECT),
         "location" to listOf(
             android.Manifest.permission.ACCESS_FINE_LOCATION,
@@ -788,6 +818,21 @@ object RovstiBridge {
     @JvmStatic
     fun composeSms(number: String, body: String): Boolean =
         start(Intent(Intent.ACTION_SENDTO, Uri.fromParts("smsto", number, null)).putExtra("sms_body", body))
+
+    /** One SMS composer for several recipients: `smsto:` with [numbers] joined by ';' (already joined by Rust). */
+    @JvmStatic
+    fun composeGroupSms(numbers: String, body: String): Boolean {
+        if (numbers.isBlank()) return false
+        return start(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(numbers, ";"))).putExtra("sms_body", body))
+    }
+
+    /** The e-mail composer for several [addresses] (comma-separated): `mailto:` plus `EXTRA_EMAIL`. */
+    @JvmStatic
+    fun emailGroup(addresses: String): Boolean {
+        val list = addresses.split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }
+        if (list.isEmpty()) return false
+        return start(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:")).putExtra(Intent.EXTRA_EMAIL, list.toTypedArray()))
+    }
 
     /** The e-mail composer for [address] (`mailto:`). */
     @JvmStatic

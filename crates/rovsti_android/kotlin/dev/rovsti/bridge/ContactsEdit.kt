@@ -159,15 +159,16 @@ object ContactsEdit {
         else -> Email.TYPE_OTHER
     }
 
-    private fun field(value: String, kind: String, label: String?): JSONObject {
+    private fun field(value: String, kind: String, label: String?, primary: Boolean = false): JSONObject {
         val o = JSONObject().put("value", value).put("kind", kind)
         if (kind == "custom" && !label.isNullOrBlank()) o.put("label", label)
+        if (primary) o.put("primary", true)
         return o
     }
 
     /**
      * One draft being filled from `Data` rows. [add] reads a row whose columns are
-     * MIMETYPE, DATA1, DATA2, DATA3, DATA5, DATA4 starting at index `base`. A name, organisation or
+     * MIMETYPE, DATA1, DATA2, DATA3, DATA5, DATA4, IS_SUPER_PRIMARY starting at index `base`. A name, organisation or
      * note already set wins, so a contact merged from several raw contacts keeps the first.
      */
     private class DraftBuilder(val contactId: Long, val account: String = "") {
@@ -194,10 +195,10 @@ object ContactsEdit {
                     family = c.getString(base + 3).orEmpty()
                 }
                 Phone.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) {
-                    numbers.put(field(data1, kindOfPhone(c.getInt(base + 2)), c.getString(base + 3)))
+                    numbers.put(field(data1, kindOfPhone(c.getInt(base + 2)), c.getString(base + 3), c.getInt(base + 6) != 0))
                 }
                 Email.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) {
-                    emails.put(field(data1, kindOfEmail(c.getInt(base + 2)), c.getString(base + 3)))
+                    emails.put(field(data1, kindOfEmail(c.getInt(base + 2)), c.getString(base + 3), c.getInt(base + 6) != 0))
                 }
                 Event.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) {
                     val kind = kindOfEvent(c.getInt(base + 2))
@@ -236,7 +237,7 @@ object ContactsEdit {
         }
     }
 
-    private val DATA_PROJECTION = arrayOf(Data.MIMETYPE, Data.DATA1, Data.DATA2, Data.DATA3, Data.DATA5, Data.DATA4)
+    private val DATA_PROJECTION = arrayOf(Data.MIMETYPE, Data.DATA1, Data.DATA2, Data.DATA3, Data.DATA5, Data.DATA4, Data.IS_SUPER_PRIMARY)
     private val DATA_MIMES = EDITED_MIMES + GroupMembership.CONTENT_ITEM_TYPE
 
     private fun starred(context: Context, contactId: Long): Boolean =
@@ -276,6 +277,10 @@ object ContactsEdit {
     // ---- Writing ------------------------------------------------------------
 
     private fun str(o: JSONObject, key: String): String = o.optString(key, "").trim()
+
+    /** A default field is written as both IS_PRIMARY and IS_SUPER_PRIMARY (the update path re-inserts rows). */
+    private fun ContentProviderOperation.Builder.withPrimary(primary: Boolean): ContentProviderOperation.Builder =
+        if (primary) withValue(Data.IS_PRIMARY, 1).withValue(Data.IS_SUPER_PRIMARY, 1) else this
 
     /** Appends the inserts for [draft]; `rawId` for an existing raw contact, else a back reference. */
     private fun insertData(ops: ArrayList<ContentProviderOperation>, draft: JSONObject, rawId: Long?, backRef: Int) {
@@ -336,6 +341,7 @@ object ContactsEdit {
                         .withValue(Phone.NUMBER, value)
                         .withValue(Phone.TYPE, typeOfPhone(kind))
                         .withValue(Phone.LABEL, if (kind == "custom") n.optString("label", "").ifEmpty { null } else null)
+                        .withPrimary(n.optBoolean("primary", false))
                         .build(),
                 )
             }
@@ -350,6 +356,7 @@ object ContactsEdit {
                         .withValue(Email.ADDRESS, value)
                         .withValue(Email.TYPE, typeOfEmail(kind))
                         .withValue(Email.LABEL, if (kind == "custom") e.optString("label", "").ifEmpty { null } else null)
+                        .withPrimary(e.optBoolean("primary", false))
                         .build(),
                 )
             }

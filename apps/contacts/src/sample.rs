@@ -226,7 +226,10 @@ pub(crate) fn draft(id: i64) -> Option<ContactDraft> {
         numbers: wire
             .numbers
             .iter()
-            .map(|n| DraftField::new(n.raw.clone(), kind(&n.label)))
+            .map(|n| DraftField {
+                primary: n.default,
+                ..DraftField::new(n.raw.clone(), kind(&n.label))
+            })
             .collect(),
         groups: groups()
             .iter()
@@ -325,6 +328,16 @@ mod tests {
         let stamped: Vec<i64> = contacts().iter().filter_map(|c| c.updated_ms).collect();
         assert_eq!(stamped.len(), 2);
         assert!(stamped.iter().all(|t| *t > 0));
+    }
+
+    #[test]
+    fn one_sample_contact_has_a_primary_number() {
+        let primary = draft(4).expect("sample");
+        assert_eq!(
+            rovsti_core::contact_edit::primary_of(&primary.numbers),
+            Some(1)
+        );
+        assert!(draft(1).expect("sample").numbers.iter().all(|n| !n.primary));
     }
 
     #[test]

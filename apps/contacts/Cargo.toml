@@ -26,3 +26,6 @@ gpui_android.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+qrcode.workspace = true

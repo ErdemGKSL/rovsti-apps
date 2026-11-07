@@ -6120,6 +6120,7 @@ dependencies = [
  "gpui_platform",
  "image",
  "log",
+ "qrcode",
  "rovsti_android",
  "rovsti_core",
  "rovsti_ui",

@@ -109,6 +109,21 @@ pub fn compose_sms(number: &str, body: &str) -> Result<bool> {
     bridge::call_bool("composeSms", &[Arg::Str(number), Arg::Str(body)])
 }
 
+/// Opens one SMS composer for all `numbers` (`smsto:` joined by `;`) with `body`
+/// filled in; the user still presses send. `false` when no recipient is left or
+/// no app answered.
+pub fn compose_group_sms(numbers: &[String], body: &str) -> Result<bool> {
+    let joined = rovsti_core::group_tools::sms_address(numbers);
+    bridge::call_bool("composeGroupSms", &[Arg::Str(&joined), Arg::Str(body)])
+}
+
+/// Opens the e-mail composer addressed to all `addresses` (`EXTRA_EMAIL`).
+/// `false` when no recipient is left or no app answered.
+pub fn email_group(addresses: &[String]) -> Result<bool> {
+    let joined = rovsti_core::group_tools::email_address(addresses);
+    bridge::call_bool("emailGroup", &[Arg::Str(&joined)])
+}
+
 /// Opens the e-mail composer for `address` (`mailto:`). `false` when no app answered.
 pub fn send_email_to(address: &str) -> Result<bool> {
     bridge::call_bool_str("sendEmailTo", address)
@@ -182,6 +197,12 @@ mod tests {
         assert!(matches!(send_sms_to("1"), Err(Error::Unsupported)));
         assert!(matches!(compose_sms("1", "hi"), Err(Error::Unsupported)));
         assert!(matches!(send_email_to("a@b.c"), Err(Error::Unsupported)));
+        let list = vec!["1".to_owned(), "2".to_owned()];
+        assert!(matches!(
+            compose_group_sms(&list, "hi"),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(email_group(&list), Err(Error::Unsupported)));
         assert!(matches!(copy_text("x"), Err(Error::Unsupported)));
         assert!(matches!(share_text("x"), Err(Error::Unsupported)));
         assert!(matches!(hearing_aid_compatible(), Err(Error::Unsupported)));

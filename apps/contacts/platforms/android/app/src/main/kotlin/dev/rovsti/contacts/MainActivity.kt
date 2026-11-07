@@ -13,6 +13,13 @@ class MainActivity : GpuiActivity() {
         super.onCreate(state)
         // GpuiActivity loaded the library; now resolve the JNI bridge (AD-8).
         RovstiBridge.attachNative()
+        RovstiBridge.deliverOpenContact(intent)
+    }
+
+    /** A birthday notification tap queues `open_contact` through the mailbox. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        RovstiBridge.deliverOpenContact(intent)
     }
 
     /** The vCard file pickers answer here; the bridge turns the answer into a `document_result`. */

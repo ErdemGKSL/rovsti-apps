@@ -19,11 +19,15 @@ pub mod chat_find;
 pub mod chat_gallery;
 pub mod contact;
 pub mod contact_card;
+/// Clean up filters: contacts without a number, name, photo or group.
+pub mod contact_cleanup;
 /// Birthdays and anniversaries: parsing, next occurrence, upcoming list.
 pub mod contact_dates;
 /// Duplicate detection and merging of contacts.
 pub mod contact_dupes;
 pub mod contact_edit;
+/// Calls with one contact on the card: limits, header, permission text.
+pub mod contact_history;
 pub mod contact_photo;
 /// Scan to add: QR decoding and the payload parser.
 pub mod contact_scan;
@@ -41,6 +45,8 @@ pub mod dial;
 pub mod forward;
 pub mod gesture;
 pub mod global_search;
+/// Group utilities: SMS and email recipients, .vcf file name.
+pub mod group_tools;
 pub mod import_plan;
 pub mod inbox;
 /// Bulk actions for multi-selected inbox rows: availability, pin caps, notices.

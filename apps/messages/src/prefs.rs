@@ -136,7 +136,6 @@ impl MessagesPrefs {
 
     /// Mutes `tag`; `Some(end)` (epoch ms) ends the mute by itself, `None`
     /// mutes until the user unmutes.
-    #[allow(dead_code)] // used by the mute-duration UI in a later step
     pub fn set_muted_until(&mut self, tag: &str, until: Option<i64>) {
         self.muted.insert(tag.to_owned());
         match until {
@@ -150,7 +149,6 @@ impl MessagesPrefs {
     }
 
     /// When the mute of `tag` ends, if it is timed.
-    #[allow(dead_code)] // used by the mute-duration UI in a later step
     pub fn mute_end(&self, tag: &str) -> Option<i64> {
         self.mute_until.get(tag).copied()
     }

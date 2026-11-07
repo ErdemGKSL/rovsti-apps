@@ -9,6 +9,7 @@ mod access;
 mod backend;
 mod backup_ui;
 mod conversation;
+mod date_jump_ui;
 mod drafts;
 mod files;
 mod find_ui;
@@ -49,6 +50,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, TextInputAction,
     TextInputPurpose, Window, WindowBounds, WindowOptions, div, list, px, size,
 };
+use rovsti_core::mute::MuteFor;
 use rovsti_core::{
     Message, MessageDirection, PhoneNumber, ThreadId, blocklist,
     inbox::InboxThread,
@@ -100,11 +102,6 @@ const TAB_ICONS: [Icon; 3] = [
 
 /// How long a tapped OTP chip says "Copied".
 const COPIED_FOR: Duration = Duration::from_secs(3);
-
-const HOUR_MS: i64 = 3_600_000;
-/// The mute lengths the chat menu offers ("Always" is the third).
-const MUTE_8H_MS: i64 = 8 * HOUR_MS;
-const MUTE_WEEK_MS: i64 = 7 * 24 * HOUR_MS;
 
 /// The long-press menu of a WhatsApp row.
 #[derive(Clone, Debug)]
@@ -294,6 +291,8 @@ struct MessagesApp {
     row_menu: Option<RowMenu>,
     /// New message: the recipient being asked "SMS or WhatsApp".
     channel_pick: Option<Recipient>,
+    /// The header bell's "Mute for" menu of the open chat.
+    mute_menu: Option<ThreadId>,
     /// The "Forward to" chooser.
     forward: Option<forward_ui::ForwardSheet>,
     /// Bumped on every change of `wa_threads`.
@@ -558,6 +557,7 @@ impl MessagesApp {
             scheduled_entries: Vec::new(),
             row_menu: None,
             channel_pick: None,
+            mute_menu: None,
             forward: None,
             wa_rev: 0,
             backend_epoch: 0,
@@ -1570,6 +1570,85 @@ impl MessagesApp {
         cx.notify();
     }
 
+    /// Mutes an SMS thread for `choice` (it ends by itself) and offers Undo.
+    fn mute_sms_for(&mut self, id: i64, choice: MuteFor, cx: &mut Context<Self>) {
+        let tag = notifications::thread_tag(&ThreadId::Sms(id));
+        let now = now_ms();
+        let until = choice.until_ms(now);
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| p.set_muted_until(&tag, until))
+        });
+        let tz = self.backend.read(cx).locale().tz_offset_s;
+        let text = rovsti_core::mute::muted_notice(until, now, tz);
+        self.show_pill_action(text, "Undo", PillAction::SmsMute(id, false), cx);
+    }
+
+    /// A mute length picked in the header bell's menu.
+    fn mute_for(&mut self, thread: ThreadId, choice: MuteFor, cx: &mut Context<Self>) {
+        self.mute_menu = None;
+        match thread {
+            ThreadId::WhatsApp(jid) => self.chat_action(
+                &jid,
+                ChatActionKind::Mute {
+                    until_ms: choice.until_ms(now_ms()),
+                },
+                false,
+                cx,
+            ),
+            ThreadId::Sms(id) => self.mute_sms_for(id, choice, cx),
+        }
+        self.sync_open_page(cx);
+        cx.notify();
+    }
+
+    /// The header bell's "Mute for" menu over the open chat.
+    fn mute_menu_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let thread = self.mute_menu.clone()?;
+        let colors = theme::colors(theme);
+        let mut items: Vec<AnyElement> = MuteFor::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(index, choice)| {
+                let thread = thread.clone();
+                menu_item(
+                    theme,
+                    ("mute-for", index),
+                    Icon::LucideBellOff,
+                    choice.label().into(),
+                    colors.label,
+                )
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.mute_for(thread.clone(), choice, cx)),
+                )
+                .into_any_element()
+            })
+            .collect();
+        items.push(
+            menu_item(
+                theme,
+                "mute-for-cancel",
+                Icon::LucideX,
+                "Cancel".into(),
+                colors.label,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.mute_menu = None;
+                cx.notify();
+            }))
+            .into_any_element(),
+        );
+        Some(menu_card(
+            theme,
+            "mute-menu",
+            "Mute for".into(),
+            items,
+            cx.listener(|this, _, _, cx| {
+                this.mute_menu = None;
+                cx.notify();
+            }),
+        ))
+    }
+
     /// Mutes or unmutes an SMS thread and offers Undo.
     fn set_sms_mute(&mut self, id: i64, mute: bool, cx: &mut Context<Self>) {
         let tag = notifications::thread_tag(&ThreadId::Sms(id));
@@ -1627,9 +1706,15 @@ impl MessagesApp {
                 self.backend
                     .update(cx, |backend, cx| backend.mark_read(id, cx));
             }
-            SmsAction::Mute | SmsAction::Unmute => {
+            SmsAction::Mute => {
+                // The lengths show in the same menu.
+                if let Some(menu) = &mut self.row_menu {
+                    menu.mute_choices = true;
+                }
+            }
+            SmsAction::Unmute => {
                 self.row_menu = None;
-                self.set_sms_mute(id, action == SmsAction::Mute, cx);
+                self.set_sms_mute(id, false, cx);
             }
             SmsAction::NotSpam => {
                 self.row_menu = None;
@@ -1733,6 +1818,17 @@ impl MessagesApp {
         match &self.open {
             Open::WhatsApp(_, c) => c.update(cx, |c, cx| c.open_starred(cx)),
             Open::Sms(c) => c.update(cx, |c, cx| c.open_starred(cx)),
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// "Jump to date" of a page menu: closes the menu and opens the sheet.
+    fn menu_date(&mut self, cx: &mut Context<Self>) {
+        self.row_menu = None;
+        match &self.open {
+            Open::WhatsApp(_, c) => c.update(cx, |c, cx| c.open_date_sheet(cx)),
+            Open::Sms(c) => c.update(cx, |c, cx| c.open_date_sheet(cx)),
             _ => {}
         }
         cx.notify();
@@ -2370,7 +2466,14 @@ impl MessagesApp {
             thread.unread = unread;
         }
         self.rebuild(cx);
-        if let Some(text) = inbox::action_notice(&action) {
+        let notice = match action {
+            ChatActionKind::Mute { until_ms } => {
+                let tz = self.backend.read(cx).locale().tz_offset_s;
+                Some(rovsti_core::mute::muted_notice(until_ms, now_ms(), tz))
+            }
+            _ => inbox::action_notice(&action).map(str::to_owned),
+        };
+        if let Some(text) = notice {
             match inbox::undo_of(&action, &before).filter(|_| !quiet) {
                 Some(undo) => {
                     self.show_pill_action(text, "Undo", PillAction::Chat(jid.to_owned(), undo), cx)
@@ -2648,14 +2751,6 @@ impl MessagesApp {
     fn row_menu_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.row_menu.as_ref()?;
         let colors = theme::colors(theme);
-        let now = now_ms();
-        let jid = menu.jid.clone().unwrap_or_default();
-        let action = |id: &'static str, icon: Icon, label: String, kind: ChatActionKind| {
-            let jid = jid.clone();
-            menu_item(theme, id, icon, label.into(), colors.label).on_click(
-                cx.listener(move |this, _, _, cx| this.chat_action(&jid, kind.clone(), false, cx)),
-            )
-        };
         let mut items: Vec<AnyElement> = Vec::new();
         if menu.delete_confirm {
             let prompt = sms_actions::delete_prompt(&menu.title);
@@ -2696,37 +2791,31 @@ impl MessagesApp {
                 .into_any_element(),
             );
         } else if menu.mute_choices {
-            items.push(
-                action(
-                    "menu-mute-8h",
-                    Icon::LucideBellOff,
-                    "8 hours".into(),
-                    ChatActionKind::Mute {
-                        until_ms: Some(now + MUTE_8H_MS),
-                    },
-                )
-                .into_any_element(),
-            );
-            items.push(
-                action(
-                    "menu-mute-week",
-                    Icon::LucideBellOff,
-                    "1 week".into(),
-                    ChatActionKind::Mute {
-                        until_ms: Some(now + MUTE_WEEK_MS),
-                    },
-                )
-                .into_any_element(),
-            );
-            items.push(
-                action(
-                    "menu-mute-always",
-                    Icon::LucideBellOff,
-                    "Always".into(),
-                    ChatActionKind::Mute { until_ms: None },
-                )
-                .into_any_element(),
-            );
+            for (index, choice) in MuteFor::ALL.into_iter().enumerate() {
+                let jid = menu.jid.clone();
+                let sms_id = menu.sms.as_ref().map(|sms| sms.thread_id);
+                items.push(
+                    menu_item(
+                        theme,
+                        ("menu-mute-for", index),
+                        Icon::LucideBellOff,
+                        choice.label().into(),
+                        colors.label,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(jid) = &jid {
+                            let kind = ChatActionKind::Mute {
+                                until_ms: choice.until_ms(now_ms()),
+                            };
+                            this.chat_action(jid, kind, false, cx);
+                        } else if let Some(id) = sms_id {
+                            this.row_menu = None;
+                            this.mute_sms_for(id, choice, cx);
+                        }
+                    }))
+                    .into_any_element(),
+                );
+            }
         } else {
             if menu.send_later {
                 items.push(
@@ -2738,6 +2827,17 @@ impl MessagesApp {
                         colors.label,
                     )
                     .on_click(cx.listener(|this, _, window, cx| this.menu_find(window, cx)))
+                    .into_any_element(),
+                );
+                items.push(
+                    menu_item(
+                        theme,
+                        "menu-date",
+                        Icon::LucideCalendarSearch,
+                        "Jump to date".into(),
+                        colors.label,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.menu_date(cx)))
                     .into_any_element(),
                 );
                 items.push(
@@ -2995,6 +3095,7 @@ impl MessagesApp {
             || self.schedule.is_open()
             || self.row_menu.is_some()
             || self.channel_pick.is_some()
+            || self.mute_menu.is_some()
             || self.search_open
             || self.show_archived
             || self.show_spam
@@ -3012,6 +3113,9 @@ impl MessagesApp {
             // The picture viewer closed first.
         } else if self.schedule.is_open() {
             self.close_schedule(cx);
+        } else if self.mute_menu.is_some() {
+            self.mute_menu = None;
+            cx.notify();
         } else if self.channel_pick.is_some() {
             self.channel_pick = None;
             cx.notify();
@@ -3368,7 +3472,7 @@ impl MessagesApp {
             let meta = self.wa_info.get(jid).map(|info| info.meta.clone());
             match inbox::wa_bell(meta.as_ref(), local, now_ms()) {
                 inbox::BellToggle::Mute => {
-                    self.chat_action(jid, ChatActionKind::Mute { until_ms: None }, false, cx)
+                    self.mute_menu = Some(thread.clone());
                 }
                 inbox::BellToggle::Unmute { gateway, local } => {
                     if gateway {
@@ -3387,17 +3491,20 @@ impl MessagesApp {
             cx.notify();
             return;
         }
-        self.backend.update(cx, |backend, cx| {
-            backend.update_prefs(cx, |prefs| {
-                let muted = !prefs.is_muted(&tag);
-                prefs.set_muted(&tag, muted);
-            });
-        });
+        let ThreadId::Sms(id) = thread else {
+            return;
+        };
+        if self.backend.read(cx).prefs().is_muted(&tag) {
+            self.set_sms_mute(id, false, cx);
+        } else {
+            self.mute_menu = Some(ThreadId::Sms(id));
+            cx.notify();
+        }
     }
 
     /// Mute state and the Scheduled strip of the open conversation.
     fn sync_open_page(&mut self, cx: &mut Context<Self>) {
-        let (muted, in_spam, queue) = {
+        let (muted, in_spam, queue, until) = {
             let backend = self.backend.read(cx);
             let in_spam = self
                 .open_thread_id(cx)
@@ -3413,7 +3520,20 @@ impl MessagesApp {
                     ThreadId::Sms(_) => local,
                 }
             });
-            (muted, in_spam, backend.queue().items().to_vec())
+            let until = self.open_thread_id(cx).and_then(|t| {
+                let tag = notifications::thread_tag(&t);
+                let local = backend.prefs().mute_end(&tag);
+                let remote = match &t {
+                    ThreadId::WhatsApp(jid) => self
+                        .wa_info
+                        .get(jid)
+                        .and_then(|info| info.meta.muted_until_ms)
+                        .filter(|&u| u != rovsti_wa_proto::MUTED_FOREVER),
+                    ThreadId::Sms(_) => None,
+                };
+                remote.or(local)
+            });
+            (muted, in_spam, backend.queue().items().to_vec(), until)
         };
         match &self.open {
             Open::WhatsApp(jid, conversation) => {
@@ -3424,6 +3544,7 @@ impl MessagesApp {
                 );
                 conversation.update(cx, |c, cx| {
                     c.set_muted(muted, cx);
+                    c.set_muted_until(until, cx);
                     c.set_scheduled(items, cx);
                 });
             }
@@ -3436,6 +3557,7 @@ impl MessagesApp {
                 );
                 conversation.update(cx, |c, cx| {
                     c.set_muted(muted, cx);
+                    c.set_muted_until(until, cx);
                     c.set_in_spam(in_spam, cx);
                     c.set_scheduled(items, cx);
                 });
@@ -3732,6 +3854,7 @@ impl MessagesApp {
             out.extend(self.row_menu_overlay(theme, cx));
         }
         out.extend(self.channel_pick_overlay(theme, cx));
+        out.extend(self.mute_menu_overlay(theme, cx));
         out
     }
 

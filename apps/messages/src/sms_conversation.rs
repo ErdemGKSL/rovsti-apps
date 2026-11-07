@@ -228,6 +228,12 @@ pub struct SmsConversation {
     goto: Option<rovsti_core::global_search::JumpTarget>,
     /// Older pages loaded while working towards `goto`.
     goto_pages: usize,
+    /// The "Jump to date" sheet, with the day picked so far.
+    date_sheet: Option<rovsti_core::date_jump::DayPick>,
+    /// The day being worked towards and the older pages loaded for it.
+    date_goto: Option<(rovsti_core::date_jump::DayPick, usize)>,
+    /// When the mute ends (header line), if it is timed.
+    muted_until: Option<i64>,
     /// The scroll-to-bottom button and its count of new messages.
     jump: JumpState,
     /// Unread count the thread opened with, until the first page decides the divider.
@@ -315,6 +321,9 @@ impl SmsConversation {
             select: None,
             select_delete: false,
             starred_open: false,
+            date_sheet: None,
+            date_goto: None,
+            muted_until: None,
             star_ids: HashSet::new(),
             info_sheet: None,
             gallery: None,
@@ -452,6 +461,14 @@ impl SmsConversation {
         }
     }
 
+    /// The end of a timed mute for the header line.
+    pub fn set_muted_until(&mut self, until: Option<i64>, cx: &mut Context<Self>) {
+        if self.muted_until != until {
+            self.muted_until = until;
+            cx.notify();
+        }
+    }
+
     pub fn set_muted(&mut self, muted: bool, cx: &mut Context<Self>) {
         if self.muted != muted {
             self.muted = muted;
@@ -469,6 +486,10 @@ impl SmsConversation {
         }
         if self.select.is_some() {
             self.end_select();
+            cx.notify();
+            return true;
+        }
+        if self.date_sheet.take().is_some() || self.date_goto.take().is_some() {
             cx.notify();
             return true;
         }
@@ -895,6 +916,7 @@ impl SmsConversation {
                             this.goto_pages += 1;
                         }
                         this.continue_goto(cx);
+                        this.continue_date_goto(cx);
                         // Read only while someone looks: the app in the
                         // background leaves new messages unread.
                         if (first || before_ms.is_none()) && this.backend.read(cx).ui_active() {
@@ -907,6 +929,7 @@ impl SmsConversation {
                         // The detail is for the log; the screen says it plainly.
                         this.error = Some(load_error_text(&error).into());
                         this.goto = None;
+                        this.date_goto = None;
                         if let Some(find) = &mut this.find {
                             find.asked = false;
                         }
@@ -1161,6 +1184,92 @@ impl SmsConversation {
         };
         cx.emit(SmsConversationEvent::Toast(text));
         cx.notify();
+    }
+
+    /// "Jump to date" on the page menu: opens the sheet on today.
+    pub fn open_date_sheet(&mut self, cx: &mut Context<Self>) {
+        let (now, tz) = (self.frame_now, self.backend.read(cx).locale().tz_offset_s);
+        self.date_sheet = Some(rovsti_core::date_jump::DayPick::today(now, tz));
+        cx.notify();
+    }
+
+    fn date_actions() -> crate::date_jump_ui::Actions<Self> {
+        crate::date_jump_ui::Actions {
+            pick: |this, day, cx| {
+                this.date_sheet = Some(day);
+                cx.notify();
+            },
+            go: |this, cx| {
+                if let Some(day) = this.date_sheet.take() {
+                    this.date_goto = Some((day, 0));
+                    this.notice = None;
+                    this.continue_date_goto(cx);
+                }
+                cx.notify();
+            },
+            close: |this, cx| {
+                this.date_sheet = None;
+                cx.notify();
+            },
+        }
+    }
+
+    /// Works towards the first message of the picked day: shows it, loads one more
+    /// older page, or says why it stopped.
+    fn continue_date_goto(&mut self, cx: &mut Context<Self>) {
+        use rovsti_core::date_jump::{
+            DateStep, date_notice, date_step, later_notice, starts_later,
+        };
+        let Some((day, pages)) = self.date_goto else {
+            return;
+        };
+        let (now, tz) = (self.frame_now, self.backend.read(cx).locale().tz_offset_s);
+        let start = day.start_ms(tz);
+        let label = day.label(now, tz);
+        let at: Vec<i64> = self.timeline.items().iter().map(|i| i.at_ms).collect();
+        match date_step(&at, self.timeline.has_older(), pages, start) {
+            DateStep::Reveal(index) => {
+                self.date_goto = None;
+                let item = &self.timeline.items()[index];
+                let (key, at_ms) = (item.key, item.at_ms);
+                self.glow(key, cx);
+                if starts_later(at_ms, start, tz) {
+                    self.notice = Some(later_notice(&label).into());
+                }
+            }
+            DateStep::LoadOlder => {
+                if let Some(oldest) = self.timeline.oldest_ms() {
+                    if !self.loading {
+                        self.date_goto = Some((day, pages + 1));
+                    }
+                    self.load(Some(oldest.saturating_add(1)), cx);
+                } else {
+                    self.date_goto = None;
+                }
+            }
+            step => {
+                self.date_goto = None;
+                if matches!(step, DateStep::Newest) {
+                    self.list.scroll_to_end();
+                }
+                self.notice = date_notice(step, &label).map(Into::into);
+            }
+        }
+        cx.notify();
+    }
+
+    /// The Jump to date sheet over the conversation.
+    fn date_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let day = self.date_sheet?;
+        let tz = self.backend.read(cx).locale().tz_offset_s;
+        Some(crate::date_jump_ui::sheet(
+            theme,
+            day,
+            self.frame_now,
+            tz,
+            Self::date_actions(),
+            cx,
+        ))
     }
 
     /// Opens the "Starred messages" sheet (the page menu's row).
@@ -2853,7 +2962,8 @@ impl Render for SmsConversation {
                 back,
                 avatar,
                 self.title.clone(),
-                header_subtitle(&self.title, &self.recipients),
+                rovsti_core::mute::header_line(self.muted_until, now, locale.tz_offset_s)
+                    .or_else(|| header_subtitle(&self.title, &self.recipients)),
                 Some(trailing),
             )
             .into_any_element()
@@ -2929,6 +3039,20 @@ impl Render for SmsConversation {
                     .text_size(typography::CAPTION.size)
                     .text_color(colors.secondary_label)
                     .child(counter),
+            );
+        }
+        if self.date_goto.is_some() {
+            has_info = true;
+            info = info.child(
+                div()
+                    .id("date-progress")
+                    .text_size(typography::CAPTION.size)
+                    .text_color(colors.secondary_label)
+                    .child("Loading older messages…")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.date_goto = None;
+                        cx.notify();
+                    })),
             );
         }
         if let Some(notice) = self.notice.clone() {
@@ -3030,6 +3154,7 @@ impl Render for SmsConversation {
         let delete_sheet = self.delete_overlay(theme, cx);
         let select_delete_sheet = self.select_delete_overlay(theme, cx);
         let starred_sheet = self.starred_overlay(theme, cx);
+        let date_sheet = self.date_overlay(theme, cx);
         div()
             .size_full()
             .relative()
@@ -3046,6 +3171,7 @@ impl Render for SmsConversation {
             .children(delete_sheet)
             .children(select_delete_sheet)
             .children(starred_sheet)
+            .children(date_sheet)
     }
 }
 

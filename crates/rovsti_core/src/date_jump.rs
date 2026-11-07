@@ -131,6 +131,16 @@ pub fn date_notice(step: DateStep, label: &str) -> Option<String> {
 }
 
 /// True when the revealed message is on a later day than the chosen one.
+/// The quick chips of the sheet: Yesterday, 1 week ago, 1 month ago.
+pub fn quick_picks(now_ms: i64, tz: i32) -> [(&'static str, DayPick); 3] {
+    let today = DayPick::today(now_ms, tz);
+    [
+        ("Yesterday", today.step_day(-1, now_ms, tz)),
+        ("1 week ago", today.step_day(-7, now_ms, tz)),
+        ("1 month ago", today.step_month(-1, now_ms, tz)),
+    ]
+}
+
 pub fn starts_later(at_ms: i64, start_ms: i64, tz: i32) -> bool {
     day_key(at_ms, tz) > day_key(start_ms, tz)
 }
@@ -157,6 +167,16 @@ mod tests {
 
     fn pick(y: i64, m: u32, d: u32) -> DayPick {
         DayPick::today(at(y, m, d, 12), 0)
+    }
+
+    #[test]
+    fn quick_picks_step_back() {
+        let n = now();
+        let [y, w, m] = quick_picks(n, 0);
+        assert_eq!((y.0, w.0, m.0), ("Yesterday", "1 week ago", "1 month ago"));
+        assert_eq!(y.1, pick(2026, 11, 8));
+        assert_eq!(w.1, pick(2026, 11, 2));
+        assert_eq!(m.1, pick(2026, 10, 9));
     }
 
     #[test]

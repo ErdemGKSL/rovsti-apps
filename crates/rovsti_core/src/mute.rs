@@ -51,6 +51,14 @@ pub fn muted_notice(until_ms: Option<i64>, now_ms: i64, tz: i32) -> String {
     format!("Muted until {weekday} {d} {month} {clock}")
 }
 
+/// The header line of a chat muted until a time: `None` for no end (or one that
+/// has passed), so an "always" mute shows nothing extra.
+pub fn header_line(until_ms: Option<i64>, now_ms: i64, tz: i32) -> Option<String> {
+    until_ms
+        .filter(|&u| u > now_ms)
+        .map(|u| muted_notice(Some(u), now_ms, tz))
+}
+
 /// Whether a mute is still in force.
 pub fn is_active(until_ms: Option<i64>, now_ms: i64) -> bool {
     until_ms.is_none_or(|u| u > now_ms)
@@ -92,6 +100,16 @@ mod tests {
         assert_eq!(
             muted_notice(Some(NOW + 15 * HOUR_MS), NOW, 0),
             "Muted until Tue 10 Nov 01:05"
+        );
+    }
+
+    #[test]
+    fn header_line_needs_a_future_end() {
+        assert_eq!(header_line(None, NOW, 0), None);
+        assert_eq!(header_line(Some(NOW), NOW, 0), None);
+        assert_eq!(
+            header_line(Some(NOW + HOUR_MS), NOW, 0).as_deref(),
+            Some("Muted until 11:05")
         );
     }
 

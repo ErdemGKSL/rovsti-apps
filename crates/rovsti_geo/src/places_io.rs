@@ -4,7 +4,7 @@
 use rovsti_core::location_link::is_valid;
 
 use crate::saved_stops::{DUPLICATE_GATE_M, MAX_NAME_CHARS, MAX_STOPS, SavedStop, SavedStops};
-use crate::{Coord, Diameter};
+use crate::{Coord, Diameter, Endpoint};
 
 /// Largest import text accepted, in bytes.
 pub const MAX_IMPORT_BYTES: usize = 2 * 1024 * 1024;
@@ -16,6 +16,8 @@ pub struct Incoming {
     pub name: String,
     pub a: Coord,
     pub b: Coord,
+    /// Kept from our JSON; GPX has no such flag.
+    pub favourite: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,6 +144,7 @@ fn parse_json(text: &str) -> Result<Vec<Incoming>, ImportError> {
             name: clean_name(&s.name),
             a: s.a.coord,
             b: s.b.coord,
+            favourite: s.favourite,
         })
         .collect())
 }
@@ -306,6 +309,7 @@ fn parse_gpx(text: &str) -> Result<Vec<Incoming>, ImportError> {
                                 name: clean_name(&g.name),
                                 a,
                                 b,
+                                favourite: false,
                             });
                         }
                     }
@@ -345,6 +349,7 @@ fn parse_gpx(text: &str) -> Result<Vec<Incoming>, ImportError> {
             name: clean_name(&pair_name(na, nb)),
             a,
             b,
+            favourite: false,
         });
     }
     Ok(out)
@@ -374,6 +379,25 @@ pub struct MergePlan {
     pub invalid: usize,
     /// Dropped because the list is full.
     pub over_cap: usize,
+}
+
+/// Adds the planned stops to `stops`, keeping each favourite flag. Returns how many
+/// were added.
+pub fn apply_plan(stops: &mut SavedStops, plan: &MergePlan, now_ms: i64) -> usize {
+    let end = |coord| Endpoint {
+        label: String::new(),
+        coord,
+    };
+    let mut added = 0;
+    for item in &plan.add {
+        if let Ok(id) = stops.add(&item.name, end(item.a), end(item.b), now_ms) {
+            if item.favourite {
+                stops.toggle_favourite(id);
+            }
+            added += 1;
+        }
+    }
+    added
 }
 
 fn near_gate(x: &Incoming, a: Coord, b: Coord) -> bool {
@@ -438,7 +462,6 @@ pub fn export_file_name(ext: &str, today: &str) -> String {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::Endpoint;
 
     fn ep(lat: f64, lon: f64) -> Endpoint {
         Endpoint {
@@ -564,6 +587,7 @@ mod tests {
             name: name.into(),
             a: Coord::new(a.0, a.1),
             b: Coord::new(b.0, b.1),
+            favourite: false,
         }
     }
 
@@ -650,6 +674,34 @@ mod tests {
         assert_eq!(
             parse_import(&text).unwrap()[0].name.chars().count(),
             MAX_NAME_CHARS
+        );
+    }
+
+    #[test]
+    fn json_import_keeps_favourite_and_skips_duplicates() {
+        let mut s = sample();
+        let id = s.stops[1].id;
+        s.toggle_favourite(id);
+        let got = parse_import(&to_json(&s)).unwrap();
+        assert_eq!(
+            got.iter().map(|g| g.favourite).collect::<Vec<_>>(),
+            [false, true, false]
+        );
+        let mut target = SavedStops::default();
+        let plan = merge_plan(&target, got.clone());
+        assert_eq!(apply_plan(&mut target, &plan, 9), 3);
+        assert_eq!(
+            target.stops.iter().map(|x| x.favourite).collect::<Vec<_>>(),
+            [false, true, false]
+        );
+        let again = merge_plan(&target, got);
+        assert!(again.add.is_empty());
+        assert_eq!(again.duplicates, 3);
+        assert!(
+            parse_import(&to_gpx(&s))
+                .unwrap()
+                .iter()
+                .all(|g| !g.favourite)
         );
     }
 }

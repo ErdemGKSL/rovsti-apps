@@ -6,6 +6,8 @@
 use rovsti_core::search::fold;
 use serde::{Deserialize, Serialize};
 
+use crate::coord_format::{CoordFormat, format};
+use crate::session::format_distance;
 use crate::{Coord, Diameter, DiameterError, Endpoint, Feed};
 
 /// Version written to and required from `saved.json`.
@@ -52,6 +54,9 @@ pub struct SavedStop {
     pub a: Endpoint,
     pub b: Endpoint,
     pub created_ms: i64,
+    /// Starred stops are listed first. Absent from the file when false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub favourite: bool,
 }
 
 impl SavedStop {
@@ -171,6 +176,7 @@ impl SavedStops {
             a,
             b,
             created_ms: now_ms,
+            favourite: false,
         });
         Ok(id)
     }
@@ -196,17 +202,30 @@ impl SavedStops {
         self.stops.len() != before
     }
 
-    /// Moves a stop `delta` positions (negative is up), clamped to the list.
-    /// False when the id is missing or nothing moved.
+    /// Flips the favourite flag and returns the new value; `None` when the id is missing.
+    pub fn toggle_favourite(&mut self, id: u64) -> Option<bool> {
+        let stop = self.stops.iter_mut().find(|s| s.id == id)?;
+        stop.favourite = !stop.favourite;
+        Some(stop.favourite)
+    }
+
+    /// Moves a stop `delta` positions (negative is up) among the stops with the
+    /// same favourite flag, clamped to that group. False when the id is missing
+    /// or nothing moved.
     pub fn move_by(&mut self, id: u64, delta: isize) -> bool {
         let Some(from) = self.stops.iter().position(|s| s.id == id) else {
             return false;
         };
-        let last = self.stops.len() - 1;
-        let to = from.saturating_add_signed(delta).min(last);
-        if to == from {
+        let flag = self.stops[from].favourite;
+        let group: Vec<usize> = (0..self.stops.len())
+            .filter(|&i| self.stops[i].favourite == flag)
+            .collect();
+        let at = group.iter().position(|&i| i == from).unwrap_or(0);
+        let to_at = at.saturating_add_signed(delta).min(group.len() - 1);
+        if to_at == at {
             return false;
         }
+        let to = group[to_at];
         let stop = self.stops.remove(from);
         self.stops.insert(to, stop);
         true
@@ -251,7 +270,8 @@ pub enum SavedSort {
     Nearest,
 }
 
-/// `hits` in the requested order. `Nearest` without a position keeps saved order.
+/// `hits` in the requested order, favourites first in every order (stable inside
+/// each group). `Nearest` without a position keeps saved order.
 pub fn sorted(mut hits: Vec<&SavedStop>, sort: SavedSort, here: Option<Coord>) -> Vec<&SavedStop> {
     match (sort, here) {
         (SavedSort::Name, _) => hits.sort_by_cached_key(|s| fold(&s.name)),
@@ -263,7 +283,31 @@ pub fn sorted(mut hits: Vec<&SavedStop>, sort: SavedSort, here: Option<Coord>) -
         }
         _ => {}
     }
+    hits.sort_by_key(|s| !s.favourite);
     hits
+}
+
+/// The list as plain text for sharing: a header, then per stop its name, centre,
+/// distance from `here` when known, and a map link. Empty for no stops.
+pub fn list_text(stops: &[&SavedStop], here: Option<Coord>) -> String {
+    if stops.is_empty() {
+        return String::new();
+    }
+    let mut out = format!("Saved stops ({})", stops.len());
+    for s in stops {
+        let c = s.center();
+        let star = if s.favourite { "\u{2605} " } else { "" };
+        out.push_str(&format!(
+            "\n{star}{}: {}",
+            s.name,
+            format(c, CoordFormat::Decimal, None)
+        ));
+        if let Some(h) = here {
+            out.push_str(&format!(" ({} away)", format_distance(h.distance_m(c))));
+        }
+        out.push_str(&format!("\n  {}", format(c, CoordFormat::OsmLink, None)));
+    }
+    out
 }
 
 /// Result of [`load_saved_stops`].
@@ -347,6 +391,7 @@ mod tests {
             a: ep("A", 41.0, 29.0),
             b: ep("B", 41.001, 29.0),
             created_ms: 0,
+            favourite: false,
         };
         let sp = shortcut_spec(&stop);
         assert_eq!(sp.id, "stop-7");
@@ -614,5 +659,120 @@ mod tests {
         let a = ep("", 41.0, 29.0);
         let b = ep("Point", 41.001, 29.0);
         assert_eq!(suggest_name(None, &a, &b), "");
+    }
+
+    fn three() -> SavedStops {
+        let mut s = SavedStops::default();
+        for (n, k) in [
+            ("Charlie", 0.0),
+            ("alpha", 0.1),
+            ("Bravo", 0.2),
+            ("Delta", 0.3),
+        ] {
+            let (a, b) = gate(k);
+            s.add(n, a, b, 0).unwrap();
+        }
+        s
+    }
+
+    fn names(v: &[&SavedStop]) -> Vec<String> {
+        v.iter().map(|s| s.name.clone()).collect()
+    }
+
+    #[test]
+    fn old_json_loads_and_plain_stops_omit_the_key() {
+        let old = r#"{"version":2,"next_id":2,"stops":[{"id":1,"name":"X",
+            "a":{"label":"","coord":{"lat":41.0,"lon":29.0}},
+            "b":{"label":"","coord":{"lat":41.001,"lon":29.0}},"created_ms":3}]}"#;
+        let l = load_saved_stops(Some(old));
+        assert!(!l.discarded);
+        assert!(!l.stops.stops[0].favourite);
+        let mut s = l.stops;
+        assert!(!serde_json::to_string(&s).unwrap().contains("favourite"));
+        s.toggle_favourite(1);
+        assert!(
+            serde_json::to_string(&s)
+                .unwrap()
+                .contains("\"favourite\":true")
+        );
+    }
+
+    #[test]
+    fn toggle_twice() {
+        let mut s = three();
+        assert_eq!(s.toggle_favourite(2), Some(true));
+        assert_eq!(s.toggle_favourite(2), Some(false));
+        assert_eq!(s.toggle_favourite(99), None);
+    }
+
+    #[test]
+    fn favourites_first_in_every_sort() {
+        let mut s = three();
+        s.toggle_favourite(3); // Bravo
+        s.toggle_favourite(4); // Delta
+        let all = || s.stops.iter().collect::<Vec<_>>();
+        assert_eq!(
+            names(&sorted(all(), SavedSort::Saved, None)),
+            ["Bravo", "Delta", "Charlie", "alpha"]
+        );
+        assert_eq!(
+            names(&sorted(all(), SavedSort::Name, None)),
+            ["Bravo", "Delta", "alpha", "Charlie"]
+        );
+        let here = Some(Coord::new(41.3, 29.0));
+        assert_eq!(
+            names(&sorted(all(), SavedSort::Nearest, here)),
+            ["Delta", "Bravo", "alpha", "Charlie"]
+        );
+    }
+
+    #[test]
+    fn move_by_stays_in_group() {
+        let mut s = three();
+        s.toggle_favourite(3); // order: Charlie alpha Bravo* Delta
+        let order = |s: &SavedStops| s.stops.iter().map(|x| x.id).collect::<Vec<_>>();
+        assert!(!s.move_by(3, -1)); // only favourite: at the edge
+        assert!(s.move_by(1, 1)); // Charlie swaps past alpha only
+        assert_eq!(order(&s), [2, 1, 3, 4]);
+    }
+
+    #[test]
+    fn move_by_edges() {
+        let mut s = three();
+        s.toggle_favourite(1);
+        s.toggle_favourite(2); // Charlie* alpha* Bravo Delta
+        assert!(!s.move_by(2, 1)); // last favourite cannot enter the others
+        assert!(!s.move_by(3, -1)); // first non-favourite cannot enter favourites
+        assert!(s.move_by(2, -1));
+        assert_eq!(
+            s.stops.iter().map(|x| x.id).collect::<Vec<_>>(),
+            [2, 1, 3, 4]
+        );
+    }
+
+    #[test]
+    fn list_text_shapes() {
+        assert_eq!(list_text(&[], None), "");
+        let mut s = SavedStops::default();
+        let (a, b) = gate(0.0);
+        s.add("Kadıköy İskele", a, b, 0).unwrap();
+        let (a, b) = gate(0.1);
+        s.add("Pier", a, b, 0).unwrap();
+        s.toggle_favourite(1);
+        let v: Vec<&SavedStop> = s.stops.iter().collect();
+        let c0 = format(v[0].center(), CoordFormat::Decimal, None);
+        let l0 = format(v[0].center(), CoordFormat::OsmLink, None);
+        let plain = list_text(&v, None);
+        let lines: Vec<&str> = plain.lines().collect();
+        assert_eq!(lines.len(), 5);
+        assert_eq!(lines[0], "Saved stops (2)");
+        assert_eq!(lines[1], format!("\u{2605} Kadıköy İskele: {c0}"));
+        assert_eq!(lines[2], format!("  {l0}"));
+        assert!(lines[3].starts_with("Pier: "));
+        assert!(!lines[3].contains("away"));
+        let here = v[0].center();
+        let near = list_text(&v, Some(here));
+        assert!(near.contains(&format!("{c0} (0 m away)")));
+        assert!(near.lines().nth(3).unwrap().ends_with(" km away)"));
     }
 }

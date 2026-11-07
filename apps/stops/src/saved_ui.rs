@@ -757,15 +757,7 @@ impl StopsApp {
     fn confirm_import(&mut self, plan: MergePlan, cx: &mut Context<Self>) {
         let before = self.saved.clone();
         let now = crate::store::now_ms();
-        let end = |coord| rovsti_geo::Endpoint {
-            label: String::new(),
-            coord,
-        };
-        let added = plan
-            .add
-            .iter()
-            .filter(|st| self.saved.add(&st.name, end(st.a), end(st.b), now).is_ok())
-            .count();
+        let added = places_io::apply_plan(&mut self.saved, &plan, now);
         self.sheet.close();
         if added == 0 {
             self.show_pill("Nothing new to add", None, cx);

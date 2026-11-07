@@ -493,12 +493,12 @@ impl StopsApp {
                     self.on_feed_picked(&result, cx);
                 }
                 Ok(result) if result.op == DocumentOp::ExportMessages => {
-                    let text = if result.ok {
-                        "Saved stops exported"
-                    } else {
-                        "Can't export: the file was not saved"
-                    };
-                    self.show_pill(text, None, cx);
+                    // A cancelled save dialog is not an error: say nothing.
+                    if result.ok {
+                        self.show_pill("Saved stops exported", None, cx);
+                    } else if result.error.is_some() {
+                        self.show_pill("Can't export: the file was not saved", None, cx);
+                    }
                 }
                 Ok(result) if result.op == DocumentOp::ImportMessages => {
                     self.on_places_picked(&result, cx);

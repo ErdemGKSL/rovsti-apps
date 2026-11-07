@@ -356,17 +356,23 @@ const fn pin_menu_rows(is_stop: bool) -> usize {
 
 /// Width and height of the small menu over a tapped pin.
 pub const PIN_MENU_W: f32 = 180.0;
-pub const PIN_MENU_H: f32 = 288.0;
+pub const PIN_MENU_H: f32 = 248.0;
 /// Height of one row of the pin menu.
-const PIN_MENU_ROW_H: f32 = 36.0;
+const PIN_MENU_ROW_H: f32 = 32.0;
 const PIN_MENU_MARGIN: f32 = 8.0;
 /// Gap between the pin and its menu, and the pin's own height above its point.
 const PIN_MENU_GAP: f32 = 14.0;
 
 /// The pin menu box `(x, y, w, h)` in map-local pixels from the top-left: above
 /// `pin`, below it where there is no room, kept inside `size` with a margin.
+#[cfg(test)]
 pub fn pin_menu_rect(pin: (f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) {
-    let (w, h) = (PIN_MENU_W, PIN_MENU_H);
+    pin_menu_rect_h(pin, size, PIN_MENU_H)
+}
+
+/// [`pin_menu_rect`] for a menu `h` high (a pin that is no transit stop has one row less).
+pub fn pin_menu_rect_h(pin: (f32, f32), size: (f32, f32), h: f32) -> (f32, f32, f32, f32) {
+    let w = PIN_MENU_W;
     let above = pin.1 - PIN_MENU_GAP - h;
     let y = if above >= PIN_MENU_MARGIN {
         above
@@ -2184,11 +2190,19 @@ impl StopsApp {
         let slot = self.pick.menu()?;
         let dest = self.pick.ends.get(slot)?;
         let pin = scene.pins.iter().find(|p| p.slot == slot)?;
-        let rect = pin_menu_rect((size.0 / 2.0 + pin.at.0, size.1 / 2.0 + pin.at.1), size);
         let stop = dest
             .gtfs_stop
             .as_deref()
             .and_then(|id| stop_index(self.gtfs.as_deref(), id));
+        let rect = pin_menu_rect_h(
+            (size.0 / 2.0 + pin.at.0, size.1 / 2.0 + pin.at.1),
+            size,
+            if stop.is_some() {
+                PIN_MENU_H
+            } else {
+                PIN_MENU_H - PIN_MENU_ROW_H
+            },
+        );
         let details = pick::details_text(dest);
         let share_dest = dest.clone();
         let copy_dest = dest.clone();

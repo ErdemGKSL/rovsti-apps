@@ -617,7 +617,9 @@ impl StopsApp {
     /// The picked file: read it, plan the merge and ask before adding.
     pub(crate) fn on_places_picked(&mut self, result: &DocumentResult, cx: &mut Context<Self>) {
         let Some(path) = result.path.as_deref().filter(|_| result.ok) else {
-            log::debug!("places pick cancelled or refused");
+            if result.error.is_some() {
+                self.show_pill("Can't import: that file can't be read", None, cx);
+            }
             return;
         };
         let text = match backend::read_import(path) {

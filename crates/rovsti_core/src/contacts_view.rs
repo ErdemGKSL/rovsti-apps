@@ -285,6 +285,37 @@ pub fn copied_numbers_text(n: usize) -> String {
     }
 }
 
+/// The letters the scrubber shows: the sections present, in order, each once,
+/// with `#` last.
+pub fn scrubber_letters(rows: impl IntoIterator<Item = char>) -> Vec<char> {
+    let mut letters: Vec<char> = Vec::new();
+    for c in rows {
+        if !letters.contains(&c) {
+            letters.push(c);
+        }
+    }
+    letters.sort_by_key(|&c| (c == '#', c));
+    letters
+}
+
+/// The letter index under a touch at `y` on a strip of `height` split into
+/// `count` equal cells; out-of-range touches clamp to the ends.
+pub fn letter_at(y: f32, height: f32, count: usize) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    if height.is_nan() || height <= 0.0 || !y.is_finite() {
+        return Some(0);
+    }
+    let cell = height / count as f32;
+    Some(((y / cell).floor().max(0.0) as usize).min(count - 1))
+}
+
+/// The first row whose section letter is `letter`.
+pub fn first_row_of(letters_of_rows: &[char], letter: char) -> Option<usize> {
+    letters_of_rows.iter().position(|&c| c == letter)
+}
+
 #[cfg(test)]
 mod tests {
     fn vm(label: &str, display: &str) -> super::NumberVm {
@@ -578,5 +609,36 @@ mod tests {
         let kept: Vec<i64> = without(&all, &[]).iter().map(|c| c.id).collect();
         assert_eq!(kept, [3, 1, 2]);
         assert!(without(&all, &[1, 2, 3]).is_empty());
+    }
+
+    #[test]
+    fn scrubber_letters_are_unique_sorted_with_hash_last() {
+        let rows = ['B', 'B', 'A', '#', 'C', 'A'];
+        assert_eq!(super::scrubber_letters(rows), vec!['A', 'B', 'C', '#']);
+        assert_eq!(super::scrubber_letters(['#']), vec!['#']);
+        assert!(super::scrubber_letters(std::iter::empty()).is_empty());
+    }
+
+    #[test]
+    fn letter_at_maps_and_clamps() {
+        assert_eq!(super::letter_at(0.0, 100.0, 10), Some(0));
+        assert_eq!(super::letter_at(9.9, 100.0, 10), Some(0));
+        assert_eq!(super::letter_at(10.0, 100.0, 10), Some(1));
+        assert_eq!(super::letter_at(99.9, 100.0, 10), Some(9));
+        assert_eq!(super::letter_at(100.0, 100.0, 10), Some(9));
+        assert_eq!(super::letter_at(-30.0, 100.0, 10), Some(0));
+        assert_eq!(super::letter_at(500.0, 100.0, 10), Some(9));
+        assert_eq!(super::letter_at(5.0, 100.0, 0), None);
+        assert_eq!(super::letter_at(5.0, 0.0, 3), Some(0));
+    }
+
+    #[test]
+    fn first_row_of_finds_the_section_start() {
+        let rows = ['A', 'A', 'B', 'D', 'D', '#'];
+        assert_eq!(super::first_row_of(&rows, 'A'), Some(0));
+        assert_eq!(super::first_row_of(&rows, 'D'), Some(3));
+        assert_eq!(super::first_row_of(&rows, '#'), Some(5));
+        assert_eq!(super::first_row_of(&rows, 'C'), None);
+        assert_eq!(super::first_row_of(&[], 'A'), None);
     }
 }

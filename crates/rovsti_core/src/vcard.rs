@@ -3,13 +3,16 @@
 //! Reads vCard 2.1, 3.0 and 4.0 (what phones, Google Contacts and iCloud
 //! produce) into [`ContactDraft`]s and writes vCard 3.0, which every address
 //! book accepts. Only what the app edits is carried: name, organisation,
-//! numbers, emails and the note. Photos, addresses, birthdays and other
-//! properties are skipped on import and not written.
+//! numbers, emails, the note, the birthday and anniversary (`BDAY`,
+//! `ANNIVERSARY`, `X-ANNIVERSARY`) and postal addresses (`ADR`). Photos and
+//! other properties are skipped on import and not written; a date that does
+//! not parse is dropped without failing the card.
 //!
 //! Pure text in, pure values out: the file itself is read and written by the
 //! platform (Storage Access Framework), and the text is already UTF-8.
 
-use crate::contact_edit::{ContactDraft, DraftField, FieldKind};
+use crate::contact_dates;
+use crate::contact_edit::{ContactDraft, DraftEvent, DraftField, EventKind, FieldKind};
 
 /// Longest content line before folding, in bytes (RFC 6350 says 75 octets).
 const FOLD_AT: usize = 75;
@@ -90,6 +93,17 @@ impl Builder {
                 .emails
                 .push(DraftField::new(unescape(&prop.value), email_kind(prop))),
             "NOTE" => card.note = unescape(&prop.value),
+            "BDAY" => push_event(card, &prop.value, EventKind::Birthday),
+            "ANNIVERSARY" | "X-ANNIVERSARY" => {
+                push_event(card, &prop.value, EventKind::Anniversary);
+            }
+            "ADR" => {
+                let text = adr_text(&prop.value);
+                if !text.is_empty() {
+                    card.addresses
+                        .push(DraftField::new(text, address_kind(prop)));
+                }
+            }
             _ => {}
         }
     }
@@ -169,6 +183,50 @@ impl Property {
             .map(|t| t.trim().to_ascii_uppercase())
             .filter(|t| !t.is_empty())
             .collect()
+    }
+}
+
+/// Adds a dated event; a date that does not parse is dropped.
+fn push_event(card: &mut ContactDraft, value: &str, kind: EventKind) {
+    if let Some(date) = contact_dates::parse(&unescape(value)) {
+        card.events.push(DraftEvent::new(date.to_android(), kind));
+    }
+}
+
+/// The 7 `ADR` components (PO box, extended, street, city, region, postcode,
+/// country) as "street\ncity region postcode\ncountry", empties skipped.
+fn adr_text(value: &str) -> String {
+    let parts: Vec<String> = split_all_unescaped(value, ';')
+        .iter()
+        .map(|p| unescape(p).trim().to_owned())
+        .collect();
+    let part = |i: usize| parts.get(i).map_or("", String::as_str);
+    let street = [part(0), part(1), part(2)]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let town = [part(3), part(4), part(5)]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    [street.as_str(), town.as_str(), part(6)]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn address_kind(prop: &Property) -> FieldKind {
+    let types = prop.types();
+    let has = |t: &str| types.iter().any(|x| x == t);
+    if has("HOME") {
+        FieldKind::Home
+    } else if has("WORK") {
+        FieldKind::Work
+    } else {
+        FieldKind::Other
     }
 }
 
@@ -385,7 +443,44 @@ fn write_card(contact: &ContactDraft, out: &mut String) {
     if !contact.note.is_empty() {
         push_line(out, &format!("NOTE:{}", escape(&contact.note)));
     }
+    let dated = |kind: EventKind| {
+        contact
+            .events
+            .iter()
+            .filter(|e| e.kind == kind)
+            .find_map(|e| contact_dates::parse(&e.date))
+    };
+    if let Some(date) = dated(EventKind::Birthday) {
+        push_line(out, &format!("BDAY:{}", date.to_android()));
+    }
+    if let Some(date) = dated(EventKind::Anniversary) {
+        push_line(out, &format!("X-ANNIVERSARY:{}", date.to_android()));
+    }
+    for address in &contact.addresses {
+        let kind = match address.kind {
+            FieldKind::Home => ";TYPE=HOME",
+            FieldKind::Work => ";TYPE=WORK",
+            _ => "",
+        };
+        // The whole text sits in the street component, so it reads back as is.
+        push_line(out, &format!("ADR{kind}:;;{};;;;", escape(&address.value)));
+    }
     push_line(out, "END:VCARD");
+}
+
+/// File name for sharing `drafts`: the contact's own name for one,
+/// `rovsti-contacts-<n>-YYYY-MM-DD.vcf` for several.
+pub fn export_name(drafts: &[ContactDraft], today: (i32, u8, u8)) -> String {
+    match drafts {
+        [one] => crate::shared_card::vcf_file_name(&one.display_name()),
+        _ => format!(
+            "rovsti-contacts-{}-{:04}-{:02}-{:02}.vcf",
+            drafts.len(),
+            today.0,
+            today.1,
+            today.2
+        ),
+    }
 }
 
 fn tel_type(number: &DraftField) -> &'static str {
@@ -500,6 +595,11 @@ PHOTO;ENCODING=b;TYPE=JPEG:AAAA\nBDAY:1990-01-01\nFN:Ayşe Can\nEND:VCARD\n";
         let parsed = parse(text);
         assert_eq!(parsed.contacts.len(), 1);
         assert_eq!(parsed.contacts[0].numbers[0].value, "5551112233");
+        // The birthday is now read; the photo is still skipped.
+        assert_eq!(
+            parsed.contacts[0].events,
+            vec![DraftEvent::new("1990-01-01", EventKind::Birthday)]
+        );
     }
 
     #[test]
@@ -565,5 +665,151 @@ BEGIN:VCARD\nFN:C D\nTEL:222\nEND:VCARD\n";
         let parsed = parse("BEGIN:VCARD\nVERSION:3.0\nFN:A B\nEMAIL:a@b.com\nEND:VCARD\n");
         assert_eq!(parsed.contacts.len(), 1);
         assert!(parsed.contacts[0].numbers.is_empty());
+    }
+
+    fn round_trip(card: ContactDraft) -> ContactDraft {
+        let mut card = card;
+        card.clean();
+        let parsed = parse(&write(std::slice::from_ref(&card)));
+        assert_eq!(parsed.skipped, 0);
+        assert_eq!(parsed.contacts[0], card);
+        parsed.contacts.into_iter().next().expect("one card")
+    }
+
+    fn named() -> ContactDraft {
+        ContactDraft {
+            given: "Ayşe".into(),
+            numbers: vec![DraftField::new("5551112233", FieldKind::Mobile)],
+            ..ContactDraft::default()
+        }
+    }
+
+    #[test]
+    fn birthday_with_and_without_year_round_trips() {
+        let mut a = named();
+        a.events = vec![DraftEvent::new("1994-05-12", EventKind::Birthday)];
+        round_trip(a);
+        let mut b = named();
+        b.events = vec![DraftEvent::new("--05-12", EventKind::Birthday)];
+        let text = write(std::slice::from_ref(&b));
+        assert!(text.contains("BDAY:--05-12\r\n"));
+        round_trip(b);
+    }
+
+    #[test]
+    fn anniversary_round_trips_as_x_anniversary() {
+        let mut a = named();
+        a.events = vec![
+            DraftEvent::new("1994-05-12", EventKind::Birthday),
+            DraftEvent::new("2015-06-20", EventKind::Anniversary),
+        ];
+        assert!(write(std::slice::from_ref(&a)).contains("X-ANNIVERSARY:2015-06-20\r\n"));
+        round_trip(a);
+    }
+
+    #[test]
+    fn addresses_with_escapes_round_trip() {
+        let mut a = named();
+        a.addresses = vec![
+            DraftField::new(
+                "12 Main St, Apt 4; Floor 2\nParis 75001\nFrance",
+                FieldKind::Home,
+            ),
+            DraftField::new("1 Back\\slash Rd", FieldKind::Work),
+            DraftField::new("PO Box 9", FieldKind::Other),
+        ];
+        let text = write(std::slice::from_ref(&a));
+        assert!(text.contains("ADR;TYPE=HOME:;;12 Main St\\, Apt 4\\; Floor 2\\nParis"));
+        round_trip(a);
+    }
+
+    #[test]
+    fn adr_components_are_joined() {
+        let text = "BEGIN:VCARD\nFN:A B\nTEL:1\n\
+ADR;TYPE=WORK:;;1 Infinite Loop;Cupertino;CA;95014;USA\n\
+ADR;TYPE=HOME:;;;Berlin;;;Germany\nADR:;;;;;;\nEND:VCARD";
+        let card = &parse(text).contacts[0];
+        assert_eq!(card.addresses.len(), 2);
+        assert_eq!(
+            card.addresses[0].value,
+            "1 Infinite Loop\nCupertino CA 95014\nUSA"
+        );
+        assert_eq!(card.addresses[0].kind, FieldKind::Work);
+        assert_eq!(card.addresses[1].value, "Berlin\nGermany");
+        assert_eq!(card.addresses[1].kind, FieldKind::Home);
+    }
+
+    #[test]
+    fn reads_an_icloud_version_three_card() {
+        let text = "BEGIN:VCARD\r\nVERSION:3.0\r\nPRODID:-//Apple Inc.//iPhone OS 17.0//EN\r\n\
+N:Doe;Jane;;;\r\nFN:Jane Doe\r\nitem1.ADR;type=HOME;type=pref:;;1 Apple Park Way;Cupertino;CA;95014;United States\r\n\
+item1.X-ABADR:us\r\nBDAY:1994-05-12\r\nitem2.X-ABDATE;type=pref:2015-06-20\r\nitem2.X-ABLabel:_$!<Anniversary>!$_\r\n\
+X-ANNIVERSARY;VALUE=date:2015-06-20\r\nTEL;type=CELL;type=VOICE;type=pref:+1 555 010 0000\r\nEND:VCARD\r\n";
+        let card = &parse(text).contacts[0];
+        assert_eq!(card.family, "Doe");
+        assert_eq!(
+            card.events,
+            vec![
+                DraftEvent::new("1994-05-12", EventKind::Birthday),
+                DraftEvent::new("2015-06-20", EventKind::Anniversary),
+            ]
+        );
+        assert_eq!(
+            card.addresses[0].value,
+            "1 Apple Park Way\nCupertino CA 95014\nUnited States"
+        );
+        assert_eq!(card.addresses[0].kind, FieldKind::Home);
+    }
+
+    #[test]
+    fn reads_a_google_version_four_card() {
+        let text = "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Doe;John;;;\r\nFN:John Doe\r\n\
+BDAY:19940512\r\nANNIVERSARY:20150620\r\n\
+ADR;TYPE=work:;;5 Main St\\, Suite 2;Springfield;IL;62701;USA\r\n\
+TEL;TYPE=cell:+15550100\r\nEND:VCARD\r\n\
+BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Sam Lee\r\nBDAY;VALUE=date:--0229\r\nTEL:1\r\nEND:VCARD\r\n";
+        let parsed = parse(text);
+        let john = &parsed.contacts[0];
+        assert_eq!(
+            john.events,
+            vec![
+                DraftEvent::new("1994-05-12", EventKind::Birthday),
+                DraftEvent::new("2015-06-20", EventKind::Anniversary),
+            ]
+        );
+        assert_eq!(
+            john.addresses[0].value,
+            "5 Main St, Suite 2\nSpringfield IL 62701\nUSA"
+        );
+        assert_eq!(john.addresses[0].kind, FieldKind::Work);
+        assert_eq!(
+            parsed.contacts[1].events,
+            vec![DraftEvent::new("--02-29", EventKind::Birthday)]
+        );
+    }
+
+    #[test]
+    fn an_unparsable_bday_is_dropped_not_fatal() {
+        let text =
+            "BEGIN:VCARD\nFN:A B\nTEL:1\nBDAY:someday\nBDAY:1990-02-30\nX-ANNIVERSARY:\nEND:VCARD";
+        let parsed = parse(text);
+        assert_eq!(parsed.skipped, 0);
+        assert!(parsed.contacts[0].events.is_empty());
+    }
+
+    #[test]
+    fn export_names() {
+        let mut one = named();
+        one.family = "Yılmaz".into();
+        let day = (2026, 11, 7);
+        assert_eq!(
+            export_name(std::slice::from_ref(&one), day),
+            crate::shared_card::vcf_file_name(&one.display_name())
+        );
+        assert_eq!(
+            export_name(&[named(), one], (2026, 1, 9)),
+            "rovsti-contacts-2-2026-01-09.vcf"
+        );
+        assert_eq!(export_name(&[], day), "rovsti-contacts-0-2026-11-07.vcf");
     }
 }

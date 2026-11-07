@@ -44,7 +44,7 @@
       },
       "activity": "dev.rovsti.phone.MainActivity",
       "signing": {
-        "keystore": "/home/erdem/.config/rovsti/rovsti-release.jks",
+        "keystore": "/home/erdem/ownCloud/Personal/rovsti/rovsti-release.jks",
         "key-alias": "rovsti",
         "store-password-env": "ANDROID_STORE_PASSWORD",
         "key-password-env": "ANDROID_KEY_PASSWORD"

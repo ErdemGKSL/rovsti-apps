@@ -33,24 +33,26 @@ object Shortcuts {
     fun safeSide(canvas: Int): Int = canvas * 72 / 108
 
     /** [specJson] is `rovsti_core::contact_options::PinShortcut`. */
-    fun pinContact(ctx: Context, specJson: String): Boolean = try {
-        val manager = ctx.getSystemService(ShortcutManager::class.java) ?: return false
-        if (!manager.isRequestPinShortcutSupported) return false
-        val spec = JSONObject(specJson)
-        val contactId = spec.getLong("contact_id")
-        val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return false
-        launch.setAction(Intent.ACTION_MAIN)
-            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            .putExtra(BirthdayReminders.EXTRA_CONTACT_ID, contactId)
-        val info = ShortcutInfo.Builder(ctx, spec.getString("id"))
-            .setShortLabel(spec.getString("short_label"))
-            .setLongLabel(spec.optString("long_label", spec.getString("short_label")))
-            .setIcon(icon(ctx, if (spec.isNull("icon_path")) null else spec.optString("icon_path")))
-            .setIntent(launch)
-            .build()
-        manager.requestPinShortcut(info, null)
-    } catch (_: RuntimeException) {
-        false
+    fun pinContact(ctx: Context, specJson: String): Boolean {
+        return try {
+            val manager = ctx.getSystemService(ShortcutManager::class.java) ?: return false
+            if (!manager.isRequestPinShortcutSupported) return false
+            val spec = JSONObject(specJson)
+            val contactId = spec.getLong("contact_id")
+            val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return false
+            launch.setAction(Intent.ACTION_MAIN)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(BirthdayReminders.EXTRA_CONTACT_ID, contactId)
+            val info = ShortcutInfo.Builder(ctx, spec.getString("id"))
+                .setShortLabel(spec.getString("short_label"))
+                .setLongLabel(spec.optString("long_label", spec.getString("short_label")))
+                .setIcon(icon(ctx, if (spec.isNull("icon_path")) null else spec.optString("icon_path")))
+                .setIntent(launch)
+                .build()
+            manager.requestPinShortcut(info, null)
+        } catch (_: RuntimeException) {
+            false
+        }
     }
 
     /** [specJson] is `rovsti_geo::StopShortcut` (`id`, `short_label`, `long_label`, `stop_id`); app icon. */

@@ -41,7 +41,28 @@ Install: `adb install -r <apk>`, or `gpuiforge run android --device <serial>`.
 bash scripts/build-release.sh
 ```
 
-(uses the `signing` object in `gpuiforge.json`; passwords come from `~/.config/rovsti/signing.env`).
+(uses the `signing` object in `gpuiforge.json`; `scripts/build-apks.sh` builds all four apps).
+
+### Release key
+
+All four apps are signed with one key: `~/ownCloud/Personal/rovsti/rovsti-release.jks`,
+alias `rovsti`, certificate `CN=Rovsti throwaway, O=Rovsti, C=TR`, SHA-256
+`df5123f5d10c3608ad257e43e927c7abb39a8198233a90a7bb818985e68d8fc5`. It was made on the
+Windows PC on 2026-11-03 and the apps on the phone carry it, so APKs from any machine must
+use it or Android refuses the update as a package conflict. `gpuiforge.json` points at it,
+and `scripts/signing.sh` (sourced by the build scripts) loads `ANDROID_STORE_PASSWORD` /
+`ANDROID_KEY_PASSWORD` from `signing.env` beside it, never printing them.
+
+Override the key with `ROVSTI_SIGNING_DIR` (folder with `rovsti-release.jks` + `signing.env`),
+or `ROVSTI_SIGNING_ENV` / `ROVSTI_KEYSTORE` / `ROVSTI_KEY_ALIAS`; the scripts then build from a
+temporary `.gpuiforge-signing.json` copy. The older Linux key (2026-10-27,
+SHA-256 `01bd06dd...89c1bb4`) stays in `~/.config/rovsti` as
+`ROVSTI_SIGNING_DIR=$HOME/.config/rovsti`, but it cannot update the installed apps.
+`versionCode` is fixed at 1 in each `app/build.gradle.kts`; raise it on every machine
+together, since Android refuses a lower versionCode than the installed one.
+
+Check the key of an installed app: `adb pull "$(adb shell pm path dev.rovsti.phone | head -1 | cut -d: -f2)" installed.apk`,
+then `apksigner verify --print-certs installed.apk` (the same works on any APK).
 
 ## Performance builds
 

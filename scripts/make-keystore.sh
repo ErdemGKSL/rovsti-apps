@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Creates the release signing key for the Rovsti apps (one key signs all three).
-# The keystore and passwords stay on this machine, outside the repo.
+# Creates a NEW release signing key for the Rovsti apps (one key signs all four).
+# The apps already on the phone are signed with ~/ownCloud/Personal/rovsti (see
+# scripts/signing.sh); a new key cannot update them, so only use this for a fresh
+# setup. The keystore and passwords stay outside the repo.
 set -euo pipefail
 
-DIR="${ROVSTI_SIGNING_DIR:-$HOME/.config/rovsti}"
+DIR="${ROVSTI_SIGNING_DIR:-$HOME/ownCloud/Personal/rovsti}"
 KEYSTORE="$DIR/rovsti-release.jks"
 ENV_FILE="$DIR/signing.env"
 JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"

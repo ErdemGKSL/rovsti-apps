@@ -1,8 +1,8 @@
-# Rovsti Stops: everyday utilities (rounds 1-3)
+# Rovsti Stops: everyday utilities (rounds 1-4)
 
 Everything here is local. Pure logic lives in `crates/rovsti_geo` (unit-tested); the GPUI code in
 `apps/stops/src` is thin glue, and Android calls go through `rovsti_android` (desktop returns
-`Error::Unsupported`). Backlog and status: `_bmad-output/plans/util-stops.md` (R1) and `_bmad-output/plans/util-stops-r2.md` (R2), `_bmad-output/plans/util-stops-r3.md` (R3 and later).
+`Error::Unsupported`). Backlog and status: `_bmad-output/plans/util-stops.md` (R1) and `_bmad-output/plans/util-stops-r2.md` (R2), `_bmad-output/plans/util-stops-r3.md` (R3), `_bmad-output/plans/util-stops-r4.md` (R4 and later).
 
 | # | Utility | What it does | Where |
 |---|---------|--------------|-------|
@@ -30,6 +30,28 @@ Everything here is local. Pure logic lives in `crates/rovsti_geo` (unit-tested);
 | S23 | Paste DMS / DDM / Plus Code | The picker accepts `41°01'32.2"N 28°58'36.0"E`, `41° 1.537' N, 28° 58.600' E`, `N 41.0256 E 28.9767` and full Plus Codes (not short ones), alongside links and plain decimals. Out-of-range values give the usual error. | `rovsti_geo::coord_format::{parse_coord, plus_code_decode}`, `dest::parse_location`; `picker.rs` paste field and search box |
 | S25 | Share my current location | Tapping the blue dot (idle map, not measuring) opens "My location" ("Accurate to 15 m") with Copy as, Share, QR code, Use as A and Use as B instead of placing a pin. | `map.rs::hits_position`; `map_actions.rs::open_my_location`; reuses `open_copy_as`, `open_qr`, `share_point`; reach: tap the dot |
 | S26 | Measure actions | "More" on the measure card (2 or more points) opens Copy result (pill "Measurement copied"), Share as GPX (save dialog, pill "Measurement exported") and Save as stop (first and last point, only when they form a valid gate; pill "Saved as <name>" with Undo, or "Already saved as <name>"). | `rovsti_geo::measure::{summary_text, to_gpx, as_gate, export_file_name}`; `map_actions.rs` (`measure_actions`, `copy_measurement`, `export_measurement`, `save_measurement_as_stop`); reach: Ruler > More |
+| S24 | Favourite saved stops | A star marks a stop and lists it first in every sort (Saved / Name / Nearest). Up/Down reordering stays inside the favourites or the other group, and is disabled at the group edge. Kept in JSON export/import and backup. Pills "Added to favourites" / "Removed from favourites"; the same tap undoes it, so no confirm. | `rovsti_geo::saved_stops::{SavedStop::favourite, toggle_favourite, sorted, move_by}`, `places_io`; `saved_ui.rs` (`row_title`, `favourite_pill`, `can_move`); reach: Saved tab > open a stop > "Favourite" / "Unfavourite" |
+| S27 | Last trip card | The idle Trip tab shows the newest finished trip for 12 hours: "Arrived at Home – Work" (or "Trip stopped: ..."), "18 min · 3.4 km · 1 snooze", with Start again, Save as stop, Share and Close. Close only hides the card. | `rovsti_geo::history::{History::last_finished, TripRecord::{title, summary_line}, format_duration, snoozes_text}`; `trip_ui.rs` (`last_trip_title`, `show_last_trip`); reach: Trip tab after a trip |
+| S28 | Map scale bar | Round-length scale bar in the map card. Pre-existing before R4, no change. | `map.rs::scale_bar` |
+| S29 | Open a saved stop in maps | Opens the stop's `geo:` link in the user's maps app. Pill "Opening in maps". | `saved_ui.rs` (opened row), `map::maps_url`; reach: Saved tab > open a stop > "Open in maps" |
+| S30 | Copy saved stops as text | Copies the visible stops (search and sort respected) as lines "★ Name: 40.99000, 29.02000 (1.2 km away)" plus an OpenStreetMap link. Pill "Copied 12 stops" / "Copied 1 stop". | `rovsti_geo::saved_stops::list_text`; `saved_ui.rs::copy_list_pill`; reach: Saved tab header "Copy list" (shown when a stop is visible) |
+| S31 | History text fix | Garbled separators in History rows and stats (double-encoded "–" and "·") are fixed; no behaviour change. | `settings_ui.rs` |
+| S32 | Backup and restore | One JSON file with saved stops, trip history and settings. Restore asks first and can be undone. Pills "Backup saved", "Backup restored" (Undo). See Backup below. | `rovsti_geo::backup::{Backup, to_json, parse, summary, export_file_name}`; `saved_ui.rs` (`on_backup_picked`, `restore_blocked`, `restore_sheet_body`); `backend::{export_text, pick_import, read_import}`; reach: Settings > Backup |
+| S33 | Share and copy a trip | A history record offers Share (system share sheet) and Copy (pill "Trip copied"): "Arrived at Home – Work on 5 Nov 2026, 18:42. 18 min · 3.4 km · 1 snooze." plus a geo link of B. | `rovsti_geo::history_io::share_text`; `settings_ui.rs`; reach: Settings > History > open a trip |
+
+
+## Backup (S32)
+
+- **Contains:** saved stops (with favourites), trip history and the app settings (appearance, alarm, tile
+  server and cache size, and so on), as pretty JSON named `rovsti-stops-backup-<date>.json`.
+- **Leaves out:** the tile cache, the GTFS feed, and the WhatsApp link (the connect key lives with
+  `rovsti_wa_client` and is never written).
+- **Restore:** Settings > Backup > Restore backup. Blocked during a trip (pill "Not while a trip is
+  running"). A bad file shows a pill (not a backup, another app, newer version, damaged stops). A good one
+  opens the confirm sheet "Restore backup" with a summary such as "12 stops, 48 trips and settings from 5
+  Nov 2026"; Cancel or the red "Replace everything". Afterwards the pill "Backup restored" offers Undo,
+  which puts back the previous stops, history and settings.
+- Tests: `rovsti_geo::backup` and the `saved_ui` helpers.
 
 ## Measure tool (S8)
 

@@ -44,13 +44,13 @@ baseSha: 4df8c8f8cb988cb79b084445b6b8135dcc7d53d0
 | S10-S16 | Offline area, appearance, vibration pattern, alarm sound, volume, history search/filter/start again/save, history export | done R2 |
 | S17, S18, S20-S23, S25, S26 | Follow-me, home screen shortcut, live status share, re-arm, tile cache size, paste DMS/Plus Code, share my location, measure actions | done R3 |
 | S28 | Map scale bar | done (pre-existing, `map.rs::scale_bar`) |
-| S31 | Fix garbled separators in History rows and stats (mojibake) | R4 step 4 |
-| S24 | Saved stops: favourites (star, listed first in every sort, kept in JSON export/import) | R4 steps 1, 4 |
-| S29 | Saved stop: Open in maps (distance from me already in the row) | R4 step 4 |
-| S30 | Saved stops: Copy list as plain text (visible stops, respects search and sort) | R4 steps 1, 4 |
-| S27 | Last trip card on the idle Trip tab: "Arrived at Home – Work", "18 min · 3.4 km · 1 snooze", Start again / Save as stop / Share / Close | R4 steps 2, 5 |
-| S33 | History record: Share and Copy trip summary | R4 steps 2, 5 |
-| S32 | Backup and restore everything (saved stops, history, settings) as one JSON file, confirm + Undo | R4 steps 3, 6 |
+| S31 | Fix garbled separators in History rows and stats (mojibake) | done R4 |
+| S24 | Saved stops: favourites (star, listed first in every sort, kept in JSON export/import) | done R4 |
+| S29 | Saved stop: Open in maps (distance from me already in the row) | done R4 |
+| S30 | Saved stops: Copy list as plain text (visible stops, respects search and sort) | done R4 |
+| S27 | Last trip card on the idle Trip tab: "Arrived at Home – Work", "18 min · 3.4 km · 1 snooze", Start again / Save as stop / Share / Close | done R4 |
+| S33 | History record: Share and Copy trip summary | done R4 |
+| S32 | Backup and restore everything (saved stops, history, settings) as one JSON file, confirm + Undo | done R4 |
 | S34 | Pin menu: "1.2 km from you, NE" line and "Measure from here" | backlog R5 |
 | S35 | Saved stops: colour tag | backlog R5 |
 | S36 | History: delete trips older than 30 / 90 days (two-tap) | backlog R5 |

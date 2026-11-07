@@ -7,15 +7,50 @@
 //! keyboard layout ([`TextInputPurpose`]) and the action key
 //! ([`TextInputAction`]) are set per field. [`field_box`] draws the glass box.
 
-use std::{cell::Cell, ops::Range};
+use std::{
+    cell::{Cell, RefCell},
+    ops::Range,
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
+};
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle, Focusable,
-    IntoElement, KeyDownEvent, Pixels, Point, PreeditSelection, Styled, SurroundingText,
-    TextInputAction, TextInputMode, TextInputPurpose, UTF16Selection, Window, canvas, div, px,
+    App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle, Focusable, Font,
+    Hsla, IntoElement, KeyDownEvent, Pixels, Point, PreeditSelection, ShapedLine, Styled,
+    SurroundingText, TextAlign, TextInputAction, TextInputMode, TextInputPurpose, TextRun,
+    UTF16Selection, UnderlineStyle, Window, canvas, div, fill, point, px, size,
 };
-use liquid_glass_kit::tokens::Theme;
+use liquid_glass_kit::tokens::{Theme, typography};
 use rovsti_core::text_edit::EditBuffer;
+use rovsti_core::text_view::{
+    CARET_MARGIN, caret_visible, clamp_scroll, masked_index, next_toggle_ms, scroll_for_caret,
+    unmasked_index,
+};
+
+/// Whether carets blink. The screenshot rig turns it off so frames are stable.
+static BLINK: AtomicBool = AtomicBool::new(true);
+
+/// Turns caret blinking on or off for every field (on by default).
+pub fn set_blink(on: bool) {
+    BLINK.store(on, Ordering::Relaxed);
+}
+
+/// Caret width, dp.
+const CARET_W: f32 = 2.0;
+/// Selection corner radius, dp.
+const SELECTION_RADIUS: f32 = 3.0;
+/// Composing-text underline thickness, dp.
+const MARKED_UNDERLINE: f32 = 1.5;
+
+/// The text as last shaped and painted: what hit-testing and the keyboard's
+/// geometry queries read.
+struct Laid {
+    line: ShapedLine,
+    /// The content box, window coordinates.
+    bounds: Bounds<Pixels>,
+    /// The text is drawn masked (a passphrase).
+    masked: bool,
+}
 
 pub struct TextField {
     focus: FocusHandle,
@@ -32,6 +67,18 @@ pub struct TextField {
     keep_focus_on_action: bool,
     /// Where the field was last laid out (window coordinates).
     viewport: Cell<Option<Bounds<Pixels>>>,
+    /// Horizontal scroll of the text inside the content box, dp.
+    scroll: Cell<f32>,
+    /// The last painted line; `None` while unfocused.
+    laid: RefCell<Option<Laid>>,
+    /// Bumped on every edit or caret move; paint scrolls to the caret once per bump.
+    activity: Cell<u64>,
+    seen_activity: Cell<u64>,
+    /// When the last edit or move happened: the caret stays solid after it.
+    last_activity: Cell<Instant>,
+    /// The field was focused when it last painted (the blink timer's cue).
+    painted_focused: Cell<bool>,
+    blinking: Cell<bool>,
 }
 
 impl TextField {
@@ -56,6 +103,69 @@ impl TextField {
             actions: 0,
             keep_focus_on_action: false,
             viewport: Cell::new(None),
+            scroll: Cell::new(0.0),
+            laid: RefCell::new(None),
+            activity: Cell::new(0),
+            seen_activity: Cell::new(u64::MAX),
+            last_activity: Cell::new(Instant::now()),
+            painted_focused: Cell::new(false),
+            blinking: Cell::new(false),
+        }
+    }
+
+    /// Records an edit or caret move: the caret turns solid and the view
+    /// scrolls to it at the next paint.
+    fn touch(&self) {
+        self.activity.set(self.activity.get().wrapping_add(1));
+        self.last_activity.set(Instant::now());
+    }
+
+    fn elapsed_ms(&self) -> u64 {
+        u64::try_from(self.last_activity.get().elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// Whether the caret is drawn now.
+    fn caret_on(&self) -> bool {
+        caret_visible(self.elapsed_ms(), BLINK.load(Ordering::Relaxed))
+    }
+
+    /// Starts the blink timer (once). It wakes at each on/off change and
+    /// notifies, until the field stops painting focused.
+    fn ensure_blink(&self, cx: &mut Context<Self>) {
+        if !BLINK.load(Ordering::Relaxed) || self.blinking.replace(true) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            loop {
+                let Ok(wait) = this.read_with(cx, |f, _| next_toggle_ms(f.elapsed_ms())) else {
+                    return;
+                };
+                cx.background_executor()
+                    .timer(Duration::from_millis(wait + 1))
+                    .await;
+                let again = this.update(cx, |f, cx| {
+                    if f.painted_focused.get() {
+                        cx.notify();
+                        true
+                    } else {
+                        f.blinking.set(false);
+                        false
+                    }
+                });
+                if !matches!(again, Ok(true)) {
+                    return;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Index in the displayed string (masked for a passphrase) of a text byte.
+    fn display_index(&self, byte: usize) -> usize {
+        if self.secret.get() {
+            masked_index(self.buf.text(), byte)
+        } else {
+            byte
         }
     }
 
@@ -86,6 +196,7 @@ impl TextField {
     pub fn set(&mut self, text: &str, cx: &mut Context<Self>) {
         self.buf.set_text(text);
         self.edits += 1;
+        self.touch();
         cx.notify();
     }
 
@@ -105,12 +216,14 @@ impl TextField {
 
     pub fn select_all(&mut self, cx: &mut Context<Self>) {
         self.buf.select_all();
+        self.touch();
         cx.notify();
     }
 
     /// Selects `anchor..head` (UTF-8 bytes, clamped to grapheme boundaries).
     pub fn set_selection(&mut self, anchor: usize, head: usize, cx: &mut Context<Self>) {
         self.buf.set_selection(anchor, head);
+        self.touch();
         cx.notify();
     }
 
@@ -123,6 +236,7 @@ impl TextField {
         if !self.buf.is_empty() || self.buf.marked().is_some() {
             self.buf.set_text("");
             self.edits += 1;
+            self.touch();
             cx.notify();
         }
     }
@@ -134,6 +248,7 @@ impl TextField {
         if self.buf.delete_backward() {
             self.edits += 1;
         }
+        self.touch();
         cx.notify();
     }
 
@@ -142,6 +257,7 @@ impl TextField {
         if self.buf.delete_forward() {
             self.edits += 1;
         }
+        self.touch();
         cx.notify();
     }
 
@@ -157,6 +273,7 @@ impl TextField {
         if changed {
             self.edits += 1;
         }
+        self.touch();
         cx.notify();
     }
 
@@ -276,6 +393,7 @@ impl EntityInputHandler for TextField {
         // The platform's `setSelection` / the cursor after a commit. The
         // composing range stays as it is.
         self.buf.set_selection_utf16(range_utf16, false);
+        self.touch();
         cx.notify();
     }
 
@@ -285,6 +403,7 @@ impl EntityInputHandler for TextField {
 
     fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
         self.buf.unmark();
+        self.touch();
     }
 
     fn replace_text_in_range(
@@ -377,12 +496,25 @@ impl EntityInputHandler for TextField {
 
     fn bounds_for_range(
         &mut self,
-        _: Range<usize>,
+        range_utf16: Range<usize>,
         element_bounds: Bounds<Pixels>,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        Some(element_bounds)
+        let laid = self.laid.borrow();
+        let Some(laid) = laid.as_ref() else {
+            return Some(element_bounds);
+        };
+        let bytes = self.buf.bytes_of(range_utf16);
+        let x0 = laid.line.x_for_index(self.display_index(bytes.start));
+        let x1 = laid.line.x_for_index(self.display_index(bytes.end));
+        let lh = typography::BODY.line;
+        let origin = point(
+            laid.bounds.left() - px(self.scroll.get()) + x0,
+            laid.bounds.top() + (laid.bounds.size.height - lh) / 2.0,
+        );
+        // A caret for an empty range; the span for composing or selected text.
+        Some(Bounds::new(origin, size((x1 - x0).max(px(CARET_W)), lh)))
     }
 
     fn element_bounds(
@@ -398,12 +530,51 @@ impl EntityInputHandler for TextField {
 
     fn character_index_for_point(
         &mut self,
-        _: Point<Pixels>,
+        pt: Point<Pixels>,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<usize> {
-        // Until the field shapes its text, a tap answers the caret.
-        Some(self.buf.utf16_of(self.buf.head()..self.buf.head()).start)
+        let laid = self.laid.borrow();
+        let byte = match laid.as_ref() {
+            Some(laid) => {
+                let x = pt.x - laid.bounds.left() + px(self.scroll.get());
+                let idx = laid.line.closest_index_for_x(x);
+                let idx = if laid.masked {
+                    unmasked_index(self.buf.text(), idx)
+                } else {
+                    idx
+                };
+                self.buf.snap(idx)
+            }
+            // Not painted yet: a tap answers the caret.
+            None => self.buf.head(),
+        };
+        Some(self.buf.utf16_of(byte..byte).start)
+    }
+
+    fn scroll_text_input(
+        &mut self,
+        delta: Point<Pixels>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let laid = self.laid.borrow();
+        let Some(laid) = laid.as_ref() else {
+            return false;
+        };
+        // Positive deltas move the content right: the offset shrinks.
+        let old = self.scroll.get();
+        let new = clamp_scroll(
+            old - f32::from(delta.x),
+            f32::from(laid.line.width),
+            f32::from(laid.bounds.size.width),
+            CARET_MARGIN,
+        );
+        // An explicit scroll cancels the pending scroll-to-caret.
+        self.seen_activity.set(self.activity.get());
+        self.scroll.set(new);
+        cx.notify();
+        (new - old).abs() > 0.01
     }
 }
 
@@ -431,6 +602,19 @@ pub fn on_backspace(
 /// An invisible layer that connects the platform keyboard to `field` while it
 /// has focus. Put it inside the box that shows the text.
 pub fn input_layer(field: Entity<TextField>, cx: &App) -> impl IntoElement {
+    text_layer(field, Hsla::default(), Hsla::default(), false, cx)
+}
+
+/// The text layer: connects the keyboard, and while `field` has focus shapes
+/// and draws its text (scrolled to the caret, no ellipsis), the selection,
+/// the composing underline and the caret. `paint` is off for [`input_layer`].
+fn text_layer(
+    field: Entity<TextField>,
+    label: Hsla,
+    accent: Hsla,
+    paint: bool,
+    cx: &App,
+) -> impl IntoElement {
     let focus = field.read(cx).focus.clone();
     canvas(
         |_, _, _| (),
@@ -440,10 +624,145 @@ pub fn input_layer(field: Entity<TextField>, cx: &App) -> impl IntoElement {
                 gpui::ElementInputHandler::new(bounds, field.clone()),
                 cx,
             );
+            let focused = focus.is_focused(window);
+            field.update(cx, |f, cx| {
+                f.painted_focused.set(focused);
+                if focused && paint {
+                    f.ensure_blink(cx);
+                }
+            });
+            if paint {
+                paint_text(&field, focused, bounds, label, accent, window, cx);
+            }
         },
     )
     .absolute()
     .size_full()
+}
+
+/// Shapes and draws the focused field's line.
+fn paint_text(
+    field: &Entity<TextField>,
+    focused: bool,
+    bounds: Bounds<Pixels>,
+    label: Hsla,
+    accent: Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !focused {
+        field.read(cx).laid.replace(None);
+        return;
+    }
+    let (secret, shown, sel, head, marked, scroll_state) = {
+        let f = field.read(cx);
+        let secret = f.secret.get();
+        let shown: gpui::SharedString = if secret {
+            masked(f.buf.text()).into()
+        } else {
+            f.buf.text().to_owned().into()
+        };
+        let sel = f.buf.selection();
+        let marked = f
+            .buf
+            .marked()
+            .map(|m| f.display_index(m.start)..f.display_index(m.end));
+        (
+            secret,
+            shown,
+            f.display_index(sel.start)..f.display_index(sel.end),
+            f.display_index(f.buf.head()),
+            marked,
+            (f.scroll.get(), f.activity.get() != f.seen_activity.get()),
+        )
+    };
+    let font = window.text_style().font();
+    let line = window.text_system().shape_line(
+        shown.clone(),
+        typography::BODY.size,
+        &runs(&font, label, shown.len(), marked),
+        None,
+    );
+    let lh = typography::BODY.line;
+    let view_w = f32::from(bounds.size.width);
+    let text_w = f32::from(line.width);
+    let mut scroll = clamp_scroll(scroll_state.0, text_w, view_w, CARET_MARGIN);
+    let follow = scroll_state.1;
+    if follow {
+        let caret_x = f32::from(line.x_for_index(head));
+        scroll = scroll_for_caret(scroll, caret_x, text_w, view_w, CARET_MARGIN);
+    }
+    let caret_on = {
+        let f = field.read(cx);
+        f.scroll.set(scroll);
+        if follow {
+            f.seen_activity.set(f.activity.get());
+        }
+        f.caret_on()
+    };
+
+    let top = bounds.top() + (bounds.size.height - lh) / 2.0;
+    let left = bounds.left() - px(scroll);
+    if !sel.is_empty() {
+        let mut quad = fill(
+            Bounds::new(
+                point(left + line.x_for_index(sel.start), top),
+                size(line.x_for_index(sel.end) - line.x_for_index(sel.start), lh),
+            ),
+            accent.opacity(0.28),
+        );
+        quad.corner_radii = px(SELECTION_RADIUS).into();
+        window.paint_quad(quad);
+    }
+    if let Err(err) = line.paint(point(left, top), lh, TextAlign::Left, None, window, cx) {
+        log::warn!("text field: paint failed: {err}");
+    }
+    if sel.is_empty() && caret_on {
+        let mut quad = fill(
+            Bounds::new(
+                point(left + line.x_for_index(head), top),
+                size(px(CARET_W), lh),
+            ),
+            accent,
+        );
+        quad.corner_radii = px(CARET_W / 2.0).into();
+        window.paint_quad(quad);
+    }
+    *field.read(cx).laid.borrow_mut() = Some(Laid {
+        line,
+        bounds,
+        masked: secret,
+    });
+}
+
+/// Text runs for a line of `len` bytes: the marked range underlined.
+fn runs(font: &Font, color: Hsla, len: usize, marked: Option<Range<usize>>) -> Vec<TextRun> {
+    let plain = |len| TextRun {
+        len,
+        font: font.clone(),
+        color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    match marked.filter(|m| m.start < m.end && m.end <= len) {
+        Some(m) => [
+            plain(m.start),
+            TextRun {
+                underline: Some(UnderlineStyle {
+                    color: Some(color),
+                    thickness: px(MARKED_UNDERLINE),
+                    wavy: false,
+                }),
+                ..plain(m.end - m.start)
+            },
+            plain(len - m.end),
+        ]
+        .into_iter()
+        .filter(|r| r.len > 0)
+        .collect(),
+        None => vec![plain(len)],
+    }
 }
 
 /// The glass box around `field`: `placeholder` while it is empty and
@@ -502,23 +821,19 @@ fn field_box_with(
         raw.to_owned().into()
     };
     let typing = focus.is_focused(window);
-    let shown = if text.is_empty() && !typing {
-        div()
-            .truncate()
-            .text_color(colors.tertiary_label)
-            .child(placeholder)
-    } else if typing {
-        // While typing, the end of the text is what the owner is looking at (a long
-        // address, the last characters just typed): cut the start with the ellipsis,
-        // never the end, which the caret follows.
-        div()
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_ellipsis_start()
-            .text_color(colors.label)
-            .child(text)
+    // Focused, the text layer draws the line (scrolled to the caret, no
+    // ellipsis); otherwise a div shows the start with an end ellipsis.
+    let shown = if typing {
+        None
+    } else if text.is_empty() {
+        Some(
+            div()
+                .truncate()
+                .text_color(colors.tertiary_label)
+                .child(placeholder),
+        )
     } else {
-        div().truncate().text_color(colors.label).child(text)
+        Some(div().truncate().text_color(colors.label).child(text))
     };
     div()
         .id(id)
@@ -548,17 +863,14 @@ fn field_box_with(
                         .items_center()
                         .overflow_hidden()
                         .text_size(typography::BODY.size)
-                        .child(input_layer(field.clone(), cx))
-                        .child(shown)
-                        .children(typing.then(|| {
-                            div()
-                                .flex_none()
-                                .ml(px(1.0))
-                                .w(px(2.0))
-                                .h(px(20.0))
-                                .rounded_full()
-                                .bg(colors.accent)
-                        })),
+                        .child(text_layer(
+                            field.clone(),
+                            colors.label,
+                            colors.accent,
+                            true,
+                            cx,
+                        ))
+                        .children(shown),
                 ),
         )
 }

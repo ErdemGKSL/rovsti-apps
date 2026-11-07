@@ -115,6 +115,8 @@ pub mod text_detect;
 pub mod text_edit;
 /// Chat text size setting.
 pub mod text_scale;
+/// Scroll, caret blink and password-mask index maths for the text field view.
+pub mod text_view;
 pub mod thread;
 /// Local pinned, archived and unread marks for SMS threads.
 pub mod thread_marks;

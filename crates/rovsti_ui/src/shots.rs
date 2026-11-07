@@ -210,6 +210,7 @@ impl<V: Render + 'static> Rig<V> {
         build: impl FnOnce(&mut Window, &mut App) -> Entity<V> + 'static,
     ) -> Self {
         force_backdrop_support(true);
+        crate::field::set_blink(false);
         FrameClock::set_fixed_step(Some(FRAME));
         set_theme_override(Some(spec.theme));
         let px_size = size(

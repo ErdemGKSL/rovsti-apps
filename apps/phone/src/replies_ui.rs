@@ -576,11 +576,13 @@ impl ReplyEditor {
             fields: (0..MAX_REPLIES)
                 .map(|_| {
                     cx.new(|cx| {
-                        TextField::with_input(
+                        let mut f = TextField::with_input(
                             gpui::TextInputPurpose::Text,
                             gpui::TextInputAction::Done,
                             cx,
-                        )
+                        );
+                        f.set_max_chars(Some(MAX_REPLY_CHARS));
+                        f
                     })
                 })
                 .collect(),
@@ -656,7 +658,7 @@ impl PhoneApp {
         }
     }
 
-    /// One of the fields changed: clip it at 100 characters and autosave.
+    /// One of the fields changed: autosave (the field itself caps at the maximum).
     pub(crate) fn replies_field_changed(&mut self, _window: &Window, cx: &mut Context<Self>) {
         if !self.settings.sub_open() || self.settings.sub != Some(crate::settings_ui::Sub::Replies)
         {
@@ -664,20 +666,12 @@ impl PhoneApp {
         }
         let mut changed = false;
         for i in 0..MAX_REPLIES {
-            let (edits, text) = {
-                let f = self.replies_ed.fields[i].read(cx);
-                (f.edits, f.text().to_owned())
-            };
+            let edits = self.replies_ed.fields[i].read(cx).edits;
             if edits == self.replies_ed.seen[i] {
                 continue;
             }
             self.replies_ed.seen[i] = edits;
             changed = true;
-            if text.chars().count() > MAX_REPLY_CHARS {
-                let clipped: String = text.chars().take(MAX_REPLY_CHARS).collect();
-                self.replies_ed.fields[i].update(cx, |f, cx| f.set(&clipped, cx));
-                self.replies_ed.seen[i] = self.replies_ed.fields[i].read(cx).edits;
-            }
         }
         if changed {
             self.replies_save(cx);

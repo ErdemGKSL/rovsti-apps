@@ -442,6 +442,12 @@ impl TextField {
         cx.notify();
     }
 
+    /// Caps the text at `max` characters (`None` lifts the cap). Inserts, pastes
+    /// and IME commits are clipped to the room left; deletions are never limited.
+    pub fn set_max_chars(&mut self, max: Option<usize>) {
+        self.buf.set_max_chars(max);
+    }
+
     pub fn text(&self) -> &str {
         self.buf.text()
     }
@@ -2329,6 +2335,26 @@ mod tests {
         let (host, cx) = cx.add_window_view(|_, cx| Host(cx.new(TextField::new)));
         let field = host.read_with(cx, |h, _| h.0.clone());
         (field, cx)
+    }
+
+    #[gpui::test]
+    fn max_chars_limits_ime_input(cx: &mut TestAppContext) {
+        let (field, cx) = window_cx(cx);
+        field.update_in(cx, |f, w, cx| {
+            f.set_max_chars(Some(5));
+            f.set("abcde", cx);
+            f.set_selection(2, 2, cx);
+            f.replace_text_in_range(None, "XYZ", w, cx);
+            assert_eq!(f.text(), "abcde");
+            assert_eq!(f.selection(), 2..2);
+            f.set_selection(1, 3, cx);
+            f.replace_text_in_range(None, "Z", w, cx);
+            assert_eq!(f.text(), "aZde");
+            assert_eq!(f.selection(), 2..2);
+            f.replace_and_mark_text_in_range(None, "QRS", None, w, cx);
+            assert_eq!(f.text(), "aZQde");
+            assert_eq!(f.marked(), Some(2..3));
+        });
     }
 
     #[gpui::test]

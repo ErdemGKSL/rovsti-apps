@@ -27,6 +27,7 @@ mod notifications;
 mod photos;
 mod prefs;
 mod schedule_ui;
+mod select_ui;
 mod settings_ui;
 mod sms_actions;
 mod sms_conversation;
@@ -223,7 +224,7 @@ enum PillAction {
     /// Opens the chat a message was just forwarded to.
     OpenThread { thread: ThreadId, title: String },
     /// Brings back an SMS/MMS deleted a moment ago.
-    UndoSmsDelete(rovsti_core::sms_timeline::SmsKey),
+    UndoSmsDelete(Vec<rovsti_core::sms_timeline::SmsKey>),
 }
 
 /// The page pushed over the tabs.
@@ -1316,12 +1317,19 @@ impl MessagesApp {
                 PillAction::RequestSmsRole,
                 cx,
             ),
-            SmsConversationEvent::Deleted(key) => this.show_pill_action(
-                rovsti_core::pending_delete::notice(1),
+            SmsConversationEvent::Deleted(keys) => this.show_pill_action(
+                rovsti_core::pending_delete::notice(keys.len()),
                 "Undo",
-                PillAction::UndoSmsDelete(*key),
+                PillAction::UndoSmsDelete(keys.clone()),
                 cx,
             ),
+            SmsConversationEvent::Toast(text) => {
+                this.show_pill(text.clone());
+                cx.notify();
+            }
+            SmsConversationEvent::CopyBlock { text, notice } => {
+                this.copy_text_with(text.clone().into(), false, notice.clone(), cx);
+            }
             SmsConversationEvent::Notice(text) => {
                 this.show_pill(*text);
                 cx.notify();
@@ -1722,8 +1730,10 @@ impl MessagesApp {
     /// "Starred messages" of a WhatsApp page menu: closes the menu and opens the sheet.
     fn menu_starred(&mut self, cx: &mut Context<Self>) {
         self.row_menu = None;
-        if let Open::WhatsApp(_, c) = &self.open {
-            c.update(cx, |c, cx| c.open_starred(cx));
+        match &self.open {
+            Open::WhatsApp(_, c) => c.update(cx, |c, cx| c.open_starred(cx)),
+            Open::Sms(c) => c.update(cx, |c, cx| c.open_starred(cx)),
+            _ => {}
         }
         cx.notify();
     }
@@ -2164,10 +2174,12 @@ impl MessagesApp {
                 }
             }
             PillAction::Reblock(raw) => self.reblock(raw, cx),
-            PillAction::UndoSmsDelete(key) => {
+            PillAction::UndoSmsDelete(keys) => {
                 if let Open::Sms(conversation) = &self.open {
                     conversation.update(cx, |page, cx| {
-                        page.undo_delete(key, cx);
+                        for key in keys {
+                            page.undo_delete(key, cx);
+                        }
                     });
                 }
             }
@@ -2746,6 +2758,29 @@ impl MessagesApp {
                             "menu-starred",
                             Icon::LucideStar,
                             "Starred messages".into(),
+                            colors.label,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.menu_starred(cx)))
+                        .into_any_element(),
+                    );
+                } else if let Some(sms) = &menu.sms {
+                    let count = self
+                        .backend
+                        .read(cx)
+                        .prefs()
+                        .sms_stars
+                        .count_for(&sms.thread_id.to_string());
+                    let label = if count > 0 {
+                        format!("Starred messages ({count})")
+                    } else {
+                        "Starred messages".to_owned()
+                    };
+                    items.push(
+                        menu_item(
+                            theme,
+                            "menu-starred",
+                            Icon::LucideStar,
+                            label.into(),
                             colors.label,
                         )
                         .on_click(cx.listener(|this, _, _, cx| this.menu_starred(cx)))

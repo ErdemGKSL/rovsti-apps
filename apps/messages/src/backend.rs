@@ -915,6 +915,7 @@ impl Backend {
             };
             if gone {
                 self.threads = preview.threads().threads;
+                self.forget_star(&provider_id, cx);
                 cx.emit(BackendEvent::SmsChanged);
             }
             cx.emit(done(gone));
@@ -926,6 +927,7 @@ impl Backend {
             cx.emit(done(false));
             return;
         }
+        let provider_id_for_star = provider_id.clone();
         let task = cx
             .background_executor()
             .spawn(async move { sms::delete_message(&provider_id) });
@@ -934,6 +936,7 @@ impl Backend {
             this.update(cx, |this, cx| {
                 let ok = matches!(result, Ok(true));
                 if ok {
+                    this.forget_star(&provider_id_for_star, cx);
                     this.pull_threads(cx);
                 } else {
                     if let Err(error) = &result {
@@ -949,12 +952,22 @@ impl Backend {
         .detach();
     }
 
+    /// Drops the local star of a deleted message.
+    fn forget_star(&mut self, provider_id: &str, cx: &mut Context<Self>) {
+        if self.prefs.sms_stars.is_starred(provider_id) {
+            self.update_prefs(cx, |prefs| {
+                prefs.sms_stars.forget(provider_id);
+            });
+        }
+    }
+
     /// Drops what the preferences kept for a thread that is gone.
     fn forget_thread_prefs(&mut self, thread_id: i64, cx: &mut Context<Self>) {
         let tag = crate::notifications::thread_tag(&rovsti_core::ThreadId::Sms(thread_id));
         self.update_prefs(cx, |prefs| {
             prefs.set_muted(&tag, false);
             prefs.sim_choices.remove(&thread_id);
+            prefs.sms_stars.forget_thread(&thread_id.to_string());
         });
     }
 

@@ -4,7 +4,12 @@
 //! this module is the GPUI shell around it plus a few pure text helpers.
 
 use rovsti_core::text_detect::{self, DetectAction};
-use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ListAlignment,
@@ -16,9 +21,11 @@ use rovsti_core::{
     ThreadId,
     chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
+    multi_select::{self, Selection},
     pending_delete::PendingDeletes,
     sms::{DeliveryState, SmsSend, SmsSimsPayload, SmsStatus, segments},
     sms_timeline::{SmsItem, SmsKey, SmsTimeline},
+    starred::{self, LocalStar, StarredRow},
     unread_jump::{self, JumpState},
     wire::{DocumentOp, DocumentResult},
 };
@@ -116,8 +123,15 @@ pub enum SmsConversationEvent {
     },
     /// Delete on a message without the SMS role: the page offers the role.
     NeedsRole,
-    /// A message was hidden for deletion: the page's pill offers Undo.
-    Deleted(SmsKey),
+    /// Messages were hidden for deletion: the page's pill offers Undo for all of them.
+    Deleted(Vec<SmsKey>),
+    /// A confirmation with computed text ("Starred 3 messages").
+    Toast(String),
+    /// The ticked messages as one block: the page copies it and says `notice`.
+    CopyBlock {
+        text: String,
+        notice: String,
+    },
 }
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
@@ -188,6 +202,14 @@ pub struct SmsConversation {
     muted: bool,
     /// The bubble (by `message_key`) whose copy pills are showing.
     selected: Option<u64>,
+    /// Select mode: the ticked messages.
+    select: Option<Selection<SmsKey>>,
+    /// The "Delete n messages?" sheet of select mode is open.
+    select_delete: bool,
+    /// The "Starred messages" sheet is open.
+    starred_open: bool,
+    /// Provider ids of this thread's starred messages, refreshed whenever rows are rebuilt.
+    star_ids: HashSet<String>,
     /// The open Info or Select text sheet.
     info_sheet: Option<crate::info_ui::InfoSheet>,
     /// The "Media, links and docs" sheet.
@@ -290,6 +312,10 @@ impl SmsConversation {
             muted: false,
             in_spam: false,
             selected: None,
+            select: None,
+            select_delete: false,
+            starred_open: false,
+            star_ids: HashSet::new(),
             info_sheet: None,
             gallery: None,
             saving: false,
@@ -436,6 +462,21 @@ impl SmsConversation {
     /// System Back inside the page: clears the selected bubble; `false` when
     /// nothing was selected.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.select_delete {
+            self.select_delete = false;
+            cx.notify();
+            return true;
+        }
+        if self.select.is_some() {
+            self.end_select();
+            cx.notify();
+            return true;
+        }
+        if self.starred_open {
+            self.starred_open = false;
+            cx.notify();
+            return true;
+        }
         if self.delete_confirm.take().is_some() {
             cx.notify();
             return true;
@@ -1043,6 +1084,275 @@ impl SmsConversation {
         cx.notify();
     }
 
+    // ---- select mode and local stars ------------------------------------------
+
+    /// The thread's key in `sms_stars`; `None` for a draft that has no provider thread yet.
+    fn star_thread(&self) -> Option<String> {
+        (self.thread_id >= 0).then(|| self.thread_id.to_string())
+    }
+
+    /// The provider id a star is kept under; `None` for a send with no provider row yet.
+    fn star_id(&self, key: SmsKey) -> Option<String> {
+        self.timeline.provider_key(key)?.provider_id()
+    }
+
+    fn is_starred(&self, key: SmsKey) -> bool {
+        self.star_id(key)
+            .is_some_and(|id| self.star_ids.contains(&id))
+    }
+
+    /// Reads the thread's stars from the preferences.
+    fn refresh_stars(&mut self, cx: &gpui::App) {
+        self.star_ids = match self.star_thread() {
+            Some(thread) => self
+                .backend
+                .read(cx)
+                .prefs()
+                .sms_stars
+                .rows_for(&thread)
+                .into_iter()
+                .map(|row| row.id)
+                .collect(),
+            None => HashSet::new(),
+        };
+    }
+
+    /// Stars or unstars `keys` (those with a provider id). Returns how many changed hands.
+    fn set_stars(&mut self, keys: &[SmsKey], star: bool, cx: &mut Context<Self>) -> usize {
+        let Some(thread) = self.star_thread() else {
+            return 0;
+        };
+        let title = self.title.to_string();
+        let edits: Vec<(String, Option<LocalStar>)> = keys
+            .iter()
+            .filter_map(|key| {
+                let item = self.timeline.items().iter().find(|i| i.key == *key)?;
+                let id = self.star_id(*key)?;
+                let value = star.then(|| local_star(item, &thread, &title));
+                Some((id, value))
+            })
+            .collect();
+        let count = edits.len();
+        if count > 0 {
+            self.backend.update(cx, |backend, cx| {
+                backend.update_prefs(cx, |prefs| {
+                    for (id, value) in &edits {
+                        prefs.sms_stars.set(id, value.clone());
+                    }
+                });
+            });
+            self.rows_dirty = true;
+            cx.notify();
+        }
+        count
+    }
+
+    /// The Star / Unstar pill under one bubble.
+    fn star_one(&mut self, key: SmsKey, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.rows_dirty = true;
+        let star = !self.is_starred(key);
+        let text = if self.set_stars(&[key], star, cx) == 0 {
+            "Can't star that message yet".to_owned()
+        } else if star {
+            "Starred".to_owned()
+        } else {
+            "Unstarred".to_owned()
+        };
+        cx.emit(SmsConversationEvent::Toast(text));
+        cx.notify();
+    }
+
+    /// Opens the "Starred messages" sheet (the page menu's row).
+    pub fn open_starred(&mut self, cx: &mut Context<Self>) {
+        self.starred_open = true;
+        self.refresh_stars(cx);
+        cx.notify();
+    }
+
+    /// The Select pill: enters select mode with this message ticked.
+    fn begin_select(&mut self, key: SmsKey, cx: &mut Context<Self>) {
+        let mut selection = Selection::new();
+        selection.toggle(key);
+        self.select = Some(selection);
+        self.selected = None;
+        self.rows_dirty = true;
+        cx.notify();
+    }
+
+    fn end_select(&mut self) {
+        self.select = None;
+        self.select_delete = false;
+        self.rows_dirty = true;
+    }
+
+    /// A tap or long press on a row in select mode.
+    fn toggle_select(&mut self, key: SmsKey, cx: &mut Context<Self>) {
+        if !self
+            .timeline
+            .items()
+            .iter()
+            .any(|i| i.key == key && selectable(i))
+        {
+            return;
+        }
+        if let Some(selection) = &mut self.select
+            && !selection.toggle(key)
+        {
+            cx.emit(SmsConversationEvent::Toast(multi_select::cap_notice()));
+        }
+        self.rows_dirty = true;
+        cx.notify();
+    }
+
+    /// "Select all": every loaded message that can be ticked.
+    fn select_all_loaded(&mut self, cx: &mut Context<Self>) {
+        let keys: Vec<SmsKey> = self
+            .timeline
+            .items()
+            .iter()
+            .filter(|i| selectable(i) && !self.is_hidden(i.key))
+            .map(|i| i.key)
+            .collect();
+        let total = keys.len();
+        if let Some(selection) = &mut self.select {
+            selection.select_all(keys);
+            if selection.len() < total {
+                cx.emit(SmsConversationEvent::Toast(multi_select::cap_notice()));
+            }
+        }
+        self.rows_dirty = true;
+        cx.notify();
+    }
+
+    /// Drops ticks of messages that left the timeline or are being deleted.
+    fn prune_selection(&mut self) {
+        if let Some(selection) = &mut self.select {
+            let live: HashSet<SmsKey> = self
+                .timeline
+                .items()
+                .iter()
+                .filter(|i| !(self.pending.contains(&i.key) || self.deleting.contains(&i.key)))
+                .map(|i| i.key)
+                .collect();
+            selection.retain(|key| live.contains(key));
+        }
+    }
+
+    /// The ticked messages in timeline order.
+    fn selected_items(&self) -> Vec<&SmsItem> {
+        let Some(selection) = &self.select else {
+            return Vec::new();
+        };
+        self.timeline
+            .items()
+            .iter()
+            .filter(|i| selection.contains(&i.key) && !self.is_hidden(i.key))
+            .collect()
+    }
+
+    /// The ticked messages with text as one block, as the chat export writes them.
+    fn select_block(&self, cx: &gpui::App) -> Option<String> {
+        let title = self.title.to_string();
+        let items = self.selected_items();
+        let texts: Vec<Option<String>> = items.iter().map(|i| copy_text(i)).collect();
+        let lines: Vec<ExportLine<'_>> = items
+            .iter()
+            .zip(&texts)
+            .filter_map(|(item, text)| {
+                Some(ExportLine {
+                    at_ms: item.at_ms,
+                    author: if item.outgoing { "You" } else { &title },
+                    text: text.as_deref()?,
+                })
+            })
+            .collect();
+        if lines.is_empty() {
+            return None;
+        }
+        let offset = self.backend.read(cx).locale().tz_offset_s;
+        Some(multi_select::copy_block(&lines, offset))
+    }
+
+    fn select_copy(&mut self, cx: &mut Context<Self>) {
+        let n = self.selected_items().len();
+        match self.select_block(cx) {
+            Some(text) => cx.emit(SmsConversationEvent::CopyBlock {
+                text,
+                notice: multi_select::copied_notice(n),
+            }),
+            None => cx.emit(SmsConversationEvent::Toast("Nothing to copy".into())),
+        }
+        self.end_select();
+        cx.notify();
+    }
+
+    fn select_forward(&mut self, cx: &mut Context<Self>) {
+        use rovsti_core::forward::ForwardBody;
+        let single = match self.selected_items().as_slice() {
+            [one] => forward_item(one, &self.title).filter(|f| f.picture.is_some()),
+            _ => None,
+        };
+        let item = single.or_else(|| {
+            self.select_block(cx)
+                .map(|text| crate::forward_ui::ForwardItem {
+                    body: ForwardBody::Text(text),
+                    picture: None,
+                })
+        });
+        match item {
+            Some(item) => cx.emit(SmsConversationEvent::Forward(item)),
+            None => cx.emit(SmsConversationEvent::Toast("Nothing to forward".into())),
+        }
+        self.end_select();
+        cx.notify();
+    }
+
+    fn select_star(&mut self, cx: &mut Context<Self>) {
+        let keys: Vec<SmsKey> = self.selected_items().iter().map(|i| i.key).collect();
+        let states: Vec<bool> = keys.iter().map(|k| self.is_starred(*k)).collect();
+        let star = multi_select::star_all(&states);
+        let done = self.set_stars(&keys, star, cx);
+        let text = if done == 0 {
+            "Can't star those messages yet".to_owned()
+        } else {
+            multi_select::starred_notice(done, star)
+        };
+        cx.emit(SmsConversationEvent::Toast(text));
+        self.end_select();
+        cx.notify();
+    }
+
+    /// The Delete action of the bar: without the SMS role the page offers it, else the
+    /// confirm sheet opens.
+    fn select_ask_delete(&mut self, cx: &mut Context<Self>) {
+        let backend = self.backend.read(cx);
+        if !backend.sms_role_held() && !backend.is_preview() {
+            cx.emit(SmsConversationEvent::NeedsRole);
+        } else {
+            self.select_delete = true;
+        }
+        cx.notify();
+    }
+
+    /// "Delete" on the sheet: every ticked message is hidden and waits out one shared
+    /// Undo window.
+    fn select_delete_now(&mut self, cx: &mut Context<Self>) {
+        let keys: Vec<SmsKey> = self.selected_items().iter().map(|i| i.key).collect();
+        self.end_select();
+        if keys.is_empty() {
+            cx.notify();
+            return;
+        }
+        let now = now_ms();
+        for key in &keys {
+            self.pending.add(*key, now);
+        }
+        cx.emit(SmsConversationEvent::Deleted(keys));
+        self.start_ticking(cx);
+        cx.notify();
+    }
+
     /// Whether `key` is hidden: waiting out its Undo window or being deleted.
     fn is_hidden(&self, key: SmsKey) -> bool {
         self.pending.contains(&key) || self.deleting.contains(&key)
@@ -1069,7 +1379,7 @@ impl SmsConversation {
         };
         self.pending.add(key, now_ms());
         self.rows_dirty = true;
-        cx.emit(SmsConversationEvent::Deleted(key));
+        cx.emit(SmsConversationEvent::Deleted(vec![key]));
         self.start_ticking(cx);
         cx.notify();
     }
@@ -1521,7 +1831,9 @@ impl SmsConversation {
                 Entry::Unread(count) => key_of((3u8, count)),
                 Entry::Message(index) => {
                     let base = message_key(&items[index]);
-                    key_of((base, self.selected == Some(base)))
+                    let picked = self.select.as_ref().map(|s| s.contains(&items[index].key));
+                    let starred = self.is_starred(items[index].key);
+                    key_of((base, self.selected == Some(base), picked, starred))
                 }
             }))
             .collect();
@@ -1728,6 +2040,262 @@ impl SmsConversation {
         ))
     }
 
+    /// Select mode's bar over the conversation.
+    fn select_bar(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        use crate::select_ui::{BarAction, BarEnds, select_bar};
+        let items = self.selected_items();
+        let n = items.len();
+        let states: Vec<bool> = items.iter().map(|i| self.is_starred(i.key)).collect();
+        let star = multi_select::star_all(&states);
+        let ends = BarEnds {
+            close: Box::new(cx.listener(|this, _, _, cx| {
+                this.end_select();
+                cx.notify();
+            })),
+            select_all: Box::new(cx.listener(|this, _, _, cx| this.select_all_loaded(cx))),
+        };
+        let actions = if n == 0 {
+            Vec::new()
+        } else {
+            vec![
+                BarAction {
+                    id: "sms-sel-copy",
+                    icon: Icon::LucideCopy,
+                    label: "Copy".into(),
+                    danger: false,
+                    on_click: Box::new(cx.listener(|this, _, _, cx| this.select_copy(cx))),
+                },
+                BarAction {
+                    id: "sms-sel-forward",
+                    icon: Icon::LucideForward,
+                    label: "Forward".into(),
+                    danger: false,
+                    on_click: Box::new(cx.listener(|this, _, _, cx| this.select_forward(cx))),
+                },
+                BarAction {
+                    id: "sms-sel-star",
+                    icon: Icon::LucideStar,
+                    label: if star { "Star" } else { "Unstar" }.into(),
+                    danger: false,
+                    on_click: Box::new(cx.listener(|this, _, _, cx| this.select_star(cx))),
+                },
+                BarAction {
+                    id: "sms-sel-delete",
+                    icon: Icon::LucideTrash2,
+                    label: "Delete".into(),
+                    danger: true,
+                    on_click: Box::new(cx.listener(|this, _, _, cx| this.select_ask_delete(cx))),
+                },
+            ]
+        };
+        select_bar(theme, multi_select::title(n), ends, actions)
+    }
+
+    /// "Delete n messages?" for select mode.
+    fn select_delete_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.select_delete {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        let n = self.selected_items().len();
+        let cancel = |this: &mut Self, cx: &mut Context<Self>| {
+            this.select_delete = false;
+            cx.notify();
+        };
+        let items = vec![
+            crate::menu_item(
+                theme,
+                "sms-seldel-yes",
+                Icon::LucideTrash2,
+                "Delete".into(),
+                colors.red,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.select_delete_now(cx)))
+            .into_any_element(),
+            crate::menu_item(
+                theme,
+                "sms-seldel-no",
+                Icon::LucideX,
+                "Cancel".into(),
+                colors.label,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| cancel(this, cx)))
+            .into_any_element(),
+        ];
+        let title = if n == 1 {
+            "Delete 1 message? It is removed from this phone.".to_owned()
+        } else {
+            format!("Delete {n} messages? They are removed from this phone.")
+        };
+        Some(crate::menu_card(
+            theme,
+            "sms-select-delete-menu",
+            title.into(),
+            items,
+            cx.listener(move |this, _, _, cx| cancel(this, cx)),
+        ))
+    }
+
+    /// Jumps to a starred message: the sheet closes and the page works towards it.
+    fn jump_to_star(&mut self, row: &StarredRow, cx: &mut Context<Self>) {
+        self.starred_open = false;
+        self.goto = Some(rovsti_core::global_search::JumpTarget {
+            id: row.id.clone(),
+            at_ms: row.at_ms,
+        });
+        self.goto_pages = 0;
+        self.continue_goto(cx);
+        cx.notify();
+    }
+
+    /// Unstars by provider id (the sheet's rows).
+    fn unstar_id(&mut self, id: &str, cx: &mut Context<Self>) {
+        let id = id.to_owned();
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |prefs| {
+                prefs.sms_stars.set(&id, None);
+            });
+        });
+        self.rows_dirty = true;
+        cx.emit(SmsConversationEvent::Toast("Unstarred".into()));
+        cx.notify();
+    }
+
+    /// The "Starred messages" sheet over the conversation.
+    fn starred_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.starred_open {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        let rows = self
+            .star_thread()
+            .map(|thread| self.backend.read(cx).prefs().sms_stars.rows_for(&thread))
+            .unwrap_or_default();
+        let now = self.frame_now;
+        let offset = self.rows_offset;
+        let mut items: Vec<AnyElement> = Vec::new();
+        if rows.is_empty() {
+            items.push(
+                div()
+                    .px(px(16.0))
+                    .py(px(12.0))
+                    .text_size(typography::BODY.size)
+                    .text_color(colors.secondary_label)
+                    .child(starred::empty_text(false))
+                    .into_any_element(),
+            );
+        } else {
+            let list: Vec<AnyElement> = rows
+                .into_iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    let (unstar_id, hold_id) = (row.id.clone(), row.id.clone());
+                    let when = format!(
+                        "{} {}",
+                        day_label(day_start_ms(row.at_ms, offset), now, offset),
+                        clock(row.at_ms, offset)
+                    );
+                    let author = row.author.clone();
+                    let preview = row.preview.clone();
+                    let target = row;
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .id(("sms-starred-row", index))
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .px(px(16.0))
+                                .py(px(8.0))
+                                .min_h(rovsti_ui::tokens::metrics::MIN_HIT)
+                                .rounded(px(14.0))
+                                .hover(|s| s.bg(colors.label.opacity(0.06)))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .justify_between()
+                                        .gap(px(8.0))
+                                        .text_size(typography::CAPTION.size)
+                                        .text_color(colors.secondary_label)
+                                        .child(div().truncate().child(author))
+                                        .child(div().flex_none().child(when)),
+                                )
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(typography::BODY.size)
+                                        .text_color(colors.label)
+                                        .child(preview),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.jump_to_star(&target, cx);
+                                }))
+                                .on_long_press(cx.listener(move |this, _, _, cx| {
+                                    this.unstar_id(&hold_id, cx);
+                                })),
+                        )
+                        .child(
+                            div()
+                                .id(("sms-starred-unstar", index))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .size(rovsti_ui::tokens::metrics::MIN_HIT)
+                                .child(
+                                    gpui::svg()
+                                        .path(Icon::LucideStar.path())
+                                        .size(px(20.0))
+                                        .text_color(colors.accent),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.unstar_id(&unstar_id, cx);
+                                })),
+                        )
+                        .into_any_element()
+                })
+                .collect();
+            items.push(
+                div()
+                    .id("sms-starred-list")
+                    .flex()
+                    .flex_col()
+                    .max_h(px(420.0))
+                    .overflow_y_scroll()
+                    .children(list)
+                    .into_any_element(),
+            );
+        }
+        items.push(
+            crate::menu_item(
+                theme,
+                "sms-starred-close",
+                Icon::LucideX,
+                "Close".into(),
+                colors.label,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.starred_open = false;
+                cx.notify();
+            }))
+            .into_any_element(),
+        );
+        Some(crate::menu_card(
+            theme,
+            "sms-starred-sheet",
+            "Starred messages".into(),
+            items,
+            cx.listener(|this, _, _, cx| {
+                this.starred_open = false;
+                cx.notify();
+            }),
+        ))
+    }
+
     /// The Info or Select text sheet over the conversation.
     fn info_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let sheet = self.info_sheet.as_ref()?;
@@ -1847,7 +2415,7 @@ impl SmsConversation {
                         .max_h(px(320.0))
                         .rounded(radius::CARD)
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if this.selected.is_some() {
+                            if this.selected.is_some() || this.select.is_some() {
                                 // An open selection is closed by the bubble's own tap.
                                 return;
                             }
@@ -1899,16 +2467,30 @@ impl SmsConversation {
                     .child(item.body.clone()),
             );
         }
+        let starred = self.is_starred(item.key);
         bubble = bubble.child(
             div()
                 .self_end()
+                .flex()
+                .items_center()
+                .gap(px(3.0))
                 .text_size(typography::CAPTION.size)
                 .text_color(meta_color)
+                .when(starred, |row| {
+                    row.child(
+                        gpui::svg()
+                            .path(Icon::LucideStar.path())
+                            .size(px(10.0))
+                            .text_color(meta_color),
+                    )
+                })
                 .child(meta),
         );
         let key = message_key(item);
         let has_files = !saveable_parts(item).is_empty();
-        if let Some(local_id) = retry {
+        if self.select.is_some() {
+            // The row's own tap toggles the tick.
+        } else if let Some(local_id) = retry {
             bubble = bubble
                 .on_click(cx.listener(move |this, _, _, cx| this.retry(local_id, cx)))
                 .on_long_press(cx.listener(move |this, _, _, cx| {
@@ -2013,6 +2595,28 @@ impl SmsConversation {
                 );
             }
             let key = item.key;
+            if self.star_id(key).is_some() {
+                let label = if starred { "Unstar" } else { "Star" };
+                pills = pills.child(
+                    glass_pill(theme, label)
+                        .id(("sms-star", index))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            gpui::svg()
+                                .path(Icon::LucideStar.path())
+                                .size(px(14.0))
+                                .text_color(colors.label),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| this.star_one(key, cx))),
+                );
+            }
+            pills = pills.child(
+                glass_pill(theme, "Select")
+                    .id(("sms-pick", index))
+                    .on_click(cx.listener(move |this, _, _, cx| this.begin_select(key, cx))),
+            );
             pills = pills.child(
                 glass_pill(theme, "Delete")
                     .id(("sms-del-one", index))
@@ -2132,10 +2736,31 @@ impl SmsConversation {
             }
             column = column.child(pills);
         }
-        div()
+        let row = div()
             .flex()
             .when(own, |row| row.justify_end())
-            .child(column)
+            .child(column);
+        let Some(selection) = &self.select else {
+            return row.into_any_element();
+        };
+        if !selectable(item) {
+            return row.opacity(0.5).into_any_element();
+        }
+        let picked = selection.contains(&item.key);
+        let (toggle, hold) = (item.key, item.key);
+        div()
+            .id(("sms-sel", index))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .py(px(2.0))
+            .px(px(4.0))
+            .rounded(radius::CARD)
+            .when(picked, |r| r.bg(colors.accent.opacity(0.15)))
+            .child(crate::select_ui::check_mark(theme, picked))
+            .child(div().flex_1().min_w_0().child(row))
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_select(toggle, cx)))
+            .on_long_press(cx.listener(move |this, _, _, cx| this.toggle_select(hold, cx)))
             .into_any_element()
     }
 }
@@ -2159,6 +2784,8 @@ impl Render for SmsConversation {
 
         self.frame_now = now;
         if self.rows_dirty || self.rows_offset != offset {
+            self.refresh_stars(cx);
+            self.prune_selection();
             self.sync_rows_at(offset);
         }
         let timeline = list(
@@ -2218,14 +2845,19 @@ impl Render for SmsConversation {
             .child(more)
             .into_any_element();
         let avatar = self.header_avatar(theme, cx);
-        let header = header_bar_with(
-            theme,
-            back,
-            avatar,
-            self.title.clone(),
-            header_subtitle(&self.title, &self.recipients),
-            Some(trailing),
-        );
+        let header = if self.select.is_some() {
+            self.select_bar(theme, cx)
+        } else {
+            header_bar_with(
+                theme,
+                back,
+                avatar,
+                self.title.clone(),
+                header_subtitle(&self.title, &self.recipients),
+                Some(trailing),
+            )
+            .into_any_element()
+        };
         let find_row = self.find.as_ref().map(|find| {
             find_bar(
                 theme,
@@ -2396,6 +3028,8 @@ impl Render for SmsConversation {
         let info_sheet = self.info_overlay(theme, cx);
         let gallery_sheet = self.gallery_overlay(theme, cx);
         let delete_sheet = self.delete_overlay(theme, cx);
+        let select_delete_sheet = self.select_delete_overlay(theme, cx);
+        let starred_sheet = self.starred_overlay(theme, cx);
         div()
             .size_full()
             .relative()
@@ -2410,10 +3044,25 @@ impl Render for SmsConversation {
             .children(info_sheet)
             .children(gallery_sheet)
             .children(delete_sheet)
+            .children(select_delete_sheet)
+            .children(starred_sheet)
     }
 }
 
 // ---- pure helpers -----------------------------------------------------------
+
+/// The star kept for a message: who wrote it and a one-line preview.
+fn local_star(item: &SmsItem, thread: &str, title: &str) -> LocalStar {
+    let preview = copy_text(item)
+        .or_else(|| item.parts.first().map(|p| part_label(&p.content_type)))
+        .unwrap_or_default();
+    LocalStar {
+        thread_id: thread.to_owned(),
+        at_ms: item.at_ms,
+        author: if item.outgoing { "You" } else { title }.to_owned(),
+        preview,
+    }
+}
 
 /// The key of a bubble: everything that changes what it shows or how tall it is.
 fn message_key(item: &SmsItem) -> u64 {
@@ -2795,6 +3444,29 @@ mod tests {
         m.state = DeliveryState::None;
         m.body = "  ".into();
         assert!(!selectable(&m));
+    }
+
+    #[test]
+    fn local_stars_name_the_author_and_preview() {
+        let mut m = item(false, DeliveryState::None, 5_000);
+        m.body = "  see you at 6  ".to_owned();
+        let star = local_star(&m, "12", "Ada");
+        assert_eq!(star.author, "Ada");
+        assert_eq!(star.thread_id, "12");
+        assert_eq!(star.at_ms, 5_000);
+        assert_eq!(star.preview, "see you at 6");
+        let mine = item(true, DeliveryState::Sent, 6_000);
+        assert_eq!(local_star(&mine, "12", "Ada").author, "You");
+    }
+
+    #[test]
+    fn sms_keys_order_for_selection() {
+        let mut selection = Selection::new();
+        assert!(selection.toggle(SmsKey::Mms(2)));
+        assert!(selection.toggle(SmsKey::Sms(9)));
+        assert!(selection.contains(&SmsKey::Sms(9)));
+        assert!(!selection.contains(&SmsKey::Local(1)));
+        assert_eq!(selection.len(), 2);
     }
 
     #[test]

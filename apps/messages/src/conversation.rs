@@ -3178,28 +3178,7 @@ impl Conversation {
         }
         let picked = selection.contains(&message.id);
         let (toggle, hold) = (message.id.clone(), message.id.clone());
-        let ring = if picked {
-            colors.accent
-        } else {
-            colors.tertiary_label
-        };
-        let mark = div()
-            .flex_none()
-            .size(px(22.0))
-            .rounded_full()
-            .border_1()
-            .border_color(ring)
-            .flex()
-            .items_center()
-            .justify_center()
-            .when(picked, |m| {
-                m.bg(colors.accent).child(
-                    gpui::svg()
-                        .path(Icon::LucideCheck.path())
-                        .size(px(14.0))
-                        .text_color(gpui::white()),
-                )
-            });
+        let mark = crate::select_ui::check_mark(theme, picked);
         div()
             .id(SharedString::from(format!("sel-{}", message.id)))
             .flex()
@@ -4095,84 +4074,56 @@ impl Conversation {
 
     /// Select mode's glass bar: Close, the count, Select all, then the bulk actions.
     fn select_bar(&self, theme: Theme, cx: &mut Context<Self>) -> gpui::AnyElement {
-        let colors = theme::colors(theme);
+        use crate::select_ui::{BarAction, BarEnds, select_bar};
         let n = self.select.as_ref().map_or(0, Selection::len);
-        let close = glass_icon_button(theme, Icon::LucideX, 0.0, false)
-            .id("sel-close")
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.end_select();
-                cx.notify();
-            }))
-            .into_any_element();
-        let all = glass_pill(theme, "Select all")
-            .id("sel-all")
-            .on_click(cx.listener(|this, _, _, cx| this.select_all_loaded(cx)))
-            .into_any_element();
         let ids = self.selected_ids();
         let states: Vec<bool> = ids.iter().map(|id| self.starred(id)).collect();
         let star = multi_select::star_all(&states);
-        let pill = |key: &'static str, icon: Icon, label: &str, danger: bool| {
-            let color = if danger { colors.red } else { colors.label };
-            glass_pill(theme, label.to_owned())
-                .id(key)
-                .flex()
-                .items_center()
-                .gap(px(6.0))
-                .text_color(color)
-                .child(
-                    gpui::svg()
-                        .path(icon.path())
-                        .size(px(14.0))
-                        .text_color(color),
-                )
+        let ends = BarEnds {
+            close: Box::new(cx.listener(|this, _, _, cx| {
+                this.end_select();
+                cx.notify();
+            })),
+            select_all: Box::new(cx.listener(|this, _, _, cx| this.select_all_loaded(cx))),
         };
-        let actions = div()
-            .flex()
-            .flex_wrap()
-            .gap(px(6.0))
-            .px(px(8.0))
-            .pb(px(8.0))
-            .when(n > 0, |row| {
-                row.child(
-                    pill("sel-copy", Icon::LucideCopy, "Copy", false)
-                        .on_click(cx.listener(|this, _, _, cx| this.select_copy(cx))),
-                )
-                .child(
-                    pill("sel-forward", Icon::LucideForward, "Forward", false)
-                        .on_click(cx.listener(|this, _, _, cx| this.select_forward(cx))),
-                )
-                .child(
-                    pill(
-                        "sel-star",
-                        Icon::LucideStar,
-                        if star { "Star" } else { "Unstar" },
-                        false,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.select_star(cx))),
-                )
-                .child(
-                    pill("sel-delete", Icon::LucideTrash2, "Delete", true).on_click(cx.listener(
-                        |this, _, _, cx| {
-                            this.select_delete = true;
-                            cx.notify();
-                        },
-                    )),
-                )
-            });
-        div()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .child(header_bar_with(
-                theme,
-                close,
-                None,
-                multi_select::title(n).into(),
-                None,
-                Some(all),
-            ))
-            .child(actions)
-            .into_any_element()
+        let actions = if n == 0 {
+            Vec::new()
+        } else {
+            vec![
+                BarAction {
+                    id: "sel-copy",
+                    icon: Icon::LucideCopy,
+                    label: "Copy".into(),
+                    danger: false,
+                    on_click: Box::new(cx.listener(|this, _, _, cx| this.select_copy(cx))),
+                },
+                BarAction {
+                    id: "sel-forward",
+                    icon: Icon::LucideForward,
+                    label: "Forward".into(),
+                    danger: false,
+                    on_click: Box::new(cx.listener(|this, _, _, cx| this.select_forward(cx))),
+                },
+                BarAction {
+                    id: "sel-star",
+                    icon: Icon::LucideStar,
+                    label: if star { "Star" } else { "Unstar" }.into(),
+                    danger: false,
+                    on_click: Box::new(cx.listener(|this, _, _, cx| this.select_star(cx))),
+                },
+                BarAction {
+                    id: "sel-delete",
+                    icon: Icon::LucideTrash2,
+                    label: "Delete".into(),
+                    danger: true,
+                    on_click: Box::new(cx.listener(|this, _, _, cx| {
+                        this.select_delete = true;
+                        cx.notify();
+                    })),
+                },
+            ]
+        };
+        select_bar(theme, multi_select::title(n), ends, actions)
     }
 
     /// "Delete for everyone / for me" over the conversation.

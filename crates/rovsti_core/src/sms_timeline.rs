@@ -6,7 +6,7 @@ use crate::sms::{
     DeliveryState, MmsPart, MmsRow, SmsBox, SmsMessagesPayload, SmsRow, SmsSend, SmsStatus,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SmsKey {
     /// `content://sms/<id>`.
     Sms(i64),

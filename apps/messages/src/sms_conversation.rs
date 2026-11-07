@@ -123,6 +123,11 @@ pub enum SmsConversationEvent {
     Forward(crate::forward_ui::ForwardItem),
     /// The Copy link pill: the page copies the URL and says "Link copied".
     CopyLink(String),
+    /// A copy with its own pill text ("Coordinates copied", "Name copied").
+    CopyNotice {
+        text: String,
+        notice: &'static str,
+    },
     /// The Copy date pill: the page copies the text and says "Date copied".
     CopyDate(String),
     /// The Add to calendar pill: the page opens the calendar editor.
@@ -225,6 +230,8 @@ pub struct SmsConversation {
     star_ids: HashSet<String>,
     /// The open Info or Select text sheet.
     info_sheet: Option<crate::info_ui::InfoSheet>,
+    /// The header's copy choices (name, number), while their sheet is open.
+    header_sheet: Option<Vec<rovsti_core::copy_choices::CopyChoice>>,
     /// The "Media, links and docs" sheet.
     gallery: Option<crate::gallery_ui::GallerySheet>,
     /// The "View contact" sheet of a shared card.
@@ -349,6 +356,7 @@ impl SmsConversation {
             muted_until: None,
             star_ids: HashSet::new(),
             info_sheet: None,
+            header_sheet: None,
             gallery: None,
             card_sheet: None,
             cards: Default::default(),
@@ -541,6 +549,7 @@ impl SmsConversation {
         }
         if self.gallery.take().is_some()
             || self.info_sheet.take().is_some()
+            || self.header_sheet.take().is_some()
             || self.card_sheet.take().is_some()
         {
             cx.notify();
@@ -2576,6 +2585,53 @@ impl SmsConversation {
         ))
     }
 
+    /// Title hold: the sheet of copy choices (name, number).
+    fn open_header_sheet(&mut self, cx: &mut Context<Self>) {
+        let number = match self.recipients.as_slice() {
+            [one] => Some(one.as_str()),
+            _ => None,
+        };
+        let choices = rovsti_core::copy_choices::header_choices(&self.title, number, None);
+        if choices.is_empty() {
+            cx.emit(SmsConversationEvent::Notice("Nothing to copy"));
+        } else {
+            self.selected = None;
+            self.rows_dirty = true;
+            self.header_sheet = Some(choices);
+        }
+        cx.notify();
+    }
+
+    /// The header's copy choices over the conversation.
+    fn header_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let choices = self.header_sheet.as_ref()?;
+        let close = cx.listener(|this, _, _, cx| {
+            this.header_sheet = None;
+            cx.notify();
+        });
+        let page = cx.entity();
+        Some(crate::info_ui::choices_overlay(
+            theme,
+            choices,
+            close,
+            move |i| {
+                let page = page.clone();
+                Box::new(move |_, _, cx| {
+                    page.update(cx, |this, cx| {
+                        let choice = this.header_sheet.take().and_then(|c| c.into_iter().nth(i));
+                        if let Some(choice) = choice {
+                            cx.emit(SmsConversationEvent::CopyNotice {
+                                text: choice.text,
+                                notice: choice.notice,
+                            });
+                        }
+                        cx.notify();
+                    });
+                })
+            },
+        ))
+    }
+
     /// The Info or Select text sheet over the conversation.
     fn info_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let sheet = self.info_sheet.as_ref()?;
@@ -3051,9 +3107,44 @@ impl SmsConversation {
                         })),
                 );
             }
+            let place = rovsti_core::location_link::find_places(&item.body, 1).pop();
+            if let Some(place) = &place {
+                let (lat, lon, label) = (place.lat, place.lon, place.label.clone());
+                let coords = rovsti_core::location_link::coords_text(lat, lon);
+                pills = pills.child(
+                    glass_pill(theme, "Open in Maps")
+                        .id(("sms-place-open", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            cx.open_url(&rovsti_core::location_link::geo_url(
+                                lat,
+                                lon,
+                                label.as_deref(),
+                            ));
+                            cx.notify();
+                        })),
+                );
+                pills = pills.child(
+                    glass_pill(theme, "Copy coordinates")
+                        .id(("sms-place-copy", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            cx.emit(SmsConversationEvent::CopyNotice {
+                                text: coords.clone(),
+                                notice: "Coordinates copied",
+                            });
+                            cx.notify();
+                        })),
+                );
+            }
             if let Some(link) = rovsti_core::spam::open_links(&item.body, 1)
                 .into_iter()
                 .next()
+                && !place
+                    .as_ref()
+                    .is_some_and(|p| crate::conversation::place_is_link(&item.body, p, &link.url))
             {
                 pills = pills.child(
                     glass_pill(theme, "Copy link")
@@ -3244,6 +3335,10 @@ impl Render for SmsConversation {
             .child(more)
             .into_any_element();
         let avatar = self.header_avatar(theme, cx);
+        let hold: crate::conversation::TitleHold = {
+            let page = cx.entity();
+            Box::new(move |_, cx| page.update(cx, |this, cx| this.open_header_sheet(cx)))
+        };
         let header = if self.select.is_some() {
             self.select_bar(theme, cx)
         } else {
@@ -3255,6 +3350,7 @@ impl Render for SmsConversation {
                 rovsti_core::mute::header_line(self.muted_until, now, locale.tz_offset_s)
                     .or_else(|| header_subtitle(&self.title, &self.recipients)),
                 Some(trailing),
+                Some(hold),
             )
             .into_any_element()
         };
@@ -3440,6 +3536,7 @@ impl Render for SmsConversation {
         };
 
         let info_sheet = self.info_overlay(theme, cx);
+        let header_sheet = self.header_overlay(theme, cx);
         let card_sheet = self
             .card_sheet
             .as_ref()
@@ -3461,6 +3558,7 @@ impl Render for SmsConversation {
             .children(has_info.then_some(info))
             .child(bottom)
             .children(info_sheet)
+            .children(header_sheet)
             .children(card_sheet)
             .children(gallery_sheet)
             .children(delete_sheet)

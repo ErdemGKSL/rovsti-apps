@@ -88,6 +88,7 @@ pub fn select_bar(
             title.into(),
             None,
             Some(all),
+            None,
         ))
         .child(row)
         .into_any_element()

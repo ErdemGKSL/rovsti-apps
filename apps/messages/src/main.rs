@@ -1206,6 +1206,7 @@ impl MessagesApp {
             ConversationEvent::CopyBlock { text, notice } => {
                 this.copy_text_with(text.clone().into(), false, notice.clone(), cx);
             }
+            ConversationEvent::CopyCode(code) => this.copy_code(code.clone().into(), cx),
             ConversationEvent::CopyLink(url) => {
                 this.copy_text_with(url.clone().into(), false, "Link copied", cx);
             }
@@ -1316,6 +1317,9 @@ impl MessagesApp {
             SmsConversationEvent::ToggleMute => this.toggle_open_mute(cx),
             SmsConversationEvent::Copy { text, sensitive } => {
                 this.copy_text(text.clone().into(), *sensitive, cx);
+            }
+            SmsConversationEvent::CopyNotice { text, notice } => {
+                this.copy_text_with(text.clone().into(), false, *notice, cx);
             }
             SmsConversationEvent::CopyLink(url) => {
                 this.copy_text_with(url.clone().into(), false, "Link copied", cx);

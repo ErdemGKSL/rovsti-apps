@@ -96,6 +96,41 @@ pub(crate) fn copy_text_of(body: &MessageBody, meta: Option<&MessageMeta>) -> Op
     (!text.is_empty()).then(|| text.to_owned())
 }
 
+/// The one-time code of a message to copy: incoming, not deleted, with a code
+/// in its text or caption.
+pub(crate) fn copy_code_of(message: &WaMessage, meta: Option<&MessageMeta>) -> Option<String> {
+    copy_code_parts(message.from_me, &message.body, meta)
+}
+
+/// [`copy_code_of`] for callers that hold the parts (the inbox preview).
+pub(crate) fn copy_code_parts(
+    from_me: bool,
+    body: &MessageBody,
+    meta: Option<&MessageMeta>,
+) -> Option<String> {
+    if from_me {
+        return None;
+    }
+    let text = copy_text_of(body, meta)?;
+    rovsti_core::otp::detect(&text).map(|o| o.code)
+}
+
+/// Whether the place found in `text` is exactly the link `url` (a Maps link):
+/// then "Copy link" would only repeat what "Open in Maps" and "Copy
+/// coordinates" already offer.
+pub(crate) fn place_is_link(text: &str, place: &location_link::Place, url: &str) -> bool {
+    fn bare(s: &str) -> &str {
+        let s = s
+            .trim()
+            .trim_end_matches(['.', ',', ';', ':', '!', '?', ')']);
+        s.strip_prefix("https://")
+            .or_else(|| s.strip_prefix("http://"))
+            .unwrap_or(s)
+    }
+    text.get(place.span.clone())
+        .is_some_and(|slice| bare(slice).eq_ignore_ascii_case(bare(url)))
+}
+
 /// Messages per history request.
 const PAGE: u32 = 50;
 
@@ -147,6 +182,8 @@ pub enum ConversationEvent {
     Email(String),
     /// The Copy link pill: the page copies the URL and says "Link copied".
     CopyLink(String),
+    /// The Copy code pill: the page copies the one-time code, hidden from the paste preview.
+    CopyCode(String),
     /// The Copy date pill: the page copies the text and says "Date copied".
     CopyDate(String),
     /// The Add to calendar pill: the page opens the calendar editor.
@@ -387,6 +424,8 @@ pub struct Conversation {
     select_delete: bool,
     /// The open Info or Select text sheet.
     info_sheet: Option<crate::info_ui::InfoSheet>,
+    /// The header's copy choices (name, number, ID), while their sheet is open.
+    header_sheet: Option<Vec<rovsti_core::copy_choices::CopyChoice>>,
     /// The "View contact" sheet of a shared card.
     card_sheet: Option<CardView>,
     /// The message a quote tap jumped to (it glows for a moment).
@@ -551,6 +590,7 @@ impl Conversation {
             select: None,
             select_delete: false,
             info_sheet: None,
+            header_sheet: None,
             card_sheet: None,
             starred_open: false,
             date_sheet: None,
@@ -660,6 +700,8 @@ impl Conversation {
             self.gallery = None;
         } else if self.card_sheet.is_some() {
             self.card_sheet = None;
+        } else if self.header_sheet.is_some() {
+            self.header_sheet = None;
         } else if self.info_sheet.is_some() {
             self.info_sheet = None;
         } else if self.date_sheet.is_some() {
@@ -3981,6 +4023,18 @@ impl Conversation {
                 ));
             return row.into_any_element();
         }
+        if let Some(code) = copy_code_of(message, meta) {
+            row = row.child(
+                pill("copy-code", Icon::LucideCopy, "Copy code", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::CopyCode(code.clone()));
+                        cx.notify();
+                    },
+                )),
+            );
+        }
         for (n, action) in card_actions(meta).into_iter().enumerate() {
             let (icon, label) = match &action {
                 CardAction::OpenMap { .. } => (Icon::LucideMapPin, "Open in Maps"),
@@ -4135,9 +4189,48 @@ impl Conversation {
                 );
             }
         }
+        let place = if revoked {
+            None
+        } else {
+            copy_text_of(&message.body, meta).and_then(|text| {
+                location_link::find_places(&text, 1)
+                    .pop()
+                    .map(|p| (text, p))
+            })
+        };
+        if let Some((_, place)) = &place {
+            let (lat, lon, label) = (place.lat, place.lon, place.label.clone());
+            let coords = location_link::coords_text(lat, lon);
+            row = row.child(
+                pill("place-open", Icon::LucideMapPin, "Open in Maps", false).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.open_url(&location_link::geo_url(lat, lon, label.as_deref()));
+                        cx.notify();
+                    }),
+                ),
+            );
+            row = row.child(
+                pill("place-copy", Icon::LucideCopy, "Copy coordinates", false).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::CopyBlock {
+                            text: coords.clone(),
+                            notice: "Coordinates copied".to_owned(),
+                        });
+                        cx.notify();
+                    }),
+                ),
+            );
+        }
         if !revoked
             && let Some(text) = copy_text_of(&message.body, meta)
             && let Some(link) = rovsti_core::spam::open_links(&text, 1).into_iter().next()
+            && !place
+                .as_ref()
+                .is_some_and(|(t, p)| place_is_link(t, p, &link.url))
         {
             row = row.child(
                 pill("copy-link", Icon::LucideCopy, "Copy link", false).on_click(cx.listener(
@@ -4430,6 +4523,55 @@ impl Conversation {
             .ok();
         })
         .detach();
+    }
+
+    /// The copy choices of this chat's header (name, number, WhatsApp ID).
+    fn header_choices(&self) -> Vec<rovsti_core::copy_choices::CopyChoice> {
+        let number = is_pn_jid(&self.chat).then(|| format!("+{}", jid_user(&self.chat)));
+        rovsti_core::copy_choices::header_choices(&self.title, number.as_deref(), Some(&self.chat))
+    }
+
+    /// Title hold: the sheet of copy choices.
+    fn open_header_sheet(&mut self, cx: &mut Context<Self>) {
+        let choices = self.header_choices();
+        if choices.is_empty() {
+            cx.emit(ConversationEvent::Notice("Nothing to copy".to_owned()));
+        } else {
+            self.strip = None;
+            self.rows_dirty = true;
+            self.header_sheet = Some(choices);
+        }
+        cx.notify();
+    }
+
+    /// The header's copy choices over the conversation.
+    fn header_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let choices = self.header_sheet.as_ref()?;
+        let close = cx.listener(|this, _, _, cx| {
+            this.header_sheet = None;
+            cx.notify();
+        });
+        let page = cx.entity();
+        Some(crate::info_ui::choices_overlay(
+            theme,
+            choices,
+            close,
+            move |i| {
+                let page = page.clone();
+                Box::new(move |_, _, cx| {
+                    page.update(cx, |this, cx| {
+                        let choice = this.header_sheet.take().and_then(|c| c.into_iter().nth(i));
+                        if let Some(choice) = choice {
+                            cx.emit(ConversationEvent::CopyBlock {
+                                text: choice.text,
+                                notice: choice.notice.to_owned(),
+                            });
+                        }
+                        cx.notify();
+                    });
+                })
+            },
+        ))
     }
 
     /// The Info or Select text sheet over the conversation.
@@ -4841,6 +4983,10 @@ impl Render for Conversation {
             .child(mute)
             .into_any_element();
         let avatar = self.header_avatar(theme, cx);
+        let hold: TitleHold = {
+            let page = cx.entity();
+            Box::new(move |_, cx| page.update(cx, |this, cx| this.open_header_sheet(cx)))
+        };
         let header = if self.select.is_some() {
             self.select_bar(theme, cx)
         } else {
@@ -4851,6 +4997,7 @@ impl Render for Conversation {
                 self.title.clone(),
                 self.subtitle(now),
                 Some(trailing),
+                Some(hold),
             )
             .into_any_element()
         };
@@ -4993,6 +5140,7 @@ impl Render for Conversation {
         let date_sheet = self.date_overlay(theme, cx);
         let gallery_sheet = self.gallery_overlay(theme, cx);
         let info_sheet = self.info_overlay(theme, cx);
+        let header_sheet = self.header_overlay(theme, cx);
         let card_sheet = self.card_card_overlay(theme, cx);
 
         div()
@@ -5012,6 +5160,7 @@ impl Render for Conversation {
             .children(starred_sheet)
             .children(date_sheet)
             .children(info_sheet)
+            .children(header_sheet)
             .children(card_sheet)
             .children(gallery_sheet)
     }
@@ -5090,10 +5239,14 @@ pub(crate) fn header_bar(
     subtitle: Option<String>,
     trailing: Option<gpui::AnyElement>,
 ) -> gpui::Div {
-    header_bar_with(theme, back, None, title, subtitle, trailing)
+    header_bar_with(theme, back, None, title, subtitle, trailing, None)
 }
 
+/// What holding the header's title does.
+pub(crate) type TitleHold = Box<dyn Fn(&mut Window, &mut gpui::App) + 'static>;
+
 /// [`header_bar`] with an avatar between the back button and the title.
+/// `on_title_hold` runs after a Selection haptic when the title is held.
 pub(crate) fn header_bar_with(
     theme: Theme,
     back: gpui::AnyElement,
@@ -5101,6 +5254,7 @@ pub(crate) fn header_bar_with(
     title: SharedString,
     subtitle: Option<String>,
     trailing: Option<gpui::AnyElement>,
+    on_title_hold: Option<TitleHold>,
 ) -> gpui::Div {
     let colors = theme::colors(theme);
     div()
@@ -5115,10 +5269,17 @@ pub(crate) fn header_bar_with(
         .children(avatar)
         .child(
             div()
+                .id(("conv-title", 0usize))
                 .flex_1()
                 .min_w_0()
                 .flex()
                 .flex_col()
+                .when_some(on_title_hold, |col, hold| {
+                    col.on_long_press(move |_, window, cx| {
+                        rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+                        hold(window, cx);
+                    })
+                })
                 .child(
                     div()
                         .truncate()
@@ -5950,6 +6111,45 @@ mod tests {
             ..MessageMeta::default()
         };
         assert_eq!(copy_text_of(&text, Some(&card)), None);
+    }
+
+    fn wa_msg(from_me: bool, text: &str) -> WaMessage {
+        WaMessage {
+            id: "m1".into(),
+            chat: "905321111111@s.whatsapp.net".into(),
+            from_me,
+            sender: None,
+            timestamp_ms: 1,
+            body: MessageBody::Text(text.into()),
+            reactions: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn copy_code_of_incoming_codes_only() {
+        let code = "Your verification code is 482913.";
+        assert_eq!(
+            copy_code_of(&wa_msg(false, code), None).as_deref(),
+            Some("482913")
+        );
+        assert_eq!(copy_code_of(&wa_msg(true, code), None), None);
+        assert_eq!(copy_code_of(&wa_msg(false, "see you at 1500"), None), None);
+        let revoked = MessageMeta {
+            revoked: true,
+            ..MessageMeta::default()
+        };
+        assert_eq!(copy_code_of(&wa_msg(false, code), Some(&revoked)), None);
+    }
+
+    #[test]
+    fn a_place_that_is_the_link_hides_copy_link() {
+        let url = "https://www.google.com/maps/@41.0082,28.9784,15z";
+        let text = format!("Here: {url}.");
+        let place = location_link::find_places(&text, 1).pop().expect("place");
+        assert!(place_is_link(&text, &place, url));
+        let bare = "meet at 41.0082, 28.9784 https://example.com/a";
+        let place = location_link::find_places(bare, 1).pop().expect("place");
+        assert!(!place_is_link(bare, &place, "https://example.com/a"));
     }
 
     // 2026-11-05 14:05:00 UTC

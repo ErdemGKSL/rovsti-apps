@@ -797,16 +797,23 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
     let title = row_title(row, sms);
     let newest = &row.threads[0];
     // A code is worth a chip while it is new: an old, read one is just text.
-    let otp = (newest.id.channel() == Channel::Sms && row.unread > 0)
-        .then(|| otp::detect(&newest.last.body))
-        .flatten()
-        .map(|o| SharedString::from(o.code));
     // The row's WhatsApp chat (a merged person has at most one).
     let wa_chat = row.threads.iter().find_map(|t| match &t.id {
         ThreadId::WhatsApp(jid) => Some(jid.as_str()),
         ThreadId::Sms(_) => None,
     });
     let info = wa_chat.and_then(|jid| inputs.wa.get(jid));
+    // WhatsApp rows read the code from the chat's last message, which must be incoming.
+    let otp = (row.unread > 0)
+        .then(|| match (&newest.id, info.and_then(|i| i.last.as_ref())) {
+            (ThreadId::WhatsApp(_), Some(last)) => {
+                crate::conversation::copy_code_parts(last.from_me, &last.body, Some(&last.meta))
+            }
+            (ThreadId::WhatsApp(_), None) => None,
+            (ThreadId::Sms(_), _) => otp::detect(&newest.last.body).map(|o| o.code),
+        })
+        .flatten()
+        .map(SharedString::from);
     let snippet = match (&newest.id, info) {
         (ThreadId::WhatsApp(_), Some(info)) => wa_snippet(info, inputs.contacts),
         _ => None,
@@ -1916,6 +1923,35 @@ mod tests {
             &BlockSet::default(),
         );
         assert_eq!(plain.rows[0].otp, None);
+    }
+
+    #[test]
+    fn an_unread_whatsapp_code_gets_a_chip_only_when_incoming() {
+        let jid = "905321111111@s.whatsapp.net";
+        let build = |unread: u32, from_me: bool, body: &str| {
+            let mut infos = HashMap::new();
+            infos.insert(
+                jid.to_owned(),
+                info(
+                    ChatMeta::default(),
+                    Some(last(from_me, None, body, MessageMeta::default())),
+                    false,
+                ),
+            );
+            build_meta(
+                &[],
+                &[wa(jid, "A", MIN, unread)],
+                vec![],
+                &rules(),
+                &BlockSet::default(),
+                &infos,
+            )
+        };
+        let code = "Your verification code is 482913.";
+        assert_eq!(build(1, false, code).rows[0].otp.as_deref(), Some("482913"));
+        assert_eq!(build(0, false, code).rows[0].otp, None);
+        assert_eq!(build(1, true, code).rows[0].otp, None);
+        assert_eq!(build(1, false, "see you at 1500").rows[0].otp, None);
     }
 
     #[test]

@@ -283,6 +283,80 @@ pub(crate) fn info_overlay(
         .into_any_element()
 }
 
+/// The sheet of the header's copy choices (name, number, WhatsApp ID): one
+/// pill per choice, then Close. `pick(i)` is the tap on choice `i`.
+pub(crate) fn choices_overlay(
+    theme: Theme,
+    choices: &[rovsti_core::copy_choices::CopyChoice],
+    close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    pick: impl Fn(usize) -> Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+) -> AnyElement {
+    let colors = theme::colors(theme);
+    let close = std::rc::Rc::new(close);
+    let close_pill = std::rc::Rc::clone(&close);
+    let mut pills = div().flex().flex_wrap().gap(px(6.0)).pt(px(6.0));
+    for (i, choice) in choices.iter().enumerate() {
+        pills = pills.child(
+            glass_pill(theme, choice.label)
+                .id(("choice-copy", i))
+                .on_click(pick(i)),
+        );
+    }
+    pills = pills.child(
+        glass_pill(theme, "Close")
+            .id("choice-close")
+            .on_click(move |e, w, cx| close_pill(e, w, cx)),
+    );
+    let mut card = glass(GlassSpec::control(theme))
+        .occlude()
+        .w_full()
+        .rounded(px(26.0))
+        .shadow(shadow::glass(theme.is_dark()))
+        .flex()
+        .flex_col()
+        .gap(px(6.0))
+        .p(px(16.0))
+        .child(
+            div()
+                .truncate()
+                .text_size(typography::FOOTNOTE.size)
+                .font_weight(typography::HEADLINE.weight)
+                .text_color(colors.secondary_label)
+                .child("Copy"),
+        );
+    for (i, choice) in choices.iter().enumerate() {
+        card = card.child(
+            div()
+                .id(("choice-row", i))
+                .truncate()
+                .py(px(2.0))
+                .text_size(typography::BODY.size)
+                .text_color(colors.label)
+                .child(choice.text.clone()),
+        );
+    }
+    card = card.child(pills);
+    div()
+        .id("choices-sheet")
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .flex()
+        .flex_col()
+        .justify_end()
+        .px(px(12.0))
+        .pb(px(28.0))
+        .bg(gpui::Hsla {
+            a: 0.4,
+            ..gpui::black()
+        })
+        .occlude()
+        .on_click(move |e, w, cx| close(e, w, cx))
+        .child(card)
+        .into_any_element()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

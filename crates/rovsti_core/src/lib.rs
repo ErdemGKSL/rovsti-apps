@@ -33,6 +33,7 @@ pub mod lru;
 pub mod message_info;
 pub mod mms_pdu;
 pub mod msg_backup;
+pub mod multi_select;
 pub mod names;
 pub mod notify;
 pub mod number_format;

@@ -23,11 +23,23 @@ fn iso_date(day: i64) -> String {
     format!("{year:04}-{month:02}-{d:02}")
 }
 
-/// The chat as text: a header, a "-- 12 Nov 2026 --" line at each local day
-/// change and "[14:05] Ada: text" per message. Continuation lines are indented
-/// by two spaces, blank messages are skipped, the text ends with a newline.
+/// The chat as text: a header, a blank line, then [`block_text`].
 pub fn export_text(title: &str, lines: &[ExportLine<'_>], tz_offset_s: i32) -> String {
     let mut out = format!("Chat with {title}\n");
+    let block = block_text(lines, tz_offset_s);
+    if !block.is_empty() {
+        out.push('\n');
+        out.push_str(&block);
+    }
+    out
+}
+
+/// The messages as text without a header: a "-- 12 Nov 2026 --" line at each local
+/// day change (days separated by a blank line) and "[14:05] Ada: text" per message.
+/// Continuation lines are indented by two spaces, blank messages are skipped, the
+/// text ends with a newline unless nothing is left.
+pub fn block_text(lines: &[ExportLine<'_>], tz_offset_s: i32) -> String {
+    let mut out = String::new();
     let mut day = None;
     for line in lines {
         if line.text.trim().is_empty() {
@@ -35,8 +47,11 @@ pub fn export_text(title: &str, lines: &[ExportLine<'_>], tz_offset_s: i32) -> S
         }
         let d = day_key(line.at_ms, tz_offset_s);
         if day != Some(d) {
+            if day.is_some() {
+                out.push('\n');
+            }
             day = Some(d);
-            out.push_str(&format!("\n-- {} --\n", date_label(d)));
+            out.push_str(&format!("-- {} --\n", date_label(d)));
         }
         let secs = (line.at_ms.div_euclid(1000) + i64::from(tz_offset_s)).rem_euclid(SECS_PER_DAY);
         let (h, m) = (secs / 3600, secs % 3600 / 60);
@@ -105,6 +120,16 @@ mod tests {
         // +10h pushes the first message to the next local day.
         let out = export_text("Ada", &lines[..1], 10 * 3600);
         assert!(out.contains("-- 13 Nov 2026 --\n[00:05] Ada: hi"));
+    }
+
+    #[test]
+    fn block_text_is_export_minus_header() {
+        let lines = [line(T, "Ada", "hi"), line(T + DAY, "Me", "next\nmore")];
+        let export = export_text("Ada", &lines, 0);
+        let block = block_text(&lines, 0);
+        assert_eq!(export, format!("Chat with Ada\n\n{block}"));
+        assert!(block.starts_with("-- 12 Nov 2026 --\n"));
+        assert_eq!(block_text(&[line(T, "A", " ")], 0), "");
     }
 
     #[test]

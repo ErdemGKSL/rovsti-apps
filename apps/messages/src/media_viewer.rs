@@ -1299,6 +1299,15 @@ impl MessagesApp {
                             true,
                             ready,
                             cx,
+                        ))
+                        .child(Self::viewer_button(
+                            theme,
+                            "mv-forward",
+                            "Forward",
+                            Icon::LucideForward,
+                            true,
+                            ready,
+                            cx,
                         )),
                 );
             div()

@@ -13,7 +13,7 @@ use gpui::{
 use rovsti_core::{
     contact_dates,
     contact_edit::account_label,
-    contact_select::{self, GroupTarget, SelectAction},
+    contact_select::{self, GroupTarget, SHARE_FORMATS, SelectAction, ShareFormat},
     multi_select::{self, Selection},
 };
 use rovsti_ui::{
@@ -38,6 +38,38 @@ pub(crate) struct SelectUi {
     targets: Vec<GroupTarget>,
     /// The accounts of the selection are being read.
     busy: bool,
+    /// What the sheet lists: groups to join, or the formats to share in.
+    mode: SheetMode,
+}
+
+/// The two things the select sheet offers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum SheetMode {
+    #[default]
+    Group,
+    ShareFormat,
+}
+
+/// The rows of the share sheet: each format with its icon, in order.
+pub(crate) fn share_sheet_rows() -> Vec<(ShareFormat, Icon)> {
+    SHARE_FORMATS
+        .iter()
+        .map(|format| {
+            let icon = match format {
+                ShareFormat::Vcf => Icon::LucideContact,
+                ShareFormat::Text => Icon::LucideUpload,
+            };
+            (*format, icon)
+        })
+        .collect()
+}
+
+/// The title of the sheet.
+fn sheet_title(mode: SheetMode) -> &'static str {
+    match mode {
+        SheetMode::Group => "Add to group",
+        SheetMode::ShareFormat => "Share as",
+    }
 }
 
 /// The round check at the end of a row: filled accent when ticked.
@@ -182,7 +214,7 @@ impl ContactsApp {
 
     fn run_select_action(&mut self, action: SelectAction, cx: &mut Context<Self>) {
         match action {
-            SelectAction::Share => self.share_selection(cx),
+            SelectAction::Share => self.open_share_format_sheet(cx),
             SelectAction::SaveToFile => self.save_selection(cx),
             SelectAction::AddToGroup => self.open_group_sheet(cx),
             SelectAction::Star => self.star_selection(cx),
@@ -194,6 +226,57 @@ impl ContactsApp {
                 }
             }
         }
+    }
+
+    /// Select mode's Share: asks for the format first.
+    fn open_share_format_sheet(&mut self, cx: &mut Context<Self>) {
+        if self.selected_ids().is_empty() {
+            return;
+        }
+        self.select_ui.mode = SheetMode::ShareFormat;
+        self.select_ui.sheet.open();
+        cx.notify();
+    }
+
+    /// A format was tapped in the share sheet.
+    fn share_in_format(&mut self, format: ShareFormat, cx: &mut Context<Self>) {
+        self.select_ui.sheet.close();
+        match format {
+            ShareFormat::Vcf => self.share_selection(cx),
+            ShareFormat::Text => self.share_selection_text(cx),
+        }
+    }
+
+    /// Share sheet with the ticked contacts as plain text.
+    fn share_selection_text(&mut self, cx: &mut Context<Self>) {
+        let ids = self.selected_ids();
+        if ids.is_empty() {
+            return;
+        }
+        let hidden = self.hidden_ids();
+        self.notice = Some("Preparing the text…".into());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { backend::share_text_of(&ids, &hidden) })
+                .await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(0) => this.notice = Some("Nothing to share.".into()),
+                    Ok(count) => {
+                        this.notice = Some(contact_select::shared_text_notice(count).into());
+                        this.select = None;
+                    }
+                    Err(words) => {
+                        this.notice = Some(format!("Can't share the contacts: {words}.").into());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Share sheet with the ticked contacts as one `.vcf`.
@@ -367,6 +450,7 @@ impl ContactsApp {
                     Ok(selected) => {
                         this.select_ui.targets =
                             contact_select::group_targets(&this.groups, &selected);
+                        this.select_ui.mode = SheetMode::Group;
                         this.select_ui.sheet.open();
                     }
                     Err(words) => {
@@ -546,9 +630,32 @@ impl ContactsApp {
             return None;
         }
         let colors = theme::colors(theme);
-        let rows: Vec<AnyElement> = self
-            .select_ui
-            .targets
+        let mode = self.select_ui.mode;
+        let format_rows: Vec<AnyElement> = if mode == SheetMode::ShareFormat {
+            share_sheet_rows()
+                .into_iter()
+                .enumerate()
+                .map(|(ix, (format, icon))| {
+                    tap_row(
+                        theme,
+                        ("sel-share-row", ix),
+                        Some(icon),
+                        format.label(),
+                        Tone::Plain,
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.share_in_format(format, cx)))
+                    .into_any_element()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let group_targets: &[GroupTarget] = if mode == SheetMode::Group {
+            &self.select_ui.targets
+        } else {
+            &[]
+        };
+        let rows: Vec<AnyElement> = group_targets
             .iter()
             .enumerate()
             .map(|(ix, target)| {
@@ -565,7 +672,7 @@ impl ContactsApp {
                 .into_any_element()
             })
             .collect();
-        let empty = rows.is_empty().then(|| {
+        let empty = (mode == SheetMode::Group && rows.is_empty()).then(|| {
             div()
                 .px(px(20.0))
                 .py(px(8.0))
@@ -584,8 +691,9 @@ impl ContactsApp {
                     .text_size(typography::TITLE3.size)
                     .font_weight(typography::TITLE3.weight)
                     .text_color(colors.label)
-                    .child("Add to group"),
+                    .child(sheet_title(mode)),
             )
+            .children(format_rows)
             .children(rows)
             .children(empty);
         let entity = cx.entity();
@@ -593,7 +701,7 @@ impl ContactsApp {
         self.select_ui.sheet.render(
             theme,
             window,
-            "Add to group",
+            sheet_title(mode),
             body,
             move |_, cx| {
                 entity.update(cx, |this, cx| {
@@ -608,5 +716,24 @@ impl ContactsApp {
                 });
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn share_sheet_lists_both_formats_in_order() {
+        let rows = share_sheet_rows();
+        let labels: Vec<_> = rows.iter().map(|(f, _)| f.label()).collect();
+        assert_eq!(labels, [".vcf file", "Text"]);
+    }
+
+    #[test]
+    fn sheet_titles_follow_the_mode() {
+        assert_eq!(sheet_title(SheetMode::Group), "Add to group");
+        assert_eq!(sheet_title(SheetMode::ShareFormat), "Share as");
+        assert_eq!(SheetMode::default(), SheetMode::Group);
     }
 }

@@ -420,6 +420,8 @@ struct ContactsApp {
     known_max_id: Option<i64>,
     added_marks: Vec<rovsti_core::contact_recent::AddedMark>,
     viewed: Vec<String>,
+    /// The numbers / emails waiting for the "Add to which contact?" choice.
+    add_pending: Option<rovsti_core::contact_edit::Addition>,
     emergency_rows: Vec<me::EmergencyRow>,
     emergency_open: bool,
     /// The owner changed them before the prefs file was read.
@@ -714,6 +716,7 @@ impl ContactsApp {
             known_max_id: None,
             added_marks: Vec::new(),
             viewed: Vec::new(),
+            add_pending: None,
             emergency_rows: Vec::new(),
             emergency_open: false,
             me_touched: false,
@@ -1021,6 +1024,7 @@ impl ContactsApp {
         if self.open.is_none() {
             return;
         }
+        self.note_viewed_contact(id, cx);
         self.check_whatsapp(cx);
         self.load_card_calls(cx);
         self.load_card_options(id, cx);
@@ -1828,6 +1832,9 @@ impl ContactsApp {
                 let draft = matches!(self.book, Book::Ready(_))
                     .then(|| rovsti_core::contact_edit::draft_from_query(query))
                     .flatten();
+                let addition = matches!(self.book, Book::Ready(_))
+                    .then(|| rovsti_core::contact_edit::Addition::from_query(query))
+                    .flatten();
                 div()
                     .flex()
                     .flex_col()
@@ -1844,6 +1851,13 @@ impl ContactsApp {
                                 this.open_new_editor_with(draft.clone(), cx)
                             }))
                     }))
+                    .children(addition.map(|add| {
+                        glass_pill(theme, "Add to a Contact")
+                            .id("add-from-search")
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_add_picker(add.clone(), cx)
+                            }))
+                    }))
                     .into_any_element()
             })
         } else {
@@ -1855,12 +1869,18 @@ impl ContactsApp {
         .then(|| self.recent_entry(theme, cx));
         let my_card_row = (matches!(self.book, Book::Ready(_)) && query.trim().is_empty())
             .then(|| self.my_card_entry(theme, cx));
+        let viewed_row = if matches!(self.book, Book::Ready(_)) {
+            self.viewed_entry(theme, &query, cx)
+        } else {
+            None
+        };
         div()
             .flex()
             .flex_col()
             .child(large_title(theme, TABS[CONTACTS_TAB], trailing))
             .child(self.search_field(theme, window, cx))
             .children(my_card_row)
+            .children(viewed_row)
             .children(recent_row)
             .children(body)
             .into_any_element()

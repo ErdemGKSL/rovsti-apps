@@ -440,7 +440,6 @@ pub(crate) fn import_with_photos(
 
 /// Adds the numbers and emails of `add` to contact `id`. Returns the contact as
 /// it was (for Undo) and the pill's words.
-#[allow(dead_code)] // wired by the UI steps S5 and S7
 pub(crate) fn add_to_existing(
     id: i64,
     add: &contact_edit::Addition,
@@ -722,6 +721,18 @@ mod hand_off {
         ))
     }
 
+    /// Opens the share sheet with the chosen contacts as plain text. Returns
+    /// how many were shared (0 when none is left). `hidden` ids are left out.
+    pub(crate) fn share_text_of(ids: &[i64], hidden: &[i64]) -> Result<usize, String> {
+        let all = pull_full()?;
+        let mut cards = contact_select::pick_drafts(&all, ids);
+        cards.retain(|c| c.id.is_none_or(|id| !hidden.contains(&id)));
+        if cards.is_empty() {
+            return Ok(0);
+        }
+        done(telecom::share_text(&contact_select::share_text(&cards))).map(|()| cards.len())
+    }
+
     /// Saves `bytes` (a PNG) to the gallery as `name`.
     pub(crate) fn save_png(name: &str, bytes: &[u8]) -> Result<(), String> {
         let path = write_temp(name, bytes)?;
@@ -911,6 +922,13 @@ mod tests {
             "Nothing to add"
         );
         assert!(add_to_existing(-5, &again).is_err());
+    }
+
+    #[test]
+    fn share_text_of_needs_a_phone_on_desktop() {
+        let id = pull_full().expect("ok")[0].id.expect("sample id");
+        assert!(share_text_of(&[id], &[]).is_err());
+        assert_eq!(share_text_of(&[id], &[id]), Ok(0));
     }
 
     #[test]

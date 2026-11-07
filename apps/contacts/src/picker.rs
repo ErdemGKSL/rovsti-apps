@@ -28,6 +28,29 @@ pub(crate) enum PickFor {
     MyCard,
     /// Add-only: contacts with a number, not yet on the emergency list.
     Emergency,
+    /// Single choice: the contact a number or email is added to.
+    AddTo,
+}
+
+impl PickFor {
+    /// One contact is chosen, not several.
+    fn single(self) -> bool {
+        matches!(self, Self::MyCard | Self::AddTo)
+    }
+}
+
+/// The title of the "Add to a Contact" picker.
+pub(crate) fn add_to_title() -> &'static str {
+    "Add to which contact?"
+}
+
+/// The pill for a failed add: the contact's own words stay as they are.
+pub(crate) fn add_failed_words(words: &str) -> String {
+    if words.ends_with("already has this") || words == "Nothing to add" {
+        words.to_owned()
+    } else {
+        format!("Can't add to the contact: {words}.")
+    }
 }
 
 /// The open picker.
@@ -112,6 +135,13 @@ impl ContactsApp {
     }
 
     pub(crate) fn close_picker(&mut self, cx: &mut Context<Self>) {
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|p| p.for_ == PickFor::AddTo)
+        {
+            self.add_pending = None;
+        }
         self.picker = None;
         self.picker_rows.clear();
         self.page.restart();
@@ -161,7 +191,7 @@ impl ContactsApp {
         if let Some(picker) = self.picker.as_mut()
             && !picker.saving
         {
-            let single = picker.for_ == PickFor::MyCard;
+            let single = picker.for_.single();
             if picker.chosen.remove(&id) {
                 // Unticked.
             } else {
@@ -201,6 +231,10 @@ impl ContactsApp {
                 self.finish_emergency(change.add, cx);
                 return;
             }
+            PickFor::AddTo => {
+                self.finish_add_to(change.add.first().copied(), cx);
+                return;
+            }
         };
         picker.saving = true;
         let title = self
@@ -226,6 +260,55 @@ impl ContactsApp {
                     this.notice = Some(format!("Can't change the group: {words}.").into());
                     cx.notify();
                 }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// "Add to a Contact" on a no-results search: opens the single choice.
+    pub(crate) fn open_add_picker(
+        &mut self,
+        add: rovsti_core::contact_edit::Addition,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_picker(PickFor::AddTo, Vec::new(), cx);
+        self.add_pending = Some(add);
+    }
+
+    /// Done on the add picker: the details go into the chosen contact, with Undo.
+    fn finish_add_to(&mut self, id: Option<i64>, cx: &mut Context<Self>) {
+        let add = self.add_pending.take();
+        self.close_picker(cx);
+        let (Some(id), Some(add)) = (id, add) else {
+            return;
+        };
+        self.notice = Some("Adding…".into());
+        self.notice_action = None;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { backend::add_to_existing(id, &add) })
+                .await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok((before, words)) => {
+                        let text: SharedString = words.into();
+                        this.wa.lookups.remove(&id);
+                        this.edit_undo = Some(crate::EditUndo {
+                            before,
+                            notice: text.clone(),
+                        });
+                        this.notice_action = Some(crate::NoticeAction::UndoEdit);
+                        this.notice = Some(text);
+                        // The search that found nothing is over.
+                        this.field.update(cx, |field, cx| field.clear(cx));
+                        this.reload(cx);
+                    }
+                    Err(words) => this.notice = Some(add_failed_words(&words).into()),
+                }
+                cx.notify();
             })
             .ok();
         })
@@ -280,6 +363,7 @@ impl ContactsApp {
             PickFor::Favorites => "Favorites".into(),
             PickFor::MyCard => "This is me".into(),
             PickFor::Emergency => "Add emergency contact".into(),
+            PickFor::AddTo => add_to_title().into(),
         }
     }
 
@@ -443,6 +527,27 @@ mod tests {
             "Added 1 to Favorites and removed 3."
         );
         assert_eq!(favorites_summary(0, 0), "No changes.");
+    }
+
+    #[test]
+    fn add_picker_is_a_single_choice() {
+        assert!(PickFor::AddTo.single());
+        assert!(PickFor::MyCard.single());
+        assert!(!PickFor::Favorites.single());
+        assert_eq!(add_to_title(), "Add to which contact?");
+    }
+
+    #[test]
+    fn add_failures_keep_the_contacts_words() {
+        assert_eq!(
+            add_failed_words("Ayşe already has this"),
+            "Ayşe already has this"
+        );
+        assert_eq!(add_failed_words("Nothing to add"), "Nothing to add");
+        assert_eq!(
+            add_failed_words("no contacts permission"),
+            "Can't add to the contact: no contacts permission."
+        );
     }
 
     #[test]

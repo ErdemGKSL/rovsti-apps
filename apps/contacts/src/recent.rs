@@ -8,15 +8,21 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, div, px,
 };
-use rovsti_core::{avatar, contacts_view, wire::WireContact};
+use rovsti_core::{
+    avatar,
+    contact_card::ContactCard,
+    contact_recent::{self, VIEWED_KEEP},
+    contacts_view,
+    wire::WireContact,
+};
 use rovsti_ui::{
     Icon,
     components::{empty_state, glass_icon_button, large_title, list_row, section},
     theme::{self, hue_pair},
-    tokens::{Theme, typography},
+    tokens::{Theme, metrics, typography},
 };
 
-use crate::{ContactsApp, photos::photo_avatar};
+use crate::{ContactsApp, confirm::Confirm, photos::photo_avatar};
 
 /// The page looks this far back.
 const WITHIN_DAYS: u16 = 30;
@@ -48,7 +54,178 @@ pub(crate) fn build<'a>(
         .collect()
 }
 
+/// Whether the Recently viewed section shows: not while searching, and only
+/// with something to list.
+pub(crate) fn viewed_visible(query: &str, count: usize) -> bool {
+    query.trim().is_empty() && count > 0
+}
+
+/// The pill after Clear.
+pub(crate) fn viewed_cleared_notice() -> &'static str {
+    "Recently viewed cleared"
+}
+
 impl ContactsApp {
+    /// The contacts of the viewed list that are still in the book and not
+    /// waiting to be deleted, newest first.
+    fn viewed_contacts(&self) -> Vec<WireContact> {
+        let Some(index) = self.index() else {
+            return Vec::new();
+        };
+        if self.viewed.is_empty() {
+            return Vec::new();
+        }
+        let hidden = self
+            .pending_delete
+            .as_ref()
+            .map(|p| p.ids.as_slice())
+            .unwrap_or_default();
+        let wanted: Vec<WireContact> = index
+            .all()
+            .filter(|c| {
+                c.lookup_key
+                    .as_deref()
+                    .is_some_and(|k| self.viewed.iter().any(|v| v == k))
+            })
+            .cloned()
+            .collect();
+        contact_recent::viewed(&self.viewed, &wanted, hidden)
+            .into_iter()
+            .take(VIEWED_KEEP)
+            .cloned()
+            .collect()
+    }
+
+    /// Opening a card: puts the contact first in Recently viewed.
+    pub(crate) fn note_viewed_contact(&mut self, id: i64, cx: &mut Context<Self>) {
+        let Some(key) = self
+            .index()
+            .and_then(|index| index.all().find(|c| c.id == id))
+            .and_then(|c| c.lookup_key.clone())
+            .filter(|k| !k.is_empty())
+        else {
+            return;
+        };
+        let next = contact_recent::note_viewed(&self.viewed, &key);
+        if next != self.viewed {
+            self.viewed = next;
+            self.save_prefs(cx);
+        }
+    }
+
+    /// A deleted contact leaves Recently viewed.
+    pub(crate) fn forget_viewed_contacts(&mut self, ids: &[i64], cx: &mut Context<Self>) {
+        let keys: Vec<String> = self
+            .index()
+            .map(|index| {
+                index
+                    .all()
+                    .filter(|c| ids.contains(&c.id))
+                    .filter_map(|c| c.lookup_key.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let next = keys.iter().fold(self.viewed.clone(), |acc, key| {
+            contact_recent::forget_viewed(&acc, key)
+        });
+        if next != self.viewed {
+            self.viewed = next;
+            self.save_prefs(cx);
+        }
+    }
+
+    /// The Clear button was confirmed.
+    pub(crate) fn clear_viewed(&mut self, cx: &mut Context<Self>) {
+        self.viewed.clear();
+        self.save_prefs(cx);
+        self.notice = Some(viewed_cleared_notice().into());
+        cx.notify();
+    }
+
+    /// The Recently viewed section of the Contacts tab: a header with Clear,
+    /// then one compact row per contact. `None` while searching or empty.
+    pub(crate) fn viewed_entry(
+        &mut self,
+        theme: Theme,
+        query: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let contacts = self.viewed_contacts();
+        if !viewed_visible(query, contacts.len()) {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        let format = self.style.format;
+        let mut rows: Vec<AnyElement> = Vec::with_capacity(contacts.len());
+        for (n, contact) in contacts.iter().enumerate() {
+            let id = contact.id;
+            let has_photo = contact.photo_uri.is_some();
+            if let Some(uri) = contact
+                .photo_uri
+                .as_deref()
+                .filter(|_| self.photos.needs(id))
+            {
+                self.want_photos([(id, uri)], cx);
+            }
+            let name: SharedString = ContactCard::new(contact, format).name.into();
+            let picture = self.avatar_picture(id, has_photo, None, cx);
+            let mono = avatar::monogram(&name)
+                .map(String::from)
+                .unwrap_or_default();
+            let tint = hue_pair(theme, avatar::hue_index(Some(id))).0;
+            let leading = photo_avatar(
+                theme,
+                mono,
+                32.0,
+                tint,
+                picture.as_ref().map(|(image, opacity)| (image, *opacity)),
+            )
+            .into_any_element();
+            rows.push(
+                list_row(theme, Some(leading), name, None, None)
+                    .id(("viewed", n))
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_contact(id, cx)))
+                    .on_long_press(cx.listener(move |this, _, _, cx| this.open_quick_for(id, cx)))
+                    .into_any_element(),
+            );
+        }
+        let clear = div()
+            .id("viewed-clear")
+            .min_h(px(32.0))
+            .flex()
+            .items_center()
+            .text_size(typography::FOOTNOTE.size)
+            .text_color(colors.accent)
+            .child("Clear")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.confirm = Some(Confirm::ClearViewed);
+                cx.notify();
+            }));
+        let header = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .px(metrics::ROW_INSET)
+            .pt(px(4.0))
+            .child(
+                div()
+                    .text_size(typography::FOOTNOTE.size)
+                    .font_weight(typography::HEADLINE.weight)
+                    .text_color(colors.secondary_label)
+                    .child("Recently viewed"),
+            )
+            .child(clear);
+        Some(
+            div()
+                .pb(px(8.0))
+                .flex()
+                .flex_col()
+                .child(header)
+                .child(section(theme, None, rows))
+                .into_any_element(),
+        )
+    }
+
     pub(crate) fn set_recent_open(&mut self, open: bool, cx: &mut Context<Self>) {
         self.recent_open = open;
         self.clear_notice();
@@ -183,6 +360,19 @@ mod tests {
         assert_eq!(names, ["New", "Mid"]);
         assert_eq!(rows[0].when, "Today");
         assert_eq!(rows[1].when, "3 days ago");
+    }
+
+    #[test]
+    fn viewed_section_hides_when_empty_or_searching() {
+        assert!(viewed_visible("", 3));
+        assert!(viewed_visible("   ", 1));
+        assert!(!viewed_visible("", 0));
+        assert!(!viewed_visible("ay", 3));
+    }
+
+    #[test]
+    fn clearing_says_so() {
+        assert_eq!(viewed_cleared_notice(), "Recently viewed cleared");
     }
 
     #[test]

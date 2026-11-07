@@ -73,6 +73,8 @@ pub(crate) enum Confirm {
     CallLogAccess,
     /// The card menu's "Remove my card".
     RemoveMyCard,
+    /// The Contacts tab's "Clear" on Recently viewed.
+    ClearViewed,
     /// This contact would leave the emergency list.
     RemoveEmergency {
         key: String,
@@ -88,6 +90,11 @@ fn trash_confirm_text(confirm: &Confirm) -> Option<(String, String)> {
         Confirm::DeleteWithoutCopy { ids } => Some(crate::trash::no_copy_text(ids.len())),
         _ => None,
     }
+}
+
+/// Title and body of the card for clearing Recently viewed.
+fn clear_viewed_text() -> (&'static str, &'static str) {
+    rovsti_core::contact_recent::CLEAR_VIEWED
 }
 
 /// "1 contact", "3 contacts".
@@ -204,6 +211,7 @@ impl ContactsApp {
             Confirm::CallLogAccess => self.request_call_log(cx),
             Confirm::Voicemail { id, .. } => self.apply_voicemail(id, true, cx),
             Confirm::RemoveMyCard => self.clear_my_card(cx),
+            Confirm::ClearViewed => self.clear_viewed(cx),
             Confirm::RemoveEmergency { key, .. } => self.remove_emergency(&key, cx),
         }
     }
@@ -215,6 +223,7 @@ impl ContactsApp {
             return;
         }
         self.commit_pending_delete(cx);
+        self.forget_viewed_contacts(&ids, cx);
         if let Some(index) = self.index() {
             let rest = contacts_view::without(index.all(), &ids);
             self.book = Book::Ready(Arc::new(ContactIndex::new(rest)));
@@ -463,6 +472,10 @@ impl ContactsApp {
                 "No contact is marked as you. The contact itself stays in your address book.",
                 vec![cancel, yes("Remove", true, cx)],
             ),
+            Confirm::ClearViewed => {
+                let (title, body) = clear_viewed_text();
+                confirm_card(theme, title, body, vec![cancel, yes("Clear", true, cx)])
+            }
             Confirm::RemoveEmergency { name, .. } => confirm_card(
                 theme,
                 format!("Remove {name}?"),
@@ -539,6 +552,14 @@ mod tests {
         assert_eq!(title, "Delete anyway?");
         assert!(body.contains("Can't keep a copy in Trash"));
         assert!(trash_confirm_text(&Confirm::DiscardEdits).is_none());
+    }
+
+    #[test]
+    fn clear_viewed_card_says_the_contacts_stay() {
+        let (title, body) = clear_viewed_text();
+        assert_eq!(title, "Clear recently viewed?");
+        assert!(body.contains("The contacts stay"));
+        assert!(trash_confirm_text(&Confirm::ClearViewed).is_none());
     }
 
     #[test]

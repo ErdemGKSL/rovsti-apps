@@ -33,13 +33,13 @@ baseSha: 10f349dcac419c32b66ae7e95a7dc0759752b031
 | # | Utility | Status |
 |---|---------|--------|
 | S1-S9 | Copy as, share stop, QR, open in maps, export/import stops, Saved search/sort, transit stop sheet, measure, bearing | done R1 |
-| S10 | Download this map area for offline use: estimate, progress, cancel, zoom cap | R2 (steps 2, 6) |
-| S11 | Appearance quick toggle Auto / Light / Dark (map follows), persisted | R2 (steps 1, 6) |
-| S12 | Vibration pattern choice (Standard / Pulse / Long / Heartbeat) with a preview buzz | R2 (steps 1, 4, 5) |
-| S13 | Alarm sound picker (system alarm picker) stored as uri + title, used as `user_alarm` | R2 (steps 1, 4, 5) |
-| S14 | Alarm volume (80 / 90 / 100 %) with a short "Test volume" | R2 (steps 1, 4, 5) |
-| S15 | History: search, outcome filter, Start again, Save as stop | R2 (steps 3, 7) |
-| S16 | Export history as CSV / GPX | R2 (steps 3, 7) |
+| S10 | Download this map area for offline use: estimate, progress, cancel, zoom cap | done R2 |
+| S11 | Appearance quick toggle Auto / Light / Dark (map follows), persisted | done R2 |
+| S12 | Vibration pattern choice (Standard / Pulse / Long / Heartbeat) with a preview buzz | done R2 |
+| S13 | Alarm sound picker (system alarm picker) stored as uri + title, used as `user_alarm` | done R2 |
+| S14 | Alarm volume (80 / 90 / 100 %) with a short "Test volume" | done R2 |
+| S15 | History: search, outcome filter, Start again, Save as stop | done R2 |
+| S16 | Export history as CSV / GPX | done R2 |
 | S17 | Follow-me mode on the map (cycling Me button) | backlog R3 |
 | S18 | Home screen shortcut for a saved stop that starts its trip | backlog R3 |
 | S19 | Reverse a saved stop's direction and Duplicate a saved stop | backlog R3 |
@@ -49,8 +49,8 @@ baseSha: 10f349dcac419c32b66ae7e95a7dc0759752b031
 | S23 | Coordinates entry: paste DMS / DDM / Plus Code in the picker | backlog R3 |
 | S25 | Share my current location (Me long-press or pin menu on the blue dot): Copy as / Share / QR | backlog R3 |
 | S26 | Measure tool: copy the result, share the polyline as GPX, save two points as a stop | backlog R3 |
-| S27 | Trip summary after arrival (time, distance, snoozes) with Share and Save as stop | backlog R4 |
 | S24 | Saved stops: pin favourites to top, colour tag | backlog R4 |
+| S27 | Trip summary after arrival (time, distance, snoozes) with Share and Save as stop | backlog R4 |
 
 ## Round 2 plan (S10-S16)
 

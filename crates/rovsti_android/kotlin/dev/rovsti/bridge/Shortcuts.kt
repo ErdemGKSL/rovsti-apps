@@ -17,6 +17,9 @@ import org.json.JSONObject
  * [BirthdayReminders.EXTRA_CONTACT_ID]; `RovstiBridge.deliverOpenContact` turns that into `open_contact`.
  */
 object Shortcuts {
+    /** Launch extra of a stop shortcut (Long); `RovstiBridge.deliverOpenStop` turns it into `open_stop`. */
+    const val EXTRA_STOP_ID = "dev.rovsti.stops.STOP_ID"
+
     /** Adaptive icon canvas in pixels; the visible safe zone is 72/108 of it. */
     private const val CANVAS = 216
 
@@ -43,6 +46,27 @@ object Shortcuts {
             .setShortLabel(spec.getString("short_label"))
             .setLongLabel(spec.optString("long_label", spec.getString("short_label")))
             .setIcon(icon(ctx, if (spec.isNull("icon_path")) null else spec.optString("icon_path")))
+            .setIntent(launch)
+            .build()
+        manager.requestPinShortcut(info, null)
+    } catch (_: RuntimeException) {
+        false
+    }
+
+    /** [specJson] is `rovsti_geo::StopShortcut` (`id`, `short_label`, `long_label`, `stop_id`); app icon. */
+    fun pinStop(ctx: Context, specJson: String): Boolean = try {
+        val manager = ctx.getSystemService(ShortcutManager::class.java) ?: return false
+        if (!manager.isRequestPinShortcutSupported) return false
+        val spec = JSONObject(specJson)
+        val stopId = spec.getLong("stop_id")
+        val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return false
+        launch.setAction(Intent.ACTION_MAIN)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            .putExtra(EXTRA_STOP_ID, stopId)
+        val info = ShortcutInfo.Builder(ctx, spec.getString("id"))
+            .setShortLabel(spec.getString("short_label"))
+            .setLongLabel(spec.optString("long_label", spec.getString("short_label")))
+            .setIcon(icon(ctx, null))
             .setIntent(launch)
             .build()
         manager.requestPinShortcut(info, null)

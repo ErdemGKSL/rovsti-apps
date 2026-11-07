@@ -84,4 +84,48 @@ object StopsLocation {
             false
         }
     }
+
+    private const val WATCH_INTERVAL_MS = 2_000L
+    private const val WATCH_DISTANCE_M = 5f
+    private var watcher: LocationListener? = null
+
+    /**
+     * Live fixes every 2 s / 5 m on the main looper, emitted as `stops_location`. `on = false` removes
+     * the listener (true). Idempotent: a second `on` keeps the running listener. False without
+     * permission or an enabled provider.
+     */
+    @Synchronized
+    fun watch(ctx: Context, on: Boolean): Boolean {
+        val manager = ctx.getSystemService(LocationManager::class.java)
+        if (!on) {
+            val listener = watcher ?: return true
+            watcher = null
+            try {
+                manager?.removeUpdates(listener)
+            } catch (_: SecurityException) {
+            }
+            return true
+        }
+        if (watcher != null) return true
+        if (!allowed(ctx) || manager == null) return false
+        val provider = listOf("fused", LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .filter { it != "fused" || Build.VERSION.SDK_INT >= 31 }
+            .firstOrNull { name ->
+                try {
+                    manager.isProviderEnabled(name)
+                } catch (_: IllegalArgumentException) {
+                    false
+                }
+            } ?: return false
+        val listener = LocationListener { fix -> RovstiBridge.emit("stops_location", json(fix)) }
+        return try {
+            manager.requestLocationUpdates(provider, WATCH_INTERVAL_MS, WATCH_DISTANCE_M, listener, Looper.getMainLooper())
+            watcher = listener
+            true
+        } catch (_: SecurityException) {
+            false
+        } catch (_: IllegalArgumentException) {
+            false
+        }
+    }
 }

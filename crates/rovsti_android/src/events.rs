@@ -63,6 +63,9 @@ pub mod kind {
     /// A birthday notification was tapped (`{id}`, the contact id); one-shot,
     /// queued until the UI attaches. See [`parse_open_contact`].
     pub const OPEN_CONTACT: &str = "open_contact";
+    /// A tap on a saved-stop shortcut; `{"id":..}`. One-shot, queued until the
+    /// UI attaches. See [`parse_open_stop`].
+    pub const OPEN_STOP: &str = "open_stop";
     /// Rovsti Stops: the trip service applied a fix (`rovsti_geo::session::FixOut`).
     pub const TRIP_STATUS: &str = "trip_status";
     /// Rovsti Stops: the alarm rang, snoozed or was dismissed; see
@@ -101,6 +104,13 @@ pub fn parse_wa_call_action(json: &str) -> Option<(String, WaCallAction)> {
 pub fn parse_open_contact(json: &str) -> Option<i64> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     value.get("id")?.as_i64().filter(|id| *id > 0)
+}
+
+/// Decodes an `open_stop` payload into the saved stop id. `None` for
+/// malformed JSON, a missing or non-integer id, or an id below 1.
+pub fn parse_open_stop(json: &str) -> Option<u64> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    value.get("id")?.as_u64().filter(|id| *id > 0)
 }
 
 /// One undecoded event.
@@ -208,6 +218,24 @@ mod tests {
             "[1]",
         ] {
             assert_eq!(parse_open_contact(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn open_stop_payload_parses() {
+        assert_eq!(kind::OPEN_STOP, "open_stop");
+        assert_eq!(parse_open_stop(r#"{"id":42}"#), Some(42));
+        assert_eq!(parse_open_stop(r#"{"id":42,"x":1}"#), Some(42));
+        for bad in [
+            "",
+            "{}",
+            r#"{"id":"7"}"#,
+            r#"{"id":0}"#,
+            r#"{"id":-3}"#,
+            r#"{"id":1.5}"#,
+            "[1]",
+        ] {
+            assert_eq!(parse_open_stop(bad), None, "{bad}");
         }
     }
 

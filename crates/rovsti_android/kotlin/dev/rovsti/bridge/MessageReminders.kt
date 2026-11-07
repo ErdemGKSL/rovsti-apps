@@ -12,7 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * One armed message reminder: `{id, tag, message_id, message_at_ms, at_ms, title, body}`.
+ * One armed message reminder: `{id, tag, message_id, message_at_ms, at_ms, notif_title, notif_body}`.
  * The tag is the notification/thread tag (`sms:<id>`, `wa:<jid>`) the tap opens.
  */
 data class MessageReminderItem(
@@ -40,7 +40,7 @@ data class MessageReminderItem(
             if (id <= 0 || tag.isBlank() || messageId.isBlank()) return null
             return MessageReminderItem(
                 id, tag, messageId, o.optLong("message_at_ms", 0), o.optLong("at_ms", 0),
-                o.optString("title", tag), o.optString("body", ""), o,
+                o.optString("notif_title", o.optString("title", tag)), o.optString("notif_body", o.optString("body", "")), o,
             )
         }
     }

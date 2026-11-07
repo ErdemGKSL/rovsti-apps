@@ -193,7 +193,7 @@ fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
     // A new conversation has no provider thread to delete or mark yet.
     if sms.thread_id < 0 {
         use sms_actions::SmsAction as A;
-        actions.retain(|a| !matches!(a, A::Delete | A::Archive | A::MarkUnread));
+        actions.retain(|a| !matches!(a, A::Delete | A::Archive | A::MarkUnread | A::Pin));
     }
     actions
 }
@@ -5393,6 +5393,6 @@ mod tests {
             thread_id: -1,
             ..menu(false, false, false)
         };
-        assert_eq!(row_sms_actions(&new_row), vec![Pin, Mute, Block]);
+        assert_eq!(row_sms_actions(&new_row), vec![Mute, Block]);
     }
 }

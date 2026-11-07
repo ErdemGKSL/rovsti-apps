@@ -206,11 +206,11 @@ pub fn outcome_text(outcome: Outcome) -> &'static str {
     }
 }
 
-/// "A â€“ B" for a trip with two points, the single label of a legacy record.
+/// "A – B" for a trip with two points, the single label of a legacy record.
 pub fn record_pair(record: &TripRecord) -> String {
     match (&record.a, &record.b) {
         (Some(a), Some(b)) => format!(
-            "{} â€“ {}",
+            "{} – {}",
             crate::pick::row_label(&a.label),
             crate::pick::row_label(&b.label)
         ),
@@ -219,10 +219,10 @@ pub fn record_pair(record: &TripRecord) -> String {
     }
 }
 
-/// "5 Nov  Â·  18 min  Â·  3.4 km" under a history row's title.
+/// "5 Nov  ·  18 min  ·  3.4 km" under a history row's title.
 pub fn record_details(record: &TripRecord, now_ms: i64, tz_offset_s: i32) -> String {
     format!(
-        "{}  Â·  {}  Â·  {}",
+        "{}  ·  {}  ·  {}",
         date_text(record.ended_ms, now_ms, tz_offset_s),
         duration_text(record.duration_ms()),
         distance_text(record.travelled_m)
@@ -243,7 +243,7 @@ pub fn stats_rows(stats: &Stats) -> Vec<(String, String)> {
     ];
     for (i, (label, count)) in stats.top.iter().enumerate() {
         let name = if i == 0 { "Top places" } else { "" };
-        rows.push((name.to_owned(), format!("{label}  Â·  {count}")));
+        rows.push((name.to_owned(), format!("{label}  ·  {count}")));
     }
     rows
 }
@@ -381,7 +381,7 @@ pub fn notice_summary(prefs: &StopsPrefs, connected: bool) -> String {
             } else {
                 &n.chat_name
             };
-            format!("{name}  Â·  {}", n.when.label().to_lowercase())
+            format!("{name}  ·  {}", n.when.label().to_lowercase())
         }
         _ => "Off".to_owned(),
     }
@@ -2210,7 +2210,7 @@ mod tests {
         // 14 Nov 2023, seen from 2023.
         assert_eq!(
             record_details(&legacy_record(), 1_700_100_000_000, 0),
-            "14 Nov  Â·  18 min  Â·  3.4 km"
+            "14 Nov  ·  18 min  ·  3.4 km"
         );
         assert_eq!(record_pair(&legacy_record()), "Kadikoy");
         let unnamed = TripRecord {
@@ -2228,7 +2228,7 @@ mod tests {
             coord: Coord::new(41.0, lon),
         };
         let r = TripRecord {
-            label: "Home â€“ Work".into(),
+            label: "Home – Work".into(),
             a: Some(end("Home", 29.0)),
             b: Some(end("Work", 29.01)),
             destination: None,
@@ -2236,9 +2236,9 @@ mod tests {
         };
         assert_eq!(
             record_details(&r, 1_700_100_000_000, 0),
-            "14 Nov  Â·  18 min  Â·  3.4 km"
+            "14 Nov  ·  18 min  ·  3.4 km"
         );
-        assert_eq!(record_pair(&r), "Home â€“ Work");
+        assert_eq!(record_pair(&r), "Home – Work");
     }
 
     #[test]
@@ -2259,8 +2259,8 @@ mod tests {
         assert_eq!(rows[2].1, "12.3 km");
         assert_eq!(rows[3].1, "10 min");
         assert_eq!(rows[4].1, "2");
-        assert_eq!(rows[5], ("Top places".into(), "Home  Â·  3".into()));
-        assert_eq!(rows[6], (String::new(), "Work  Â·  1".into()));
+        assert_eq!(rows[5], ("Top places".into(), "Home  ·  3".into()));
+        assert_eq!(rows[6], (String::new(), "Work  ·  1".into()));
     }
 
     #[test]
@@ -2394,7 +2394,7 @@ mod tests {
         });
         assert_eq!(
             notice_summary(&prefs, true),
-            "Family  Â·  10 min before the circle"
+            "Family  ·  10 min before the circle"
         );
         assert_eq!(notice_summary(&prefs, false), "Needs WhatsApp");
     }

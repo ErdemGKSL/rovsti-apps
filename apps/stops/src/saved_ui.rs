@@ -88,6 +88,46 @@ pub fn visible_stops(
         .collect()
 }
 
+/// The list row title: a star in front of a favourite.
+pub fn row_title(stop: &SavedStop) -> String {
+    if stop.favourite {
+        format!("\u{2605} {}", stop.name)
+    } else {
+        stop.name.clone()
+    }
+}
+
+/// The pill after tapping Favourite; `state` is the new flag.
+pub fn favourite_pill(state: bool) -> &'static str {
+    if state {
+        "Added to favourites"
+    } else {
+        "Removed from favourites"
+    }
+}
+
+/// The pill after copying the visible list.
+pub fn copy_list_pill(n: usize) -> String {
+    format!("Copied {n} {}", if n == 1 { "stop" } else { "stops" })
+}
+
+/// Whether stop `id` has a neighbour with the same favourite flag `delta`
+/// places away (-1 up, 1 down); false at a group edge or for an unknown id.
+pub fn can_move(saved: &SavedStops, id: u64, delta: isize) -> bool {
+    let Some(at) = saved.stops.iter().position(|s| s.id == id) else {
+        return false;
+    };
+    let flag = saved.stops[at].favourite;
+    let mut i = at as isize + delta.signum();
+    while i >= 0 && (i as usize) < saved.stops.len() {
+        if saved.stops[i as usize].favourite == flag {
+            return true;
+        }
+        i += delta.signum();
+    }
+    false
+}
+
 /// Up and Down only make sense in the order the user arranged, unfiltered.
 pub fn reorderable(count: usize, query: &str, sort: SavedSort) -> bool {
     sort == SavedSort::Saved && (!show_search(count) || query.trim().is_empty())
@@ -240,7 +280,9 @@ impl StopsApp {
         let count = self.saved.stops.len();
         let here = self.map.position.map(|(c, _)| c);
         self.saved_visible = visible_stops(&self.saved, &self.saved_query, self.saved_sort, here);
-        let header = u64::from(show_search(count)) | (u64::from(show_sort(count)) << 1);
+        let header = u64::from(show_search(count))
+            | (u64::from(show_sort(count)) << 1)
+            | (u64::from(!self.saved_visible.is_empty()) << 2);
         // Its key changes when its height does, so it is measured again.
         let mut keys = vec![lists::key(0, header)];
         if self.saved_visible.is_empty() {
@@ -306,6 +348,16 @@ impl StopsApp {
             .flex_col()
             .child(large_title(theme, "Saved", None))
             .child(tools);
+        if !self.saved_visible.is_empty() {
+            header = header.child(
+                div().flex().px(px(16.0)).pb(px(10.0)).child(
+                    glass_pill(theme, "Copy list")
+                        .id("saved-copy-list")
+                        .flex_1()
+                        .on_click(cx.listener(|this, _, _, cx| this.copy_list(cx))),
+                ),
+            );
+        }
         if show_search(count) || show_sort(count) {
             let mut row = div()
                 .flex()
@@ -352,12 +404,6 @@ impl StopsApp {
             return div().into_any_element();
         };
         let reorder = reorderable(count, &self.saved_query, self.saved_sort);
-        let at = self
-            .saved
-            .stops
-            .iter()
-            .position(|st| st.id == stop.id)
-            .unwrap_or(0);
         let colors = theme::colors(theme);
         let id = stop.id;
         let detail = stop_detail(stop, self.map.position.map(|(c, _)| c));
@@ -365,7 +411,7 @@ impl StopsApp {
         let row = list_row(
             theme,
             None,
-            stop.name.clone(),
+            row_title(stop),
             Some(detail.into()),
             Some(if open { "Close" } else { "" }.into()),
         )
@@ -388,7 +434,7 @@ impl StopsApp {
             } else {
                 "Delete".to_string()
             };
-            let up: AnyElement = if reorder && at > 0 {
+            let up: AnyElement = if reorder && can_move(&self.saved, id, -1) {
                 glass_pill(theme, "Up")
                     .id(("stop-up", id as usize))
                     .flex_1()
@@ -400,7 +446,7 @@ impl StopsApp {
                     .text_color(colors.tertiary_label)
                     .into_any_element()
             };
-            let down: AnyElement = if reorder && at + 1 < count {
+            let down: AnyElement = if reorder && can_move(&self.saved, id, 1) {
                 glass_pill(theme, "Down")
                     .id(("stop-down", id as usize))
                     .flex_1()
@@ -421,6 +467,29 @@ impl StopsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.show_stop_on_map(id, cx);
                             })),
+                    )
+                    .child(
+                        glass_pill(theme, "Open in maps")
+                            .id(("stop-maps", id as usize))
+                            .flex_1()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_stop_in_maps(id, cx);
+                            })),
+                    )
+                    .child(
+                        glass_pill(
+                            theme,
+                            if stop.favourite {
+                                "Unfavourite"
+                            } else {
+                                "Favourite"
+                            },
+                        )
+                        .id(("stop-fav", id as usize))
+                        .flex_1()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_stop_favourite(id, cx);
+                        })),
                     )
                     .child(
                         glass_pill(theme, "Start")
@@ -504,6 +573,45 @@ impl StopsApp {
             }
         }
         lists::grouped(theme, lists::Place::of(i, shown), item).into_any_element()
+    }
+
+    fn toggle_stop_favourite(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(state) = self.saved.toggle_favourite(id) else {
+            return;
+        };
+        self.save_stops(cx);
+        self.saved_visible = visible_stops(
+            &self.saved,
+            &self.saved_query,
+            self.saved_sort,
+            self.map.position.map(|(c, _)| c),
+        );
+        self.show_pill(favourite_pill(state), None, cx);
+    }
+
+    fn open_stop_in_maps(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(stop) = self.saved.get(id) else {
+            return;
+        };
+        let url = crate::map::maps_url(stop.center(), &stop.name);
+        cx.open_url(&url);
+        self.show_pill("Opening in maps", None, cx);
+    }
+
+    /// Copies the visible stops (search and sort respected) as plain text.
+    fn copy_list(&mut self, cx: &mut Context<Self>) {
+        let stops: Vec<&SavedStop> = self
+            .saved_visible
+            .iter()
+            .filter_map(|id| self.saved.get(*id))
+            .collect();
+        if stops.is_empty() {
+            return;
+        }
+        let text = saved_stops::list_text(&stops, self.map.position.map(|(c, _)| c));
+        let n = stops.len();
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        self.show_pill(copy_list_pill(n), None, cx);
     }
 
     fn move_stop(&mut self, id: u64, delta: isize, cx: &mut Context<Self>) {
@@ -923,6 +1031,49 @@ mod tests {
         }
         assert_eq!(visible_stops(&s, "zzz", SavedSort::Saved, None).len(), 3);
         assert!(reorderable(3, "zzz", SavedSort::Saved));
+    }
+
+    #[test]
+    fn row_title_stars_favourites() {
+        let mut s = six();
+        s.toggle_favourite(2);
+        assert_eq!(row_title(s.get(1).unwrap()), "Zeta");
+        assert_eq!(row_title(s.get(2).unwrap()), "\u{2605} alpha");
+    }
+
+    #[test]
+    fn favourite_and_copy_pills() {
+        assert_eq!(favourite_pill(true), "Added to favourites");
+        assert_eq!(favourite_pill(false), "Removed from favourites");
+        assert_eq!(copy_list_pill(1), "Copied 1 stop");
+        assert_eq!(copy_list_pill(12), "Copied 12 stops");
+    }
+
+    #[test]
+    fn can_move_stops_at_group_edges() {
+        let mut s = six();
+        s.toggle_favourite(3);
+        s.toggle_favourite(5);
+        // Order: 1 2 3* 4 5* 6. Non-favourites: 1 2 4 6; favourites: 3 5.
+        assert!(!can_move(&s, 1, -1));
+        assert!(can_move(&s, 1, 1));
+        assert!(can_move(&s, 4, -1));
+        assert!(can_move(&s, 4, 1));
+        assert!(!can_move(&s, 6, 1));
+        assert!(!can_move(&s, 3, -1));
+        assert!(can_move(&s, 3, 1));
+        assert!(can_move(&s, 5, -1));
+        assert!(!can_move(&s, 5, 1));
+        assert!(!can_move(&s, 99, 1));
+    }
+
+    #[test]
+    fn favourites_lead_under_a_query() {
+        let mut s = six();
+        s.toggle_favourite(4); // Mid
+        s.toggle_favourite(5); // Near
+        let ids = visible_stops(&s, "e", SavedSort::Saved, None);
+        assert_eq!(names(&s, &ids), ["Near", "Zeta", "Émile"]);
     }
 
     #[test]

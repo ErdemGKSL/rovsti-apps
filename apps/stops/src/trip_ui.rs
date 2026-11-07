@@ -828,6 +828,8 @@ impl StopsApp {
         dir: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
+        self.map.follow_mode = self.map.follow_mode.on_pan();
+        self.sync_follow(true, cx);
         let notice = if self.notice_on && self.notice_available(cx) {
             self.prefs.notice.clone()
         } else {

@@ -504,17 +504,18 @@ fn done(result: rovsti_android::Result<bool>) -> Result<(), String> {
 }
 
 /// Whether the launcher can pin a shortcut (false on desktop).
-#[allow(dead_code)] // wired up by step 7
+#[allow(dead_code)] // the pill is always shown; desktop answers with a notice
 pub fn can_pin_shortcut() -> bool {
     rovsti_android::shortcuts::can_pin().unwrap_or(false)
 }
 
 /// Asks the launcher to pin a home screen shortcut that opens `stop`.
-#[allow(dead_code)] // wired up by step 7
-pub fn pin_stop_shortcut(stop: &SavedStop) -> Result<(), String> {
-    let spec = serde_json::to_string(&shortcut_spec(stop))
-        .map_err(|_| "the shortcut can't be built".to_owned())?;
-    done(rovsti_android::shortcuts::pin_stop(&spec))
+/// `Ok(false)` means the launcher did not take it.
+pub fn pin_stop_shortcut(stop: &SavedStop) -> rovsti_android::Result<bool> {
+    match serde_json::to_string(&shortcut_spec(stop)) {
+        Ok(spec) => rovsti_android::shortcuts::pin_stop(&spec),
+        Err(_) => Ok(false),
+    }
 }
 
 /// A file name that is safe on every file system.

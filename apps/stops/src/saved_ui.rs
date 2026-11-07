@@ -457,6 +457,14 @@ impl StopsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_stop_qr(id, cx);
                             })),
+                    )
+                    .child(
+                        glass_pill(theme, "Home screen")
+                            .id(("stop-pin", id as usize))
+                            .flex_1()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.pin_stop_home(id, cx);
+                            })),
                     ),
             );
             item = item.child(
@@ -526,6 +534,23 @@ impl StopsApp {
         let text = rovsti_geo::dest::stop_share_text(&stop.name, stop.a.coord, stop.b.coord);
         let name = stop.name.clone();
         self.share_out(name, text, cx);
+    }
+
+    /// Asks the launcher to put a shortcut to the stop on the home screen.
+    fn pin_stop_home(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(stop) = self.saved.get(id).cloned() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { backend::pin_stop_shortcut(&stop) })
+                .await;
+            let text = pin_pill(&result);
+            this.update(cx, |this, cx| this.show_pill(text, None, cx))
+                .ok();
+        })
+        .detach();
     }
 
     /// Opens Copy as for the middle of the gate.
@@ -772,10 +797,28 @@ impl StopsApp {
     }
 }
 
+/// The pill after asking the launcher for a shortcut.
+pub fn pin_pill(result: &Result<bool, AndroidError>) -> String {
+    match result {
+        Ok(true) => "Added to the home screen".to_owned(),
+        Ok(false) => "The launcher did not add it".to_owned(),
+        Err(_) => {
+            crate::settings_ui::android_notice("Home screen shortcut", result).unwrap_or_default()
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shortcut_pill_covers_every_answer() {
+        assert_eq!(pin_pill(&Ok(true)), "Added to the home screen");
+        assert_eq!(pin_pill(&Ok(false)), "The launcher did not add it");
+        assert!(pin_pill(&Err(AndroidError::Unsupported)).contains("phone only"));
+    }
     use rovsti_geo::{Endpoint, SavedStops};
 
     fn stop(name: &str, lat_b: f64) -> SavedStop {

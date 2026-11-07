@@ -264,6 +264,10 @@ impl StopsApp {
             if window.is_window_active() {
                 this.refresh_preflight(cx);
                 this.refresh_trip(cx);
+                // Re-arm the watch when the map was still following.
+                this.sync_follow(false, cx);
+            } else {
+                this.pause_follow(cx);
             }
         });
 
@@ -526,6 +530,27 @@ impl StopsApp {
         self.refresh_preflight_later(cx);
     }
 
+    /// A home screen shortcut asked to run a saved stop.
+    fn on_open_stop(&mut self, id: u64, cx: &mut Context<Self>) {
+        match open_stop_outcome(&self.saved, id, self.trip.is_some()) {
+            OpenStop::Gone => self.show_pill("That stop was deleted", None, cx),
+            OpenStop::Busy => self.show_pill("Not while a trip is running", None, cx),
+            OpenStop::Start => {
+                let Some(stop) = self.saved.get(id) else {
+                    return;
+                };
+                let text = format!("Starting {}", stop.name);
+                let (a, b) = (
+                    pick::dest_from_endpoint(&stop.a),
+                    pick::dest_from_endpoint(&stop.b),
+                );
+                self.tabs.jump_to(0);
+                self.request_start(a, b, cx);
+                self.show_pill(text, None, cx);
+            }
+        }
+    }
+
     /// One event from Kotlin.
     fn on_event(&mut self, event: &RawEvent, cx: &mut Context<Self>) {
         match event.kind.as_str() {
@@ -538,6 +563,10 @@ impl StopsApp {
             kind::STOPS_LOCATION => match parse_location_fix(&event.json) {
                 Some(fix) => self.apply_fix(fix, false, cx),
                 None => log::warn!("unreadable stops_location event"),
+            },
+            kind::OPEN_STOP => match rovsti_android::events::parse_open_stop(&event.json) {
+                Some(id) => self.on_open_stop(id, cx),
+                None => log::warn!("unreadable open_stop event"),
             },
             kind::ALARM_SOUND_PICKED => self.on_alarm_sound_picked(&event.json, cx),
             kind::PERMISSIONS_CHANGED => {
@@ -839,6 +868,8 @@ impl Render for StopsApp {
                     entity.update(cx, |this, cx| {
                         this.tabs.press();
                         if this.tabs.select(index) {
+                            this.map.follow_mode = this.map.follow_mode.on_pan();
+                            this.sync_follow(true, cx);
                             this.expanded = None;
                             this.confirm_delete = None;
                             // Leaving disarms a half-done destructive tap and
@@ -918,4 +949,53 @@ fn main() {
         .expect("failed to open the Rovsti Stops window");
         cx.activate(true);
     });
+}
+
+/// What a home screen shortcut for a saved stop should do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenStop {
+    Start,
+    Busy,
+    Gone,
+}
+
+fn open_stop_outcome(saved: &SavedStops, id: u64, trip_running: bool) -> OpenStop {
+    if saved.get(id).is_none() {
+        OpenStop::Gone
+    } else if trip_running {
+        OpenStop::Busy
+    } else {
+        OpenStop::Start
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod open_stop_tests {
+    use super::*;
+    use rovsti_geo::{Coord, Endpoint};
+
+    fn saved_with_one() -> (SavedStops, u64) {
+        let mut saved = SavedStops::default();
+        let ep = |lat| Endpoint {
+            coord: Coord::new(lat, 29.0),
+            label: String::new(),
+        };
+        let id = saved.add("Home", ep(41.0), ep(41.1), 0).unwrap();
+        (saved, id)
+    }
+
+    #[test]
+    fn a_known_stop_starts_unless_a_trip_runs() {
+        let (saved, id) = saved_with_one();
+        assert_eq!(open_stop_outcome(&saved, id, false), OpenStop::Start);
+        assert_eq!(open_stop_outcome(&saved, id, true), OpenStop::Busy);
+    }
+
+    #[test]
+    fn a_deleted_stop_is_gone_even_during_a_trip() {
+        let (saved, id) = saved_with_one();
+        assert_eq!(open_stop_outcome(&saved, id + 99, false), OpenStop::Gone);
+        assert_eq!(open_stop_outcome(&saved, id + 99, true), OpenStop::Gone);
+    }
 }

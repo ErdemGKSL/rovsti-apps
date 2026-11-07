@@ -39,5 +39,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Images and files handed to the share sheet (cache/share only, read-only). -->
+        <provider
+            android:name="dev.rovsti.bridge.RovstiShareProvider"
+            android:authorities="${applicationId}.rovstishare"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

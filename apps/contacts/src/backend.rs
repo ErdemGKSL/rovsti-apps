@@ -6,9 +6,12 @@
 //! Desktop runs have no provider; the reads answer from `sample` and the
 //! writes say they need a phone.
 
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
-use rovsti_android::{Error, contacts_edit, documents, providers};
+use rovsti_android::{Error, contacts_edit, documents, media, providers};
 use rovsti_core::{
     contact_edit::{
         Account, AccountsPayload, ContactDraft, DetailPayload, FullPayload, Group, GroupsPayload,
@@ -184,6 +187,14 @@ pub(crate) fn delete_group(group_id: i64) -> Result<(), String> {
 /// Every contact (with or without a number) as vCard text, and how many that is.
 /// `hidden` is a contact in its Undo window: it is left out of the file.
 pub(crate) fn export_text(hidden: Option<i64>) -> Result<(String, usize), String> {
+    let mut contacts = pull_full()?;
+    contacts.retain(|c| hidden.is_none() || c.id != hidden);
+    Ok((vcard::write(&contacts), contacts.len()))
+}
+
+/// Every contact as an editable, cleaned and valid draft, sorted by folded
+/// name. Desktop answers from the sample.
+pub(crate) fn pull_full() -> Result<Vec<ContactDraft>, String> {
     let mut contacts = match decode::<FullPayload>(contacts_edit::full()) {
         Ok(payload) => payload.contacts,
         Err(Failed::Unsupported) => sample::contacts()
@@ -196,9 +207,8 @@ pub(crate) fn export_text(hidden: Option<i64>) -> Result<(String, usize), String
         contact.clean();
     }
     contacts.retain(|c| c.validate().is_ok());
-    contacts.retain(|c| hidden.is_none() || c.id != hidden);
     contacts.sort_by_cached_key(|c| fold(&c.display_name()));
-    Ok((vcard::write(&contacts), contacts.len()))
+    Ok(contacts)
 }
 
 /// Opens "save as" for the `.vcf`. The answer is a `document_result`.
@@ -281,13 +291,7 @@ pub(crate) fn change_photo(contact_id: i64, path: &str) -> Result<(), String> {
 pub(crate) fn contact_photo(uri: &str, size: u32) -> Option<image::RgbaImage> {
     match providers::contact_photo(uri, size) {
         Ok(path) if path.is_empty() => None,
-        Ok(path) => {
-            let bytes = std::fs::read(&path).ok()?;
-            image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
-                .map_err(|error| log::debug!("photo {path}: {error}"))
-                .ok()
-                .map(image::DynamicImage::into_rgba8)
-        }
+        Ok(path) => contact_photo_at(&path),
         Err(Error::Unsupported) => None,
         Err(error) => {
             log::debug!("contact photo failed: {error}");
@@ -295,6 +299,127 @@ pub(crate) fn contact_photo(uri: &str, size: u32) -> Option<image::RgbaImage> {
         }
     }
 }
+
+// The photo viewer and share actions (plan steps S5 to S8) call these; until
+// they land the wrappers are only exercised by tests.
+#[allow(dead_code)]
+mod hand_off {
+    use super::*;
+
+    /// Side length of the photo shown in the full-screen viewer.
+    pub(crate) const FULL_PHOTO: u32 = 1080;
+
+    /// Where files for save and share are written.
+    fn temp_dir() -> Option<PathBuf> {
+        let dir = std::env::temp_dir().join("rovsti-contacts");
+        std::fs::create_dir_all(&dir).ok()?;
+        Some(dir)
+    }
+
+    /// A file name that is safe on every file system.
+    pub(super) fn safe_name(name: &str) -> String {
+        let clean: String = name
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let clean = clean.trim_matches(['_', '.']);
+        if clean.is_empty() {
+            "contact".to_owned()
+        } else {
+            clean.chars().take(60).collect()
+        }
+    }
+
+    fn write_temp(name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
+        let words = || Failed::Other("temp file".to_owned()).words();
+        let path = temp_dir().ok_or_else(words)?.join(safe_name(name));
+        std::fs::write(&path, bytes).map_err(|_| words())?;
+        Ok(path)
+    }
+
+    /// The full-size photo of a contact, decoded, plus a PNG file it can be saved
+    /// or shared from. Blocks: run it on the background executor. Desktop paints
+    /// a sample portrait into the temp PNG.
+    pub(crate) fn full_photo(uri: &str) -> Option<(image::RgbaImage, PathBuf)> {
+        let (image, source) = match providers::contact_photo(uri, FULL_PHOTO) {
+            Ok(path) if path.is_empty() => return None,
+            Ok(path) => (contact_photo_at(&path)?, Some(path)),
+            Err(Error::Unsupported) => (sample::photo(FULL_PHOTO), None),
+            Err(error) => {
+                log::debug!("full photo failed: {error}");
+                return None;
+            }
+        };
+        let path = match source {
+            Some(path) => PathBuf::from(path),
+            None => {
+                let name: String = uri.chars().filter(char::is_ascii_alphanumeric).collect();
+                let path = temp_dir()?.join(format!("photo-{name}.png"));
+                image
+                    .save_with_format(&path, image::ImageFormat::Png)
+                    .ok()?;
+                path
+            }
+        };
+        Some((image, path))
+    }
+
+    pub(super) fn contact_photo_at(path: &str) -> Option<image::RgbaImage> {
+        let bytes = std::fs::read(path).ok()?;
+        image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+            .map_err(|error| log::debug!("photo {path}: {error}"))
+            .ok()
+            .map(image::DynamicImage::into_rgba8)
+    }
+
+    /// Saves the PNG at `path` to the gallery (Pictures/Rovsti) as `name`.
+    pub(crate) fn save_to_gallery(path: &Path, name: &str) -> Result<(), String> {
+        done(media::save_image_to_gallery(
+            &path.to_string_lossy(),
+            name,
+            "image/png",
+        ))
+    }
+
+    /// Opens the share sheet with the PNG at `path`.
+    pub(crate) fn share_image(path: &Path, title: &str) -> Result<(), String> {
+        done(media::share_image(
+            &path.to_string_lossy(),
+            "image/png",
+            title,
+        ))
+    }
+
+    /// Opens the share sheet with `text` as a `.vcf` file called `name`.
+    pub(crate) fn share_vcf(name: &str, text: &str) -> Result<(), String> {
+        let file = format!("{}.vcf", safe_name(name));
+        let path = write_temp(&file, text.as_bytes())?;
+        done(media::share_file(
+            &path.to_string_lossy(),
+            "text/x-vcard",
+            &file,
+        ))
+    }
+
+    /// Opens the share sheet with `bytes` as a PNG file called `name`.
+    pub(crate) fn share_png(name: &str, bytes: &[u8]) -> Result<(), String> {
+        let file = format!("{}.png", safe_name(name));
+        let path = write_temp(&file, bytes)?;
+        done(media::share_image(
+            &path.to_string_lossy(),
+            "image/png",
+            &file,
+        ))
+    }
+}
+#[allow(unused_imports)]
+pub(crate) use hand_off::*;
 
 #[cfg(test)]
 mod tests {
@@ -436,5 +561,49 @@ mod tests {
         let first = sample::contacts()[0].id;
         let (_, fewer) = export_text(Some(first)).expect("sample exports");
         assert_eq!(fewer, count - 1);
+    }
+
+    const NEEDS_PHONE: &str = "this needs an Android phone";
+
+    #[test]
+    fn desktop_hand_offs_need_a_phone() {
+        let path = Path::new("/c/p.png");
+        assert_eq!(
+            save_to_gallery(path, "p.png").expect_err("no gallery"),
+            NEEDS_PHONE
+        );
+        assert_eq!(share_image(path, "").expect_err("no sheet"), NEEDS_PHONE);
+        assert_eq!(
+            share_vcf("Ayşe Yılmaz", "BEGIN:VCARD").expect_err("no sheet"),
+            NEEDS_PHONE
+        );
+        assert_eq!(
+            share_png("qr", &[1, 2, 3]).expect_err("no sheet"),
+            NEEDS_PHONE
+        );
+    }
+
+    #[test]
+    fn desktop_full_photo_is_a_sample_png_on_disk() {
+        let (image, path) = full_photo("content://c/1").expect("sample photo");
+        assert_eq!(image.width(), FULL_PHOTO);
+        assert!(path.exists());
+        assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+    }
+
+    #[test]
+    fn file_names_are_made_safe() {
+        assert_eq!(safe_name("Ayşe Yılmaz"), "Ayşe_Yılmaz");
+        assert_eq!(safe_name("../a/b"), "a_b");
+        assert_eq!(safe_name("  "), "contact");
+    }
+
+    #[test]
+    fn the_full_pull_is_clean_valid_and_feeds_the_export() {
+        let all = pull_full().expect("sample");
+        assert_eq!(all.len(), sample::contacts().len());
+        assert!(all.iter().all(|c| c.validate().is_ok()));
+        let (_, count) = export_text(None).expect("export");
+        assert_eq!(count, all.len());
     }
 }

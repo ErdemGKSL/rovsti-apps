@@ -8,11 +8,13 @@ import android.content.Context
 import android.database.Cursor
 import android.provider.ContactsContract
 import android.provider.ContactsContract.CommonDataKinds.Email
+import android.provider.ContactsContract.CommonDataKinds.Event
 import android.provider.ContactsContract.CommonDataKinds.GroupMembership
 import android.provider.ContactsContract.CommonDataKinds.Note
 import android.provider.ContactsContract.CommonDataKinds.Organization
 import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.provider.ContactsContract.CommonDataKinds.StructuredName
+import android.provider.ContactsContract.CommonDataKinds.StructuredPostal
 import android.provider.ContactsContract.Contacts
 import android.provider.ContactsContract.Data
 import android.provider.ContactsContract.Groups
@@ -40,6 +42,8 @@ object ContactsEdit {
         Email.CONTENT_ITEM_TYPE,
         Organization.CONTENT_ITEM_TYPE,
         Note.CONTENT_ITEM_TYPE,
+        Event.CONTENT_ITEM_TYPE,
+        StructuredPostal.CONTENT_ITEM_TYPE,
     )
 
     private inline fun guard(block: () -> String): String = try {
@@ -108,6 +112,34 @@ object ContactsEdit {
         else -> "other"
     }
 
+    private fun kindOfEvent(type: Int) = when (type) {
+        Event.TYPE_BIRTHDAY -> "birthday"
+        Event.TYPE_ANNIVERSARY -> "anniversary"
+        Event.TYPE_CUSTOM -> "custom"
+        else -> "other"
+    }
+
+    private fun typeOfEvent(kind: String) = when (kind) {
+        "birthday" -> Event.TYPE_BIRTHDAY
+        "anniversary" -> Event.TYPE_ANNIVERSARY
+        "custom" -> Event.TYPE_CUSTOM
+        else -> Event.TYPE_OTHER
+    }
+
+    private fun kindOfPostal(type: Int) = when (type) {
+        StructuredPostal.TYPE_HOME -> "home"
+        StructuredPostal.TYPE_WORK -> "work"
+        StructuredPostal.TYPE_CUSTOM -> "custom"
+        else -> "other"
+    }
+
+    private fun typeOfPostal(kind: String) = when (kind) {
+        "home" -> StructuredPostal.TYPE_HOME
+        "work" -> StructuredPostal.TYPE_WORK
+        "custom" -> StructuredPostal.TYPE_CUSTOM
+        else -> StructuredPostal.TYPE_OTHER
+    }
+
     private fun typeOfPhone(kind: String) = when (kind) {
         "mobile" -> Phone.TYPE_MOBILE
         "home" -> Phone.TYPE_HOME
@@ -142,6 +174,8 @@ object ContactsEdit {
         var starred = false
         val numbers = JSONArray()
         val emails = JSONArray()
+        val events = JSONArray()
+        val addresses = JSONArray()
         val groups = JSONArray()
 
         fun add(c: Cursor, base: Int) {
@@ -158,6 +192,16 @@ object ContactsEdit {
                 Email.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) {
                     emails.put(field(data1, kindOfEmail(c.getInt(base + 2)), c.getString(base + 3)))
                 }
+                Event.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) {
+                    val kind = kindOfEvent(c.getInt(base + 2))
+                    val o = JSONObject().put("date", data1).put("kind", kind)
+                    val label = c.getString(base + 3)
+                    if (kind == "custom" && !label.isNullOrBlank()) o.put("label", label)
+                    events.put(o)
+                }
+                StructuredPostal.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) {
+                    addresses.put(field(data1, kindOfPostal(c.getInt(base + 2)), c.getString(base + 3)))
+                }
                 Organization.CONTENT_ITEM_TYPE -> if (org.isEmpty()) org = data1.orEmpty()
                 Note.CONTENT_ITEM_TYPE -> if (note.isEmpty()) note = data1.orEmpty()
                 GroupMembership.CONTENT_ITEM_TYPE -> c.getLong(base + 1).takeIf { it > 0 }?.let { groups.put(it) }
@@ -170,6 +214,8 @@ object ContactsEdit {
                 .put("given", given).put("family", family).put("org", org).put("note", note)
                 .put("numbers", numbers).put("emails", emails).put("groups", groups)
                 .put("starred", starred)
+            if (events.length() > 0) o.put("events", events)
+            if (addresses.length() > 0) o.put("addresses", addresses)
             if (account.isNotEmpty()) o.put("account", account)
             return o
         }
@@ -263,6 +309,34 @@ object ContactsEdit {
                         .withValue(Email.ADDRESS, value)
                         .withValue(Email.TYPE, typeOfEmail(kind))
                         .withValue(Email.LABEL, if (kind == "custom") e.optString("label", "").ifEmpty { null } else null)
+                        .build(),
+                )
+            }
+        }
+        draft.optJSONArray("events")?.let { events ->
+            for (i in 0 until events.length()) {
+                val e = events.optJSONObject(i) ?: continue
+                val date = str(e, "date").takeIf { it.isNotEmpty() } ?: continue
+                val kind = e.optString("kind", "birthday")
+                ops.add(
+                    insert(Event.CONTENT_ITEM_TYPE)
+                        .withValue(Event.START_DATE, date)
+                        .withValue(Event.TYPE, typeOfEvent(kind))
+                        .withValue(Event.LABEL, if (kind == "custom") e.optString("label", "").ifEmpty { null } else null)
+                        .build(),
+                )
+            }
+        }
+        draft.optJSONArray("addresses")?.let { addresses ->
+            for (i in 0 until addresses.length()) {
+                val a = addresses.optJSONObject(i) ?: continue
+                val value = str(a, "value").takeIf { it.isNotEmpty() } ?: continue
+                val kind = a.optString("kind", "other")
+                ops.add(
+                    insert(StructuredPostal.CONTENT_ITEM_TYPE)
+                        .withValue(StructuredPostal.FORMATTED_ADDRESS, value)
+                        .withValue(StructuredPostal.TYPE, typeOfPostal(kind))
+                        .withValue(StructuredPostal.LABEL, if (kind == "custom") a.optString("label", "").ifEmpty { null } else null)
                         .build(),
                 )
             }

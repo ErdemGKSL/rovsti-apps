@@ -1,7 +1,7 @@
 //! Sample address book for desktop runs, where there is no provider to ask.
 
 use rovsti_core::{
-    contact_edit::{Account, ContactDraft, DraftField, FieldKind, Group},
+    contact_edit::{Account, ContactDraft, DraftEvent, DraftField, EventKind, FieldKind, Group},
     wire::{WireContact, WireNumber},
 };
 
@@ -108,6 +108,13 @@ pub(crate) fn contacts() -> Vec<WireContact> {
         email: Some("selin.aksoy@example.com".to_owned()),
         ..contact(11, "Selin Aksoy", Vec::new(), false)
     });
+    // The same number as Burak Demir's, written another way: a duplicate pair.
+    all.push(contact(
+        12,
+        "B. Demir",
+        vec![number("+90 532 123 45 67", Some("Mobile"), false)],
+        false,
+    ));
     all.sort_by_cached_key(|c| (rovsti_core::search::fold(&c.display_name), c.id));
     all
 }
@@ -145,6 +152,32 @@ pub(crate) fn groups() -> Vec<Group> {
     ]
 }
 
+/// Fixed birthdays, an anniversary and a home address for a few samples.
+fn dates_and_places(id: i64) -> (Vec<DraftEvent>, Vec<DraftField>) {
+    let event = |date: &str, kind| vec![DraftEvent::new(date, kind)];
+    match id {
+        1 => (
+            event("1992-05-12", EventKind::Birthday),
+            vec![DraftField::new(
+                "Atatürk Cd. 12\nKadıköy, İstanbul",
+                FieldKind::Home,
+            )],
+        ),
+        3 => (event("--09-30", EventKind::Birthday), Vec::new()),
+        6 => (event("2015-06-21", EventKind::Anniversary), Vec::new()),
+        _ => (Vec::new(), Vec::new()),
+    }
+}
+
+#[allow(dead_code)] // used by the photo viewer on desktop (plan step S5)
+/// A sample portrait (a soft diagonal gradient) for desktop runs.
+pub(crate) fn photo(size: u32) -> image::RgbaImage {
+    image::RgbaImage::from_fn(size, size, |x, y| {
+        let t = ((x + y) * 255 / (2 * size.max(1))) as u8;
+        image::Rgba([40 + t / 2, 120, 255 - t / 2, 255])
+    })
+}
+
 /// The editable form of a sample contact, as the provider would return it.
 pub(crate) fn draft(id: i64) -> Option<ContactDraft> {
     let wire = contacts().into_iter().find(|c| c.id == id)?;
@@ -158,8 +191,11 @@ pub(crate) fn draft(id: i64) -> Option<ContactDraft> {
         Some("Mobile") | None => FieldKind::Mobile,
         Some(_) => FieldKind::Other,
     };
+    let (events, addresses) = dates_and_places(id);
     Some(ContactDraft {
         id: Some(wire.id),
+        events,
+        addresses,
         given: given.to_owned(),
         family: family.to_owned(),
         numbers: wire
@@ -218,5 +254,42 @@ mod tests {
     fn the_sample_google_group_belongs_to_the_listed_account() {
         let account = &accounts()[0];
         assert!(groups().iter().any(|g| g.account == account.key));
+    }
+
+    #[test]
+    fn sample_drafts_pass_finish() {
+        for c in contacts() {
+            let d = draft(c.id).expect("draft");
+            assert!(d.finish().is_ok(), "{} should be valid", c.display_name);
+        }
+    }
+
+    #[test]
+    fn sample_dates_parse_and_one_has_no_year() {
+        let events: Vec<DraftEvent> = contacts()
+            .iter()
+            .filter_map(|c| draft(c.id))
+            .flat_map(|d| d.events)
+            .collect();
+        assert!(events.len() >= 3);
+        let parsed: Vec<_> = events
+            .iter()
+            .map(|e| rovsti_core::contact_dates::parse(&e.date).expect("parses"))
+            .collect();
+        assert!(parsed.iter().any(|d| d.year.is_none()));
+        assert!(events.iter().any(|e| e.kind == EventKind::Anniversary));
+        assert!(
+            contacts()
+                .iter()
+                .filter_map(|c| draft(c.id))
+                .any(|d| !d.addresses.is_empty())
+        );
+    }
+
+    #[test]
+    fn the_sample_has_exactly_one_duplicate_group() {
+        let drafts: Vec<ContactDraft> = contacts().iter().filter_map(|c| draft(c.id)).collect();
+        let groups = rovsti_core::contact_dupes::find(&drafts);
+        assert_eq!(groups.len(), 1);
     }
 }

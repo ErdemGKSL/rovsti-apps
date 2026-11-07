@@ -132,6 +132,8 @@ pub enum ConversationEvent {
     AddContact(String),
     /// The Email pill of an address found in a message.
     Email(String),
+    /// The Copy link pill: the page copies the URL and says "Link copied".
+    CopyLink(String),
     /// The Share pill of a message: the page opens the system share sheet.
     Share(String),
     /// A short message for the page's pill (save results).
@@ -327,6 +329,8 @@ pub struct Conversation {
     find: Option<FindState<String>>,
     /// The "Starred messages" sheet is open.
     starred_open: bool,
+    /// The "Media, links and docs" sheet.
+    gallery: Option<crate::gallery_ui::GallerySheet>,
     /// The scroll-to-bottom button and its count of new messages.
     jump: JumpState,
     /// Unread count the chat opened with, until the first page decides the divider.
@@ -449,6 +453,7 @@ impl Conversation {
             delete_confirm: None,
             info_sheet: None,
             starred_open: false,
+            gallery: None,
             jump: JumpState::default(),
             opening_unread: (unread > 0).then_some(unread),
             divider: None,
@@ -524,7 +529,9 @@ impl Conversation {
     /// System Back inside the page: closes the Delete menu, a message's menu,
     /// or the edit or reply bar; `false` when there is none of them.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.info_sheet.is_some() {
+        if self.gallery.is_some() {
+            self.gallery = None;
+        } else if self.info_sheet.is_some() {
             self.info_sheet = None;
         } else if self.starred_open {
             self.starred_open = false;
@@ -879,6 +886,185 @@ impl Conversation {
     pub fn open_starred(&mut self, cx: &mut Context<Self>) {
         self.starred_open = true;
         cx.notify();
+    }
+
+    /// "Media, links and docs" on the page menu: opens the sheet.
+    pub fn open_gallery(&mut self, cx: &mut Context<Self>) {
+        self.gallery = Some(self.build_gallery());
+        cx.notify();
+    }
+
+    /// The gallery of the loaded, non-hidden, non-revoked messages.
+    fn build_gallery(&self) -> crate::gallery_ui::GallerySheet {
+        use rovsti_core::chat_gallery::{self, GalleryInput};
+        struct Row {
+            text: Option<String>,
+            kind: Option<rovsti_core::chat_gallery::GalleryKind>,
+            name: Option<String>,
+            size: Option<u64>,
+        }
+        let texts: Vec<Row> = self
+            .timeline
+            .items()
+            .iter()
+            .map(|item| {
+                let message = &item.message;
+                let meta = self.timeline.meta(&message.id);
+                let (kind, size) = match &message.body {
+                    MessageBody::Media { kind, size, .. } => {
+                        (crate::gallery_ui::kind_of(*kind), Some(*size))
+                    }
+                    _ => (None, None),
+                };
+                let name = crate::gallery_ui::file_name_of(meta.and_then(|m| m.media.as_ref()))
+                    .map(str::to_owned);
+                Row {
+                    text: copy_text_of(&message.body, meta),
+                    kind,
+                    name,
+                    size,
+                }
+            })
+            .collect();
+        let inputs: Vec<GalleryInput<'_>> = self
+            .timeline
+            .items()
+            .iter()
+            .zip(&texts)
+            .filter(|(item, row)| {
+                let kind = &row.kind;
+                let id = &item.message.id;
+                let is_media = matches!(item.message.body, MessageBody::Media { .. });
+                // Stickers are media messages without a gallery kind.
+                !(is_media && kind.is_none())
+                    && !self.hidden.contains(id)
+                    && !self.timeline.meta(id).is_some_and(|m| m.revoked)
+            })
+            .map(|(item, row)| GalleryInput {
+                id: &item.message.id,
+                at_ms: item.message.timestamp_ms,
+                kind: row.kind,
+                text: row.text.as_deref(),
+                file_name: row.name.as_deref(),
+                size: row.size,
+            })
+            .collect();
+        crate::gallery_ui::GallerySheet::new(
+            chat_gallery::build(&inputs),
+            self.timeline.has_older(),
+            self.timeline.items().len(),
+        )
+    }
+
+    /// A tap inside the gallery sheet.
+    fn gallery_action(&mut self, action: crate::gallery_ui::GalleryAction, cx: &mut Context<Self>) {
+        use crate::gallery_ui::GalleryAction as A;
+        match action {
+            A::Close => self.gallery = None,
+            A::Tab(tab) => {
+                if let Some(sheet) = &mut self.gallery {
+                    sheet.tab = tab;
+                }
+            }
+            A::Media(id) => {
+                let (items, index) = self.viewer_items(&id);
+                if items.get(index).is_some_and(|i| i.key == id) {
+                    self.gallery = None;
+                    cx.emit(ConversationEvent::OpenMedia { items, index });
+                } else {
+                    // A video or file: its message holds the save and open card.
+                    self.gallery = None;
+                    self.jump_to(&id, cx);
+                }
+            }
+            A::Open(url) => cx.open_url(&url),
+            A::CopyLink(url) => cx.emit(ConversationEvent::CopyLink(url)),
+            A::Jump(id) => {
+                self.gallery = None;
+                self.jump_to(&id, cx);
+            }
+            A::Older => {
+                if let Some(oldest) = self.timeline.oldest_ms() {
+                    self.load(Some(oldest.saturating_add(1)), cx);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The Media, links and docs sheet over the conversation.
+    fn gallery_overlay(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.gallery.as_ref()?;
+        if self
+            .gallery
+            .as_ref()
+            .is_some_and(|g| g.built_for != self.timeline.items().len())
+        {
+            let tab = self.gallery.as_ref().map(|g| g.tab).unwrap_or_default();
+            let mut fresh = self.build_gallery();
+            fresh.tab = tab;
+            self.gallery = Some(fresh);
+        }
+        // Previews are fetched only for tiles of the open tab.
+        let wanted: Vec<String> = self
+            .gallery
+            .as_ref()
+            .filter(|g| g.tab == rovsti_core::chat_gallery::GalleryTab::Media)
+            .map(|g| {
+                g.gallery
+                    .media
+                    .iter()
+                    .filter(|(id, _)| {
+                        self.cached_image(id).is_none()
+                            && self
+                                .timeline
+                                .meta(id)
+                                .and_then(|m| m.media.as_ref())
+                                .is_some_and(|m| m.thumbnail)
+                    })
+                    .take(THUMB_PARALLEL * 4)
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for id in wanted {
+            self.want_thumbnail(&id, cx);
+        }
+        let sheet = self.gallery.as_ref()?;
+        let offset = self.locale.tz_offset_s;
+        let now = self.frame_now;
+        let this = cx.entity().downgrade();
+        let dispatch: crate::gallery_ui::Dispatch = std::rc::Rc::new(move |action, _, app| {
+            this.update(app, |this, cx| this.gallery_action(action, cx))
+                .ok();
+        });
+        Some(crate::gallery_ui::render_gallery(
+            theme,
+            sheet,
+            self.loading,
+            |ms| {
+                format!(
+                    "{} {}",
+                    day_label(day_start_ms(ms, offset), now, offset),
+                    clock(ms, offset)
+                )
+            },
+            offset,
+            |id| {
+                let video = matches!(
+                    self.timeline.items().iter().find(|i| i.message.id == id),
+                    Some(i) if matches!(i.message.body, MessageBody::Media { kind: MediaKind::Video, .. })
+                );
+                crate::gallery_ui::Thumb {
+                    source: self
+                        .cached_image(id)
+                        .or_else(|| self.cached_thumb(id))
+                        .map(Into::into),
+                    video,
+                }
+            },
+            dispatch,
+        ))
     }
 
     /// The starred messages of the loaded pages, newest first.
@@ -3081,6 +3267,21 @@ impl Conversation {
                 );
             }
         }
+        if !revoked
+            && let Some(text) = copy_text_of(&message.body, meta)
+            && let Some(link) = rovsti_core::spam::open_links(&text, 1).into_iter().next()
+        {
+            row = row.child(
+                pill("copy-link", Icon::LucideCopy, "Copy link", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::CopyLink(link.url.clone()));
+                        cx.notify();
+                    },
+                )),
+            );
+        }
         if !revoked && let Some(text) = copy_text_of(&message.body, meta) {
             let own = (!self.is_group).then(|| jid_user(&self.chat).to_owned());
             let own: Vec<&str> = own.as_deref().into_iter().collect();
@@ -3667,6 +3868,7 @@ impl Render for Conversation {
         let context = self.compose_context(theme, cx);
         let overlay = self.delete_overlay(theme, cx);
         let starred_sheet = self.starred_overlay(theme, cx);
+        let gallery_sheet = self.gallery_overlay(theme, cx);
         let info_sheet = self.info_overlay(theme, cx);
 
         div()
@@ -3685,6 +3887,7 @@ impl Render for Conversation {
             .children(overlay)
             .children(starred_sheet)
             .children(info_sheet)
+            .children(gallery_sheet)
     }
 }
 
@@ -3746,7 +3949,7 @@ pub(crate) fn jump_button(
 }
 
 /// Midnight (local) of the day that holds `ms`, as UTC milliseconds.
-fn day_start_ms(ms: i64, offset_s: i32) -> i64 {
+pub(crate) fn day_start_ms(ms: i64, offset_s: i32) -> i64 {
     let offset_ms = i64::from(offset_s) * 1000;
     (ms + offset_ms).div_euclid(86_400_000) * 86_400_000 - offset_ms
 }

@@ -34,7 +34,7 @@ use rovsti_wa_ui::photo_avatar;
 use crate::{
     backend::{Backend, BackendEvent, now_ms, sim_for},
     conversation::{
-        HIGHLIGHT_FOR, clock, composer_bar, day_label, header_bar_with, jump_button,
+        HIGHLIGHT_FOR, clock, composer_bar, day_label, day_start_ms, header_bar_with, jump_button,
         quick_reply_row, replies_at, unread_divider_row,
     },
     find_ui::{FindActions, FindState, find_bar},
@@ -102,6 +102,8 @@ pub enum SmsConversationEvent {
     OpenAvatar(ViewerItem),
     /// The Forward pill of a message: the page opens the chooser.
     Forward(crate::forward_ui::ForwardItem),
+    /// The Copy link pill: the page copies the URL and says "Link copied".
+    CopyLink(String),
 }
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
@@ -173,6 +175,8 @@ pub struct SmsConversation {
     selected: Option<u64>,
     /// The open Info or Select text sheet.
     info_sheet: Option<crate::info_ui::InfoSheet>,
+    /// The "Media, links and docs" sheet.
+    gallery: Option<crate::gallery_ui::GallerySheet>,
     /// A picture or file is being handed to the "Save as" sheet.
     saving: bool,
     /// An exported chat is at the "Save as" sheet; true when only part of it was loaded.
@@ -253,6 +257,7 @@ impl SmsConversation {
             in_spam: false,
             selected: None,
             info_sheet: None,
+            gallery: None,
             saving: false,
             exporting: None,
             peer_photo: None,
@@ -385,7 +390,7 @@ impl SmsConversation {
     /// System Back inside the page: clears the selected bubble; `false` when
     /// nothing was selected.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.info_sheet.take().is_some() {
+        if self.gallery.take().is_some() || self.info_sheet.take().is_some() {
             cx.notify();
             return true;
         }
@@ -979,6 +984,194 @@ impl SmsConversation {
         self.rows_dirty = true;
         cx.open_url(url);
         cx.notify();
+    }
+
+    /// The provider id of a timeline item in the gallery: `Sms(12)`, or
+    /// `Mms(7)#1` for part 1 of an MMS.
+    fn gallery_id(key: SmsKey, part: Option<usize>) -> String {
+        match part {
+            Some(n) => format!("{key:?}#{n}"),
+            None => format!("{key:?}"),
+        }
+    }
+
+    /// The timeline item and part a gallery id names.
+    fn gallery_target(&self, id: &str) -> Option<(usize, Option<usize>)> {
+        let (key, part) = match id.split_once('#') {
+            Some((key, part)) => (key, part.parse::<usize>().ok()),
+            None => (id, None),
+        };
+        let at = self
+            .timeline
+            .items()
+            .iter()
+            .position(|i| Self::gallery_id(i.key, None) == key)?;
+        Some((at, part))
+    }
+
+    /// "Media, links and docs" on the page menu: opens the sheet.
+    pub fn open_gallery(&mut self, cx: &mut Context<Self>) {
+        self.gallery = Some(self.build_gallery());
+        cx.notify();
+    }
+
+    /// The gallery of the loaded messages: picture parts are Media, other
+    /// files Docs, and links come from the bodies.
+    fn build_gallery(&self) -> crate::gallery_ui::GallerySheet {
+        use crate::gallery_ui::{base_name, kind_of_mime};
+        use rovsti_core::chat_gallery::{self, GalleryInput};
+        struct Owned {
+            id: String,
+            at_ms: i64,
+            kind: Option<chat_gallery::GalleryKind>,
+            text: Option<String>,
+            name: Option<String>,
+        }
+        let mut owned: Vec<Owned> = Vec::new();
+        for item in self.timeline.items() {
+            if !item.body.trim().is_empty() {
+                owned.push(Owned {
+                    id: Self::gallery_id(item.key, None),
+                    at_ms: item.at_ms,
+                    kind: None,
+                    text: Some(item.body.clone()),
+                    name: None,
+                });
+            }
+            for (n, part) in item.parts.iter().enumerate() {
+                let (Some(kind), Some(path)) = (kind_of_mime(&part.content_type), &part.path)
+                else {
+                    continue;
+                };
+                owned.push(Owned {
+                    id: Self::gallery_id(item.key, Some(n)),
+                    at_ms: item.at_ms,
+                    kind: Some(kind),
+                    text: None,
+                    name: Some(base_name(path).to_owned()),
+                });
+            }
+        }
+        let inputs: Vec<GalleryInput<'_>> = owned
+            .iter()
+            .map(|o| GalleryInput {
+                id: &o.id,
+                at_ms: o.at_ms,
+                kind: o.kind,
+                text: o.text.as_deref(),
+                file_name: o.name.as_deref(),
+                size: None,
+            })
+            .collect();
+        crate::gallery_ui::GallerySheet::new(
+            chat_gallery::build(&inputs),
+            self.timeline.has_older(),
+            self.timeline.items().len(),
+        )
+    }
+
+    /// A tap inside the gallery sheet.
+    fn gallery_action(&mut self, action: crate::gallery_ui::GalleryAction, cx: &mut Context<Self>) {
+        use crate::gallery_ui::GalleryAction as A;
+        match action {
+            A::Close => self.gallery = None,
+            A::Tab(tab) => {
+                if let Some(sheet) = &mut self.gallery {
+                    sheet.tab = tab;
+                }
+            }
+            A::Media(id) => {
+                self.gallery = None;
+                match self.gallery_target(&id) {
+                    Some((at, Some(part)))
+                        if self.timeline.items()[at]
+                            .parts
+                            .get(part)
+                            .is_some_and(|p| is_image(&p.content_type) && p.path.is_some()) =>
+                    {
+                        let (items, index) =
+                            viewer_items(self.timeline.items(), &self.title, at, part);
+                        if !items.is_empty() {
+                            cx.emit(SmsConversationEvent::OpenMedia { items, index });
+                        }
+                    }
+                    Some((at, _)) => {
+                        let key = self.timeline.items()[at].key;
+                        self.glow(key, cx);
+                    }
+                    None => {}
+                }
+            }
+            A::Open(url) => cx.open_url(&url),
+            A::CopyLink(url) => cx.emit(SmsConversationEvent::CopyLink(url)),
+            A::Jump(id) => {
+                self.gallery = None;
+                if let Some((at, _)) = self.gallery_target(&id) {
+                    let key = self.timeline.items()[at].key;
+                    self.glow(key, cx);
+                }
+            }
+            A::Older => {
+                if !self.loading
+                    && let Some(oldest) = self.timeline.oldest_ms()
+                {
+                    self.load(Some(oldest.saturating_add(1)), cx);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// The Media, links and docs sheet over the conversation.
+    fn gallery_overlay(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let stale = self
+            .gallery
+            .as_ref()
+            .is_some_and(|g| g.built_for != self.timeline.items().len());
+        if stale {
+            let tab = self.gallery.as_ref().map(|g| g.tab).unwrap_or_default();
+            let mut fresh = self.build_gallery();
+            fresh.tab = tab;
+            self.gallery = Some(fresh);
+        }
+        let sheet = self.gallery.as_ref()?;
+        let offset = self.backend.read(cx).locale().tz_offset_s;
+        let now = now_ms();
+        let this = cx.entity().downgrade();
+        let dispatch: crate::gallery_ui::Dispatch = std::rc::Rc::new(move |action, _, app| {
+            this.update(app, |this, cx| this.gallery_action(action, cx))
+                .ok();
+        });
+        Some(crate::gallery_ui::render_gallery(
+            theme,
+            sheet,
+            self.loading,
+            |ms| {
+                format!(
+                    "{} {}",
+                    day_label(day_start_ms(ms, offset), now, offset),
+                    clock(ms, offset)
+                )
+            },
+            offset,
+            |id| {
+                let part = self
+                    .gallery_target(id)
+                    .and_then(|(at, part)| self.timeline.items()[at].parts.get(part?).cloned());
+                let video = part.as_ref().is_some_and(|p| {
+                    p.content_type
+                        .trim()
+                        .to_ascii_lowercase()
+                        .starts_with("video/")
+                });
+                let source = part
+                    .filter(|p| is_image(&p.content_type))
+                    .and_then(|p| p.path)
+                    .map(|path| PathBuf::from(path).into());
+                crate::gallery_ui::Thumb { source, video }
+            },
+            dispatch,
+        ))
     }
 
     /// The loaded messages as the text of an export or a share.
@@ -1592,6 +1785,21 @@ impl SmsConversation {
                         })),
                 );
             }
+            if let Some(link) = rovsti_core::spam::open_links(&item.body, 1)
+                .into_iter()
+                .next()
+            {
+                pills = pills.child(
+                    glass_pill(theme, "Copy link")
+                        .id(("sms-copy-link", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            cx.emit(SmsConversationEvent::CopyLink(link.url.clone()));
+                            cx.notify();
+                        })),
+                );
+            }
             let own: Vec<&str> = self.recipients.iter().map(String::as_str).collect();
             for (n, action) in text_detect::actions(&item.body, 2, &own)
                 .into_iter()
@@ -1878,6 +2086,7 @@ impl Render for SmsConversation {
         };
 
         let info_sheet = self.info_overlay(theme, cx);
+        let gallery_sheet = self.gallery_overlay(theme, cx);
         div()
             .size_full()
             .relative()
@@ -1890,6 +2099,7 @@ impl Render for SmsConversation {
             .children(has_info.then_some(info))
             .child(bottom)
             .children(info_sheet)
+            .children(gallery_sheet)
     }
 }
 

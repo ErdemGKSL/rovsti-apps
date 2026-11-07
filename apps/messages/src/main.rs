@@ -14,6 +14,7 @@ mod files;
 mod find_ui;
 // Only the Android JNI entry calls `handle`; desktop builds exercise it from the tests.
 mod forward_ui;
+mod gallery_ui;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod headless;
 mod inbox;
@@ -1126,6 +1127,9 @@ impl MessagesApp {
             ConversationEvent::Menu => this.open_wa_page_menu(cx),
             ConversationEvent::OpenSettings => this.open_settings_tab(cx),
             ConversationEvent::Copy(text) => this.copy_text(text.clone().into(), false, cx),
+            ConversationEvent::CopyLink(url) => {
+                this.copy_text_with(url.clone().into(), false, "Link copied", cx);
+            }
             ConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             ConversationEvent::Call(n) => {
                 this.telecom_action(sms_actions::SmsAction::Call, n.clone(), cx);
@@ -1213,6 +1217,9 @@ impl MessagesApp {
             SmsConversationEvent::ToggleMute => this.toggle_open_mute(cx),
             SmsConversationEvent::Copy { text, sensitive } => {
                 this.copy_text(text.clone().into(), *sensitive, cx);
+            }
+            SmsConversationEvent::CopyLink(url) => {
+                this.copy_text_with(url.clone().into(), false, "Link copied", cx);
             }
             SmsConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             SmsConversationEvent::Call(n) => {
@@ -1635,6 +1642,17 @@ impl MessagesApp {
         self.row_menu = None;
         if let Open::WhatsApp(_, c) = &self.open {
             c.update(cx, |c, cx| c.open_starred(cx));
+        }
+        cx.notify();
+    }
+
+    /// "Media, links and docs" of a page menu: closes the menu and opens the sheet.
+    fn menu_gallery(&mut self, cx: &mut Context<Self>) {
+        self.row_menu = None;
+        match &self.open {
+            Open::WhatsApp(_, c) => c.update(cx, |c, cx| c.open_gallery(cx)),
+            Open::Sms(c) => c.update(cx, |c, cx| c.open_gallery(cx)),
+            _ => {}
         }
         cx.notify();
     }
@@ -2589,6 +2607,17 @@ impl MessagesApp {
                         colors.label,
                     )
                     .on_click(cx.listener(|this, _, window, cx| this.menu_find(window, cx)))
+                    .into_any_element(),
+                );
+                items.push(
+                    menu_item(
+                        theme,
+                        "menu-gallery",
+                        Icon::LucideImage,
+                        "Media, links and docs".into(),
+                        colors.label,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.menu_gallery(cx)))
                     .into_any_element(),
                 );
                 if menu.jid.is_some() {
@@ -3567,6 +3596,17 @@ impl MessagesApp {
     /// Copies text to the clipboard (`sensitive` hides it from the paste preview)
     /// and says "Copied". A sensitive copy also marks the inbox's code chip.
     fn copy_text(&mut self, code: SharedString, sensitive: bool, cx: &mut Context<Self>) {
+        self.copy_text_with(code, sensitive, "Copied", cx);
+    }
+
+    /// Copies `code` and answers with the pill `done`, such as "Link copied".
+    fn copy_text_with(
+        &mut self,
+        code: SharedString,
+        sensitive: bool,
+        done: &'static str,
+        cx: &mut Context<Self>,
+    ) {
         let text = code.clone();
         let task = cx
             .background_executor()
@@ -3589,7 +3629,7 @@ impl MessagesApp {
                             return None;
                         }
                     }
-                    this.show_pill("Copied");
+                    this.show_pill(done);
                     cx.notify();
                     this.copied.clone()
                 })

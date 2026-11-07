@@ -168,23 +168,61 @@ pub fn empty_state(
     crate::page::empty_state(theme, None, title, body, None)
 }
 
-/// Screen background with a soft colour wash, so glass chrome has something
-/// to refract and tint (glass over a flat fill reads as a grey plate).
+/// Height of the header wash below the status bar, in dp.
+const WASH_REACH: f32 = 200.0;
+/// Status-bar height assumed for the wash extent (the backdrop has no window).
+const WASH_SAFE_TOP: f32 = 48.0;
+
+/// Height of the header wash: `content_top + 200` dp.
+pub fn wash_height() -> f32 {
+    crate::layout::geom::content_top(WASH_SAFE_TOP) + WASH_REACH
+}
+
+/// Wash alphas at the three stops: peak, peak / 3, 0.
+pub fn wash_stops(theme: Theme) -> [f32; 3] {
+    let peak = crate::theme::wash_alpha(theme);
+    [peak, peak / 3.0, 0.0]
+}
+
+/// Screen background with a faint vertical colour wash behind the header, so
+/// glass chrome has something to refract and tint. `linear_gradient` takes two
+/// stops, so two stacked gradient divs make the three: peak, peak / 3, 0.
 pub fn backdrop(theme: Theme, accent: Hsla) -> Div {
     let colors = crate::theme::colors(theme);
-    let wash = Hsla {
-        a: crate::theme::wash_alpha(theme),
-        ..accent
-    };
+    let [a0, a1, a2] = wash_stops(theme);
+    let at = |a: f32| Hsla { a, ..accent };
+    let h = wash_height();
+    let split = h * 0.4;
     div()
         .absolute()
         .inset_0()
         .bg(colors.background)
-        .child(div().absolute().inset_0().bg(gpui::linear_gradient(
-            160.0,
-            gpui::linear_color_stop(wash, 0.0),
-            gpui::linear_color_stop(Hsla { a: 0.0, ..accent }, 0.55),
-        )))
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(px(split))
+                .bg(gpui::linear_gradient(
+                    180.0,
+                    gpui::linear_color_stop(at(a0), 0.0),
+                    gpui::linear_color_stop(at(a1), 1.0),
+                )),
+        )
+        .child(
+            div()
+                .absolute()
+                .top(px(split))
+                .left_0()
+                .right_0()
+                .h(px(h - split))
+                .bg(gpui::linear_gradient(
+                    180.0,
+                    gpui::linear_color_stop(at(a1), 0.0),
+                    gpui::linear_color_stop(at(a2), 1.0),
+                )),
+        )
 }
 
 /// A round glass icon button in a fixed 44 px slot (so a press scale never
@@ -293,4 +331,26 @@ pub fn flat_glass(theme: Theme, tint: Option<(Hsla, f32)>) -> Div {
         .border(px(0.8))
         .border_color(rim)
         .shadow(crate::tokens::shadow::glass(theme.is_dark()))
+}
+
+#[cfg(test)]
+mod wash_tests {
+    use super::*;
+
+    #[test]
+    fn wash_covers_content_top_plus_200() {
+        assert_eq!(
+            wash_height(),
+            crate::layout::geom::content_top(48.0) + 200.0
+        );
+    }
+
+    #[test]
+    fn wash_peaks_low_and_fades_in_three_stops() {
+        let [p, m, z] = wash_stops(Theme::Dark);
+        assert_eq!(p, 0.14);
+        assert!((m - p / 3.0).abs() < 1e-6);
+        assert_eq!(z, 0.0);
+        assert_eq!(wash_stops(Theme::Light)[0], 0.10);
+    }
 }

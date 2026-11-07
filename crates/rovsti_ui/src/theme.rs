@@ -76,7 +76,7 @@ pub fn accent_glow(theme: Theme) -> Hsla {
 
 /// Alpha of the backdrop wash at its strongest point (top of the gradient).
 pub fn wash_alpha(theme: Theme) -> f32 {
-    if theme.is_dark() { 0.28 } else { 0.18 }
+    if theme.is_dark() { 0.14 } else { 0.10 }
 }
 
 /// `fg` composited over `under` (straight alpha), as an opaque colour.

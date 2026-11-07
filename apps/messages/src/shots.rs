@@ -187,6 +187,11 @@ fn shots() {
             if nn == 1 && theme == Theme::Light {
                 assert_inbox_contrast(&path);
             }
+            if nn == 1 {
+                let img = rovsti_ui::shots::open_png(&path);
+                let step = rovsti_ui::shots::color::edge_strip_step(&img, 8, 16);
+                assert!(step <= 2, "{theme:?}: backdrop step {step} at x=8 > 2");
+            }
             saved.push(path);
         }
     }

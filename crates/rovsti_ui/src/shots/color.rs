@@ -76,6 +76,25 @@ pub fn max_vertical_step(img: &RgbaImage, x: u32, y0: u32, y1: u32) -> u8 {
     max
 }
 
+/// [`max_vertical_step`] at `x` over the full height, after averaging each row
+/// over the `strip` leftmost pixels. The renderer's gradients carry +-2 per-pixel
+/// noise; the mean keeps the trend, so only real banding or edges show.
+pub fn edge_strip_step(img: &RgbaImage, x: u32, strip: u32) -> u8 {
+    let strip = strip.min(img.width()).max(1);
+    let mut col = RgbaImage::new(x + 1, img.height());
+    for y in 0..img.height() {
+        let mut sum = [0u32; 3];
+        for sx in 0..strip {
+            for (c, s) in sum.iter_mut().enumerate() {
+                *s += u32::from(img.get_pixel(sx, y)[c]);
+            }
+        }
+        let m = |i: usize| u8::try_from(sum[i] / strip).unwrap_or(u8::MAX);
+        col.put_pixel(x, y, image::Rgba([m(0), m(1), m(2), 255]));
+    }
+    max_vertical_step(&col, x, 0, col.height())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +149,21 @@ mod tests {
         assert_eq!(max_vertical_step(&img, 1, 0, 10), 40);
         assert_eq!(max_vertical_step(&img, 0, 0, 10), 0);
         assert_eq!(max_vertical_step(&img, 9, 0, 10), 0);
+    }
+
+    #[test]
+    fn strip_mean_ignores_pixel_noise_but_not_an_edge() {
+        let mut img = RgbaImage::from_pixel(16, 10, image::Rgba([10, 10, 10, 255]));
+        for y in 0..10 {
+            img.put_pixel(y % 2, y, image::Rgba([14, 14, 14, 255]));
+        }
+        assert!(edge_strip_step(&img, 8, 16) <= 1);
+        for y in 5..10 {
+            for x in 0..16 {
+                img.put_pixel(x, y, image::Rgba([60, 60, 60, 255]));
+            }
+        }
+        assert!(edge_strip_step(&img, 8, 16) >= 40);
     }
 }
 

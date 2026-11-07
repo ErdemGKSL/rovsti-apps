@@ -418,14 +418,15 @@ readable through the panel (X10). The scrim behind a popover is transparent but 
 Built by grepping `menu_card`, `expanded`, `confirm_delete`, `_choices`, `glass_pill(` and
 `open_field_sheet` in `apps/`. "menu_card" is the Messages bottom card (`menu_item` rows
 under a title); every caller moves to the popover or sheet. Line numbers are at the time of
-writing. The per-app units work from this table. `glass_pill(` sites that are plain toolbar
+writing. Rows whose Target starts with **Done.** are migrated (Messages row menu and bell,
+Stops Saved); all others are left to the per-app units. The per-app units work from this table. `glass_pill(` sites that are plain toolbar
 buttons (Select, Cancel, Done) are covered by 2.16 and are not listed one by one except where
 they act as an action list.
 
 | Site (file:line) | Behaviour today | Target | Unit |
 |------------------|-----------------|--------|------|
-| `apps/messages/src/main.rs:3768` `menu_card` "row-menu" | Inbox row long-press opens a long bottom card of actions (M13, M14), with the Mute lengths swapped into the same card (`mute_choices`, main.rs:1901, 3583) | Popover at the press point with groups; "Mute for" is a submenu; Delete is a confirm page | messages |
-| `apps/messages/src/main.rs:1752` `menu_card` "mute-menu" | Separate bottom card for "Mute for" lengths | Submenu page inside the row popover | messages |
+| `apps/messages/src/main.rs:3768` `menu_card` "row-menu" | Inbox row long-press opens a long bottom card of actions (M13, M14), with the Mute lengths swapped into the same card (`mute_choices`, main.rs:1901, 3583) | **Done.** Popover at the press point with groups; "Mute for" is a submenu; Delete is a confirm page | messages |
+| `apps/messages/src/main.rs:1752` `menu_card` "mute-menu" | Separate bottom card for "Mute for" lengths | **Done.** Submenu page inside the row popover | messages |
 | `apps/messages/src/main.rs:3266` `menu_card` "bulk-mute-menu" | Select mode, "Mute for" bottom card | Popover anchored to the bulk bar "more" button, submenu page | messages |
 | `apps/messages/src/main.rs:3286` `menu_card` "bulk-delete-menu" | Select mode delete confirm in a bottom card | Confirm page inside the popover (`confirm_delete_thread`, main.rs:2634) | messages |
 | `apps/messages/src/main.rs:3528` `menu_card` "channel-pick" | Choosing WhatsApp or SMS for a recipient in a bottom card | Popover anchored to the recipient row (2 items) | messages |
@@ -450,10 +451,10 @@ they act as an action list.
 | `apps/phone/src/recents.rs:1536`, `3429` `glass_pill(` | Select-mode header actions and per-row text pills | Header buttons (2.16 Small); row actions in a long-press popover | phone |
 | `apps/phone/src/person_ui.rs:61` `reply_choices` | Quick reply list in a sheet (P12 family, call-details transparency) | Popover from the "Message" action (up to 8 replies) | phone |
 | `apps/phone/src/keypad.rs:870`, `1152`, `1977` `glass_pill(` | Suggestion actions, WhatsApp and Paste pills near the number field | 2.16 Small tinted buttons, or a "..." popover for more than 3 | phone |
-| `apps/stops/src/saved_ui.rs:326`, `447`, `465` `expanded` | Tapping a saved stop expands the row and inserts about 12 pills into the list (S13) | Row tap opens the stop sheet; the actions move into a "..." popover on the row (Share, Copy as, QR, Home screen, Rename, colour; Delete as a confirm page) | stops |
-| `apps/stops/src/saved_ui.rs:327`, `475`, `596`, `619` `confirm_delete`, "Cancel" pill | Delete arms in place ("Tap again") with a Cancel pill appended to the row | Confirm page inside the popover | stops |
-| `apps/stops/src/saved_ui.rs:361-387` "Export GPX", "Export JSON", "Import", "Copy list" | Header button wall over two rows (S14) | One "..." header button with a popover (2 groups: Import / Export, then Copy list) | stops |
-| `apps/stops/src/saved_ui.rs:415` `glass_pill(` "Sort: ..." | Pill that cycles the sort order | Popover with the sort choices and a check mark on the current one | stops |
+| `apps/stops/src/saved_ui.rs:326`, `447`, `465` `expanded` | Tapping a saved stop expands the row and inserts about 12 pills into the list (S13) | **Done.** Row tap opens the stop sheet; the actions move into a "..." popover on the row (Share, Copy as, QR, Home screen, Rename, colour; Delete as a confirm page) | stops |
+| `apps/stops/src/saved_ui.rs:327`, `475`, `596`, `619` `confirm_delete`, "Cancel" pill | Delete arms in place ("Tap again") with a Cancel pill appended to the row | **Done.** Confirm page inside the popover | stops |
+| `apps/stops/src/saved_ui.rs:361-387` "Export GPX", "Export JSON", "Import", "Copy list" | Header button wall over two rows (S14) | **Done.** One "..." header button with a popover (2 groups: Import / Export, then Copy list) | stops |
+| `apps/stops/src/saved_ui.rs:415` `glass_pill(` "Sort: ..." | Pill that cycles the sort order | **Done.** Popover with the sort choices and a check mark on the current one | stops |
 | `apps/stops/src/saved_ui.rs:977-982`, `1083-1088` "Replace everything", "Add n" | Import confirm as two pills in a card | Sheet with 2.16 Large and Gray buttons | stops |
 | `apps/stops/src/settings_ui.rs:1077-1128` history row pills | Start again, Save as stop, Use, Share, Copy, Delete as pills inside the history row | Long-press popover on the trip row; Delete as a confirm page | stops |
 | `apps/stops/src/settings_ui.rs:1160-1171`, `1210`, `1226-1233` | Clear history, "Show: ..." filter and Export CSV/GPX pills in a header | "Show" popover; Export in the header "..." popover | stops |
@@ -513,8 +514,9 @@ its fill is at least 4.5:1 in both themes (2.12).
 | `filter_chip_row` | `ChatItem::Filters` wrapped chips | 2.9 |
 | `section_header`, `empty_state` | per-app text | 2.10 |
 | `layout::content_bottom_inset` | `content_bottom_inset` and `content_bottom_inset_with` | 2.3 |
-| `Menu` popover, `GlassSpec::thick` | `menu_card`, inline pill rows, `open_field_sheet` for short lists | 2.15 |
-| `rovsti_ui::button` | `glass_pill(` text pills, text links | 2.16 |
+| `Menu` popover (`rovsti_ui::menu`, pure model and geometry in `menu/model.rs`) | `menu_card`, inline pill rows, `open_field_sheet` for short lists | 2.15 |
+| `GlassSpec::thick` | see-through overlay material of sheets, menus and action sheets | 2.15 |
+| `Button` (`rovsti_ui::button`: Filled, Tinted, Gray, Plain, Destructive; Large, Regular, Small) | `glass_pill(` text pills, text links | 2.16 |
 
 ### 2.14 Migrated screens
 
@@ -522,6 +524,9 @@ its fill is at least 4.5:1 in both themes (2.12).
 |--------|-------|-------|
 | Messages inbox (header, Status row, chips, Spam row, chat rows, end inset) | Done: `PageHeader`, `ListRow`, `avatar_stack` (48 dp slot), `filter_chip_row`, `source_badge`, `content_bottom_inset`, calm backdrop, frosted tab bar | `messages/01-inbox`, `02-unread-filter`, `03-inbox-empty`, `10-inbox-end` |
 | Messages Status screen (stack row, header, sections) | Done: shares the 76 dp text column and `accent_text` | `messages/09-status` |
+| Messages row menu (long-press popover with groups, Mute submenu, Delete confirm page, deduplicated for merged threads) and the header bell popover | Done: `Menu` on `thick` glass, anchored at the press point, tab bar stays free | `messages/11-row-menu`, `11-row-menu-mute`, `11-row-menu-delete` |
+| Stops Saved (header "..." popover, row "..." popover, one-line search and sort row, rows never grow on tap) | Done: no pills are inserted into the list | `stops/06-saved-list`, `06-saved-row-menu`, `06-saved-more-menu`, `07-saved-stop-sheet` |
+| Phone and Contacts sheets (call details, setup, QR) | Material only: `Sheet` uses `thick` glass, opaque enough to read; layouts unchanged | `phone/09-call-details`, `contacts/12-qr-sheet` |
 | Messages other screens (conversation, composer, search, settings) | Left to the Messages per-app unit | |
 | Phone (all screens) | Left to the Phone per-app unit | |
 | Contacts (all screens) | Left to the Contacts per-app unit | |

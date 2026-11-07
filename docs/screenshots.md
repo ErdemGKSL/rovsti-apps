@@ -26,6 +26,7 @@ cargo test -p rovsti_ui --features shots shots -- --ignored --nocapture   # smok
 cargo test -p rovsti_ui --features shots fields -- --ignored --nocapture  # fields only
 cargo test -p rovsti_ui --features shots field_touch -- --ignored --nocapture  # handles + edit menu
 cargo test -p rovsti_ui --features shots layout -- --ignored --nocapture  # layout component gallery
+cargo test -p rovsti_ui --features shots menus -- --ignored --nocapture   # menus and buttons gallery
 ```
 
 Each app test takes under a minute once built (about 0.5 to 2.5 s per shot). The first
@@ -74,6 +75,22 @@ muted and pinned, long title, OTP chip, avatar stack, merged SMS+WhatsApp contac
 filter chip row and an empty state. Thin guides mark the 16 dp margins so alignment can be
 judged by eye. The spec is `docs/design/layout.md`; the source is
 `crates/rovsti_ui/src/shots/layout.rs`.
+
+## Menus gallery
+
+`04-menus-*-{dark,light}.png` (in `target/shots/rovsti_ui/`) shows the `Menu` popover over a
+busy inbox with a tab-bar stand-in: `04-menus` (below the anchor, with groups and a
+destructive row), `04-menus-above` (flipped above), `04-menus-submenu` (the "Mute" page),
+`04-menus-confirm` (title, red action, Cancel) and `04-menus-buttons` (every `Button` style
+and size). The test asserts that the panel text reads over the busy backdrop (contrast) and
+that the menu stays clear of the tab bar. Source: `crates/rovsti_ui/src/shots/menus.rs`.
+
+Real-app menu shots:
+
+- Messages: `11-row-menu` (long-press popover), `11-row-menu-mute` (Mute submenu) and
+  `11-row-menu-delete` (confirm page).
+- Stops: `06-saved-row-menu` (row "..." popover) and `06-saved-more-menu` (header "..."
+  popover). They replace the old inline pill row.
 
 ## Simulated safe area
 
@@ -126,9 +143,9 @@ path as it is written. `target/shots/rovsti_ui/` holds `00-smoke-*` and `01-fiel
 | App | Scenes | Files |
 | --- | --- | --- |
 | phone | 13 | 27 + sheet |
-| messages | 14 | 29 + sheet |
+| messages | 16 | 33 + sheet |
 | contacts | 13 | 27 + sheet |
-| stops | 12 | 25 + sheet |
+| stops | 14 | 29 + sheet |
 
 Committed baselines of the contact sheets live in `docs/screenshots/baseline/<app>.png`
 (downscaled to at most 1200 px wide, under 1.5 MB each; messages is 1000 px wide to fit the size). They are the "before" picture for a layout round: render

@@ -47,7 +47,7 @@ pub use prefs::{
     AlarmSound, Appearance, NOTICE_MINUTES, NoticePrefs, NoticeWhen, SNOOZE_CHOICES, StopsPrefs,
 };
 pub use saved_stops::{
-    LoadedStops, SavedStop, SavedStopError, SavedStops, StopShortcut, shortcut_spec,
+    LoadedStops, SavedStop, SavedStopError, SavedStops, StopColour, StopShortcut, shortcut_spec,
 };
 pub use session::{
     ActiveTrip, FixIn, FixOut, FixOutcome, FixPos, NoticeDelivery, NoticeState, Track,

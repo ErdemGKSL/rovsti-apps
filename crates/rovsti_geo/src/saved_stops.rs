@@ -46,6 +46,41 @@ pub fn shortcut_spec(stop: &SavedStop) -> StopShortcut {
     }
 }
 
+/// The colour a saved stop is drawn in on the map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StopColour {
+    #[default]
+    Orange,
+    Red,
+    Green,
+    Blue,
+}
+
+impl StopColour {
+    pub const ALL: [StopColour; 4] = [Self::Orange, Self::Red, Self::Green, Self::Blue];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Orange => "Orange",
+            Self::Red => "Red",
+            Self::Green => "Green",
+            Self::Blue => "Blue",
+        }
+    }
+
+    /// The next colour, wrapping from the last back to the first.
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|c| *c == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    /// Whether this is the colour a stop has until the user picks one.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// One saved stop: a name and the two points that define its gate.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedStop {
@@ -57,6 +92,9 @@ pub struct SavedStop {
     /// Starred stops are listed first. Absent from the file when false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub favourite: bool,
+    /// Map colour. Absent from the file when orange.
+    #[serde(default, skip_serializing_if = "StopColour::is_default")]
+    pub colour: StopColour,
 }
 
 impl SavedStop {
@@ -177,6 +215,7 @@ impl SavedStops {
             b,
             created_ms: now_ms,
             favourite: false,
+            colour: StopColour::default(),
         });
         Ok(id)
     }
@@ -207,6 +246,24 @@ impl SavedStops {
         let stop = self.stops.iter_mut().find(|s| s.id == id)?;
         stop.favourite = !stop.favourite;
         Some(stop.favourite)
+    }
+
+    /// Moves the stop to its next colour and returns it; `None` when the id is missing.
+    pub fn cycle_colour(&mut self, id: u64) -> Option<StopColour> {
+        let stop = self.stops.iter_mut().find(|s| s.id == id)?;
+        stop.colour = stop.colour.next();
+        Some(stop.colour)
+    }
+
+    /// Sets the colour; false when the id is missing.
+    pub fn set_colour(&mut self, id: u64, colour: StopColour) -> bool {
+        match self.stops.iter_mut().find(|s| s.id == id) {
+            Some(stop) => {
+                stop.colour = colour;
+                true
+            }
+            None => false,
+        }
     }
 
     /// Moves a stop `delta` positions (negative is up) among the stops with the
@@ -411,6 +468,48 @@ mod tests {
     use crate::Stop;
 
     #[test]
+    fn colour_round_trips_and_legacy_files_are_orange() {
+        let mut s = SavedStops::default();
+        let (a, b) = gate(0.01);
+        let id = s.add("X", a, b, 1).unwrap();
+        assert!(!serde_json::to_string(&s).unwrap().contains("colour"));
+        assert!(s.set_colour(id, StopColour::Red));
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("\"colour\":\"red\""));
+        let back: SavedStops = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.stops[0].colour, StopColour::Red);
+        let legacy = json.replace(",\"colour\":\"red\"", "");
+        assert!(!legacy.contains("colour"));
+        let old: SavedStops = serde_json::from_str(&legacy).unwrap();
+        assert_eq!(old.stops[0].colour, StopColour::Orange);
+        assert!(!serde_json::to_string(&old).unwrap().contains("colour"));
+        assert!(!s.set_colour(99, StopColour::Blue));
+    }
+
+    #[test]
+    fn colour_next_cycles_all_four() {
+        let mut c = StopColour::default();
+        let mut seen = Vec::new();
+        for _ in 0..4 {
+            seen.push(c);
+            c = c.next();
+        }
+        assert_eq!(seen, StopColour::ALL);
+        assert_eq!(c, StopColour::Orange);
+        assert_eq!(StopColour::Green.label(), "Green");
+    }
+
+    #[test]
+    fn cycle_colour_moves_the_stop_and_misses_unknown_ids() {
+        let mut s = SavedStops::default();
+        let (a, b) = gate(0.01);
+        let id = s.add("X", a, b, 1).unwrap();
+        assert_eq!(s.cycle_colour(id), Some(StopColour::Red));
+        assert_eq!(s.get(id).unwrap().colour, StopColour::Red);
+        assert_eq!(s.cycle_colour(99), None);
+    }
+
+    #[test]
     fn shortcut_spec_truncates_on_chars() {
         let stop = SavedStop {
             id: 7,
@@ -419,6 +518,7 @@ mod tests {
             b: ep("B", 41.001, 29.0),
             created_ms: 0,
             favourite: false,
+            colour: StopColour::default(),
         };
         let sp = shortcut_spec(&stop);
         assert_eq!(sp.id, "stop-7");
@@ -860,6 +960,7 @@ mod tests {
             b: pa(),
             created_ms: 0,
             favourite: true,
+            colour: StopColour::default(),
         });
         assert!(s.nearest(Coord::new(41.0, 29.0), NEAREST_CHIP_M).is_none());
         let (a, b) = gate(0.01);

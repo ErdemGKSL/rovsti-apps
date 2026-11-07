@@ -3,7 +3,9 @@
 
 use rovsti_core::location_link::is_valid;
 
-use crate::saved_stops::{DUPLICATE_GATE_M, MAX_NAME_CHARS, MAX_STOPS, SavedStop, SavedStops};
+use crate::saved_stops::{
+    DUPLICATE_GATE_M, MAX_NAME_CHARS, MAX_STOPS, SavedStop, SavedStops, StopColour,
+};
 use crate::{Coord, Diameter, Endpoint};
 
 /// Largest import text accepted, in bytes.
@@ -18,6 +20,8 @@ pub struct Incoming {
     pub b: Coord,
     /// Kept from our JSON; GPX has no such flag.
     pub favourite: bool,
+    /// Kept from our JSON; GPX has no colour, so it is orange.
+    pub colour: StopColour,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -145,6 +149,7 @@ fn parse_json(text: &str) -> Result<Vec<Incoming>, ImportError> {
             a: s.a.coord,
             b: s.b.coord,
             favourite: s.favourite,
+            colour: s.colour,
         })
         .collect())
 }
@@ -310,6 +315,7 @@ fn parse_gpx(text: &str) -> Result<Vec<Incoming>, ImportError> {
                                 a,
                                 b,
                                 favourite: false,
+                                colour: StopColour::default(),
                             });
                         }
                     }
@@ -350,6 +356,7 @@ fn parse_gpx(text: &str) -> Result<Vec<Incoming>, ImportError> {
             a,
             b,
             favourite: false,
+            colour: StopColour::default(),
         });
     }
     Ok(out)
@@ -394,6 +401,7 @@ pub fn apply_plan(stops: &mut SavedStops, plan: &MergePlan, now_ms: i64) -> usiz
             if item.favourite {
                 stops.toggle_favourite(id);
             }
+            stops.set_colour(id, item.colour);
             added += 1;
         }
     }
@@ -588,6 +596,7 @@ mod tests {
             a: Coord::new(a.0, a.1),
             b: Coord::new(b.0, b.1),
             favourite: false,
+            colour: StopColour::default(),
         }
     }
 
@@ -674,6 +683,32 @@ mod tests {
         assert_eq!(
             parse_import(&text).unwrap()[0].name.chars().count(),
             MAX_NAME_CHARS
+        );
+    }
+
+    #[test]
+    fn json_keeps_colour_and_gpx_gives_orange() {
+        let mut s = sample();
+        let (first, second) = (s.stops[0].id, s.stops[1].id);
+        s.set_colour(first, StopColour::Red);
+        s.set_colour(second, StopColour::Blue);
+        let json = to_json(&s);
+        assert_eq!(json.matches("\"colour\"").count(), 2);
+        let got = parse_import(&json).unwrap();
+        assert_eq!(
+            got.iter().map(|g| g.colour).collect::<Vec<_>>(),
+            [StopColour::Red, StopColour::Blue, StopColour::Orange]
+        );
+        let mut target = SavedStops::default();
+        let plan = merge_plan(&target, got);
+        apply_plan(&mut target, &plan, 9);
+        assert_eq!(target.stops[0].colour, StopColour::Red);
+        assert_eq!(target.stops[1].colour, StopColour::Blue);
+        assert!(
+            parse_import(&to_gpx(&s))
+                .unwrap()
+                .iter()
+                .all(|g| g.colour == StopColour::Orange)
         );
     }
 

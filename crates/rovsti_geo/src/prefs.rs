@@ -151,6 +151,8 @@ pub struct StopsPrefs {
     /// Tile cache cap, megabytes (one of [`TILE_CACHE_CHOICES_MB`]).
     #[serde(default = "default_tile_cache_mb")]
     pub tile_cache_mb: u32,
+    /// Draw the saved stops on the map.
+    pub show_saved_on_map: bool,
 }
 
 fn default_tile_cache_mb() -> u32 {
@@ -170,6 +172,7 @@ impl Default for StopsPrefs {
             volume_pct: MIN_ALARM_VOLUME_PCT,
             alarm_sound: None,
             tile_cache_mb: default_tile_cache_mb(),
+            show_saved_on_map: true,
         }
     }
 }
@@ -435,6 +438,13 @@ mod tests {
     }
 
     #[test]
+    fn legacy_prefs_show_saved_on_map() {
+        let p: StopsPrefs = serde_json::from_str(r#"{"snooze_min": 7}"#).unwrap();
+        assert!(p.show_saved_on_map);
+        assert!(StopsPrefs::default().show_saved_on_map);
+    }
+
+    #[test]
     fn notice_state_from_prefs() {
         let mut n = NoticePrefs {
             chat: "c".into(),
@@ -521,11 +531,13 @@ mod tests {
                 title: "X".into(),
             }),
             tile_cache_mb: 512,
+            show_saved_on_map: false,
         };
         let r = p.with_alarm_defaults();
         assert!(r.alarm_is_default());
         assert_eq!(r.appearance, Appearance::Dark);
         assert_eq!(r.tile_cache_mb, 512);
+        assert!(!r.show_saved_on_map);
         assert_eq!(r.tile_url, p.tile_url);
         assert_eq!(r.notice, p.notice);
     }

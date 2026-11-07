@@ -192,6 +192,7 @@ pub fn saved_key(saved: &SavedStops) -> u64 {
     let mut hasher = DefaultHasher::new();
     for stop in &saved.stops {
         stop.id.hash(&mut hasher);
+        stop.colour.hash(&mut hasher);
         for end in [&stop.a, &stop.b] {
             end.coord.lat.to_bits().hash(&mut hasher);
             end.coord.lon.to_bits().hash(&mut hasher);
@@ -3086,6 +3087,10 @@ mod tests {
         assert_ne!(saved_key(&c), two);
         a.remove(id);
         assert_eq!(saved_key(&a), one);
+        // Recolouring a stop changes it as well.
+        let first = a.stops[0].id;
+        a.cycle_colour(first);
+        assert_ne!(saved_key(&a), one);
     }
 
     // -- polyline thinning --

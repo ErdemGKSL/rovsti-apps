@@ -159,6 +159,20 @@ mod tests {
     }
 
     #[test]
+    fn round_trip_keeps_colour() {
+        let mut b = sample();
+        let id = b.saved.stops[0].id;
+        b.saved
+            .set_colour(id, crate::saved_stops::StopColour::Green);
+        let back = parse(&to_json(&b)).unwrap();
+        assert_eq!(
+            back.saved.stops[0].colour,
+            crate::saved_stops::StopColour::Green
+        );
+        assert_eq!(back, b);
+    }
+
+    #[test]
     fn prefs_missing_new_fields_get_defaults() {
         let mut v: serde_json::Value = serde_json::from_str(&to_json(&sample())).unwrap();
         v["prefs"] = serde_json::json!({ "snooze_min": 10 });

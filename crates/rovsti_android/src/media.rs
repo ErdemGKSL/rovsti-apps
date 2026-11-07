@@ -29,6 +29,15 @@ pub fn share_image(path: &str, mime: &str, title: &str) -> Result<bool> {
     )
 }
 
+/// Opens the share sheet with any file at `path` of type `mime`; `name` is the
+/// file name the receiver sees. `false` when no sheet could be started.
+pub fn share_file(path: &str, mime: &str, name: &str) -> Result<bool> {
+    bridge::call_bool(
+        "shareFile",
+        &[Arg::Str(path), Arg::Str(mime), Arg::Str(name)],
+    )
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -42,6 +51,10 @@ mod tests {
         ));
         assert!(matches!(
             share_image("/c/p.png", "image/png", "Photo"),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(
+            share_file("/c/a.pdf", "application/pdf", "a.pdf"),
             Err(Error::Unsupported)
         ));
     }

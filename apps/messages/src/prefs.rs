@@ -63,6 +63,13 @@ pub struct MessagesPrefs {
     /// The voice note playback speed, remembered between notes and runs.
     #[serde(default)]
     pub voice_speed: rovsti_core::voice_player::Speed,
+    /// Local stars on SMS/MMS messages (WhatsApp stars live on the gateway).
+    #[serde(default)]
+    pub sms_stars: rovsti_core::starred::LocalStars,
+    /// When a timed mute ends (epoch ms), per notification tag. Tags in
+    /// `muted` without an entry here are muted until the user unmutes.
+    #[serde(default)]
+    pub mute_until: BTreeMap<String, i64>,
 }
 
 impl Default for MessagesPrefs {
@@ -75,6 +82,8 @@ impl Default for MessagesPrefs {
             muted: BTreeSet::new(),
             quick_replies: rovsti_core::quick_replies::defaults(),
             voice_speed: rovsti_core::voice_player::Speed::default(),
+            sms_stars: rovsti_core::starred::LocalStars::default(),
+            mute_until: BTreeMap::new(),
         }
     }
 }
@@ -86,6 +95,7 @@ impl MessagesPrefs {
         MessagesPrefs {
             sim_choices: self.sim_choices.clone(),
             quick_replies: self.quick_replies.clone(),
+            sms_stars: self.sms_stars.clone(),
             ..MessagesPrefs::default()
         }
     }
@@ -120,7 +130,44 @@ impl MessagesPrefs {
             self.muted.insert(tag.to_owned());
         } else {
             self.muted.remove(tag);
+            self.mute_until.remove(tag);
         }
+    }
+
+    /// Mutes `tag`; `Some(end)` (epoch ms) ends the mute by itself, `None`
+    /// mutes until the user unmutes.
+    #[allow(dead_code)] // used by the mute-duration UI in a later step
+    pub fn set_muted_until(&mut self, tag: &str, until: Option<i64>) {
+        self.muted.insert(tag.to_owned());
+        match until {
+            Some(end) => {
+                self.mute_until.insert(tag.to_owned(), end);
+            }
+            None => {
+                self.mute_until.remove(tag);
+            }
+        }
+    }
+
+    /// When the mute of `tag` ends, if it is timed.
+    #[allow(dead_code)] // used by the mute-duration UI in a later step
+    pub fn mute_end(&self, tag: &str) -> Option<i64> {
+        self.mute_until.get(tag).copied()
+    }
+
+    /// Drops the timed mutes whose end is at or before `now_ms`. `true` when
+    /// anything changed.
+    pub fn expire_mutes(&mut self, now_ms: i64) -> bool {
+        let before = self.mute_until.len();
+        let muted = &mut self.muted;
+        self.mute_until.retain(|tag, end| {
+            let keep = *end > now_ms;
+            if !keep {
+                muted.remove(tag);
+            }
+            keep
+        });
+        self.mute_until.len() != before
     }
 
     /// Moves the per-thread state of tag `from_tag` to `into_tag` (a merged
@@ -132,6 +179,10 @@ impl MessagesPrefs {
         let mut changed = false;
         if self.muted.remove(from_tag) {
             self.muted.insert(into_tag.to_owned());
+            changed = true;
+        }
+        if let Some(end) = self.mute_until.remove(from_tag) {
+            self.mute_until.insert(into_tag.to_owned(), end);
             changed = true;
         }
         changed
@@ -356,6 +407,62 @@ mod tests {
         prefs.set_muted("wa:a", true);
         prefs.set_muted("wa:a", false);
         assert!(!prefs.is_muted("wa:a"));
+    }
+
+    #[test]
+    fn old_prefs_file_loads_without_stars_and_mute_ends() {
+        let prefs: MessagesPrefs = serde_json::from_str(r#"{"muted":["wa:a"]}"#).expect("old file");
+        assert!(prefs.is_muted("wa:a"));
+        assert!(prefs.mute_until.is_empty());
+        assert_eq!(prefs.sms_stars, rovsti_core::starred::LocalStars::default());
+    }
+
+    #[test]
+    fn expire_mutes_drops_only_passed_ends() {
+        let mut prefs = MessagesPrefs::default();
+        prefs.set_muted_until("sms:1", Some(100));
+        prefs.set_muted_until("sms:2", Some(500));
+        prefs.set_muted_until("sms:3", None);
+        assert_eq!(prefs.mute_end("sms:2"), Some(500));
+        assert!(!prefs.expire_mutes(99));
+        assert!(prefs.expire_mutes(100));
+        assert!(!prefs.is_muted("sms:1"));
+        assert!(prefs.is_muted("sms:2") && prefs.is_muted("sms:3"));
+        assert!(prefs.expire_mutes(1000));
+        assert!(!prefs.is_muted("sms:2"));
+        assert!(prefs.is_muted("sms:3"));
+        assert_eq!(prefs.mute_end("sms:3"), None);
+    }
+
+    #[test]
+    fn unmuting_clears_the_end() {
+        let mut prefs = MessagesPrefs::default();
+        prefs.set_muted_until("sms:1", Some(100));
+        prefs.set_muted("sms:1", false);
+        assert_eq!(prefs.mute_end("sms:1"), None);
+    }
+
+    #[test]
+    fn reset_keeps_sms_stars() {
+        let prefs = MessagesPrefs {
+            sms_stars: serde_json::from_str(
+                r#"{"sms:2":{"thread_id":"1","at_ms":5,"author":"A","preview":"hi"}}"#,
+            )
+            .expect("stars"),
+            ..MessagesPrefs::default()
+        };
+        assert!(prefs.sms_stars.is_starred("sms:2"));
+        let kept = prefs.sms_stars.clone();
+        assert_eq!(prefs.reset().sms_stars, kept);
+    }
+
+    #[test]
+    fn rekey_carries_the_mute_end() {
+        let mut prefs = MessagesPrefs::default();
+        prefs.set_muted_until("wa:1@lid", Some(42));
+        assert!(prefs.rekey_thread("wa:1@lid", "wa:2@s.whatsapp.net"));
+        assert_eq!(prefs.mute_end("wa:2@s.whatsapp.net"), Some(42));
+        assert_eq!(prefs.mute_end("wa:1@lid"), None);
     }
 
     #[test]

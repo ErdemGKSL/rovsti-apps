@@ -602,6 +602,7 @@ impl MessagesApp {
     fn watch_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.window_active = window.is_window_active();
         let active = self.window_active;
+        self.expire_mutes(cx);
         self.backend
             .update(cx, |backend, cx| backend.set_ui_active(active, cx));
         let subscription = cx.observe_window_activation(window, |this, window, cx| {
@@ -3049,6 +3050,9 @@ impl MessagesApp {
     /// told (see [`Backend::set_ui_active`]), and an open SMS thread that got
     /// messages meanwhile is read now.
     fn sms_window_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        if active {
+            self.expire_mutes(cx);
+        }
         self.backend
             .update(cx, |backend, cx| backend.set_ui_active(active, cx));
         if !active && let Open::Sms(conversation) = &self.open {
@@ -3090,8 +3094,22 @@ impl MessagesApp {
             .detach();
     }
 
+    /// Ends the timed mutes whose time has passed.
+    fn expire_mutes(&mut self, cx: &mut Context<Self>) {
+        let now = now_ms();
+        self.backend.update(cx, |backend, cx| {
+            let due = backend.prefs().mute_until.values().any(|end| *end <= now);
+            if due {
+                backend.update_prefs(cx, |prefs| {
+                    prefs.expire_mutes(now);
+                });
+            }
+        });
+    }
+
     /// Runs one arrival through the digest and posts the result.
     fn announce(&mut self, thread: &ThreadId, arrival: Arrival, cx: &mut Context<Self>) {
+        self.expire_mutes(cx);
         let (switches, muted) = {
             let prefs = self.backend.read(cx).prefs();
             (

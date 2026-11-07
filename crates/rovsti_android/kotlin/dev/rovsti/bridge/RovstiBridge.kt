@@ -801,6 +801,70 @@ object RovstiBridge {
         return start(Intent.createChooser(send, title.ifEmpty { null }).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
     }
 
+    /** Shares any file at [path] as [name] through the system share sheet. */
+    @JvmStatic
+    fun shareFile(path: String, mime: String, name: String): Boolean {
+        val uri = MediaShare.stageForShare(app, path, name.ifEmpty { null }) ?: return false
+        val send = Intent(Intent.ACTION_SEND).setType(mime.ifEmpty { "*/*" })
+            .putExtra(Intent.EXTRA_STREAM, uri)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        if (name.isNotEmpty()) send.putExtra(Intent.EXTRA_TITLE, name)
+        return start(Intent.createChooser(send, name.ifEmpty { null }).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    }
+
+    /**
+     * Opens the system "new contact" screen filled from [json]: `{name, company, notes,
+     * phones: [{number, label}], emails: [{address, label}]}`. Malformed JSON gives false.
+     */
+    @JvmStatic
+    fun insertContact(json: String): Boolean {
+        val card = try {
+            JSONObject(json)
+        } catch (_: org.json.JSONException) {
+            return false
+        }
+        val rows = ArrayList<android.content.ContentValues>()
+        val phones = card.optJSONArray("phones")
+        for (i in 0 until (phones?.length() ?: 0)) {
+            val p = phones?.optJSONObject(i) ?: continue
+            val number = p.optString("number")
+            if (number.isEmpty()) continue
+            val label = p.optString("label")
+            val row = android.content.ContentValues()
+            row.put(android.provider.ContactsContract.Data.MIMETYPE, android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE)
+            row.put(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER, number)
+            when (label.lowercase()) {
+                "mobile" -> row.put(android.provider.ContactsContract.CommonDataKinds.Phone.TYPE, android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE)
+                "home" -> row.put(android.provider.ContactsContract.CommonDataKinds.Phone.TYPE, android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_HOME)
+                "work" -> row.put(android.provider.ContactsContract.CommonDataKinds.Phone.TYPE, android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_WORK)
+                else -> {
+                    row.put(android.provider.ContactsContract.CommonDataKinds.Phone.TYPE, android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_CUSTOM)
+                    if (label.isNotEmpty()) row.put(android.provider.ContactsContract.CommonDataKinds.Phone.LABEL, label)
+                }
+            }
+            rows.add(row)
+        }
+        val emails = card.optJSONArray("emails")
+        for (i in 0 until (emails?.length() ?: 0)) {
+            val e = emails?.optJSONObject(i) ?: continue
+            val address = e.optString("address")
+            if (address.isEmpty()) continue
+            val row = android.content.ContentValues()
+            row.put(android.provider.ContactsContract.Data.MIMETYPE, android.provider.ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE)
+            row.put(android.provider.ContactsContract.CommonDataKinds.Email.ADDRESS, address)
+            rows.add(row)
+        }
+        val intent = Intent(Intent.ACTION_INSERT, android.provider.ContactsContract.Contacts.CONTENT_URI)
+        val name = card.optString("name")
+        if (name.isNotEmpty()) intent.putExtra(android.provider.ContactsContract.Intents.Insert.NAME, name)
+        val company = card.optString("company")
+        if (company.isNotEmpty()) intent.putExtra(android.provider.ContactsContract.Intents.Insert.COMPANY, company)
+        val notes = card.optString("notes")
+        if (notes.isNotEmpty()) intent.putExtra(android.provider.ContactsContract.Intents.Insert.NOTES, notes)
+        intent.putParcelableArrayListExtra(android.provider.ContactsContract.Intents.Insert.DATA, rows)
+        return start(intent)
+    }
+
     /** Story 14.8: `TelephonyManager.isHearingAidCompatibilitySupported()` (API 23). */
     @JvmStatic
     fun hearingAidCompatible(): Boolean = try {

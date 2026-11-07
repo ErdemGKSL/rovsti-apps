@@ -38,6 +38,16 @@ object MediaShare {
         "jpg", "jpeg" -> "image/jpeg"
         "webp" -> "image/webp"
         "gif" -> "image/gif"
+        "pdf" -> "application/pdf"
+        "vcf" -> "text/x-vcard"
+        "txt" -> "text/plain"
+        "mp3" -> "audio/mpeg"
+        "m4a", "aac" -> "audio/mp4"
+        "ogg", "opus" -> "audio/ogg"
+        "amr" -> "audio/amr"
+        "3gp" -> "video/3gpp"
+        "mp4" -> "video/mp4"
+        "zip" -> "application/zip"
         else -> "application/octet-stream"
     }
 
@@ -75,16 +85,16 @@ object MediaShare {
         }
     }
 
-    /** Copies [path] into `cache/share` and returns its provider URI; null on failure. */
-    fun stageForShare(context: Context, path: String): Uri? {
+    /** Copies [path] into `cache/share` (as [name] when given) and returns its provider URI; null on failure. */
+    fun stageForShare(context: Context, path: String, name: String? = null): Uri? {
         val source = File(path)
         if (!source.isFile) return null
         return try {
             val folder = dir(context)
             folder.listFiles()?.sortedBy { it.lastModified() }?.dropLast(MAX_STAGED - 1)?.forEach { it.delete() }
-            val name = safeName("${System.currentTimeMillis()}-${source.name}", "share-${System.currentTimeMillis()}.png")
-            source.copyTo(File(folder, name), overwrite = true)
-            Uri.Builder().scheme("content").authority(authority(context)).appendPath(name).build()
+            val staged = safeName("${System.currentTimeMillis()}-${name ?: source.name}", "share-${System.currentTimeMillis()}.bin")
+            source.copyTo(File(folder, staged), overwrite = true)
+            Uri.Builder().scheme("content").authority(authority(context)).appendPath(staged).build()
         } catch (_: java.io.IOException) {
             null
         }

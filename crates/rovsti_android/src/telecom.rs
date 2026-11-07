@@ -144,6 +144,13 @@ pub fn add_contact(number: &str) -> Result<bool> {
     bridge::call_bool_str("addContact", number)
 }
 
+/// Opens the system "new contact" screen pre-filled from `card_json` (name,
+/// company, notes, phones and emails). Needs no permission; `false` when the
+/// JSON is malformed or no Contacts app answered.
+pub fn insert_contact(card_json: &str) -> Result<bool> {
+    bridge::call_bool_str("insertContact", card_json)
+}
+
 /// Opens the system Contacts app. `false` when no app answered.
 pub fn open_contacts() -> Result<bool> {
     bridge::call_bool0("openContacts")
@@ -168,6 +175,7 @@ mod tests {
         assert!(matches!(place_call("1"), Err(Error::Unsupported)));
         assert!(matches!(call_voicemail(), Err(Error::Unsupported)));
         assert!(matches!(add_contact("1"), Err(Error::Unsupported)));
+        assert!(matches!(insert_contact("{}"), Err(Error::Unsupported)));
         for page in SystemPage::ALL {
             assert!(matches!(open_system(page), Err(Error::Unsupported)));
         }

@@ -146,6 +146,12 @@ list in `docs/phone-acceptance.md`.
       vCard 3/4 (`BDAY`, `ANNIVERSARY`, `ADR`), addresses open in maps; Find duplicates and Merge
       with confirm and Undo; "Upcoming" birthdays on Favorites (next 3 within 30 days, "See all"
       for 365 days, a "Wish" SMS chip); alphabet scrubber with haptic ticks and a letter bubble
+- [x] Utilities, round 2 (C11-C18, done without a device): select mode in the Contacts list
+      (select all, export or share a `.vcf`, add to group, star, delete with Undo); export one
+      contact to a `.vcf` file; crop and rotate before setting a photo, and set a photo from the
+      camera; "Recently added" (last 30 days) on the Contacts tab; copy a whole contact as text or
+      vCard; a WhatsApp chip per number; websites, nickname and job title (card, editor, vCard
+      `URL`, `NICKNAME`, `TITLE`)
 - [ ] Check the photo viewer gestures, the QR sheet, the calendar-event and address writes, and
       the scrubber drag on a phone: written without a device
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device

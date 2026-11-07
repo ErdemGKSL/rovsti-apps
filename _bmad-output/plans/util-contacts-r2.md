@@ -48,14 +48,14 @@ rotation, no user crop; no camera capture anywhere in `crates/rovsti_android/kot
 | C8 | Find duplicates and Merge with confirm and Undo | done R1 |
 | C9 | Upcoming birthdays (Favorites section + page, Wish SMS) | done R1 |
 | C10 | Alphabet scrubber | done R1 |
-| C11 | Select mode in the Contacts list: select all, export selection (.vcf file), share (.vcf), add to group, star/unstar, delete (confirm + Undo) | planned R2 (S1, S6) |
-| C12 | Export one contact to a .vcf file ("save as") from the card Share menu | planned R2 (S1, S5) |
-| C13 | Photo crop / rotate before setting (pan + zoom square crop, quarter turns) | planned R2 (S3, S4, S7) |
-| C14 | Set photo from the camera (`ACTION_IMAGE_CAPTURE` into the app cache) | planned R2 (S4, S7) |
-| C15 | Recently added / edited list (`CONTACT_LAST_UPDATED_TIMESTAMP`) | planned R2 (S1, S4, S8) |
-| C16 | Copy whole contact (text) and Copy as vCard from the card Share menu | planned R2 (S1, S5) |
-| C17 | WhatsApp chat chip per number row when that number is on WhatsApp | planned R2 (S5) |
-| C18 | Websites, nickname, job title: read, write, edit, vCard URL/NICKNAME/TITLE, tap opens browser | planned R2 (S2, S4, S5) |
+| C11 | Select mode in the Contacts list: select all, export selection (.vcf file), share (.vcf), add to group, star/unstar, delete (confirm + Undo) | done R2 |
+| C12 | Export one contact to a .vcf file ("save as") from the card Share menu | done R2 |
+| C13 | Photo crop / rotate before setting (pan + zoom square crop, quarter turns) | done R2 |
+| C14 | Set photo from the camera (`ACTION_IMAGE_CAPTURE` into the app cache) | done R2 |
+| C15 | Recently added / edited list (`CONTACT_LAST_UPDATED_TIMESTAMP`) | done R2 |
+| C16 | Copy whole contact (text) and Copy as vCard from the card Share menu | done R2 |
+| C17 | WhatsApp chat chip per number row when that number is on WhatsApp | done R2 |
+| C18 | Websites, nickname, job title: read, write, edit, vCard URL/NICKNAME/TITLE, tap opens browser | done R2 |
 | C19 | Scan to add: decode a contact QR from a picked image (pure Rust decoder, licence-checked) | backlog R3 |
 | C20 | Trash: deleted contacts kept locally as drafts for 30 days, Restore, Empty Trash (confirm) | backlog R3 |
 | C21 | Contact history: last calls and SMS with this contact (local providers, read-only, permission) | backlog R3 |

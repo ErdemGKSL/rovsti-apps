@@ -307,6 +307,12 @@ pub fn show_scrubber(rows: usize, query: &str) -> bool {
     query.trim().is_empty() && rows > SCRUBBER_MIN_ROWS
 }
 
+/// Whether the Contacts tab header shows the "Recently added" row: no search
+/// text and at least one recent contact.
+pub fn show_recent(query: &str, recent_len: usize) -> bool {
+    query.trim().is_empty() && recent_len > 0
+}
+
 /// The letter index under a touch at `y` on a strip of `height` split into
 /// `count` equal cells; out-of-range touches clamp to the ends.
 pub fn letter_at(y: f32, height: f32, count: usize) -> Option<usize> {
@@ -714,6 +720,14 @@ mod tests {
         assert!(!super::show_scrubber(20, ""));
         assert!(!super::show_scrubber(500, "an"));
         assert!(!super::show_scrubber(0, ""));
+    }
+
+    #[test]
+    fn recent_row_shows_for_unfiltered_non_empty_lists_only() {
+        assert!(super::show_recent("", 1));
+        assert!(super::show_recent("  ", 50));
+        assert!(!super::show_recent("", 0));
+        assert!(!super::show_recent("an", 3));
     }
 
     #[test]

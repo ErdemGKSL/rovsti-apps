@@ -20,6 +20,7 @@ mod photos;
 mod picker;
 mod prefs;
 mod qr_sheet;
+mod recent;
 mod sample;
 mod select;
 mod transfer;
@@ -311,6 +312,8 @@ struct ContactsApp {
     upcoming_numbers: std::collections::HashMap<i64, String>,
     upcoming_loads: u64,
     upcoming_open: bool,
+    recent: Vec<recent::RecentRow>,
+    recent_open: bool,
     /// The alphabet scrubber: the section letter of each Contacts row, the
     /// letters shown, and the drag.
     row_letters: Vec<char>,
@@ -497,6 +500,8 @@ impl ContactsApp {
             upcoming_numbers: std::collections::HashMap::new(),
             upcoming_loads: 0,
             upcoming_open: false,
+            recent: Vec::new(),
+            recent_open: false,
             row_letters: Vec::new(),
             scrub_letters: Vec::new(),
             scrub: upcoming::Scrub::default(),
@@ -612,6 +617,7 @@ impl ContactsApp {
             self.favorites.clear();
             self.group_rows.clear();
             self.group_items.clear();
+            self.recent.clear();
             self.refill_others(cx);
             cx.notify();
             return;
@@ -638,6 +644,7 @@ impl ContactsApp {
             }
         }
         self.group_items = self.build_group_items();
+        self.recent = recent::build(index.all(), crate::whatsapp::now_ms(), self.wa.offset_s);
         self.apply_marks();
         self.refill_others(cx);
         cx.notify();
@@ -778,6 +785,7 @@ impl ContactsApp {
             || self.dupes.open
             || self.dupes.sheet.is_open()
             || self.upcoming_open
+            || self.recent_open
             || self.select_ui.sheet.is_open()
             || self.select.is_some()
             || self.tabs.selected() != CONTACTS_TAB
@@ -815,6 +823,8 @@ impl ContactsApp {
             self.close_group(cx);
         } else if self.upcoming_open {
             self.set_upcoming_open(false, cx);
+        } else if self.recent_open {
+            self.set_recent_open(false, cx);
         } else if self.dupes.sheet.is_open() {
             self.close_dupes_sheet(cx);
         } else if self.dupes.open {
@@ -1405,11 +1415,16 @@ impl ContactsApp {
         } else {
             None
         };
+        let query = self.field.read(cx).text().to_owned();
+        let recent_row = (matches!(self.book, Book::Ready(_))
+            && contacts_view::show_recent(&query, self.recent.len()))
+        .then(|| self.recent_entry(theme, cx));
         div()
             .flex()
             .flex_col()
             .child(large_title(theme, TABS[CONTACTS_TAB], trailing))
             .child(self.search_field(theme, window, cx))
+            .children(recent_row)
             .children(body)
             .into_any_element()
     }
@@ -1854,6 +1869,8 @@ impl Render for ContactsApp {
             (page, true)
         } else if self.upcoming_open && tab == FAVORITES_TAB {
             (self.upcoming_page(theme, cx), false)
+        } else if self.recent_open && tab == CONTACTS_TAB {
+            (self.recent_page(theme, cx), false)
         } else if self.dupes.open && tab == SETTINGS_TAB {
             (self.dupes_page(theme, cx), false)
         } else if self.whatsapp_open && tab == SETTINGS_TAB {
@@ -1958,8 +1975,10 @@ impl Render for ContactsApp {
                                 || this.whatsapp_open
                                 || this.dupes.open
                                 || this.upcoming_open
+                                || this.recent_open
                             {
                                 this.upcoming_open = false;
+                                this.recent_open = false;
                                 this.whatsapp_open = false;
                                 this.dupes.open = false;
                                 this.dupes.sheet.close();

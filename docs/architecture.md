@@ -226,6 +226,10 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
   `contacts-prefs.json`.
 - **AD-CT4 Photos.** Android Photo Picker (no permission); Rust plans a centred square crop
   (`contact_photo::plan`), Kotlin decodes, crops and writes a JPEG to the display photo.
+- **AD-CT4a Camera write rule.** `RovstiShareProvider` is read-only except for the camera
+  capture: `openFile` accepts mode "w"/"wt" only for files named `camera-<digits>.jpg` in
+  `cache/share/` (`MediaShare.writable`). The camera app gets a write grant on that one URI
+  through `EXTRA_OUTPUT`; every other name stays "r". The app declares no `CAMERA` permission.
 - **AD-CT5 WhatsApp goes through the apps that own it.** Chat and call are handed to Messages
   and Phone by an explicit intent (`dev.rovsti.action.WA_CHAT` / `WA_CALL`, extras `jid`,
   `name`) guarded by the signature permission `dev.rovsti.permission.HANDOFF`; Kotlin keeps only

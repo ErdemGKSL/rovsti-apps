@@ -298,13 +298,23 @@ impl<V: Render + 'static> Rig<V> {
         drawn
     }
 
+    /// Draws a frame and returns it.
+    pub fn capture(&mut self) -> RgbaImage {
+        self.draw();
+        self.cx
+            .capture_screenshot(self.any())
+            .expect("capture the frame")
+    }
+
     /// Writes the current frame to `target/shots/<app>/<name>.png`.
     pub fn save(&mut self) -> PathBuf {
-        self.draw();
-        let img = self
-            .cx
-            .capture_screenshot(self.any())
-            .expect("capture the frame");
+        let img = self.capture();
+        self.save_image(&img)
+    }
+
+    /// Writes `img` (a frame, or one composed from several) under this
+    /// shot's name.
+    pub fn save_image(&self, img: &RgbaImage) -> PathBuf {
         let name = file_name(
             self.spec.nn,
             self.spec.screen,
@@ -318,6 +328,9 @@ impl<V: Render + 'static> Rig<V> {
         path
     }
 }
+
+#[cfg(test)]
+mod fields;
 
 #[cfg(test)]
 mod tests {

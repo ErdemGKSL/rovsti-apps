@@ -239,3 +239,17 @@ GPUI reports a leaked entity handle.
 badges 1/2/3/12/120, OTP, 3 spam, 3 status authors). Scenes 05 and 09 run against a loopback fake
 gateway (`src/shots/gateway.rs`). 03 is a no-match search (the Unread chip cannot be empty in the
 preview), and 08 shows the search row with "SMS search not available" on desktop.
+
+## Step 7 result (text field gallery)
+
+`cargo test -p rovsti_ui --features shots fields -- --ignored --nocapture` writes
+`target/shots/rovsti_ui/01-fields-dark.png` and `01-fields-light.png` (824x1830). Code:
+`crates/rovsti_ui/src/shots/fields.rs`; `field.rs` is unchanged. Eight captioned `field_box` rows
+(`STATES` table): placeholder, focused empty, focused short text, focused long Turkish URL,
+unfocused long text, composing text, secret, phone purpose. GPUI has one focus per window, so the
+page is drawn once per focused row and each row's band is composed from the frame where it had
+focus. Baseline seen: caret always at the end of the text; the focused URL is cut at the start
+with an ellipsis; the unfocused long text is cut at the end; the composing text shows no marked
+underline (looks like committed text); the secret field shows one dot per char.
+The text-field mechanics unit will add caret-mid-text and selection states to `STATES` in this
+gallery (a new `State` row each; the compose code handles any number of focused rows).

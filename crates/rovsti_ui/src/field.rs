@@ -10,7 +10,7 @@
 use std::{
     cell::{Cell, RefCell},
     ops::Range,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicU8, Ordering},
     time::{Duration, Instant},
 };
 
@@ -45,6 +45,87 @@ static BLINK: AtomicBool = AtomicBool::new(true);
 /// Turns caret blinking on or off for every field (on by default).
 pub fn set_blink(on: bool) {
     BLINK.store(on, Ordering::Relaxed);
+}
+
+/// Who draws the selection handles, magnifier and cut/copy/paste menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectionChrome {
+    /// The platform's own selection UI (Android's editor).
+    Native,
+    /// The field draws its own handles and menu (desktop, tests).
+    Drawn,
+}
+
+/// Override of [`selection_chrome`]: 0 = none, 1 = Native, 2 = Drawn.
+static CHROME_OVERRIDE: AtomicU8 = AtomicU8::new(0);
+
+/// The selection chrome in effect: the override if set, else `Native` on
+/// Android and `Drawn` elsewhere.
+pub fn selection_chrome() -> SelectionChrome {
+    match CHROME_OVERRIDE.load(Ordering::Relaxed) {
+        1 => SelectionChrome::Native,
+        2 => SelectionChrome::Drawn,
+        _ if cfg!(target_os = "android") => SelectionChrome::Native,
+        _ => SelectionChrome::Drawn,
+    }
+}
+
+/// Forces a selection chrome for every field (`None` restores the default).
+/// For tests and the screenshot rig.
+pub fn set_selection_chrome(chrome: Option<SelectionChrome>) {
+    let v = match chrome {
+        None => 0,
+        Some(SelectionChrome::Native) => 1,
+        Some(SelectionChrome::Drawn) => 2,
+    };
+    CHROME_OVERRIDE.store(v, Ordering::Relaxed);
+}
+
+/// A touch gesture on a field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gesture {
+    /// A single tap away from the caret.
+    Tap,
+    /// Two quick taps.
+    DoubleTap,
+    /// A tap on the caret (or insertion handle).
+    TapOnCaret,
+    /// A long press on text.
+    LongPress,
+    /// A long press in a field with no text.
+    LongPressEmpty,
+}
+
+/// What the field itself does for a [`Gesture`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChromeAction {
+    /// Leave it to the platform; the field draws and changes nothing.
+    Platform,
+    /// Move the caret to the touch point.
+    PlaceCaret,
+    /// Move the caret and show the drawn insertion handle.
+    PlaceCaretWithHandle,
+    /// Select the word under the touch and show handles and menu.
+    SelectWord,
+    /// Toggle the drawn menu at the caret.
+    ToggleMenu,
+    /// Show the drawn paste menu for an empty field.
+    ShowPasteMenu,
+}
+
+/// The pure policy table: what the field does for `gesture` under `policy`.
+/// Under [`SelectionChrome::Native`] the platform owns selection UI, so the
+/// field only places the caret on a plain tap.
+pub fn chrome_for(policy: SelectionChrome, gesture: Gesture) -> ChromeAction {
+    use ChromeAction::*;
+    match (policy, gesture) {
+        (SelectionChrome::Native, Gesture::Tap) => PlaceCaret,
+        (SelectionChrome::Native, _) => Platform,
+        (SelectionChrome::Drawn, Gesture::Tap) => PlaceCaretWithHandle,
+        (SelectionChrome::Drawn, Gesture::DoubleTap | Gesture::LongPress) => SelectWord,
+        (SelectionChrome::Drawn, Gesture::TapOnCaret) => ToggleMenu,
+        (SelectionChrome::Drawn, Gesture::LongPressEmpty) => ShowPasteMenu,
+    }
 }
 
 /// Caret width, dp.
@@ -2005,6 +2086,42 @@ mod tests {
     use gpui::{AppContext as _, TestAppContext};
 
     use super::*;
+
+    #[test]
+    fn chrome_table_native_leaves_it_to_the_platform() {
+        use ChromeAction::*;
+        let n = SelectionChrome::Native;
+        assert_eq!(chrome_for(n, Gesture::Tap), PlaceCaret);
+        for g in [
+            Gesture::DoubleTap,
+            Gesture::TapOnCaret,
+            Gesture::LongPress,
+            Gesture::LongPressEmpty,
+        ] {
+            assert_eq!(chrome_for(n, g), Platform);
+        }
+    }
+
+    #[test]
+    fn chrome_table_drawn() {
+        use ChromeAction::*;
+        let d = SelectionChrome::Drawn;
+        assert_eq!(chrome_for(d, Gesture::Tap), PlaceCaretWithHandle);
+        assert_eq!(chrome_for(d, Gesture::DoubleTap), SelectWord);
+        assert_eq!(chrome_for(d, Gesture::TapOnCaret), ToggleMenu);
+        assert_eq!(chrome_for(d, Gesture::LongPress), SelectWord);
+        assert_eq!(chrome_for(d, Gesture::LongPressEmpty), ShowPasteMenu);
+    }
+
+    #[test]
+    fn chrome_override_round_trips() {
+        set_selection_chrome(Some(SelectionChrome::Native));
+        assert_eq!(selection_chrome(), SelectionChrome::Native);
+        set_selection_chrome(Some(SelectionChrome::Drawn));
+        assert_eq!(selection_chrome(), SelectionChrome::Drawn);
+        set_selection_chrome(None);
+        assert_eq!(selection_chrome(), SelectionChrome::Drawn);
+    }
 
     struct Host(Entity<TextField>);
 

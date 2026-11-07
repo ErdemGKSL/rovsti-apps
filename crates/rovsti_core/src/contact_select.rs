@@ -106,8 +106,18 @@ pub fn full_text(d: &ContactDraft) -> String {
     if !name.is_empty() {
         lines.push(name);
     }
-    if !d.org.trim().is_empty() {
-        lines.push(d.org.trim().to_owned());
+    let nick = d.nickname.trim();
+    if !nick.is_empty() {
+        lines.push(format!("\"{nick}\""));
+    }
+    let org = [d.title.trim(), d.org.trim()]
+        .iter()
+        .filter(|p| !p.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !org.is_empty() {
+        lines.push(org);
     }
     let fields = |lines: &mut Vec<String>, list: &[crate::contact_edit::DraftField], one_line| {
         for f in list {
@@ -131,6 +141,14 @@ pub fn full_text(d: &ContactDraft) -> String {
     fields(&mut lines, &d.numbers, false);
     fields(&mut lines, &d.emails, false);
     fields(&mut lines, &d.addresses, true);
+    for site in d
+        .websites
+        .iter()
+        .map(|w| w.trim())
+        .filter(|w| !w.is_empty())
+    {
+        lines.push(format!("Website: {site}"));
+    }
     for e in &d.events {
         let when = match contact_dates::parse(&e.date) {
             Some(date) => date.text(),
@@ -248,5 +266,17 @@ mod tests {
              Home: 1 Main St, Istanbul, TR\nBirthday: 12 May 1994\nMet at work"
         );
         assert_eq!(full_text(&ContactDraft::default()), "");
+    }
+
+    #[test]
+    fn full_text_has_nickname_title_and_websites() {
+        let mut c = d(1, "Ayşe");
+        c.nickname = "Ayo".into();
+        c.title = "CTO".into();
+        c.org = "Acme".into();
+        c.websites = vec!["acme.com".into(), " ".into()];
+        assert_eq!(full_text(&c), "Ayşe\n\"Ayo\"\nCTO, Acme\nWebsite: acme.com");
+        c.org.clear();
+        assert_eq!(full_text(&c), "Ayşe\n\"Ayo\"\nCTO\nWebsite: acme.com");
     }
 }

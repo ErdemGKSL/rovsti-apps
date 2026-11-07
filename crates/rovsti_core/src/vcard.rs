@@ -3,7 +3,8 @@
 //! Reads vCard 2.1, 3.0 and 4.0 (what phones, Google Contacts and iCloud
 //! produce) into [`ContactDraft`]s and writes vCard 3.0, which every address
 //! book accepts. Only what the app edits is carried: name, organisation,
-//! numbers, emails, the note, the birthday and anniversary (`BDAY`,
+//! nickname (`NICKNAME`, the first of a comma list), job title (`TITLE`),
+//! numbers, emails, websites (`URL`), the note, the birthday and anniversary (`BDAY`,
 //! `ANNIVERSARY`, `X-ANNIVERSARY`) and postal addresses (`ADR`). Photos and
 //! other properties are skipped on import and not written; a date that does
 //! not parse is dropped without failing the card.
@@ -83,6 +84,20 @@ impl Builder {
                     .first()
                     .map(|p| unescape(p))
                     .unwrap_or_default();
+            }
+            "NICKNAME" => {
+                card.nickname = split_all_unescaped(&prop.value, ',')
+                    .iter()
+                    .map(|n| unescape(n).trim().to_owned())
+                    .find(|n| !n.is_empty())
+                    .unwrap_or_default();
+            }
+            "TITLE" => card.title = unescape(&prop.value),
+            "URL" => {
+                let url = unescape(&prop.value);
+                if !url.trim().is_empty() {
+                    card.websites.push(url);
+                }
             }
             "TEL" => {
                 let value = prop.value.trim();
@@ -420,6 +435,15 @@ fn write_card(contact: &ContactDraft, out: &mut String) {
     if !contact.org.is_empty() {
         push_line(out, &format!("ORG:{}", escape(&contact.org)));
     }
+    if !contact.nickname.is_empty() {
+        push_line(out, &format!("NICKNAME:{}", escape(&contact.nickname)));
+    }
+    if !contact.title.is_empty() {
+        push_line(out, &format!("TITLE:{}", escape(&contact.title)));
+    }
+    for site in &contact.websites {
+        push_line(out, &format!("URL:{}", escape(site)));
+    }
     for number in &contact.numbers {
         push_line(
             out,
@@ -532,6 +556,31 @@ EMAIL;TYPE=INTERNET,HOME:ayse@example.com\r\nNOTE:Line one\\nLine\\, two\r\nEND:
         assert_eq!(card.numbers[1].kind, FieldKind::Work);
         assert_eq!(card.emails[0].kind, FieldKind::Home);
         assert_eq!(card.note, "Line one\nLine, two");
+    }
+
+    #[test]
+    fn nickname_title_and_urls_round_trip() {
+        let mut c = ContactDraft {
+            given: "Ayşe".into(),
+            nickname: "Ay, o".into(),
+            title: "Head; of Things".into(),
+            websites: vec!["https://a.com/x,y".into(), "b.org".into()],
+            ..ContactDraft::default()
+        };
+        c.clean();
+        let text = write(std::slice::from_ref(&c));
+        assert!(text.contains("NICKNAME:Ay\\, o\r\n"));
+        assert!(text.contains("TITLE:Head\\; of Things\r\n"));
+        assert_eq!(parse(&text).contacts, vec![c]);
+    }
+
+    #[test]
+    fn nickname_reads_the_first_of_a_list() {
+        let text = "BEGIN:VCARD\nFN:Anne\nNICKNAME:,Annie,Ann\nTITLE:Boss\nURL;TYPE=WORK:http://x.com\nURL:\nEND:VCARD";
+        let card = &parse(text).contacts[0];
+        assert_eq!(card.nickname, "Annie");
+        assert_eq!(card.title, "Boss");
+        assert_eq!(card.websites, vec!["http://x.com"]);
     }
 
     #[test]

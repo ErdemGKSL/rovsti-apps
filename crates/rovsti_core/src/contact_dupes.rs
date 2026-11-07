@@ -198,6 +198,19 @@ pub fn merge(keeper: &ContactDraft, others: &[ContactDraft]) -> ContactDraft {
     {
         out.org = o.org.clone();
     }
+    if out.nickname.trim().is_empty()
+        && let Some(o) = others.iter().find(|o| !o.nickname.trim().is_empty())
+    {
+        out.nickname = o.nickname.clone();
+    }
+    if out.title.trim().is_empty()
+        && let Some(o) = others.iter().find(|o| !o.title.trim().is_empty())
+    {
+        out.title = o.title.clone();
+    }
+    for site in others.iter().flat_map(|o| &o.websites) {
+        out.websites.push(site.clone());
+    }
     let mut notes: Vec<String> = Vec::new();
     for note in std::iter::once(&keeper.note).chain(others.iter().map(|o| &o.note)) {
         let note = note.trim();
@@ -362,6 +375,20 @@ mod tests {
         let m = merge(&k, &[o]);
         assert_eq!(m.events.len(), 2);
         assert_eq!(m.addresses.len(), 2);
+    }
+
+    #[test]
+    fn merge_keeps_nickname_title_and_unions_websites() {
+        let mut k = c(1, "Keep", &[], &[]);
+        k.nickname = "Kay".into();
+        k.websites = vec!["a.com".into()];
+        let mut o = c(2, "Other", &[], &[]);
+        o.nickname = "Oh".into();
+        o.title = "CTO".into();
+        o.websites = vec!["A.com".into(), "b.com".into()];
+        let m = merge(&k, &[o]);
+        assert_eq!((m.nickname.as_str(), m.title.as_str()), ("Kay", "CTO"));
+        assert_eq!(m.websites, vec!["a.com", "b.com"]);
     }
 
     #[test]

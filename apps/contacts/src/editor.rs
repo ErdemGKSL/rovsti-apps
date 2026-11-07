@@ -241,6 +241,10 @@ impl Editor {
             groups: self.groups.iter().copied().collect(),
             starred: self.starred,
             account: self.account.clone(),
+            // No form rows yet (step S4): keep what the contact already has.
+            nickname: self.initial.nickname.clone(),
+            title: self.initial.title.clone(),
+            websites: self.initial.websites.clone(),
         }
     }
 

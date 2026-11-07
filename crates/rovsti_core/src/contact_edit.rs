@@ -164,12 +164,21 @@ pub struct ContactDraft {
     pub given: String,
     pub family: String,
     pub org: String,
+    /// What friends call the contact. Never replaces the name in the list.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub nickname: String,
+    /// Job title.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub title: String,
     pub note: String,
     pub numbers: Vec<DraftField>,
     pub emails: Vec<DraftField>,
     /// Postal addresses (the value may span lines).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub addresses: Vec<DraftField>,
+    /// Websites as typed; open them with [`web_url`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub websites: Vec<String>,
     /// Birthdays, anniversaries and other dated events.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<DraftEvent>,
@@ -240,7 +249,13 @@ impl ContactDraft {
     /// Trims everything, drops empty and repeated fields and applies the
     /// length limits. Safe to call more than once.
     pub fn clean(&mut self) {
-        for text in [&mut self.given, &mut self.family, &mut self.org] {
+        for text in [
+            &mut self.given,
+            &mut self.family,
+            &mut self.org,
+            &mut self.nickname,
+            &mut self.title,
+        ] {
             *text = clip(text.trim(), MAX_TEXT_CHARS).to_owned();
         }
         self.note = clip(self.note.trim(), MAX_NOTE_CHARS).to_owned();
@@ -248,6 +263,7 @@ impl ContactDraft {
         clean_fields(&mut self.emails, |value| value.to_lowercase());
         clean_fields(&mut self.addresses, |value| value.to_lowercase());
         clean_events(&mut self.events);
+        clean_websites(&mut self.websites);
         self.groups.sort_unstable();
         self.groups.dedup();
     }
@@ -513,6 +529,52 @@ fn clean_fields(fields: &mut Vec<DraftField>, key: impl Fn(&str) -> String) {
     fields.truncate(MAX_FIELDS);
 }
 
+/// Trims websites, drops empty and repeated ones (ignoring case), clips them
+/// and keeps at most [`MAX_FIELDS`].
+fn clean_websites(sites: &mut Vec<String>) {
+    let mut seen = std::collections::HashSet::new();
+    sites.retain_mut(|site| {
+        *site = clip(site.trim(), MAX_VALUE_CHARS).to_owned();
+        !site.is_empty() && seen.insert(site.to_lowercase())
+    });
+    sites.truncate(MAX_FIELDS);
+}
+
+/// The address to open for a typed website: `https://` is added when there is
+/// no scheme; only `http` and `https` are accepted. `None` for empty text,
+/// inner whitespace, another scheme or an empty host.
+pub fn web_url(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() || s.chars().any(char::is_whitespace) {
+        return None;
+    }
+    let lower = s.to_ascii_lowercase();
+    let rest = if lower.starts_with("https://") || lower.starts_with("http://") {
+        &s[s.find("://")? + 3..]
+    } else if s.contains("://") || lower.starts_with("mailto:") || lower.starts_with("tel:") {
+        return None;
+    } else {
+        s
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    let host = host.rsplit_once('@').map_or(host, |(_, h)| h);
+    let host = host.rsplit_once(':').map_or(host, |(h, port)| {
+        if port.chars().all(|c| c.is_ascii_digit()) {
+            h
+        } else {
+            host
+        }
+    });
+    if host.is_empty() || host.starts_with('.') || host.contains(':') && !host.starts_with('[') {
+        return None;
+    }
+    if lower.starts_with("https://") || lower.starts_with("http://") {
+        Some(s.to_owned())
+    } else {
+        Some(format!("https://{s}"))
+    }
+}
+
 /// Trims events, drops empty and repeated ones and keeps at most
 /// [`MAX_FIELDS`].
 fn clean_events(events: &mut Vec<DraftEvent>) {
@@ -597,6 +659,64 @@ mod tests {
                 .collect(),
             ..ContactDraft::default()
         }
+    }
+
+    #[test]
+    fn web_url_cases() {
+        assert_eq!(
+            web_url("example.com").as_deref(),
+            Some("https://example.com")
+        );
+        assert_eq!(
+            web_url(" http://a.org/x?y=1 ").as_deref(),
+            Some("http://a.org/x?y=1")
+        );
+        assert_eq!(web_url("HTTPS://A.org").as_deref(), Some("HTTPS://A.org"));
+        assert_eq!(
+            web_url("localhost:8080/p").as_deref(),
+            Some("https://localhost:8080/p")
+        );
+        for bad in [
+            "",
+            "  ",
+            "a b.com",
+            "ftp://x.com",
+            "javascript:alert(1)",
+            "mailto:a@b.c",
+            "https://",
+            "http:///path",
+            "tel:123",
+            "https://:80",
+        ] {
+            assert_eq!(web_url(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn websites_nickname_and_title_are_cleaned() {
+        let mut c = ContactDraft {
+            given: "A".into(),
+            nickname: "  Annie ".into(),
+            title: " CTO ".into(),
+            websites: vec![" Example.com ".into(), "example.COM".into(), " ".into()],
+            ..ContactDraft::default()
+        };
+        c.websites.extend((0..20).map(|i| format!("s{i}.com")));
+        c.clean();
+        assert_eq!((c.nickname.as_str(), c.title.as_str()), ("Annie", "CTO"));
+        assert_eq!(c.websites[0], "Example.com");
+        assert_eq!(c.websites.len(), MAX_FIELDS);
+        assert_eq!(c.display_name(), "A");
+    }
+
+    #[test]
+    fn old_json_without_websites_reads_and_empty_is_skipped() {
+        let c: ContactDraft = serde_json::from_str(r#"{"given":"A"}"#).expect("old json reads");
+        assert!(c.websites.is_empty() && c.nickname.is_empty() && c.title.is_empty());
+        let json = serde_json::to_string(&c).expect("serializes");
+        assert!(
+            !json.contains("websites") && !json.contains("nickname") && !json.contains("title")
+        );
     }
 
     #[test]

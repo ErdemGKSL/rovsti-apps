@@ -28,6 +28,28 @@ and has no GPUI types, so the logic is tested on the desktop. The old per-app co
 (`apps/contacts/src/field.rs`, `apps/phone/src/field.rs`) are gone; add new inputs with
 `TextField::new`, `with_input` or `multiline`, never a second `EntityInputHandler`.
 
+Selection chrome. `rovsti_ui::field::selection_chrome()` is `Native` on Android and `Drawn`
+everywhere else (`set_selection_chrome(Some(..))` overrides it for tests and the shots).
+- Android (`Native`): the field hands the platform its own selection UI, as an HTML input
+  does. A tap reaches the field as `TextInputFocusEvent`: it focuses, raises the keyboard
+  and puts the caret at the touch point. The host then shows the one native insertion
+  handle. A long press is not claimed, so the host runs its own word selection (locale
+  aware), floating toolbar (Cut, Copy, Paste, Select all), draggable handles and the
+  magnifier while a handle is dragged. Toolbar items arrive as ctrl-a/c/x/v key events,
+  which `TextField::handle_key` already handles. The field draws no handles or menu and
+  never calls `show_insertion`.
+- Desktop and the shots (`Drawn`): the field draws its own teardrop handles and the
+  capsule edit menu (kept inside the field's horizontal bounds).
+- Finger pan: a drag in a field arrives as `ScrollWheelEvent`s. The pure `pan` function
+  moves the horizontal scroll (single line) or vertical scroll (multiline) and reports
+  whether it consumed the delta. At an edge it does not, so the page scrolls on, like a
+  browser. A long URL in Stops search can be panned by finger.
+- Undo and redo: `rovsti_core::text_edit::History` (100 steps) records before each edit.
+  Runs of typing and runs of deletes coalesce into one step; paste, cut, newline, a
+  selection replace or a caret jump close the group, and IME composition is one step.
+  Ctrl/Cmd+Z undoes, Ctrl/Cmd+Shift+Z and Ctrl+Y redo. `set` and `clear` from an app
+  reset the history.
+
 ```
 apps/{phone,messages,contacts,stops}  GPUI views, one window per app
         │

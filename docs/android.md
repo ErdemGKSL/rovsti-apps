@@ -274,6 +274,25 @@ cargo check -p rovsti_wa_client --target aarch64-linux-android
 Crates with C code (SQLite, ring) need the NDK linker, so a full Android
 `cargo check` of `rovsti_messages` needs `ANDROID_NDK_HOME`.
 
+## Text field device checklist
+
+Text fields use the host's native selection UI on Android (see
+[architecture](architecture.md#layers)). The headless shots draw their own chrome, so only
+a device proves this. Check each on Phone, Messages, Contacts and Stops:
+
+- [ ] Tap in the middle of a word: the caret lands there and exactly ONE insertion handle
+      shows (no second teardrop).
+- [ ] Long-press a word: the Android toolbar (Cut, Copy, Paste, Select all) appears with
+      the word selected; dragging a handle shows the magnifier.
+- [ ] Gboard: drag the space bar to move the cursor, and swipe-type over a word in
+      mid-text to replace it.
+- [ ] Autocorrect of a word in the middle of the text replaces only that word.
+- [ ] Paste from the toolbar and from the keyboard clipboard strip.
+- [ ] Stops search: with a long URL pasted, a finger drag pans the text sideways; at the
+      end the page scrolls on.
+- [ ] Messages composer grows to 6 lines, then scrolls inside itself.
+- [ ] Secret field (WhatsApp connect key): the toolbar has no Copy or Cut.
+
 ## Contact photos (Phone, story 10.5)
 
 The bridge still moves only strings and ints. `RovstiBridge.contactPhoto(uri, size)`

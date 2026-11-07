@@ -49,7 +49,15 @@ at a time if your cargo version rejects the combined form:
 5 selected word with handles, 6 edit menu open, 7 long Turkish URL scrolled to the caret
 (no ellipsis), 8 unfocused long text (end ellipsis), 9 composing text (underlined),
 10 multiline 3 lines, 11 secret (Password mode, masked), 12 phone purpose, 13 empty
-with the Paste-only menu. `02-field-touch-*` covers the touch states. To add a state,
+with the Paste-only menu, 14 long URL panned to the start while focused (set by
+the same scroll call a finger drag makes). `02-field-touch-*` covers the touch states.
+
+The shots always draw the field's own handles and menu. On Android the field uses the
+host's native chrome instead, which cannot be rendered headless. The rig can force either
+with `rovsti_ui::field::set_selection_chrome(Some(SelectionChrome::Drawn))` (or `Native`,
+`None` for the platform default); call it before opening the window, it is per thread.
+Native-mode behaviour is covered by `#[gpui::test]`s in `field.rs`, and by the device
+checklist in `docs/android.md`. To add a state,
 append to `STATES` in `crates/rovsti_ui/src/shots/fields.rs` and raise the array length.
 
 The caret blinks (530 ms on/off) on a device. The shots must be stable, so the rig calls

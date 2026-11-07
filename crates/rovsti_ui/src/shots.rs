@@ -171,13 +171,16 @@ impl PlatformHeadlessRenderer for WgpuHeadless {
             self.size = size;
         }
         let mut attempt = 1;
-        let rgba = loop {
+        let mut rgba = loop {
             match self.renderer.render_rgba(scene) {
                 Ok(rgba) => break rgba,
                 Err(err) if attempt < RENDER_ATTEMPTS && retryable(&err) => attempt += 1,
                 Err(err) => return Err(err),
             }
         };
+        // The target is Rgba8UnormSrgb and GPUI already writes sRGB values, so
+        // the readback is encoded twice; decode once (see `color`).
+        color::decode_rgba(&mut rgba);
         RgbaImage::from_raw(size.width.0 as u32, size.height.0 as u32, rgba)
             .context("offscreen buffer size mismatch")
     }
@@ -348,6 +351,8 @@ impl<V: Render + 'static> Rig<V> {
         path
     }
 }
+
+pub mod color;
 
 #[cfg(test)]
 mod field_touch;

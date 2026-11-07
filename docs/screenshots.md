@@ -87,6 +87,18 @@ bar. Do not set it in app code.
 `messages/10-inbox-end-{dark,light}.png` guards this: the inbox is scrolled to the very
 end and the last row must sit fully above the floating tab bar.
 
+## Colour accuracy
+
+`gpui_wgpu`'s offscreen target is `Rgba8UnormSrgb` (`offscreen_renderer.rs:40`) while GPUI
+already writes sRGB-encoded values, so the hardware encodes them twice and the raw readback
+is too light (accent `#0A84FF` came out as (56,190,255)). `WgpuHeadless` therefore decodes
+the readback once with an sRGB-to-linear table on R, G and B (not alpha), see
+`crates/rovsti_ui/src/shots/color.rs`. Shots now match the device's colours, so contrast
+can be measured on them (`color::contrast_in`, `color::max_vertical_step`). Shots made
+before this change are too light and must not be compared with new ones. Guard:
+`cargo test -p rovsti_ui --features shots color -- --include-ignored` (`color_probe` checks
+three known colours to within 3 levels).
+
 ## Output
 
 Files go to `target/shots/<app>/` (or `$CARGO_TARGET_DIR/shots/<app>/`):

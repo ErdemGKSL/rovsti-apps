@@ -23,6 +23,7 @@ mod photos;
 mod picker;
 mod prefs;
 mod qr_sheet;
+mod quick;
 mod recent;
 mod sample;
 mod select;
@@ -369,6 +370,13 @@ struct ContactsApp {
     field_sheet: Sheet,
     /// The card's Share menu and the QR code sheet it opens.
     share_sheet: Sheet,
+    /// The quick actions sheet (long press on a Favorites, group or Recent row).
+    quick_sheet: Sheet,
+    quick: Option<quick::QuickTarget>,
+    /// The saved Favorites order (lookup keys) and the reorder mode.
+    favorites_order: Vec<String>,
+    fav_edit: bool,
+    fav_order_noticed: bool,
     qr_sheet: Sheet,
     qr_card: Option<qr_sheet::QrCard>,
     field_target: Option<detail::FieldTarget>,
@@ -475,6 +483,10 @@ impl ContactsApp {
                     this.birthday_reminders = saved.birthday_reminders;
                     this.reminder_hour = saved.hour();
                 }
+                if this.favorites_order.is_empty() {
+                    this.favorites_order = saved.order();
+                    this.rebuild(cx);
+                }
                 this.prefs_ready = true;
                 this.rearm_and_sync_birthdays(cx);
                 if this.style_touched || this.birthday_touched {
@@ -575,6 +587,11 @@ impl ContactsApp {
             crop: None,
             field_sheet: Sheet::new(),
             share_sheet: Sheet::new(),
+            quick_sheet: Sheet::new(),
+            quick: None,
+            favorites_order: Vec::new(),
+            fav_edit: false,
+            fav_order_noticed: false,
             qr_sheet: Sheet::new(),
             qr_card: None,
             field_target: None,
@@ -680,7 +697,10 @@ impl ContactsApp {
             cx.notify();
             return;
         };
-        let favorites = contacts_view::ordered(contact_card::favorites(index.all()), self.style);
+        let favorites = self.favorite_refs(&index);
+        if favorites.len() < 2 {
+            self.fav_edit = false;
+        }
         self.favorites = contacts_view::build_rows_styled(favorites, "", self.style)
             .into_iter()
             .map(Row::from)
@@ -708,6 +728,51 @@ impl ContactsApp {
         cx.notify();
     }
 
+    /// The favorites in the owner's saved order (the rest by name).
+    fn favorite_refs<'a>(
+        &self,
+        index: &'a rovsti_core::search::ContactIndex,
+    ) -> Vec<&'a WireContact> {
+        contacts_view::order_favorite_refs(
+            contacts_view::ordered(contact_card::favorites(index.all()), self.style),
+            &self.favorites_order,
+        )
+    }
+
+    /// Moves a favorite one place, keeps the order and rebuilds.
+    fn move_favorite_row(&mut self, id: i64, up: bool, cx: &mut Context<Self>) {
+        let Some(index) = self.index().cloned() else {
+            return;
+        };
+        let shown = self.favorite_refs(&index);
+        let Some(pos) = shown.iter().position(|c| c.id == id) else {
+            return;
+        };
+        let at_edge = if up { pos == 0 } else { pos + 1 == shown.len() };
+        if at_edge {
+            return;
+        }
+        let Some(keys) = contacts_view::move_favorite(&shown, pos, up) else {
+            self.notice = Some("This contact can't be moved.".into());
+            cx.notify();
+            return;
+        };
+        self.favorites_order = keys;
+        self.save_prefs(cx);
+        self.rebuild(cx);
+        if !self.fav_order_noticed {
+            self.fav_order_noticed = true;
+            self.notice = Some("Order saved".into());
+        }
+        cx.notify();
+    }
+
+    fn set_fav_edit(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.fav_edit = on;
+        self.fav_order_noticed = false;
+        cx.notify();
+    }
+
     /// Rebuilds the Contacts rows alone, for the query and the name style
     /// (each keystroke lands here; Favorites and groups do not follow it).
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
@@ -717,7 +782,7 @@ impl ContactsApp {
                 let shown: Vec<&WireContact> = if query.trim().is_empty() {
                     contacts_view::ordered(index.all(), self.style)
                 } else {
-                    index.search(&query)
+                    index.search_loose(&query)
                 };
                 contacts_view::build_rows_styled(shown, &query, self.style)
                     .into_iter()
@@ -833,6 +898,7 @@ impl ContactsApp {
             || self.photo_sheet.is_open()
             || self.field_sheet.is_open()
             || self.share_sheet.is_open()
+            || self.quick_sheet.is_open()
             || self.qr_sheet.is_open()
             || self.crop.is_some()
             || self.viewer.as_ref().is_some_and(|v| !v.is_closing())
@@ -851,6 +917,7 @@ impl ContactsApp {
             || self.cleanup_ui.open
             || self.select_ui.sheet.is_open()
             || self.select.is_some()
+            || self.fav_edit
             || self.tabs.selected() != CONTACTS_TAB
             || !self.field.read(cx).text().is_empty()
     }
@@ -870,6 +937,8 @@ impl ContactsApp {
             self.close_qr_sheet(cx);
         } else if self.share_sheet.is_open() {
             self.close_share_sheet(cx);
+        } else if self.quick_sheet.is_open() {
+            self.close_quick_sheet(cx);
         } else if self.field_sheet.is_open() {
             self.close_field_sheet(cx);
         } else if self.crop.is_some() {
@@ -912,6 +981,8 @@ impl ContactsApp {
             }
         } else if self.select.is_some() {
             self.leave_select(cx);
+        } else if self.fav_edit {
+            self.set_fav_edit(false, cx);
         } else if self.tabs.select(CONTACTS_TAB) {
             self.clear_notice();
             self.page.restart();
@@ -1068,6 +1139,7 @@ impl ContactsApp {
             save_to: self.save_to.clone(),
             birthday_reminders: self.birthday_reminders,
             reminder_hour: self.reminder_hour,
+            favorites_order: self.favorites_order.clone(),
             ..ContactsPrefs::from_style(self.style)
         }
     }
@@ -1230,20 +1302,48 @@ impl ContactsApp {
         let ticked = (key == "contact")
             .then(|| self.select.as_ref().map(|s| s.contains(&id)))
             .flatten();
+        // Reorder mode: Move up / Move down glass buttons end each favorite row.
+        let reorder = (key == "favorite" && self.fav_edit).then(|| {
+            let slot = usize::try_from(id).unwrap_or_default();
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    glass_icon_button(theme, Icon::LucideChevronUp, 0.0, false)
+                        .id(("fav-up", slot))
+                        .aria_label("Move up")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.move_favorite_row(id, true, cx);
+                        })),
+                )
+                .child(
+                    glass_icon_button(theme, Icon::LucideChevronDown, 0.0, false)
+                        .id(("fav-down", slot))
+                        .aria_label("Move down")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.move_favorite_row(id, false, cx);
+                        })),
+                )
+        });
         list_row(
             theme,
             Some(photo_avatar(theme, row.monogram.clone(), 40.0, tint, photo).into_any_element()),
             row.name.clone(),
             row.subtitle.clone(),
-            if ticked.is_some() {
+            if ticked.is_some() || reorder.is_some() {
                 None
             } else {
                 row.trailing.clone()
             },
         )
         .children(ticked.map(|on| select::check_mark(theme, on)))
+        .children(reorder)
         .id((key, usize::try_from(id).unwrap_or_default()))
         .on_click(cx.listener(move |this, _, _, cx| {
+            if key == "favorite" && this.fav_edit {
+                return;
+            }
             if key == "contact" && this.select.is_some() {
                 this.toggle_selected(id, cx);
             } else {
@@ -1253,6 +1353,8 @@ impl ContactsApp {
         .on_long_press(cx.listener(move |this, _, _, cx| {
             if key == "contact" {
                 this.long_press_contact(id, cx);
+            } else if !(key == "favorite" && this.fav_edit) {
+                this.open_quick_for(id, cx);
             }
         }))
         .into_any_element()
@@ -1531,9 +1633,33 @@ impl ContactsApp {
             })
         });
         let trailing = matches!(self.book, Book::Ready(_)).then(|| {
-            glass_icon_button(theme, Icon::LucidePlus, 0.0, false)
-                .id("favorites-add")
-                .on_click(cx.listener(|this, _, _, cx| this.open_favorites_picker(cx)))
+            let buttons: Vec<AnyElement> =
+                quick::favorites_header_actions(self.favorites.len(), self.fav_edit)
+                    .into_iter()
+                    .map(|action| match action {
+                        quick::FavHeader::Add => {
+                            glass_icon_button(theme, Icon::LucidePlus, 0.0, false)
+                                .id("favorites-add")
+                                .on_click(
+                                    cx.listener(|this, _, _, cx| this.open_favorites_picker(cx)),
+                                )
+                                .into_any_element()
+                        }
+                        quick::FavHeader::Edit => glass_pill(theme, "Edit")
+                            .id("favorites-edit")
+                            .on_click(cx.listener(|this, _, _, cx| this.set_fav_edit(true, cx)))
+                            .into_any_element(),
+                        quick::FavHeader::Done => glass_pill(theme, "Done")
+                            .id("favorites-done")
+                            .on_click(cx.listener(|this, _, _, cx| this.set_fav_edit(false, cx)))
+                            .into_any_element(),
+                    })
+                    .collect();
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .children(buttons)
                 .into_any_element()
         });
         let upcoming = if matches!(self.book, Book::Ready(_)) {
@@ -1956,6 +2082,8 @@ impl Render for ContactsApp {
                 | self.field_sheet.tick_real(real)
                 | self.share_sheet.tick(dt)
                 | self.share_sheet.tick_real(real)
+                | self.quick_sheet.tick(dt)
+                | self.quick_sheet.tick_real(real)
                 | self.qr_sheet.tick(dt)
                 | self.qr_sheet.tick_real(real)
                 | self.select_ui.sheet.tick(dt)
@@ -2178,6 +2306,7 @@ impl Render for ContactsApp {
             .children(self.photo_sheet_view(theme, window, cx))
             .children(self.field_sheet_view(theme, window, cx))
             .children(self.share_sheet_view(theme, window, cx))
+            .children(self.quick_sheet_view(theme, window, cx))
             .children(self.qr_sheet_view(theme, window, cx))
             .children(self.dupes_sheet_view(theme, window, cx))
             .children(self.select_sheet_view(theme, window, cx))

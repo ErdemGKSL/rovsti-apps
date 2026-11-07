@@ -149,6 +149,7 @@ impl ContactsApp {
             this.recent_open = false;
             this.open_contact(id, cx);
         }))
+        .on_long_press(cx.listener(move |this, _, _, cx| this.open_quick_for(id, cx)))
         .into_any_element()
     }
 }

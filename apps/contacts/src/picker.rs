@@ -127,7 +127,7 @@ impl ContactsApp {
                 let shown = if query.trim().is_empty() {
                     contacts_view::ordered(index.all(), self.style)
                 } else {
-                    index.search(&query)
+                    index.search_loose(&query)
                 };
                 contacts_view::build_rows_styled(shown, &query, self.style)
                     .into_iter()

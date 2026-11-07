@@ -29,6 +29,8 @@ pub mod gesture;
 pub mod global_search;
 pub mod import_plan;
 pub mod inbox;
+/// Inbox filter chips: matching, counts, visibility and labels.
+pub mod inbox_filter;
 pub mod keypad_layout;
 pub mod lru;
 pub mod message_info;
@@ -62,6 +64,8 @@ pub mod starred;
 pub mod t9;
 pub mod text_detect;
 pub mod thread;
+/// Local pinned, archived and unread marks for SMS threads.
+pub mod thread_marks;
 pub mod unread_jump;
 pub mod vcard;
 pub mod voice_player;

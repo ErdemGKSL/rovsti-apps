@@ -71,13 +71,13 @@ M21, M22, M25. `git stash list` is empty. Re-checked by grep for the open rows:
 | M17 | Voice note / audio playback: play/pause, scrub, 1x/1.5x/2x, remembered speed | done R3 |
 | M18 | Global message search with jump-to-message | done R3 |
 | M19 | Date/time detection -> Add to calendar / Copy | done R3 |
-| M20 | Select mode: tick several messages; Copy (one block with names and times), Forward as one text, Star/Unstar, Delete for me (WA) / Delete (SMS, Undo), Select all loaded | planned R4 (S1, S4, S5) |
-| M23 | Local star for SMS/MMS (kept in prefs), "Starred messages" sheet for SMS threads | planned R4 (S1, S3, S5) |
-| M24 | Jump to date in a conversation (day picker, loads older pages, glows first message of that day) | planned R4 (S2, S6) |
-| M29 | Header bell asks 8 hours / 1 week / Always (WA via gateway, SMS local with expiry); "Muted until …" pill | planned R4 (S2, S3, S6) |
-| M26 | Shared contact card: "View contact" sheet with every number/email, Add to contacts with all fields, Save .vcf, Share card; also for MMS vCard parts | planned R4 (S2, S3, S7) |
-| M28 | Share a single non-image file (MMS part; WA document/audio/video) through the share sheet | planned R4 (S3, S7) |
-| M27 | Clear chat | cut: SMS = existing Delete conversation; WA = M20 Select all + Delete for me (no gateway clear endpoint, no gateway change in this pass) |
+| M20 | Select mode: tick several messages; Copy (one block with names and times), Forward as one text, Star/Unstar, Delete for me (WA) / Delete (SMS, Undo), Select all loaded | done R4 |
+| M23 | Local star for SMS/MMS (kept in prefs), "Starred messages" sheet for SMS threads | done R4 |
+| M24 | Jump to date in a conversation (day picker, loads older pages, glows first message of that day) | done R4 |
+| M29 | Header bell asks 8 hours / 1 week / Always (WA via gateway, SMS local with expiry); "Muted until …" pill | done R4 |
+| M26 | Shared contact card: "View contact" sheet with every number/email, Add to contacts with all fields, Save .vcf, Share card; also for MMS vCard parts | done R4 |
+| M28 | Share a single non-image file (MMS part; WA document/audio/video) through the share sheet | done R4 |
+| M27 | Clear chat | cut, stays cut: SMS = existing Delete conversation; WA = M20 Select all + Delete for me. No gateway clear endpoint; revisit only if the gateway grows one |
 | M30 | Inbox filter chips: All / Unread / WhatsApp / SMS (count in each) | open (R5) |
 | M31 | Swipe a bubble right to reply (spring snap-back, haptic tick) | open (R5) |
 | M32 | Double-tap a WA bubble to react with the first quick reaction | open (R5) |
@@ -313,6 +313,10 @@ Commit messages: `Rovsti messages: <Pure|Android seams|UI>: <what> (Mxx)`.
   confirm/undo/pill expectations above.
 - This file: mark shipped rows "done R4", note anything deferred; round 5 backlog is
   M30-M35 (WA clear chat stays cut unless the gateway grows an endpoint).
+- Status (done): rows M20, M23, M24, M26, M28, M29 are "done R4"; acceptance rows 119-123
+  (WA select mode) and 124-137 (SMS select, stars, jump to date, mute, contact cards, file
+  sharing). Deferrals: none; WA delete for everyone and WA clear chat stay out (no gateway
+  endpoint).
 - Commit: `Rovsti messages: utilities R4 docs and backlog`.
 
 ## Round 5 backlog

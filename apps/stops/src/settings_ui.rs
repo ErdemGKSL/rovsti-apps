@@ -1331,6 +1331,7 @@ impl StopsApp {
 
     /// Two taps: the first asks, the second clears.
     fn clear_history(&mut self, cx: &mut Context<Self>) {
+        self.confirm_prune = None;
         if !self.confirm_clear {
             self.confirm_clear = true;
             cx.notify();
@@ -1354,6 +1355,7 @@ impl StopsApp {
     /// Two taps: the first arms, the second deletes trips older than `days`.
     fn prune_history(&mut self, days: u32, cx: &mut Context<Self>) {
         let (armed, delete) = prune_step(self.confirm_prune, days);
+        self.confirm_clear = false;
         self.confirm_prune = armed;
         if !delete {
             cx.notify();

@@ -274,6 +274,9 @@ struct ContactsApp {
     transfer_busy: bool,
     /// How many contacts the export in flight holds.
     exported: Option<usize>,
+    /// Per number of the open card: the JID when it is on WhatsApp (one
+    /// chip per JID).
+    card_wa_numbers: Vec<Option<String>>,
     /// An import was added: the file buttons stay busy until this pull (or a
     /// newer one) lands, so a second import is planned against the new book.
     import_settle: Option<u64>,
@@ -463,6 +466,7 @@ impl ContactsApp {
             pending_group: None,
             transfer_busy: false,
             exported: None,
+            card_wa_numbers: Vec::new(),
             import_settle: None,
             wa_photo_busy: false,
             notice: None,
@@ -662,6 +666,7 @@ impl ContactsApp {
             .and_then(|index| index.all().find(|c| c.id == id))
             .map(|c| ContactCard::new(c, format));
         self.open_draft = None;
+        self.refresh_card_wa();
         self.close_field_sheet_now();
         self.clear_notice();
         // The lists keep their own scroll; the card starts at its top.

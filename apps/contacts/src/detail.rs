@@ -9,8 +9,8 @@ use gpui::{
 use rovsti_core::{
     contact_card::ContactCard,
     contact_dates,
-    contact_edit::{ContactDraft, DraftEvent, EventKind},
-    vcard,
+    contact_edit::{ContactDraft, DraftEvent, EventKind, web_url},
+    contact_select, vcard,
 };
 use rovsti_ui::{
     Icon,
@@ -39,6 +39,8 @@ pub(crate) enum FieldTarget {
     Address(String),
     /// A dated event as copyable text ("Birthday · 7 Mar 1990").
     Date(String),
+    /// A website, as typed.
+    Website(String),
 }
 
 /// One row of the field sheet.
@@ -50,6 +52,7 @@ pub(crate) enum FieldAction {
     Copy(&'static str),
     Share(&'static str),
     OpenMaps,
+    OpenLink,
 }
 
 impl FieldAction {
@@ -60,6 +63,7 @@ impl FieldAction {
             Self::SendEmail => "Send Email",
             Self::Copy(label) | Self::Share(label) => label,
             Self::OpenMaps => "Open in Maps",
+            Self::OpenLink => "Open Link",
         }
     }
 
@@ -71,6 +75,7 @@ impl FieldAction {
             Self::Copy(_) => Icon::LucideCopy,
             Self::Share(_) => Icon::LucideUpload,
             Self::OpenMaps => Icon::LucideMapPin,
+            Self::OpenLink => Icon::LucideExternalLink,
         }
     }
 
@@ -82,6 +87,7 @@ impl FieldAction {
             Self::Copy(_) => "field-copy",
             Self::Share(_) => "field-share",
             Self::OpenMaps => "field-maps",
+            Self::OpenLink => "field-link",
         }
     }
 }
@@ -104,6 +110,11 @@ impl FieldTarget {
                 FieldAction::OpenMaps,
             ],
             Self::Date(_) => vec![FieldAction::Copy("Copy Date")],
+            Self::Website(_) => vec![
+                FieldAction::OpenLink,
+                FieldAction::Copy("Copy Link"),
+                FieldAction::Share("Share Link"),
+            ],
         }
     }
 
@@ -111,7 +122,11 @@ impl FieldTarget {
     fn text(&self) -> &str {
         match self {
             Self::Number { display, .. } => display,
-            Self::Email(text) | Self::Note(text) | Self::Address(text) | Self::Date(text) => text,
+            Self::Email(text)
+            | Self::Note(text)
+            | Self::Address(text)
+            | Self::Date(text)
+            | Self::Website(text) => text,
         }
     }
 
@@ -145,6 +160,9 @@ impl FieldTarget {
 pub(crate) enum ShareChoice {
     Text,
     Vcf,
+    SaveFile,
+    CopyText,
+    CopyVcard,
     Qr,
 }
 
@@ -153,6 +171,9 @@ impl ShareChoice {
         match self {
             Self::Text => "Share as text",
             Self::Vcf => "Share contact file (.vcf)",
+            Self::SaveFile => "Save to file (.vcf)",
+            Self::CopyText => "Copy contact",
+            Self::CopyVcard => "Copy as vCard",
             Self::Qr => "Show QR code",
         }
     }
@@ -161,6 +182,8 @@ impl ShareChoice {
         match self {
             Self::Text => Icon::LucideUpload,
             Self::Vcf => Icon::LucideContact,
+            Self::SaveFile => Icon::LucideDownload,
+            Self::CopyText | Self::CopyVcard => Icon::LucideCopy,
             Self::Qr => Icon::LucideQrCode,
         }
     }
@@ -168,7 +191,13 @@ impl ShareChoice {
 
 /// The Share menu entries: the QR code needs a number or an email to carry.
 pub(crate) fn share_choices(has_numbers: bool, has_emails: bool) -> Vec<ShareChoice> {
-    let mut choices = vec![ShareChoice::Text, ShareChoice::Vcf];
+    let mut choices = vec![
+        ShareChoice::Text,
+        ShareChoice::Vcf,
+        ShareChoice::SaveFile,
+        ShareChoice::CopyText,
+        ShareChoice::CopyVcard,
+    ];
     if has_numbers || has_emails {
         choices.push(ShareChoice::Qr);
     }
@@ -180,6 +209,15 @@ pub(crate) fn share_choices(has_numbers: bool, has_emails: bool) -> Vec<ShareCho
 pub(crate) fn date_copy_text(event: &DraftEvent) -> Option<String> {
     let date = contact_dates::parse(&event.date)?;
     Some(format!("{} · {}", event.title(), date.text()))
+}
+
+/// The org line under the name: "Engineer · Acme", or whichever part exists.
+pub(crate) fn org_line(title: &str, org: &str) -> Option<String> {
+    let parts: Vec<&str> = [title.trim(), org.trim()]
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 /// The first email address of the full contact that is not blank.
@@ -270,8 +308,61 @@ impl ContactsApp {
                 }
                 cx.notify();
             }
+            ShareChoice::SaveFile => self.save_card_file(cx),
+            ShareChoice::CopyText | ShareChoice::CopyVcard => {
+                self.share_sheet.close();
+                let Some(draft) = self.open_draft.clone() else {
+                    self.notice = Some("The contact is still loading.".into());
+                    cx.notify();
+                    return;
+                };
+                let (payload, done) = if choice == ShareChoice::CopyText {
+                    (
+                        contact_select::full_text(&draft),
+                        contact_select::copied_contact_notice(),
+                    )
+                } else {
+                    (
+                        vcard::write(&[draft]),
+                        contact_select::copied_vcard_notice(),
+                    )
+                };
+                self.act(
+                    "copy the contact",
+                    move || rovsti_android::telecom::copy_text(&payload),
+                    cx,
+                );
+                self.notice = Some(done.into());
+                cx.notify();
+            }
             ShareChoice::Qr => self.open_qr(cx),
         }
+    }
+
+    /// "Save to file": the system "save as" for this one contact. The answer
+    /// is a `document_result` handled by the export path in `transfer.rs`.
+    fn save_card_file(&mut self, cx: &mut Context<Self>) {
+        self.share_sheet.close();
+        let Some(draft) = self.open_draft.clone() else {
+            self.notice = Some("The contact is still loading.".into());
+            cx.notify();
+            return;
+        };
+        if self.transfer_busy {
+            self.notice = Some("Wait for the file being saved or read to finish.".into());
+            cx.notify();
+            return;
+        }
+        let today = contact_dates::local_ymd(crate::whatsapp::now_ms(), self.wa.offset_s);
+        let name = vcard::export_name(std::slice::from_ref(&draft), today);
+        match backend::start_export_named(&name, &vcard::write(&[draft])) {
+            Ok(()) => {
+                self.transfer_busy = true;
+                self.exported = Some(1);
+            }
+            Err(words) => self.notice = Some(format!("Can't save the file: {words}.").into()),
+        }
+        cx.notify();
     }
 
     /// The Share menu over the card, once it is visible.
@@ -300,6 +391,9 @@ impl ContactsApp {
                     match choice {
                         ShareChoice::Text => "share-text",
                         ShareChoice::Vcf => "share-vcf",
+                        ShareChoice::SaveFile => "share-save",
+                        ShareChoice::CopyText => "share-copy-text",
+                        ShareChoice::CopyVcard => "share-copy-vcard",
                         ShareChoice::Qr => "share-qr",
                     },
                     Some(choice.icon()),
@@ -343,6 +437,14 @@ impl ContactsApp {
         )
     }
 
+    /// Opens a website in the browser, or says it can't be opened.
+    fn open_web(&mut self, text: &str, cx: &mut Context<Self>) {
+        match web_url(text) {
+            Some(url) => cx.open_url(&url),
+            None => self.notice = Some("Can't open that link".into()),
+        }
+    }
+
     /// Runs one row of the field sheet.
     fn run_field_action(
         &mut self,
@@ -374,6 +476,11 @@ impl ContactsApp {
                 cx,
             ),
             FieldAction::Copy(_) => self.copy_field(text, cx),
+            FieldAction::OpenLink => {
+                self.field_sheet.close();
+                self.open_web(&text, cx);
+                cx.notify();
+            }
             FieldAction::Share(_) => self.field_act(
                 "share",
                 move || rovsti_android::telecom::share_text(&text),
@@ -538,6 +645,23 @@ impl ContactsApp {
             .child(main)
             .children(trailing)
             .into_any_element()
+    }
+
+    /// The "WhatsApp" chip of a number row.
+    fn wa_chip(theme: Theme, index: usize) -> gpui::Stateful<gpui::Div> {
+        let colors = theme::colors(theme);
+        div()
+            .id(("wa-chip", index))
+            .flex_none()
+            .h(px(32.0))
+            .px(px(14.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .bg(colors.accent.opacity(0.14))
+            .text_size(typography::FOOTNOTE.size)
+            .text_color(colors.accent)
+            .child("WhatsApp")
     }
 
     /// The "Wish" chip of a birthday row.
@@ -823,9 +947,12 @@ impl ContactsApp {
             );
 
         let org: Option<SharedString> = full
-            .map(|d| d.org.trim())
-            .filter(|o| !o.is_empty())
-            .map(|o| SharedString::from(o.to_owned()));
+            .and_then(|d| org_line(&d.title, &d.org))
+            .map(SharedString::from);
+        let nickname: Option<SharedString> = full
+            .map(|d| d.nickname.trim())
+            .filter(|n| !n.is_empty())
+            .map(|n| SharedString::from(n.to_owned()));
         let head = div()
             .flex()
             .flex_col()
@@ -859,6 +986,14 @@ impl ContactsApp {
                     .text_color(colors.label)
                     .child(SharedString::from(card.name.clone())),
             )
+            .children(nickname.map(|nick| {
+                div()
+                    .px(px(24.0))
+                    .text_center()
+                    .text_size(typography::BODY.size)
+                    .text_color(colors.secondary_label)
+                    .child(nick)
+            }))
             .children(org.map(|org| {
                 div()
                     .px(px(24.0))
@@ -963,7 +1098,16 @@ impl ContactsApp {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.open_field_sheet(more_target.clone(), cx);
                     }));
-                Self::field_line(theme, main, more)
+                let chip = self.card_wa_numbers.get(i).cloned().flatten().map(|jid| {
+                    let name = card.name.clone();
+                    Self::wa_chip(theme, i).on_click(cx.listener(move |this, _, _, cx| {
+                        this.wa_handoff(false, jid.clone(), name.clone(), cx);
+                    }))
+                });
+                match chip {
+                    Some(chip) => Self::field_line_with(theme, main, [chip, more]),
+                    None => Self::field_line(theme, main, more),
+                }
             })
             .collect();
 
@@ -1109,6 +1253,43 @@ impl ContactsApp {
             })
             .unwrap_or_default();
 
+        let website_rows: Vec<AnyElement> = full
+            .map(|d| {
+                d.websites
+                    .iter()
+                    .filter(|w| !w.trim().is_empty())
+                    .enumerate()
+                    .map(|(i, site)| {
+                        let text = site.trim().to_owned();
+                        let target = FieldTarget::Website(text.clone());
+                        let (more_target, press_target) = (target.clone(), target);
+                        let main = Self::field_main(
+                            theme,
+                            ("website", i),
+                            "Website".into(),
+                            text.clone().into(),
+                            colors.accent,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_web(&text, cx);
+                            cx.notify();
+                        }))
+                        .on_long_press(cx.listener(
+                            move |this, _, _, cx| {
+                                this.open_field_sheet(press_target.clone(), cx);
+                            },
+                        ));
+                        let more =
+                            Self::field_more(theme, ("website-more", i), Icon::LucideEllipsis)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.open_field_sheet(more_target.clone(), cx);
+                                }));
+                        Self::field_line(theme, main, more)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let group_rows: Vec<AnyElement> = full
             .map(|d| {
                 self.groups
@@ -1229,6 +1410,10 @@ impl ContactsApp {
                     .then(|| section(theme, Some("Address".into()), address_rows)),
             )
             .children(
+                (!website_rows.is_empty())
+                    .then(|| section(theme, Some("Websites".into()), website_rows)),
+            )
+            .children(
                 (!group_rows.is_empty()).then(|| section(theme, Some("Groups".into()), group_rows)),
             )
             .children(note.map(|note| section(theme, None, [note])))
@@ -1270,9 +1455,12 @@ mod tests {
     #[test]
     fn share_menu_offers_qr_only_with_something_to_encode() {
         use ShareChoice::*;
-        assert_eq!(share_choices(false, false), vec![Text, Vcf]);
-        assert_eq!(share_choices(true, false), vec![Text, Vcf, Qr]);
-        assert_eq!(share_choices(false, true), vec![Text, Vcf, Qr]);
+        let base = [Text, Vcf, SaveFile, CopyText, CopyVcard];
+        assert_eq!(share_choices(false, false), base);
+        let mut with_qr = base.to_vec();
+        with_qr.push(Qr);
+        assert_eq!(share_choices(true, false), with_qr);
+        assert_eq!(share_choices(false, true), with_qr);
     }
 
     #[test]
@@ -1297,6 +1485,23 @@ mod tests {
             FieldAction::SendEmail
         );
         assert_eq!(FieldTarget::Note("n".into()).actions().len(), 1);
+        let site = FieldTarget::Website("example.com".into());
+        assert_eq!(
+            site.actions(),
+            vec![
+                FieldAction::OpenLink,
+                FieldAction::Copy("Copy Link"),
+                FieldAction::Share("Share Link")
+            ]
+        );
+        assert_eq!(site.title(), "example.com");
+        assert_eq!(
+            org_line("Engineer", "Acme").as_deref(),
+            Some("Engineer · Acme")
+        );
+        assert_eq!(org_line(" ", "Acme").as_deref(), Some("Acme"));
+        assert_eq!(org_line("CTO", "").as_deref(), Some("CTO"));
+        assert_eq!(org_line("", " "), None);
         let address = FieldTarget::Address("\n 1 Main St\nIzmir".into());
         assert_eq!(
             address.actions(),

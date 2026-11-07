@@ -57,6 +57,7 @@ pub(crate) enum Set {
     Numbers,
     Emails,
     Addresses,
+    Websites,
 }
 
 impl Set {
@@ -65,6 +66,7 @@ impl Set {
             Self::Numbers => Config::PHONE,
             Self::Emails => Config::EMAIL,
             Self::Addresses => Config::NOTE,
+            Self::Websites => Config::TEXT,
         }
     }
 
@@ -72,7 +74,8 @@ impl Set {
         match self {
             Self::Numbers => &FieldKind::NUMBER_KINDS,
             Self::Emails => &FieldKind::EMAIL_KINDS,
-            Self::Addresses => &FieldKind::ADDRESS_KINDS,
+            // A website has no kind; the row shows a fixed "Link" tag.
+            Self::Addresses | Self::Websites => &FieldKind::ADDRESS_KINDS,
         }
     }
 
@@ -109,6 +112,8 @@ pub(crate) struct Editor {
     given: Entity<TextField>,
     family: Entity<TextField>,
     org: Entity<TextField>,
+    nickname: Entity<TextField>,
+    title: Entity<TextField>,
     note: Entity<TextField>,
     numbers: Vec<FieldRow>,
     emails: Vec<FieldRow>,
@@ -122,6 +127,7 @@ pub(crate) struct Editor {
     initial: ContactDraft,
     events: Vec<EventRow>,
     addresses: Vec<FieldRow>,
+    websites: Vec<FieldRow>,
 }
 
 /// The account a new contact starts in: the remembered one while it is still
@@ -179,6 +185,8 @@ impl Editor {
             given: make_field(Config::TEXT, &draft.given, cx),
             family: make_field(Config::TEXT, &draft.family, cx),
             org: make_field(Config::TEXT, &draft.org, cx),
+            nickname: make_field(Config::TEXT, &draft.nickname, cx),
+            title: make_field(Config::TEXT, &draft.title, cx),
             note: make_field(Config::NOTE, &draft.note, cx),
             numbers,
             emails: make_rows(&draft.emails, Config::EMAIL, cx),
@@ -197,6 +205,15 @@ impl Editor {
                 })
                 .collect(),
             addresses: make_rows(&draft.addresses, Config::NOTE, cx),
+            websites: make_rows(
+                &draft
+                    .websites
+                    .iter()
+                    .map(|w| DraftField::new(w, FieldKind::Home))
+                    .collect::<Vec<_>>(),
+                Config::TEXT,
+                cx,
+            ),
         };
         // Read back from the form (with its blank first number), so an
         // untouched form compares equal.
@@ -241,10 +258,13 @@ impl Editor {
             groups: self.groups.iter().copied().collect(),
             starred: self.starred,
             account: self.account.clone(),
-            // No form rows yet (step S4): keep what the contact already has.
-            nickname: self.initial.nickname.clone(),
-            title: self.initial.title.clone(),
-            websites: self.initial.websites.clone(),
+            nickname: self.nickname.read(cx).text().to_owned(),
+            title: self.title.read(cx).text().to_owned(),
+            websites: self
+                .websites
+                .iter()
+                .map(|r| r.text.read(cx).text().to_owned())
+                .collect(),
         }
     }
 
@@ -253,6 +273,7 @@ impl Editor {
             Set::Numbers => &mut self.numbers,
             Set::Emails => &mut self.emails,
             Set::Addresses => &mut self.addresses,
+            Set::Websites => &mut self.websites,
         }
     }
 }
@@ -750,6 +771,28 @@ impl ContactsApp {
                 form_row(theme)
                     .child(field_box(
                         theme,
+                        "f-nickname",
+                        &editor.nickname,
+                        "Nickname",
+                        false,
+                        window,
+                        cx,
+                    ))
+                    .into_any_element(),
+                form_row(theme)
+                    .child(field_box(
+                        theme,
+                        "f-title",
+                        &editor.title,
+                        "Job title",
+                        false,
+                        window,
+                        cx,
+                    ))
+                    .into_any_element(),
+                form_row(theme)
+                    .child(field_box(
+                        theme,
                         "f-org",
                         &editor.org,
                         "Organisation",
@@ -800,6 +843,7 @@ impl ContactsApp {
         let emails = self.field_section(theme, Set::Emails, window, cx);
         let dates = self.event_section(theme, window, cx);
         let addresses = self.field_section(theme, Set::Addresses, window, cx);
+        let websites = self.field_section(theme, Set::Websites, window, cx);
 
         let groups: Vec<AnyElement> = self
             .groups
@@ -884,6 +928,7 @@ impl ContactsApp {
             .child(emails)
             .child(dates)
             .child(addresses)
+            .child(websites)
             .child(section(
                 theme,
                 Some("Groups".into()),
@@ -952,6 +997,16 @@ impl ContactsApp {
                     "addr-add",
                     "Add address",
                 ),
+                Set::Websites => (
+                    &editor.websites,
+                    "Websites",
+                    "example.com",
+                    "web-kind",
+                    "web-field",
+                    "web-remove",
+                    "web-add",
+                    "Add website",
+                ),
             };
         let multiline = set == Set::Addresses;
         let mut children: Vec<AnyElement> = rows
@@ -970,7 +1025,11 @@ impl ContactsApp {
                             .items_center()
                             .text_size(typography::FOOTNOTE.size)
                             .text_color(colors.accent)
-                            .child(row.title(cx))
+                            .child(if set == Set::Websites {
+                                SharedString::from("Link")
+                            } else {
+                                row.title(cx)
+                            })
                             .on_click(
                                 cx.listener(move |this, _, _, cx| this.cycle_kind(set, i, cx)),
                             ),

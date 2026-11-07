@@ -78,6 +78,12 @@ impl WaPanel {
         wa_jid(&self.target(numbers), self.lookups.get(&id))
     }
 
+    /// The JID of one number when it is known to be on WhatsApp: it matches a
+    /// 1:1 chat, or contact `id`'s lookup found it registered.
+    pub fn jid_for_number(&self, id: i64, number: &str) -> Option<String> {
+        number_jid(number, &self.chat_users, self.lookups.get(&id))
+    }
+
     /// The status line of the card, `None` when there is nothing to say.
     pub fn status(&self, id: i64, numbers: &[String], now_ms: i64) -> Option<String> {
         let target = self.target(numbers);
@@ -125,6 +131,45 @@ pub(crate) fn wa_jid(target: &WaTarget, lookup: Option<&LookupState>) -> Option<
         },
         WaTarget::NeedsCountryCode | WaTarget::None => None,
     }
+}
+
+/// The JID of `number` when it is on WhatsApp: a 1:1 chat with the same
+/// number, or a positive answer of the contact's lookup.
+pub(crate) fn number_jid(
+    number: &str,
+    chat_users: &[String],
+    lookup: Option<&LookupState>,
+) -> Option<String> {
+    let parsed = PhoneNumber::parse(number).ok()?;
+    let chat = chat_users.iter().find(|user| {
+        PhoneNumber::parse(&format!("+{user}")).is_ok_and(|chat| parsed.matches(&chat))
+    });
+    if let Some(user) = chat {
+        return Some(format!("{user}@s.whatsapp.net"));
+    }
+    let wanted = user_jid(parsed.as_str()).ok()?;
+    match lookup {
+        Some(LookupState::Done(users)) => users
+            .iter()
+            .find(|u| u.on_whatsapp && u.jid == wanted)
+            .map(|u| u.jid.clone()),
+        _ => None,
+    }
+}
+
+/// Which number rows get a WhatsApp chip: those with a JID, and only the
+/// first row of each JID.
+pub(crate) fn wa_chip_index(jids: &[Option<String>]) -> Vec<bool> {
+    let mut seen: Vec<&str> = Vec::new();
+    jids.iter()
+        .map(|jid| match jid.as_deref() {
+            Some(j) if !seen.contains(&j) => {
+                seen.push(j);
+                true
+            }
+            _ => false,
+        })
+        .collect()
 }
 
 /// The status line of the card's WhatsApp section.
@@ -297,6 +342,7 @@ impl ContactsApp {
         }
         let just_connected = connected && !self.wa.connected;
         self.wa.connected = connected;
+        self.refresh_card_wa();
         if resync || just_connected {
             self.refresh_chats(cx);
         } else if connected {
@@ -334,6 +380,7 @@ impl ContactsApp {
     fn set_chats(&mut self, chats: &[ChatSummary], cx: &mut Context<Self>) {
         self.wa.chat_users = chat_users(chats);
         self.refresh_marks();
+        self.refresh_card_wa();
         self.check_whatsapp(cx);
         cx.notify();
     }
@@ -365,6 +412,25 @@ impl ContactsApp {
         let card = self.open.as_ref()?;
         let numbers: Vec<String> = card.numbers.iter().map(|n| n.raw.clone()).collect();
         self.wa.jid(card.id, &numbers)
+    }
+
+    /// Recomputes the per-number WhatsApp chips of the open card. Called when
+    /// the card opens and when chats or the lookup change, never per frame.
+    pub(crate) fn refresh_card_wa(&mut self) {
+        let jids: Vec<Option<String>> = match &self.open {
+            Some(card) if self.wa.connected => card
+                .numbers
+                .iter()
+                .map(|n| self.wa.jid_for_number(card.id, &n.raw))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let keep = wa_chip_index(&jids);
+        self.card_wa_numbers = jids
+            .into_iter()
+            .zip(keep)
+            .map(|(jid, keep)| jid.filter(|_| keep))
+            .collect();
     }
 
     /// For the open card: ask for the WhatsApp picture (shown when the
@@ -456,6 +522,7 @@ impl ContactsApp {
                     }
                 };
                 this.wa.lookups.insert(id, state);
+                this.refresh_card_wa();
                 if let Some(card) = this.open.as_ref().filter(|c| c.id == id) {
                     let numbers: Vec<String> = card.numbers.iter().map(|n| n.raw.clone()).collect();
                     this.subscribe_presence(id, &numbers, &gateway, cx);
@@ -689,6 +756,39 @@ mod tests {
             panel.jid(1, &numbers).as_deref(),
             Some("905321234567@s.whatsapp.net")
         );
+    }
+
+    #[test]
+    fn number_jid_needs_a_chat_or_a_positive_lookup() {
+        let chats = vec!["905321234567".to_owned()];
+        assert_eq!(
+            number_jid("+90 532 123 45 67", &chats, None).as_deref(),
+            Some("905321234567@s.whatsapp.net")
+        );
+        assert_eq!(number_jid("+905321234568", &chats, None), None);
+        let found = LookupState::Done(vec![WaUser {
+            jid: "905321234568@s.whatsapp.net".into(),
+            on_whatsapp: true,
+            business: false,
+            verified_name: None,
+        }]);
+        assert_eq!(
+            number_jid("+905321234568", &[], Some(&found)).as_deref(),
+            Some("905321234568@s.whatsapp.net")
+        );
+        assert_eq!(number_jid("+905321234569", &[], Some(&found)), None);
+        assert_eq!(number_jid("not a number", &chats, Some(&found)), None);
+    }
+
+    #[test]
+    fn one_chip_per_jid_and_only_for_whatsapp_numbers() {
+        let a = Some("1@s.whatsapp.net".to_owned());
+        let b = Some("2@s.whatsapp.net".to_owned());
+        assert_eq!(
+            wa_chip_index(&[a.clone(), None, a.clone(), b]),
+            vec![true, false, false, true]
+        );
+        assert!(wa_chip_index(&[]).is_empty());
     }
 
     #[test]

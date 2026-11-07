@@ -28,7 +28,9 @@ use rovsti_core::{
     unread_jump,
 };
 use rovsti_ui::{
-    Icon, theme,
+    Icon, layout,
+    row::{BadgeTone, ListRow, SourceKind, with_source_badges},
+    theme,
     tokens::{Theme, typography},
 };
 use rovsti_wa_proto::{
@@ -41,7 +43,7 @@ use rovsti_wa_ui::{display_name, photo_avatar};
 use crate::conversation::civil_from_days;
 use crate::notifications::thread_tag;
 use crate::sms_actions;
-use crate::ticks::{Tick, read_color, ticks};
+use crate::ticks::Tick;
 
 /// Which channel a badge names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1108,18 +1110,34 @@ pub struct RowExtras {
     pub select: Option<bool>,
 }
 
-fn small_icon(icon: Icon, color: gpui::Hsla) -> impl IntoElement {
-    gpui::svg()
-        .flex_none()
-        .path(icon.path())
-        .size(px(14.0))
-        .text_color(color)
+/// The source kinds drawn as corner badges on the avatar, one per channel of the
+/// person (the pure mapping of [`RowView::badges`]).
+pub fn source_kinds(badges: &[Badge]) -> Vec<SourceKind> {
+    badges
+        .iter()
+        .map(|badge| match badge {
+            Badge::Sms => SourceKind::Sms,
+            Badge::WhatsApp => SourceKind::WhatsApp,
+        })
+        .collect()
 }
 
-/// One inbox row: avatar, title and time, badges and snippet, unread dot, and
-/// under it the OTP chip when there is one. The chip is a sibling of the
-/// tappable row, so copying a code never opens the conversation. Only rows
-/// on screen are built (the inbox is a virtualised `list`).
+/// The text of the trailing unread badge: the count, empty for a chat marked
+/// unread by hand (a plain dot-sized marker), `None` when read.
+pub fn unread_badge(unread: u32, marked_unread: bool) -> Option<String> {
+    match (unread, marked_unread) {
+        (0, false) => None,
+        (0, true) => Some(String::new()),
+        (n, _) if n > 999 => Some("999+".to_owned()),
+        (n, _) => Some(n.to_string()),
+    }
+}
+
+/// One inbox row on the shared [`ListRow`]: a 48 dp avatar with the source
+/// badge on its corner, title and time, snippet and unread badge, and under
+/// them the OTP chip when there is one. The chip stops the click, so copying a
+/// code never opens the conversation. Only rows on screen are built (the
+/// inbox is a virtualised `list`).
 pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras) -> AnyElement {
     let RowExtras {
         photo,
@@ -1135,44 +1153,19 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
         Channel::Sms => colors.accent,
         Channel::WhatsApp => colors.green,
     };
-    let unread = view.unread > 0 || view.marked_unread;
-    let weight = if unread {
-        typography::HEADLINE.weight
-    } else {
-        typography::BODY.weight
-    };
 
-    let badges = view.badges.iter().map(|badge| {
-        let color = match badge {
-            Badge::Sms => colors.accent,
-            Badge::WhatsApp => colors.green,
-        };
-        div()
+    let leading = match (select, open_avatar) {
+        (Some(ticked), _) => div()
             .flex_none()
-            .px(px(6.0))
-            .rounded_full()
-            .bg(color.opacity(0.16))
-            .text_size(typography::CAPTION.size)
-            .text_color(color)
-            .child(badge.label())
-    });
-
-    let mut main = div()
-        .id(("inbox-row", index))
-        .flex()
-        .items_center()
-        .gap(px(12.0))
-        .child({
-            let avatar = photo_avatar(theme, view.initials.clone(), 44.0, tint, photo);
-            match open_avatar {
-                _ if select.is_some() => div()
-                    .flex_none()
-                    .size(px(44.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(crate::select_ui::check_mark(theme, select == Some(true)))
-                    .into_any_element(),
+            .size(px(layout::AVATAR))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(crate::select_ui::check_mark(theme, ticked))
+            .into_any_element(),
+        (None, open_avatar) => {
+            let avatar = photo_avatar(theme, view.initials.clone(), layout::AVATAR, tint, photo);
+            let avatar = match open_avatar {
                 Some(open_avatar) => avatar
                     .id(("inbox-avatar", index))
                     .on_click(move |event, window, cx| {
@@ -1181,132 +1174,68 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
                     })
                     .into_any_element(),
                 None => avatar.into_any_element(),
-            }
-        })
-        .child(
+            };
+            with_source_badges(
+                theme,
+                div().relative().flex_none().child(avatar),
+                &source_kinds(&view.badges),
+            )
+            .into_any_element()
+        }
+    };
+
+    let unread = view.unread > 0 || view.marked_unread;
+    let mut row = ListRow::new(view.title.clone())
+        .leading(leading)
+        .meta(view.time.clone())
+        .unread(unread)
+        .subtitle(view.snippet.clone());
+    if view.muted {
+        row = row.title_accessory(Icon::LucideBellOff);
+    }
+    if view.pinned {
+        row = row.title_accessory(Icon::LucidePin);
+    }
+    if let Some(tick) = view.tick {
+        row = row.subtitle_tick(tick.icons()[0], tick.is_read());
+    }
+    if let Some(text) = unread_badge(view.unread, view.marked_unread) {
+        let tone = if view.muted {
+            BadgeTone::Quiet
+        } else {
+            BadgeTone::Accent
+        };
+        row = row.trailing_badge(text, tone);
+    }
+    if let Some(code) = view.otp.as_ref() {
+        row = row.below(
             div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(typography::HEADLINE.size)
-                                .font_weight(typography::HEADLINE.weight)
-                                .text_color(colors.label)
-                                .child(view.title.clone()),
-                        )
-                        .children(
-                            view.muted
-                                .then(|| small_icon(Icon::LucideBellOff, colors.tertiary_label)),
-                        )
-                        .children(
-                            view.pinned
-                                .then(|| small_icon(Icon::LucidePin, colors.tertiary_label)),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .text_size(typography::CAPTION.size)
-                                .text_color(if unread {
-                                    colors.accent
-                                } else {
-                                    colors.tertiary_label
-                                })
-                                .child(view.time.clone()),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .children(badges)
-                        .children(view.tick.map(|tick| {
-                            ticks(tick, 15.0, colors.tertiary_label, read_color(false))
-                        }))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(typography::SUBHEADLINE.size)
-                                .font_weight(weight)
-                                .text_color(colors.secondary_label)
-                                .child(view.snippet.clone()),
-                        )
-                        .children(unread.then(|| {
-                            // Marked unread by hand: a dot without a count.
-                            let badge = div()
-                                .flex_none()
-                                .rounded_full()
-                                .bg(if view.muted {
-                                    colors.tertiary_label
-                                } else {
-                                    colors.accent
-                                })
-                                .flex()
-                                .items_center()
-                                .justify_center();
-                            if view.unread > 0 {
-                                badge
-                                    .min_w(px(20.0))
-                                    .h(px(20.0))
-                                    .px(px(6.0))
-                                    .text_size(typography::CAPTION.size)
-                                    .text_color(colors.background)
-                                    .child(view.unread.to_string())
-                            } else {
-                                badge.size(px(12.0))
-                            }
-                        })),
-                ),
-        )
-        .on_click(open);
+                .id(("inbox-otp", index))
+                .self_start()
+                .px(px(12.0))
+                .py(px(4.0))
+                .rounded_full()
+                .bg(colors.accent.opacity(0.16))
+                .text_size(typography::SUBHEADLINE.size)
+                .font_weight(typography::HEADLINE.weight)
+                .text_color(colors.accent)
+                .child(if copied {
+                    format!("Copied {code}")
+                } else {
+                    format!("Copy {code}")
+                })
+                .on_click(move |event, window, cx| {
+                    cx.stop_propagation();
+                    copy_code(event, window, cx);
+                }),
+        );
+    }
+
+    let mut main = row.render(theme).id(("inbox-row", index)).on_click(open);
     if let Some(menu) = menu {
         main = main.on_long_press(menu);
     }
-
-    let chip = view.otp.as_ref().map(|code| {
-        div()
-            .id(("inbox-otp", index))
-            .ml(px(56.0))
-            .mt(px(6.0))
-            .self_start()
-            .px(px(12.0))
-            .py(px(4.0))
-            .rounded_full()
-            .bg(colors.accent.opacity(0.16))
-            .text_size(typography::SUBHEADLINE.size)
-            .font_weight(typography::HEADLINE.weight)
-            .text_color(colors.accent)
-            .child(if copied {
-                format!("Copied {code}")
-            } else {
-                format!("Copy {code}")
-            })
-            .on_click(copy_code)
-    });
-
-    div()
-        .flex()
-        .flex_col()
-        .px(px(16.0))
-        .py(px(8.0))
-        .border_b(px(0.5))
-        .border_color(colors.separator)
-        .child(main)
-        .children(chip)
-        .into_any_element()
+    main.into_any_element()
 }
 
 #[cfg(test)]
@@ -1317,6 +1246,24 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn source_kinds_follow_the_channels_in_order() {
+        assert!(source_kinds(&[]).is_empty());
+        assert_eq!(
+            source_kinds(&[Badge::WhatsApp, Badge::Sms]),
+            vec![SourceKind::WhatsApp, SourceKind::Sms]
+        );
+    }
+
+    #[test]
+    fn unread_badge_text() {
+        assert_eq!(unread_badge(0, false), None);
+        assert_eq!(unread_badge(0, true), Some(String::new()));
+        assert_eq!(unread_badge(3, false), Some("3".to_owned()));
+        assert_eq!(unread_badge(3, true), Some("3".to_owned()));
+        assert_eq!(unread_badge(1000, false), Some("999+".to_owned()));
+    }
 
     #[test]
     fn avatar_viewer_source_prefers_contact_photo() {

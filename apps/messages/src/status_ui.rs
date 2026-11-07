@@ -21,8 +21,11 @@ use rovsti_core::{call_log::relative_time, recents::LocaleTime};
 use rovsti_ui::{
     Icon,
     components::{empty_state, glass_icon_button, glass_pill},
-    current_theme, theme,
-    tokens::{Theme, metrics, typography},
+    current_theme,
+    layout::{self, geom},
+    row::{StackItem, avatar_stack},
+    theme,
+    tokens::{Theme, metrics, mix, typography},
 };
 use rovsti_wa_client::Gateway;
 use rovsti_wa_proto::{
@@ -258,44 +261,54 @@ fn ring_avatar(
         ))
 }
 
-/// The leading element of the Chats tab's Status row: up to three rings,
-/// unseen first.
+/// Width of the Status row's avatar stack for `people` authors: the discs it
+/// draws (at most [`layout::STACK_MAX`], the last one "+n") side by side with
+/// their overlap, or the 48 dp slot of the empty circle glyph.
+pub(crate) fn stack_slot_width(people: usize) -> f32 {
+    if people == 0 {
+        return layout::AVATAR;
+    }
+    let discs = geom::stack_discs(people, layout::STACK_MAX);
+    geom::avatar_stack_width(discs, layout::STACK_AVATAR, layout::STACK_OVERLAP)
+}
+
+/// The leading element of the Chats tab's Status row and its width: a
+/// [`rovsti_ui::row::avatar_stack`] of discs (green for unseen updates, grey
+/// for seen ones). The stack is exactly as wide as its discs, so the row's
+/// text column starts after it and nothing can overlap the title.
 pub(crate) fn entry_avatars(
     theme: Theme,
     list: &StatusList,
     backend: &Entity<Backend>,
     avatars: &Entity<WaAvatars>,
     cx: &mut App,
-) -> AnyElement {
-    let shown: Vec<&StatusAuthor> = list.authors.iter().take(3).collect();
-    let mut stack = div().flex_none().flex().items_center().w(px(44.0));
-    for (i, author) in shown.iter().enumerate() {
-        avatars.update(cx, |a, cx| a.want(&author.author, None, cx));
-        let title = author_title(author, backend.read(cx), avatars.read(cx));
-        let photo = avatars.read(cx).picture(&author.author);
-        let size = if shown.len() == 1 { 34.0 } else { 26.0 };
-        let mut ring = div().child(ring_avatar(
-            theme,
-            &title,
-            size,
-            author.unviewed() > 0,
-            photo,
-        ));
-        if i > 0 {
-            ring = ring.ml(px(-16.0));
-        }
-        stack = stack.child(ring);
+) -> (AnyElement, f32) {
+    let colors = theme::colors(theme);
+    let items: Vec<StackItem> = list
+        .authors
+        .iter()
+        .map(|author| {
+            let title = author_title(author, backend.read(cx), avatars.read(cx));
+            let tint = if author.unviewed() > 0 {
+                colors.green
+            } else {
+                // Solid, so the letter's contrast is judged on the real fill.
+                mix(colors.background, colors.secondary_label, 0.5)
+            };
+            StackItem::new(inbox::initials(&title), tint)
+        })
+        .collect();
+    let width = stack_slot_width(items.len());
+    let slot = div().h(px(layout::AVATAR)).flex().items_center();
+    if items.is_empty() {
+        let icon = gpui::svg()
+            .path(Icon::LucideCircle.path())
+            .size(px(28.0))
+            .text_color(colors.green);
+        return (slot.w(px(width)).child(icon).into_any_element(), width);
     }
-    if shown.is_empty() {
-        let colors = theme::colors(theme);
-        stack = stack.justify_center().child(
-            gpui::svg()
-                .path(Icon::LucideCircle.path())
-                .size(px(22.0))
-                .text_color(colors.green),
-        );
-    }
-    stack.into_any_element()
+    let stack = avatar_stack(theme, &items, layout::STACK_AVATAR, layout::STACK_OVERLAP);
+    (slot.child(stack).into_any_element(), width)
 }
 
 // ---- the page ---------------------------------------------------------------
@@ -1162,6 +1175,17 @@ impl Render for StatusPage {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn stack_slot_width_matches_the_discs_drawn() {
+        use rovsti_ui::layout::{STACK_AVATAR, STACK_OVERLAP};
+        let step = STACK_AVATAR - STACK_OVERLAP;
+        assert_eq!(stack_slot_width(0), layout::AVATAR);
+        assert_eq!(stack_slot_width(1), STACK_AVATAR);
+        assert_eq!(stack_slot_width(3), STACK_AVATAR + 2.0 * step);
+        // More than three fold into "+n": still three discs wide.
+        assert_eq!(stack_slot_width(9), stack_slot_width(3));
+    }
+
     use super::*;
 
     #[test]

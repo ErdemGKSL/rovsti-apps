@@ -69,12 +69,15 @@ use rovsti_core::{
 };
 use rovsti_ui::{
     Icon, IconAssets,
-    components::{avatar, empty_state, glass_icon_button, glass_pill, large_title, list_row},
+    chips::{ChipSpec, filter_chip_row},
+    components::{empty_state, glass_icon_button, glass_pill, large_title, list_row},
     current_theme,
     field::{TextField, field_box},
     glass::{GlassSpec, glass},
-    layout::content_bottom_inset,
+    layout::{self, content_bottom_inset, space},
     notice_pill::{NoticePill, PillEvent},
+    page::{HeaderAction, PageHeader},
+    row::{BadgeTone, ListRow},
     storage,
     tab_bar::{Tab, TabBar},
     theme,
@@ -2397,17 +2400,6 @@ impl MessagesApp {
             .ok();
         })
         .detach();
-    }
-
-    /// The Chats title's check button: asks before marking every unread chat read.
-    fn ask_mark_all(&mut self, cx: &mut Context<Self>) {
-        let targets = inbox::mark_all_targets(&self.view.rows);
-        if targets.is_empty() {
-            self.show_pill("Nothing to mark as read");
-            return;
-        }
-        let prompt = inbox::mark_all_prompt(&targets);
-        self.show_pill_action(prompt, "Mark", PillAction::MarkAll(targets), cx);
     }
 
     /// Marks the confirmed chats read. SMS goes through the backend, which asks Android off
@@ -5246,19 +5238,6 @@ impl MessagesApp {
         };
         match item {
             ChatItem::Title => {
-                let compose = glass_icon_button(theme, Icon::LucidePencil, 0.0, false)
-                    .id("new-message")
-                    .on_click(cx.listener(|this, _, _, cx| this.open_new(cx)))
-                    .into_any_element();
-                let search = glass_icon_button(theme, Icon::LucideSearch, 0.0, false)
-                    .id("search-chats")
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.search_open = true;
-                        let focus = this.search_field.read(cx).focus_handle();
-                        window.focus(&focus, cx);
-                        cx.notify();
-                    }))
-                    .into_any_element();
                 if let Some(selection) = &self.inbox_select {
                     let title = match selection.len() {
                         0 => "Select chats".to_owned(),
@@ -5279,20 +5258,30 @@ impl MessagesApp {
                         .into_any_element();
                     return large_title(window, theme, title, Some(actions)).into_any_element();
                 }
-                let mark_all = (!inbox::mark_all_targets(&self.view.rows).is_empty()).then(|| {
-                    glass_icon_button(theme, Icon::LucideCheckCheck, 0.0, false)
-                        .id("mark-all-read")
-                        .on_click(cx.listener(|this, _, _, cx| this.ask_mark_all(cx)))
-                });
-                let actions = div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .children(mark_all)
-                    .child(search)
-                    .child(compose)
-                    .into_any_element();
-                large_title(window, theme, TABS[CHATS_TAB], Some(actions)).into_any_element()
+                // Search and Compose only. "Mark all read" lives in select mode
+                // (Select all, then Mark as read).
+                let entity = cx.entity();
+                let search_entity = entity.clone();
+                PageHeader::new(TABS[CHATS_TAB])
+                    .action(
+                        HeaderAction::new("search-chats", Icon::LucideSearch, "Search chats")
+                            .on_click(move |window, cx| {
+                                search_entity.update(cx, |this, cx| {
+                                    this.search_open = true;
+                                    let focus = this.search_field.read(cx).focus_handle();
+                                    window.focus(&focus, cx);
+                                    cx.notify();
+                                });
+                            }),
+                    )
+                    .action(
+                        HeaderAction::new("new-message", Icon::LucidePencil, "New message")
+                            .on_click(move |_, cx| {
+                                entity.update(cx, |this, cx| this.open_new(cx));
+                            }),
+                    )
+                    .render(window, theme)
+                    .into_any_element()
             }
             ChatItem::Search => div()
                 .w_full()
@@ -5543,56 +5532,71 @@ impl MessagesApp {
                 .into_any_element()
             }
             ChatItem::Status => {
-                let (leading, subtitle, unseen) = {
+                let (leading, width, subtitle, unseen) = {
                     let feed = self.statuses.read(cx);
                     let list = feed.list().clone();
-                    let leading =
+                    let (leading, width) =
                         status_ui::entry_avatars(theme, &list, &self.backend, &self.avatars, cx);
-                    (leading, status_ui::entry_subtitle(&list), list.unviewed())
+                    (
+                        leading,
+                        width,
+                        status_ui::entry_subtitle(&list),
+                        list.unviewed(),
+                    )
                 };
-                list_row(
-                    theme,
-                    Some(leading),
-                    "Status",
-                    Some(subtitle.into()),
-                    (unseen > 0).then(|| unseen.to_string().into()),
-                )
-                .id("status-entry")
-                .on_click(cx.listener(|this, _, _, cx| this.open_status(cx)))
-                .into_any_element()
+                let row = ListRow::new("Status")
+                    .leading(leading)
+                    .leading_width(width)
+                    .subtitle(subtitle);
+                let row = if unseen > 0 {
+                    row.trailing_badge(unseen.to_string(), BadgeTone::Accent)
+                } else {
+                    row
+                };
+                row.render(theme)
+                    .id("status-entry")
+                    .on_click(cx.listener(|this, _, _, cx| this.open_status(cx)))
+                    .into_any_element()
             }
             ChatItem::Filters => {
                 let facts: Vec<inbox_filter::RowFacts> =
                     self.view.rows.iter().map(inbox::row_facts).collect();
                 let counts = inbox_filter::counts(&facts);
-                let selected = self.inbox_filter;
+                let visible = inbox_filter::visible(&counts);
+                let count_of = |filter: InboxFilter| {
+                    counts[inbox_filter::ALL
+                        .iter()
+                        .position(|f| *f == filter)
+                        .unwrap_or(0)]
+                };
+                let chips: Vec<ChipSpec> = visible
+                    .iter()
+                    .map(|&filter| {
+                        let (label, badge) = inbox_filter::chip_parts(filter, count_of(filter));
+                        ChipSpec::new(label, badge)
+                    })
+                    .collect();
+                let selected = visible
+                    .iter()
+                    .position(|f| *f == self.inbox_filter)
+                    .unwrap_or(0);
+                let entity = cx.entity();
                 div()
-                    .px(px(16.0))
-                    .py(px(6.0))
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(8.0))
-                    .children(inbox_filter::visible(&counts).into_iter().enumerate().map(
-                        |(i, filter)| {
-                            let count = counts[inbox_filter::ALL
-                                .iter()
-                                .position(|f| *f == filter)
-                                .unwrap_or(0)];
-                            let on = filter == selected;
-                            let chip = glass_pill(theme, inbox_filter::chip_label(filter, count))
-                                .id(("inbox-filter", i))
-                                .text_size(typography::SUBHEADLINE.size);
-                            let chip = if on {
-                                chip.bg(colors.accent.opacity(0.22))
-                                    .text_color(colors.accent)
-                            } else {
-                                chip
+                    .py(px(space::XS))
+                    .child(filter_chip_row(
+                        "inbox-filters",
+                        theme,
+                        &chips,
+                        selected,
+                        move |i, _, cx| {
+                            let Some(&filter) = visible.get(i) else {
+                                return;
                             };
-                            chip.on_click(cx.listener(move |this, _, _, cx| {
+                            entity.update(cx, |this, cx| {
                                 this.inbox_filter = filter;
                                 this.chat_list.scroll_to_top();
                                 cx.notify();
-                            }))
+                            });
                         },
                     ))
                     .into_any_element()
@@ -5619,24 +5623,40 @@ impl MessagesApp {
                 )
                 .into_any_element(),
             ChatItem::SpamFilter => {
+                // A quiet row: neutral tile, secondary glyph, quiet count.
                 let unread = self.view.spam_unread();
                 let count = self.view.spam.len();
-                list_row(
-                    theme,
-                    Some(avatar(theme, "!", 44.0, colors.orange).into_any_element()),
-                    "Spam",
-                    Some(
-                        format!("{count} conversation{}", if count == 1 { "" } else { "s" }).into(),
-                    ),
-                    (unread > 0).then(|| unread.to_string().into()),
-                )
-                .id("spam-filter")
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.show_spam = true;
-                    this.chat_list.scroll_to_top();
-                    cx.notify();
-                }))
-                .into_any_element()
+                let tile = div()
+                    .flex_none()
+                    .size(px(layout::AVATAR))
+                    .rounded_full()
+                    .bg(colors.fill)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        gpui::svg()
+                            .path(Icon::LucideShieldAlert.path())
+                            .size(px(22.0))
+                            .text_color(colors.secondary_label),
+                    );
+                let row = ListRow::new("Spam").leading(tile).subtitle(format!(
+                    "{count} conversation{}",
+                    if count == 1 { "" } else { "s" }
+                ));
+                let row = if unread > 0 {
+                    row.trailing_badge(unread.to_string(), BadgeTone::Quiet)
+                } else {
+                    row
+                };
+                row.render(theme)
+                    .id("spam-filter")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_spam = true;
+                        this.chat_list.scroll_to_top();
+                        cx.notify();
+                    }))
+                    .into_any_element()
             }
             ChatItem::Row(row) => {
                 let Some(view) = self.shown_rows().get(row) else {

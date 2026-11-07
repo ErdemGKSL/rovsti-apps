@@ -29,6 +29,8 @@ pub mod contact_dupes;
 pub mod contact_edit;
 /// Calls with one contact on the card: limits, header, permission text.
 pub mod contact_history;
+/// Contacts shared to the app: .vcf files and text.
+pub mod contact_intake;
 pub mod contact_photo;
 /// Select mode in the Contacts list: export ids, group changes, notices, contact text.
 /// Quick actions on a contact row.

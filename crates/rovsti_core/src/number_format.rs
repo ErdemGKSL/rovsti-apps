@@ -211,6 +211,24 @@ pub fn available(raw: &str, home_cc: Option<&str>) -> Vec<(NumberForm, String)> 
     out
 }
 
+/// The forms offered by "Copy as...": [`available`] without the vCard form.
+pub fn copy_forms(raw: &str, home_cc: Option<&str>) -> Vec<(NumberForm, String)> {
+    let mut forms = available(raw, home_cc);
+    forms.retain(|(form, _)| *form != NumberForm::VCard);
+    forms
+}
+
+/// The pill after copying a number in `form`.
+pub fn copied_notice(form: NumberForm) -> &'static str {
+    match form {
+        NumberForm::Display => "Number copied",
+        NumberForm::E164 => "International number copied",
+        NumberForm::National => "National number copied",
+        NumberForm::TelLink => "Phone link copied",
+        NumberForm::VCard => "Contact card copied",
+    }
+}
+
 /// The most bytes a contact QR payload may hold; bigger cards scan badly.
 pub const QR_MAX_BYTES: usize = 1200;
 
@@ -547,5 +565,19 @@ mod tests {
         assert_eq!(file_slug_opt("***"), None);
         assert_eq!(qr_file_name("Ada Lovelace"), "rovsti-Ada-Lovelace-qr.png");
         assert_eq!(qr_file_name("😀"), "rovsti-contact-qr.png");
+    }
+
+    #[test]
+    fn copy_forms_drop_vcard_and_duplicates() {
+        let forms = copy_forms("+90 532 111 22 33", Some("90"));
+        assert!(forms.iter().all(|(f, _)| *f != NumberForm::VCard));
+        assert!(forms.iter().any(|(f, _)| *f == NumberForm::E164));
+        let texts: HashSet<&String> = forms.iter().map(|(_, t)| t).collect();
+        assert_eq!(texts.len(), forms.len());
+        assert_eq!(
+            copied_notice(NumberForm::E164),
+            "International number copied"
+        );
+        assert_eq!(copied_notice(NumberForm::Display), "Number copied");
     }
 }

@@ -108,6 +108,119 @@ pub fn scan_notice(s: &Scanned) -> &'static str {
     }
 }
 
+/// Most numbers or emails read from one pasted text.
+const MAX_PASTED_FIELDS: usize = 5;
+/// A name longer than this many words is a sentence, not a name.
+const MAX_NAME_WORDS: usize = 5;
+
+/// Reads text from the clipboard: a vCard, a MECARD, a number, an email, or
+/// a line such as `Ayse Yilmaz +90 532 111 22 33`.
+pub fn parse_pasted(text: &str) -> Scanned {
+    let text = clip(text);
+    match parse_payload(text) {
+        Scanned::Nothing => name_line_scan(text),
+        bare @ (Scanned::Number(_) | Scanned::Email(_)) => match parse_name_line(text) {
+            Some(card) if !card.given.is_empty() => Scanned::Cards(vec![card]),
+            _ => bare,
+        },
+        cards => cards,
+    }
+}
+
+/// The pill for a pasted text.
+pub fn paste_notice(s: &Scanned) -> &'static str {
+    match s {
+        Scanned::Cards(cards) if cards.len() == 1 => "Contact found on the clipboard",
+        Scanned::Cards(_) => "Contacts found on the clipboard",
+        Scanned::Number(_) => "Phone number found on the clipboard",
+        Scanned::Email(_) => "Email address found on the clipboard",
+        Scanned::Nothing => "Nothing to add on the clipboard",
+    }
+}
+
+fn name_line_scan(text: &str) -> Scanned {
+    parse_name_line(text).map_or(Scanned::Nothing, |card| Scanned::Cards(vec![card]))
+}
+
+fn is_label(word: &str) -> bool {
+    matches!(
+        word.trim_end_matches(':').to_ascii_lowercase().as_str(),
+        "tel" | "phone" | "mobile" | "cell" | "gsm" | "e-mail" | "email" | "mail" | "name"
+    )
+}
+
+fn is_phone_token(t: &str) -> bool {
+    t.chars()
+        .all(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '(' | ')' | '.' | '/'))
+}
+
+fn trim_punct(t: &str) -> &str {
+    t.trim_matches(|c: char| !c.is_alphanumeric())
+}
+
+/// Closes a run of phone tokens, keeping it when it is a usable number.
+fn flush_run(run: &mut Vec<&str>, numbers: &mut Vec<DraftField>) {
+    if !run.is_empty() {
+        let value = run.join(" ");
+        if import_plan::number_key(&value).is_some_and(|k| k.len() >= 7)
+            && numbers.len() < MAX_PASTED_FIELDS
+        {
+            numbers.push(DraftField::new(value, FieldKind::Mobile));
+        }
+        run.clear();
+    }
+}
+
+/// A card from free text: phone runs, emails and what is left as the name.
+fn parse_name_line(text: &str) -> Option<ContactDraft> {
+    let mut numbers: Vec<DraftField> = Vec::new();
+    let mut emails: Vec<DraftField> = Vec::new();
+    let mut name: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        let mut run: Vec<&str> = Vec::new();
+        for token in line.split_whitespace() {
+            let mail = token.trim_matches(|c: char| matches!(c, '<' | '>' | ',' | ';' | ':' | '"'));
+            if is_email(mail) {
+                flush_run(&mut run, &mut numbers);
+                if emails.len() < MAX_PASTED_FIELDS && !emails.iter().any(|e| e.value == mail) {
+                    emails.push(DraftField::new(mail, FieldKind::Home));
+                }
+            } else if is_phone_token(token.trim_end_matches([',', ';']))
+                && token.chars().any(|c| c.is_ascii_digit())
+            {
+                run.push(token.trim_end_matches([',', ';']));
+            } else {
+                flush_run(&mut run, &mut numbers);
+                if !is_label(token) {
+                    let word = trim_punct(token);
+                    if !word.is_empty() {
+                        name.push(word);
+                    }
+                }
+            }
+        }
+        flush_run(&mut run, &mut numbers);
+    }
+    if numbers.is_empty() && emails.is_empty() {
+        return None;
+    }
+    if name.len() > MAX_NAME_WORDS {
+        name.clear();
+    }
+    let mut card = ContactDraft::default();
+    if let Some(last) = name.pop() {
+        if name.is_empty() {
+            card.given = last.to_owned();
+        } else {
+            card.given = name.join(" ");
+            card.family = last.to_owned();
+        }
+    }
+    card.numbers = numbers;
+    card.emails = emails;
+    Some(card)
+}
+
 fn cards_or_nothing(cards: Vec<ContactDraft>) -> Scanned {
     if cards.is_empty() {
         Scanned::Nothing
@@ -357,5 +470,59 @@ BEGIN:VCARD\nVERSION:3.0\nFN:Alan Turing\nN:Turing;Alan;;;\nEMAIL:alan@example.c
             panic!("cards");
         };
         assert!(cards[0].given.len() <= MAX_PAYLOAD);
+    }
+
+    #[test]
+    fn pasted_name_and_number() {
+        let Scanned::Cards(cards) = parse_pasted("Ayse Yilmaz +90 532 111 22 33") else {
+            panic!("cards");
+        };
+        let c = &cards[0];
+        assert_eq!((c.given.as_str(), c.family.as_str()), ("Ayse", "Yilmaz"));
+        assert_eq!(c.numbers[0].value, "+90 532 111 22 33");
+    }
+
+    #[test]
+    fn pasted_label_is_stripped() {
+        let Scanned::Cards(cards) = parse_pasted("Omer\nTel: 0532 111 22 33") else {
+            panic!("cards");
+        };
+        assert_eq!(cards[0].display_name(), "Omer");
+        assert_eq!(cards[0].numbers[0].value, "0532 111 22 33");
+    }
+
+    #[test]
+    fn pasted_several_numbers_and_email() {
+        let text = "Ada Lovelace\nMobile: +44 7700 900123\nPhone: 020 7946 0958\nE-mail: ada@x.com";
+        let Scanned::Cards(cards) = parse_pasted(text) else {
+            panic!("cards");
+        };
+        let c = &cards[0];
+        assert_eq!(c.display_name(), "Ada Lovelace");
+        assert_eq!(c.numbers.len(), 2);
+        assert_eq!(c.emails[0].value, "ada@x.com");
+    }
+
+    #[test]
+    fn pasted_plain_text_is_nothing() {
+        assert_eq!(
+            parse_pasted("see you at noon, bring the book"),
+            Scanned::Nothing
+        );
+        assert_eq!(parse_pasted(""), Scanned::Nothing);
+        assert_eq!(
+            paste_notice(&Scanned::Nothing),
+            "Nothing to add on the clipboard"
+        );
+    }
+
+    #[test]
+    fn pasted_bare_number_and_vcard() {
+        assert_eq!(
+            parse_pasted("0532 111 22 33"),
+            Scanned::Number("0532 111 22 33".into())
+        );
+        let text = "BEGIN:VCARD\nVERSION:3.0\nFN:Ada Lovelace\nN:Lovelace;Ada;;;\nEND:VCARD";
+        assert!(matches!(parse_pasted(text), Scanned::Cards(_)));
     }
 }

@@ -248,6 +248,61 @@ pub mod geom {
         0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2])
     }
 
+    /// `fg` with its hue and saturation kept and its lightness stepped by 1 %
+    /// (away from `bg`) until the contrast against `bg` is at least `min`. A
+    /// colour that already passes is returned unchanged; if even black or
+    /// white cannot reach `min`, the extreme is returned.
+    pub fn ensure_contrast(fg: [f32; 3], bg: [f32; 3], min: f32) -> [f32; 3] {
+        if contrast_ratio(fg, bg) >= min {
+            return fg;
+        }
+        let (h, s, l) = rgb_to_hsl(fg);
+        let darker = luminance(bg) > 0.5;
+        let mut out = fg;
+        for step in 1..=100 {
+            let delta = step as f32 * 0.01;
+            let l2 = if darker { l - delta } else { l + delta };
+            out = hsl_to_rgb(h, s, l2.clamp(0.0, 1.0));
+            if contrast_ratio(out, bg) >= min || !(0.0..=1.0).contains(&l2) {
+                break;
+            }
+        }
+        out
+    }
+
+    fn rgb_to_hsl([r, g, b]: [f32; 3]) -> (f32, f32, f32) {
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let l = (max + min) / 2.0;
+        let d = max - min;
+        if d < 1e-6 {
+            return (0.0, 0.0, l);
+        }
+        let s = d / (1.0 - (2.0 * l - 1.0).abs());
+        let h = if max == r {
+            ((g - b) / d).rem_euclid(6.0)
+        } else if max == g {
+            (b - r) / d + 2.0
+        } else {
+            (r - g) / d + 4.0
+        };
+        (h, s, l)
+    }
+
+    fn hsl_to_rgb(h: f32, s: f32, l: f32) -> [f32; 3] {
+        let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+        let x = c * (1.0 - (h.rem_euclid(2.0) - 1.0).abs());
+        let m = l - c / 2.0;
+        let (r, g, b) = match h as u32 {
+            0 => (c, x, 0.0),
+            1 => (x, c, 0.0),
+            2 => (0.0, c, x),
+            3 => (0.0, x, c),
+            4 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+        [r + m, g + m, b + m]
+    }
+
     /// WCAG contrast ratio between two sRGB colours (1.0 to 21.0).
     pub fn contrast_ratio(a: [f32; 3], b: [f32; 3]) -> f32 {
         let (la, lb) = (luminance(a), luminance(b));
@@ -467,6 +522,28 @@ mod tests {
         assert_eq!(content_bottom(34.0, 300.0), 34.0 + 80.0 + 300.0);
         assert_eq!(content_top(47.0), 55.0);
         assert_eq!(content_top(0.0), 8.0);
+    }
+
+    #[test]
+    fn ensure_contrast_darkens_the_ios_blue_on_white() {
+        let blue = [0.0, 122.0 / 255.0, 1.0];
+        assert!(contrast_ratio(blue, [1.0; 3]) < 4.5);
+        let fixed = ensure_contrast(blue, [1.0; 3], 4.5);
+        assert!(contrast_ratio(fixed, [1.0; 3]) >= 4.5);
+        // Same hue, so still blue: B dominant, R near zero.
+        assert!(fixed[2] > fixed[1] && fixed[1] > fixed[0]);
+        // Close to the #0068DA the theme uses.
+        assert!(fixed[2] * 255.0 > 190.0 && fixed[2] * 255.0 < 235.0);
+    }
+
+    #[test]
+    fn ensure_contrast_keeps_passing_colours_and_lightens_on_dark() {
+        let navy = [0.0, 0.2, 0.5];
+        assert_eq!(ensure_contrast(navy, [1.0; 3], 4.5), navy);
+        let dim = [0.2, 0.2, 0.3];
+        let fixed = ensure_contrast(dim, [0.0; 3], 4.5);
+        assert!(contrast_ratio(fixed, [0.0; 3]) >= 4.5);
+        assert!(fixed[2] > dim[2]);
     }
 
     #[test]

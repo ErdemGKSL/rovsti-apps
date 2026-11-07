@@ -1218,7 +1218,7 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
                 .bg(colors.accent.opacity(0.16))
                 .text_size(typography::SUBHEADLINE.size)
                 .font_weight(typography::HEADLINE.weight)
-                .text_color(colors.accent)
+                .text_color(theme::accent_text(theme))
                 .child(if copied {
                     format!("Copied {code}")
                 } else {

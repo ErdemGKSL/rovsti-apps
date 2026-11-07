@@ -330,7 +330,7 @@ impl ListRow {
                     .text_size(typography::FOOTNOTE.size)
                     .line_height(typography::FOOTNOTE.line)
                     .text_color(if self.unread {
-                        colors.accent
+                        crate::theme::accent_text(theme)
                     } else {
                         colors.secondary_label
                     })

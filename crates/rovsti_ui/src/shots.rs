@@ -101,6 +101,13 @@ pub fn output_root() -> PathBuf {
     target.join("shots")
 }
 
+/// Reads a saved shot back (already sRGB-decoded, as `save` wrote it).
+pub fn open_png(path: &std::path::Path) -> RgbaImage {
+    image::open(path)
+        .unwrap_or_else(|e| panic!("open {}: {e}", path.display()))
+        .to_rgba8()
+}
+
 /// Wipes `target/shots/.data/<app>` and points `XDG_DATA_HOME` at it, and sets
 /// `TZ=Europe/Istanbul`, so prefs and times do not depend on the developer's
 /// machine. Call once at the start of the app's test, before any window.

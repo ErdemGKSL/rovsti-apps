@@ -9,7 +9,7 @@
 
 use std::sync::OnceLock;
 
-use gpui::{Hsla, rgb};
+use gpui::{Hsla, Rgba, rgb};
 use liquid_glass_kit::tokens::{Colors, Theme};
 
 /// The accent for both themes plus the bright mid-tone used for washes and
@@ -53,10 +53,15 @@ pub fn colors(theme: Theme) -> Colors {
     if let Some(pair) = ACCENT.get() {
         colors.accent = pair.accent(theme);
     }
+    if theme == Theme::Dark {
+        colors.tertiary_label.a = 0.55; // icons only; the kit's 30 % is ~2.3:1
+    }
     if theme == Theme::Light {
         // The iOS secondary label (60 % of #3C3C43) is about 3.4:1 on white;
-        // 74 % reaches the 4.5:1 the layout spec asks for body-size text.
-        colors.secondary_label.a = 0.74;
+        // 82 % reaches 4.5:1 on every surface incl. the backdrop wash.
+        colors.secondary_label.a = 0.82;
+        // Tertiary is icons only; the iOS 30 % is about 1.7:1, 62 % reaches 3:1.
+        colors.tertiary_label.a = 0.62;
     }
     colors
 }
@@ -67,6 +72,67 @@ pub fn accent_glow(theme: Theme) -> Hsla {
     ACCENT
         .get()
         .map_or_else(|| theme.colors().accent, |p| p.glow)
+}
+
+/// Alpha of the backdrop wash at its strongest point (top of the gradient).
+pub fn wash_alpha(theme: Theme) -> f32 {
+    if theme.is_dark() { 0.28 } else { 0.18 }
+}
+
+/// `fg` composited over `under` (straight alpha), as an opaque colour.
+pub fn flatten(fg: Hsla, under: Hsla) -> Hsla {
+    let (f, u): (Rgba, Rgba) = (fg.into(), under.into());
+    let mixc = |a: f32, b: f32| a * f.a + b * u.a * (1.0 - f.a);
+    let a = f.a + u.a * (1.0 - f.a);
+    let norm = |c: f32| if a > 0.0 { c / a } else { 0.0 };
+    Rgba {
+        r: norm(mixc(f.r, u.r)),
+        g: norm(mixc(f.g, u.g)),
+        b: norm(mixc(f.b, u.b)),
+        a,
+    }
+    .into()
+}
+
+/// The page background under the strongest point of the backdrop wash.
+pub fn wash_peak(theme: Theme) -> Hsla {
+    let glow = Hsla {
+        a: wash_alpha(theme),
+        ..accent_glow(theme)
+    };
+    flatten(glow, colors(theme).background)
+}
+
+/// `accent` adjusted until it reads as text (4.5:1) on every surface text sits
+/// on. Fills keep using the plain accent.
+pub fn accent_text_on(accent: Hsla, surfaces: &[Hsla]) -> Hsla {
+    let a: Rgba = accent.into();
+    let mut ink = [a.r, a.g, a.b];
+    for surface in surfaces {
+        let s: Rgba = (*surface).into();
+        ink = crate::layout::geom::ensure_contrast(ink, [s.r, s.g, s.b], 4.5);
+    }
+    Hsla::from(Rgba {
+        r: ink[0],
+        g: ink[1],
+        b: ink[2],
+        a: a.a,
+    })
+}
+
+/// The accent for text and links (light about `#0068DA`, dark unchanged for
+/// the iOS blue). Use this wherever the accent is a glyph colour, not a fill.
+pub fn accent_text(theme: Theme) -> Hsla {
+    let c = colors(theme);
+    accent_text_on(
+        c.accent,
+        &[
+            c.background,
+            c.grouped_background,
+            c.secondary_background,
+            wash_peak(theme),
+        ],
+    )
 }
 
 /// Semantic call colours (accessible variants, DESIGN.md): Answer, End and
@@ -128,9 +194,13 @@ pub fn hue_pair(theme: Theme, index: Option<usize>) -> (Hsla, Hsla) {
 mod tests {
     use super::*;
 
+    /// `set_accent` is process-global: tests that read colours take this.
+    static GLOBAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     // One test: `set_accent` is process-global.
     #[test]
     fn accent_replaces_only_the_accent() {
+        let _g = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
         let before = colors(Theme::Dark);
         assert_eq!(before.accent, Theme::Dark.colors().accent);
         let pair = AccentPair::from_hex(0x08806E, 0x2DD4B4, 0x14C8A8);
@@ -148,13 +218,79 @@ mod tests {
         assert_eq!(colors(Theme::Light).accent, pair.light);
     }
 
+    fn rgb3(c: Hsla) -> [f32; 3] {
+        let c: Rgba = c.into();
+        [c.r, c.g, c.b]
+    }
+
+    /// Every text role against every surface it sits on, both themes, alpha
+    /// blended first. `tertiary_label` is icons only (3:1).
     #[test]
-    fn secondary_text_reaches_4_5_on_white() {
-        use gpui::Rgba;
-        let c = colors(Theme::Light).secondary_label;
-        let (f, w): (Rgba, Rgba) = (c.into(), gpui::white().into());
-        let blend = |a: f32, b: f32| a * f.a + b * (1.0 - f.a);
-        let ink = [blend(f.r, w.r), blend(f.g, w.g), blend(f.b, w.b)];
-        assert!(crate::layout::geom::contrast_ratio(ink, [1.0; 3]) >= 4.5);
+    fn text_roles_reach_4_5_on_every_surface() {
+        let _g = GLOBAL.lock().unwrap_or_else(|e| e.into_inner());
+        use crate::chips::{chip_badge_colors, chip_colors};
+        use crate::layout::geom::contrast_ratio;
+        for theme in [Theme::Light, Theme::Dark] {
+            let c = colors(theme);
+            let wash = wash_peak(theme);
+            let pages = [
+                ("background", c.background),
+                ("grouped_background", c.grouped_background),
+                ("secondary_background", c.secondary_background),
+                ("wash peak", wash),
+            ];
+            let accent_text = accent_text(theme);
+            let mut cases: Vec<(String, Hsla, Hsla)> = Vec::new();
+            for (surface, bg) in pages {
+                for (role, fg) in [
+                    ("label", c.label),
+                    ("secondary_label", c.secondary_label),
+                    ("accent_text", accent_text),
+                ] {
+                    cases.push((format!("{role} on {surface}"), fg, bg));
+                }
+                let icon = contrast_ratio(rgb3(flatten(c.tertiary_label, bg)), rgb3(bg));
+                assert!(
+                    icon >= 3.0,
+                    "{theme:?} tertiary_label icon on {surface}: {icon:.2}"
+                );
+            }
+            for (surface, bg) in [("background", c.background), ("wash peak", wash)] {
+                for selected in [false, true] {
+                    let (ink, fill) = chip_colors(theme, selected);
+                    let under = flatten(fill, bg);
+                    cases.push((
+                        format!("chip label sel={selected} on {surface}"),
+                        ink,
+                        under,
+                    ));
+                    let (bink, bfill) = chip_badge_colors(theme, selected);
+                    cases.push((
+                        format!("chip count sel={selected} on {surface}"),
+                        bink,
+                        flatten(bfill, under),
+                    ));
+                }
+            }
+            for (name, fg, bg) in cases {
+                let bg = flatten(bg, c.background);
+                let r = contrast_ratio(rgb3(flatten(fg, bg)), rgb3(bg));
+                assert!(r >= 4.5, "{theme:?} {name}: {r:.2}");
+            }
+        }
+    }
+
+    #[test]
+    fn accent_text_darkens_in_light_and_lightens_at_most_in_dark() {
+        let blue: Hsla = rgb(0x007AFF).into();
+        let light = accent_text_on(blue, &[gpui::white()]);
+        assert!(light.l < blue.l);
+        assert!(contrast_between(light, gpui::white()) >= 4.5);
+        let kept = accent_text_on(rgb(0x0A84FF).into(), &[gpui::black()]);
+        assert_eq!(kept, Hsla::from(rgb(0x0A84FF)));
+    }
+
+    fn contrast_between(a: Hsla, b: Hsla) -> f32 {
+        crate::layout::geom::contrast_ratio(rgb3(a), rgb3(b))
     }
 }

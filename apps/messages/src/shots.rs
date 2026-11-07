@@ -150,6 +150,24 @@ fn render(spec: ShotSpec, linked: Option<&str>, scene: Scene) -> PathBuf {
     rig.save()
 }
 
+/// Text regions of `01-inbox-light.png` (px at 2x: x, y, w, h) that must keep
+/// at least 4.5:1 between their ink and their surface.
+type Rect = (u32, u32, u32, u32);
+const INBOX_LIGHT_TEXT: [(&str, Rect); 4] = [
+    ("preview (Ayşe)", (152, 634, 312, 38)),
+    ("unread time 15:35", (714, 594, 80, 34)),
+    ("chip count (Unread 8)", (280, 350, 28, 28)),
+    ("Spam badge", (750, 490, 44, 36)),
+];
+
+fn assert_inbox_contrast(path: &std::path::Path) {
+    let img = rovsti_ui::shots::open_png(path);
+    for (name, rect) in INBOX_LIGHT_TEXT {
+        let ratio = rovsti_ui::shots::color::contrast_in(&img, rect);
+        assert!(ratio >= 4.5, "{name} {rect:?}: contrast {ratio:.2} < 4.5");
+    }
+}
+
 #[test]
 #[ignore = "needs a GPU adapter (lavapipe works) and system fonts"]
 fn shots() {
@@ -166,6 +184,9 @@ fn shots() {
             };
             let path = render(spec, linked.then_some(gateway.as_str()), scene);
             println!("{}", path.display());
+            if nn == 1 && theme == Theme::Light {
+                assert_inbox_contrast(&path);
+            }
             saved.push(path);
         }
     }

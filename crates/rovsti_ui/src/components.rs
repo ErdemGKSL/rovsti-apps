@@ -173,7 +173,7 @@ pub fn empty_state(
 pub fn backdrop(theme: Theme, accent: Hsla) -> Div {
     let colors = crate::theme::colors(theme);
     let wash = Hsla {
-        a: if theme.is_dark() { 0.28 } else { 0.18 },
+        a: crate::theme::wash_alpha(theme),
         ..accent
     };
     div()

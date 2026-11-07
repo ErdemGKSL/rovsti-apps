@@ -41,7 +41,8 @@ impl ChipSpec {
 pub fn chip_colors(theme: Theme, selected: bool) -> (Hsla, Hsla) {
     let colors = crate::theme::colors(theme);
     if selected {
-        (gpui::white(), solid_under_white(colors.accent))
+        let fill = solid_under_white(colors.accent);
+        (crate::row::readable_on(fill), fill)
     } else {
         (colors.label, colors.fill)
     }
@@ -61,19 +62,33 @@ fn solid_under_white(fill: Hsla) -> Hsla {
     out
 }
 
-fn chip(theme: Theme, spec: &ChipSpec, selected: bool) -> Div {
+/// Ink and (translucent) fill of a chip's count badge.
+pub fn chip_badge_colors(theme: Theme, selected: bool) -> (Hsla, Hsla) {
     let colors = crate::theme::colors(theme);
+    let (ink, _) = chip_colors(theme, selected);
+    if selected {
+        // Tint away from the ink so the ink gains contrast, never loses it.
+        let tint = if ink.l > 0.5 {
+            gpui::black()
+        } else {
+            gpui::white()
+        };
+        (ink, tint.opacity(0.22))
+    } else {
+        (
+            // Opaque, so the count stays 4.5:1 on the chip fill over any wash.
+            Hsla {
+                a: 1.0,
+                ..colors.secondary_label
+            },
+            colors.secondary_label.opacity(0.05),
+        )
+    }
+}
+
+fn chip(theme: Theme, spec: &ChipSpec, selected: bool) -> Div {
     let (ink, fill) = chip_colors(theme, selected);
-    let badge_fill = if selected {
-        gpui::white().opacity(0.24)
-    } else {
-        colors.secondary_label.opacity(0.18)
-    };
-    let badge_ink = if selected {
-        ink
-    } else {
-        colors.secondary_label
-    };
+    let (badge_ink, badge_fill) = chip_badge_colors(theme, selected);
     div()
         .h(px(layout::CHIP_H))
         .min_w(px(layout::CHIP_H))

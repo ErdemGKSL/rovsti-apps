@@ -172,6 +172,25 @@ pub fn place_menu(
     (left, top)
 }
 
+/// Narrows the menu's `left` so the capsule stays over its field: at least
+/// `max(field_left, MENU_EDGE)` and at most `min(field_right, window_w -
+/// MENU_EDGE)` on the right. Left as is when the field is narrower than the
+/// menu.
+pub fn keep_over_field(
+    left: f32,
+    menu_w: f32,
+    field_left: f32,
+    field_right: f32,
+    window_w: f32,
+) -> f32 {
+    let lo = field_left.max(MENU_EDGE);
+    let hi = field_right.min(window_w - MENU_EDGE);
+    if hi - lo < menu_w {
+        return left;
+    }
+    left.clamp(lo, hi - menu_w)
+}
+
 /// Horizontal scroll per tick while a finger at `x` drags near the content
 /// edges `left`/`right`: negative to the left, positive to the right, zero
 /// away from the edges. Grows to `max` at the edge and beyond.
@@ -386,6 +405,19 @@ mod tests {
         assert_eq!(t, 112.0);
         // Wider than the window: pinned to the left edge.
         assert_eq!(place_menu(200.0, 300.0, 344.0, 500.0, 412.0, 40.0).0, 8.0);
+    }
+
+    #[test]
+    fn menu_stays_over_its_field() {
+        // Field 16..396 in a 412 window: pushed in from the 8 dp edge.
+        assert_eq!(keep_over_field(8.0, 120.0, 16.0, 396.0, 412.0), 16.0);
+        assert_eq!(keep_over_field(300.0, 120.0, 16.0, 396.0, 412.0), 276.0);
+        assert_eq!(keep_over_field(150.0, 120.0, 16.0, 396.0, 412.0), 150.0);
+        // A field hugging the window edge still respects the 8 dp inset.
+        assert_eq!(keep_over_field(8.0, 120.0, 0.0, 412.0, 412.0), 8.0);
+        assert_eq!(keep_over_field(290.0, 120.0, 0.0, 412.0, 412.0), 284.0);
+        // Narrower than the menu: unchanged.
+        assert_eq!(keep_over_field(8.0, 180.0, 40.0, 160.0, 412.0), 8.0);
     }
 
     #[test]

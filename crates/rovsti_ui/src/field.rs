@@ -30,7 +30,8 @@ use rovsti_core::text_edit::{EditBuffer, History, Kind};
 use rovsti_core::text_touch::{
     ECHO_MS, EDGE_MAX, EDGE_ZONE, HANDLE_HIT, HANDLE_SIZE, INSERTION_MS, MENU_H, MENU_ITEM_PAD,
     MenuItem, MenuState, TapAction, drag_selection, edge_scroll, handle_visible, hits_caret,
-    in_selection, menu_items, menu_width, place_menu, resolve_tap, tap_byte, teardrop,
+    in_selection, keep_over_field, menu_items, menu_width, place_menu, resolve_tap, tap_byte,
+    teardrop,
 };
 use rovsti_core::text_view::{
     CARET_MARGIN, ML_LINE, ML_PAD_V, box_height, capsule_radius, caret_visible, clamp_scroll,
@@ -1915,6 +1916,14 @@ fn edit_menu(
         width,
         f32::from(window.viewport_size().width),
         SAFE_TOP,
+    );
+    let win_w = f32::from(window.viewport_size().width);
+    let left = keep_over_field(
+        left,
+        width,
+        f32::from(content.left()) - pad,
+        f32::from(content.right()) + pad,
+        win_w,
     );
     // The box's own origin: the content box sits `pad` in from the left.
     let rel_left = left - (f32::from(content.left()) - pad);

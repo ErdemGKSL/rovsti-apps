@@ -317,7 +317,12 @@ impl ContactsApp {
     }
 
     /// The full page: the next 365 days under This week, This month, Later.
-    pub(crate) fn upcoming_page(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn upcoming_page(
+        &mut self,
+        window: &Window,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let top = div()
             .flex()
             .items_center()
@@ -364,7 +369,7 @@ impl ContactsApp {
         };
         div()
             .child(top)
-            .child(large_title(theme, "Upcoming", None))
+            .child(large_title(window, theme, "Upcoming", None))
             .child(body)
             .into_any_element()
     }

@@ -396,7 +396,12 @@ impl ContactsApp {
     }
 
     /// The duplicates page, pushed over Settings.
-    pub(crate) fn dupes_page(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn dupes_page(
+        &self,
+        window: &Window,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = theme::colors(theme);
         let top = div().px(px(8.0)).pt(px(48.0)).child(
             glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
@@ -458,7 +463,7 @@ impl ContactsApp {
         };
         div()
             .child(top)
-            .child(large_title(theme, "Duplicates", None))
+            .child(large_title(window, theme, "Duplicates", None))
             .child(body)
             .into_any_element()
     }

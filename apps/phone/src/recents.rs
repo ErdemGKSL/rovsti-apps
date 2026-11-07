@@ -998,8 +998,7 @@ impl PhoneApp {
     fn recents_hit(&self, position: Point<Pixels>, window: &Window) -> Option<(usize, Zone)> {
         // The floating tab bar sits over the bottom of the list; a tap on it
         // must never reach the rows behind.
-        let limit = window.viewport_size().height
-            - rovsti_ui::tab_bar::content_bottom_inset_with(crate::safe_bottom(window))
+        let limit = window.viewport_size().height - rovsti_ui::layout::content_bottom_inset(window)
             + metrics::TAB_BAR_MARGIN;
         if position.y > limit
             || self
@@ -1401,9 +1400,8 @@ impl PhoneApp {
 
     /// Height from the window bottom up to the select bar's top edge.
     fn select_bar_inset(&self) -> f32 {
-        f32::from(rovsti_ui::tab_bar::content_bottom_inset_with(
-            self.safe_bottom,
-        )) + SELECT_BAR_GAP
+        rovsti_ui::layout::geom::content_bottom(self.safe_bottom, 0.0)
+            + SELECT_BAR_GAP
             + SELECT_BAR_H
     }
 
@@ -1495,8 +1493,10 @@ impl PhoneApp {
                 .left(metrics::ROW_INSET)
                 .right(metrics::ROW_INSET)
                 .bottom(
-                    rovsti_ui::tab_bar::content_bottom_inset_with(self.safe_bottom)
-                        + px(SELECT_BAR_GAP),
+                    px(rovsti_ui::layout::geom::content_bottom(
+                        self.safe_bottom,
+                        0.0,
+                    )) + px(SELECT_BAR_GAP),
                 )
                 .h(px(SELECT_BAR_H))
                 .occlude()

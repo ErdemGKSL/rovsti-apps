@@ -1366,9 +1366,8 @@ impl PhoneApp {
         } else if self.sheet.is_visible() || self.settings.covers() {
             GAP + 10.0
         } else {
-            self.safe_bottom
-                + f32::from(metrics::TAB_BAR_MARGIN)
-                + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1
+            rovsti_ui::layout::geom::tab_bar_bottom(self.safe_bottom)
+                + f32::from(metrics::TAB_BAR_HEIGHT)
                 + GAP
         }
     }
@@ -1392,8 +1391,10 @@ impl PhoneApp {
     fn page(&mut self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let tab = self.tabs.selected();
         let complete = self.checklist(cx).complete();
-        let setup = self.setup_button(theme, complete, cx).into_any_element();
-        let gear = self.settings_gear(theme, cx).into_any_element();
+        let setup = self
+            .setup_button(window, theme, complete, cx)
+            .into_any_element();
+        let gear = self.settings_gear(window, theme, cx).into_any_element();
         if tab != KEYPAD_TAB {
             // Past 24 px of scroll the large title hands over to a compact one
             // (opacity and translate only: the list never moves).
@@ -1410,10 +1411,10 @@ impl PhoneApp {
                 .left(px(self.title_shift()))
                 .opacity(1.0 - collapse)
                 .pr(px(56.0))
-                .child(large_title(theme, TABS[tab], None));
+                .child(large_title(window, theme, TABS[tab], None));
             let compact = div()
                 .absolute()
-                .top(px(54.0))
+                .top(px(54.0 + title_dy(window)))
                 .left_0()
                 .right_0()
                 .h(px(44.0))
@@ -1469,7 +1470,7 @@ impl PhoneApp {
                     .top(px(self.page_lift()))
                     .left(px(self.page_slide()))
                     .size_full()
-                    .child(self.keypad(theme, setup, gear, cx)),
+                    .child(self.keypad(window, theme, setup, gear, cx)),
             )
             .into_any_element()
     }
@@ -1559,9 +1560,16 @@ impl PhoneApp {
     }
 }
 
-/// Effective bottom inset of the window in px (0 on desktop).
+/// How far the header chrome (gear, setup, compact title) sits from where it
+/// was drawn when `large_title` assumed a 56 dp top: the title now starts at
+/// `content_top(safe.top)`, so the buttons beside it follow.
+pub(crate) fn title_dy(window: &Window) -> f32 {
+    rovsti_ui::layout::geom::content_top(rovsti_ui::layout::safe_area(window).top) - 56.0
+}
+
+/// Bottom safe-area inset of the window in dp (0 on desktop).
 pub(crate) fn safe_bottom(window: &Window) -> f32 {
-    f32::from(window.insets().effective().bottom)
+    rovsti_ui::layout::safe_area(window).bottom
 }
 
 impl Render for PhoneApp {
@@ -1611,7 +1619,7 @@ impl Render for PhoneApp {
 
         let tabs = &self.tabs;
         self.tab_view
-            .update(cx, |view, cx| view.sync(tabs, theme, cx));
+            .update(cx, |view, cx| view.sync(tabs, theme, safe_bottom, cx));
         let incall = self.render_incall(theme, window, cx);
         let add_call = self.add_call_overlay(theme, window, cx);
         let sim_sheet = self.sim_overlay(theme, window, cx);
@@ -1653,10 +1661,10 @@ impl Render for PhoneApp {
                     div()
                         .id("tab-bar-slot")
                         .absolute()
-                        .bottom(metrics::TAB_BAR_MARGIN + px(safe_bottom) - px(away * 140.0))
+                        .bottom(px(-away * 140.0))
                         .left_0()
                         .right_0()
-                        .h(metrics::TAB_BAR_HEIGHT * 1.1)
+                        .h(rovsti_ui::tab_bar::slot_height(safe_bottom))
                         .opacity(self.settings_tab_fade())
                         .child(
                             self.tab_view

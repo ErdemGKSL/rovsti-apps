@@ -32,7 +32,7 @@ use rovsti_core::{
 use rovsti_ui::{
     Icon,
     glass::{GlassSpec, glass},
-    tab_bar::content_bottom_inset,
+    layout::content_bottom_inset,
     theme,
     tokens::{Theme, shadow, typography},
     touch::{TAP_SLOP, TapGuard, drag_surface},
@@ -706,7 +706,7 @@ impl ContactsApp {
                     }),
             );
 
-        let bottom = f32::from(content_bottom_inset()) + 16.0;
+        let bottom = f32::from(content_bottom_inset(window)) + 16.0;
         let bar = div()
             .absolute()
             .bottom(px(bottom))

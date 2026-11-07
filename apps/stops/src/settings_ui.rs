@@ -507,15 +507,15 @@ impl StopsApp {
     ) -> Page {
         match self.settings_page {
             SettingsPage::Main => Page::Flow(self.settings_main(theme, cx)),
-            SettingsPage::History => self.history_page(theme, cx),
-            SettingsPage::Notice => self.notice_page(theme, cx),
+            SettingsPage::History => self.history_page(window, theme, cx),
+            SettingsPage::Notice => self.notice_page(window, theme, cx),
             SettingsPage::WhatsApp => {
                 let body = self.whatsapp.clone().into_any_element();
-                Page::Flow(self.settings_subpage(theme, "WhatsApp", body, cx))
+                Page::Flow(self.settings_subpage(window, theme, "WhatsApp", body, cx))
             }
             SettingsPage::MapTiles => {
                 let body = self.tiles_body(theme, window, cx);
-                Page::Flow(self.settings_subpage(theme, "Map tiles", body, cx))
+                Page::Flow(self.settings_subpage(window, theme, "Map tiles", body, cx))
             }
         }
     }
@@ -523,19 +523,25 @@ impl StopsApp {
     /// A back button, the title, then the page.
     fn settings_subpage(
         &self,
+        window: &Window,
         theme: Theme,
         title: &'static str,
         body: AnyElement,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
-            .child(Self::subpage_header(theme, title, cx))
+            .child(Self::subpage_header(window, theme, title, cx))
             .child(body)
             .into_any_element()
     }
 
     /// The back button and the title of a Settings page.
-    fn subpage_header(theme: Theme, title: &'static str, cx: &mut Context<Self>) -> AnyElement {
+    fn subpage_header(
+        window: &Window,
+        theme: Theme,
+        title: &'static str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .child(
                 div().px(px(8.0)).pt(px(48.0)).child(
@@ -548,7 +554,7 @@ impl StopsApp {
                         ),
                 ),
             )
-            .child(large_title(theme, title, None))
+            .child(large_title(window, theme, title, None))
             .into_any_element()
     }
 
@@ -942,7 +948,7 @@ impl StopsApp {
 
     /// History: statistics, then every recorded trip (the file keeps up to
     /// 500) in a virtualised list, so only the rows on screen are built.
-    fn history_page(&mut self, theme: Theme, cx: &mut Context<Self>) -> Page {
+    fn history_page(&mut self, window: &Window, theme: Theme, cx: &mut Context<Self>) -> Page {
         if self.history.records.is_empty() {
             let body = empty_state(
                 theme,
@@ -950,7 +956,7 @@ impl StopsApp {
                 "Finished and cancelled trips are listed here, with some statistics.",
             )
             .into_any_element();
-            return Page::Flow(self.settings_subpage(theme, "History", body, cx));
+            return Page::Flow(self.settings_subpage(window, theme, "History", body, cx));
         }
         // A hidden field must not keep filtering.
         let query = if crate::saved_ui::history_field_visible(self.history.records.len()) {
@@ -1011,7 +1017,7 @@ impl StopsApp {
         }
 
         match ix {
-            0 => Self::subpage_header(theme, "History", cx),
+            0 => Self::subpage_header(window, theme, "History", cx),
             1 => {
                 let stats = stats_rows(&self.history.stats(now_ms()));
                 let rows = stats.into_iter().map(|(label, value)| {
@@ -1426,10 +1432,10 @@ impl StopsApp {
 
     /// The arriving-soon page: the chat picker is a virtualised list, followed
     /// by the message, when to send it, and Turn off.
-    fn notice_page(&mut self, theme: Theme, cx: &mut Context<Self>) -> Page {
+    fn notice_page(&mut self, window: &Window, theme: Theme, cx: &mut Context<Self>) -> Page {
         if !self.whatsapp.read(cx).is_connected() {
             let body = self.notice_unlinked(theme, cx);
-            return Page::Flow(self.settings_subpage(theme, "Arriving soon", body, cx));
+            return Page::Flow(self.settings_subpage(window, theme, "Arriving soon", body, cx));
         }
         let chosen = self
             .prefs
@@ -1524,7 +1530,7 @@ impl StopsApp {
     ) -> AnyElement {
         let colors = theme::colors(theme);
         match item {
-            NoticeItem::Header => Self::subpage_header(theme, "Arriving soon", cx),
+            NoticeItem::Header => Self::subpage_header(window, theme, "Arriving soon", cx),
             NoticeItem::Intro => note(
                 theme,
                 "Sends one WhatsApp message through your gateway when you are close. Nothing else leaves the phone.",

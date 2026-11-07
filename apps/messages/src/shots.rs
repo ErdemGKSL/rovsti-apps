@@ -50,7 +50,7 @@ fn search(app: &mut MessagesApp, text: &str, window: &mut Window, cx: &mut Conte
 
 /// Every main screen and important sheet, in shot order.
 /// `(number, name, needs a linked gateway, what it does)`.
-const SCENES: [(u32, &str, bool, Scene); 13] = [
+const SCENES: [(u32, &str, bool, Scene); 14] = [
     (1, "inbox", false, |_, _, _| {}),
     (2, "unread-filter", false, |app, _, cx| {
         app.inbox_filter = InboxFilter::Unread;
@@ -90,6 +90,11 @@ const SCENES: [(u32, &str, bool, Scene); 13] = [
     (9, "status", true, |app, _, cx| app.open_status(cx)),
     (10, "spam-folder", false, |app, _, cx| {
         app.show_spam = true;
+        cx.notify();
+    }),
+    (10, "inbox-end", false, |app, _, cx| {
+        // The last row must clear the floating tab bar.
+        app.chat_list.scroll_to_end();
         cx.notify();
     }),
     (11, "row-menu", false, |app, _, cx| {

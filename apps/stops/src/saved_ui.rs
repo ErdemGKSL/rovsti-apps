@@ -379,7 +379,7 @@ impl StopsApp {
         let mut header = div()
             .flex()
             .flex_col()
-            .child(large_title(theme, "Saved", None))
+            .child(large_title(window, theme, "Saved", None))
             .child(tools);
         if !self.saved_visible.is_empty() {
             header = header.child(

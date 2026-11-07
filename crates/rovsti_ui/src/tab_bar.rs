@@ -26,6 +26,8 @@ use liquid_glass_kit::{
     tokens::{Theme, metrics, shadow},
 };
 
+use crate::layout;
+
 const BAR_PAD: f32 = 4.0;
 const TAB_WIDTH: f32 = 64.0;
 const ICON_SIZE: f32 = 22.0;
@@ -203,9 +205,10 @@ impl TabBar {
 
     /// Everything [`TabBar::render`] draws, as plain numbers: two equal frames
     /// draw the same bar, which is what lets [`TabBarView`] skip a frame.
-    pub fn frame(&self, theme: Theme) -> TabBarFrame {
+    pub fn frame(&self, theme: Theme, safe_bottom: f32) -> TabBarFrame {
         TabBarFrame {
             theme,
+            safe_bottom,
             selected: self.selected,
             puck: self.puck.value,
             press: self.press.value,
@@ -226,22 +229,20 @@ impl TabBar {
     pub fn render(
         &self,
         theme: Theme,
+        safe_bottom: f32,
         on_select: impl Fn(usize, &mut Window, &mut App) + 'static,
         on_touch: impl Fn(TouchPhase, &mut Window, &mut App) + 'static,
     ) -> Stateful<Div> {
         div()
             .id("tab-bar-anchor")
             .absolute()
-            .bottom(metrics::TAB_BAR_MARGIN)
+            .bottom_0()
             .left_0()
             .right_0()
-            .h(metrics::TAB_BAR_HEIGHT * 1.1)
-            .flex()
-            .items_center()
-            .justify_center()
+            .h(px(layout::geom::tab_bar_slot_h(safe_bottom)))
             .child(bar_body(
                 &self.tabs,
-                &self.frame(theme),
+                &self.frame(theme, safe_bottom),
                 std::rc::Rc::new(on_select),
                 on_touch,
             ))
@@ -252,6 +253,7 @@ impl TabBar {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TabBarFrame {
     theme: Theme,
+    safe_bottom: f32,
     selected: usize,
     puck: f32,
     press: f32,
@@ -271,8 +273,8 @@ type TouchFn = std::rc::Rc<dyn Fn(TouchPhase, &mut Window, &mut App)>;
 /// (a list scrolling, a key ripple) replays the bar's last frame instead of
 /// building, laying out and painting it again (`Entity::cached`; AD-21 1).
 /// Call [`TabBarView::sync`] once per render of the owner, then place
-/// `view.cached(..)` where the bar goes: it fills the box it is given and
-/// centres the bar in it.
+/// `view.cached(..)` where the bar goes: it fills the box it is given (give it
+/// [`slot_height`]) and anchors the bar `safe_bottom + 8` above the box's bottom.
 pub struct TabBarView {
     tabs: Vec<Tab>,
     frame: Option<TabBarFrame>,
@@ -295,8 +297,14 @@ impl TabBarView {
 
     /// Takes the bar's current look. Notifies (and so invalidates the cached
     /// frame) only when something it draws actually changed.
-    pub fn sync(&mut self, bar: &TabBar, theme: Theme, cx: &mut gpui::Context<Self>) {
-        let frame = bar.frame(theme);
+    pub fn sync(
+        &mut self,
+        bar: &TabBar,
+        theme: Theme,
+        safe_bottom: f32,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let frame = bar.frame(theme, safe_bottom);
         if self.frame == Some(frame) {
             return;
         }
@@ -318,9 +326,6 @@ impl gpui::Render for TabBarView {
         div()
             .id("tab-bar-anchor")
             .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
             .children(self.frame.map(|frame| {
                 bar_body(
                     &self.tabs,
@@ -350,10 +355,18 @@ fn bar_body(
     let tab_w = (bar_w - BAR_PAD * 2.0) / count;
 
     let grow = 1.0 + (scale::PUCK_PRESSED - 1.0) * press.min(1.2) * 0.35;
-    let puck_w = tab_w * grow * f.puck_sx;
-    let puck_h = (bar_h - BAR_PAD * 2.0) * grow * f.puck_sy;
-    let puck_cx = BAR_PAD + (f.puck + 0.5) * tab_w;
-    let puck_cy = bar_h / 2.0;
+    let (puck_x, puck_y, puck_w, puck_h) = layout::geom::puck_rect(
+        bar_w,
+        bar_h,
+        BAR_PAD,
+        tab_list.len(),
+        f.puck,
+        layout::geom::PuckScale {
+            grow,
+            sx: f.puck_sx,
+            sy: f.puck_sy,
+        },
+    );
     let puck_spec = GlassSpec::chrome(theme).lerp(GlassSpec::lens(theme), press.min(1.0));
 
     let tabs = tab_list.iter().enumerate().map(|(i, tab)| {
@@ -421,7 +434,7 @@ fn bar_body(
             })
     });
 
-    glass(GlassSpec::chrome(theme))
+    let bar = glass(GlassSpec::chrome(theme))
         .relative()
         // The bar is above the page: a tap on it must not also reach the rows and buttons
         // that happen to sit under it.
@@ -434,8 +447,8 @@ fn bar_body(
         .child(
             glass_interactive(puck_spec, move || GlassInteraction { press, focus: None })
                 .absolute()
-                .left(px(puck_cx - puck_w / 2.0))
-                .top(px(puck_cy - puck_h / 2.0))
+                .left(px(puck_x))
+                .top(px(puck_y))
                 .w(px(puck_w))
                 .h(px(puck_h))
                 .rounded_full(),
@@ -449,17 +462,23 @@ fn bar_body(
                 .h_full()
                 .flex()
                 .children(tabs),
-        )
+        );
+
+    // Anchored `safe_bottom + 8` above the window bottom; the slot is taller
+    // than the bar so the press swell has room to grow upwards.
+    div()
+        .size_full()
+        .flex()
+        .items_end()
+        .justify_center()
+        .pb(px(layout::geom::tab_bar_bottom(f.safe_bottom)))
+        .child(bar)
 }
 
-/// Bottom padding a scrolling page needs so its last row clears the bar.
-pub fn content_bottom_inset() -> gpui::Pixels {
-    content_bottom_inset_with(0.0)
-}
-
-/// [`content_bottom_inset`] plus the window's bottom safe-area inset (px).
-pub fn content_bottom_inset_with(safe_bottom: f32) -> gpui::Pixels {
-    metrics::TAB_BAR_HEIGHT + metrics::TAB_BAR_MARGIN * 2.0 + gpui::px(safe_bottom)
+/// Height of the box that hosts the bar (a [`TabBarView`] or [`TabBar::render`]):
+/// the bar with room for its press swell, above the bottom inset.
+pub fn slot_height(safe_bottom: f32) -> gpui::Pixels {
+    px(layout::geom::tab_bar_slot_h(safe_bottom))
 }
 
 #[cfg(test)]

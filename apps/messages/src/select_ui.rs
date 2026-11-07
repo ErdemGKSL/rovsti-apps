@@ -102,7 +102,7 @@ fn action_row(theme: Theme, actions: Vec<BarAction>) -> Div {
 /// The glass action bar at the bottom of the screen (in place of the tab bar)
 /// while rows are ticked: the same pills as [`select_bar`]. `actions` is empty
 /// while nothing is ticked, which leaves a hint.
-pub fn bottom_bar(theme: Theme, actions: Vec<BarAction>) -> AnyElement {
+pub fn bottom_bar(theme: Theme, safe_bottom: f32, actions: Vec<BarAction>) -> AnyElement {
     let colors = theme::colors(theme);
     let body = if actions.is_empty() {
         div()
@@ -117,7 +117,7 @@ pub fn bottom_bar(theme: Theme, actions: Vec<BarAction>) -> AnyElement {
     div()
         .id("inbox-select-bar")
         .absolute()
-        .bottom(rovsti_ui::tokens::metrics::TAB_BAR_MARGIN)
+        .bottom(px(rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)))
         .left(px(8.0))
         .right(px(8.0))
         .flex()

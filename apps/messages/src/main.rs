@@ -73,9 +73,10 @@ use rovsti_ui::{
     current_theme,
     field::{TextField, field_box},
     glass::{GlassSpec, glass},
+    layout::content_bottom_inset,
     notice_pill::{NoticePill, PillEvent},
     storage,
-    tab_bar::{Tab, TabBar, content_bottom_inset},
+    tab_bar::{Tab, TabBar},
     theme,
     tokens::{Theme, metrics, shadow, typography},
 };
@@ -2861,7 +2862,7 @@ impl MessagesApp {
     }
 
     /// The glass bar at the bottom while select mode is on.
-    fn bulk_bar(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn bulk_bar(&self, safe_bottom: f32, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         use crate::select_ui::BarAction;
         let rows = self.selected_rows();
         let facts = self.selected_facts(&rows, cx);
@@ -2890,7 +2891,7 @@ impl MessagesApp {
                 }
             })
             .collect();
-        crate::select_ui::bottom_bar(theme, actions)
+        crate::select_ui::bottom_bar(theme, safe_bottom, actions)
     }
 
     /// A bar button was tapped.
@@ -4676,12 +4677,13 @@ impl MessagesApp {
     }
 
     /// The pill's distance from the window bottom.
-    fn pill_bottom(&self, cx: &App) -> f32 {
+    fn pill_bottom(&self, safe_bottom: f32, cx: &App) -> f32 {
         const GAP: f32 = 12.0;
         if self.open_thread_id(cx).is_some() || !matches!(self.open, Open::None) {
             return GAP + 72.0;
         }
-        let bar = f32::from(metrics::TAB_BAR_MARGIN) + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1;
+        let bar = rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)
+            + f32::from(metrics::TAB_BAR_HEIGHT);
         // The bulk action bar is taller than the tab bar.
         bar + GAP
             + if self.inbox_select.is_some() {
@@ -4713,17 +4715,21 @@ impl MessagesApp {
         // The pill is drawn after the viewer so it stays visible over it.
         out.extend(self.media_viewer_overlay(theme, window, cx));
         out.extend(self.forward_overlay(theme, window, cx));
-        out.extend(self.pill.render(theme, self.pill_bottom(cx), {
-            let entity = cx.entity();
-            move |pointer, position, _, cx| {
-                entity.update(cx, |this, cx| {
-                    if this.pill.pointer(pointer, position) == PillEvent::Action {
-                        this.pill_fired(cx);
-                    }
-                    cx.notify();
-                });
-            }
-        }));
+        out.extend(self.pill.render(
+            theme,
+            self.pill_bottom(rovsti_ui::layout::safe_area(window).bottom, cx),
+            {
+                let entity = cx.entity();
+                move |pointer, position, _, cx| {
+                    entity.update(cx, |this, cx| {
+                        if this.pill.pointer(pointer, position) == PillEvent::Action {
+                            this.pill_fired(cx);
+                        }
+                        cx.notify();
+                    });
+                }
+            },
+        ));
         out.extend(self.schedule.render(theme, window, now_ms(), offset, cx));
         if matches!(self.open, Open::None | Open::Sms(_)) {
             out.extend(self.row_menu_overlay(theme, cx));
@@ -5271,7 +5277,7 @@ impl MessagesApp {
                         .child(cancel)
                         .child(all)
                         .into_any_element();
-                    return large_title(theme, title, Some(actions)).into_any_element();
+                    return large_title(window, theme, title, Some(actions)).into_any_element();
                 }
                 let mark_all = (!inbox::mark_all_targets(&self.view.rows).is_empty()).then(|| {
                     glass_icon_button(theme, Icon::LucideCheckCheck, 0.0, false)
@@ -5286,7 +5292,7 @@ impl MessagesApp {
                     .child(search)
                     .child(compose)
                     .into_any_element();
-                large_title(theme, TABS[CHATS_TAB], Some(actions)).into_any_element()
+                large_title(window, theme, TABS[CHATS_TAB], Some(actions)).into_any_element()
             }
             ChatItem::Search => div()
                 .w_full()
@@ -5695,7 +5701,7 @@ impl MessagesApp {
                 )
                 .into_any_element(),
             },
-            ChatItem::Tail => div().h(content_bottom_inset()).into_any_element(),
+            ChatItem::Tail => div().h(content_bottom_inset(window)).into_any_element(),
         }
     }
 }
@@ -5769,30 +5775,29 @@ impl Render for MessagesApp {
             };
             // The keyboard covers the page's bottom: room to scroll a form
             // field (passphrase, spam rule) above it.
-            let insets = window.insets();
-            let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
             div()
                 .id("page")
                 .size_full()
                 .overflow_y_scroll()
-                .pb(content_bottom_inset() + keyboard)
+                .pb(content_bottom_inset(window))
                 .opacity(self.page.progress())
                 .child(
                     div()
                         .relative()
                         .top(px(self.page.offset(24.0)))
-                        .child(large_title(theme, TABS[tab], None))
+                        .child(large_title(window, theme, TABS[tab], None))
                         .child(body),
                 )
                 .into_any_element()
         };
 
         let bottom = if self.inbox_select.is_some() {
-            self.bulk_bar(theme, cx)
+            self.bulk_bar(rovsti_ui::layout::safe_area(window).bottom, theme, cx)
         } else {
             self.tabs
                 .render(
                     theme,
+                    rovsti_ui::layout::safe_area(window).bottom,
                     move |index, _, cx| {
                         entity.update(cx, |this, cx| {
                             this.tabs.press();

@@ -702,19 +702,20 @@ impl PhoneApp {
     pub(crate) fn keypad_input(&self, window: &Window) -> rovsti_core::keypad_layout::KeypadInput {
         let size = window.viewport_size();
         let e = window.insets().effective();
+        let safe = rovsti_ui::layout::safe_area(window);
         rovsti_core::keypad_layout::KeypadInput {
             viewport_w: f32::from(size.width),
             viewport_h: f32::from(size.height),
             insets: rovsti_core::keypad_layout::Insets {
-                top: f32::from(e.top),
+                top: f32::from(e.top).max(safe.top),
                 right: f32::from(e.right),
-                bottom: f32::from(e.bottom),
+                bottom: f32::from(e.bottom).max(safe.bottom),
                 left: f32::from(e.left),
             },
             text_len: self.dialed.chars().count(),
-            header_h: HEADER_H,
+            header_h: HEADER_H + crate::title_dy(window),
             tab_bar_h: f32::from(rovsti_ui::tokens::metrics::TAB_BAR_HEIGHT) * 1.1,
-            tab_bar_margin: f32::from(rovsti_ui::tokens::metrics::TAB_BAR_MARGIN),
+            tab_bar_margin: rovsti_ui::layout::TAB_BAR_GAP,
         }
     }
 
@@ -2182,6 +2183,7 @@ impl PhoneApp {
 
     pub(crate) fn keypad(
         &self,
+        window: &Window,
         theme: Theme,
         setup: AnyElement,
         gear: AnyElement,
@@ -2323,7 +2325,9 @@ impl PhoneApp {
 
         // The header sits in its layout rect: portrait keeps the large title
         // (button row at 54..98 in the box); landscape is one row.
-        let header = div().absolute().left_0().w_full().h(px(HEADER_H));
+        let dy = crate::title_dy(window);
+        let header_h = HEADER_H + dy;
+        let header = div().absolute().left_0().w_full().h(px(header_h));
         let header = if layout.header_compact {
             let colors = theme::colors(theme);
             header
@@ -2350,13 +2354,18 @@ impl PhoneApp {
                 .child(gear)
         } else {
             header
-                .top(px(layout.header.bottom() - HEADER_H))
+                .top(px(layout.header.bottom() - header_h))
                 .child(
                     div()
                         .relative()
                         .left(px(self.title_shift()))
                         .pr(px(56.0))
-                        .child(large_title(theme, crate::TABS[crate::KEYPAD_TAB], None)),
+                        .child(large_title(
+                            window,
+                            theme,
+                            crate::TABS[crate::KEYPAD_TAB],
+                            None,
+                        )),
                 )
                 .child(setup)
                 .child(gear)

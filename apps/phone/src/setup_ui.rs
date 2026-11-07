@@ -128,6 +128,7 @@ impl PhoneApp {
     /// The header button: a glass shield with a dot while anything is open.
     pub(crate) fn setup_button(
         &self,
+        window: &gpui::Window,
         theme: Theme,
         complete: bool,
         cx: &mut gpui::Context<Self>,
@@ -142,7 +143,7 @@ impl PhoneApp {
             .role(Role::Button)
             .aria_label("Setup")
             .absolute()
-            .top(px(54.0))
+            .top(px(54.0 + crate::title_dy(window)))
             .right(px(12.0))
             .size(px(44.0))
             .on_mouse_down(

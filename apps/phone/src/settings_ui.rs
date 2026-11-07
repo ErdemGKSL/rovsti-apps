@@ -1285,14 +1285,19 @@ impl PhoneApp {
     // ---- rendering --------------------------------------------------------------
 
     /// The gear in the title's reserved slot (absolute, left of the Setup button).
-    pub(crate) fn settings_gear(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn settings_gear(
+        &self,
+        window: &Window,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let press = self.presses.value("gear");
         div()
             .id("gear")
             .role(Role::Button)
             .aria_label("Settings")
             .absolute()
-            .top(px(54.0))
+            .top(px(54.0 + crate::title_dy(window)))
             .right(px(60.0))
             .size(px(44.0))
             .on_mouse_down(

@@ -21,7 +21,7 @@ use rovsti_ui::{
     components::{flat_glass, glass_pill, large_title},
     sheet::Sheet,
     theme,
-    tokens::{Theme, metrics, radius, typography},
+    tokens::{Theme, radius, typography},
 };
 
 use crate::{
@@ -536,7 +536,12 @@ impl ContactsApp {
             .flex()
             .flex_col()
             .child(div().px(px(16.0)).pt(px(48.0)).flex().child(cancel))
-            .child(large_title(theme, contact_select::title(count), Some(all)))
+            .child(large_title(
+                window,
+                theme,
+                contact_select::title(count),
+                Some(all),
+            ))
             .child(self.search_field(theme, window, cx))
             .into_any_element()
     }
@@ -544,6 +549,7 @@ impl ContactsApp {
     /// The glass action bar, in place of the tab bar.
     pub(crate) fn select_bar_view(
         &self,
+        safe_bottom: f32,
         theme: Theme,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
@@ -597,7 +603,7 @@ impl ContactsApp {
             div()
                 .id("contacts-select-bar")
                 .absolute()
-                .bottom(metrics::TAB_BAR_MARGIN)
+                .bottom(px(rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)))
                 .left(px(8.0))
                 .right(px(8.0))
                 .flex()

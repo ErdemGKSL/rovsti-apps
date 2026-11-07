@@ -377,7 +377,12 @@ impl ContactsApp {
     }
 
     /// The read-only summary page.
-    pub(crate) fn summary_page(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn summary_page(
+        &self,
+        window: &gpui::Window,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let top = div().px(px(8.0)).pt(px(48.0)).child(
             glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
                 .id("summary-back")
@@ -425,7 +430,7 @@ impl ContactsApp {
         };
         div()
             .child(top)
-            .child(large_title(theme, "Contacts", None))
+            .child(large_title(window, theme, "Contacts", None))
             .child(body)
             .into_any_element()
     }

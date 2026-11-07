@@ -491,7 +491,7 @@ impl ContactsApp {
                         .on_click(cx.listener(|this, _, _, cx| this.finish_picker(cx))),
                     ),
             )
-            .child(large_title(theme, title, None).pt(px(8.0)))
+            .child(large_title(window, theme, title, None).pt(px(8.0)))
             .child(self.search_box(&field, theme, window, cx))
             .child(
                 div()

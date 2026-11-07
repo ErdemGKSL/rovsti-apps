@@ -12,7 +12,9 @@ use liquid_glass_kit::{
 use crate::motion::press_scale;
 
 /// Large title at the top of a screen, with an optional trailing accessory.
+/// Its top padding clears the status bar / cutout (`content_top(safe.top)`).
 pub fn large_title(
+    window: &gpui::Window,
     theme: Theme,
     title: impl Into<SharedString>,
     trailing: Option<AnyElement>,
@@ -23,7 +25,9 @@ pub fn large_title(
         .items_end()
         .justify_between()
         .px(metrics::ROW_INSET)
-        .pt(px(56.0))
+        .pt(px(crate::layout::geom::content_top(
+            crate::layout::safe_area(window).top,
+        )))
         .pb(px(8.0))
         .child(
             // Shrinks beside the accessory, so a long title (a group's or a

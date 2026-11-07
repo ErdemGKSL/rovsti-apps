@@ -14,7 +14,6 @@ use rovsti_core::call::format_elapsed;
 use rovsti_ui::{
     Icon,
     glass::{GlassInteraction, GlassSpec, glass_interactive},
-    tab_bar::content_bottom_inset_with,
     theme::{self, call_colors},
     tokens::{Theme, metrics, shadow, typography},
     touch::touch_surface,
@@ -171,9 +170,11 @@ impl PhoneApp {
             .aria_label(SharedString::from(notice.text()))
             .absolute()
             .bottom(
-                content_bottom_inset_with(self.safe_bottom)
-                    + px(ABOVE_BAR - DROP * (1.0 - v)
-                        + (BANNER_H + 8.0) * self.pill_in.value.clamp(0.0, 1.0)),
+                px(rovsti_ui::layout::geom::content_bottom(
+                    self.safe_bottom,
+                    0.0,
+                )) + px(ABOVE_BAR - DROP * (1.0 - v)
+                    + (BANNER_H + 8.0) * self.pill_in.value.clamp(0.0, 1.0)),
             )
             .left_0()
             .right_0()
@@ -253,7 +254,10 @@ impl PhoneApp {
         let stacked = if banner && pill { BANNER_H + 8.0 } else { 0.0 };
         Some(
             window.viewport_size().height
-                - content_bottom_inset_with(self.safe_bottom)
+                - px(rovsti_ui::layout::geom::content_bottom(
+                    self.safe_bottom,
+                    0.0,
+                ))
                 - px(ABOVE_BAR + BANNER_H + stacked),
         )
     }
@@ -299,7 +303,10 @@ impl PhoneApp {
                 .aria_label(self.pill_text.clone())
                 .absolute()
                 .bottom(
-                    content_bottom_inset_with(self.safe_bottom) + px(ABOVE_BAR - DROP * (1.0 - v)),
+                    px(rovsti_ui::layout::geom::content_bottom(
+                        self.safe_bottom,
+                        0.0,
+                    )) + px(ABOVE_BAR - DROP * (1.0 - v)),
                 )
                 .left_0()
                 .right_0()

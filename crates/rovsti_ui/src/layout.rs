@@ -115,6 +115,17 @@ pub mod geom {
         safe_bottom + TAB_BAR_GAP + TAB_BAR_H + CONTENT_GAP + keyboard
     }
 
+    /// Distance from the window bottom to the resting bar's bottom edge.
+    pub fn tab_bar_bottom(safe_bottom: f32) -> f32 {
+        safe_bottom + TAB_BAR_GAP
+    }
+
+    /// Height of the slot that hosts the bar: the bar plus 10% for its press
+    /// swell, sitting above the bottom inset and gap.
+    pub fn tab_bar_slot_h(safe_bottom: f32) -> f32 {
+        tab_bar_bottom(safe_bottom) + TAB_BAR_H * 1.1
+    }
+
     /// Top inset for content below the status bar / cutout.
     pub fn content_top(safe_top: f32) -> f32 {
         safe_top + TOP_GAP
@@ -174,6 +185,21 @@ pub fn safe_area(window: &Window) -> SafeArea {
     merge_safe_area(real, SIMULATED.with(std::cell::Cell::get))
 }
 
+/// Keyboard height still covering the window (`ime - consumed`), in dp.
+pub fn keyboard_inset(window: &Window) -> f32 {
+    let i = window.insets();
+    f32::from((i.ime.bottom - i.consumed.bottom).max(gpui::px(0.0)))
+}
+
+/// The one bottom padding every scrollable view reserves so its last row
+/// clears the floating tab bar: [`safe_area`] bottom, bar, gaps and keyboard.
+pub fn content_bottom_inset(window: &Window) -> gpui::Pixels {
+    gpui::px(geom::content_bottom(
+        safe_area(window).bottom,
+        keyboard_inset(window),
+    ))
+}
+
 fn merge_safe_area(real: SafeArea, simulated: Option<SafeArea>) -> SafeArea {
     match simulated {
         None => real,
@@ -202,6 +228,14 @@ mod tests {
         assert_eq!(avatar_stack_width(1, 26.0, 10.0), 26.0);
         // Overlap larger than the diameter cannot shrink below one avatar.
         assert_eq!(avatar_stack_width(3, 26.0, 40.0), 26.0);
+    }
+
+    #[test]
+    fn bar_sits_above_bottom_inset() {
+        assert_eq!(tab_bar_bottom(16.0), 24.0);
+        assert!(tab_bar_slot_h(16.0) > tab_bar_bottom(16.0) + TAB_BAR_H);
+        assert!(content_bottom(16.0, 0.0) >= tab_bar_bottom(16.0) + TAB_BAR_H);
+        assert_eq!(tab_bar_slot_h(0.0), 8.0 + 56.0 * 1.1);
     }
 
     #[test]

@@ -561,7 +561,7 @@ impl ContactsApp {
                 )
                 .into_any_element();
         }
-        let title = large_title(theme, TABS[GROUPS_TAB], None);
+        let title = large_title(window, theme, TABS[GROUPS_TAB], None);
         if let Some(state) = self.book_state(theme, cx) {
             return div().child(title).child(state).into_any_element();
         }
@@ -696,7 +696,7 @@ impl ContactsApp {
             // The gap above the first contact.
             .when(empty.is_none(), |header| header.pb(px(8.0)))
             .child(top)
-            .child(large_title(theme, title, None))
+            .child(large_title(window, theme, title, None))
             .child(section(
                 theme,
                 None,

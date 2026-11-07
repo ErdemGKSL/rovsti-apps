@@ -23,7 +23,7 @@ use rovsti_ui::{
         empty_state, flat_glass, glass_icon_button, glass_pill, large_title, list_row, section,
     },
     theme::{self, hue_pair},
-    tokens::{Theme, metrics, radius, typography},
+    tokens::{Theme, radius, typography},
 };
 
 use crate::{ContactsApp, backend, confirm::Confirm, photos::photo_avatar};
@@ -238,7 +238,12 @@ impl ContactsApp {
     }
 
     /// The page: chips with counts, then the matching contacts.
-    pub(crate) fn cleanup_page(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn cleanup_page(
+        &mut self,
+        window: &gpui::Window,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = theme::colors(theme);
         let chip = self.cleanup_ui.chip.min(3);
         let selecting = self.cleanup_ui.select.as_ref().map(Selection::len);
@@ -329,7 +334,7 @@ impl ContactsApp {
         };
         div()
             .child(top)
-            .child(large_title(theme, title, trailing))
+            .child(large_title(window, theme, title, trailing))
             .child(chips)
             .child(body)
             .into_any_element()
@@ -379,6 +384,7 @@ impl ContactsApp {
     /// Delete for the ticked contacts, in place of the tab bar.
     pub(crate) fn cleanup_bar_view(
         &self,
+        safe_bottom: f32,
         theme: Theme,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
@@ -421,7 +427,7 @@ impl ContactsApp {
             div()
                 .id("cleanup-select-bar")
                 .absolute()
-                .bottom(metrics::TAB_BAR_MARGIN)
+                .bottom(px(rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)))
                 .left(px(8.0))
                 .right(px(8.0))
                 .flex()

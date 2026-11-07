@@ -67,8 +67,9 @@ use rovsti_ui::{
     current_theme,
     field::{Bare, TextField, bare_field},
     glass::{GlassSpec, glass},
+    layout::content_bottom_inset,
     sheet::Sheet,
-    tab_bar::{Tab, TabBar, content_bottom_inset},
+    tab_bar::{Tab, TabBar},
     theme::{self, hue_pair},
     tokens::{Theme, metrics, shadow, typography},
 };
@@ -1062,7 +1063,7 @@ impl ContactsApp {
     }
 
     /// The shared WhatsApp settings screen, pushed over Settings.
-    fn whatsapp_page(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn whatsapp_page(&self, window: &Window, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         div()
             .child(
                 div().px(px(8.0)).pt(px(48.0)).child(
@@ -1071,7 +1072,7 @@ impl ContactsApp {
                         .on_click(cx.listener(|this, _, _, cx| this.set_whatsapp_open(false, cx))),
                 ),
             )
-            .child(large_title(theme, "WhatsApp", None))
+            .child(large_title(window, theme, "WhatsApp", None))
             .child(self.whatsapp.clone())
             .into_any_element()
     }
@@ -1864,7 +1865,7 @@ impl ContactsApp {
         div()
             .flex()
             .flex_col()
-            .child(large_title(theme, TABS[CONTACTS_TAB], trailing))
+            .child(large_title(window, theme, TABS[CONTACTS_TAB], trailing))
             .child(self.search_field(theme, window, cx))
             .children(my_card_row)
             .children(viewed_row)
@@ -1939,7 +1940,7 @@ impl ContactsApp {
         div()
             .flex()
             .flex_col()
-            .child(large_title(theme, TABS[FAVORITES_TAB], trailing))
+            .child(large_title(window, theme, TABS[FAVORITES_TAB], trailing))
             .children(upcoming)
             .children(body)
             .into_any_element()
@@ -2281,7 +2282,7 @@ impl ContactsApp {
         self.notice_timer = Some((text, task));
     }
 
-    fn notice(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn notice(&self, window: &Window, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let colors = theme::colors(theme);
         let text = self.notice.clone()?;
         let undo = self.notice_action.map(|action| {
@@ -2310,7 +2311,7 @@ impl ContactsApp {
                 .left_0()
                 .right_0()
                 .bottom(
-                    content_bottom_inset()
+                    content_bottom_inset(window)
                         + px(8.0)
                         // Above the viewer's bottom bar.
                         + px(if self.viewer.is_some() || self.crop.is_some() {
@@ -2395,9 +2396,8 @@ impl Render for ContactsApp {
         let picking = self.picker.is_some();
 
         // The keyboard covers the bottom of the screen: leave room to scroll.
-        let insets = window.insets();
-        let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
-        let bottom = content_bottom_inset() + keyboard;
+        let keyboard = px(rovsti_ui::layout::keyboard_inset(window));
+        let bottom = content_bottom_inset(window);
         let focused_field = ui::take_focused_field_bounds();
         if editing {
             self.reveal_focused_field(focused_field, keyboard, window, cx);
@@ -2423,21 +2423,21 @@ impl Render for ContactsApp {
             );
             (page, true)
         } else if self.upcoming_open && tab == FAVORITES_TAB {
-            (self.upcoming_page(theme, cx), false)
+            (self.upcoming_page(window, theme, cx), false)
         } else if self.recent_open && tab == CONTACTS_TAB {
-            (self.recent_page(theme, cx), false)
+            (self.recent_page(window, theme, cx), false)
         } else if self.emergency_open && tab == SETTINGS_TAB {
-            (self.emergency_page(theme, cx), false)
+            (self.emergency_page(window, theme, cx), false)
         } else if self.summary_open && tab == SETTINGS_TAB {
-            (self.summary_page(theme, cx), false)
+            (self.summary_page(window, theme, cx), false)
         } else if self.cleanup_ui.open && tab == SETTINGS_TAB {
-            (self.cleanup_page(theme, cx), false)
+            (self.cleanup_page(window, theme, cx), false)
         } else if self.trash_ui.open && tab == SETTINGS_TAB {
-            (self.trash_page(theme, cx), false)
+            (self.trash_page(window, theme, cx), false)
         } else if self.dupes.open && tab == SETTINGS_TAB {
-            (self.dupes_page(theme, cx), false)
+            (self.dupes_page(window, theme, cx), false)
         } else if self.whatsapp_open && tab == SETTINGS_TAB {
-            (self.whatsapp_page(theme, cx), false)
+            (self.whatsapp_page(window, theme, cx), false)
         } else {
             match tab {
                 CONTACTS_TAB => {
@@ -2460,7 +2460,7 @@ impl Render for ContactsApp {
                 ),
                 _ => (
                     div()
-                        .child(large_title(theme, TABS[tab], None))
+                        .child(large_title(window, theme, TABS[tab], None))
                         .child(self.settings_tab(theme, cx))
                         .into_any_element(),
                     false,
@@ -2499,13 +2499,13 @@ impl Render for ContactsApp {
             ))
             .child(scroller)
             .children(if self.viewer.is_none() && self.crop.is_none() {
-                self.notice(theme, cx)
+                self.notice(window, theme, cx)
             } else {
                 None
             })
-            .children(self.select_bar_view(theme, cx))
-            .children(self.trash_bar_view(theme, cx))
-            .children(self.cleanup_bar_view(theme, cx))
+            .children(self.select_bar_view(rovsti_ui::layout::safe_area(window).bottom, theme, cx))
+            .children(self.trash_bar_view(rovsti_ui::layout::safe_area(window).bottom, theme, cx))
+            .children(self.cleanup_bar_view(rovsti_ui::layout::safe_area(window).bottom, theme, cx))
             .children(self.select.is_some().then(|| {
                 let entity = cx.entity();
                 canvas(
@@ -2532,6 +2532,7 @@ impl Render for ContactsApp {
                 .then(|| {
                     self.tabs.render(
                         theme,
+                        rovsti_ui::layout::safe_area(window).bottom,
                         move |index, _, cx| {
                             entity.update(cx, |this, cx| {
                                 this.tabs.press();
@@ -2603,7 +2604,7 @@ impl Render for ContactsApp {
             .children(self.photo_crop_overlay(theme, window, cx))
             // The pill sits above the viewer, which hides the one under the page.
             .children(if self.viewer.is_some() || self.crop.is_some() {
-                self.notice(theme, cx)
+                self.notice(window, theme, cx)
             } else {
                 None
             })

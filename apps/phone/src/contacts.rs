@@ -837,8 +837,7 @@ impl PhoneApp {
     fn list_limit(window: &Window) -> f32 {
         // The floating tab bar sits over the bottom of the list.
         f32::from(
-            window.viewport_size().height
-                - rovsti_ui::tab_bar::content_bottom_inset_with(crate::safe_bottom(window))
+            window.viewport_size().height - rovsti_ui::layout::content_bottom_inset(window)
                 + metrics::TAB_BAR_MARGIN,
         )
     }
@@ -2041,9 +2040,7 @@ impl PhoneApp {
                     .relative()
                     .w_full()
                     .h(px(GRID_ROW_H))
-                    .mb(rovsti_ui::tab_bar::content_bottom_inset_with(
-                        crate::safe_bottom(window),
-                    ))
+                    .mb(rovsti_ui::layout::content_bottom_inset(window))
                     .child(self.frequent_block(theme, width, cx))
                     .child(pointer_surface(
                         Rc::clone(&self.favorites.bounds),

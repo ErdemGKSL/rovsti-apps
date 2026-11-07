@@ -24,7 +24,7 @@ use rovsti_ui::{
     components::{flat_glass, glass_icon_button, glass_pill, large_title, list_row, section},
     sheet::Sheet,
     theme::{self, hue_pair},
-    tokens::{Theme, metrics, radius, typography},
+    tokens::{Theme, radius, typography},
 };
 
 use crate::{
@@ -371,7 +371,12 @@ impl ContactsApp {
     }
 
     /// The page: deleted contacts, newest first.
-    pub(crate) fn trash_page(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn trash_page(
+        &mut self,
+        window: &Window,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = theme::colors(theme);
         let items = rows(&self.trash, now_ms());
         let selecting = self.trash_ui.select.as_ref().map(Selection::len);
@@ -448,7 +453,7 @@ impl ContactsApp {
         };
         div()
             .child(top)
-            .child(large_title(theme, title, trailing))
+            .child(large_title(window, theme, title, trailing))
             .child(body)
             .into_any_element()
     }
@@ -494,6 +499,7 @@ impl ContactsApp {
     /// Restore and Delete forever for the ticked entries, in place of the tab bar.
     pub(crate) fn trash_bar_view(
         &self,
+        safe_bottom: f32,
         theme: Theme,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
@@ -544,7 +550,7 @@ impl ContactsApp {
             div()
                 .id("trash-select-bar")
                 .absolute()
-                .bottom(metrics::TAB_BAR_MARGIN)
+                .bottom(px(rovsti_ui::layout::geom::tab_bar_bottom(safe_bottom)))
                 .left(px(8.0))
                 .right(px(8.0))
                 .flex()

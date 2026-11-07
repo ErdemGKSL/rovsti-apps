@@ -207,6 +207,10 @@ pub struct Rig<V: 'static> {
     _exclusive: std::sync::MutexGuard<'static, ()>,
 }
 
+/// Simulated status-bar and home-indicator insets of every shot (dp).
+const SIM_SAFE_TOP: f32 = 24.0;
+const SIM_SAFE_BOTTOM: f32 = 16.0;
+
 static RIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl<V: Render + 'static> Rig<V> {
@@ -220,6 +224,13 @@ impl<V: Render + 'static> Rig<V> {
         crate::field::set_blink(false);
         FrameClock::set_fixed_step(Some(FRAME));
         set_theme_override(Some(spec.theme));
+        // A typical gesture-nav phone: status bar on top, home indicator below.
+        crate::layout::set_simulated_safe_area(Some(crate::layout::SafeArea {
+            top: SIM_SAFE_TOP,
+            bottom: SIM_SAFE_BOTTOM,
+            left: 0.0,
+            right: 0.0,
+        }));
         let px_size = size(
             DevicePixels((spec.size.width as i32) * SCALE as i32),
             DevicePixels((spec.size.height as i32) * SCALE as i32),
@@ -441,7 +452,7 @@ mod tests {
                             cx,
                         )),
                 )
-                .child(self.tabs.render(theme, |_, _, _| {}, |_, _, _| {}))
+                .child(self.tabs.render(theme, 0.0, |_, _, _| {}, |_, _, _| {}))
         }
     }
 

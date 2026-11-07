@@ -1122,7 +1122,7 @@ impl ContactsApp {
             .gap(px(20.0))
             .pb(px(24.0))
             .child(top)
-            .child(large_title(theme, title, None))
+            .child(large_title(window, theme, title, None))
             .child(photo_head)
             .children(editor.error.clone().map(|error| {
                 div()

@@ -376,7 +376,12 @@ impl ContactsApp {
     }
 
     /// The page: the list with Call and remove, Add, and Share.
-    pub(crate) fn emergency_page(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn emergency_page(
+        &mut self,
+        window: &gpui::Window,
+        theme: Theme,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = theme::colors(theme);
         let top = div().px(px(8.0)).pt(px(48.0)).child(
             glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
@@ -437,7 +442,7 @@ impl ContactsApp {
             .flex_col()
             .gap(px(20.0))
             .child(top)
-            .child(large_title(theme, "Emergency contacts", None))
+            .child(large_title(window, theme, "Emergency contacts", None))
             .child(list)
             .child(actions)
             .child(

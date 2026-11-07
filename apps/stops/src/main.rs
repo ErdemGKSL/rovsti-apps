@@ -32,10 +32,11 @@ use rovsti_ui::{
     components::large_title,
     current_theme,
     field::TextField,
+    layout::content_bottom_inset,
     motion::{Entrance, Motion},
     notice_pill::{NoticePill, PillEvent},
     sheet::Sheet,
-    tab_bar::{Tab, TabBar, content_bottom_inset},
+    tab_bar::{Tab, TabBar},
     tokens::{Theme, metrics},
 };
 use rovsti_wa_ui::{AppId, WhatsAppSettings};
@@ -796,7 +797,9 @@ impl StopsApp {
         } else if keyboard > 0.0 {
             keyboard + GAP
         } else {
-            f32::from(metrics::TAB_BAR_MARGIN) + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1 + GAP
+            rovsti_ui::layout::geom::tab_bar_bottom(rovsti_ui::layout::safe_area(window).bottom)
+                + f32::from(metrics::TAB_BAR_HEIGHT)
+                + GAP
         }
     }
 
@@ -850,9 +853,7 @@ impl Render for StopsApp {
         let titled = tab != 2 || self.settings_page == SettingsPage::Main;
 
         // The keyboard covers the bottom of the screen: leave room to scroll.
-        let insets = window.insets();
-        let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
-        let bottom = content_bottom_inset() + keyboard;
+        let bottom = content_bottom_inset(window);
         let progress = self.page.progress();
         let offset = px(self.page.offset(24.0));
         let page = match body {
@@ -866,7 +867,7 @@ impl Render for StopsApp {
                     div()
                         .relative()
                         .top(offset)
-                        .children(titled.then(|| large_title(theme, TABS[tab], None)))
+                        .children(titled.then(|| large_title(window, theme, TABS[tab], None)))
                         .child(body),
                 ),
             // Only the rows on screen are built; the list scrolls itself.
@@ -896,6 +897,7 @@ impl Render for StopsApp {
             .child(page)
             .child(self.tabs.render(
                 theme,
+                rovsti_ui::layout::safe_area(window).bottom,
                 move |index, _, cx| {
                     entity.update(cx, |this, cx| {
                         this.tabs.press();

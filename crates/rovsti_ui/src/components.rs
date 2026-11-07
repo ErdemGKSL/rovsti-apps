@@ -13,6 +13,8 @@ use crate::motion::press_scale;
 
 /// Large title at the top of a screen, with an optional trailing accessory.
 /// Its top padding clears the status bar / cutout (`content_top(safe.top)`).
+/// Screens with action buttons use [`crate::page::PageHeader`]; this stays for
+/// callers that bring their own accessory.
 pub fn large_title(
     window: &gpui::Window,
     theme: Theme,
@@ -28,7 +30,7 @@ pub fn large_title(
         .pt(px(crate::layout::geom::content_top(
             crate::layout::safe_area(window).top,
         )))
-        .pb(px(8.0))
+        .pb(px(crate::layout::space::S))
         .child(
             // Shrinks beside the accessory, so a long title (a group's or a
             // contact's name) wraps instead of running off the screen.
@@ -156,34 +158,14 @@ pub fn glass_pill(theme: Theme, label: impl Into<SharedString>) -> Div {
         .child(label.into())
 }
 
-/// Centred empty-state message.
+/// Centred empty-state message without icon or action; see
+/// [`crate::page::empty_state`] for the full form.
 pub fn empty_state(
     theme: Theme,
     title: impl Into<SharedString>,
     body: impl Into<SharedString>,
 ) -> impl IntoElement {
-    let colors = crate::theme::colors(theme);
-    div()
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap(px(6.0))
-        .px(px(32.0))
-        .py(px(48.0))
-        .child(
-            div()
-                .text_size(typography::TITLE3.size)
-                .font_weight(typography::TITLE3.weight)
-                .text_color(colors.label)
-                .child(title.into()),
-        )
-        .child(
-            div()
-                .text_size(typography::SUBHEADLINE.size)
-                .text_color(colors.secondary_label)
-                .text_center()
-                .child(body.into()),
-        )
+    crate::page::empty_state(theme, None, title, body, None)
 }
 
 /// Screen background with a soft colour wash, so glass chrome has something

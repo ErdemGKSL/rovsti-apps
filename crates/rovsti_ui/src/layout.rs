@@ -31,6 +31,19 @@ pub const HIT: f32 = 44.0;
 pub const CHIP_H: f32 = 32.0;
 /// Source badge on an avatar corner.
 pub const SOURCE_BADGE: f32 = 16.0;
+/// Glyph size inside a header action button.
+pub const HEADER_ICON: f32 = 22.0;
+/// Header actions shown at most; more belong in a menu.
+pub const HEADER_MAX_ACTIONS: usize = 2;
+/// Gap between the glass circles of neighbouring header actions.
+pub const HEADER_ACTION_GAP: f32 = space::S;
+/// Empty-state icon size.
+pub const EMPTY_ICON: f32 = 48.0;
+/// Empty-state widest text column.
+pub const EMPTY_MAX_W: f32 = 320.0;
+/// Section header gap above and below its text.
+pub const SECTION_TOP: f32 = space::XXL;
+pub const SECTION_BOTTOM: f32 = space::S;
 
 /// Floating tab bar height; mirrors `liquid_glass_kit::tokens::metrics::TAB_BAR_HEIGHT`.
 pub const TAB_BAR_H: f32 = 56.0;
@@ -124,6 +137,45 @@ pub mod geom {
     /// swell, sitting above the bottom inset and gap.
     pub fn tab_bar_slot_h(safe_bottom: f32) -> f32 {
         tab_bar_bottom(safe_bottom) + TAB_BAR_H * 1.1
+    }
+
+    /// How many of `count` header actions are shown (at most
+    /// [`HEADER_MAX_ACTIONS`]).
+    pub fn header_visible_actions(count: usize) -> usize {
+        count.min(HEADER_MAX_ACTIONS)
+    }
+
+    /// Gap between the 44 dp hit boxes of neighbouring header actions so the
+    /// 40 dp glass circles inside are [`HEADER_ACTION_GAP`] apart.
+    pub fn header_hit_gap() -> f32 {
+        HEADER_ACTION_GAP - (HIT - BUTTON)
+    }
+
+    /// Width of the action cluster (hit boxes plus gaps); 0 for none.
+    pub fn header_actions_width(count: usize) -> f32 {
+        let n = header_visible_actions(count);
+        if n == 0 {
+            return 0.0;
+        }
+        n as f32 * HIT + (n - 1) as f32 * header_hit_gap()
+    }
+
+    /// Right padding of the header row so the last glass circle's edge sits on
+    /// the screen margin (the hit box extends past it by half the difference).
+    pub fn header_right_pad() -> f32 {
+        MARGIN - (HIT - BUTTON) / 2.0
+    }
+
+    /// Width available to the header title beside `count` actions.
+    pub fn header_title_width(screen_w: f32, count: usize) -> f32 {
+        let actions = header_actions_width(count);
+        let gap = if actions > 0.0 { space::S } else { 0.0 };
+        (screen_w - MARGIN - header_right_pad() - actions - gap).max(0.0)
+    }
+
+    /// Width of the empty-state text column in `available` width.
+    pub fn empty_state_width(available: f32) -> f32 {
+        (available - MARGIN * 2.0).clamp(0.0, EMPTY_MAX_W)
     }
 
     /// Top inset for content below the status bar / cutout.
@@ -374,5 +426,36 @@ mod tests {
         assert_eq!(SIMULATED.with(std::cell::Cell::get), Some(sim));
         set_simulated_safe_area(None);
         assert_eq!(SIMULATED.with(std::cell::Cell::get), None);
+    }
+
+    #[test]
+    fn header_actions_cap_and_geometry() {
+        assert_eq!(geom::header_visible_actions(0), 0);
+        assert_eq!(geom::header_visible_actions(5), 2);
+        assert_eq!(geom::header_hit_gap(), 4.0);
+        assert_eq!(geom::header_actions_width(0), 0.0);
+        assert_eq!(geom::header_actions_width(1), 44.0);
+        assert_eq!(geom::header_actions_width(2), 92.0);
+        // Three requested = two shown.
+        assert_eq!(geom::header_actions_width(3), 92.0);
+        // The last glass circle ends exactly on the margin: 14 + 2 inside the hit box.
+        assert_eq!(geom::header_right_pad() + (HIT - BUTTON) / 2.0, MARGIN);
+    }
+
+    #[test]
+    fn header_title_fits_beside_actions() {
+        let w = 412.0;
+        let none = geom::header_title_width(w, 0);
+        let two = geom::header_title_width(w, 2);
+        assert_eq!(none, w - MARGIN - 14.0);
+        assert_eq!(two, none - 92.0 - space::S);
+        assert_eq!(geom::header_title_width(50.0, 2), 0.0);
+    }
+
+    #[test]
+    fn empty_state_width_is_capped() {
+        assert_eq!(geom::empty_state_width(412.0), 320.0);
+        assert_eq!(geom::empty_state_width(300.0), 268.0);
+        assert_eq!(geom::empty_state_width(10.0), 0.0);
     }
 }

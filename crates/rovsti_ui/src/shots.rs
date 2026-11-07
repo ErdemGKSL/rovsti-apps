@@ -353,6 +353,8 @@ impl<V: Render + 'static> Rig<V> {
 mod field_touch;
 #[cfg(test)]
 mod fields;
+#[cfg(test)]
+mod layout;
 
 #[cfg(test)]
 mod tests {

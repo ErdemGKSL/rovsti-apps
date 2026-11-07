@@ -56,6 +56,9 @@ pub mod kind {
     /// A sibling app asked this one to call or chat on WhatsApp
     /// (`{action, jid, name}`); one-shot, queued until the UI attaches.
     pub const HANDOFF: &str = "handoff";
+    /// A birthday notification was tapped (`{id}`, the contact id); one-shot,
+    /// queued until the UI attaches. See [`parse_open_contact`].
+    pub const OPEN_CONTACT: &str = "open_contact";
     /// Rovsti Stops: the trip service applied a fix (`rovsti_geo::session::FixOut`).
     pub const TRIP_STATUS: &str = "trip_status";
     /// Rovsti Stops: the alarm rang, snoozed or was dismissed; see
@@ -87,6 +90,13 @@ pub fn parse_wa_call_action(json: &str) -> Option<(String, WaCallAction)> {
         _ => return None,
     };
     Some((id.to_owned(), action))
+}
+
+/// Decodes an `open_contact` payload into the contact id. `None` for
+/// malformed JSON, a missing or non-integer id, or an id below 1.
+pub fn parse_open_contact(json: &str) -> Option<i64> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    value.get("id")?.as_i64().filter(|id| *id > 0)
 }
 
 /// One undecoded event.
@@ -177,6 +187,24 @@ mod tests {
     fn message_reminder_event_names_match_kotlin() {
         assert_eq!(kind::MESSAGE_REMINDERS_CHANGED, "message_reminders_changed");
         assert_eq!(kind::MESSAGE_REMINDER_FIRED, "message_reminder_fired");
+    }
+
+    #[test]
+    fn open_contact_payload_parses() {
+        assert_eq!(kind::OPEN_CONTACT, "open_contact");
+        assert_eq!(parse_open_contact(r#"{"id":42}"#), Some(42));
+        assert_eq!(parse_open_contact(r#"{"id":42,"x":1}"#), Some(42));
+        for bad in [
+            "",
+            "{}",
+            r#"{"id":"7"}"#,
+            r#"{"id":0}"#,
+            r#"{"id":-3}"#,
+            r#"{"id":1.5}"#,
+            "[1]",
+        ] {
+            assert_eq!(parse_open_contact(bad), None, "{bad}");
+        }
     }
 
     #[test]

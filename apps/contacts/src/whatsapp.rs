@@ -311,6 +311,7 @@ impl ContactsApp {
                 this.update(cx, |this, cx| {
                     let changed = this.wa.offset_s != locale.tz_offset_s;
                     this.wa.offset_s = locale.tz_offset_s;
+                    this.locale = locale;
                     if changed {
                         // "Today" moves with the zone.
                         this.load_upcoming(cx);

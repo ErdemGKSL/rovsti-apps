@@ -185,6 +185,11 @@ impl ContactsApp {
             self.on_document_result(&event.json, cx);
         } else if event.kind == kind::WA_PUSH {
             self.whatsapp.update(cx, |w, cx| w.wake(cx));
+        } else if event.kind == kind::OPEN_CONTACT {
+            match rovsti_android::events::parse_open_contact(&event.json) {
+                Some(id) => self.open_contact_from_event(id, cx),
+                None => log::warn!("bad open_contact: {}", event.json),
+            }
         }
     }
 

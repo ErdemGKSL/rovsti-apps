@@ -235,7 +235,6 @@ pub(crate) fn drafts_of(ids: &[i64]) -> Result<Vec<ContactDraft>, String> {
 
 /// Calls with any of `numbers`, newest first (cellular only; local call log).
 /// Without the call-log permission or on desktop this is an error in words.
-#[allow(dead_code, reason = "wired to the card in a later step")]
 pub(crate) fn call_history(numbers: &[String]) -> Result<Vec<HistoryLine>, String> {
     let payload: CallLogPayload =
         decode(providers::call_log(PULL_LIMIT)).map_err(|error| error.words())?;
@@ -245,7 +244,6 @@ pub(crate) fn call_history(numbers: &[String]) -> Result<Vec<HistoryLine>, Strin
 
 /// Makes entry `index` of the contact's numbers (or e-mails, when `emails`) its
 /// default, or clears the default when `index` is `None`, and saves.
-#[allow(dead_code, reason = "wired to the field sheet in a later step")]
 pub(crate) fn set_default(
     draft: &ContactDraft,
     emails: bool,
@@ -295,7 +293,6 @@ pub(crate) fn group_email(addresses: &[String]) -> Result<(), String> {
 
 /// Brings the armed birthday alarms in line with `upcoming`: arms the missing
 /// ones and disarms the stale ones. With reminders off, disarms them all.
-#[allow(dead_code, reason = "wired to Settings in a later step")]
 pub(crate) fn sync_birthdays(
     prefs: &ContactsPrefs,
     upcoming: &[Upcoming],

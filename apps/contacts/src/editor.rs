@@ -38,6 +38,8 @@ pub(crate) struct FieldRow {
     text: Entity<TextField>,
     kind: FieldKind,
     label: Option<String>,
+    /// The entry's default flag, kept as it was read and written back unchanged.
+    primary: bool,
 }
 
 impl FieldRow {
@@ -170,6 +172,7 @@ fn make_rows(
             text: make_field(config, &f.value, cx),
             kind: f.kind,
             label: f.label.clone(),
+            primary: f.primary,
         })
         .collect()
 }
@@ -236,7 +239,7 @@ impl Editor {
                     value: r.text.read(cx).text().to_owned(),
                     kind: r.kind,
                     label: r.label.clone(),
-                    primary: false,
+                    primary: r.primary,
                 })
                 .collect()
         };
@@ -382,6 +385,7 @@ impl ContactsApp {
                     text,
                     kind: set.first_kind(),
                     label: None,
+                    primary: false,
                 });
             }
         }

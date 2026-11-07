@@ -11,6 +11,24 @@ use crate::contact_edit::EventKind;
 
 /// The default local hour of a reminder.
 pub const DEFAULT_HOUR: u8 = 9;
+/// The hours the Settings time rows offer.
+pub const HOUR_CHOICES: [u8; 5] = [7, 8, 9, 10, 12];
+
+/// "7:00", or "7:00 am" / "12:00 pm" on a 12-hour clock.
+pub fn hour_label(hour: u8, hour12: bool) -> String {
+    let hour = hour.min(23);
+    if !hour12 {
+        return format!("{hour}:00");
+    }
+    let (shown, suffix) = match hour {
+        0 => (12, "am"),
+        1..=11 => (hour, "am"),
+        12 => (12, "pm"),
+        _ => (hour - 12, "pm"),
+    };
+    format!("{shown}:00 {suffix}")
+}
+
 /// How far ahead alarms are armed, in days.
 pub const HORIZON_DAYS: u16 = 60;
 
@@ -145,6 +163,17 @@ pub fn diff<'a>(armed: &[i64], wanted: &'a [BirthdayAlarm]) -> (Vec<i64>, Vec<&'
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hour_labels_follow_the_clock_style() {
+        assert_eq!(hour_label(7, false), "7:00");
+        assert_eq!(hour_label(7, true), "7:00 am");
+        assert_eq!(hour_label(12, true), "12:00 pm");
+        assert_eq!(hour_label(0, true), "12:00 am");
+        assert_eq!(hour_label(15, true), "3:00 pm");
+        assert_eq!(hour_label(99, false), "23:00");
+        assert!(HOUR_CHOICES.contains(&DEFAULT_HOUR));
+    }
 
     // 2024-03-10 08:00 UTC.
     const NOW: i64 = 1_710_057_600_000;

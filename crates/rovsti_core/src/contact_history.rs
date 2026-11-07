@@ -3,7 +3,10 @@
 //! [`recents::history_text`](crate::recents::history_text); this module only
 //! holds the limits, the header and the permission text.
 
-use crate::{contacts_view::recent_when, recents::HistoryLine};
+use crate::{
+    contacts_view::recent_when,
+    recents::{HistoryLine, LocaleTime, history_text},
+};
 
 /// Calls shown on the card.
 pub const CARD_LIMIT: usize = 5;
@@ -30,6 +33,19 @@ pub fn summary_at(lines: &[HistoryLine], now_ms: i64, tz_offset_s: i32) -> Optio
         when
     };
     Some(format!("{count}, last call {when}"))
+}
+
+/// Title and detail of the lines the card shows: the newest [`CARD_LIMIT`].
+pub fn history_rows(
+    lines: &[HistoryLine],
+    now_ms: i64,
+    locale: LocaleTime,
+) -> Vec<(String, String)> {
+    lines
+        .iter()
+        .take(CARD_LIMIT)
+        .map(|line| history_text(line, now_ms, locale))
+        .collect()
 }
 
 /// Title and body of the call-log permission prompt.
@@ -61,6 +77,16 @@ mod tests {
             duration_s: 10,
             number: "555".to_owned(),
         }
+    }
+
+    #[test]
+    fn history_rows_map_lines_and_stop_at_the_card_limit() {
+        let lines: Vec<HistoryLine> = (0..8).map(|i| line(i, NOW - i * 1000)).collect();
+        let rows = history_rows(&lines, NOW, LocaleTime::default());
+        assert_eq!(rows.len(), CARD_LIMIT);
+        assert_eq!(rows[0].0, "Incoming call");
+        assert!(rows[0].1.ends_with("0:10"), "{:?}", rows[0]);
+        assert!(history_rows(&[], NOW, LocaleTime::default()).is_empty());
     }
 
     #[test]

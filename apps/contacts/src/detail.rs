@@ -9,7 +9,7 @@ use gpui::{
 use rovsti_core::{
     contact_card::ContactCard,
     contact_dates,
-    contact_edit::{ContactDraft, DraftEvent, EventKind, web_url},
+    contact_edit::{ContactDraft, DraftEvent, DraftField, EventKind, default_action, web_url},
     contact_select, vcard,
 };
 use rovsti_ui::{
@@ -26,14 +26,53 @@ use crate::{
     ui::{Tone, tap_row},
 };
 
+/// Where a number or email sits among its siblings in the full contact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Slot {
+    pub index: usize,
+    pub count: usize,
+    pub primary: bool,
+}
+
+/// The same entry in two spellings: numbers by their digits (and `+`), other
+/// text ignoring case and outer spaces.
+fn same_entry(a: &str, b: &str) -> bool {
+    fn key(s: &str) -> String {
+        let s = s.trim();
+        if s.chars().any(|c| c.is_ascii_digit()) {
+            s.chars()
+                .filter(|c| c.is_ascii_digit() || *c == '+')
+                .collect()
+        } else {
+            s.to_lowercase()
+        }
+    }
+    key(a) == key(b)
+}
+
+/// Where `value` sits in `fields`, or `None` when it is not there.
+pub(crate) fn slot_of(fields: &[DraftField], value: &str) -> Option<Slot> {
+    let index = fields.iter().position(|f| same_entry(&f.value, value))?;
+    Some(Slot {
+        index,
+        count: fields.len(),
+        primary: fields[index].primary,
+    })
+}
+
 /// What the field sheet acts on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum FieldTarget {
     Number {
         raw: String,
         display: String,
+        /// `None` while the full contact is still loading.
+        slot: Option<Slot>,
     },
-    Email(String),
+    Email {
+        address: String,
+        slot: Option<Slot>,
+    },
     Note(String),
     /// A postal address (may span lines).
     Address(String),
@@ -53,6 +92,8 @@ pub(crate) enum FieldAction {
     Share(&'static str),
     OpenMaps,
     OpenLink,
+    /// Make the entry the default (`false`) or clear the default (`true`).
+    SetDefault(bool),
 }
 
 impl FieldAction {
@@ -64,6 +105,8 @@ impl FieldAction {
             Self::Copy(label) | Self::Share(label) => label,
             Self::OpenMaps => "Open in Maps",
             Self::OpenLink => "Open Link",
+            Self::SetDefault(true) => "Clear default",
+            Self::SetDefault(false) => "Set as default",
         }
     }
 
@@ -76,6 +119,7 @@ impl FieldAction {
             Self::Share(_) => Icon::LucideUpload,
             Self::OpenMaps => Icon::LucideMapPin,
             Self::OpenLink => Icon::LucideExternalLink,
+            Self::SetDefault(_) => Icon::LucideStar,
         }
     }
 
@@ -88,21 +132,35 @@ impl FieldAction {
             Self::Share(_) => "field-share",
             Self::OpenMaps => "field-maps",
             Self::OpenLink => "field-link",
+            Self::SetDefault(_) => "field-default",
         }
     }
+}
+
+/// The Set / Clear default row: only for an entry that has a sibling.
+fn default_row(slot: Option<Slot>) -> Option<FieldAction> {
+    let slot = slot?;
+    let (_, clear) = default_action(slot.primary, slot.count)?;
+    Some(FieldAction::SetDefault(clear))
 }
 
 impl FieldTarget {
     /// The rows the field sheet offers, top to bottom.
     pub(crate) fn actions(&self) -> Vec<FieldAction> {
         match self {
-            Self::Number { .. } => vec![
+            Self::Number { slot, .. } => [
                 FieldAction::Call,
                 FieldAction::Message,
                 FieldAction::Copy("Copy Number"),
                 FieldAction::Share("Share Number"),
-            ],
-            Self::Email(_) => vec![FieldAction::SendEmail, FieldAction::Copy("Copy Email")],
+            ]
+            .into_iter()
+            .chain(default_row(*slot))
+            .collect(),
+            Self::Email { slot, .. } => [FieldAction::SendEmail, FieldAction::Copy("Copy Email")]
+                .into_iter()
+                .chain(default_row(*slot))
+                .collect(),
             Self::Note(_) => vec![FieldAction::Copy("Copy Note")],
             Self::Address(_) => vec![
                 FieldAction::Copy("Copy Address"),
@@ -122,7 +180,7 @@ impl FieldTarget {
     fn text(&self) -> &str {
         match self {
             Self::Number { display, .. } => display,
-            Self::Email(text)
+            Self::Email { address: text, .. }
             | Self::Note(text)
             | Self::Address(text)
             | Self::Date(text)
@@ -202,6 +260,15 @@ pub(crate) fn share_choices(has_numbers: bool, has_emails: bool) -> Vec<ShareCho
         choices.push(ShareChoice::Qr);
     }
     choices
+}
+
+/// The pill after Set / Clear default.
+pub(crate) fn default_notice(emails: bool, clear: bool) -> &'static str {
+    match (emails, clear) {
+        (false, false) => "Default number set",
+        (true, false) => "Default email set",
+        (_, true) => "Default cleared",
+    }
 }
 
 /// The copyable text of a dated event ("Birthday · 7 Mar 1990"), or `None`
@@ -486,6 +553,7 @@ impl ContactsApp {
                 move || rovsti_android::telecom::share_text(&text),
                 cx,
             ),
+            FieldAction::SetDefault(clear) => self.set_default_entry(target, clear, cx),
             FieldAction::OpenMaps => {
                 self.field_sheet.close();
                 match contact_dates::maps_url(&text) {
@@ -495,6 +563,81 @@ impl ContactsApp {
                 cx.notify();
             }
         }
+    }
+
+    /// The field target of number `raw` of the open card (with its place in
+    /// the full contact, once that is loaded).
+    fn number_target(&self, raw: &str, display: &str) -> FieldTarget {
+        FieldTarget::Number {
+            raw: raw.to_owned(),
+            display: display.to_owned(),
+            slot: self
+                .open_draft
+                .as_ref()
+                .and_then(|d| slot_of(&d.numbers, raw)),
+        }
+    }
+
+    /// Set or clear the default number or email: the contact is saved on the
+    /// background executor, then the card and the book follow.
+    fn set_default_entry(&mut self, target: &FieldTarget, clear: bool, cx: &mut Context<Self>) {
+        self.field_sheet.close();
+        let Some(draft) = self.open_draft.clone() else {
+            self.notice = Some("The contact is still loading.".into());
+            cx.notify();
+            return;
+        };
+        let (emails, value) = match target {
+            FieldTarget::Number { raw, .. } => (false, raw.as_str()),
+            FieldTarget::Email { address, .. } => (true, address.as_str()),
+            _ => return,
+        };
+        let list = if emails {
+            &draft.emails
+        } else {
+            &draft.numbers
+        };
+        let Some(slot) = slot_of(list, value) else {
+            self.notice = Some("That entry changed. Open the card again.".into());
+            cx.notify();
+            return;
+        };
+        let index = (!clear).then_some(slot.index);
+        let done = default_notice(emails, clear);
+        self.clear_notice();
+        cx.spawn(async move |this, cx| {
+            let saved = cx
+                .background_executor()
+                .spawn({
+                    let draft = draft.clone();
+                    async move { backend::set_default(&draft, emails, index) }
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                match saved {
+                    Ok(_) => {
+                        if let Some(open) =
+                            this.open_draft.as_mut().filter(|open| open.id == draft.id)
+                        {
+                            let list = if emails {
+                                &mut open.emails
+                            } else {
+                                &mut open.numbers
+                            };
+                            rovsti_core::contact_edit::set_primary(list, index);
+                        }
+                        this.notice = Some(done.into());
+                        this.reload(cx);
+                    }
+                    Err(words) => {
+                        this.notice = Some(format!("Can't change the default: {words}.").into());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// The field sheet over the card, once it is visible.
@@ -645,6 +788,23 @@ impl ContactsApp {
             .child(main)
             .children(trailing)
             .into_any_element()
+    }
+
+    /// The small "Default" tag of a number or email row.
+    fn default_tag(theme: Theme, id: (&'static str, usize)) -> gpui::Stateful<gpui::Div> {
+        let colors = theme::colors(theme);
+        div()
+            .id(id)
+            .flex_none()
+            .h(px(24.0))
+            .px(px(10.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .bg(colors.secondary_label.opacity(0.14))
+            .text_size(typography::CAPTION.size)
+            .text_color(colors.secondary_label)
+            .child("Default")
     }
 
     /// The "WhatsApp" chip of a number row.
@@ -1066,20 +1226,14 @@ impl ContactsApp {
             .enumerate()
             .map(|(i, number)| {
                 let raw = number.raw.clone();
-                let target = FieldTarget::Number {
-                    raw: number.raw.clone(),
-                    display: number.display.clone(),
-                };
+                let target = self.number_target(&number.raw, &number.display);
                 let (more_target, press_target) = (target.clone(), target);
-                let label: SharedString = if number.default {
-                    format!("{} · default", number.label).into()
-                } else {
-                    number.label.clone().into()
-                };
+                let tag = (number.default && card.numbers.len() > 1)
+                    .then(|| Self::default_tag(theme, ("number-default", i)));
                 let main = Self::field_main(
                     theme,
                     ("number", i),
-                    label,
+                    number.label.clone().into(),
                     number.display.clone().into(),
                     colors.accent,
                 )
@@ -1104,10 +1258,8 @@ impl ContactsApp {
                         this.wa_handoff(false, jid.clone(), name.clone(), cx);
                     }))
                 });
-                match chip {
-                    Some(chip) => Self::field_line_with(theme, main, [chip, more]),
-                    None => Self::field_line(theme, main, more),
-                }
+                let trailing: Vec<_> = tag.into_iter().chain(chip).chain([more]).collect();
+                Self::field_line_with(theme, main, trailing)
             })
             .collect();
 
@@ -1118,10 +1270,13 @@ impl ContactsApp {
                     .enumerate()
                     .map(|(i, email)| {
                         let address = email.value.clone();
-                        let (more_target, press_target) = (
-                            FieldTarget::Email(address.clone()),
-                            FieldTarget::Email(address.clone()),
-                        );
+                        let target = FieldTarget::Email {
+                            address: address.clone(),
+                            slot: slot_of(&d.emails, &address),
+                        };
+                        let (more_target, press_target) = (target.clone(), target);
+                        let tag = (email.primary && d.emails.len() > 1)
+                            .then(|| Self::default_tag(theme, ("email-default", i)));
                         let main = Self::field_main(
                             theme,
                             ("email", i),
@@ -1146,7 +1301,7 @@ impl ContactsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_field_sheet(more_target.clone(), cx);
                             }));
-                        Self::field_line(theme, main, more)
+                        Self::field_line_with(theme, main, tag.into_iter().chain([more]))
                     })
                     .collect()
             })
@@ -1343,6 +1498,7 @@ impl ContactsApp {
                 });
 
         let whatsapp = self.whatsapp_section(card, theme, cx);
+        let calls = self.calls_section(card, theme, cx);
 
         let actions_list = section(
             theme,
@@ -1400,6 +1556,7 @@ impl ContactsApp {
             .child(head)
             .child(actions)
             .children((!numbers.is_empty()).then(|| section(theme, Some("Phone".into()), numbers)))
+            .children(calls)
             .children(whatsapp)
             .children((!emails.is_empty()).then(|| section(theme, Some("Email".into()), emails)))
             .children(
@@ -1468,6 +1625,7 @@ mod tests {
         let number = FieldTarget::Number {
             raw: "+90".into(),
             display: "+90 1".into(),
+            slot: None,
         };
         assert_eq!(
             number.actions(),
@@ -1481,7 +1639,11 @@ mod tests {
         assert_eq!(number.dial(), "+90");
         assert_eq!(number.text(), "+90 1");
         assert_eq!(
-            FieldTarget::Email("a@b.c".into()).actions()[0],
+            FieldTarget::Email {
+                address: "a@b.c".into(),
+                slot: None
+            }
+            .actions()[0],
             FieldAction::SendEmail
         );
         assert_eq!(FieldTarget::Note("n".into()).actions().len(), 1);
@@ -1515,6 +1677,94 @@ mod tests {
         let date = FieldTarget::Date("Birthday · 7 Mar".into());
         assert_eq!(date.actions(), vec![FieldAction::Copy("Copy Date")]);
         assert_eq!(date.title(), "Date");
+    }
+
+    fn number_with(slot: Option<Slot>) -> FieldTarget {
+        FieldTarget::Number {
+            raw: "+90".into(),
+            display: "+90 1".into(),
+            slot,
+        }
+    }
+
+    #[test]
+    fn default_rows_need_two_or_more_entries() {
+        let slot = |count, primary| {
+            Some(Slot {
+                index: 0,
+                count,
+                primary,
+            })
+        };
+        for target in [
+            number_with(None),
+            number_with(slot(1, false)),
+            number_with(slot(1, true)),
+        ] {
+            assert!(
+                !target
+                    .actions()
+                    .iter()
+                    .any(|a| matches!(a, FieldAction::SetDefault(_))),
+                "{target:?}"
+            );
+        }
+        assert_eq!(
+            number_with(slot(2, false)).actions().last(),
+            Some(&FieldAction::SetDefault(false))
+        );
+        assert_eq!(
+            number_with(slot(3, true)).actions().last(),
+            Some(&FieldAction::SetDefault(true))
+        );
+        let email = FieldTarget::Email {
+            address: "a@b.c".into(),
+            slot: slot(2, true),
+        };
+        assert_eq!(
+            email.actions(),
+            vec![
+                FieldAction::SendEmail,
+                FieldAction::Copy("Copy Email"),
+                FieldAction::SetDefault(true)
+            ]
+        );
+        assert_eq!(FieldAction::SetDefault(false).label(), "Set as default");
+        assert_eq!(FieldAction::SetDefault(true).label(), "Clear default");
+        assert_eq!(default_notice(false, false), "Default number set");
+        assert_eq!(default_notice(true, false), "Default email set");
+        assert_eq!(default_notice(true, true), "Default cleared");
+    }
+
+    #[test]
+    fn slot_of_matches_numbers_by_digits_and_emails_by_case() {
+        let mut numbers = vec![
+            DraftField::new("0555 111 22 33", FieldKind::Mobile),
+            DraftField::new("+90 555 999 88 77", FieldKind::Work),
+        ];
+        numbers[1].primary = true;
+        assert_eq!(
+            slot_of(&numbers, "05551112233"),
+            Some(Slot {
+                index: 0,
+                count: 2,
+                primary: false
+            })
+        );
+        assert_eq!(
+            slot_of(&numbers, "+905559998877"),
+            Some(Slot {
+                index: 1,
+                count: 2,
+                primary: true
+            })
+        );
+        assert_eq!(slot_of(&numbers, "123"), None);
+        let emails = [DraftField::new("Ada@Example.com", FieldKind::Home)];
+        assert_eq!(
+            slot_of(&emails, " ada@example.COM ").map(|s| s.index),
+            Some(0)
+        );
     }
 
     #[test]

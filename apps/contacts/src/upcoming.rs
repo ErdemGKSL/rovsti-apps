@@ -118,8 +118,13 @@ impl ContactsApp {
                 }
                 // A failed read (no permission yet) leaves the section empty.
                 let (list, numbers) = result.unwrap_or_default();
+                let changed = !this.upcoming_ready || this.upcoming != list;
                 this.upcoming = list;
                 this.upcoming_numbers = numbers;
+                this.upcoming_ready = true;
+                if changed {
+                    this.sync_birthdays(false, cx);
+                }
                 cx.notify();
             })
             .ok();

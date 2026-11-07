@@ -8,12 +8,14 @@
 //! address book. Nothing leaves the device.
 
 mod backend;
+mod birthdays;
 mod confirm;
 mod detail;
 mod dupes;
 mod editor;
 mod field;
 mod groups;
+mod history;
 mod photo_crop;
 mod photo_viewer;
 mod photos;
@@ -112,6 +114,8 @@ const REVEAL_MARGIN: f32 = 16.0;
 enum NoticeAction {
     UndoDelete,
     UndoMerge,
+    /// "Settings": opens the app's permission page after a refusal.
+    OpenAppDetails,
 }
 
 /// Whether a notice button survives a clear: only the Undo of a waiting delete
@@ -120,7 +124,7 @@ fn keeps_undo(action: Option<NoticeAction>, pending: bool, merged: bool) -> bool
     match action {
         Some(NoticeAction::UndoDelete) => pending,
         Some(NoticeAction::UndoMerge) => merged,
-        None => false,
+        Some(NoticeAction::OpenAppDetails) | None => false,
     }
 }
 
@@ -304,6 +308,20 @@ struct ContactsApp {
     /// "Use as Contact Photo" is fetching or saving.
     wa_photo_busy: bool,
     notice: Option<SharedString>,
+    /// The calls shown on the open card, and the read that fills them.
+    calls: history::Calls,
+    calls_loads: u64,
+    /// The phone's clock style, for the call times.
+    locale: rovsti_core::recents::LocaleTime,
+    /// Birthday and anniversary notifications (opt in) and their local hour.
+    birthday_reminders: bool,
+    reminder_hour: u8,
+    /// The owner changed the reminders before the saved ones were read.
+    birthday_touched: bool,
+    /// The saved preferences were read, and the upcoming list was built once:
+    /// the alarms are synced only when both are true.
+    prefs_ready: bool,
+    upcoming_ready: bool,
     /// The button of `notice`, cleared with it or when another notice replaces it.
     notice_action: Option<NoticeAction>,
     /// The merge that Undo would revert, and the Find duplicates page.
@@ -450,7 +468,13 @@ impl ContactsApp {
                         .push(fresh.entries.into_iter().map(|e| e.draft).collect(), now);
                 }
                 this.save_to.clone_from(&saved.save_to);
-                if this.style_touched {
+                if !this.birthday_touched {
+                    this.birthday_reminders = saved.birthday_reminders;
+                    this.reminder_hour = saved.hour();
+                }
+                this.prefs_ready = true;
+                this.rearm_and_sync_birthdays(cx);
+                if this.style_touched || this.birthday_touched {
                     // The owner chose before the file was read: theirs wins.
                     this.save_prefs(cx);
                 } else {
@@ -515,6 +539,14 @@ impl ContactsApp {
             wa_photo_busy: false,
             notice: None,
             notice_action: None,
+            calls: history::Calls::Hidden,
+            calls_loads: 0,
+            locale: rovsti_core::recents::LocaleTime::default(),
+            birthday_reminders: false,
+            reminder_hour: rovsti_core::birthday_reminder::DEFAULT_HOUR,
+            birthday_touched: false,
+            prefs_ready: false,
+            upcoming_ready: false,
             upcoming: Vec::new(),
             upcoming_numbers: std::collections::HashMap::new(),
             upcoming_loads: 0,
@@ -736,6 +768,7 @@ impl ContactsApp {
             return;
         }
         self.check_whatsapp(cx);
+        self.load_card_calls(cx);
         // The rest of the card (organisation, emails, note, groups) follows.
         cx.spawn(async move |this, cx| {
             let draft = cx
@@ -777,6 +810,7 @@ impl ContactsApp {
 
     fn close_contact(&mut self, cx: &mut Context<Self>) {
         self.close_field_sheet_now();
+        self.forget_card_calls();
         self.viewer = None;
         self.crop = None;
         self.open = None;
@@ -1018,14 +1052,21 @@ impl ContactsApp {
         cx.notify();
     }
 
+    /// The preferences as they are now.
+    fn prefs_snapshot(&self) -> ContactsPrefs {
+        ContactsPrefs {
+            save_to: self.save_to.clone(),
+            birthday_reminders: self.birthday_reminders,
+            reminder_hour: self.reminder_hour,
+            ..ContactsPrefs::from_style(self.style)
+        }
+    }
+
     fn save_prefs(&self, cx: &mut Context<Self>) {
         let Some(dir) = self.prefs_dir.clone() else {
             return;
         };
-        let saved = ContactsPrefs {
-            save_to: self.save_to.clone(),
-            ..ContactsPrefs::from_style(self.style)
-        };
+        let saved = self.prefs_snapshot();
         cx.background_executor()
             .spawn(async move {
                 if let Err(error) = prefs::save(&dir, saved) {
@@ -1508,9 +1549,21 @@ impl ContactsApp {
         style: NameStyle,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        Self::choice_line(theme, key, label.into(), selected)
+            .on_click(cx.listener(move |this, _, _, cx| this.set_style(style, cx)))
+            .into_any_element()
+    }
+
+    /// A settings row with a check mark when selected; the caller adds the tap.
+    fn choice_line(
+        theme: Theme,
+        id: impl Into<gpui::ElementId>,
+        label: SharedString,
+        selected: bool,
+    ) -> gpui::Stateful<gpui::Div> {
         let colors = theme::colors(theme);
         div()
-            .id(key)
+            .id(id)
             .flex()
             .items_center()
             .justify_between()
@@ -1527,8 +1580,6 @@ impl ContactsApp {
                     .size(px(18.0))
                     .text_color(colors.accent)
             }))
-            .on_click(cx.listener(move |this, _, _, cx| this.set_style(style, cx)))
-            .into_any_element()
     }
 
     fn settings_tab(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
@@ -1611,6 +1662,7 @@ impl ContactsApp {
                         .into_any_element()],
                 )
             }))
+            .child(self.birthdays_section(theme, cx))
             .child(section(
                 theme,
                 Some("Contacts file".into()),
@@ -1748,6 +1800,10 @@ impl ContactsApp {
                 .merge_undo
                 .as_ref()
                 .is_some_and(|undo| Some(&undo.notice) == self.notice.as_ref()),
+            Some(NoticeAction::OpenAppDetails) => self
+                .notice
+                .as_deref()
+                .is_some_and(|text| text.ends_with("permission is off")),
             None => false,
         };
         if !owns_button {
@@ -1793,10 +1849,19 @@ impl ContactsApp {
         let colors = theme::colors(theme);
         let text = self.notice.clone()?;
         let undo = self.notice_action.map(|action| {
-            crate::ui::pill(theme, "notice-undo", "Undo", false).on_click(cx.listener(
+            let label = match action {
+                NoticeAction::UndoDelete | NoticeAction::UndoMerge => "Undo",
+                NoticeAction::OpenAppDetails => "Settings",
+            };
+            crate::ui::pill(theme, "notice-undo", label, false).on_click(cx.listener(
                 move |this, _, _, cx| match action {
                     NoticeAction::UndoDelete => this.undo_delete(cx),
                     NoticeAction::UndoMerge => this.undo_merge(cx),
+                    NoticeAction::OpenAppDetails => {
+                        this.notice = None;
+                        this.notice_action = None;
+                        this.act("open the settings", permissions::open_app_details, cx);
+                    }
                 },
             ))
         });

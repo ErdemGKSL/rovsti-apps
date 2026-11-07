@@ -48,6 +48,7 @@ mod lists;
 mod map;
 mod pick;
 mod picker;
+mod qr_sheet;
 mod saved_ui;
 mod settings_ui;
 #[allow(dead_code)] // wired into the map in a later step

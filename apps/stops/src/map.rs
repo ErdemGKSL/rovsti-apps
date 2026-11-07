@@ -340,9 +340,22 @@ pub fn fallback_centre(history: &History, saved: &SavedStops) -> Option<Coord> {
     saved.stops.first().map(SavedStop::center)
 }
 
+/// The `geo:` link that opens a point in any maps app.
+pub fn maps_url(coord: Coord, label: &str) -> String {
+    let label = label.trim();
+    rovsti_geo::dest::point_qr_payload(coord, (!label.is_empty()).then_some(label))
+}
+
+/// Number of rows of the pin menu: Share, Copy, QR code, Open in maps, Move,
+/// Remove and, for a transit stop, Lines.
+#[cfg(test)]
+const fn pin_menu_rows(is_stop: bool) -> usize {
+    if is_stop { 7 } else { 6 }
+}
+
 /// Width and height of the small menu over a tapped pin.
 pub const PIN_MENU_W: f32 = 180.0;
-pub const PIN_MENU_H: f32 = 168.0;
+pub const PIN_MENU_H: f32 = 288.0;
 /// Height of one row of the pin menu.
 const PIN_MENU_ROW_H: f32 = 36.0;
 const PIN_MENU_MARGIN: f32 = 8.0;
@@ -2053,6 +2066,10 @@ impl StopsApp {
             .and_then(|id| stop_index(self.gtfs.as_deref(), id));
         let details = pick::details_text(dest);
         let share_dest = dest.clone();
+        let copy_dest = dest.clone();
+        let qr_dest = dest.clone();
+        let open_coord = dest.coord;
+        let open_label = dest.label.clone();
         let colors = theme::colors(theme);
         let row = |id: &'static str, label: &'static str, color: Hsla| {
             div()
@@ -2082,6 +2099,27 @@ impl StopsApp {
                         this.pick.close_menu();
                         let name = pick::point_label(slot, Some(&share_dest));
                         this.share_point(name, share_dest.coord, &share_dest.label, cx);
+                    },
+                )),
+            )
+            .child(row("pin-copy", "Copy", colors.label).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.pick.close_menu();
+                    this.open_copy_as(copy_dest.label.clone(), copy_dest.coord, cx);
+                },
+            )))
+            .child(row("pin-qr", "QR code", colors.label).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.pick.close_menu();
+                    this.open_qr(&qr_dest.label, qr_dest.coord, cx);
+                },
+            )))
+            .child(
+                row("pin-open", "Open in maps", colors.label).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.pick.close_menu();
+                        cx.open_url(&maps_url(open_coord, &open_label));
+                        cx.notify();
                     },
                 )),
             )
@@ -3501,14 +3539,24 @@ mod tests {
 
     #[test]
     fn the_menu_rows_fit_the_menu_box() {
-        // Share, Move, Remove, Lines and the details line.
-        const { assert!(4.0 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
+        // Every row of a transit stop's menu and the details line.
+        const { assert!(pin_menu_rows(true) as f32 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
+        const { assert!(pin_menu_rows(false) < pin_menu_rows(true)) };
+    }
+
+    #[test]
+    fn open_in_maps_builds_a_geo_link() {
+        let c = Coord::new(41.0, 28.5);
+        let plain = maps_url(c, "  ");
+        assert!(plain.starts_with("geo:41"), "{plain}");
+        assert!(maps_url(c, "Pier").contains("Pier"));
     }
 
     #[test]
     fn the_pin_menu_opens_above_and_flips_below_near_the_top() {
-        let size = (370.0, 340.0);
-        let pin = (185.0, 250.0);
+        // Tall enough for the menu to fit above the pin (it is PIN_MENU_H high).
+        let size = (370.0, 640.0);
+        let pin = (185.0, 500.0);
         let above = pin_menu_rect(pin, size);
         assert!(above.1 + above.3 < pin.1);
         let top = (185.0, 40.0);

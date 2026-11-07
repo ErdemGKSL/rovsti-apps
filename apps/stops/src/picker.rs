@@ -4,23 +4,34 @@
 //! [`offer`] is the pure core: text from a share, a link or the paste field
 //! becomes a destination to confirm, or a sentence that says why not.
 
+use gpui::HapticFeedback;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ListSizingBehavior, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, list, px,
 };
-use rovsti_geo::{Coord, Diameter, DiameterError, Feed, dest::parse_location};
+use rovsti_geo::{
+    Coord, Diameter, DiameterError, Feed,
+    coord_format::{self, CoordFormat},
+    dest::parse_location,
+};
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
     field::field_box,
-    theme,
+    haptics, theme,
     tokens::{Theme, typography},
 };
 
 use crate::{
     StopsApp, lists, pick,
+    qr_sheet::QrCard,
     transit::{self, LineChoice, MAX_LINES},
     trip_ui,
 };
+
+/// The pill after a coordinate format was copied.
+pub fn copied_pill(format: CoordFormat) -> String {
+    format!("Copied {}", format.label())
+}
 
 /// Stops listed for a search.
 const MAX_STOP_HITS: usize = 20;
@@ -186,6 +197,10 @@ pub enum SheetMode {
     SaveStop { a: Destination, b: Destination },
     /// A transit stop (index into the feed): its lines, Use as A / Use as B.
     Stop(u32),
+    /// Every format of a point's coordinates; a tap copies one.
+    CopyAs { label: String, coord: Coord },
+    /// The QR code of a point.
+    Qr(QrCard),
 }
 
 /// The stop search for one query, and the lines of the stop the sheet shows,
@@ -385,6 +400,70 @@ impl StopsApp {
         cx.notify();
     }
 
+    /// Opens the Copy as sheet for a point.
+    pub(crate) fn open_copy_as(&mut self, label: String, coord: Coord, cx: &mut Context<Self>) {
+        self.sheet_mode = SheetMode::CopyAs { label, coord };
+        self.sheet.open();
+        cx.notify();
+    }
+
+    /// Opens the QR sheet for a point (a `geo:` link), or says why not.
+    pub(crate) fn open_qr(&mut self, label: &str, coord: Coord, cx: &mut Context<Self>) {
+        let name = label.trim();
+        let payload = rovsti_geo::dest::point_qr_payload(coord, (!name.is_empty()).then_some(name));
+        match crate::qr_sheet::make_card(&payload, name) {
+            Ok(card) => {
+                self.sheet_mode = SheetMode::Qr(card);
+                self.sheet.open();
+            }
+            Err(words) => self.show_pill(words, None, cx),
+        }
+        cx.notify();
+    }
+
+    /// Copies `coord` in `format`, closes the sheet and says what was copied.
+    fn copy_coord(
+        &mut self,
+        coord: Coord,
+        label: &str,
+        format: CoordFormat,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = coord_format::format(coord, format, (!label.is_empty()).then_some(label));
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        haptics::perform(window, HapticFeedback::Selection);
+        self.sheet.close();
+        self.show_pill(copied_pill(format), None, cx);
+        cx.notify();
+    }
+
+    fn copy_as_body(
+        &mut self,
+        theme: Theme,
+        label: &str,
+        coord: Coord,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let rows = CoordFormat::ALL.into_iter().enumerate().map(|(i, format)| {
+            let value = coord_format::format(coord, format, (!label.is_empty()).then_some(label));
+            let label = label.to_owned();
+            list_row(theme, None, format.label(), Some(value.into()), None)
+                .id(("copy-as", i))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.copy_coord(coord, &label, format, window, cx);
+                }))
+                .into_any_element()
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(Self::sheet_title(theme, "Copy coordinates as"))
+            .child(section(theme, None, rows))
+            .into_any_element()
+    }
+
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // A line looked at but not chosen leaves the map again.
@@ -494,6 +573,10 @@ impl StopsApp {
                 ("Save stop", self.save_stop_body(theme, a, b, window, cx))
             }
             SheetMode::Stop(stop) => ("Transit stop", self.stop_body(theme, stop, cx)),
+            SheetMode::CopyAs { label, coord } => {
+                ("Copy as", self.copy_as_body(theme, &label, coord, cx))
+            }
+            SheetMode::Qr(card) => ("QR code", self.qr_body(theme, card, cx)),
         };
         let body = div()
             .flex()
@@ -1077,6 +1160,16 @@ fn looks_like_link(text: &str) -> bool {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    #[test]
+    fn the_copied_pill_names_the_format() {
+        use rovsti_geo::coord_format::CoordFormat;
+        assert_eq!(
+            super::copied_pill(CoordFormat::PlusCode),
+            "Copied Plus Code"
+        );
+        assert_eq!(super::copied_pill(CoordFormat::GeoUri), "Copied geo: link");
+    }
+
     use super::*;
 
     fn confirm(text: &str) -> Destination {

@@ -534,7 +534,6 @@ fn write_temp(name: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
 }
 
 /// Saves `bytes` (a PNG) to the gallery as `name`.
-#[allow(dead_code)] // used by the share-as-QR UI in a later step
 pub fn save_png(name: &str, bytes: &[u8]) -> Result<(), String> {
     let path = write_temp(name, bytes)?;
     done(rovsti_android::media::save_image_to_gallery(
@@ -545,7 +544,6 @@ pub fn save_png(name: &str, bytes: &[u8]) -> Result<(), String> {
 }
 
 /// Opens the share sheet with `bytes` as a PNG file called `name`.
-#[allow(dead_code)] // used by the share-as-QR UI in a later step
 pub fn share_png(name: &str, bytes: &[u8]) -> Result<(), String> {
     let stem = name.strip_suffix(".png").unwrap_or(name);
     let file = format!("{}.png", safe_name(stem));

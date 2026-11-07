@@ -33,6 +33,8 @@ pub mod gesture;
 pub mod global_search;
 pub mod import_plan;
 pub mod inbox;
+/// Bulk actions for multi-selected inbox rows: availability, pin caps, notices.
+pub mod inbox_bulk;
 /// Inbox filter chips: matching, counts, visibility and labels.
 pub mod inbox_filter;
 pub mod keypad_layout;

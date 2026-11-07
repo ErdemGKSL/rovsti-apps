@@ -139,6 +139,8 @@ pub enum ConversationEvent {
     /// The header avatar was tapped (only when a photo shows): the page opens
     /// the full-size profile photo.
     OpenAvatar(ViewerItem),
+    /// The Forward pill of a message or picture: the page opens the chooser.
+    Forward(crate::forward_ui::ForwardItem),
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
@@ -1104,6 +1106,45 @@ impl Conversation {
             });
         }
         (items, index)
+    }
+
+    /// What the Forward pill sends: the text or caption, and the picture of
+    /// an image message. `None` when there is nothing to forward.
+    fn forward_item(
+        &self,
+        message: &WaMessage,
+        meta: Option<&MessageMeta>,
+    ) -> Option<crate::forward_ui::ForwardItem> {
+        use rovsti_core::forward::ForwardBody;
+        let text = copy_text_of(&message.body, meta);
+        let picture = match &message.body {
+            MessageBody::Media {
+                kind: MediaKind::Image,
+                mime,
+                ..
+            } => Some(ViewerItem {
+                key: message.id.clone(),
+                title: if message.from_me {
+                    "You".into()
+                } else {
+                    self.title.clone()
+                },
+                mime: mime.clone(),
+                source: ViewerSource::WaMedia {
+                    message_id: message.id.clone(),
+                },
+                at_ms: message.timestamp_ms,
+                placeholder: None,
+                avatar: None,
+            }),
+            _ => None,
+        };
+        let body = match (&picture, text) {
+            (Some(_), caption) => ForwardBody::Picture { caption },
+            (None, Some(text)) => ForwardBody::Text(text),
+            (None, None) => return None,
+        };
+        Some(crate::forward_ui::ForwardItem { body, picture })
     }
 
     fn cached_image(&self, id: &str) -> Option<Arc<Image>> {
@@ -2694,6 +2735,18 @@ impl Conversation {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.set_starred(&target, !starred, cx);
                 })),
+            );
+        }
+        if !revoked && let Some(forward) = self.forward_item(&item.message, meta) {
+            row = row.child(
+                pill("forward", Icon::LucideForward, "Forward", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::Forward(forward.clone()));
+                        cx.notify();
+                    },
+                )),
             );
         }
         if let Some(text) = copy_text_of(&message.body, meta) {

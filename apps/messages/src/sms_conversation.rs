@@ -94,6 +94,8 @@ pub enum SmsConversationEvent {
     },
     /// The header's contact photo was tapped: the page opens it full size.
     OpenAvatar(ViewerItem),
+    /// The Forward pill of a message: the page opens the chooser.
+    Forward(crate::forward_ui::ForwardItem),
 }
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
@@ -1355,6 +1357,18 @@ impl SmsConversation {
                         })),
                 );
             }
+            if let Some(forward) = forward_item(item, &self.title) {
+                pills = pills.child(
+                    glass_pill(theme, "Forward")
+                        .id(("sms-forward", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            cx.emit(SmsConversationEvent::Forward(forward.clone()));
+                            cx.notify();
+                        })),
+                );
+            }
             let files = saveable_parts(item);
             let total = files.len();
             for (n, part) in files.into_iter().enumerate() {
@@ -1880,6 +1894,40 @@ pub fn mms_save_name(content_type: &str, at_ms: i64, number: usize) -> String {
 pub fn copy_text(item: &SmsItem) -> Option<String> {
     let text = item.body.trim();
     (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// What the Forward pill sends: the text and the first picture. `None` when
+/// the message has neither.
+pub(crate) fn forward_item(
+    item: &SmsItem,
+    title: &SharedString,
+) -> Option<crate::forward_ui::ForwardItem> {
+    use rovsti_core::forward::ForwardBody;
+    let text = copy_text(item);
+    let picture = item.parts.iter().find_map(|p| {
+        let path = p.path.as_deref().filter(|_| is_image(&p.content_type))?;
+        Some(ViewerItem {
+            key: format!("{:?}-forward", item.key),
+            title: if item.outgoing {
+                "You".into()
+            } else {
+                title.clone()
+            },
+            mime: p.content_type.trim().to_ascii_lowercase(),
+            source: ViewerSource::File {
+                path: PathBuf::from(path),
+            },
+            at_ms: item.at_ms,
+            placeholder: None,
+            avatar: None,
+        })
+    });
+    let body = match (&picture, text) {
+        (Some(_), caption) => ForwardBody::Picture { caption },
+        (None, Some(text)) => ForwardBody::Text(text),
+        (None, None) => return None,
+    };
+    Some(crate::forward_ui::ForwardItem { body, picture })
 }
 
 /// The one-time code of an incoming message, to copy.

@@ -13,6 +13,7 @@ mod drafts;
 mod files;
 mod find_ui;
 // Only the Android JNI entry calls `handle`; desktop builds exercise it from the tests.
+mod forward_ui;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod headless;
 mod inbox;
@@ -214,6 +215,8 @@ enum PillAction {
     UnmarkAll(Vec<String>),
     /// Opens a WhatsApp chat (its JID and title).
     OpenChat { jid: String, title: String },
+    /// Opens the chat a message was just forwarded to.
+    OpenThread { thread: ThreadId, title: String },
 }
 
 /// The page pushed over the tabs.
@@ -281,6 +284,8 @@ struct MessagesApp {
     row_menu: Option<RowMenu>,
     /// New message: the recipient being asked "SMS or WhatsApp".
     channel_pick: Option<Recipient>,
+    /// The "Forward to" chooser.
+    forward: Option<forward_ui::ForwardSheet>,
     /// Bumped on every change of `wa_threads`.
     wa_rev: u64,
     /// Bumped on every backend notification (threads, contacts, rules, clock).
@@ -516,6 +521,7 @@ impl MessagesApp {
             scheduled_entries: Vec::new(),
             row_menu: None,
             channel_pick: None,
+            forward: None,
             wa_rev: 0,
             backend_epoch: 0,
             inbox_key: None,
@@ -1130,6 +1136,7 @@ impl MessagesApp {
             ConversationEvent::OpenAvatar(item) => {
                 this.open_media_viewer(vec![item.clone()], 0, cx);
             }
+            ConversationEvent::Forward(item) => this.open_forward(item.clone(), cx),
         })
         .detach();
         // Opening reads the chat.
@@ -1207,6 +1214,7 @@ impl MessagesApp {
             SmsConversationEvent::OpenAvatar(item) => {
                 this.open_media_viewer(vec![item.clone()], 0, cx);
             }
+            SmsConversationEvent::Forward(item) => this.open_forward(item.clone(), cx),
             SmsConversationEvent::Notice(text) => {
                 this.show_pill(*text);
                 cx.notify();
@@ -1965,6 +1973,7 @@ impl MessagesApp {
                 }
             }
             PillAction::OpenChat { jid, title } => self.open_chat(jid, title, cx),
+            PillAction::OpenThread { thread, title } => self.open_thread(thread, title, cx),
             PillAction::ReopenScheduled { to, body } => {
                 let title = self
                     .backend
@@ -2193,6 +2202,204 @@ impl MessagesApp {
         })
         .detach();
         cx.notify();
+    }
+
+    // ---- forward -------------------------------------------------------------
+
+    /// Opens the "Forward to" chooser for `item`, leaving out the open chat.
+    pub(crate) fn open_forward(&mut self, item: forward_ui::ForwardItem, cx: &mut Context<Self>) {
+        let field =
+            cx.new(|cx| TextField::with_input(TextInputPurpose::Text, TextInputAction::Search, cx));
+        cx.observe(&field, |_, _, cx| cx.notify()).detach();
+        self.forward = Some(forward_ui::ForwardSheet {
+            item,
+            field,
+            exclude: self.open_thread_id(cx),
+        });
+        cx.notify();
+    }
+
+    fn close_forward(&mut self, cx: &mut Context<Self>) {
+        self.forward = None;
+        cx.notify();
+    }
+
+    fn forward_overlay(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let sheet = self.forward.as_ref()?;
+        Some(forward_ui::forward_overlay(
+            theme,
+            sheet,
+            &self.view.rows,
+            window,
+            cx,
+        ))
+    }
+
+    /// A chat was tapped in the chooser: close it and send.
+    fn pick_forward(&mut self, target: forward_ui::ForwardTarget, cx: &mut Context<Self>) {
+        if let Some(sheet) = self.forward.take() {
+            self.run_forward(sheet.item, target, cx);
+        }
+        cx.notify();
+    }
+
+    /// Sends `item` to `target` and says how it went.
+    fn run_forward(
+        &mut self,
+        item: forward_ui::ForwardItem,
+        target: forward_ui::ForwardTarget,
+        cx: &mut Context<Self>,
+    ) {
+        use rovsti_core::forward::{ForwardPlan, plan};
+        let title = target.title.to_string();
+        let thread = target.thread.clone();
+        let wa_gateway = self.whatsapp.read(cx).gateway();
+        let sms_ready = self.backend.read(cx).sms_role_held();
+        let dir = self.backend.read(cx).data_dir().map_or_else(
+            || std::env::temp_dir().join("rovsti-forward"),
+            |dir| dir.join("cache"),
+        );
+        let (caption, picture) = match plan(&item.body, target.to()) {
+            ForwardPlan::Nothing => {
+                self.show_pill("Nothing to forward");
+                return;
+            }
+            ForwardPlan::Text(text) => {
+                match &thread {
+                    ThreadId::Sms(id) => {
+                        if !sms_ready {
+                            self.show_pill("Set Rovsti as the SMS app to forward by SMS");
+                            return;
+                        }
+                        let id = *id;
+                        let ok = self
+                            .backend
+                            .update(cx, |backend, cx| backend.forward_sms(id, text, None, cx));
+                        self.finish_forward(&title, thread, ok);
+                    }
+                    ThreadId::WhatsApp(jid) => {
+                        let Some(gateway) = wa_gateway else {
+                            self.show_pill("WhatsApp is not connected");
+                            return;
+                        };
+                        let request = SendText {
+                            chat: jid.clone(),
+                            text,
+                            quoted_id: None,
+                        };
+                        self.show_pill("Forwarding…");
+                        let task = cx
+                            .background_executor()
+                            .spawn(async move { gateway.send_text(&request).is_ok() });
+                        self.settle_forward(title, thread, task, cx);
+                    }
+                }
+                return;
+            }
+            ForwardPlan::Picture { caption } => (caption, item.picture),
+        };
+        let Some(picture) = picture else {
+            self.show_pill("Nothing to forward");
+            return;
+        };
+        if matches!(thread, ThreadId::Sms(_)) && !sms_ready {
+            self.show_pill("Set Rovsti as the SMS app to forward by SMS");
+            return;
+        }
+        if matches!(thread, ThreadId::WhatsApp(_)) && wa_gateway.is_none() {
+            self.show_pill("WhatsApp is not connected");
+            return;
+        }
+        self.show_pill("Forwarding…");
+        cx.notify();
+        let sms_thread = match &thread {
+            ThreadId::Sms(id) => Some(*id),
+            ThreadId::WhatsApp(_) => None,
+        };
+        let chat = match &thread {
+            ThreadId::WhatsApp(jid) => Some(jid.clone()),
+            ThreadId::Sms(_) => None,
+        };
+        let mime = picture.mime.clone();
+        let task = cx.background_executor().spawn(async move {
+            let path = forward_file(&picture, wa_gateway.as_ref(), &dir)?;
+            match (chat, wa_gateway) {
+                (Some(chat), Some(gateway)) => {
+                    let bytes = std::fs::read(&path).ok()?;
+                    gateway
+                        .send_media_with(
+                            &chat,
+                            rovsti_wa_proto::MediaKind::Image,
+                            &mime,
+                            caption.as_deref(),
+                            &rovsti_wa_proto::MediaOptions::default(),
+                            bytes,
+                        )
+                        .map_err(|error| log::warn!("forwarding a picture failed: {error}"))
+                        .ok()?;
+                    Some((path, caption, true))
+                }
+                _ => Some((path, caption, false)),
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let ok = match (result, sms_thread) {
+                    (Some((_, _, sent)), None) => sent,
+                    (Some((path, caption, _)), Some(id)) => {
+                        let path = path.to_string_lossy().into_owned();
+                        this.backend.update(cx, |backend, cx| {
+                            backend.forward_sms(id, caption.unwrap_or_default(), Some(path), cx)
+                        })
+                    }
+                    (None, _) => false,
+                };
+                this.finish_forward(&title, thread, ok);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Waits for a background WhatsApp send and shows its pill.
+    fn settle_forward(
+        &mut self,
+        title: String,
+        thread: ThreadId,
+        task: gpui::Task<bool>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.spawn(async move |this, cx| {
+            let ok = task.await;
+            this.update(cx, |this, cx| {
+                this.finish_forward(&title, thread, ok);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// "Forwarded to Ada" with an Open action, or the failure.
+    fn finish_forward(&mut self, title: &str, thread: ThreadId, ok: bool) {
+        let text = rovsti_core::forward::notice(title, ok);
+        if ok {
+            self.pill_action_later(text, thread, title.to_owned());
+        } else {
+            self.show_pill(text);
+        }
+    }
+
+    fn pill_action_later(&mut self, text: String, thread: ThreadId, title: String) {
+        let token = self.pill.show(text, Some("Open".into()), true, false);
+        self.pill_action = Some((token, PillAction::OpenThread { thread, title }));
     }
 
     /// New message with WhatsApp linked: SMS or WhatsApp for the picked recipient.
@@ -2539,7 +2746,8 @@ impl MessagesApp {
     /// message page, a step inside the WhatsApp settings, or any tab but the first (Chats). When
     /// it has not, Back leaves the app.
     fn can_go_back(&self, cx: &App) -> bool {
-        self.media_viewer.is_some()
+        self.forward.is_some()
+            || self.media_viewer.is_some()
             || self.schedule.is_open()
             || self.row_menu.is_some()
             || self.channel_pick.is_some()
@@ -2554,7 +2762,9 @@ impl MessagesApp {
 
     /// System Back: one step out of the top-most layer.
     fn go_back(&mut self, cx: &mut Context<Self>) {
-        if self.back_media_viewer(cx) {
+        if self.forward.is_some() {
+            self.close_forward(cx);
+        } else if self.back_media_viewer(cx) {
             // The picture viewer closed first.
         } else if self.schedule.is_open() {
             self.close_schedule(cx);
@@ -3241,6 +3451,7 @@ impl MessagesApp {
         self.sync_media_viewer(window);
         // The pill is drawn after the viewer so it stays visible over it.
         out.extend(self.media_viewer_overlay(theme, window, cx));
+        out.extend(self.forward_overlay(theme, window, cx));
         out.extend(self.pill.render(theme, self.pill_bottom(cx), {
             let entity = cx.entity();
             move |pointer, position, _, cx| {
@@ -4157,6 +4368,39 @@ impl Render for MessagesApp {
             ))
             .children(overlays)
             .into_any_element()
+    }
+}
+
+/// A local file holding the picture to forward: a phone file as is, a
+/// WhatsApp picture from the viewer's cache or downloaded into `cache/forward`.
+/// Blocking: run it on the background executor.
+fn forward_file(
+    picture: &media_viewer::ViewerItem,
+    gateway: Option<&rovsti_wa_client::Gateway>,
+    cache: &Path,
+) -> Option<std::path::PathBuf> {
+    match &picture.source {
+        media_viewer::ViewerSource::File { path } => path.exists().then(|| path.clone()),
+        media_viewer::ViewerSource::WaMedia { message_id } => {
+            let name = forward_ui::cache_name(message_id, &picture.mime);
+            let viewer = cache.join("viewer").join(&name);
+            if viewer.exists() {
+                return Some(viewer);
+            }
+            let path = cache.join("forward").join(&name);
+            if path.exists() {
+                return Some(path);
+            }
+            let bytes = gateway?
+                .media(message_id)
+                .map_err(|error| log::warn!("downloading a picture to forward failed: {error}"))
+                .ok()?;
+            std::fs::create_dir_all(path.parent()?).ok()?;
+            std::fs::write(&path, bytes).ok()?;
+            Some(path)
+        }
+        media_viewer::ViewerSource::WaPicture { .. }
+        | media_viewer::ViewerSource::ContactPhoto { .. } => None,
     }
 }
 

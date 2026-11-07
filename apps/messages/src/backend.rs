@@ -1080,6 +1080,21 @@ impl Backend {
     /// Sends text typed into a notification to a thread nobody has open: the
     /// provider's own row appears on the next `sms_changed`.
     pub fn reply_sms(&mut self, thread_id: i64, text: String, cx: &mut Context<Self>) {
+        if !self.forward_sms(thread_id, text, None, cx) {
+            cx.emit(BackendEvent::Notice("The reply was not sent".into()));
+        }
+    }
+
+    /// Sends text, or a picture (a path the app can read) with its text as an
+    /// MMS, to an SMS thread. `false` when the thread has no address or the
+    /// app is not the SMS app.
+    pub fn forward_sms(
+        &mut self,
+        thread_id: i64,
+        text: String,
+        image_path: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let to = self
             .threads
             .iter()
@@ -1087,20 +1102,23 @@ impl Backend {
             .map(|t| t.addresses.clone())
             .unwrap_or_default();
         if to.is_empty() || !self.sms_role_held() {
-            cx.emit(BackendEvent::Notice("The reply was not sent".into()));
-            return;
+            return false;
         }
         let sub_id = sim_for(&self.sims, self.sim_choice(thread_id));
         let local_id = self.next_local_id();
-        self.send_sms(
-            SmsSend {
-                local_id,
-                to,
-                body: text,
-                sub_id,
-            },
-            cx,
-        );
+        match image_path {
+            Some(path) => self.send_mms(local_id, to, text, Some(path), sub_id, cx),
+            None => self.send_sms(
+                SmsSend {
+                    local_id,
+                    to,
+                    body: text,
+                    sub_id,
+                },
+                cx,
+            ),
+        }
+        true
     }
 
     /// Sends an MMS with an optional picture (a path the app can read).

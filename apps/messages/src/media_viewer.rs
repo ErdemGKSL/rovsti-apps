@@ -34,7 +34,8 @@ use rovsti_ui::{
 };
 use rovsti_wa_client::{Gateway, Picture};
 
-use crate::{MessagesApp, conversation::cache_stem, files::ext_for_mime};
+use crate::{MessagesApp, conversation::cache_stem, files::ext_for_mime, forward_ui::ForwardItem};
+use rovsti_core::forward::ForwardBody;
 
 /// Height of the strip at the top and bottom where the chrome sits; a finger
 /// that lands there belongs to the buttons, not to the picture.
@@ -304,6 +305,18 @@ impl MediaViewer {
         } else {
             self.load = Load::Failed;
         }
+    }
+
+    /// The current picture as something to forward, once its full file is
+    /// loaded (so any source, profile photos included, is a local file).
+    pub(crate) fn forward_item(&self) -> Option<ForwardItem> {
+        let (_, path) = self.full.as_ref()?;
+        let mut picture = self.current().clone();
+        picture.source = ViewerSource::File { path: path.clone() };
+        Some(ForwardItem {
+            body: ForwardBody::Picture { caption: None },
+            picture: Some(picture),
+        })
     }
 
     /// "3 of 7" for the top bar; `None` for a lone picture.
@@ -926,6 +939,19 @@ impl MessagesApp {
         .detach();
     }
 
+    /// Closes the viewer and opens the Forward chooser for the current picture.
+    fn viewer_forward(&mut self, window: &Window, cx: &mut Context<Self>) {
+        let Some(item) = self
+            .media_viewer
+            .as_ref()
+            .and_then(MediaViewer::forward_item)
+        else {
+            return;
+        };
+        self.close_media_viewer(window, cx);
+        self.open_forward(item, cx);
+    }
+
     fn viewer_share(&mut self, cx: &mut Context<Self>) {
         let Some((path, item)) = self.viewer_target() else {
             return;
@@ -1121,6 +1147,7 @@ impl MessagesApp {
                 match id {
                     "mv-close" => this.close_media_viewer(window, cx),
                     "mv-save" => this.viewer_save(cx),
+                    "mv-forward" => this.viewer_forward(window, cx),
                     "mv-retry" => this.load_viewer_item(cx),
                     _ => this.viewer_share(cx),
                 }

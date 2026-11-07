@@ -163,6 +163,15 @@ pub fn tile_cache_texts(usage: Option<u64>, armed: bool) -> (&'static str, Strin
     (title, subtitle)
 }
 
+/// Label of the "Reset alarm settings" row; it asks for a second tap first.
+pub fn reset_alarm_label(armed: bool) -> &'static str {
+    if armed {
+        "Tap again to reset"
+    } else {
+        "Reset alarm settings"
+    }
+}
+
 /// Title and subtitle of the "Cache size" row.
 pub fn cache_size_text(cap_mb: u32, armed_mb: Option<u32>) -> (String, &'static str) {
     match armed_mb {
@@ -553,6 +562,7 @@ impl StopsApp {
         self.confirm_clear_tiles = false;
         self.shrink_armed = None;
         self.confirm_clear_other = false;
+        self.confirm_reset_alarm = false;
         self.page.restart();
         self.history_list.scroll_to_top();
         self.notice_list.scroll_to_top();
@@ -731,6 +741,22 @@ impl StopsApp {
             }))
             .into_any_element(),
         );
+        if !self.prefs.alarm_is_default() {
+            let colors = theme::colors(theme);
+            alarm.push(
+                list_row(
+                    theme,
+                    None,
+                    reset_alarm_label(self.confirm_reset_alarm),
+                    None,
+                    None,
+                )
+                .id("set-reset-alarm")
+                .text_color(colors.red)
+                .on_click(cx.listener(|this, _, _, cx| this.reset_alarm_settings(cx)))
+                .into_any_element(),
+            );
+        }
 
         let mut reliability = vec![
             list_row(
@@ -2062,6 +2088,32 @@ impl StopsApp {
         cx.notify();
     }
 
+    /// Two taps: the first arms, the second resets only the alarm settings.
+    pub(crate) fn reset_alarm_settings(&mut self, cx: &mut Context<Self>) {
+        if !self.confirm_reset_alarm {
+            self.confirm_reset_alarm = true;
+            cx.notify();
+            return;
+        }
+        self.confirm_reset_alarm = false;
+        let before = self.prefs.clone();
+        self.prefs = self.prefs.with_alarm_defaults();
+        self.save_prefs(cx);
+        self.show_pill(
+            "Alarm settings reset",
+            Some(crate::PillAction::RestorePrefs(Box::new(before))),
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// Undo of "Reset alarm settings": puts the earlier settings back.
+    pub(crate) fn restore_prefs(&mut self, prefs: rovsti_geo::StopsPrefs, cx: &mut Context<Self>) {
+        self.prefs = prefs;
+        self.save_prefs(cx);
+        cx.notify();
+    }
+
     pub(crate) fn restore_alarm_sound(
         &mut self,
         old: Option<rovsti_geo::prefs::AlarmSound>,
@@ -2186,6 +2238,12 @@ mod tests {
         ];
         assert_eq!(other_servers_bytes(&s, "b"), 6);
         assert_eq!(other_servers_bytes(&[], "b"), 0);
+    }
+
+    #[test]
+    fn reset_alarm_label_asks_for_a_second_tap() {
+        assert_eq!(reset_alarm_label(false), "Reset alarm settings");
+        assert_eq!(reset_alarm_label(true), "Tap again to reset");
     }
 
     #[test]

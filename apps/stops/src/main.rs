@@ -93,6 +93,8 @@ pub(crate) enum PillAction {
     /// The saved stops as they were before an import.
     RestoreSaved(SavedStops),
     RestoreAlarmSound(Option<rovsti_geo::prefs::AlarmSound>),
+    /// The settings as they were before "Reset alarm settings".
+    RestorePrefs(Box<StopsPrefs>),
     /// Takes back "Save as stop": the saved stop with this id.
     UndoSave(u64),
     /// Takes a dismissed alarm back: the same trip again.
@@ -224,6 +226,7 @@ pub(crate) struct StopsApp {
     pub(crate) shrink_armed: Option<u32>,
     /// The first tap on "Other servers" has armed the second.
     pub(crate) confirm_clear_other: bool,
+    pub(crate) confirm_reset_alarm: bool,
     /// Bytes per server directory, measured with `tile_usage`.
     pub(crate) tile_sources: Vec<(String, u64)>,
     /// The first tap on "Download this area" has armed the second.
@@ -428,6 +431,7 @@ impl StopsApp {
             confirm_clear_tiles: false,
             shrink_armed: None,
             confirm_clear_other: false,
+            confirm_reset_alarm: false,
             tile_sources: Vec::new(),
             area_armed: false,
         };
@@ -762,6 +766,7 @@ impl StopsApp {
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
             PillAction::RestoreSaved(saved) => self.restore_saved(saved, cx),
             PillAction::RestoreAlarmSound(sound) => self.restore_alarm_sound(sound, cx),
+            PillAction::RestorePrefs(prefs) => self.restore_prefs(*prefs, cx),
             PillAction::UndoSave(id) => self.undo_save(id, cx),
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);

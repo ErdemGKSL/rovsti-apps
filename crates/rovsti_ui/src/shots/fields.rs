@@ -15,7 +15,7 @@ use std::ops::Range;
 use gpui::{
     AppContext as _, ClipboardItem, Context, Entity, EntityInputHandler as _, IntoElement,
     ParentElement as _, Render, Size, Styled as _, TextInputAction, TextInputPurpose, Window, div,
-    px,
+    point, px,
 };
 use image::RgbaImage;
 use liquid_glass_kit::tokens::Theme;
@@ -51,6 +51,8 @@ enum Extra {
     Menu(&'static str),
     /// Nothing typed, the edit menu open (Paste only).
     PasteMenu,
+    /// Panned with a finger swipe to the start of the text, field still focused.
+    PannedToStart,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,7 +81,7 @@ const fn state(caption: &'static str, fill: Fill, focused: bool) -> State {
 
 const THREE_LINES: &str = "Selam!\nYarın Kadıköy'de buluşalım mı?\nSaat 19.30 olur.";
 
-const STATES: [State; 13] = [
+const STATES: [State; 14] = [
     state("Placeholder (unfocused, empty)", Fill::Empty, false),
     state("Focused, empty", Fill::Empty, true),
     state("Focused, short text", Fill::Text("Merhaba"), true),
@@ -126,6 +128,14 @@ const STATES: [State; 13] = [
         extra: Extra::PasteMenu,
         ..state("Empty, Paste-only menu", Fill::Empty, true)
     },
+    State {
+        extra: Extra::PannedToStart,
+        ..state(
+            "Long URL panned to the start while focused",
+            Fill::Text(TURKISH_URL),
+            true,
+        )
+    },
 ];
 
 /// Byte range of `needle` in `text` (the whole text when missing).
@@ -155,7 +165,7 @@ fn selection_of(s: &State) -> Option<(usize, usize)> {
             let r = find(&text, n);
             Some((r.start, r.end))
         }
-        Extra::PasteMenu | Extra::None => None,
+        Extra::PasteMenu | Extra::PannedToStart | Extra::None => None,
     }
 }
 
@@ -393,6 +403,16 @@ fn fields() {
                 let field = rig.root.read_with(&rig.cx, |g, _| g.fields[row].clone());
                 rig.update(|cx, _| field.update(cx, |f, cx| f.show_insertion_handle(cx)));
             }
+            if matches!(STATES[row].extra, Extra::PannedToStart) {
+                // A swipe to the right far past the start, like a finger pan.
+                let field = rig.root.read_with(&rig.cx, |g, _| g.fields[row].clone());
+                rig.update(|cx, window| {
+                    field.update(cx, |f, cx| {
+                        f.pan_by(point(px(10_000.0), px(0.0)), window, cx)
+                    });
+                });
+                rig.settle();
+            }
             frames.push((row, rig.capture()));
         }
         let img = compose(&base, &frames);
@@ -441,7 +461,10 @@ mod tests {
 
     #[test]
     fn which_rows_need_focus() {
-        assert_eq!(focused_rows(&STATES), vec![1, 2, 3, 4, 5, 6, 8, 9, 10, 12]);
+        assert_eq!(
+            focused_rows(&STATES),
+            vec![1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13]
+        );
         assert!(!STATES[0].focused);
     }
 

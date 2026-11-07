@@ -928,6 +928,61 @@ impl TextField {
         .detach();
     }
 
+    /// Pans the text by a finger or wheel `delta`. A single-line field pans
+    /// along the dominant axis and only while focused (unfocused, it shows
+    /// its start with an ellipsis); a multiline field pans vertically. Returns
+    /// whether the text moved.
+    pub(crate) fn pan_by(
+        &mut self,
+        delta: Point<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let (new, used) = if self.lines.is_some() {
+            let multi = self.multi.borrow();
+            let Some(m) = multi.as_ref() else {
+                return false;
+            };
+            pan_y(
+                self.scroll_y.get(),
+                f32::from(delta.y),
+                m.total_rows as f32 * ML_LINE,
+                f32::from(m.bounds.size.height),
+            )
+        } else {
+            if !self.focus.is_focused(window) {
+                return false;
+            }
+            let laid = self.laid.borrow();
+            let Some(laid) = laid.as_ref() else {
+                return false;
+            };
+            let (content, view) = (
+                f32::from(laid.line.width),
+                f32::from(laid.bounds.size.width),
+            );
+            let (dx, dy) = (f32::from(delta.x), f32::from(delta.y));
+            let along = if dy.abs() > dx.abs() && content > view {
+                dy
+            } else {
+                dx
+            };
+            pan(self.scroll.get(), along, content, view, CARET_MARGIN)
+        };
+        if !used {
+            return false;
+        }
+        // An explicit pan cancels the pending scroll-to-caret.
+        self.seen_activity.set(self.activity.get());
+        if self.lines.is_some() {
+            self.scroll_y.set(new);
+        } else {
+            self.scroll.set(new);
+        }
+        cx.notify();
+        true
+    }
+
     fn drag_tick(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(drag) = self.drag.get() else {
             self.drag_loop.set(false);
@@ -2003,6 +2058,40 @@ pub fn bare_field(
     )
 }
 
+/// The horizontal scroll after a finger pan by `delta` (content follows the
+/// finger, so the offset shrinks by `delta`), and whether the pan was used.
+/// A pan that cannot move the text, because it already sits at the edge in
+/// that direction or fits the view, is not used: the page scrolls on.
+pub(crate) fn pan(
+    scroll: f32,
+    delta: f32,
+    content: f32,
+    viewport: f32,
+    margin: f32,
+) -> (f32, bool) {
+    let old = clamp_scroll(scroll, content, viewport, margin);
+    let new = clamp_scroll(old - delta, content, viewport, margin);
+    (new, (new - old).abs() > 0.01)
+}
+
+/// [`pan`] for the vertical scroll of a multiline field.
+pub(crate) fn pan_y(scroll: f32, delta: f32, content: f32, viewport: f32) -> (f32, bool) {
+    let old = clamp_scroll_y(scroll, content, viewport);
+    let new = clamp_scroll_y(old - delta, content, viewport);
+    (new, (new - old).abs() > 0.01)
+}
+
+/// Wheel or finger pan over a field. Stops the event only when the text moved.
+fn on_pan(field: Entity<TextField>) -> impl Fn(&gpui::ScrollWheelEvent, &mut Window, &mut App) {
+    move |event, window, cx| {
+        let delta = event.delta.pixel_delta(typography::BODY.line);
+        let used = field.update(cx, |f, cx| f.pan_by(delta, window, cx));
+        if used {
+            cx.stop_propagation();
+        }
+    }
+}
+
 fn field_box_with(
     theme: Theme,
     id: impl Into<gpui::ElementId>,
@@ -2100,6 +2189,7 @@ fn field_box_with(
                     });
                 }
             })
+            .on_scroll_wheel(on_pan(field.clone()))
             .child(inner)
             .child(touch_layer(field.clone(), colors.accent))
             .children(handle_shields(field, 0.0, window, cx))
@@ -2121,6 +2211,7 @@ fn field_box_with(
                 cx.stop_propagation();
             }
         })
+        .on_scroll_wheel(on_pan(field.clone()))
         .child(
             glass(GlassSpec::control(theme))
                 .size_full()
@@ -2414,6 +2505,84 @@ mod tests {
             let line = f.shape_display(w);
             f32::from(f.content.get().unwrap().left() + line.x_for_index(b))
         })
+    }
+
+    #[test]
+    fn pan_table() {
+        // (scroll, delta, content, viewport) -> (scroll, used); margin 0.
+        let t = |s, d, c, v| pan(s, d, c, v, 0.0);
+        assert_eq!(t(0.0, -30.0, 300.0, 100.0), (30.0, true)); // start, swipe left
+        assert_eq!(t(0.0, 30.0, 300.0, 100.0), (0.0, false)); // start, swipe right
+        assert_eq!(t(50.0, -20.0, 300.0, 100.0), (70.0, true)); // middle
+        assert_eq!(t(50.0, 20.0, 300.0, 100.0), (30.0, true));
+        assert_eq!(t(190.0, -50.0, 300.0, 100.0), (200.0, true)); // clamps to end
+        assert_eq!(t(200.0, -5.0, 300.0, 100.0), (200.0, false)); // at the end
+        assert_eq!(t(0.0, -30.0, 80.0, 100.0), (0.0, false)); // fits the view
+        assert_eq!(t(0.0, 0.0, 300.0, 100.0), (0.0, false));
+    }
+
+    #[test]
+    fn pan_y_table() {
+        assert_eq!(pan_y(0.0, -10.0, 90.0, 60.0), (10.0, true));
+        assert_eq!(pan_y(30.0, -10.0, 90.0, 60.0), (30.0, false));
+        assert_eq!(pan_y(30.0, 40.0, 90.0, 60.0), (0.0, true));
+        assert_eq!(pan_y(0.0, 10.0, 90.0, 60.0), (0.0, false));
+        assert_eq!(pan_y(0.0, -10.0, 40.0, 60.0), (0.0, false));
+    }
+
+    fn wheel(field: &Entity<TextField>, cx: &mut gpui::VisualTestContext, dx: f32, dy: f32) {
+        let at = field.read_with(cx, |f, _| f.content.get().unwrap().center());
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: at,
+            delta: gpui::ScrollDelta::Pixels(point(px(dx), px(dy))),
+            ..Default::default()
+        });
+    }
+
+    #[gpui::test]
+    fn wheel_pans_a_long_focused_url_and_stops_at_the_end(cx: &mut TestAppContext) {
+        let (field, cx) = box_cx(cx, &"https://örnek.com.tr/çok/uzun/adres".repeat(20));
+        field.update_in(cx, |f, w, cx| w.focus(&f.focus.clone(), cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        let before = field.read_with(cx, |f, _| f.scroll.get());
+        // Swiping right (positive) pulls the start into view.
+        wheel(&field, cx, 40.0, 0.0);
+        let after = field.read_with(cx, |f, _| f.scroll.get());
+        assert!(after < before, "{after} < {before}");
+        for _ in 0..200 {
+            wheel(&field, cx, 0.0, 40.0); // vertical-dominant swipe also pans
+        }
+        cx.update(|window, _| window.refresh());
+        assert_eq!(field.read_with(cx, |f, _| f.scroll.get()), 0.0);
+        for _ in 0..200 {
+            wheel(&field, cx, -40.0, 0.0);
+        }
+        let end = field.read_with(cx, |f, _| f.scroll.get());
+        assert!(end > 0.0);
+        wheel(&field, cx, -40.0, 0.0);
+        assert_eq!(field.read_with(cx, |f, _| f.scroll.get()), end);
+        // The pan is not undone by scroll-to-caret.
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        assert_eq!(field.read_with(cx, |f, _| f.scroll.get()), end);
+    }
+
+    #[gpui::test]
+    fn wheel_over_short_text_is_not_used(cx: &mut TestAppContext) {
+        let (field, cx) = box_cx(cx, "kısa");
+        field.update_in(cx, |f, w, cx| w.focus(&f.focus.clone(), cx));
+        cx.run_until_parked();
+        let used = field.update_in(cx, |f, w, cx| f.pan_by(point(px(-40.0), px(0.0)), w, cx));
+        assert!(!used);
+    }
+
+    #[gpui::test]
+    fn unfocused_truncated_fields_ignore_pans(cx: &mut TestAppContext) {
+        let (field, cx) = box_cx(cx, &"uzun metin ".repeat(20));
+        let used = field.update_in(cx, |f, w, cx| f.pan_by(point(px(-40.0), px(0.0)), w, cx));
+        assert!(!used);
     }
 
     #[gpui::test]

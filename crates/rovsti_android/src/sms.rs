@@ -92,6 +92,19 @@ pub fn delete_thread(thread_id: i64) -> Result<bool> {
     bridge::call_bool("smsDeleteThread", &[Arg::Str(&thread_id.to_string())])
 }
 
+/// Deletes one message by key (`"sms:12"` or `"mms:7"`). Needs the SMS role;
+/// `false` when the key is malformed or the provider refused.
+pub fn delete_message(key: &str) -> Result<bool> {
+    bridge::call_bool("smsDeleteMessage", &[Arg::Str(key)])
+}
+
+/// Searches SMS bodies with a SQL `LIKE` pattern (`like` carries its own `%`
+/// wildcards and `\` escapes), newest first, at most `limit` rows:
+/// `Envelope<SmsMessagesPayload>` JSON, each row with its `thread_id`.
+pub fn search(like: &str, limit: usize) -> Result<String> {
+    bridge::call_string("smsSearch", &[Arg::Str(like), Arg::Int(clamp_limit(limit))])
+}
+
 /// Writes messages from a backup into the provider (needs the SMS role).
 /// Answers `{"inserted":n,"skipped":m}`.
 pub fn insert_restored(json: &str) -> Result<String> {
@@ -133,6 +146,8 @@ mod tests {
         ));
         assert!(matches!(mark_read(1), Err(Error::Unsupported)));
         assert!(matches!(delete_thread(1), Err(Error::Unsupported)));
+        assert!(matches!(delete_message("sms:1"), Err(Error::Unsupported)));
+        assert!(matches!(search("%hi%", 20), Err(Error::Unsupported)));
         assert!(matches!(insert_restored("{}"), Err(Error::Unsupported)));
         assert!(matches!(arm_scheduled("{}"), Err(Error::Unsupported)));
         assert!(matches!(disarm_scheduled(1), Err(Error::Unsupported)));

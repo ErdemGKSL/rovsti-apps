@@ -2,6 +2,7 @@ package dev.rovsti.bridge
 
 import android.annotation.SuppressLint
 import android.content.ContentValues
+import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
@@ -117,6 +118,42 @@ object SmsQuery {
         true
     } catch (_: RuntimeException) {
         false
+    }
+
+    /** Deletes one message by key (`sms:12` or `mms:7`; needs the SMS role). */
+    fun deleteMessage(context: Context, key: String): Boolean = try {
+        val kind = key.substringBefore(':', "")
+        val id = key.substringAfter(':', "").toLongOrNull()
+        val base = when (kind) {
+            "sms" -> Telephony.Sms.CONTENT_URI
+            "mms" -> Telephony.Mms.CONTENT_URI
+            else -> null
+        }
+        if (base == null || id == null) false
+        else context.contentResolver.delete(ContentUris.withAppendedId(base, id), null, null) > 0
+    } catch (_: RuntimeException) {
+        false
+    }
+
+    /** SMS bodies matching the `LIKE` pattern [like] (`\` escapes), newest first; a message page envelope. */
+    fun searchJson(context: Context, like: String, limit: Int): String = guarded {
+        val n = limit.coerceAtLeast(1)
+        val sms = ArrayList<JSONObject>()
+        context.contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf("_id", "thread_id", "address", "body", "date", "type", "read", "sub_id", "status"),
+            "body LIKE ? ESCAPE '\\'", arrayOf(like), "date DESC LIMIT ${n + 1}",
+        )?.use { c ->
+            while (c.moveToNext()) {
+                sms.add(
+                    SmsJson.sms(
+                        c.getLong(0), c.getLong(1), c.getString(2) ?: "", c.getString(3) ?: "", c.getLong(4),
+                        c.getInt(5), c.getInt(6) != 0, c.getInt(7).takeIf { it >= 0 }, c.getInt(8),
+                    ),
+                )
+            }
+        }
+        SmsJson.page(sms, emptyList(), n)
     }
 
     /** The recipients of a thread, for a cold inline reply. */

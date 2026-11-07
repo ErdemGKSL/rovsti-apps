@@ -11,6 +11,7 @@
 
 pub mod blocklist;
 pub mod bridge;
+pub mod calendar;
 pub mod calls;
 pub mod contacts_edit;
 pub mod diagnostics;
@@ -30,6 +31,7 @@ pub mod settings;
 pub mod sms;
 pub mod telecom;
 pub mod trip;
+pub mod voice;
 pub mod wa;
 pub mod window;
 pub mod xiaomi;

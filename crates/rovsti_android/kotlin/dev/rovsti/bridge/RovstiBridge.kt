@@ -380,6 +380,36 @@ object RovstiBridge {
 
     @JvmStatic fun smsDeleteThread(threadId: String): Boolean = threadId.toLongOrNull()?.let { SmsQuery.deleteThread(app, it) } ?: false
 
+    @JvmStatic fun smsDeleteMessage(key: String): Boolean = SmsQuery.deleteMessage(app, key)
+
+    @JvmStatic fun smsSearch(like: String, limit: Int): String = SmsQuery.searchJson(app, like, limit)
+
+    @JvmStatic fun voicePlay(key: String, path: String, fromMs: String, speed: String): Boolean =
+        VoicePlayer.play(app, key, path, fromMs.toLongOrNull() ?: 0L, speed.toFloatOrNull() ?: 1f)
+
+    @JvmStatic fun voicePause(): Boolean = VoicePlayer.pause(app)
+
+    @JvmStatic fun voiceSeek(ms: String): Boolean = ms.toLongOrNull()?.let { VoicePlayer.seek(it) } ?: false
+
+    @JvmStatic fun voiceSpeed(speed: String): Boolean = speed.toFloatOrNull()?.let { VoicePlayer.setSpeed(it) } ?: false
+
+    @JvmStatic fun voiceStop(): Boolean = VoicePlayer.stop(app)
+
+    @JvmStatic fun voiceState(): String = VoicePlayer.stateJson()
+
+    /** Opens the calendar editor prefilled with an event (no permission needed). */
+    @JvmStatic fun calendarInsert(title: String, beginMs: String, endMs: String, allDay: Boolean): Boolean {
+        val begin = beginMs.toLongOrNull() ?: return false
+        val end = endMs.toLongOrNull() ?: return false
+        val intent = Intent(Intent.ACTION_INSERT)
+            .setData(android.provider.CalendarContract.Events.CONTENT_URI)
+            .putExtra(android.provider.CalendarContract.Events.TITLE, title)
+            .putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
+            .putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, end)
+            .putExtra(android.provider.CalendarContract.EXTRA_EVENT_ALL_DAY, allDay)
+        return start(intent)
+    }
+
     @JvmStatic fun smsInsertRestored(json: String): String = SmsQuery.insertRestored(app, json)
 
     @JvmStatic fun armScheduledSms(json: String): Boolean = ScheduledSms.arm(app, json)

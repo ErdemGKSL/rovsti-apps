@@ -31,3 +31,6 @@ wa-gateway-data/
 *.log
 .claude/settings.local.json
 .claude/worktrees/
+
+# Temporary gpuiforge config written by scripts/signing.sh for a signing override
+.gpuiforge-signing.json

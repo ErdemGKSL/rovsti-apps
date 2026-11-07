@@ -26,11 +26,15 @@ first release build (2026-11-03).
   gpuiforge's source snapshot refuses symlinks and junctions. No host uses one now: all four
   add `crates/rovsti_android/kotlin` as a Gradle source directory in `app/build.gradle.kts`.
   (Phone used to link `kotlin/dev/rovsti/bridge`, which needed a temporary copy to build.)
-- `gpuiforge.json` keeps an absolute keystore path (`/home/erdem/...` for Phone). For a
-  throwaway build, create a keystore with `keytool`, and pass the signing environment to
-  Gradle directly (`GPUIFORGE_SIGNING_ENABLED=1`, `GPUIFORGE_SIGNING_KEYSTORE`,
-  `GPUIFORGE_SIGNING_KEY_ALIAS`, `GPUIFORGE_SIGNING_STORE_PASSWORD`,
-  `GPUIFORGE_SIGNING_KEY_PASSWORD`, `-PgpuiSigning=configured`) instead of editing the file.
+- **Signing.** All apps use the release key in `<ownCloud>\Personal\rovsti`
+  (`rovsti-release.jks`, alias `rovsti`, SHA-256 `df5123f5...e68d8fc5`; see
+  `docs/phone-build.md`, "Release key"). The phone's apps carry it, so never sign with a new
+  throwaway key: Linux and Windows builds must match or the update is refused.
+  `gpuiforge.json` keeps the Linux path (`/home/erdem/ownCloud/...`), so on Windows pass
+  the signing environment to Gradle directly (`GPUIFORGE_SIGNING_ENABLED=1`,
+  `GPUIFORGE_SIGNING_KEYSTORE=<that jks>`, `GPUIFORGE_SIGNING_KEY_ALIAS=rovsti`,
+  `GPUIFORGE_SIGNING_STORE_PASSWORD`, `GPUIFORGE_SIGNING_KEY_PASSWORD` from its
+  `signing.env`, `-PgpuiSigning=configured`) instead of editing the file.
 - A first release build compiles the whole GPUI stack for Android: about 10 minutes per
   ABI. Run it in the background.
 

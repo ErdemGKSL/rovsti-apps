@@ -12,7 +12,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
 use rovsti_core::{
-    contact_dates,
+    contact_dates, contact_edit,
     contact_edit::{
         Account, ContactDraft, DraftEvent, DraftField, EventKind, FieldKind, MAX_FIELDS,
         account_label, retain_account_groups,
@@ -26,7 +26,7 @@ use rovsti_ui::{
 };
 
 use crate::{
-    ContactsApp, backend,
+    ContactsApp, EditUndo, NoticeAction, backend,
     field::{Config, TextField},
     photo_crop::PhotoSource,
     photos::photo_avatar,
@@ -466,6 +466,9 @@ impl ContactsApp {
         };
         editor.error = None;
         editor.saving = true;
+        // What the Undo on the pill goes back to, and the pill's words.
+        let undo = contact_edit::undo_target(&editor.initial, &draft);
+        let summary = contact_edit::change_summary(&editor.initial, &draft);
         // A new contact's account becomes the default for the next one.
         let remember = editor.id.is_none().then(|| draft.account.clone());
         cx.notify();
@@ -488,7 +491,13 @@ impl ContactsApp {
                     // Its numbers may have changed: look WhatsApp up again.
                     this.wa.lookups.remove(&id);
                     this.pending_open = Some(id);
-                    this.notice = Some("Saved.".into());
+                    let text: SharedString = contact_edit::saved_notice(summary).into();
+                    this.edit_undo = undo.map(|before| EditUndo {
+                        before,
+                        notice: text.clone(),
+                    });
+                    this.notice_action = this.edit_undo.as_ref().map(|_| NoticeAction::UndoEdit);
+                    this.notice = Some(text);
                     this.page.restart();
                     this.reload(cx);
                     if let Some((path, view)) = photo {
@@ -502,6 +511,47 @@ impl ContactsApp {
                     }
                     cx.notify();
                 }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Undo on the pill after a save: the version from before the edit is
+    /// saved again. The photo is not part of it (a changed photo stays).
+    pub(crate) fn undo_edit(&mut self, cx: &mut Context<Self>) {
+        let Some(undo) = self.edit_undo.take() else {
+            self.notice = None;
+            self.notice_action = None;
+            cx.notify();
+            return;
+        };
+        self.notice = Some("Undoing…".into());
+        self.notice_action = None;
+        cx.notify();
+        let before = undo.before;
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let id = backend::save(&before)?;
+                    Ok::<_, String>((id, backend::pull_detail(id).ok()))
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.notice = Some(match result {
+                    Ok((id, detail)) => {
+                        // Its numbers may have changed: look WhatsApp up again.
+                        this.wa.lookups.remove(&id);
+                        if this.open.as_ref().is_some_and(|card| card.id == id) {
+                            this.open_draft = detail;
+                        }
+                        "Edit undone".into()
+                    }
+                    Err(words) => format!("Can't undo: {words}.").into(),
+                });
+                this.reload(cx);
+                cx.notify();
             })
             .ok();
         })

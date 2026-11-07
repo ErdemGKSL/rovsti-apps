@@ -16,6 +16,7 @@ mod detail;
 mod dupes;
 mod editor;
 mod field;
+mod finds;
 mod groups;
 mod history;
 mod intake;
@@ -118,16 +119,20 @@ const REVEAL_MARGIN: f32 = 16.0;
 enum NoticeAction {
     UndoDelete,
     UndoMerge,
+    /// "Undo" on the pill after an edit was saved.
+    UndoEdit,
     /// "Settings": opens the app's permission page after a refusal.
     OpenAppDetails,
 }
 
 /// Whether a notice button survives a clear: only the Undo of a waiting delete
-/// (`pending`) or of a merge that can still be undone (`merged`).
-fn keeps_undo(action: Option<NoticeAction>, pending: bool, merged: bool) -> bool {
+/// (`pending`), of a merge that can still be undone (`merged`) or of a saved
+/// edit that can still be taken back (`edited`).
+fn keeps_undo(action: Option<NoticeAction>, pending: bool, merged: bool, edited: bool) -> bool {
     match action {
         Some(NoticeAction::UndoDelete) => pending,
         Some(NoticeAction::UndoMerge) => merged,
+        Some(NoticeAction::UndoEdit) => edited,
         Some(NoticeAction::OpenAppDetails) | None => false,
     }
 }
@@ -138,25 +143,55 @@ mod notice_tests {
 
     #[test]
     fn undo_is_kept_while_pending() {
-        assert!(keeps_undo(Some(NoticeAction::UndoDelete), true, false));
+        assert!(keeps_undo(
+            Some(NoticeAction::UndoDelete),
+            true,
+            false,
+            false
+        ));
     }
 
     #[test]
     fn undo_is_dropped_without_pending() {
-        assert!(!keeps_undo(Some(NoticeAction::UndoDelete), false, true));
+        assert!(!keeps_undo(
+            Some(NoticeAction::UndoDelete),
+            false,
+            true,
+            false
+        ));
     }
 
     #[test]
     fn merge_undo_is_kept_while_it_can_be_undone() {
-        assert!(keeps_undo(Some(NoticeAction::UndoMerge), false, true));
-        assert!(!keeps_undo(Some(NoticeAction::UndoMerge), true, false));
+        assert!(keeps_undo(
+            Some(NoticeAction::UndoMerge),
+            false,
+            true,
+            false
+        ));
+        assert!(!keeps_undo(
+            Some(NoticeAction::UndoMerge),
+            true,
+            false,
+            false
+        ));
     }
 
     #[test]
     fn undo_of_a_multi_delete_is_kept_while_pending() {
         // The bulk delete uses the same action; only `pending` matters.
-        assert!(keeps_undo(Some(NoticeAction::UndoDelete), true, true));
-        assert!(!keeps_undo(Some(NoticeAction::UndoDelete), false, true));
+        assert!(keeps_undo(
+            Some(NoticeAction::UndoDelete),
+            true,
+            true,
+            false
+        ));
+        assert!(!keeps_undo(
+            Some(NoticeAction::UndoDelete),
+            false,
+            true,
+            false
+        ));
     }
 
     #[test]
@@ -170,10 +205,28 @@ mod notice_tests {
     }
 
     #[test]
-    fn no_action_is_dropped() {
-        assert!(!keeps_undo(None, true, true));
-        assert!(!keeps_undo(None, false, false));
+    fn edit_undo_is_kept_while_it_can_be_undone() {
+        assert!(keeps_undo(Some(NoticeAction::UndoEdit), false, false, true));
+        assert!(!keeps_undo(Some(NoticeAction::UndoEdit), true, true, false));
+        assert!(!keeps_undo(
+            Some(NoticeAction::UndoDelete),
+            false,
+            false,
+            true
+        ));
     }
+
+    #[test]
+    fn no_action_is_dropped() {
+        assert!(!keeps_undo(None, true, true, false));
+        assert!(!keeps_undo(None, false, false, false));
+    }
+}
+
+/// The saved version an edit can go back to, and the pill it belongs to.
+struct EditUndo {
+    before: ContactDraft,
+    notice: SharedString,
 }
 
 /// Deleted contacts, hidden but not yet removed from Android.
@@ -206,6 +259,10 @@ enum RowSet {
     Contacts,
     Favorites,
     Group,
+    /// The "In details" rows under a search.
+    Deep,
+    /// The "Frequently contacted" rows under the favorites.
+    Frequent,
 }
 
 /// Section letters and row texts as shared strings, built once per change.
@@ -336,6 +393,16 @@ struct ContactsApp {
     notice_action: Option<NoticeAction>,
     /// The merge that Undo would revert, and the Find duplicates page.
     merge_undo: Option<dupes::MergeUndo>,
+    /// The version before the last saved edit, for the Undo on its pill.
+    edit_undo: Option<EditUndo>,
+    /// "In details" search: the index of the book (built per reload), and its rows.
+    deep: Option<Arc<rovsti_core::contact_find::DeepIndex>>,
+    deep_loads: u64,
+    deep_rows: Vec<Row>,
+    /// Frequently contacted (call log), and its rows under the favorites.
+    frequent: Vec<rovsti_core::contact_frequent::Frequent>,
+    frequent_loads: u64,
+    frequent_rows: Vec<Row>,
     dupes: dupes::Dupes,
     /// Birthdays and anniversaries within a year (soonest first), the first
     /// number of each contact for the Wish chip, and the page showing them.
@@ -655,6 +722,13 @@ impl ContactsApp {
             whatsapp,
             whatsapp_open: false,
             merge_undo: None,
+            edit_undo: None,
+            deep: None,
+            deep_loads: 0,
+            deep_rows: Vec::new(),
+            frequent: Vec::new(),
+            frequent_loads: 0,
+            frequent_rows: Vec::new(),
             dupes: dupes::Dupes::new(),
             wa: whatsapp::WaPanel::default(),
             avatars,
@@ -707,6 +781,9 @@ impl ContactsApp {
                     this.refresh_marks();
                     this.rebuild(cx);
                     this.load_upcoming(cx);
+                    this.deep = None;
+                    this.load_deep(cx);
+                    this.load_frequent(cx);
                     this.load_cleanup(cx);
                     this.run_pending_intake(cx);
                     if let Some(id) = this.pending_open.take() {
@@ -757,6 +834,7 @@ impl ContactsApp {
             self.group_rows.clear();
             self.group_items.clear();
             self.recent.clear();
+            self.frequent_rows.clear();
             self.refill_others(cx);
             cx.notify();
             return;
@@ -788,6 +866,7 @@ impl ContactsApp {
         self.group_items = self.build_group_items();
         self.recent = recent::build(index.all(), crate::whatsapp::now_ms(), self.wa.offset_s);
         self.apply_marks();
+        self.rebuild_frequent();
         self.refill_others(cx);
         cx.notify();
     }
@@ -859,11 +938,12 @@ impl ContactsApp {
             }
             None => Vec::new(),
         };
+        self.deep_rows = self.deep_rows_for(&query, &self.rows);
         // A new query starts at the top; a pull or a star keeps the place.
         let new_query = query != self.built_query;
         refill(
             &self.contacts_list,
-            self.rows.len(),
+            self.rows.len() + finds::section_len(self.deep_rows.len()),
             Some(self.search_focus(cx)),
             new_query,
         );
@@ -880,7 +960,12 @@ impl ContactsApp {
     /// Re-points the Favorites and group lists at the rows just built,
     /// keeping their scroll positions.
     fn refill_others(&self, cx: &App) {
-        refill(&self.favorites_list, self.favorites.len(), None, false);
+        refill(
+            &self.favorites_list,
+            self.favorites.len() + finds::section_len(self.frequent_rows.len()),
+            None,
+            false,
+        );
         self.refill_groups(false, cx);
     }
 
@@ -1394,12 +1479,19 @@ impl ContactsApp {
                         })),
                 )
         });
+        // Frequently contacted: a star adds the person to Favorites.
+        let add_star = (key == "frequent").then(|| {
+            glass_icon_button(theme, Icon::LucideStar, 0.0, false)
+                .id(("freq-star", usize::try_from(id).unwrap_or_default()))
+                .aria_label("Add to Favorites")
+                .on_click(cx.listener(move |this, _, _, cx| this.toggle_star(id, cx)))
+        });
         list_row(
             theme,
             Some(photo_avatar(theme, row.monogram.clone(), 40.0, tint, photo).into_any_element()),
             row.name.clone(),
             row.subtitle.clone(),
-            if ticked.is_some() || reorder.is_some() {
+            if ticked.is_some() || reorder.is_some() || add_star.is_some() {
                 None
             } else {
                 row.trailing.clone()
@@ -1407,6 +1499,7 @@ impl ContactsApp {
         )
         .children(ticked.map(|on| select::check_mark(theme, on)))
         .children(reorder)
+        .children(add_star)
         .id((key, usize::try_from(id).unwrap_or_default()))
         .on_click(cx.listener(move |this, _, _, cx| {
             if key == "favorite" && this.fav_edit {
@@ -1433,6 +1526,8 @@ impl ContactsApp {
             RowSet::Contacts => &self.rows,
             RowSet::Favorites => &self.favorites,
             RowSet::Group => &self.group_rows,
+            RowSet::Deep => &self.deep_rows,
+            RowSet::Frequent => &self.frequent_rows,
         }
     }
 
@@ -1451,6 +1546,8 @@ impl ContactsApp {
                 RowSet::Contacts => &self.rows,
                 RowSet::Favorites => &self.favorites,
                 RowSet::Group => &self.group_rows,
+                RowSet::Deep => &self.deep_rows,
+                RowSet::Frequent => &self.frequent_rows,
             };
             let photos = &mut self.photos;
             rows.get(i).and_then(|row| {
@@ -1471,6 +1568,8 @@ impl ContactsApp {
             RowSet::Contacts => &self.rows,
             RowSet::Favorites => &self.favorites,
             RowSet::Group => &self.group_rows,
+            RowSet::Deep => &self.deep_rows,
+            RowSet::Frequent => &self.frequent_rows,
         };
         if let Some(row) = rows.get(i)
             && let Some(jid) = row.wa_jid.as_deref()
@@ -1490,6 +1589,8 @@ impl ContactsApp {
             RowSet::Contacts => "contact",
             RowSet::Favorites => "favorite",
             RowSet::Group => "group-contact",
+            RowSet::Deep => "deep",
+            RowSet::Frequent => "frequent",
         };
         let item = self.contact_row(theme, row, key, cx);
         if row.vm.header && set == RowSet::Contacts {
@@ -1606,7 +1707,14 @@ impl ContactsApp {
     ) -> AnyElement {
         let theme = current_theme(window);
         if ix > 0 {
-            return self.contact_item(theme, RowSet::Contacts, ix - 1, cx);
+            return match finds::slot(ix - 1, self.rows.len(), self.deep_rows.len()) {
+                Some(finds::Slot::Main(i)) => self.contact_item(theme, RowSet::Contacts, i, cx),
+                Some(finds::Slot::Extra(i)) => self.contact_item(theme, RowSet::Deep, i, cx),
+                Some(finds::Slot::Title) => {
+                    Self::letter_header(theme, Self::section_title(finds::DEEP_TITLE))
+                }
+                None => div().into_any_element(),
+            };
         }
         if self.select.is_some() {
             return self.select_header(theme, window, cx);
@@ -1631,7 +1739,7 @@ impl ContactsApp {
         });
         let body = if let Some(state) = self.book_state(theme, cx) {
             Some(state)
-        } else if self.rows.is_empty() {
+        } else if self.rows.is_empty() && self.deep_rows.is_empty() {
             let query = self.field.read(cx).text();
             Some(if query.trim().is_empty() {
                 empty_state(
@@ -1688,7 +1796,14 @@ impl ContactsApp {
     ) -> AnyElement {
         let theme = current_theme(window);
         if ix > 0 {
-            return self.contact_item(theme, RowSet::Favorites, ix - 1, cx);
+            return match finds::slot(ix - 1, self.favorites.len(), self.frequent_rows.len()) {
+                Some(finds::Slot::Main(i)) => self.contact_item(theme, RowSet::Favorites, i, cx),
+                Some(finds::Slot::Extra(i)) => self.contact_item(theme, RowSet::Frequent, i, cx),
+                Some(finds::Slot::Title) => {
+                    Self::letter_header(theme, Self::section_title(finds::FREQUENT_TITLE))
+                }
+                None => div().into_any_element(),
+            };
         }
         let body = self.book_state(theme, cx).or_else(|| {
             self.favorites.is_empty().then(|| {
@@ -2006,12 +2121,14 @@ impl ContactsApp {
             self.notice_action,
             self.pending_delete.is_some(),
             self.merge_undo.is_some(),
+            self.edit_undo.is_some(),
         ) {
             return;
         }
         self.notice = None;
         self.notice_action = None;
         self.merge_undo = None;
+        self.edit_undo = None;
     }
 
     /// Starts the timer that takes the notice away, once per new text. A
@@ -2025,6 +2142,10 @@ impl ContactsApp {
             }),
             Some(NoticeAction::UndoMerge) => self
                 .merge_undo
+                .as_ref()
+                .is_some_and(|undo| Some(&undo.notice) == self.notice.as_ref()),
+            Some(NoticeAction::UndoEdit) => self
+                .edit_undo
                 .as_ref()
                 .is_some_and(|undo| Some(&undo.notice) == self.notice.as_ref()),
             Some(NoticeAction::OpenAppDetails) => self
@@ -2064,6 +2185,7 @@ impl ContactsApp {
                     this.notice = None;
                     this.notice_action = None;
                     this.merge_undo = None;
+                    this.edit_undo = None;
                     cx.notify();
                 }
             })
@@ -2077,13 +2199,16 @@ impl ContactsApp {
         let text = self.notice.clone()?;
         let undo = self.notice_action.map(|action| {
             let label = match action {
-                NoticeAction::UndoDelete | NoticeAction::UndoMerge => "Undo",
+                NoticeAction::UndoDelete | NoticeAction::UndoMerge | NoticeAction::UndoEdit => {
+                    "Undo"
+                }
                 NoticeAction::OpenAppDetails => "Settings",
             };
             crate::ui::pill(theme, "notice-undo", label, false).on_click(cx.listener(
                 move |this, _, _, cx| match action {
                     NoticeAction::UndoDelete => this.undo_delete(cx),
                     NoticeAction::UndoMerge => this.undo_merge(cx),
+                    NoticeAction::UndoEdit => this.undo_edit(cx),
                     NoticeAction::OpenAppDetails => {
                         this.notice = None;
                         this.notice_action = None;
@@ -2324,6 +2449,9 @@ impl Render for ContactsApp {
                                 let changed = this.tabs.select(index);
                                 if changed {
                                     this.select = None;
+                                }
+                                if changed && index == FAVORITES_TAB {
+                                    this.load_frequent(cx);
                                 }
                                 if changed
                                     || this.open.is_some()

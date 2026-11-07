@@ -217,7 +217,6 @@ pub(crate) fn csv_text(hidden: &[i64]) -> Result<(String, usize), String> {
 }
 
 /// The detail index for "In details" search over every contact.
-#[allow(dead_code)] // used by plan steps S5 and S6
 pub(crate) fn deep_index() -> Result<DeepIndex, String> {
     Ok(DeepIndex::new(&pull_full()?))
 }
@@ -225,7 +224,6 @@ pub(crate) fn deep_index() -> Result<DeepIndex, String> {
 /// Most called unstarred contacts of the last 30 days, from the local call
 /// log. Without the permission this is an error in words; desktop answers from
 /// the sample calls.
-#[allow(dead_code)] // used by plan steps S5 and S6
 pub(crate) fn frequent(contacts: &[WireContact], now_ms: i64) -> Result<Vec<Frequent>, String> {
     let entries = match decode::<CallLogPayload>(providers::call_log(PULL_LIMIT)) {
         Ok(payload) => payload.entries,

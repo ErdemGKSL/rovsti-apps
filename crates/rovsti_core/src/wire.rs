@@ -717,6 +717,9 @@ pub struct WireContact {
     /// The first email, shown when the contact has no number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    /// `CONTACT_LAST_UPDATED_TIMESTAMP` in epoch milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_ms: Option<i64>,
 }
 
 impl From<&WireContact> for crate::Contact {
@@ -1185,6 +1188,19 @@ mod tests {
         assert_eq!(c.id, crate::ContactId(7));
         assert_eq!(c.numbers.len(), 1);
         assert!(c.starred);
+    }
+
+    #[test]
+    fn old_wire_contact_json_has_no_updated_ms() {
+        let w: WireContact = serde_json::from_str(r#"{"id":1}"#).expect("parse");
+        assert_eq!(w.updated_ms, None);
+        assert!(
+            !serde_json::to_string(&w)
+                .expect("json")
+                .contains("updated_ms")
+        );
+        let w: WireContact = serde_json::from_str(r#"{"id":1,"updated_ms":5}"#).expect("parse");
+        assert_eq!(w.updated_ms, Some(5));
     }
 
     #[test]

@@ -325,6 +325,51 @@ pub fn first_row_of(letters_of_rows: &[char], letter: char) -> Option<usize> {
     letters_of_rows.iter().position(|&c| c == letter)
 }
 
+/// Contacts changed within the last `within_days`, newest first (ties by id,
+/// highest first), at most `max`. Duplicate ids keep their newest entry and
+/// contacts without a timestamp are dropped.
+pub fn recent(
+    contacts: &[WireContact],
+    now_ms: i64,
+    within_days: u16,
+    max: usize,
+) -> Vec<&WireContact> {
+    let oldest = now_ms.saturating_sub(i64::from(within_days) * 86_400_000);
+    let mut picked: Vec<(&WireContact, i64)> = Vec::new();
+    for c in contacts {
+        let Some(t) = c.updated_ms else { continue };
+        if t < oldest || t > now_ms {
+            continue;
+        }
+        match picked.iter_mut().find(|(p, _)| p.id == c.id) {
+            Some(slot) if slot.1 < t => *slot = (c, t),
+            Some(_) => {}
+            None => picked.push((c, t)),
+        }
+    }
+    picked.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.id.cmp(&a.0.id)));
+    picked.into_iter().take(max).map(|(c, _)| c).collect()
+}
+
+/// When a contact changed: "Today", "Yesterday", "3 days ago", or "12 May"
+/// from a week on.
+pub fn recent_when(updated_ms: i64, now_ms: i64, tz_offset_s: i32) -> String {
+    use crate::contact_dates::{local_day, local_ymd};
+    let ago = local_day(now_ms, tz_offset_s) - local_day(updated_ms, tz_offset_s);
+    match ago {
+        i64::MIN..=0 => "Today".to_owned(),
+        1 => "Yesterday".to_owned(),
+        2..=6 => format!("{ago} days ago"),
+        _ => {
+            let (_, m, d) = local_ymd(updated_ms, tz_offset_s);
+            let month = [
+                "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+            ][(usize::from(m)).saturating_sub(1).min(11)];
+            format!("{d} {month}")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     fn vm(label: &str, display: &str) -> super::NumberVm {
@@ -387,6 +432,48 @@ mod tests {
             label: label.map(str::to_owned),
             default,
         }
+    }
+
+    fn stamped(id: i64, updated_ms: Option<i64>) -> WireContact {
+        WireContact {
+            id,
+            updated_ms,
+            ..Default::default()
+        }
+    }
+
+    const DAY: i64 = 86_400_000;
+    // 2026-05-20 12:00:00 UTC
+    const NOW: i64 = 1_779_278_400_000;
+
+    #[test]
+    fn recent_filters_orders_and_dedups() {
+        let all = [
+            stamped(1, Some(NOW - 2 * DAY)),
+            stamped(2, Some(NOW - 10 * DAY)),
+            stamped(3, None),
+            stamped(4, Some(NOW - DAY)),
+            stamped(5, Some(NOW - DAY)),
+            stamped(1, Some(NOW - 3 * DAY)),
+        ];
+        let ids: Vec<_> = recent(&all, NOW, 7, 10).iter().map(|c| c.id).collect();
+        assert_eq!(ids, vec![5, 4, 1]);
+        assert_eq!(recent(&all, NOW, 7, 2).len(), 2);
+        assert!(recent(&all, NOW, 0, 10).is_empty());
+        assert!(recent(&[], NOW, 7, 10).is_empty());
+    }
+
+    #[test]
+    fn recent_when_uses_local_day_boundaries() {
+        assert_eq!(recent_when(NOW - 1000, NOW, 0), "Today");
+        assert_eq!(recent_when(NOW - DAY, NOW, 0), "Yesterday");
+        assert_eq!(recent_when(NOW - 3 * DAY, NOW, 0), "3 days ago");
+        assert_eq!(recent_when(NOW - 8 * DAY, NOW, 0), "12 May");
+        // 23:30 the evening before is "Yesterday" at UTC but "Today" at +01:00.
+        let t = NOW - 12 * 3_600_000 - 30 * 60_000; // 2026-05-19 23:30 UTC
+        assert_eq!(recent_when(t, NOW, 0), "Yesterday");
+        assert_eq!(recent_when(t, NOW, 3600), "Today");
+        assert_eq!(recent_when(NOW + DAY, NOW, 0), "Today");
     }
 
     fn person(id: i64, name: &str, numbers: Vec<WireNumber>) -> WireContact {

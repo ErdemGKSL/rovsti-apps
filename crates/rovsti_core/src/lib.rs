@@ -25,6 +25,8 @@ pub mod contact_dates;
 pub mod contact_dupes;
 pub mod contact_edit;
 pub mod contact_photo;
+/// Select mode in the Contacts list: export ids, group changes, notices, contact text.
+pub mod contact_select;
 pub mod contacts_prefs;
 pub mod contacts_view;
 /// Header copy choices: name, number or WhatsApp ID.

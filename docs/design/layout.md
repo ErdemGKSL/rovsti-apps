@@ -409,7 +409,7 @@ a list. Use exactly one of these.
 ```
 
 **Material.** Menu, sheet and action sheet use `GlassSpec::thick`: the `sheet` optics, blur
-24, tint = `background` at 0.86 (dark) / 0.82 (light). Content behind is no longer
+24, tint = `background` at 0.94 (dark) / 0.92 (light). Content behind is no longer
 readable through the panel (X10). The scrim behind a popover is transparent but catches taps
 (tap outside dismisses). The scrim behind a sheet keeps its current alpha.
 

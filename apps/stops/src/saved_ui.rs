@@ -201,8 +201,8 @@ pub fn sort_menu_model(current: SavedSort) -> MenuModel {
 /// The row "..." menu. Up and Down are disabled (not hidden) at the ends of a
 /// group and whenever the list is not in the order the user arranged.
 pub fn row_menu_model(can_up: bool, can_down: bool) -> MenuModel {
-    let mut up = MenuItem::new("up", "Move up");
-    let mut down = MenuItem::new("down", "Move down");
+    let mut up = MenuItem::new("up", "Move up").icon("arrow-up");
+    let mut down = MenuItem::new("down", "Move down").icon("arrow-down");
     if !can_up {
         up = up.disabled();
     }
@@ -211,11 +211,15 @@ pub fn row_menu_model(can_up: bool, can_down: bool) -> MenuModel {
     }
     MenuModel::new(vec![
         MenuGroup::new(vec![
-            MenuItem::new("show", "Show on map"),
-            MenuItem::new("maps", "Open in maps"),
+            MenuItem::new("show", "Show on map").icon("map-pin"),
+            MenuItem::new("maps", "Open in maps").icon("external-link"),
         ]),
         MenuGroup::new(vec![up, down]),
-        MenuGroup::new(vec![MenuItem::new("delete", "Delete").destructive()]),
+        MenuGroup::new(vec![
+            MenuItem::new("delete", "Delete")
+                .icon("trash-2")
+                .destructive(),
+        ]),
     ])
 }
 
@@ -226,17 +230,17 @@ pub fn delete_prompt(name: &str) -> String {
 
 /// The header "..." menu. Copy list is disabled when nothing is listed.
 pub fn more_menu_model(has_visible: bool) -> MenuModel {
-    let mut copy = MenuItem::new("copy", "Copy list");
+    let mut copy = MenuItem::new("copy", "Copy list").icon("copy");
     if !has_visible {
         copy = copy.disabled();
     }
     MenuModel::new(vec![
         MenuGroup::new(vec![copy]),
         MenuGroup::new(vec![
-            MenuItem::new("gpx", "Export GPX"),
-            MenuItem::new("json", "Export JSON"),
+            MenuItem::new("gpx", "Export GPX").icon("file-down"),
+            MenuItem::new("json", "Export JSON").icon("download"),
         ]),
-        MenuGroup::new(vec![MenuItem::new("import", "Import")]),
+        MenuGroup::new(vec![MenuItem::new("import", "Import").icon("upload")]),
     ])
 }
 

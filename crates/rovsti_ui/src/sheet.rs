@@ -340,7 +340,7 @@ impl Sheet {
                     .bg(colors.tertiary_label),
             );
 
-        let panel = glass(GlassSpec::sheet(theme))
+        let panel = glass(GlassSpec::thick(theme))
             .id("sheet-panel")
             .role(Role::Dialog)
             .aria_label(label)

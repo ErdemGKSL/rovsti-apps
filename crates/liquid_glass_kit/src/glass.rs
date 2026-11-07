@@ -97,6 +97,19 @@ impl GlassSpec {
         }
     }
 
+    /// Overlays you must not read through (popover menus, sheets): the
+    /// [`GlassSpec::sheet`] optics with more blur and a tint of the theme
+    /// background at 0.86 (dark) / 0.82 (light).
+    pub fn thick(theme: Theme) -> Self {
+        let mut tint = theme.colors().background;
+        tint.a = if theme.is_dark() { 0.86 } else { 0.82 };
+        Self {
+            blur: px(24.0),
+            tint,
+            ..Self::sheet(theme)
+        }
+    }
+
     /// Side panel: calmer optics, more opaque.
     pub fn side_panel(theme: Theme) -> Self {
         let mut tint = theme.glass_fill();
@@ -591,5 +604,17 @@ mod tests {
         assert!(grid.contains(GRID_SHADE));
         assert!(grid.ends_with(GRID_ENTRY));
         assert!(!grid.contains(PRESS_GLOW_ON));
+    }
+
+    #[test]
+    fn thick_is_the_sheet_optics_with_more_blur_and_a_denser_tint() {
+        for (theme, alpha) in [(Theme::Dark, 0.86), (Theme::Light, 0.82)] {
+            let (thick, sheet) = (GlassSpec::thick(theme), GlassSpec::sheet(theme));
+            assert_eq!(thick.blur, px(24.0));
+            assert!(thick.blur > sheet.blur);
+            assert_eq!(thick.tint.a, alpha);
+            assert_eq!(thick.lens_amount, sheet.lens_amount);
+            assert_eq!(thick.inner_shade, sheet.inner_shade);
+        }
     }
 }

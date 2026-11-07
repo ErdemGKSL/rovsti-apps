@@ -367,6 +367,8 @@ mod field_touch;
 mod fields;
 #[cfg(test)]
 mod layout;
+#[cfg(test)]
+mod menus;
 
 #[cfg(test)]
 mod tests {

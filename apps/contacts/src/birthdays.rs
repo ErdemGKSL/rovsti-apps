@@ -60,6 +60,18 @@ impl ContactsApp {
             .on_click(cx.listener(|this, _, _, cx| this.toggle_birthday_reminders(cx)))
             .into_any_element(),
         ];
+        rows.push(
+            tap_row(
+                theme,
+                "birthday-export",
+                Some(Icon::LucideCalendarPlus),
+                "Export birthdays (.ics)",
+                Tone::Plain,
+            )
+            .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
+            .on_click(cx.listener(|this, _, _, cx| this.export_calendar(cx)))
+            .into_any_element(),
+        );
         if on {
             rows.extend(HOUR_CHOICES.into_iter().map(|hour| {
                 Self::choice_line(

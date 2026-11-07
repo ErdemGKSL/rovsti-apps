@@ -10,6 +10,7 @@ use rovsti_core::contact_intake::Intake;
 use rovsti_core::{
     contact_csv, contact_dates,
     contact_edit::ContactDraft,
+    contact_ics,
     contact_photo::{self, CropView},
     contact_scan::{self, Scanned},
     import_plan,
@@ -71,11 +72,19 @@ pub(crate) fn document_op_notice(
     has_error: bool,
     count: Option<usize>,
 ) -> Option<Option<String>> {
-    if !matches!(op, DocumentOp::ExportContacts | DocumentOp::ExportCalls) {
+    if !matches!(
+        op,
+        DocumentOp::ExportContacts | DocumentOp::ExportCalls | DocumentOp::ExportMessages
+    ) {
         return None;
     }
+    // Contacts has no messages archive: that answer is the calendar file's.
+    let saved = |count: usize| match op {
+        DocumentOp::ExportMessages => contact_ics::saved_notice(count),
+        _ => export_words(count),
+    };
     Some(match (ok, has_error, count) {
-        (true, _, Some(count)) => Some(export_words(count)),
+        (true, _, Some(count)) => Some(saved(count)),
         (false, true, _) => Some("Can't save the file.".to_owned()),
         _ => None,
     })
@@ -237,7 +246,7 @@ impl ContactsApp {
     }
 
     /// A file button was tapped while another file job runs (the rows are dimmed).
-    fn say_busy(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn say_busy(&mut self, cx: &mut Context<Self>) {
         if self.notice.is_none() {
             self.notice = Some("Wait for the file being saved or read to finish.".into());
             cx.notify();
@@ -269,7 +278,9 @@ impl ContactsApp {
             }
         };
         match result.op {
-            ref op @ (DocumentOp::ExportContacts | DocumentOp::ExportCalls) => {
+            ref op @ (DocumentOp::ExportContacts
+            | DocumentOp::ExportCalls
+            | DocumentOp::ExportMessages) => {
                 self.transfer_busy = false;
                 let count = self.exported.take();
                 // A cancelled picker answers `ok: false` with no error: say nothing.
@@ -415,6 +426,7 @@ impl ContactsApp {
                 this.clear_notice();
                 this.confirm = Some(Confirm::Import {
                     cards: plan.add,
+                    photos: Vec::new(),
                     duplicates: plan.duplicates,
                     unreadable: 0,
                 });
@@ -434,10 +446,10 @@ impl ContactsApp {
         self.notice = Some("Reading the file…".into());
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let (plan, unreadable, single) = cx
+            let (plan, photos, unreadable, single) = cx
                 .background_executor()
                 .spawn(async move {
-                    let (cards, skipped) = backend::cards_of(&text);
+                    let (cards, photos, skipped) = backend::cards_with_photos(&text);
                     // One card with a picture opens the form, like a shared file.
                     let intake = Intake::Cards(cards);
                     let photo = intake::photo_path(&intake, &text);
@@ -445,9 +457,11 @@ impl ContactsApp {
                         unreachable!("built above");
                     };
                     if photo.is_some() && skipped == 0 {
-                        return (import_plan::plan(&[], Vec::new()), 0, Some((cards, photo)));
+                        let none = (import_plan::Plan::default(), Vec::new());
+                        return (none.0, none.1, 0, Some((cards, photo)));
                     }
-                    (import_plan::plan(&existing, cards), skipped, None)
+                    let (plan, kept) = import_plan::plan_with_photos(&existing, cards, photos);
+                    (plan, kept, skipped, None)
                 })
                 .await;
             this.update(cx, |this, cx| {
@@ -459,6 +473,7 @@ impl ContactsApp {
                 }
                 this.confirm = Some(Confirm::Import {
                     cards: plan.add,
+                    photos,
                     duplicates: plan.duplicates,
                     unreadable,
                 });
@@ -489,6 +504,24 @@ mod tests {
         assert_eq!(rows[1].format, ExportFormat::Csv);
         assert_eq!(rows[1].label, "Export to a CSV file");
         assert_ne!(rows[0].id, rows[1].id);
+    }
+
+    #[test]
+    fn the_calendar_answer_is_noticed_in_dates() {
+        let op = DocumentOp::ExportMessages;
+        assert_eq!(
+            document_op_notice(&op, true, false, Some(12)),
+            Some(Some("Saved 12 dates to the calendar file".to_owned()))
+        );
+        assert_eq!(
+            document_op_notice(&op, true, false, Some(1)),
+            Some(Some("Saved 1 date to the calendar file".to_owned()))
+        );
+        assert_eq!(
+            document_op_notice(&op, false, true, None),
+            Some(Some("Can't save the file.".to_owned()))
+        );
+        assert_eq!(document_op_notice(&op, false, false, None), Some(None));
     }
 
     #[test]

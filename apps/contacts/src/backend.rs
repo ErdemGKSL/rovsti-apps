@@ -250,6 +250,17 @@ pub(crate) fn cards_of(text: &str) -> (Vec<ContactDraft>, usize) {
     (parsed.contacts, parsed.skipped)
 }
 
+/// Like [`cards_of`], and the photo of each card (aligned; none for a CSV).
+pub(crate) fn cards_with_photos(text: &str) -> (Vec<ContactDraft>, Vec<Option<CardPhoto>>, usize) {
+    let (cards, skipped) = cards_of(text);
+    let photos = if contact_csv::looks_like_csv(None, "", text.as_bytes()) {
+        Vec::new()
+    } else {
+        vcard::photos(text)
+    };
+    (cards, photos, skipped)
+}
+
 /// The photo of a text holding exactly one vCard.
 pub(crate) fn single_photo(text: &str) -> Option<CardPhoto> {
     let mut photos = vcard::photos(text);
@@ -414,7 +425,6 @@ pub(crate) fn add_contacts(cards: Vec<ContactDraft>) -> Result<u32, String> {
 /// Adds the cards and sets the photos that came with them: `photos` is aligned
 /// with `cards`. Returns how many contacts were added and how many photos were
 /// set; a photo that cannot be set is only not counted.
-#[allow(dead_code)] // wired by the UI steps S5 and S7
 pub(crate) fn import_with_photos(
     cards: &[ContactDraft],
     photos: &[Option<CardPhoto>],

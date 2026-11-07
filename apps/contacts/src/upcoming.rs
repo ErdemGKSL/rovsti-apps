@@ -15,7 +15,8 @@ use gpui::{
 use rovsti_core::{
     avatar,
     contact_dates::{self, Upcoming},
-    contacts_view,
+    contact_edit::ContactDraft,
+    contact_ics, contacts_view,
 };
 use rovsti_ui::{
     Icon,
@@ -54,6 +55,30 @@ const PAGE: Place = Place {
     wish_base: WISH_PAGE,
     with_date: true,
 };
+
+/// The pill when there is nothing to put in a calendar file.
+pub(crate) const NO_DATES: &str = "No birthdays or anniversaries to save.";
+
+/// The calendar file for `drafts` (minus the ids in `hidden`): its name, its
+/// text and the number of dates, or `None` when no contact has a date.
+pub(crate) fn calendar_file(
+    drafts: &[ContactDraft],
+    hidden: &[i64],
+    now_ms: i64,
+    offset_s: i32,
+) -> Option<(String, String, usize)> {
+    let kept: Vec<ContactDraft> = drafts
+        .iter()
+        .filter(|d| d.id.is_none_or(|id| !hidden.contains(&id)))
+        .cloned()
+        .collect();
+    let events = contact_ics::events_of(&kept);
+    if events.is_empty() {
+        return None;
+    }
+    let name = contact_ics::file_name(events.len(), contact_dates::local_ymd(now_ms, offset_s));
+    Some((name, contact_ics::write(&events, now_ms), events.len()))
+}
 
 /// Where the scrubber column sits and what it is doing.
 #[derive(Default)]
@@ -124,6 +149,58 @@ impl ContactsApp {
                 this.upcoming_ready = true;
                 if changed {
                     this.sync_birthdays(false, cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// "Save to calendar file": reads every contact, writes the dates as an
+    /// `.ics` and offers it to the save dialog. The answer arrives as a
+    /// `document_result` (see `transfer.rs`).
+    pub(crate) fn export_calendar(&mut self, cx: &mut Context<Self>) {
+        if self.transfer_busy {
+            self.say_busy(cx);
+            return;
+        }
+        self.transfer_busy = true;
+        self.notice = Some("Preparing the file…".into());
+        let hidden: Vec<i64> = self
+            .pending_delete
+            .as_ref()
+            .map(|p| p.ids.clone())
+            .unwrap_or_default();
+        let offset = self.wa.offset_s;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let drafts = backend::pull_full()?;
+                    let Some((name, text, count)) =
+                        calendar_file(&drafts, &hidden, now_ms(), offset)
+                    else {
+                        return Ok(0);
+                    };
+                    backend::export_ics(&name, &text).map(|()| count)
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(0) => {
+                        this.transfer_busy = false;
+                        this.notice = Some(NO_DATES.into());
+                    }
+                    Ok(count) => {
+                        this.exported = Some(count);
+                        this.notice = Some("Choose where to save…".into());
+                    }
+                    Err(words) => {
+                        this.transfer_busy = false;
+                        this.notice = Some(format!("Can't save the file: {words}.").into());
+                    }
                 }
                 cx.notify();
             })
@@ -241,11 +318,23 @@ impl ContactsApp {
 
     /// The full page: the next 365 days under This week, This month, Later.
     pub(crate) fn upcoming_page(&mut self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
-        let top = div().px(px(8.0)).pt(px(48.0)).child(
-            glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
-                .id("upcoming-back")
-                .on_click(cx.listener(|this, _, _, cx| this.set_upcoming_open(false, cx))),
-        );
+        let top = div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .px(px(8.0))
+            .pt(px(48.0))
+            .child(
+                glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
+                    .id("upcoming-back")
+                    .on_click(cx.listener(|this, _, _, cx| this.set_upcoming_open(false, cx))),
+            )
+            .child(
+                glass_icon_button(theme, Icon::LucideCalendarPlus, 0.0, false)
+                    .id("upcoming-save-calendar")
+                    .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
+                    .on_click(cx.listener(|this, _, _, cx| this.export_calendar(cx))),
+            );
         let items = self.upcoming.clone();
         let groups = contact_dates::upcoming_groups(&items);
         let body = if groups.is_empty() {
@@ -441,7 +530,54 @@ impl ContactsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rovsti_core::contact_edit::EventKind;
+    use rovsti_core::contact_edit::{DraftEvent, EventKind};
+
+    fn with_birthday(id: i64, given: &str, date: &str) -> ContactDraft {
+        ContactDraft {
+            id: Some(id),
+            given: given.into(),
+            events: vec![DraftEvent::new(date, EventKind::Birthday)],
+            ..ContactDraft::default()
+        }
+    }
+
+    #[test]
+    fn the_calendar_file_has_a_name_and_the_dates() {
+        let drafts = [
+            with_birthday(1, "Anna", "1990-05-12"),
+            with_birthday(2, "Ben", "--03-04"),
+        ];
+        let (name, text, count) =
+            calendar_file(&drafts, &[], 1_770_000_000_000, 0).expect("two dates");
+        assert_eq!(count, 2);
+        assert!(name.starts_with("rovsti-birthdays-2-") && name.ends_with(".ics"));
+        assert!(text.contains("BEGIN:VCALENDAR") && text.contains("Anna"));
+    }
+
+    #[test]
+    fn the_calendar_file_leaves_out_hidden_contacts() {
+        let drafts = [
+            with_birthday(1, "Anna", "1990-05-12"),
+            with_birthday(2, "Ben", "1991-03-04"),
+        ];
+        let (_, text, count) = calendar_file(&drafts, &[1], 1_770_000_000_000, 0).expect("one");
+        assert_eq!(count, 1);
+        assert!(!text.contains("Anna") && text.contains("Ben"));
+    }
+
+    #[test]
+    fn no_dates_means_no_calendar_file() {
+        assert!(calendar_file(&[], &[], 0, 0).is_none());
+        let plain = ContactDraft {
+            id: Some(1),
+            given: "Cy".into(),
+            ..ContactDraft::default()
+        };
+        assert!(calendar_file(&[plain], &[], 0, 0).is_none());
+        let hidden = [with_birthday(1, "Anna", "1990-05-12")];
+        assert!(calendar_file(&hidden, &[1], 0, 0).is_none());
+        assert_eq!(NO_DATES, "No birthdays or anniversaries to save.");
+    }
 
     fn up(in_days: i64, turning: Option<i64>) -> Upcoming {
         Upcoming {

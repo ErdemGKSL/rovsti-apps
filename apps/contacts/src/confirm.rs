@@ -5,7 +5,10 @@
 use std::sync::Arc;
 
 use gpui::{AnyElement, Context, IntoElement, SharedString, StatefulInteractiveElement};
-use rovsti_core::{contact_edit::ContactDraft, contact_trash, contacts_view, search::ContactIndex};
+use rovsti_core::{
+    contact_edit::ContactDraft, contact_trash, contacts_view, search::ContactIndex,
+    vcard::CardPhoto,
+};
 use rovsti_ui::tokens::Theme;
 
 use crate::{
@@ -49,6 +52,8 @@ pub(crate) enum Confirm {
     /// A vCard file was read: these cards would be added.
     Import {
         cards: Vec<ContactDraft>,
+        /// Aligned with `cards`: the picture that came with each card.
+        photos: Vec<Option<CardPhoto>>,
         duplicates: usize,
         unreadable: usize,
     },
@@ -107,7 +112,7 @@ fn contacts_words(count: usize) -> String {
 }
 
 /// The sentence under the title of the import card.
-fn import_summary(add: usize, duplicates: usize, unreadable: usize) -> String {
+fn import_summary(add: usize, photos: usize, duplicates: usize, unreadable: usize) -> String {
     let mut parts = Vec::new();
     if duplicates > 0 {
         parts.push(format!(
@@ -121,12 +126,32 @@ fn import_summary(add: usize, duplicates: usize, unreadable: usize) -> String {
             contacts_words(unreadable)
         ));
     }
+    let with = match photos {
+        0 => String::new(),
+        1 => " with 1 photo".to_owned(),
+        n => format!(" with {n} photos"),
+    };
     match (add, parts.is_empty()) {
         (0, true) => "The file has no contacts.".to_owned(),
         (0, false) => format!("Left out: {}.", parts.join(", ")),
-        (_, true) => "They are saved on this phone.".to_owned(),
+        (_, true) => format!("They are saved on this phone{with}."),
+        (_, false) if photos > 0 => {
+            format!("Left out: {}. The others come{with}.", parts.join(", "))
+        }
         (_, false) => format!("Left out: {}.", parts.join(", ")),
     }
+}
+
+/// The pill after an import: "12 contacts added · 5 photos" (the photos part
+/// only when any were set).
+fn import_added_notice(added: usize, photos: usize) -> String {
+    let mut text = format!("{} added", contacts_words(added));
+    match photos {
+        0 => {}
+        1 => text.push_str(" · 1 photo"),
+        n => text.push_str(&format!(" · {n} photos")),
+    }
+    text
 }
 
 /// Title and body of the card for deleting `n` selected contacts.
@@ -204,7 +229,7 @@ impl ContactsApp {
             }
             Confirm::DiscardEdits => self.close_editor(cx),
             Confirm::MergeContacts { keeper, others, .. } => self.run_merge(keeper, others, cx),
-            Confirm::Import { cards, .. } => self.add_imported(cards, cx),
+            Confirm::Import { cards, photos, .. } => self.add_imported(cards, photos, cx),
             Confirm::EmptyTrash { .. } => self.empty_trash(cx),
             Confirm::DeleteForever { keys } => self.delete_forever(keys, cx),
             Confirm::DeleteWithoutCopy { ids } => self.run_delete(ids, false, cx),
@@ -365,7 +390,12 @@ impl ContactsApp {
         cx.notify();
     }
 
-    fn add_imported(&mut self, cards: Vec<ContactDraft>, cx: &mut Context<Self>) {
+    fn add_imported(
+        &mut self,
+        cards: Vec<ContactDraft>,
+        photos: Vec<Option<CardPhoto>>,
+        cx: &mut Context<Self>,
+    ) {
         if cards.is_empty() {
             return;
         }
@@ -377,11 +407,11 @@ impl ContactsApp {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { backend::add_contacts(cards) })
+                .spawn(async move { backend::import_with_photos(&cards, &photos) })
                 .await;
             this.update(cx, |this, cx| {
                 this.notice = Some(match result {
-                    Ok(added) => format!("Added {}.", contacts_words(added as usize)).into(),
+                    Ok((added, photos)) => import_added_notice(added as usize, photos).into(),
                     Err(words) => format!("Can't add the contacts: {words}.").into(),
                 });
                 this.reload(cx);
@@ -491,10 +521,12 @@ impl ContactsApp {
             | Confirm::DeleteWithoutCopy { .. } => return None,
             Confirm::Import {
                 cards,
+                photos,
                 duplicates,
                 unreadable,
             } => {
-                let summary = import_summary(cards.len(), *duplicates, *unreadable);
+                let with_photo = photos.iter().flatten().count();
+                let summary = import_summary(cards.len(), with_photo, *duplicates, *unreadable);
                 if cards.is_empty() {
                     let ok = pill(theme, "confirm-no", "OK", false)
                         .on_click(cx.listener(|this, _, _, cx| this.answer(false, cx)))
@@ -571,12 +603,36 @@ mod tests {
 
     #[test]
     fn the_import_summary_names_what_is_left_out() {
-        assert_eq!(import_summary(5, 0, 0), "They are saved on this phone.");
-        assert_eq!(import_summary(0, 0, 0), "The file has no contacts.");
+        assert_eq!(import_summary(5, 0, 0, 0), "They are saved on this phone.");
+        assert_eq!(import_summary(0, 0, 0, 0), "The file has no contacts.");
         assert_eq!(
-            import_summary(2, 1, 3),
+            import_summary(2, 0, 1, 3),
             "Left out: 1 contact already in your address book, \
              3 contacts without a name, or with a broken number or email."
         );
+    }
+
+    #[test]
+    fn the_import_summary_mentions_photos() {
+        assert_eq!(
+            import_summary(5, 5, 0, 0),
+            "They are saved on this phone with 5 photos."
+        );
+        assert_eq!(
+            import_summary(2, 1, 0, 0),
+            "They are saved on this phone with 1 photo."
+        );
+        assert_eq!(
+            import_summary(2, 2, 1, 0),
+            "Left out: 1 contact already in your address book. The others come with 2 photos."
+        );
+        assert!(!import_summary(0, 0, 1, 0).contains("photo"));
+    }
+
+    #[test]
+    fn the_import_pill_counts_photos_only_when_any() {
+        assert_eq!(import_added_notice(12, 5), "12 contacts added · 5 photos");
+        assert_eq!(import_added_notice(1, 1), "1 contact added · 1 photo");
+        assert_eq!(import_added_notice(12, 0), "12 contacts added");
     }
 }

@@ -37,11 +37,11 @@ baseSha: 20d7c96b83cb7c7a92eb8886c5e26e56c98a07ac
 | S10-S16 | Offline area, appearance, vibration pattern, alarm sound, volume, history search/filter/start again/save, history export | done R2 |
 | S17, S18, S20-S23, S25, S26 | Follow-me, home screen shortcut, live status share, re-arm, tile cache size, paste DMS/Plus Code, share my location, measure actions | done R3 |
 | S24, S27-S33 | Favourites, last trip card, scale bar (pre-existing), open saved stop in maps, copy list, mojibake fix, backup/restore, share/copy trip | done R4 |
-| S37 | Trip tab idle: "Nearest saved stop" quick-start row when within 2 km | R5 |
-| S34 | Pin menu: "1.2 km from you, NE" line and "Measure from here" | R5 |
-| S38 | Saved stop row: "Used 4 times, last 5 Nov" from history | R5 |
-| S36 | History: "Delete trips older than 30 / 90 days" (two taps, Undo) | R5 |
-| S39 | Settings > Alarm: "Reset alarm settings" (two taps, Undo) | R5 |
+| S37 | Trip tab idle: "Nearest saved stop" quick-start row when within 2 km | done R5 |
+| S34 | Pin menu: "1.2 km from you, NE" line and "Measure from here" | done R5 |
+| S38 | Saved stop row: "Used 4 times, last 5 Nov" from history | done R5 |
+| S36 | History: "Delete trips older than 30 / 90 days" (two taps, Undo) | done R5 |
+| S39 | Settings > Alarm: "Reset alarm settings" (two taps, Undo) | done R5 |
 | S40 | Show saved stops on the map (toggle in Map options, tap marker opens the stop) | backlog R6 |
 | S35 | Saved stops: colour tag | backlog R6 |
 | S19 | Reverse / Duplicate a saved stop | dropped (gate is direction-agnostic) |

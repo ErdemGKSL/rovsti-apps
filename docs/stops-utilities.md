@@ -1,8 +1,8 @@
-# Rovsti Stops: everyday utilities (rounds 1-4)
+# Rovsti Stops: everyday utilities (rounds 1-5)
 
 Everything here is local. Pure logic lives in `crates/rovsti_geo` (unit-tested); the GPUI code in
 `apps/stops/src` is thin glue, and Android calls go through `rovsti_android` (desktop returns
-`Error::Unsupported`). Backlog and status: `_bmad-output/plans/util-stops.md` (R1) and `_bmad-output/plans/util-stops-r2.md` (R2), `_bmad-output/plans/util-stops-r3.md` (R3), `_bmad-output/plans/util-stops-r4.md` (R4 and later).
+`Error::Unsupported`). Backlog and status: `_bmad-output/plans/util-stops.md` (R1) and `_bmad-output/plans/util-stops-r2.md` (R2), `_bmad-output/plans/util-stops-r3.md` (R3), `_bmad-output/plans/util-stops-r4.md` (R4), `_bmad-output/plans/util-stops-r5.md` (R5 and later backlog).
 
 | # | Utility | What it does | Where |
 |---|---------|--------------|-------|
@@ -38,6 +38,12 @@ Everything here is local. Pure logic lives in `crates/rovsti_geo` (unit-tested);
 | S31 | History text fix | Garbled separators in History rows and stats (double-encoded "–" and "·") are fixed; no behaviour change. | `settings_ui.rs` |
 | S32 | Backup and restore | One JSON file with saved stops, trip history and settings. Restore asks first and can be undone. Pills "Backup saved", "Backup restored" (Undo). See Backup below. | `rovsti_geo::backup::{Backup, to_json, parse, summary, export_file_name}`; `saved_ui.rs` (`on_backup_picked`, `restore_blocked`, `restore_sheet_body`); `backend::{export_text, pick_import, read_import}`; reach: Settings > Backup |
 | S33 | Share and copy a trip | A history record offers Share (system share sheet) and Copy (pill "Trip copied"): "Arrived at Home – Work on 5 Nov 2026, 18:42. 18 min · 3.4 km · 1 snooze." plus a geo link of B. | `rovsti_geo::history_io::share_text`; `settings_ui.rs`; reach: Settings > History > open a trip |
+
+| S34 | Distance from you and Measure from here | The pin menu footer adds "1.2 km from you, NE" (or "You are here" under 10 m) when a fix exists. "Measure from here" starts the ruler with that pin as the first point (hidden during a trip). Pill "Tap the map to measure from here". No confirm needed. | `rovsti_geo::coord_format::from_you_text`; `map.rs` (`pin_menu`, `pin_menu_height`, `MapState::measure_from`); reach: tap a pin > "Measure from here" |
+| S36 | Delete old trips | History shows "Delete 12 trips older than 30 days" / "90 days" pills (only when some match). First tap arms ("Tap again to delete 12 trips"), second deletes. Pill "Deleted 12 old trips" with Undo (restores the whole history). | `rovsti_geo::history::{older_than, remove_older_than, prune_label, PRUNE_CHOICES_DAYS}`; `settings_ui.rs` (`prune_history`, `prune_step`, `prune_pill`), `PillAction::RestoreHistory`; reach: Settings > History |
+| S37 | Nearest saved stop | The idle Trip tab shows "Nearest: Home gate", "350 m away", with Start, when a fix exists, no ends are picked and a saved stop lies within 2 km. Start uses the normal path (pill "Starting <name>" or the usual error). | `rovsti_geo::saved_stops::{SavedStops::nearest, NEAREST_CHIP_M}`; `trip_ui.rs` (`nearest_row_visible`); reach: Trip tab, idle |
+| S38 | Usage on saved stops | The Saved row subtitle adds "Used 4 times, last 5 Nov" (or "Used once, today") from the trip history; matches the gate in either direction. Read-only. | `rovsti_geo::history::{History::usage_of, usage_text, Usage}`; `saved_ui.rs::stop_detail`; reach: Saved tab |
+| S39 | Reset alarm settings | Last row of Settings > Alarm, shown only when something differs from the defaults. First tap arms ("Tap again to reset"), second resets sound, vibration, pattern, volume, snooze and alarm sound (appearance and tile settings untouched). Pill "Alarm settings reset" with Undo. | `rovsti_geo::prefs::StopsPrefs::{alarm_is_default, with_alarm_defaults}`; `settings_ui.rs` (`reset_alarm_label`), `PillAction::RestorePrefs`; reach: Settings > Alarm |
 
 
 ## Backup (S32)

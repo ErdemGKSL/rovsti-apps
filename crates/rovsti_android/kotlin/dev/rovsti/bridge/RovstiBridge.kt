@@ -813,8 +813,8 @@ object RovstiBridge {
     }
 
     /**
-     * Opens the system "new contact" screen filled from [json]: `{name, company, notes,
-     * phones: [{number, label}], emails: [{address, label}]}`. Malformed JSON gives false.
+     * Opens the system "new contact" screen filled from [json]: `{name, org, note,
+     * phones: [{value, label}], emails: [{value, label}]}`. Malformed JSON gives false.
      */
     @JvmStatic
     fun insertContact(json: String): Boolean {
@@ -827,7 +827,7 @@ object RovstiBridge {
         val phones = card.optJSONArray("phones")
         for (i in 0 until (phones?.length() ?: 0)) {
             val p = phones?.optJSONObject(i) ?: continue
-            val number = p.optString("number")
+            val number = p.optString("value")
             if (number.isEmpty()) continue
             val label = p.optString("label")
             val row = android.content.ContentValues()
@@ -847,7 +847,7 @@ object RovstiBridge {
         val emails = card.optJSONArray("emails")
         for (i in 0 until (emails?.length() ?: 0)) {
             val e = emails?.optJSONObject(i) ?: continue
-            val address = e.optString("address")
+            val address = e.optString("value")
             if (address.isEmpty()) continue
             val row = android.content.ContentValues()
             row.put(android.provider.ContactsContract.Data.MIMETYPE, android.provider.ContactsContract.CommonDataKinds.Email.CONTENT_ITEM_TYPE)
@@ -857,9 +857,9 @@ object RovstiBridge {
         val intent = Intent(Intent.ACTION_INSERT, android.provider.ContactsContract.Contacts.CONTENT_URI)
         val name = card.optString("name")
         if (name.isNotEmpty()) intent.putExtra(android.provider.ContactsContract.Intents.Insert.NAME, name)
-        val company = card.optString("company")
+        val company = card.optString("org")
         if (company.isNotEmpty()) intent.putExtra(android.provider.ContactsContract.Intents.Insert.COMPANY, company)
-        val notes = card.optString("notes")
+        val notes = card.optString("note")
         if (notes.isNotEmpty()) intent.putExtra(android.provider.ContactsContract.Intents.Insert.NOTES, notes)
         intent.putParcelableArrayListExtra(android.provider.ContactsContract.Intents.Insert.DATA, rows)
         return start(intent)

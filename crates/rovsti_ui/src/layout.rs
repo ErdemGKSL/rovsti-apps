@@ -344,6 +344,123 @@ pub mod geom {
         let (hi, lo) = if la >= lb { (la, lb) } else { (lb, la) };
         (hi + 0.05) / (lo + 0.05)
     }
+
+    /// Plain rectangle in dp (x, y = top-left).
+    #[derive(Clone, Copy, Debug, PartialEq, Default)]
+    pub struct Rect {
+        pub x: f32,
+        pub y: f32,
+        pub w: f32,
+        pub h: f32,
+    }
+
+    impl Rect {
+        pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+            Self { x, y, w, h }
+        }
+        pub fn right(&self) -> f32 {
+            self.x + self.w
+        }
+        pub fn bottom(&self) -> f32 {
+            self.y + self.h
+        }
+    }
+
+    /// Plain size in dp.
+    #[derive(Clone, Copy, Debug, PartialEq, Default)]
+    pub struct Size {
+        pub w: f32,
+        pub h: f32,
+    }
+
+    impl Size {
+        pub const fn new(w: f32, h: f32) -> Self {
+            Self { w, h }
+        }
+    }
+
+    /// Where a popover goes.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct Placement {
+        /// Final rectangle; its height is capped to `max_h`.
+        pub rect: Rect,
+        /// True when the menu hangs below the anchor.
+        pub below: bool,
+        /// Room available on the chosen side; content taller than this scrolls.
+        pub max_h: f32,
+    }
+
+    /// Row height inside a menu.
+    pub const MENU_ROW_H: f32 = 44.0;
+    /// Band between two menu groups.
+    pub const MENU_GROUP_GAP: f32 = 8.0;
+    /// Vertical padding inside a menu (top + bottom).
+    pub const MENU_PAD_V: f32 = 12.0;
+    /// Narrowest and widest popover.
+    pub const POPOVER_MIN_W: f32 = 220.0;
+    pub const POPOVER_MAX_W: f32 = 280.0;
+    /// Leading pad + icon + gap + trailing pad around a menu label.
+    pub const POPOVER_CHROME_W: f32 = 16.0 + 20.0 + 12.0 + 16.0;
+
+    /// Popover width: the longest label plus chrome, clamped to 220..280 and
+    /// never wider than the viewport minus two side margins.
+    pub fn popover_width(longest_label_dp: f32, viewport_w: f32) -> f32 {
+        let want = (longest_label_dp + POPOVER_CHROME_W).clamp(POPOVER_MIN_W, POPOVER_MAX_W);
+        want.min((viewport_w - 2.0 * MARGIN).max(0.0))
+    }
+
+    /// Menu height for groups of the given item counts: 44 per item, an 8 dp
+    /// band between groups, 12 dp padding. Empty groups are ignored.
+    pub fn menu_height(groups: &[usize]) -> f32 {
+        let groups: Vec<usize> = groups.iter().copied().filter(|n| *n > 0).collect();
+        let items: usize = groups.iter().sum();
+        if items == 0 {
+            return 0.0;
+        }
+        MENU_ROW_H * items as f32 + MENU_GROUP_GAP * (groups.len() - 1) as f32 + MENU_PAD_V
+    }
+
+    /// Places a popover of `menu` size next to `anchor` (a zero-size anchor is
+    /// a long-press point). It goes below when it fits above `bottom`, else
+    /// above when it fits under `top`, else on the larger side with its
+    /// height capped. Horizontally it is right-aligned to an anchor in the
+    /// right half, left-aligned otherwise, and clamped to `margin`.
+    pub fn place_popover(
+        anchor: Rect,
+        menu: Size,
+        viewport: Size,
+        top: f32,
+        bottom: f32,
+        margin: f32,
+        gap: f32,
+    ) -> Placement {
+        let w = menu.w.min((viewport.w - 2.0 * margin).max(0.0));
+        let anchor_cx = anchor.x + anchor.w / 2.0;
+        let x = if anchor_cx >= viewport.w / 2.0 {
+            anchor.right() - w
+        } else {
+            anchor.x
+        };
+        let x = x.min(viewport.w - margin - w).max(margin);
+
+        let below_room = (bottom - (anchor.bottom() + gap)).max(0.0);
+        let above_room = ((anchor.y - gap) - top).max(0.0);
+        let below = menu.h <= below_room || (menu.h > above_room && below_room >= above_room);
+        let max_h = if below { below_room } else { above_room };
+        let h = menu.h.min(max_h);
+        let y = if below {
+            anchor.bottom() + gap
+        } else {
+            anchor.y - gap - h
+        };
+        // An anchor already past the limits still never pushes the menu out.
+        let y = y.min(bottom - h).max(top);
+        Placement {
+            rect: Rect::new(x, y, w, h),
+            below,
+            max_h,
+        }
+    }
 }
 
 /// System insets in dp.
@@ -684,5 +801,164 @@ mod tests {
         assert_eq!(geom::empty_state_width(412.0), 320.0);
         assert_eq!(geom::empty_state_width(300.0), 268.0);
         assert_eq!(geom::empty_state_width(10.0), 0.0);
+    }
+
+    fn vp() -> Size {
+        Size::new(400.0, 800.0)
+    }
+    const BOT: f32 = 700.0;
+
+    #[test]
+    fn popover_below_when_it_fits() {
+        let p = place_popover(
+            Rect::new(20.0, 100.0, 40.0, 40.0),
+            Size::new(240.0, 200.0),
+            vp(),
+            50.0,
+            BOT,
+            16.0,
+            8.0,
+        );
+        assert!(p.below);
+        assert_eq!(p.rect, Rect::new(20.0, 148.0, 240.0, 200.0));
+    }
+
+    #[test]
+    fn popover_flips_above_near_the_bottom() {
+        let p = place_popover(
+            Rect::new(20.0, 600.0, 40.0, 40.0),
+            Size::new(240.0, 200.0),
+            vp(),
+            50.0,
+            BOT,
+            16.0,
+            8.0,
+        );
+        assert!(!p.below);
+        assert_eq!(p.rect.y, 600.0 - 8.0 - 200.0);
+        assert_eq!(p.rect.h, 200.0);
+    }
+
+    #[test]
+    fn popover_clamps_left_edge() {
+        let p = place_popover(
+            Rect::new(2.0, 100.0, 40.0, 40.0),
+            Size::new(240.0, 100.0),
+            vp(),
+            50.0,
+            BOT,
+            16.0,
+            8.0,
+        );
+        assert_eq!(p.rect.x, 16.0);
+    }
+
+    #[test]
+    fn popover_clamps_right_edge() {
+        let p = place_popover(
+            Rect::new(390.0, 100.0, 40.0, 40.0),
+            Size::new(240.0, 100.0),
+            vp(),
+            50.0,
+            BOT,
+            16.0,
+            8.0,
+        );
+        assert_eq!(p.rect.right(), 384.0);
+    }
+
+    #[test]
+    fn popover_right_aligns_for_right_half_anchor() {
+        let p = place_popover(
+            Rect::new(300.0, 100.0, 60.0, 40.0),
+            Size::new(220.0, 100.0),
+            vp(),
+            50.0,
+            BOT,
+            16.0,
+            8.0,
+        );
+        assert_eq!(p.rect.right(), 360.0);
+        let q = place_popover(
+            Rect::new(40.0, 100.0, 60.0, 40.0),
+            Size::new(220.0, 100.0),
+            vp(),
+            50.0,
+            BOT,
+            16.0,
+            8.0,
+        );
+        assert_eq!(q.rect.x, 40.0);
+    }
+
+    #[test]
+    fn popover_caps_and_scrolls_when_neither_side_fits() {
+        let p = place_popover(
+            Rect::new(20.0, 380.0, 40.0, 40.0),
+            Size::new(240.0, 900.0),
+            vp(),
+            50.0,
+            BOT,
+            16.0,
+            8.0,
+        );
+        // below room 700-428=272, above room 372-50=322 -> above, capped
+        assert!(!p.below);
+        assert_eq!(p.max_h, 322.0);
+        assert_eq!(p.rect.h, 322.0);
+        assert_eq!(p.rect.y, 50.0);
+    }
+
+    #[test]
+    fn popover_never_passes_the_bottom_limit() {
+        for y in (60..760).step_by(20) {
+            for h in [80.0, 300.0, 600.0] {
+                let p = place_popover(
+                    Rect::new(20.0, y as f32, 40.0, 40.0),
+                    Size::new(240.0, h),
+                    vp(),
+                    50.0,
+                    BOT,
+                    16.0,
+                    8.0,
+                );
+                assert!(p.rect.bottom() <= BOT + 0.001, "y={y} h={h}");
+                assert!(p.rect.y >= 50.0 - 0.001, "y={y} h={h}");
+            }
+        }
+    }
+
+    #[test]
+    fn popover_zero_size_anchor_point() {
+        let p = place_popover(
+            Rect::new(200.0, 300.0, 0.0, 0.0),
+            Size::new(240.0, 200.0),
+            vp(),
+            50.0,
+            BOT,
+            16.0,
+            8.0,
+        );
+        assert!(p.below);
+        assert_eq!(p.rect.y, 308.0);
+        // x = 200 is the right-half boundary: right-aligned, clamped to the margin
+        assert_eq!(p.rect.x, 16.0);
+    }
+
+    #[test]
+    fn popover_width_clamps() {
+        assert_eq!(popover_width(10.0, 400.0), 220.0);
+        assert_eq!(popover_width(120.0, 400.0), 220.0);
+        assert_eq!(popover_width(200.0, 400.0), 264.0);
+        assert_eq!(popover_width(500.0, 400.0), 280.0);
+        assert_eq!(popover_width(500.0, 250.0), 218.0);
+    }
+
+    #[test]
+    fn menu_height_formula() {
+        assert_eq!(menu_height(&[]), 0.0);
+        assert_eq!(menu_height(&[3]), 44.0 * 3.0 + 12.0);
+        assert_eq!(menu_height(&[2, 3, 1]), 44.0 * 6.0 + 16.0 + 12.0);
+        assert_eq!(menu_height(&[2, 0, 1]), 44.0 * 3.0 + 8.0 + 12.0);
     }
 }

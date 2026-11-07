@@ -792,6 +792,7 @@ impl Backend {
             },
             kind::SCHEDULED_FIRED => self.reconcile_fired(cx),
             kind::MESSAGE_REMINDER_FIRED => self.on_message_reminder_fired(&event.json, cx),
+            kind::MESSAGE_REMINDERS_CHANGED => self.reload_message_reminders(cx),
             _ => {}
         }
     }
@@ -1141,6 +1142,31 @@ impl Backend {
                 Err(error) => {
                     log::warn!("reading message reminders failed: {error}");
                     Vec::new()
+                }
+            };
+            this.update(cx, |this, cx| {
+                this.message_reminders = list;
+                cx.emit(BackendEvent::RemindersChanged);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Reads the armed list again after Kotlin armed one (the notification action).
+    /// Unsupported or a read error leaves the list unchanged.
+    fn reload_message_reminders(&mut self, cx: &mut Context<Self>) {
+        let task = cx
+            .background_executor()
+            .spawn(async { reminders::armed_messages() });
+        cx.spawn(async move |this, cx| {
+            let list = match task.await {
+                Ok(json) => rovsti_core::message_reminder::parse_list(&json),
+                Err(Error::Unsupported) => return,
+                Err(error) => {
+                    log::warn!("reading message reminders failed: {error}");
+                    return;
                 }
             };
             this.update(cx, |this, cx| {

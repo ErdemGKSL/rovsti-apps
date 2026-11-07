@@ -26,7 +26,7 @@ data class MessageReminderItem(
     val raw: JSONObject,
 ) {
     companion object {
-        /** Pure: null for malformed JSON, a non-positive id, a blank tag or a blank message id. */
+        /** Pure: null for malformed JSON, a non-positive id or a blank tag. A blank message id is a chat-level reminder. */
         fun parse(json: String): MessageReminderItem? = try {
             from(JSONObject(json))
         } catch (_: org.json.JSONException) {
@@ -37,7 +37,7 @@ data class MessageReminderItem(
             val id = o.optLong("id", 0)
             val tag = o.optString("tag", "")
             val messageId = o.optString("message_id", "")
-            if (id <= 0 || tag.isBlank() || messageId.isBlank()) return null
+            if (id <= 0 || tag.isBlank()) return null
             return MessageReminderItem(
                 id, tag, messageId, o.optLong("message_at_ms", 0), o.optLong("at_ms", 0),
                 o.optString("notif_title", o.optString("title", tag)), o.optString("notif_body", o.optString("body", "")), o,
@@ -111,8 +111,9 @@ object MessageReminders {
         val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent()
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(MessageNotifications.EXTRA_TAG, item.tag)
-            .putExtra(EXTRA_MESSAGE_ID, item.messageId)
-            .putExtra(EXTRA_MESSAGE_AT, item.messageAtMs)
+        if (item.messageId.isNotBlank()) {
+            launch.putExtra(EXTRA_MESSAGE_ID, item.messageId).putExtra(EXTRA_MESSAGE_AT, item.messageAtMs)
+        }
         return PendingIntent.getActivity(
             context, code(item.id), launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )

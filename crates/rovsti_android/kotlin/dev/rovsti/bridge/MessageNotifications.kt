@@ -123,6 +123,16 @@ object MessageNotifications {
         builder.addAction(
             Notification.Action.Builder(null as Icon?, "Mark read", receiverIntent(context, spec.tag, ReplyReceiver.ACTION_MARK_READ, null, 2, mutable = false)).build(),
         )
+        if (spec.otp == null) {
+            builder.addAction(
+                Notification.Action.Builder(
+                    null as Icon?, "Remind me in 1 hour",
+                    receiverIntent(context, spec.tag, ReplyReceiver.ACTION_REMIND, null, 4, mutable = false) {
+                        it.putExtra(ReplyReceiver.EXTRA_TITLE, spec.title).putExtra(ReplyReceiver.EXTRA_BODY, spec.lines.last())
+                    },
+                ).build(),
+            )
+        }
         return builder.build()
     }
 
@@ -130,16 +140,17 @@ object MessageNotifications {
         val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent()
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP).putExtra(EXTRA_TAG, tag)
         return PendingIntent.getActivity(
-            context, tag.hashCode() * 4 + 3, launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            context, tag.hashCode() * 8 + 3, launch, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
 
-    /** Reply needs `FLAG_MUTABLE` so the system can add the typed text; the others are immutable. */
-    private fun receiverIntent(context: Context, tag: String, action: String, code: String?, slot: Int, mutable: Boolean): PendingIntent {
+    /** Request codes are `tag.hashCode() * 8 + slot`: Reply 0, Copy 1, Mark read 2, open 3, Remind 4. Reply needs `FLAG_MUTABLE` so the system can add the typed text; the others are immutable. */
+    private fun receiverIntent(context: Context, tag: String, action: String, code: String?, slot: Int, mutable: Boolean, extras: (Intent) -> Unit = {}): PendingIntent {
         val intent = Intent(action).setClass(context, ReplyReceiver::class.java).putExtra(EXTRA_TAG, tag)
         code?.let { intent.putExtra(ReplyReceiver.EXTRA_CODE, it) }
+        extras(intent)
         val flag = if (mutable) PendingIntent.FLAG_MUTABLE else PendingIntent.FLAG_IMMUTABLE
-        return PendingIntent.getBroadcast(context, tag.hashCode() * 4 + slot, intent, PendingIntent.FLAG_UPDATE_CURRENT or flag)
+        return PendingIntent.getBroadcast(context, tag.hashCode() * 8 + slot, intent, PendingIntent.FLAG_UPDATE_CURRENT or flag)
     }
 
     /** Copies [text]; with [sensitive] the clip is hidden from the paste preview (API 33+, `EXTRA_IS_SENSITIVE`). */

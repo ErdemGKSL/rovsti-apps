@@ -49,6 +49,8 @@ pub mod kind {
     pub const REMINDER_FIRED: &str = "reminder_fired";
     /// A message reminder fired (`{id}`); Rust drops it from the armed list.
     pub const MESSAGE_REMINDER_FIRED: &str = "message_reminder_fired";
+    /// A message reminder was armed from a notification action (`{}`); Rust re-reads the armed list.
+    pub const MESSAGE_REMINDERS_CHANGED: &str = "message_reminders_changed";
     /// A notification was tapped (`{tag}`): open that conversation.
     pub const OPEN_THREAD: &str = "open_thread";
     /// A sibling app asked this one to call or chat on WhatsApp
@@ -169,6 +171,12 @@ mod tests {
 
     fn serial() -> std::sync::MutexGuard<'static, ()> {
         SERIAL.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    #[test]
+    fn message_reminder_event_names_match_kotlin() {
+        assert_eq!(kind::MESSAGE_REMINDERS_CHANGED, "message_reminders_changed");
+        assert_eq!(kind::MESSAGE_REMINDER_FIRED, "message_reminder_fired");
     }
 
     #[test]

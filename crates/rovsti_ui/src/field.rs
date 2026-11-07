@@ -10,7 +10,7 @@
 use std::{
     cell::{Cell, RefCell},
     ops::Range,
-    sync::atomic::{AtomicBool, AtomicU8, Ordering},
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
@@ -18,9 +18,9 @@ use gpui::{
     AnyElement, App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
     Focusable, Font, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, LongPressEvent,
     MouseButton, ParentElement as _, PathBuilder, Pixels, Point, PreeditSelection, ShapedLine,
-    Styled, SurroundingText, TextAlign, TextInputAction, TextInputMode, TextInputPurpose, TextRun,
-    TouchEvent, TouchPhase, UTF16Selection, UnderlineStyle, Window, WrappedLine, canvas, deferred,
-    div, fill, point, px, size,
+    Styled, SurroundingText, TextAlign, TextInputAction, TextInputFocusEvent, TextInputMode,
+    TextInputPurpose, TextRun, TouchEvent, TouchPhase, UTF16Selection, UnderlineStyle, Window,
+    WrappedLine, canvas, deferred, div, fill, point, px, size,
 };
 use liquid_glass_kit::{
     glass::{GlassSpec, glass},
@@ -56,13 +56,16 @@ pub enum SelectionChrome {
     Drawn,
 }
 
-/// Override of [`selection_chrome`]: 0 = none, 1 = Native, 2 = Drawn.
-static CHROME_OVERRIDE: AtomicU8 = AtomicU8::new(0);
+thread_local! {
+    /// Override of [`selection_chrome`]: 0 = none, 1 = Native, 2 = Drawn. Per
+    /// thread, so parallel tests cannot see each other's choice.
+    static CHROME_OVERRIDE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
 
 /// The selection chrome in effect: the override if set, else `Native` on
 /// Android and `Drawn` elsewhere.
 pub fn selection_chrome() -> SelectionChrome {
-    match CHROME_OVERRIDE.load(Ordering::Relaxed) {
+    match CHROME_OVERRIDE.with(std::cell::Cell::get) {
         1 => SelectionChrome::Native,
         2 => SelectionChrome::Drawn,
         _ if cfg!(target_os = "android") => SelectionChrome::Native,
@@ -78,7 +81,7 @@ pub fn set_selection_chrome(chrome: Option<SelectionChrome>) {
         Some(SelectionChrome::Native) => 1,
         Some(SelectionChrome::Drawn) => 2,
     };
-    CHROME_OVERRIDE.store(v, Ordering::Relaxed);
+    CHROME_OVERRIDE.with(|c| c.set(v));
 }
 
 /// A touch gesture on a field.
@@ -753,12 +756,26 @@ impl TextField {
         let handle = self.focus.clone();
         window.focus(&handle, cx);
         window.show_soft_keyboard();
-        match resolve_tap(click_count, focused, on_target) {
+        let native = selection_chrome() == SelectionChrome::Native;
+        let action = if native {
+            // The platform owns handles and menu: a tap places the caret, a
+            // double tap selects the word, nothing else.
+            if click_count >= 2 {
+                TapAction::SelectWord
+            } else {
+                TapAction::PlaceCaret
+            }
+        } else {
+            resolve_tap(click_count, focused, on_target)
+        };
+        match action {
             TapAction::PlaceCaret => {
                 self.buf.unmark();
                 self.buf.set_caret(byte);
                 self.menu.set(None);
-                self.show_insertion(cx);
+                if !native {
+                    self.show_insertion(cx);
+                }
             }
             TapAction::ToggleMenu => {
                 if self.menu.get().is_some() {
@@ -775,6 +792,25 @@ impl TextField {
                 self.insertion.set(None);
             }
         }
+        self.touch();
+        cx.notify();
+    }
+
+    /// The platform's request to focus the field at window `position`
+    /// ([`TextInputFocusEvent`], native chrome): focuses, raises the keyboard
+    /// and puts the caret under the finger.
+    fn focus_at(&mut self, position: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.focus.is_focused(window) {
+            self.scroll.set(0.0);
+        }
+        let byte = self.byte_at(position, window);
+        let handle = self.focus.clone();
+        window.focus(&handle, cx);
+        window.show_soft_keyboard();
+        self.buf.unmark();
+        self.buf.set_caret(byte);
+        self.menu.set(None);
+        self.insertion.set(None);
         self.touch();
         cx.notify();
     }
@@ -817,6 +853,9 @@ impl TextField {
     /// progress follows the finger and ends when it lifts. Returns whether
     /// the event was used.
     pub fn touch_event(&mut self, event: &TouchEvent, cx: &mut Context<Self>) -> bool {
+        if selection_chrome() == SelectionChrome::Native {
+            return false;
+        }
         match event.phase {
             TouchPhase::Started => {
                 let hit = self
@@ -1611,6 +1650,25 @@ fn touch_layer(field: Entity<TextField>, accent: Hsla) -> impl IntoElement {
                     cx.stop_propagation();
                 }
             });
+            if selection_chrome() == SelectionChrome::Native {
+                let f = field.clone();
+                window.on_mouse_event(move |event: &TextInputFocusEvent, phase, window, cx| {
+                    if !phase.bubble() || !bounds.contains(&event.position) {
+                        return;
+                    }
+                    f.update(cx, |f, cx| f.focus_at(event.position, window, cx));
+                    window.prevent_default();
+                    cx.stop_propagation();
+                });
+                // Not claimed: the host's long-press opens the native action
+                // mode, handles and magnifier. Only keep it from the page.
+                window.on_mouse_event(move |event: &LongPressEvent, phase, _, cx| {
+                    if phase.bubble() && bounds.contains(&event.position) {
+                        cx.stop_propagation();
+                    }
+                });
+                return;
+            }
             let f = field.clone();
             window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
                 if !phase.bubble()
@@ -1638,7 +1696,7 @@ type HandleWant = (Option<(f32, f32)>, (f32, f32), Drag);
 fn paint_handles(field: &Entity<TextField>, accent: Hsla, window: &mut Window, cx: &mut App) {
     let f = field.read(cx);
     f.handles.borrow_mut().clear();
-    if !f.focus.is_focused(window) {
+    if selection_chrome() == SelectionChrome::Native || !f.focus.is_focused(window) {
         return;
     }
     let laid = f.laid.borrow();
@@ -1725,7 +1783,7 @@ fn edit_menu(
     cx: &App,
 ) -> Option<AnyElement> {
     let f = field.read(cx);
-    if !f.menu_visible(window) {
+    if selection_chrome() == SelectionChrome::Native || !f.menu_visible(window) {
         return None;
     }
     let content = f.content.get()?;
@@ -1828,7 +1886,7 @@ fn handle_shields(
     let Some(content) = f.content.get() else {
         return Vec::new();
     };
-    if !f.focus.is_focused(window) {
+    if selection_chrome() == SelectionChrome::Native || !f.focus.is_focused(window) {
         return Vec::new();
     }
     let origin = point(content.left() - px(pad), content.top());
@@ -2418,10 +2476,94 @@ mod tests {
     }
 
     #[gpui::test]
+    fn native_focus_event_focuses_and_puts_the_caret_under_the_finger(cx: &mut TestAppContext) {
+        set_selection_chrome(Some(SelectionChrome::Native));
+        let (field, cx) = box_cx(cx, "merhaba dünya");
+        let x = x_of(&field, 5, cx);
+        cx.simulate_event(gpui::TextInputFocusEvent {
+            position: point(px(x), px(80.0)),
+        });
+        field.update_in(cx, |f, w, _| {
+            assert!(f.focus.is_focused(w));
+            assert_eq!(f.selection(), 5..5);
+            assert!(!f.insertion_visible());
+        });
+        set_selection_chrome(None);
+    }
+
+    #[gpui::test]
+    fn native_focus_event_outside_the_field_is_ignored(cx: &mut TestAppContext) {
+        set_selection_chrome(Some(SelectionChrome::Native));
+        let (field, cx) = box_cx(cx, "merhaba");
+        cx.simulate_event(gpui::TextInputFocusEvent {
+            position: point(px(5.0), px(300.0)),
+        });
+        field.update_in(cx, |f, w, _| assert!(!f.focus.is_focused(w)));
+        set_selection_chrome(None);
+    }
+
+    #[gpui::test]
+    fn native_long_press_leaves_selection_and_menu_alone(cx: &mut TestAppContext) {
+        set_selection_chrome(Some(SelectionChrome::Native));
+        let (field, cx) = box_cx(cx, "merhaba dünya");
+        let x = x_of(&field, 2, cx);
+        cx.simulate_event(gpui::TextInputFocusEvent {
+            position: point(px(x), px(80.0)),
+        });
+        cx.simulate_event(gpui::LongPressEvent {
+            position: point(px(x), px(80.0)),
+        });
+        field.update(cx, |f, _| {
+            assert_eq!(f.selection(), 2..2);
+            assert!(f.menu.get().is_none());
+            assert!(f.drag.get().is_none());
+        });
+        set_selection_chrome(None);
+    }
+
+    #[gpui::test]
+    fn native_tap_places_the_caret_without_drawn_chrome(cx: &mut TestAppContext) {
+        set_selection_chrome(Some(SelectionChrome::Native));
+        let (field, cx) = box_cx(cx, "merhaba dünya");
+        let (x3, x10) = (x_of(&field, 3, cx), x_of(&field, 10, cx));
+        field.update_in(cx, |f, w, cx| {
+            f.tap(point(px(x3), px(40.0)), 1, w, cx);
+            assert_eq!(f.selection(), 3..3);
+            assert!(!f.insertion_visible());
+            // Tapping the caret again does not open the drawn menu.
+            f.tap(point(px(x3), px(40.0)), 1, w, cx);
+            assert!(f.menu.get().is_none());
+            f.tap(point(px(x10), px(40.0)), 2, w, cx);
+            assert_eq!(&f.text()[f.selection()], "dünya");
+            assert!(f.menu.get().is_none());
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        field.update(cx, |f, _| assert!(f.handles.borrow().is_empty()));
+        set_selection_chrome(None);
+    }
+
+    #[gpui::test]
+    fn native_menu_shortcuts_still_work(cx: &mut TestAppContext) {
+        set_selection_chrome(Some(SelectionChrome::Native));
+        let (field, cx) = box_cx(cx, "hello world");
+        cx.simulate_event(gpui::TextInputFocusEvent {
+            position: point(px(20.0), px(80.0)),
+        });
+        cx.simulate_keystrokes("ctrl-a ctrl-c");
+        field.update(cx, |f, _| assert_eq!(f.selection(), 0..11));
+        cx.simulate_keystrokes("ctrl-x");
+        field.update(cx, |f, _| assert_eq!(f.text(), ""));
+        cx.simulate_keystrokes("ctrl-v");
+        field.update(cx, |f, _| assert_eq!(f.text(), "hello world"));
+        set_selection_chrome(None);
+    }
+
+    #[gpui::test]
     fn long_press_on_an_empty_field_arms_a_menu(cx: &mut TestAppContext) {
         let (field, cx) = box_cx(cx, "");
         field.update_in(cx, |f, w, cx| {
-            f.long_press(point(px(30.0), px(40.0)), w, cx);
+            f.long_press(point(px(30.0), px(80.0)), w, cx);
             assert_eq!(f.selection(), 0..0);
             assert!(f.menu.get().is_some());
         });

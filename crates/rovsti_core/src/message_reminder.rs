@@ -90,6 +90,14 @@ pub fn parse_list(json: &str) -> Vec<MessageReminder> {
         .collect()
 }
 
+/// The id in a `message_reminder_fired` payload (`{"id": 5}`, or the id as a string).
+pub fn fired_id(json: &str) -> Option<i64> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let id = value.get("id")?;
+    id.as_i64().or_else(|| id.as_str()?.trim().parse().ok())
+}
+
+/// The reminder armed for `message_id`, if any.
 pub fn for_message<'a>(
     list: &'a [MessageReminder],
     message_id: &str,
@@ -176,6 +184,15 @@ mod tests {
         assert!(parse_list("nope").is_empty());
         assert!(parse_list("{}").is_empty());
         assert!(parse_list("").is_empty());
+    }
+
+    #[test]
+    fn fired_id_reads_number_or_string() {
+        assert_eq!(fired_id(r#"{"id": 7}"#), Some(7));
+        assert_eq!(fired_id(r#"{"id": "8"}"#), Some(8));
+        assert_eq!(fired_id(r#"{"id": "x"}"#), None);
+        assert_eq!(fired_id("{}"), None);
+        assert_eq!(fired_id("nope"), None);
     }
 
     #[test]

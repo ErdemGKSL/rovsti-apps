@@ -23,7 +23,7 @@ use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Task};
 use rovsti_android::{
     Error,
     events::{self, RawEvent, kind},
-    permissions, providers,
+    permissions, providers, reminders,
     roles::{self, Role},
     sms,
 };
@@ -85,7 +85,7 @@ pub enum BackendEvent {
     /// Text typed into a notification's reply box.
     Reply(Reply),
     /// A notification was tapped (its tag).
-    OpenThread(String),
+    OpenThread(OpenTag),
     /// A sibling app asked to open a WhatsApp chat (`handoff`).
     Handoff(Handoff),
     /// Something the user should be told in a pill.
@@ -101,6 +101,8 @@ pub enum BackendEvent {
     },
     /// Scheduled sends that fired while no UI looked and failed.
     ScheduledFailed(Vec<ScheduledSms>),
+    /// The armed message reminders changed (set, cancelled or fired).
+    RemindersChanged,
 }
 
 impl EventEmitter<BackendEvent> for Backend {}
@@ -192,6 +194,8 @@ pub struct Backend {
     /// A write of the prefs and the queue is running; another is due after it.
     saving: bool,
     save_due: bool,
+    /// Armed "Remind me" reminders on single messages.
+    message_reminders: Vec<rovsti_core::message_reminder::MessageReminder>,
     /// Sample data, on desktop only.
     preview: Option<Preview>,
     preview_sims: u32,
@@ -229,6 +233,7 @@ impl Backend {
                 blocked_rows: Vec::new(),
                 saving: false,
                 save_due: false,
+                message_reminders: Vec::new(),
                 preview: desktop.then(|| Preview::new(now_ms())),
                 preview_sims: std::env::var("ROVSTI_PREVIEW_SIMS")
                     .ok()
@@ -296,6 +301,7 @@ impl Backend {
                 }
             });
             attach.detach();
+            backend.load_message_reminders(cx);
             cx.on_release(move |_, _| {
                 let _ = rovsti_android::window::ui_attached(false);
             })
@@ -777,7 +783,7 @@ impl Backend {
                 Err(error) => log::warn!("unreadable msg_reply: {error}"),
             },
             kind::OPEN_THREAD => match serde_json::from_str::<OpenTag>(&event.json) {
-                Ok(open) => cx.emit(BackendEvent::OpenThread(open.tag)),
+                Ok(open) => cx.emit(BackendEvent::OpenThread(open)),
                 Err(error) => log::warn!("unreadable open_thread: {error}"),
             },
             kind::HANDOFF => match parse_handoff(&event.json) {
@@ -785,6 +791,7 @@ impl Backend {
                 None => log::warn!("ignoring a bad handoff"),
             },
             kind::SCHEDULED_FIRED => self.reconcile_fired(cx),
+            kind::MESSAGE_REMINDER_FIRED => self.on_message_reminder_fired(&event.json, cx),
             _ => {}
         }
     }
@@ -1108,6 +1115,96 @@ impl Backend {
             .ok();
         })
         .detach();
+    }
+
+    // ---- message reminders ------------------------------------------------
+
+    /// The armed "Remind me" reminders.
+    pub fn message_reminders(&self) -> &[rovsti_core::message_reminder::MessageReminder] {
+        &self.message_reminders
+    }
+
+    /// Sets the stored alarms again (there is no boot receiver) and reads the armed list.
+    /// Desktop answers Unsupported, which leaves the list empty.
+    fn load_message_reminders(&mut self, cx: &mut Context<Self>) {
+        let task = cx.background_executor().spawn(async {
+            match reminders::rearm_messages() {
+                Ok(_) | Err(Error::Unsupported) => {}
+                Err(error) => log::debug!("re-arming message reminders: {error}"),
+            }
+            reminders::armed_messages()
+        });
+        cx.spawn(async move |this, cx| {
+            let list = match task.await {
+                Ok(json) => rovsti_core::message_reminder::parse_list(&json),
+                Err(Error::Unsupported) => Vec::new(),
+                Err(error) => {
+                    log::warn!("reading message reminders failed: {error}");
+                    Vec::new()
+                }
+            };
+            this.update(cx, |this, cx| {
+                this.message_reminders = list;
+                cx.emit(BackendEvent::RemindersChanged);
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Arms the alarm for `reminder` off the UI thread. `Ok(false)` means Android refused it.
+    pub fn arm_message_reminder(
+        &self,
+        reminder: &rovsti_core::message_reminder::MessageReminder,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<bool, Error>> {
+        let json = rovsti_core::message_reminder::arm_json(reminder);
+        cx.background_executor()
+            .spawn(async move { reminders::arm_message(&json) })
+    }
+
+    /// Cancels the alarm of reminder `id`.
+    pub fn disarm_message_reminder(&self, id: i64, cx: &mut Context<Self>) {
+        cx.background_executor()
+            .spawn(async move {
+                if let Err(error) = reminders::disarm_message(id)
+                    && !matches!(error, Error::Unsupported)
+                {
+                    log::warn!("disarming a message reminder failed: {error}");
+                }
+            })
+            .detach();
+    }
+
+    /// Remembers an armed reminder; a second one for the same message replaces the first.
+    pub fn track_message_reminder(
+        &mut self,
+        reminder: rovsti_core::message_reminder::MessageReminder,
+        cx: &mut Context<Self>,
+    ) {
+        self.message_reminders
+            .retain(|r| r.message_id != reminder.message_id);
+        self.message_reminders.push(reminder);
+        cx.emit(BackendEvent::RemindersChanged);
+        cx.notify();
+    }
+
+    /// Forgets reminder `id` (cancelled or fired).
+    pub fn forget_message_reminder(&mut self, id: i64, cx: &mut Context<Self>) {
+        let before = self.message_reminders.len();
+        self.message_reminders.retain(|r| r.id != id);
+        if self.message_reminders.len() != before {
+            cx.emit(BackendEvent::RemindersChanged);
+            cx.notify();
+        }
+    }
+
+    fn on_message_reminder_fired(&mut self, json: &str, cx: &mut Context<Self>) {
+        match rovsti_core::message_reminder::fired_id(json) {
+            Some(id) => self.forget_message_reminder(id, cx),
+            None => self.load_message_reminders(cx),
+        }
     }
 
     // ---- reading everything (backup) ----------------------------------------

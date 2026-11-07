@@ -28,6 +28,7 @@ mod new_conversation;
 mod notifications;
 mod photos;
 mod prefs;
+mod remind_ui;
 mod schedule_ui;
 mod select_ui;
 mod settings_ui;
@@ -234,6 +235,8 @@ enum PillAction {
     UndoSmsDelete(Vec<rovsti_core::sms_timeline::SmsKey>),
     /// Sets an SMS thread's local archive mark back.
     SmsArchive { thread: i64, archived: bool },
+    /// Cancels the message reminder just set.
+    UndoReminder(i64),
 }
 
 /// The page pushed over the tabs.
@@ -307,6 +310,8 @@ struct MessagesApp {
     channel_pick: Option<Recipient>,
     /// The header bell's "Mute for" menu of the open chat.
     mute_menu: Option<ThreadId>,
+    /// The "Remind me" sheet over the open chat.
+    remind: Option<remind_ui::RemindSheet>,
     /// The "Forward to" chooser.
     forward: Option<forward_ui::ForwardSheet>,
     /// Bumped on every change of `wa_threads`.
@@ -491,7 +496,16 @@ impl MessagesApp {
                 }
                 BackendEvent::SmsReceived(received) => this.on_sms_received(received, cx),
                 BackendEvent::Reply(reply) => this.on_reply(reply, cx),
-                BackendEvent::OpenThread(tag) => this.on_open_tag(tag, None, cx),
+                BackendEvent::OpenThread(open) => {
+                    // A message-reminder tap also names the message to glow.
+                    this.pending_jump = open.jump_target();
+                    this.on_open_tag(&open.tag, None, cx);
+                    this.pending_jump = None;
+                }
+                BackendEvent::RemindersChanged => {
+                    this.sync_open_page(cx);
+                    cx.notify();
+                }
                 BackendEvent::Handoff(handoff) => this.on_handoff(handoff, cx),
                 BackendEvent::Notice(text) => {
                     this.show_pill(text.clone());
@@ -578,6 +592,7 @@ impl MessagesApp {
             row_menu: None,
             channel_pick: None,
             mute_menu: None,
+            remind: None,
             forward: None,
             wa_rev: 0,
             backend_epoch: 0,
@@ -1203,6 +1218,9 @@ impl MessagesApp {
                 all_day,
             } => this.add_to_calendar(title.clone(), *start_ms, *end_ms, *all_day, cx),
             ConversationEvent::Share(text) => this.share_text(text.clone(), cx),
+            ConversationEvent::Remind { id, at_ms, preview } => {
+                this.open_remind(id.clone(), *at_ms, preview.clone(), cx)
+            }
             ConversationEvent::Call(n) => {
                 this.telecom_action(sms_actions::SmsAction::Call, n.clone(), cx);
             }
@@ -1311,6 +1329,9 @@ impl MessagesApp {
                 all_day,
             } => this.add_to_calendar(title.clone(), *start_ms, *end_ms, *all_day, cx),
             SmsConversationEvent::Share(text) => this.share_text(text.clone(), cx),
+            SmsConversationEvent::Remind { id, at_ms, preview } => {
+                this.open_remind(id.clone(), *at_ms, preview.clone(), cx)
+            }
             SmsConversationEvent::Call(n) => {
                 this.telecom_action(sms_actions::SmsAction::Call, n.clone(), cx);
             }
@@ -2390,6 +2411,7 @@ impl MessagesApp {
             PillAction::Settings(undo) => self.undo_settings(undo, cx),
             PillAction::Chat(jid, undo) => self.chat_action(&jid, undo, true, cx),
             PillAction::SmsMute(id, mute) => self.set_sms_mute(id, mute, cx),
+            PillAction::UndoReminder(id) => self.undo_reminder(id, cx),
             PillAction::SmsArchive { thread, archived } => {
                 self.set_sms_archived(thread, archived, true, cx)
             }
@@ -3273,6 +3295,7 @@ impl MessagesApp {
             || self.row_menu.is_some()
             || self.channel_pick.is_some()
             || self.mute_menu.is_some()
+            || self.remind.is_some()
             || self.search_open
             || self.show_archived
             || self.show_spam
@@ -3291,6 +3314,8 @@ impl MessagesApp {
             // The picture viewer closed first.
         } else if self.schedule.is_open() {
             self.close_schedule(cx);
+        } else if self.back_remind(cx) {
+            // The Remind me sheet stepped back or closed.
         } else if self.mute_menu.is_some() {
             self.mute_menu = None;
             cx.notify();
@@ -3717,6 +3742,7 @@ impl MessagesApp {
             });
             (muted, in_spam, backend.queue().items().to_vec(), until)
         };
+        let badges = self.reminder_badges(cx);
         match &self.open {
             Open::WhatsApp(jid, conversation) => {
                 let items = schedule_ui::strip_items(
@@ -3728,6 +3754,7 @@ impl MessagesApp {
                     c.set_muted(muted, cx);
                     c.set_muted_until(until, cx);
                     c.set_scheduled(items, cx);
+                    c.set_reminders(badges, cx);
                 });
             }
             Open::Sms(conversation) => {
@@ -3742,6 +3769,7 @@ impl MessagesApp {
                     c.set_muted_until(until, cx);
                     c.set_in_spam(in_spam, cx);
                     c.set_scheduled(items, cx);
+                    c.set_reminders(badges, cx);
                 });
             }
             Open::New(_) | Open::Status(_) | Open::None => {}
@@ -4037,6 +4065,7 @@ impl MessagesApp {
         }
         out.extend(self.channel_pick_overlay(theme, cx));
         out.extend(self.mute_menu_overlay(theme, cx));
+        out.extend(self.remind_overlay(theme, cx));
         out
     }
 

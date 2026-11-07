@@ -91,6 +91,12 @@ pub enum SmsConversationEvent {
     },
     /// A share pill under a selected bubble: the page opens the share sheet.
     Share(String),
+    /// The Remind me pill under a selected bubble: the page opens the time sheet.
+    Remind {
+        id: String,
+        at_ms: i64,
+        preview: String,
+    },
     /// A Call pill of a number found in a bubble.
     Call(String),
     /// A Message pill of a number found in a bubble: start a chat with it.
@@ -236,6 +242,8 @@ pub struct SmsConversation {
     highlight: Option<SmsKey>,
     /// The message a search hit opened the thread for, until it is shown.
     goto: Option<rovsti_core::global_search::JumpTarget>,
+    /// Provider id -> badge text of the armed message reminders.
+    reminders: std::collections::HashMap<String, String>,
     /// Older pages loaded while working towards `goto`.
     goto_pages: usize,
     /// The "Jump to date" sheet, with the day picked so far.
@@ -346,6 +354,7 @@ impl SmsConversation {
             find: None,
             highlight: None,
             goto: None,
+            reminders: std::collections::HashMap::new(),
             goto_pages: 0,
             jump: JumpState::default(),
             opening_unread: (unread > 0).then_some(unread),
@@ -438,6 +447,16 @@ impl SmsConversation {
 
     pub fn recipients(&self) -> &[String] {
         &self.recipients
+    }
+
+    /// The armed message reminders of this thread as (message id, badge text).
+    pub fn set_reminders(&mut self, badges: Vec<(String, String)>, cx: &mut Context<Self>) {
+        let badges: std::collections::HashMap<String, String> = badges.into_iter().collect();
+        if self.reminders != badges {
+            self.reminders = badges;
+            self.rows_dirty = true;
+            cx.notify();
+        }
     }
 
     pub fn set_scheduled(&mut self, scheduled: Vec<StripItem>, cx: &mut Context<Self>) {
@@ -2079,11 +2098,15 @@ impl SmsConversation {
                     let base = message_key(&items[index]);
                     let picked = self.select.as_ref().map(|s| s.contains(&items[index].key));
                     let starred = self.is_starred(items[index].key);
+                    let reminder = self
+                        .star_id(items[index].key)
+                        .and_then(|id| self.reminders.get(&id));
                     key_of((
                         base,
                         self.selected == Some(base),
                         picked,
                         starred,
+                        reminder,
                         self.cards_rev,
                     ))
                 }
@@ -2751,6 +2774,9 @@ impl SmsConversation {
             );
         }
         let starred = self.is_starred(item.key);
+        let badge = self
+            .star_id(item.key)
+            .and_then(|id| self.reminders.get(&id).cloned());
         bubble = bubble.child(
             div()
                 .self_end()
@@ -2766,6 +2792,15 @@ impl SmsConversation {
                             .size(px(10.0))
                             .text_color(meta_color),
                     )
+                })
+                .when_some(badge, |row, badge| {
+                    row.child(
+                        gpui::svg()
+                            .path(Icon::LucideAlarmClock.path())
+                            .size(px(11.0))
+                            .text_color(meta_color),
+                    )
+                    .child(badge)
                 })
                 .child(meta),
         );
@@ -2878,6 +2913,33 @@ impl SmsConversation {
                 );
             }
             let key = item.key;
+            if let Some(provider_id) = self.star_id(key) {
+                let at_ms = item.at_ms;
+                let preview = copy_text(item).unwrap_or_default();
+                pills = pills.child(
+                    glass_pill(theme, "Remind me")
+                        .id(("sms-remind", index))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(
+                            gpui::svg()
+                                .path(Icon::LucideAlarmClock.path())
+                                .size(px(14.0))
+                                .text_color(colors.label),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            cx.emit(SmsConversationEvent::Remind {
+                                id: provider_id.clone(),
+                                at_ms,
+                                preview: preview.clone(),
+                            });
+                            cx.notify();
+                        })),
+                );
+            }
             if self.star_id(key).is_some() {
                 let label = if starred { "Unstar" } else { "Star" };
                 pills = pills.child(

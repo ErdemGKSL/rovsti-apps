@@ -156,6 +156,12 @@ pub enum ConversationEvent {
     },
     /// The Share pill of a message: the page opens the system share sheet.
     Share(String),
+    /// The Remind me pill of a message: the page opens the time sheet.
+    Remind {
+        id: String,
+        at_ms: i64,
+        preview: String,
+    },
     /// A short message for the page's pill (save results).
     Notice(String),
     /// A loaded picture was tapped: the page opens the full-screen viewer.
@@ -365,6 +371,8 @@ pub struct Conversation {
     pending_quotes: HashMap<u64, String>,
     /// Stars set here, until the gateway's `message_meta` confirms them.
     star_override: HashMap<String, bool>,
+    /// Message id -> badge text ("Reminder 18:05") of the armed reminders.
+    reminders: HashMap<String, String>,
     /// Deleted for me here, until the gateway's `message_deleted` drops them.
     hidden: HashSet<String>,
     /// The Delete menu.
@@ -532,6 +540,7 @@ impl Conversation {
             local_quotes: HashMap::new(),
             pending_quotes: HashMap::new(),
             star_override: HashMap::new(),
+            reminders: HashMap::new(),
             hidden: HashSet::new(),
             delete_confirm: None,
             select: None,
@@ -557,6 +566,16 @@ impl Conversation {
             this.subscribe_presence(cx);
         }
         this
+    }
+
+    /// The armed message reminders of this chat as (message id, badge text).
+    pub fn set_reminders(&mut self, badges: Vec<(String, String)>, cx: &mut Context<Self>) {
+        let badges: HashMap<String, String> = badges.into_iter().collect();
+        if self.reminders != badges {
+            self.reminders = badges;
+            self.rows_dirty = true;
+            cx.notify();
+        }
     }
 
     pub fn set_scheduled(&mut self, scheduled: Vec<StripItem>, cx: &mut Context<Self>) {
@@ -3063,6 +3082,7 @@ impl Conversation {
             self.cached_thumb(&message.id).is_some(),
             self.local_quotes.get(&message.id).map(|q| &q.id),
             self.star_override.get(&message.id).copied(),
+            self.reminders.get(&message.id),
         );
         key_of((
             2u8,
@@ -3392,6 +3412,19 @@ impl Conversation {
                 .gap(px(3.0))
                 .text_size(typography::CAPTION.size)
                 .text_color(meta_color)
+                .children(self.reminders.get(&message.id).map(|badge| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(3.0))
+                        .child(
+                            gpui::svg()
+                                .path(Icon::LucideAlarmClock.path())
+                                .size(px(11.0))
+                                .text_color(meta_color),
+                        )
+                        .child(badge.clone())
+                }))
                 .child(line)
                 .children(tick.map(|tick| ticks(tick, 14.0, quiet, read_color(true)))),
         );
@@ -4002,6 +4035,24 @@ impl Conversation {
                         this.strip = None;
                         this.rows_dirty = true;
                         cx.emit(ConversationEvent::Forward(forward.clone()));
+                        cx.notify();
+                    },
+                )),
+            );
+        }
+        if !revoked {
+            let (target, at_ms) = (id.clone(), message.timestamp_ms);
+            let preview = copy_text_of(&message.body, meta).unwrap_or_default();
+            row = row.child(
+                pill("remind", Icon::LucideAlarmClock, "Remind me", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::Remind {
+                            id: target.clone(),
+                            at_ms,
+                            preview: preview.clone(),
+                        });
                         cx.notify();
                     },
                 )),

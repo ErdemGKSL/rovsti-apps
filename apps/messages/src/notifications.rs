@@ -97,6 +97,17 @@ pub struct OpenTag {
     pub at_ms: i64,
 }
 
+impl OpenTag {
+    /// The message to glow after opening the chat: set by a message-reminder tap only.
+    pub fn jump_target(&self) -> Option<rovsti_core::global_search::JumpTarget> {
+        let id = self.message_id.trim();
+        (!id.is_empty()).then(|| rovsti_core::global_search::JumpTarget {
+            id: id.to_owned(),
+            at_ms: self.at_ms,
+        })
+    }
+}
+
 /// The recent messages of each notified conversation, newest last.
 #[derive(Debug, Default)]
 pub struct Digests {
@@ -177,6 +188,16 @@ mod tests {
         let new: super::OpenTag =
             serde_json::from_str(r#"{"tag":"wa:x","message_id":"m1","at_ms":99}"#).expect("new");
         assert_eq!((new.message_id.as_str(), new.at_ms), ("m1", 99));
+    }
+
+    #[test]
+    fn jump_target_only_for_reminder_taps() {
+        let plain: super::OpenTag = serde_json::from_str(r#"{"tag":"sms:3"}"#).expect("plain");
+        assert!(plain.jump_target().is_none());
+        let tap: super::OpenTag =
+            serde_json::from_str(r#"{"tag":"wa:x","message_id":" m1 ","at_ms":99}"#).expect("tap");
+        let jump = tap.jump_target().expect("jump");
+        assert_eq!((jump.id.as_str(), jump.at_ms), ("m1", 99));
     }
 
     use super::*;

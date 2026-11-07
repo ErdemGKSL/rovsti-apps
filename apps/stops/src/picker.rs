@@ -13,6 +13,7 @@ use rovsti_geo::{
     Coord, Diameter, DiameterError, Feed,
     coord_format::{self, CoordFormat},
     dest::parse_location,
+    places_io::MergePlan,
 };
 use rovsti_ui::{
     components::{glass_pill, list_row, section},
@@ -184,6 +185,14 @@ pub fn offer(text: &str) -> Offer {
     }
 }
 
+/// The pill after a pasted stop filled A and B.
+pub fn stop_paste_pill(name: &str) -> String {
+    match name.trim() {
+        "" => "Filled A and B".to_owned(),
+        name => format!("Filled A and B from {name}"),
+    }
+}
+
 /// What the sheet is showing.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SheetMode {
@@ -201,6 +210,8 @@ pub enum SheetMode {
     CopyAs { label: String, coord: Coord },
     /// The QR code of a point.
     Qr(QrCard),
+    /// Confirming the import of saved stops from a file.
+    ImportStops(MergePlan),
 }
 
 /// The stop search for one query, and the lines of the stop the sheet shows,
@@ -324,7 +335,14 @@ impl StopsApp {
             self.show_pill("Nothing to paste", None, cx);
             return;
         };
-        if let Offer::Confirm(dest) = offer(&text) {
+        // Text from "Share" on a saved stop carries both points.
+        if let Some((name, a, b)) = rovsti_geo::dest::parse_stop_share(&text) {
+            let dest = |p: rovsti_geo::dest::SharedPlace| {
+                Destination::new(p.label.unwrap_or_default().trim().to_owned(), p.coord)
+            };
+            self.choose_pair(dest(a), dest(b), cx);
+            self.show_pill(stop_paste_pill(&name), None, cx);
+        } else if let Offer::Confirm(dest) = offer(&text) {
             self.confirm_destination(dest, cx);
         } else {
             self.field.update(cx, |f, cx| f.set(&text, cx));
@@ -577,6 +595,7 @@ impl StopsApp {
                 ("Copy as", self.copy_as_body(theme, &label, coord, cx))
             }
             SheetMode::Qr(card) => ("QR code", self.qr_body(theme, card, cx)),
+            SheetMode::ImportStops(plan) => ("Import stops", self.import_body(theme, &plan, cx)),
         };
         let body = div()
             .flex()
@@ -600,7 +619,7 @@ impl StopsApp {
         )
     }
 
-    fn sheet_title(theme: Theme, text: impl Into<SharedString>) -> AnyElement {
+    pub(crate) fn sheet_title(theme: Theme, text: impl Into<SharedString>) -> AnyElement {
         div()
             .px(px(20.0))
             .pb(px(8.0))
@@ -611,7 +630,7 @@ impl StopsApp {
             .into_any_element()
     }
 
-    fn footnote(theme: Theme, text: impl Into<SharedString>) -> AnyElement {
+    pub(crate) fn footnote(theme: Theme, text: impl Into<SharedString>) -> AnyElement {
         div()
             .px(px(20.0))
             .py(px(6.0))
@@ -1171,6 +1190,12 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn pasted_stop_pill_names_the_stop() {
+        assert_eq!(stop_paste_pill(" Pier "), "Filled A and B from Pier");
+        assert_eq!(stop_paste_pill("  "), "Filled A and B");
+    }
 
     fn confirm(text: &str) -> Destination {
         match offer(text) {

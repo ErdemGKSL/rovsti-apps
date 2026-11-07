@@ -86,6 +86,8 @@ pub(crate) enum PillAction {
     RestartTrip(Destination, Destination),
     RestoreTileUrl(Option<String>),
     RestoreNotice(rovsti_geo::NoticePrefs),
+    /// The saved stops as they were before an import.
+    RestoreSaved(SavedStops),
 }
 
 pub(crate) struct StopsApp {
@@ -139,6 +141,12 @@ pub(crate) struct StopsApp {
     pub(crate) expanded: Option<u64>,
     /// The saved stop whose Delete was tapped once and now asks to be confirmed.
     pub(crate) confirm_delete: Option<u64>,
+    /// The Saved tab's search text and order (not persisted).
+    pub(crate) saved_query: String,
+    pub(crate) saved_sort: rovsti_geo::saved_stops::SavedSort,
+    pub(crate) saved_field: Entity<TextField>,
+    /// The ids the Saved tab shows now, in order.
+    pub(crate) saved_visible: Vec<u64>,
     /// The virtualised lists: the Saved tab, History, the chat picker and the
     /// destination search.
     pub(crate) saved_list: lists::KeyedList,
@@ -191,6 +199,12 @@ impl StopsApp {
         cx.observe(&whatsapp, |_, _, cx| cx.notify()).detach();
         let field = cx.new(TextField::new);
         cx.observe(&field, |_, _, cx| cx.notify()).detach();
+        let saved_field = cx.new(TextField::new);
+        cx.observe(&saved_field, |this, field, cx| {
+            this.saved_query = field.read(cx).text().to_owned();
+            cx.notify();
+        })
+        .detach();
         let template_field = cx.new(TextField::new);
         let tile_field = cx.new(TextField::new);
         cx.observe(&tile_field, |_, _, cx| cx.notify()).detach();
@@ -316,6 +330,10 @@ impl StopsApp {
             field,
             back_enabled: false,
             expanded: None,
+            saved_query: String::new(),
+            saved_sort: rovsti_geo::saved_stops::SavedSort::default(),
+            saved_field,
+            saved_visible: Vec::new(),
             confirm_delete: None,
             saved_list: lists::KeyedList::default(),
             history_list: lists::KeyedList::default(),
@@ -492,15 +510,6 @@ impl StopsApp {
         }
     }
 
-    /// The `document_result` of the places picker. The import itself comes in
-    /// a later step: for now the pick is logged.
-    fn on_places_picked(&mut self, result: &DocumentResult, _cx: &mut Context<Self>) {
-        match result.path.as_deref().filter(|_| result.ok) {
-            Some(path) => log::info!("places file picked: {path}"),
-            None => log::debug!("places pick cancelled or refused"),
-        }
-    }
-
     /// Whether System Back has a layer to close: a pin menu, an armed "Move", the alarm, a
     /// sheet, a Settings page, an opened saved stop, or any tab but the first (Trip). When it
     /// has not, Back leaves the app.
@@ -637,6 +646,7 @@ impl StopsApp {
             PillAction::RestartTrip(a, b) => self.request_start(a, b, cx),
             PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
+            PillAction::RestoreSaved(saved) => self.restore_saved(saved, cx),
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);
                 self.map.follow = true;

@@ -482,7 +482,6 @@ pub fn simulate_tick(dir: &Path) -> Option<String> {
 // ---- files and the share sheet ---------------------------------------------------------
 
 /// Biggest places file the importer accepts, bytes.
-#[allow(dead_code)] // used by the places import UI in a later step
 pub const IMPORT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 /// What the notice line says after "Can't ...: " when an Android call fails.
@@ -557,7 +556,6 @@ pub fn share_png(name: &str, bytes: &[u8]) -> Result<(), String> {
 
 /// Hands `text` to the system save dialog as the file `name` of type `mime`.
 /// The answer is a `document_result` with op `ExportMessages`.
-#[allow(dead_code)] // used by the places export UI in a later step
 pub fn export_text(name: &str, mime: &str, text: &str) -> Result<(), String> {
     let file = safe_name(name);
     let path = write_temp(&file, text.as_bytes())?;
@@ -570,13 +568,11 @@ pub fn export_text(name: &str, mime: &str, text: &str) -> Result<(), String> {
 
 /// Opens the system file picker for a places file (up to 2 MB). The answer is
 /// a `document_result` with op `ImportMessages` and the cache copy in `path`.
-#[allow(dead_code)] // used by the places import UI in a later step
 pub fn pick_import() -> Result<(), String> {
     done(rovsti_android::documents::import_file(IMPORT_MAX_BYTES))
 }
 
 /// Reads the picked file at `path`, then deletes the cache copy.
-#[allow(dead_code)] // used by the places import UI in a later step
 pub fn read_import(path: &str) -> Result<String, String> {
     let text = std::fs::read_to_string(path).map_err(|_| "that file can't be read".to_owned());
     if let Err(error) = std::fs::remove_file(path) {

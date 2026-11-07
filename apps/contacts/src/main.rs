@@ -9,6 +9,7 @@
 
 mod backend;
 mod birthdays;
+mod call_options;
 mod cleanup;
 mod confirm;
 mod detail;
@@ -344,6 +345,14 @@ struct ContactsApp {
     upcoming_open: bool,
     recent: Vec<recent::RecentRow>,
     recent_open: bool,
+    /// The open card's ringtone and voicemail options, the contact the ringtone
+    /// picker was opened for, and whether the launcher can pin shortcuts.
+    card_options: call_options::CardOptions,
+    ringtone_for: Option<i64>,
+    can_pin: bool,
+    /// Settings, Contacts: the summary page.
+    summary_open: bool,
+    summary: call_options::SummaryState,
     /// Deleted contacts kept for 30 days, and the Trash page.
     trash: Trash,
     trash_ui: trash::TrashUi,
@@ -595,6 +604,11 @@ impl ContactsApp {
             upcoming_open: false,
             recent: Vec::new(),
             recent_open: false,
+            card_options: call_options::CardOptions::default(),
+            ringtone_for: None,
+            can_pin: false,
+            summary_open: false,
+            summary: call_options::SummaryState::default(),
             trash: Trash::default(),
             trash_ui: trash::TrashUi::default(),
             cleanup_ui: cleanup::CleanupUi::default(),
@@ -874,6 +888,7 @@ impl ContactsApp {
         }
         self.check_whatsapp(cx);
         self.load_card_calls(cx);
+        self.load_card_options(id, cx);
         // The rest of the card (organisation, emails, note, groups) follows.
         cx.spawn(async move |this, cx| {
             let draft = cx
@@ -947,6 +962,7 @@ impl ContactsApp {
             || self.dupes.sheet.is_open()
             || self.upcoming_open
             || self.recent_open
+            || self.summary_open
             || self.trash_ui.open
             || self.trash_ui.sheet.is_open()
             || self.cleanup_ui.open
@@ -994,6 +1010,8 @@ impl ContactsApp {
             self.set_upcoming_open(false, cx);
         } else if self.recent_open {
             self.set_recent_open(false, cx);
+        } else if self.summary_open {
+            self.set_summary_open(false, cx);
         } else if self.cleanup_ui.select.is_some() {
             self.leave_cleanup_select(cx);
         } else if self.cleanup_ui.open {
@@ -1769,6 +1787,7 @@ impl ContactsApp {
             .flex()
             .flex_col()
             .gap(px(24.0))
+            .child(self.summary_entry(theme, cx))
             .child(section(
                 theme,
                 Some("Name format".into()),
@@ -2176,6 +2195,8 @@ impl Render for ContactsApp {
             (self.upcoming_page(theme, cx), false)
         } else if self.recent_open && tab == CONTACTS_TAB {
             (self.recent_page(theme, cx), false)
+        } else if self.summary_open && tab == SETTINGS_TAB {
+            (self.summary_page(theme, cx), false)
         } else if self.cleanup_ui.open && tab == SETTINGS_TAB {
             (self.cleanup_page(theme, cx), false)
         } else if self.trash_ui.open && tab == SETTINGS_TAB {
@@ -2293,6 +2314,7 @@ impl Render for ContactsApp {
                                     || this.dupes.open
                                     || this.upcoming_open
                                     || this.recent_open
+                                    || this.summary_open
                                     || this.trash_ui.open
                                     || this.cleanup_ui.open
                                 {
@@ -2303,6 +2325,7 @@ impl Render for ContactsApp {
                                     this.trash_ui.sheet.close();
                                     this.upcoming_open = false;
                                     this.recent_open = false;
+                                    this.summary_open = false;
                                     this.whatsapp_open = false;
                                     this.dupes.open = false;
                                     this.dupes.sheet.close();

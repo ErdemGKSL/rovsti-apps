@@ -230,6 +230,7 @@ pub(crate) enum ShareChoice {
     CopyText,
     CopyVcard,
     Qr,
+    AddToHome,
 }
 
 impl ShareChoice {
@@ -241,6 +242,7 @@ impl ShareChoice {
             Self::CopyText => "Copy contact",
             Self::CopyVcard => "Copy as vCard",
             Self::Qr => "Show QR code",
+            Self::AddToHome => "Add to Home screen",
         }
     }
 
@@ -251,12 +253,17 @@ impl ShareChoice {
             Self::SaveFile => Icon::LucideDownload,
             Self::CopyText | Self::CopyVcard => Icon::LucideCopy,
             Self::Qr => Icon::LucideQrCode,
+            Self::AddToHome => Icon::LucideSmartphone,
         }
     }
 }
 
 /// The Share menu entries: the QR code needs a number or an email to carry.
-pub(crate) fn share_choices(has_numbers: bool, has_emails: bool) -> Vec<ShareChoice> {
+pub(crate) fn share_choices(
+    has_numbers: bool,
+    has_emails: bool,
+    can_pin: bool,
+) -> Vec<ShareChoice> {
     let mut choices = vec![
         ShareChoice::Text,
         ShareChoice::Vcf,
@@ -266,6 +273,9 @@ pub(crate) fn share_choices(has_numbers: bool, has_emails: bool) -> Vec<ShareCho
     ];
     if has_numbers || has_emails {
         choices.push(ShareChoice::Qr);
+    }
+    if can_pin {
+        choices.push(ShareChoice::AddToHome);
     }
     choices
 }
@@ -413,6 +423,13 @@ impl ContactsApp {
                 cx.notify();
             }
             ShareChoice::Qr => self.open_qr(cx),
+            ShareChoice::AddToHome => {
+                self.share_sheet.close();
+                if let Some(id) = self.open.as_ref().map(|card| card.id) {
+                    self.pin_home(id, cx);
+                }
+                cx.notify();
+            }
         }
     }
 
@@ -457,6 +474,7 @@ impl ContactsApp {
         let choices = share_choices(
             !card.numbers.is_empty(),
             first_email(self.open_draft.as_ref()).is_some(),
+            self.can_pin,
         );
         let text = card.share_text();
         let rows: Vec<AnyElement> = choices
@@ -472,6 +490,7 @@ impl ContactsApp {
                         ShareChoice::CopyText => "share-copy-text",
                         ShareChoice::CopyVcard => "share-copy-vcard",
                         ShareChoice::Qr => "share-qr",
+                        ShareChoice::AddToHome => "share-home",
                     },
                     Some(choice.icon()),
                     choice.label(),
@@ -1539,6 +1558,8 @@ impl ContactsApp {
 
         let whatsapp = self.whatsapp_section(card, theme, cx);
         let calls = self.calls_section(card, theme, cx);
+        let call_options =
+            self.call_options_section(id, &card.name, !card.numbers.is_empty(), theme, cx);
 
         let actions_list = section(
             theme,
@@ -1596,6 +1617,7 @@ impl ContactsApp {
             .child(head)
             .child(actions)
             .children((!numbers.is_empty()).then(|| section(theme, Some("Phone".into()), numbers)))
+            .children(call_options)
             .children(calls)
             .children(whatsapp)
             .children((!emails.is_empty()).then(|| section(theme, Some("Email".into()), emails)))
@@ -1653,11 +1675,14 @@ mod tests {
     fn share_menu_offers_qr_only_with_something_to_encode() {
         use ShareChoice::*;
         let base = [Text, Vcf, SaveFile, CopyText, CopyVcard];
-        assert_eq!(share_choices(false, false), base);
+        assert_eq!(share_choices(false, false, false), base);
         let mut with_qr = base.to_vec();
         with_qr.push(Qr);
-        assert_eq!(share_choices(true, false), with_qr);
-        assert_eq!(share_choices(false, true), with_qr);
+        assert_eq!(share_choices(true, false, false), with_qr);
+        assert_eq!(share_choices(false, true, false), with_qr);
+        with_qr.push(AddToHome);
+        assert_eq!(share_choices(true, true, true), with_qr);
+        assert_eq!(share_choices(false, false, true).last(), Some(&AddToHome));
     }
 
     #[test]

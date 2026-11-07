@@ -183,6 +183,8 @@ impl ContactsApp {
     pub(crate) fn on_event(&mut self, event: &RawEvent, cx: &mut Context<Self>) {
         if event.kind == kind::DOCUMENT_RESULT {
             self.on_document_result(&event.json, cx);
+        } else if event.kind == kind::RINGTONE_PICKED {
+            self.ringtone_picked(&event.json, cx);
         } else if event.kind == kind::WA_PUSH {
             self.whatsapp.update(cx, |w, cx| w.wake(cx));
         } else if event.kind == kind::OPEN_CONTACT {

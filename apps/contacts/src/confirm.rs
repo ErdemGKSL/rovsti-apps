@@ -64,6 +64,11 @@ pub(crate) enum Confirm {
     DeleteWithoutCopy {
         ids: Vec<i64>,
     },
+    /// Turning on "Send calls to voicemail" for this contact.
+    Voicemail {
+        id: i64,
+        name: SharedString,
+    },
     /// "Show recent calls": explains why the call log is read, then asks Android.
     CallLogAccess,
 }
@@ -190,6 +195,7 @@ impl ContactsApp {
             Confirm::DeleteForever { keys } => self.delete_forever(keys, cx),
             Confirm::DeleteWithoutCopy { ids } => self.run_delete(ids, false, cx),
             Confirm::CallLogAccess => self.request_call_log(cx),
+            Confirm::Voicemail { id, .. } => self.apply_voicemail(id, true, cx),
         }
     }
 
@@ -438,6 +444,10 @@ impl ContactsApp {
                 crate::dupes::confirm_body(others.len()),
                 vec![cancel, yes("Merge", false, cx)],
             ),
+            Confirm::Voicemail { name, .. } => {
+                let (title, body) = Self::voicemail_card_text(name);
+                confirm_card(theme, title, body, vec![cancel, yes("Send", false, cx)])
+            }
             Confirm::CallLogAccess => {
                 let (title, body) = Self::call_log_card_text();
                 confirm_card(theme, title, body, vec![cancel, yes("Allow", false, cx)])

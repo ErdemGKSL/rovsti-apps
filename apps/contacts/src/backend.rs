@@ -600,31 +600,26 @@ mod hand_off {
 pub(crate) use hand_off::*;
 
 /// The contact's own ringtone and voicemail setting.
-#[allow(dead_code, reason = "used by the UI steps that follow")]
 pub(crate) fn options_of(contact_id: i64) -> Result<ContactOptions, String> {
     let json = contacts_edit::contact_options(contact_id).map_err(|e| android_words(&e))?;
     contact_options::parse(&json).map_err(|e| Failed::Other(e.to_string()).words())
 }
 
 /// Sets the contact's ringtone: `None` default, `Some("")` silent.
-#[allow(dead_code, reason = "used by the UI steps that follow")]
 pub(crate) fn set_ringtone(contact_id: i64, uri: Option<&str>) -> Result<(), String> {
     done(contacts_edit::set_ringtone(contact_id, uri))
 }
 
-#[allow(dead_code, reason = "used by the UI steps that follow")]
 pub(crate) fn set_voicemail(contact_id: i64, on: bool) -> Result<(), String> {
     done(contacts_edit::set_send_to_voicemail(contact_id, on))
 }
 
 /// Opens the system ringtone picker; the answer is the event `ringtone_picked`.
-#[allow(dead_code, reason = "used by the UI steps that follow")]
 pub(crate) fn pick_ringtone(current: Option<&str>) -> Result<(), String> {
     done(contacts_edit::pick_ringtone(current))
 }
 
 /// Asks the launcher to pin a contact shortcut; `false` when it declined.
-#[allow(dead_code, reason = "used by the UI steps that follow")]
 pub(crate) fn pin_shortcut(spec: &PinShortcut) -> Result<bool, String> {
     let json =
         serde_json::to_string(spec).map_err(|error| Failed::Other(error.to_string()).words())?;
@@ -632,7 +627,6 @@ pub(crate) fn pin_shortcut(spec: &PinShortcut) -> Result<bool, String> {
 }
 
 /// Whether the launcher can pin shortcuts.
-#[allow(dead_code, reason = "used by the UI steps that follow")]
 pub(crate) fn can_pin() -> bool {
     shortcuts::can_pin().unwrap_or(false)
 }
@@ -665,7 +659,6 @@ pub(crate) fn shared_file(uri: &str) -> Result<Intake, String> {
 }
 
 /// Counts over the whole address book.
-#[allow(dead_code, reason = "used by the UI steps that follow")]
 pub(crate) fn summary() -> Result<Summary, String> {
     pull_full().map(|contacts| contact_stats::summarize(&contacts))
 }

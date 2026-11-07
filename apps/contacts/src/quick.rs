@@ -17,7 +17,7 @@ use rovsti_ui::{
 };
 
 use crate::{
-    ContactsApp, Row, backend,
+    ContactsApp, Row,
     ui::{Tone, tap_row},
 };
 
@@ -181,15 +181,7 @@ impl ContactsApp {
                 self.share_sheet.open();
             }
             QuickAction::Star | QuickAction::Unstar => self.toggle_star(target.id, cx),
-            QuickAction::AddToHome => {
-                self.notice = Some(
-                    format!(
-                        "Can't add to the Home screen: {}.",
-                        backend::android_words(&rovsti_android::Error::Unsupported)
-                    )
-                    .into(),
-                );
-            }
+            QuickAction::AddToHome => self.pin_home(target.id, cx),
         }
         cx.notify();
     }

@@ -78,6 +78,100 @@ pub fn unmasked_index(text: &str, masked_byte: usize) -> usize {
     text.char_indices().nth(n).map_or(text.len(), |(i, _)| i)
 }
 
+// ---- multiline ---------------------------------------------------------
+
+/// Line height of a multiline field, dp.
+pub const ML_LINE: f32 = 22.0;
+/// Space above and below the text of a multiline field, dp.
+pub const ML_PAD_V: f32 = 11.0;
+/// A multiline capsule with more than one line has this corner radius, dp.
+pub const ML_RADIUS: f32 = 22.0;
+
+/// Lines a multiline field shows for `rows` wrapped rows: grows from `min`
+/// to `max`, then scrolls.
+pub fn visible_lines(rows: usize, min: usize, max: usize) -> usize {
+    let min = min.max(1);
+    rows.clamp(min, max.max(min))
+}
+
+/// The field's height for `lines` visible lines.
+pub fn box_height(lines: usize) -> f32 {
+    lines as f32 * ML_LINE + 2.0 * ML_PAD_V
+}
+
+/// The capsule's corner radius: half the height of a one-line field, then
+/// [`ML_RADIUS`].
+pub fn capsule_radius(lines: usize) -> f32 {
+    if lines <= 1 {
+        box_height(1) / 2.0
+    } else {
+        ML_RADIUS
+    }
+}
+
+/// Byte offset where each `\n`-separated paragraph starts (one entry for an
+/// empty text, one more after a trailing newline).
+pub fn paragraph_starts(text: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    starts.extend(text.match_indices('\n').map(|(i, _)| i + 1));
+    starts
+}
+
+/// The paragraph holding `byte` and the offset inside it.
+pub fn locate_paragraph(starts: &[usize], byte: usize) -> (usize, usize) {
+    let p = starts.partition_point(|s| *s <= byte).saturating_sub(1);
+    (p, byte.saturating_sub(starts.get(p).copied().unwrap_or(0)))
+}
+
+/// The paragraph holding visual `row`, given the first row of each paragraph.
+pub fn paragraph_for_row(rows_before: &[usize], row: usize) -> usize {
+    rows_before.partition_point(|r| *r <= row).saturating_sub(1)
+}
+
+/// Clamps a vertical scroll offset into `0..=content - view`.
+pub fn clamp_scroll_y(scroll: f32, content_h: f32, view_h: f32) -> f32 {
+    scroll.clamp(0.0, (content_h - view_h).max(0.0))
+}
+
+/// The vertical scroll after a caret move: the least change that shows the
+/// caret row (`caret_top`, `line_h` tall) completely.
+pub fn scroll_y_for_caret(
+    scroll: f32,
+    caret_top: f32,
+    line_h: f32,
+    content_h: f32,
+    view_h: f32,
+) -> f32 {
+    let mut s = scroll;
+    if caret_top < s {
+        s = caret_top;
+    } else if caret_top + line_h > s + view_h {
+        s = caret_top + line_h - view_h;
+    }
+    clamp_scroll_y(s, content_h, view_h)
+}
+
+/// The rectangles of a selection from `start` to `end`, each point being
+/// `(x, row)` in a view `width` wide: `(left, row, right)` per row.
+pub fn selection_rects(
+    start: (f32, usize),
+    end: (f32, usize),
+    width: f32,
+) -> Vec<(f32, usize, f32)> {
+    let ((x0, r0), (x1, r1)) = if (start.1, start.0) <= (end.1, end.0) {
+        (start, end)
+    } else {
+        (end, start)
+    };
+    if r0 == r1 {
+        return vec![(x0, r0, x1)];
+    }
+    let mut out = vec![(x0, r0, width)];
+    out.extend((r0 + 1..r1).map(|r| (0.0, r, width)));
+    out.push((0.0, r1, x1));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +245,80 @@ mod tests {
         assert_eq!(masked_index(t, t.len()), 12);
         assert_eq!(masked_index(t, 1), 0); // inside "ş": snaps down
         assert_eq!(unmasked_index(t, 999), t.len());
+    }
+
+    #[test]
+    fn composer_grows_one_to_six_lines_then_scrolls() {
+        assert_eq!(visible_lines(0, 1, 6), 1);
+        assert_eq!(visible_lines(1, 1, 6), 1);
+        assert_eq!(visible_lines(4, 1, 6), 4);
+        assert_eq!(visible_lines(9, 1, 6), 6);
+        assert_eq!(visible_lines(2, 3, 6), 3);
+        assert_eq!(visible_lines(9, 3, 2), 3);
+        assert_eq!(box_height(1), 44.0);
+        assert_eq!(box_height(6), 154.0);
+    }
+
+    #[test]
+    fn capsule_radius_is_22_dp() {
+        assert_eq!(capsule_radius(1), 22.0);
+        assert_eq!(capsule_radius(2), 22.0);
+        assert_eq!(capsule_radius(6), 22.0);
+    }
+
+    #[test]
+    fn paragraphs_split_on_newlines() {
+        assert_eq!(paragraph_starts(""), vec![0]);
+        assert_eq!(paragraph_starts("ab"), vec![0]);
+        assert_eq!(paragraph_starts("ab\ncdé\n"), vec![0, 3, 8]);
+        let starts = paragraph_starts("ab\ncdé\n");
+        assert_eq!(locate_paragraph(&starts, 0), (0, 0));
+        assert_eq!(locate_paragraph(&starts, 2), (0, 2));
+        assert_eq!(locate_paragraph(&starts, 3), (1, 0));
+        assert_eq!(locate_paragraph(&starts, 8), (2, 0));
+        assert_eq!(locate_paragraph(&starts, 99), (2, 91));
+    }
+
+    #[test]
+    fn rows_map_to_paragraphs() {
+        // Paragraph 0 wraps over 3 rows, paragraph 1 has 1, paragraph 2 has 2.
+        let before = [0, 3, 4];
+        assert_eq!(paragraph_for_row(&before, 0), 0);
+        assert_eq!(paragraph_for_row(&before, 2), 0);
+        assert_eq!(paragraph_for_row(&before, 3), 1);
+        assert_eq!(paragraph_for_row(&before, 4), 2);
+        assert_eq!(paragraph_for_row(&before, 50), 2);
+    }
+
+    #[test]
+    fn vertical_scroll_follows_the_caret_row() {
+        // 10 rows of 22 dp in a 132 dp (6 row) view.
+        let (content, view) = (220.0, 132.0);
+        assert_eq!(scroll_y_for_caret(0.0, 0.0, 22.0, content, view), 0.0);
+        assert_eq!(scroll_y_for_caret(0.0, 110.0, 22.0, content, view), 0.0);
+        // Caret on row 9 (top 198): the view ends at the caret row's bottom.
+        assert_eq!(scroll_y_for_caret(0.0, 198.0, 22.0, content, view), 88.0);
+        // Back up to row 2 (top 44): scrolls up just enough.
+        assert_eq!(scroll_y_for_caret(88.0, 44.0, 22.0, content, view), 44.0);
+        // Text shrank: clamps.
+        assert_eq!(clamp_scroll_y(88.0, 100.0, 132.0), 0.0);
+        assert_eq!(clamp_scroll_y(-3.0, 220.0, 132.0), 0.0);
+    }
+
+    #[test]
+    fn selection_rects_cover_rows() {
+        assert_eq!(
+            selection_rects((10.0, 2), (40.0, 2), 200.0),
+            vec![(10.0, 2, 40.0)]
+        );
+        assert_eq!(
+            selection_rects((150.0, 1), (30.0, 3), 200.0),
+            vec![(150.0, 1, 200.0), (0.0, 2, 200.0), (0.0, 3, 30.0)]
+        );
+        // Reversed endpoints give the same rectangles.
+        assert_eq!(
+            selection_rects((30.0, 3), (150.0, 1), 200.0),
+            selection_rects((150.0, 1), (30.0, 3), 200.0)
+        );
     }
 }

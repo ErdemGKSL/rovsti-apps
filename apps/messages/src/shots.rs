@@ -75,7 +75,7 @@ const SCENES: [(u32, &str, bool, Scene); 13] = [
             page.update(cx, |page, cx| {
                 page.set_draft(
                     "Tamamdır, yarın akşam 7'de görüşürüz. Pastayı da unutma, \
-                     çilekli olsun lütfen!",
+                     çilekli olsun!",
                     cx,
                 );
             });

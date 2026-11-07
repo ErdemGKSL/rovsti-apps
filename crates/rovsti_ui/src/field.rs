@@ -19,8 +19,8 @@ use gpui::{
     Focusable, Font, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, LongPressEvent,
     MouseButton, ParentElement as _, PathBuilder, Pixels, Point, PreeditSelection, ShapedLine,
     Styled, SurroundingText, TextAlign, TextInputAction, TextInputMode, TextInputPurpose, TextRun,
-    TouchEvent, TouchPhase, UTF16Selection, UnderlineStyle, Window, canvas, deferred, div, fill,
-    point, px, size,
+    TouchEvent, TouchPhase, UTF16Selection, UnderlineStyle, Window, WrappedLine, canvas, deferred,
+    div, fill, point, px, size,
 };
 use liquid_glass_kit::{
     glass::{GlassSpec, glass},
@@ -33,8 +33,10 @@ use rovsti_core::text_touch::{
     in_selection, menu_items, menu_width, place_menu, resolve_tap, tap_byte, teardrop,
 };
 use rovsti_core::text_view::{
-    CARET_MARGIN, caret_visible, clamp_scroll, masked_index, next_toggle_ms, scroll_for_caret,
-    unmasked_index,
+    CARET_MARGIN, ML_LINE, ML_PAD_V, box_height, capsule_radius, caret_visible, clamp_scroll,
+    clamp_scroll_y, locate_paragraph, masked_index, next_toggle_ms, paragraph_for_row,
+    paragraph_starts, scroll_for_caret, scroll_y_for_caret, selection_rects, unmasked_index,
+    visible_lines,
 };
 
 /// Whether carets blink. The screenshot rig turns it off so frames are stable.
@@ -79,6 +81,71 @@ struct Laid {
     masked: bool,
 }
 
+/// A multiline field's wrapped text as last painted: what hit-testing and
+/// the keyboard's geometry queries read. Coordinates are relative to the
+/// content box, before the vertical scroll.
+struct MultiLaid {
+    lines: Vec<WrappedLine>,
+    /// Byte offset where each paragraph starts.
+    starts: Vec<usize>,
+    /// First visual row of each paragraph.
+    rows_before: Vec<usize>,
+    total_rows: usize,
+    /// The content box, window coordinates.
+    bounds: Bounds<Pixels>,
+}
+
+impl MultiLaid {
+    fn new(lines: Vec<WrappedLine>, text: &str, bounds: Bounds<Pixels>) -> Self {
+        let mut rows_before = Vec::with_capacity(lines.len());
+        let mut total_rows = 0;
+        for line in &lines {
+            rows_before.push(total_rows);
+            total_rows += line.wrap_boundaries.len() + 1;
+        }
+        Self {
+            lines,
+            starts: paragraph_starts(text),
+            rows_before,
+            total_rows,
+            bounds,
+        }
+    }
+
+    /// Where the caret at `byte` sits.
+    fn pos(&self, byte: usize, lh: Pixels) -> Point<Pixels> {
+        let (p, local) = locate_paragraph(&self.starts, byte);
+        let Some(line) = self.lines.get(p) else {
+            return point(px(0.0), px(0.0));
+        };
+        let at = line.position_for_index(local, lh).unwrap_or_default();
+        point(at.x, at.y + lh * self.rows_before[p])
+    }
+
+    /// The visual row of the caret at `byte`.
+    fn row(&self, byte: usize, lh: Pixels) -> usize {
+        (f32::from(self.pos(byte, lh).y) / f32::from(lh)).round() as usize
+    }
+
+    /// The text byte nearest to `at`.
+    fn index_at(&self, at: Point<Pixels>, lh: Pixels) -> usize {
+        let row = ((f32::from(at.y) / f32::from(lh)).floor().max(0.0) as usize)
+            .min(self.total_rows.saturating_sub(1));
+        let p = paragraph_for_row(&self.rows_before, row);
+        let Some(line) = self.lines.get(p) else {
+            return 0;
+        };
+        let local = point(
+            at.x.max(px(0.0)),
+            (at.y - lh * self.rows_before[p]).max(px(0.0)),
+        );
+        let local = match line.closest_index_for_position(local, lh) {
+            Ok(i) | Err(i) => i,
+        };
+        self.starts[p] + local
+    }
+}
+
 pub struct TextField {
     focus: FocusHandle,
     purpose: TextInputPurpose,
@@ -121,6 +188,16 @@ pub struct TextField {
     ignore_until: Cell<Instant>,
     /// Handle touch targets as last painted, with the drag each starts.
     handles: RefCell<Vec<(Drag, Bounds<Pixels>)>>,
+    /// A multiline field: the fewest and most lines it shows.
+    lines: Option<(usize, usize)>,
+    /// Vertical scroll of a multiline field, dp.
+    scroll_y: Cell<f32>,
+    /// The wrapped text as last painted (multiline).
+    multi: RefCell<Option<MultiLaid>>,
+    /// The line count the box was last sized for (multiline).
+    shown_lines: Cell<usize>,
+    /// The dragging finger's window y.
+    pointer_y: Cell<f32>,
 }
 
 impl TextField {
@@ -140,6 +217,11 @@ impl TextField {
             purpose,
             action,
             buf: EditBuffer::new(false),
+            lines: None,
+            scroll_y: Cell::new(0.0),
+            multi: RefCell::new(None),
+            shown_lines: Cell::new(0),
+            pointer_y: Cell::new(0.0),
             secret: Cell::new(false),
             edits: 0,
             actions: 0,
@@ -161,6 +243,27 @@ impl TextField {
             ignore_until: Cell::new(Instant::now()),
             handles: RefCell::new(Vec::new()),
         }
+    }
+
+    /// A multiline field for messages: it wraps, grows from `min_lines` to
+    /// `max_lines` lines of 22 dp, then scrolls to the caret. Enter inserts a
+    /// line break; sending is up to a button.
+    pub fn multiline(min_lines: usize, max_lines: usize, cx: &mut Context<Self>) -> Self {
+        let mut field = Self::with_input(TextInputPurpose::Text, TextInputAction::Send, cx);
+        let min = min_lines.max(1);
+        field.lines = Some((min, max_lines.max(min)));
+        field.buf = EditBuffer::new(true);
+        field
+    }
+
+    /// Whether the field wraps over several lines.
+    pub fn is_multiline(&self) -> bool {
+        self.lines.is_some()
+    }
+
+    /// The lines the multiline box shows now (1 for a single-line field).
+    pub fn shown_lines(&self) -> usize {
+        self.shown_lines.get().max(1)
     }
 
     /// Records an edit or caret move: the caret turns solid and the view
@@ -366,6 +469,10 @@ impl TextField {
             "right" => self.mutate(cx, |b| b.move_right(shift)),
             "home" => self.mutate(cx, |b| b.home(shift)),
             "end" => self.mutate(cx, |b| b.end(shift)),
+            "up" | "down" if self.lines.is_some() => self.move_vertical(k.key == "down", shift, cx),
+            "enter" if self.lines.is_some() && !command => {
+                self.mutate(cx, |b| b.replace_selection("\n"));
+            }
             "backspace" => self.backspace(cx),
             "delete" => self.delete_forward(cx),
             "a" if command => self.select_all(cx),
@@ -410,8 +517,12 @@ impl TextField {
         }
     }
 
-    /// The text byte under window x `x`.
-    fn byte_at(&self, x: Pixels, window: &Window) -> usize {
+    /// The text byte under window point `at`.
+    fn byte_at(&self, at: Point<Pixels>, window: &Window) -> usize {
+        if self.lines.is_some() {
+            return self.multi_byte_at(at).unwrap_or_else(|| self.buf.head());
+        }
+        let x = at.x;
         let Some(content) = self.content.get() else {
             return self.buf.head();
         };
@@ -427,8 +538,50 @@ impl TextField {
         self.buf.snap(byte)
     }
 
+    /// The byte under window point `at` in the painted multiline text.
+    fn multi_byte_at(&self, at: Point<Pixels>) -> Option<usize> {
+        let multi = self.multi.borrow();
+        let multi = multi.as_ref()?;
+        let rel = point(
+            at.x - multi.bounds.left(),
+            at.y - multi.bounds.top() + px(self.scroll_y.get()),
+        );
+        Some(self.buf.snap(multi.index_at(rel, typography::BODY.line)))
+    }
+
+    /// Window position of the top of the caret at `byte` in the painted
+    /// multiline text.
+    fn multi_caret(&self, byte: usize) -> Option<Point<Pixels>> {
+        let multi = self.multi.borrow();
+        let multi = multi.as_ref()?;
+        let at = multi.pos(byte, typography::BODY.line);
+        Some(point(
+            multi.bounds.left() + at.x,
+            multi.bounds.top() + at.y - px(self.scroll_y.get()),
+        ))
+    }
+
+    /// Up/Down by one wrapped row, keeping the column (the arrow keys).
+    fn move_vertical(&mut self, down: bool, extend: bool, cx: &mut Context<Self>) {
+        let lh = typography::BODY.line;
+        let Some(at) = self.multi_caret(self.buf.head()) else {
+            return;
+        };
+        let dy = if down { lh * 1.5 } else { -(lh * 0.5) };
+        let to = self
+            .multi_byte_at(point(at.x, at.y + dy))
+            .unwrap_or_else(|| self.buf.head());
+        let anchor = if extend { self.buf.anchor() } else { to };
+        self.buf.set_selection(anchor, to);
+        self.touch();
+        cx.notify();
+    }
+
     /// [`Self::byte_at`] from the painted line (no window needed).
-    fn byte_at_laid(&self, x: f32) -> Option<usize> {
+    fn byte_at_laid(&self, x: f32, y: f32) -> Option<usize> {
+        if self.lines.is_some() {
+            return self.multi_byte_at(point(px(x), px(y)));
+        }
         let laid = self.laid.borrow();
         let laid = laid.as_ref()?;
         let byte = tap_byte(
@@ -494,10 +647,16 @@ impl TextField {
             return;
         }
         let focused = self.focus.is_focused(window);
-        let byte = self.byte_at(position.x, window);
+        let byte = self.byte_at(position, window);
         let sel = self.buf.selection();
         let on_target = focused
-            && if sel.is_empty() {
+            && if sel.is_empty() && self.lines.is_some() {
+                self.multi_caret(self.buf.head()).is_some_and(|caret| {
+                    let mid = f32::from(caret.y + typography::BODY.line / 2.0);
+                    hits_caret(f32::from(position.x), f32::from(caret.x))
+                        && (f32::from(position.y) - mid).abs() <= ML_LINE * 0.75
+                })
+            } else if sel.is_empty() {
                 self.content.get().is_some_and(|content| {
                     let line = self.shape_display(window);
                     let caret_x = f32::from(content.left()) - self.scroll.get()
@@ -548,7 +707,7 @@ impl TextField {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let byte = self.byte_at(position.x, window);
+        let byte = self.byte_at(position, window);
         if !self.focus.is_focused(window) {
             self.scroll.set(0.0);
         }
@@ -565,6 +724,7 @@ impl TextField {
         self.insertion.set(None);
         self.drag.set(Some(Drag::Select(word.start, word.end)));
         self.pointer_x.set(f32::from(position.x));
+        self.pointer_y.set(f32::from(position.y));
         self.open_menu();
         crate::haptics::perform(window, gpui::HapticFeedback::LongPress);
         self.ensure_drag_loop(cx);
@@ -587,6 +747,7 @@ impl TextField {
                 let Some(drag) = hit else { return false };
                 self.drag.set(Some(drag));
                 self.pointer_x.set(f32::from(event.position.x));
+                self.pointer_y.set(f32::from(event.position.y));
                 self.ensure_drag_loop(cx);
                 cx.notify();
                 true
@@ -596,6 +757,7 @@ impl TextField {
                     return false;
                 };
                 self.pointer_x.set(f32::from(event.position.x));
+                self.pointer_y.set(f32::from(event.position.y));
                 self.apply_drag(drag, cx);
                 true
             }
@@ -615,7 +777,7 @@ impl TextField {
 
     /// Moves the selection to the finger.
     fn apply_drag(&mut self, drag: Drag, cx: &mut Context<Self>) {
-        let Some(idx) = self.byte_at_laid(self.pointer_x.get()) else {
+        let Some(idx) = self.byte_at_laid(self.pointer_x.get(), self.pointer_y.get()) else {
             return;
         };
         match drag {
@@ -651,7 +813,17 @@ impl TextField {
             self.drag_loop.set(false);
             return false;
         };
-        let scrolled = {
+        let scrolled = if self.lines.is_some() {
+            let multi = self.multi.borrow();
+            multi.as_ref().is_some_and(|m| {
+                let (top, bottom) = (f32::from(m.bounds.top()), f32::from(m.bounds.bottom()));
+                let delta = edge_scroll(self.pointer_y.get(), top, bottom, EDGE_ZONE, EDGE_MAX);
+                let old = self.scroll_y.get();
+                let new = clamp_scroll_y(old + delta, m.total_rows as f32 * ML_LINE, bottom - top);
+                self.scroll_y.set(new);
+                (new - old).abs() > 0.01
+            })
+        } else {
             let laid = self.laid.borrow();
             laid.as_ref().is_some_and(|laid| {
                 let (left, right) = (
@@ -707,6 +879,12 @@ impl TextField {
 
     /// Window x the menu centres on: the caret or the middle of the selection.
     fn menu_anchor_x(&self) -> Option<f32> {
+        if self.lines.is_some() {
+            let sel = self.buf.selection();
+            let (a, b) = (self.multi_caret(sel.start)?, self.multi_caret(sel.end)?);
+            // A selection over several rows centres on the field instead.
+            return ((a.y - b.y).abs() < px(1.0)).then(|| f32::from(a.x + b.x) / 2.0);
+        }
         let laid = self.laid.borrow();
         let laid = laid.as_ref()?;
         let sel = self.buf.selection();
@@ -725,6 +903,8 @@ impl EntityInputHandler for TextField {
     fn text_input_mode(&self, _: &mut Window, _: &mut Context<Self>) -> TextInputMode {
         if self.secret.get() {
             TextInputMode::Password
+        } else if self.lines.is_some() {
+            TextInputMode::Multiline
         } else {
             TextInputMode::SingleLine
         }
@@ -735,6 +915,10 @@ impl EntityInputHandler for TextField {
     }
 
     fn text_input_action(&self, _: &mut Window, _: &mut Context<Self>) -> Option<TextInputAction> {
+        // The enter key of a multiline field types a line break.
+        if self.lines.is_some() {
+            return None;
+        }
         Some(self.action)
     }
 
@@ -893,6 +1077,26 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
+        if self.lines.is_some() {
+            let bytes = self.buf.bytes_of(range_utf16);
+            let lh = typography::BODY.line;
+            let (Some(a), Some(b)) = (self.multi_caret(bytes.start), self.multi_caret(bytes.end))
+            else {
+                return Some(element_bounds);
+            };
+            // The span on one row; a range over several rows ends at the edge.
+            let right = self
+                .multi
+                .borrow()
+                .as_ref()
+                .map_or(a.x, |m| m.bounds.right());
+            let end = if (a.y - b.y).abs() < px(1.0) {
+                b.x
+            } else {
+                right
+            };
+            return Some(Bounds::new(a, size((end - a.x).max(px(CARET_W)), lh)));
+        }
         let laid = self.laid.borrow();
         let Some(laid) = laid.as_ref() else {
             return Some(element_bounds);
@@ -926,6 +1130,10 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<usize> {
+        if self.lines.is_some() {
+            let byte = self.multi_byte_at(pt).unwrap_or_else(|| self.buf.head());
+            return Some(self.buf.utf16_of(byte..byte).start);
+        }
         let laid = self.laid.borrow();
         let byte = match laid.as_ref() {
             Some(laid) => {
@@ -950,6 +1158,22 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.lines.is_some() {
+            let multi = self.multi.borrow();
+            let Some(m) = multi.as_ref() else {
+                return false;
+            };
+            let old = self.scroll_y.get();
+            let new = clamp_scroll_y(
+                old - f32::from(delta.y),
+                m.total_rows as f32 * ML_LINE,
+                f32::from(m.bounds.size.height),
+            );
+            self.seen_activity.set(self.activity.get());
+            self.scroll_y.set(new);
+            cx.notify();
+            return (new - old).abs() > 0.01;
+        }
         let laid = self.laid.borrow();
         let Some(laid) = laid.as_ref() else {
             return false;
@@ -1043,6 +1267,10 @@ fn paint_text(
     window: &mut Window,
     cx: &mut App,
 ) {
+    if field.read(cx).lines.is_some() {
+        paint_multiline(field, focused, bounds, label, accent, window, cx);
+        return;
+    }
     if !focused {
         field.read(cx).laid.replace(None);
         return;
@@ -1128,6 +1356,134 @@ fn paint_text(
     });
 }
 
+/// Shapes the multiline text wrapped to `width`, runs underlining `marked`.
+fn shape_multi(
+    window: &Window,
+    text: &str,
+    width: Pixels,
+    color: Hsla,
+    marked: Option<Range<usize>>,
+) -> Vec<WrappedLine> {
+    let font = window.text_style().font();
+    let shared: gpui::SharedString = text.to_owned().into();
+    window
+        .text_system()
+        .shape_text(
+            shared,
+            typography::BODY.size,
+            &runs(&font, color, text.len(), marked),
+            Some(width.max(px(1.0))),
+            None,
+        )
+        .map(|lines| lines.into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// Wrapped rows of a multiline field's text at `width`.
+fn count_rows(window: &Window, text: &str, width: Pixels) -> usize {
+    shape_multi(window, text, width, Hsla::default(), None)
+        .iter()
+        .map(|l| l.wrap_boundaries.len() + 1)
+        .sum::<usize>()
+        .max(1)
+}
+
+/// Shapes and draws a multiline field: the wrapped text scrolled to the
+/// caret, the selection per row, the composing underline and the caret.
+fn paint_multiline(
+    field: &Entity<TextField>,
+    focused: bool,
+    bounds: Bounds<Pixels>,
+    label: Hsla,
+    accent: Hsla,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (text, sel, head, marked, scroll_y, follow, (min, max)) = {
+        let f = field.read(cx);
+        (
+            f.buf.text().to_owned(),
+            f.buf.selection(),
+            f.buf.head(),
+            f.buf.marked(),
+            f.scroll_y.get(),
+            f.activity.get() != f.seen_activity.get(),
+            f.lines.unwrap_or((1, 1)),
+        )
+    };
+    let lh = typography::BODY.line;
+    let lines = shape_multi(window, &text, bounds.size.width, label, marked);
+    let laid = MultiLaid::new(lines, &text, bounds);
+    let content_h = laid.total_rows as f32 * ML_LINE;
+    let view_h = f32::from(bounds.size.height);
+    let visible = visible_lines(laid.total_rows, min, max);
+    let mut scroll = clamp_scroll_y(scroll_y, content_h, view_h);
+    if follow && focused {
+        let caret_top = f32::from(laid.pos(head, lh).y);
+        scroll = scroll_y_for_caret(scroll, caret_top, ML_LINE, content_h, view_h);
+    }
+    // The box was sized for another line count: repaint with the right
+    // height, and scroll to the caret again then.
+    let settled = field.read(cx).shown_lines.get() == visible;
+    let caret_on = {
+        let f = field.read(cx);
+        f.scroll_y.set(scroll);
+        if follow && settled {
+            f.seen_activity.set(f.activity.get());
+        }
+        f.caret_on()
+    };
+    if !settled {
+        field.update(cx, |f, cx| {
+            f.shown_lines.set(visible);
+            cx.notify();
+        });
+    }
+
+    let left = bounds.left();
+    let top = bounds.top() - px(scroll);
+    if focused && sel.start < sel.end {
+        let at = |byte: usize| {
+            let p = laid.pos(byte, lh);
+            (f32::from(p.x), laid.row(byte, lh))
+        };
+        let width = f32::from(bounds.size.width);
+        for (l, row, r) in selection_rects(at(sel.start), at(sel.end), width) {
+            let mut quad = fill(
+                Bounds::new(
+                    point(left + px(l), top + lh * row),
+                    size(px((r - l).max(0.0)), lh),
+                ),
+                accent.opacity(0.28),
+            );
+            quad.corner_radii = px(SELECTION_RADIUS).into();
+            window.paint_quad(quad);
+        }
+    }
+    for (line, rows) in laid.lines.iter().zip(&laid.rows_before) {
+        if let Err(err) = line.paint(
+            point(left, top + lh * *rows),
+            lh,
+            TextAlign::Left,
+            None,
+            window,
+            cx,
+        ) {
+            log::warn!("text field: paint failed: {err}");
+        }
+    }
+    if focused && sel.is_empty() && caret_on {
+        let p = laid.pos(head, lh);
+        let mut quad = fill(
+            Bounds::new(point(left + p.x, top + p.y), size(px(CARET_W), lh)),
+            accent,
+        );
+        quad.corner_radii = px(CARET_W / 2.0).into();
+        window.paint_quad(quad);
+    }
+    *field.read(cx).multi.borrow_mut() = Some(laid);
+}
+
 /// Text runs for a line of `len` bytes: the marked range underlined.
 fn runs(font: &Font, color: Hsla, len: usize, marked: Option<Range<usize>>) -> Vec<TextRun> {
     let plain = |len| TextRun {
@@ -1193,6 +1549,9 @@ fn touch_layer(field: Entity<TextField>, accent: Hsla) -> impl IntoElement {
     .size_full()
 }
 
+/// A handle to draw: its tip (if on screen), tip-to-centre direction and drag.
+type HandleWant = (Option<(f32, f32)>, (f32, f32), Drag);
+
 /// Paints the selection handles (or the insertion handle) and records their
 /// touch targets.
 fn paint_handles(field: &Entity<TextField>, accent: Hsla, window: &mut Window, cx: &mut App) {
@@ -1202,31 +1561,52 @@ fn paint_handles(field: &Entity<TextField>, accent: Hsla, window: &mut Window, c
         return;
     }
     let laid = f.laid.borrow();
-    let Some(laid) = laid.as_ref() else { return };
+    let multi = f.multi.borrow();
+    let (left, right, top, bottom) = match (f.lines.is_some(), laid.as_ref(), multi.as_ref()) {
+        (true, _, Some(m)) => (
+            f32::from(m.bounds.left()),
+            f32::from(m.bounds.right()),
+            f32::from(m.bounds.top()),
+            f32::from(m.bounds.bottom()),
+        ),
+        (false, Some(l), _) => (
+            f32::from(l.bounds.left()),
+            f32::from(l.bounds.right()),
+            f32::from(l.bounds.top()),
+            f32::from(l.bounds.bottom()),
+        ),
+        _ => return,
+    };
     let sel = f.buf.selection();
     let r = HANDLE_SIZE / 2.0;
     let lh = typography::BODY.line;
-    let tip_y = f32::from(laid.bounds.top() + (laid.bounds.size.height + lh) / 2.0);
-    let (left, right) = (
-        f32::from(laid.bounds.left()),
-        f32::from(laid.bounds.right()),
-    );
-    let x_of = |byte: usize| {
-        left - f.scroll.get() + f32::from(laid.line.x_for_index(f.display_index(byte)))
+    // Where the handle of the caret at `byte` points: (tip x, tip y), or
+    // `None` when that caret has scrolled out of the box.
+    let tip_of = |byte: usize| -> Option<(f32, f32)> {
+        if f.lines.is_some() {
+            let at = f.multi_caret(byte)?;
+            let (x, y) = (f32::from(at.x), f32::from(at.y));
+            return (y >= top - 1.0 && y + ML_LINE <= bottom + 1.0).then_some((x, y + ML_LINE));
+        }
+        let laid = laid.as_ref()?;
+        let tip_y = f32::from(laid.bounds.top() + (laid.bounds.size.height + lh) / 2.0);
+        let x = left - f.scroll.get() + f32::from(laid.line.x_for_index(f.display_index(byte)));
+        Some((x, tip_y))
     };
-    // (tip x, direction tip -> centre, the drag it starts)
-    let wanted: Vec<(f32, (f32, f32), Drag)> = if !sel.is_empty() {
+    // (tip, direction tip -> centre, the drag it starts)
+    let wanted: Vec<HandleWant> = if !sel.is_empty() {
         vec![
-            (x_of(sel.start), (-1.0, 1.0), Drag::Handle(Some(sel.end))),
-            (x_of(sel.end), (1.0, 1.0), Drag::Handle(Some(sel.start))),
+            (tip_of(sel.start), (-1.0, 1.0), Drag::Handle(Some(sel.end))),
+            (tip_of(sel.end), (1.0, 1.0), Drag::Handle(Some(sel.start))),
         ]
     } else if f.insertion_visible() || matches!(f.drag.get(), Some(Drag::Handle(None))) {
-        vec![(x_of(f.buf.head()), (0.0, 1.0), Drag::Handle(None))]
+        vec![(tip_of(f.buf.head()), (0.0, 1.0), Drag::Handle(None))]
     } else {
         Vec::new()
     };
     let mut hits = Vec::new();
-    for (tip_x, dir, drag) in wanted {
+    for (tip, dir, drag) in wanted {
+        let Some((tip_x, tip_y)) = tip else { continue };
         if !handle_visible(tip_x, left, right) {
             continue;
         }
@@ -1436,9 +1816,22 @@ fn field_box_with(
         raw.to_owned().into()
     };
     let typing = focus.is_focused(window);
+    let multiline = field.read(cx).lines;
+    // A multiline field draws its text itself, always; its box is sized for
+    // the rows the text wraps to at the width last painted.
+    let rows_lines = multiline.map(|(min, max)| {
+        let f = field.read(cx);
+        let rows = match f.content.get() {
+            Some(content) => count_rows(window, &text, content.size.width),
+            None => paragraph_starts(&text).len(),
+        };
+        let lines = visible_lines(rows, min, max);
+        f.shown_lines.set(lines);
+        lines
+    });
     // Focused, the text layer draws the line (scrolled to the caret, no
     // ellipsis); otherwise a div shows the start with an end ellipsis.
-    let shown = if typing {
+    let shown = if typing || (multiline.is_some() && !text.is_empty()) {
         None
     } else if text.is_empty() {
         Some(
@@ -1455,7 +1848,7 @@ fn field_box_with(
         .track_focus(&focus)
         .on_key_down(on_backspace(field.clone()))
         .flex_none()
-        .h(px(44.0))
+        .h(px(rows_lines.map_or(44.0, box_height)))
         .on_mouse_down(MouseButton::Left, {
             let field = field.clone();
             move |event, window, cx| {
@@ -1468,11 +1861,12 @@ fn field_box_with(
         .child(
             glass(GlassSpec::control(theme))
                 .size_full()
-                .rounded_full()
+                .rounded(px(capsule_radius(rows_lines.unwrap_or(1))))
                 .shadow(shadow::glass(theme.is_dark()))
                 .flex()
                 .items_center()
                 .px(px(BOX_PAD))
+                .py(px(if multiline.is_some() { ML_PAD_V } else { 0.0 }))
                 .child(
                     div()
                         .relative()
@@ -1862,6 +2256,138 @@ mod tests {
             };
             assert!(f.touch_event(&end, cx));
             assert!(f.drag.get().is_none());
+        });
+    }
+
+    /// A host that draws a multiline composer in a narrow window.
+    struct MultiHost(Entity<TextField>);
+
+    impl gpui::Render for MultiHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(200.0)).p(px(16.0)).child(field_box(
+                Theme::Dark,
+                "m",
+                &self.0,
+                "Mesaj",
+                window,
+                cx,
+            ))
+        }
+    }
+
+    fn multi_cx<'a>(
+        cx: &'a mut TestAppContext,
+        text: &str,
+    ) -> (Entity<TextField>, &'a mut gpui::VisualTestContext) {
+        let (host, cx) =
+            cx.add_window_view(|_, cx| MultiHost(cx.new(|cx| TextField::multiline(1, 3, cx))));
+        let field = host.read_with(cx, |h, _| h.0.clone());
+        field.update(cx, |f, cx| f.set(text, cx));
+        for _ in 0..4 {
+            cx.run_until_parked();
+            cx.update(|window, _| window.refresh());
+        }
+        cx.run_until_parked();
+        (field, cx)
+    }
+
+    #[gpui::test]
+    fn multiline_asks_for_multiline_input_without_an_action_key(cx: &mut TestAppContext) {
+        let (field, cx) = multi_cx(cx, "");
+        field.update_in(cx, |f, w, cx| {
+            assert_eq!(f.text_input_mode(w, cx), TextInputMode::Multiline);
+            assert_eq!(f.text_input_action(w, cx), None);
+            assert!(f.is_multiline());
+        });
+    }
+
+    #[gpui::test]
+    fn multiline_keeps_line_breaks_and_enter_inserts_one(cx: &mut TestAppContext) {
+        use gpui::Keystroke;
+        let (field, cx) = multi_cx(cx, "bir\r\niki");
+        let enter = KeyDownEvent {
+            keystroke: Keystroke::parse("enter").unwrap(),
+            is_held: false,
+            prefer_character_input: false,
+        };
+        field.update(cx, |f, cx| {
+            assert_eq!(f.text(), "bir\niki");
+            f.set_selection(3, 3, cx);
+            assert!(f.handle_key(&enter, cx));
+            assert_eq!(f.text(), "bir\n\niki");
+            assert_eq!(f.selection(), 4..4);
+        });
+    }
+
+    #[gpui::test]
+    fn multiline_box_grows_with_the_wrapped_rows_up_to_the_maximum(cx: &mut TestAppContext) {
+        let (field, cx) = multi_cx(cx, "kısa");
+        field.read_with(cx, |f, _| assert_eq!(f.shown_lines(), 1));
+        let long = "uzun bir mesaj yazıyorum burada, satıra sığmayacak kadar uzun ve daha da uzun";
+        field.update_in(cx, |f, w, cx| {
+            let handle = f.focus_handle();
+            w.focus(&handle, cx);
+            f.set(long, cx);
+        });
+        for _ in 0..4 {
+            cx.run_until_parked();
+            cx.update(|window, _| window.refresh());
+        }
+        field.read_with(cx, |f, _| {
+            assert_eq!(f.shown_lines(), 3);
+            let rows = f.multi.borrow().as_ref().unwrap().total_rows;
+            assert!(rows > 3, "{rows} rows");
+            // The caret is at the end: the view scrolled down to it.
+            let m = f.multi.borrow();
+            let m = m.as_ref().unwrap();
+            assert!(
+                f.scroll_y.get() > 0.0,
+                "scroll {} rows {} bounds {:?}",
+                f.scroll_y.get(),
+                m.total_rows,
+                m.bounds
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn multiline_hit_testing_round_trips_through_the_wrapped_layout(cx: &mut TestAppContext) {
+        let (field, cx) = multi_cx(cx, "merhaba dünya, bugün hava çok güzel\nikinci satır");
+        field.update(cx, |f, cx| {
+            f.set_selection(0, 0, cx);
+            f.scroll_y.set(0.0);
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        field.read_with(cx, |f, _| {
+            let lh = typography::BODY.line;
+            for byte in [0, 5, 9, 21, 36, 40, 45] {
+                let at = f.multi_caret(byte).unwrap();
+                // A point inside the caret's row, at the caret's x.
+                let got = f.multi_byte_at(point(at.x + px(0.5), at.y + lh / 2.0));
+                assert_eq!(got, Some(byte), "byte {byte}");
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn multiline_up_and_down_move_by_wrapped_rows(cx: &mut TestAppContext) {
+        let (field, cx) = multi_cx(cx, "bir iki üç dört beş altı yedi sekiz dokuz on");
+        field.update(cx, |f, cx| {
+            f.set_selection(0, 0, cx);
+            f.scroll_y.set(0.0);
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        field.update(cx, |f, cx| {
+            f.move_vertical(true, false, cx);
+            let first = f.selection().start;
+            assert!(first > 0, "moved down a row");
+            f.move_vertical(true, false, cx);
+            assert!(f.selection().start > first);
+            f.move_vertical(false, false, cx);
+            f.move_vertical(false, false, cx);
+            assert_eq!(f.selection(), 0..0);
         });
     }
 

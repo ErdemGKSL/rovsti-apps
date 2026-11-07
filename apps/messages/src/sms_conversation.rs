@@ -13,8 +13,8 @@ use std::{
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ListAlignment,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, TextInputAction,
-    TextInputPurpose, Window, div, img, list, prelude::*, px,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Window, div, img,
+    list, prelude::*, px,
 };
 use rovsti_android::{Error as AndroidError, documents};
 use rovsti_core::{
@@ -293,12 +293,7 @@ impl SmsConversation {
         unread: u32,
         cx: &mut Context<Self>,
     ) -> Self {
-        let composer = cx.new(|cx| {
-            let mut field =
-                TextField::with_input(TextInputPurpose::Text, TextInputAction::Send, cx);
-            field.set_keep_focus_on_action(true);
-            field
-        });
+        let composer = cx.new(|cx| TextField::multiline(1, 6, cx));
         let mut timeline = SmsTimeline::new(thread_id);
         timeline.set_recipients(recipients.clone());
         let subscriptions = vec![

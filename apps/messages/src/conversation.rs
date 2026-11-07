@@ -10,8 +10,6 @@ use std::{
 };
 
 use gpui::MouseButton;
-use gpui::TextInputAction;
-use gpui::TextInputPurpose;
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, HapticFeedback, Image, ImageFormat,
     InteractiveElement, IntoElement, ListAlignment, ObjectFit, ParentElement, Render, SharedString,
@@ -479,12 +477,7 @@ impl Conversation {
             unread,
             jump,
         } = setup;
-        let composer = cx.new(|cx| {
-            let mut field =
-                TextField::with_input(TextInputPurpose::Text, TextInputAction::Send, cx);
-            field.set_keep_focus_on_action(true);
-            field
-        });
+        let composer = cx.new(|cx| TextField::multiline(1, 6, cx));
         // Typing re-renders the composer box; the keyboard's Send key sends.
         cx.observe(&composer, |this: &mut Self, composer, cx| {
             let actions = composer.read(cx).actions();
@@ -5404,7 +5397,7 @@ pub(crate) fn composer_bar(
     div()
         .flex_none()
         .flex()
-        .items_center()
+        .items_end()
         .gap(px(8.0))
         .px(px(12.0))
         .pt(px(8.0))

@@ -46,6 +46,7 @@ mod headless;
 mod kotlin_contract;
 mod lists;
 mod map;
+mod map_options;
 mod pick;
 mod picker;
 mod qr_sheet;
@@ -187,6 +188,8 @@ pub(crate) struct StopsApp {
     pub(crate) tile_usage: Option<u64>,
     /// The first tap on "Downloaded maps" has armed the second.
     pub(crate) confirm_clear_tiles: bool,
+    /// The first tap on "Download this area" has armed the second.
+    pub(crate) area_armed: bool,
 }
 
 impl StopsApp {
@@ -275,6 +278,7 @@ impl StopsApp {
                 this.dir = Some(dir.clone());
                 this.loaded = true;
                 this.prefs = data.prefs;
+                this.apply_appearance(cx);
                 let source = this.prefs.tile_source();
                 this.map_tiles.attach(&dir, source, cx);
                 this.saved = data.saved;
@@ -357,6 +361,7 @@ impl StopsApp {
             tz_offset_s: 0,
             tile_usage: None,
             confirm_clear_tiles: false,
+            area_armed: false,
         };
         app.refresh_preflight_later(cx);
         app.load_time_zone(cx);

@@ -212,6 +212,8 @@ pub enum SheetMode {
     Qr(QrCard),
     /// Confirming the import of saved stops from a file.
     ImportStops(MergePlan),
+    /// Appearance and the offline map area download.
+    MapOptions,
 }
 
 /// The stop search for one query, and the lines of the stop the sheet shows,
@@ -483,6 +485,7 @@ impl StopsApp {
     }
 
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
+        self.area_armed = false;
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
             // A line looked at but not chosen leaves the map again.
             self.map.pattern = self
@@ -596,6 +599,7 @@ impl StopsApp {
             }
             SheetMode::Qr(card) => ("QR code", self.qr_body(theme, card, cx)),
             SheetMode::ImportStops(plan) => ("Import stops", self.import_body(theme, &plan, cx)),
+            SheetMode::MapOptions => ("Map options", self.map_options_body(theme, cx)),
         };
         let body = div()
             .flex()

@@ -13,7 +13,8 @@ use std::{
 
 use gpui::Context;
 use rovsti_geo::tiles::{
-    FetchQueue, LruIndex, Priority, TileCover, TileGeometry, TileId, TileSource, stand_in,
+    AreaDownload, FetchQueue, LruIndex, Priority, TileCover, TileGeometry, TileId, TileSource,
+    stand_in,
 };
 use rovsti_tiles::{DEFAULT_CAP_BYTES, DiskCache, TileClient, TileError, load};
 
@@ -88,6 +89,10 @@ pub struct MapTiles {
     client: TileClient,
     queue: FetchQueue,
     memory: TileMemory,
+    /// The offline area download under way (or the last one, finished).
+    area: Option<AreaDownload>,
+    /// What the app should say about an area download that just finished.
+    area_report: Option<String>,
 }
 
 impl Default for MapTiles {
@@ -100,6 +105,8 @@ impl Default for MapTiles {
             client: TileClient::new(),
             queue: FetchQueue::new(),
             memory: TileMemory::default(),
+            area: None,
+            area_report: None,
         }
     }
 }
@@ -124,6 +131,8 @@ impl MapTiles {
     ) {
         self.queue.clear();
         self.memory.clear();
+        self.area = None;
+        self.area_report = None;
         self.cache = None;
         self.generation += 1;
         cx.notify();
@@ -160,6 +169,8 @@ impl MapTiles {
         self.source = source;
         self.queue.clear();
         self.memory.clear();
+        self.area = None;
+        self.area_report = None;
         self.cache = None;
         self.generation += 1;
         cx.notify();
@@ -215,6 +226,53 @@ impl MapTiles {
         self.pump(cx);
     }
 
+    /// Whether the disk cache is open, so downloads can start.
+    pub fn is_ready(&self) -> bool {
+        self.cache.is_some()
+    }
+
+    /// The offline area download, running or finished.
+    pub fn area(&self) -> Option<&AreaDownload> {
+        self.area.as_ref()
+    }
+
+    /// Whether an offline area download is running.
+    pub fn area_running(&self) -> bool {
+        self.area.as_ref().is_some_and(|a| !a.is_finished())
+    }
+
+    /// Starts downloading `ids` as an offline area (queued as prefetch).
+    /// `false` when the cache is not open or a download is already running.
+    pub fn download_area(&mut self, ids: Vec<TileId>, cx: &mut Context<StopsApp>) -> bool {
+        if self.cache.is_none() || self.area_running() {
+            return false;
+        }
+        self.area = Some(AreaDownload::new(ids.iter().copied()));
+        self.queue.want(ids, Priority::Prefetch, now_ms());
+        self.pump(cx);
+        cx.notify();
+        true
+    }
+
+    /// Stops the area download; tiles already saved are kept. Returns what to
+    /// tell the user, or `None` when nothing was running.
+    pub fn cancel_area(&mut self, cx: &mut Context<StopsApp>) -> Option<String> {
+        if !self.area_running() {
+            return None;
+        }
+        self.queue.drop_prefetch();
+        let area = self.area.as_mut()?;
+        area.cancel();
+        let text = area.finished_text();
+        cx.notify();
+        Some(text)
+    }
+
+    /// The text for an area download that just finished, once.
+    pub fn take_area_report(&mut self) -> Option<String> {
+        self.area_report.take()
+    }
+
     /// The loaded tiles for `cover`, coarse first; a tile that is not loaded
     /// yet is stood in for by a coarser ancestor when there is one.
     pub fn gather(&mut self, cover: &TileCover) -> Vec<Arc<TileGeometry>> {
@@ -246,6 +304,9 @@ impl MapTiles {
                     .await;
                 this.update(cx, |app, cx| {
                     app.map_tiles.finish(id, generation, result, cx);
+                    if let Some(text) = app.map_tiles.take_area_report() {
+                        app.on_area_finished(text, cx);
+                    }
                 })
                 .ok();
             })
@@ -264,6 +325,7 @@ impl MapTiles {
             return;
         }
         self.queue.done(id, result.is_ok(), now_ms());
+        self.record_area(id, result.is_ok());
         match result {
             Ok(tile) => {
                 self.memory.insert(Arc::new(tile), MEMORY_CAP_VERTICES);
@@ -274,6 +336,18 @@ impl MapTiles {
         self.pump(cx);
         if self.queue.in_flight() == 0 {
             self.flush(cx);
+        }
+    }
+
+    /// Notes a handled tile in the area download; remembers the closing text
+    /// when it was the last one.
+    fn record_area(&mut self, id: TileId, ok: bool) {
+        if let Some(area) = self.area.as_mut()
+            && !area.is_finished()
+            && area.record(id, ok)
+            && area.is_finished()
+        {
+            self.area_report = Some(area.finished_text());
         }
     }
 
@@ -318,6 +392,27 @@ mod tests {
         assert_eq!(m.revision(), r1);
         m.clear();
         assert_ne!(m.revision(), r1);
+    }
+
+    #[test]
+    fn the_area_download_reports_once_when_its_last_tile_is_handled() {
+        let mut tiles = MapTiles::default();
+        let (a, b) = (TileId::new(9, 1, 0).unwrap(), TileId::new(9, 2, 0).unwrap());
+        tiles.area = Some(AreaDownload::new([a, b]));
+        assert!(tiles.area_running());
+        tiles.record_area(a, true);
+        assert!(tiles.take_area_report().is_none());
+        tiles.record_area(b, false);
+        let text = tiles.take_area_report().unwrap();
+        assert!(
+            text.contains("1 tiles") && text.contains("1 failed"),
+            "{text}"
+        );
+        assert!(!tiles.area_running());
+        // Later results change nothing and say nothing.
+        tiles.record_area(b, true);
+        assert!(tiles.take_area_report().is_none());
+        assert_eq!(tiles.area().unwrap().done, 1);
     }
 
     #[test]

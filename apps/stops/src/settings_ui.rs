@@ -781,6 +781,19 @@ impl StopsApp {
             list_row(
                 theme,
                 None,
+                "Appearance",
+                Some(self.prefs.appearance.label().into()),
+                Some("Change".into()),
+            )
+            .id("set-appearance")
+            .on_click(cx.listener(|this, _, _, cx| {
+                let next = this.prefs.appearance.next();
+                this.set_appearance(next, cx);
+            }))
+            .into_any_element(),
+            list_row(
+                theme,
+                None,
                 "Arriving-soon message",
                 Some(notice_summary(&self.prefs, connected).into()),
                 Some("Open".into()),
@@ -1360,13 +1373,14 @@ impl StopsApp {
         .id("tiles-clear")
         .on_click(cx.listener(|this, _, _, cx| this.clear_tiles(cx)))
         .into_any_element();
+        let progress = self.area_progress_row(theme, "tiles-area-cancel", cx);
         div()
             .flex()
             .flex_col()
             .gap(px(20.0))
             .child(note(
                 theme,
-                "Map tiles come from this server and are kept on the phone. Any VersaTiles-compatible Shortbread vector tile server works.",
+                "Map tiles come from this server and are kept on the phone. Any VersaTiles-compatible Shortbread vector tile server works. Download areas from the map's Map button.",
                 false,
             ))
             .child(
@@ -1397,6 +1411,7 @@ impl StopsApp {
             ))
             .child(section(theme, None, [save, reset]))
             .child(section(theme, None, [downloaded]))
+            .children(progress)
             .child(note(
                 theme,
                 "Kept for offline use, up to 128 MB per map server.",
@@ -1406,7 +1421,7 @@ impl StopsApp {
     }
 
     /// Measures the tile cache off the UI thread.
-    fn measure_tiles(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn measure_tiles(&mut self, cx: &mut Context<Self>) {
         self.tile_usage = None;
         let Some(root) = self.map_tiles.root() else {
             self.tile_usage = Some(0);

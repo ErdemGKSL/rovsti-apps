@@ -90,7 +90,7 @@ const DEFAULT_SIZE: (f32, f32) = (370.0, MAP_HEIGHT);
 const CONTROL_SIZE: f32 = 40.0;
 const CONTROL_GAP: f32 = 8.0;
 const CONTROL_MARGIN: f32 = 10.0;
-const CONTROL_COUNT: f32 = 4.0;
+const CONTROL_COUNT: f32 = 5.0;
 
 // ---- pure: what is in view ----------------------------------------------------------
 
@@ -1719,7 +1719,7 @@ impl MapState {
         }
     }
 
-    fn size(&self) -> (f32, f32) {
+    pub(crate) fn size(&self) -> (f32, f32) {
         let b = self.bounds.get();
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
         if w > 1.0 && h > 1.0 {
@@ -2103,6 +2103,14 @@ impl StopsApp {
                     .on_click(cx.listener(|this, _, _, cx| this.map_zoom(0.5, cx))),
             )
             .child(ruler)
+            .when(idle, |c| {
+                c.child(
+                    control_button(theme, "Map")
+                        .id("map-options")
+                        .text_size(typography::CAPTION.size)
+                        .on_click(cx.listener(|this, _, _, cx| this.open_map_options(cx))),
+                )
+            })
             .child(last_control);
         let measure_card = self.measure_card(theme, cx);
         let scale = div()
@@ -3456,7 +3464,7 @@ mod tests {
         let size = (370.0, 340.0);
         assert!(over_controls(size, (350.0, 20.0)));
         assert!(over_controls(size, (330.0, 150.0)));
-        assert!(!over_controls(size, (350.0, 240.0)));
+        assert!(!over_controls(size, (350.0, 290.0)));
         assert!(!over_controls(size, (100.0, 20.0)));
     }
 
@@ -3528,7 +3536,7 @@ mod tests {
                 .map(|&c| input.viewport.project(c))
                 .collect::<Vec<_>>()
         );
-        // The fourth control (the ruler) is still over the control column.
+        // The ruler is still over the control column.
         assert!(over_controls((370.0, 460.0), (350.0, 175.0)));
     }
 

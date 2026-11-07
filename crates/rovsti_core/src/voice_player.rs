@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Playback speed, cycled by the speed pill.
-#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Speed {
     #[default]
     X1,
@@ -98,6 +98,33 @@ pub fn time_label(position_ms: u64, duration_ms: u64, playing: bool) -> String {
     }
 }
 
+/// What a tap on a note's play button does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TogglePlan {
+    /// The note is playing: pause it.
+    Pause,
+    /// The note is paused part-way: continue from this position.
+    Resume { from_ms: u64 },
+    /// Start from the beginning (another note, finished, or idle).
+    Start,
+}
+
+/// Decides the play button's action for note `key` given the player `state`.
+pub fn toggle_plan(state: &PlayerState, key: &str) -> TogglePlan {
+    if state.key != key || state.error.is_some() || state.ended {
+        return TogglePlan::Start;
+    }
+    if state.playing {
+        TogglePlan::Pause
+    } else if state.position_ms > 0 && state.position_ms < state.duration_ms {
+        TogglePlan::Resume {
+            from_ms: state.position_ms,
+        }
+    } else {
+        TogglePlan::Start
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +187,37 @@ mod tests {
         assert_eq!(time_label(42_000, 42_000, false), "0:42");
         assert_eq!(time_label(0, 3_723_000, false), "1:02:03");
         assert_eq!(time_label(99_000, 42_000, true), "0:42 / 0:42");
+    }
+
+    #[test]
+    fn toggle_plan_follows_the_state() {
+        let playing = PlayerState {
+            key: "a".into(),
+            playing: true,
+            position_ms: 10,
+            duration_ms: 100,
+            ..PlayerState::default()
+        };
+        assert_eq!(toggle_plan(&playing, "a"), TogglePlan::Pause);
+        assert_eq!(toggle_plan(&playing, "b"), TogglePlan::Start);
+        let paused = PlayerState {
+            playing: false,
+            ..playing.clone()
+        };
+        assert_eq!(
+            toggle_plan(&paused, "a"),
+            TogglePlan::Resume { from_ms: 10 }
+        );
+        let ended = PlayerState {
+            ended: true,
+            ..paused.clone()
+        };
+        assert_eq!(toggle_plan(&ended, "a"), TogglePlan::Start);
+        let failed = PlayerState {
+            error: Some("x".into()),
+            ..paused
+        };
+        assert_eq!(toggle_plan(&failed, "a"), TogglePlan::Start);
+        assert_eq!(toggle_plan(&PlayerState::default(), "a"), TogglePlan::Start);
     }
 }

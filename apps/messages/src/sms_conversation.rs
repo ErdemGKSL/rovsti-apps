@@ -133,6 +133,7 @@ enum Entry {
 
 pub struct SmsConversation {
     backend: Entity<Backend>,
+    voice: Entity<crate::voice_ui::VoiceController>,
     /// A negative id is a draft: a new conversation with no provider thread yet.
     thread_id: i64,
     title: SharedString,
@@ -212,6 +213,7 @@ pub struct SmsConversation {
 impl SmsConversation {
     pub fn new(
         backend: Entity<Backend>,
+        voice: Entity<crate::voice_ui::VoiceController>,
         thread_id: i64,
         title: impl Into<SharedString>,
         recipients: Vec<String>,
@@ -238,10 +240,16 @@ impl SmsConversation {
             }),
             // Role, SIMs and the clock live in the backend.
             cx.observe(&backend, |_, _, cx| cx.notify()),
+            // The note playing, scrubbed or paused changes its bubble.
+            cx.observe(&voice, |this: &mut Self, _, cx| {
+                this.rows_dirty = true;
+                cx.notify();
+            }),
             cx.subscribe(&backend, |this, _, event, cx| this.on_backend(event, cx)),
         ];
         let mut this = Self {
             backend,
+            voice,
             thread_id,
             title: title.into(),
             recipients,
@@ -1788,6 +1796,25 @@ impl SmsConversation {
                             }
                         })),
                 );
+            } else if let Some(path) = part.path.as_deref().filter(|_| {
+                part.content_type
+                    .trim()
+                    .to_ascii_lowercase()
+                    .starts_with("audio/")
+            }) {
+                // Save stays in the selection strip (`saveable_parts`).
+                let speed = self.backend.read(cx).prefs().voice_speed;
+                bubble = bubble.child(crate::voice_ui::player_row(
+                    &self.voice,
+                    &format!("{index}-{part_index}"),
+                    format!("mms:{path}"),
+                    crate::voice_ui::VoiceSource::File(PathBuf::from(path)),
+                    0,
+                    speed,
+                    text,
+                    quiet,
+                    cx,
+                ));
             } else if part.text.is_none() {
                 bubble = bubble.child(
                     div()

@@ -31,6 +31,7 @@ mod sms_actions;
 mod sms_conversation;
 mod status_ui;
 mod ticks;
+mod voice_ui;
 
 use std::{
     borrow::Cow,
@@ -277,6 +278,8 @@ struct MessagesApp {
     statuses: Entity<StatusFeed>,
     /// Address-book photos (shared with the conversation).
     photos: Entity<ContactPhotos>,
+    /// The voice note player, shared by the open chat's audio bubbles.
+    voice: Entity<voice_ui::VoiceController>,
     /// The address book the photo misses were recorded against.
     contacts_seen: usize,
     /// The archived chats are showing instead of the inbox.
@@ -414,6 +417,7 @@ impl MessagesApp {
         let schedule = ScheduleSheet::new(cx);
         let avatars = cx.new(|cx| WaAvatars::new(&whatsapp, cx));
         let photos = cx.new(|_| ContactPhotos::new());
+        let voice = cx.new(|_| voice_ui::VoiceController::new(backend.clone()));
         let statuses = cx.new(|_| StatusFeed::default());
         let search_field =
             cx.new(|cx| TextField::with_input(TextInputPurpose::Text, TextInputAction::Search, cx));
@@ -442,6 +446,12 @@ impl MessagesApp {
             }),
             cx.observe(&avatars, |_, _, cx| cx.notify()),
             cx.observe(&photos, |_, _, cx| cx.notify()),
+            cx.subscribe(&voice, |this, _, event, cx| {
+                if let voice_ui::VoiceEvent::Notice(text) = event {
+                    this.show_pill(text.clone());
+                    cx.notify();
+                }
+            }),
             cx.observe(&statuses, |_, _, cx| cx.notify()),
             cx.subscribe(&backend, |this, _, event, cx| match event {
                 BackendEvent::WaPush => {
@@ -526,6 +536,7 @@ impl MessagesApp {
             wa_info: HashMap::new(),
             avatars,
             photos,
+            voice,
             statuses,
             contacts_seen: 0,
             show_archived: false,
@@ -589,6 +600,9 @@ impl MessagesApp {
             return;
         }
         self.window_active = active;
+        if !active {
+            self.voice.update(cx, |voice, cx| voice.stop(cx));
+        }
         if active {
             if self.seen_active {
                 self.backend.update(cx, |backend, cx| backend.on_resume(cx));
@@ -1116,6 +1130,7 @@ impl MessagesApp {
                     backend,
                     avatars,
                     photos,
+                    voice: self.voice.clone(),
                     peer,
                     active: self.window_active,
                     unread,
@@ -1201,8 +1216,10 @@ impl MessagesApp {
             .iter()
             .find(|t| t.thread_id == thread_id)
             .map_or(0, |t| t.unread);
-        let conversation =
-            cx.new(|cx| SmsConversation::new(backend, thread_id, title, recipients, unread, cx));
+        let voice = self.voice.clone();
+        let conversation = cx.new(|cx| {
+            SmsConversation::new(backend, voice, thread_id, title, recipients, unread, cx)
+        });
         let row = self
             .view
             .all_rows()
@@ -1394,6 +1411,7 @@ impl MessagesApp {
     /// A page is about to replace the open one (a notification, the channel
     /// switch): layers that belonged to the old page go with it.
     fn leave_page(&mut self, cx: &mut App) {
+        self.voice.update(cx, |voice, cx| voice.stop(cx));
         if let Open::Sms(conversation) = &self.open {
             conversation.update(cx, |page, cx| page.commit_all_deletes(cx));
         }

@@ -60,6 +60,9 @@ pub struct MessagesPrefs {
     /// The reply chips above the composers.
     #[serde(default = "rovsti_core::quick_replies::defaults")]
     pub quick_replies: Vec<String>,
+    /// The voice note playback speed, remembered between notes and runs.
+    #[serde(default)]
+    pub voice_speed: rovsti_core::voice_player::Speed,
 }
 
 impl Default for MessagesPrefs {
@@ -71,6 +74,7 @@ impl Default for MessagesPrefs {
             otp_copy: true,
             muted: BTreeSet::new(),
             quick_replies: rovsti_core::quick_replies::defaults(),
+            voice_speed: rovsti_core::voice_player::Speed::default(),
         }
     }
 }
@@ -267,6 +271,16 @@ mod tests {
     fn old_prefs_file_gets_default_replies() {
         let prefs: MessagesPrefs = serde_json::from_str("{}").expect("parsed");
         assert_eq!(prefs.quick_replies, rovsti_core::quick_replies::defaults());
+    }
+
+    #[test]
+    fn old_prefs_file_defaults_speed() {
+        use rovsti_core::voice_player::Speed;
+        let prefs: MessagesPrefs = serde_json::from_str("{}").expect("parsed");
+        assert_eq!(prefs.voice_speed, Speed::X1);
+        let fast: MessagesPrefs = serde_json::from_str("{\"voice_speed\":\"X2\"}").expect("parsed");
+        assert_eq!(fast.voice_speed, Speed::X2);
+        assert_eq!(fast.reset().voice_speed, Speed::X1);
     }
 
     #[test]

@@ -37,6 +37,8 @@ use rovsti_ui::{
     tokens::{Theme, radius, typography},
 };
 use rovsti_wa_client::Gateway;
+
+use crate::voice_ui::{VoiceEvent, VoiceSource, player_row};
 pub(crate) use rovsti_wa_proto::presence::{civil_from_days, clock, day_label, presence_label};
 use rovsti_wa_ui::{WaAvatars, display_name, photo_avatar};
 
@@ -186,6 +188,7 @@ pub struct Setup {
     pub backend: Entity<Backend>,
     pub avatars: Entity<WaAvatars>,
     pub photos: Entity<ContactPhotos>,
+    pub voice: Entity<crate::voice_ui::VoiceController>,
     pub peer: Peer,
     /// The window is in front of the user (see [`Conversation::set_active`]).
     pub active: bool,
@@ -277,6 +280,8 @@ pub struct Conversation {
     media_cache: Vec<(String, Arc<Image>)>,
     media_loading: HashSet<String>,
     media_failed: HashSet<String>,
+    /// Voice notes already reported to the gateway as played.
+    played: HashSet<String>,
     /// The cached file handed to "Save as" while its answer is pending.
     saving: Option<std::path::PathBuf>,
     /// An exported chat is at the "Save as" sheet; true when only part of the chat was loaded.
@@ -314,6 +319,7 @@ pub struct Conversation {
     notice: Option<SharedString>,
     avatars: Entity<WaAvatars>,
     photos: Entity<ContactPhotos>,
+    voice: Entity<crate::voice_ui::VoiceController>,
     peer: Peer,
     /// Preview thumbnails by message id, oldest first (at most [`THUMB_CACHE`]).
     thumbs: Vec<(String, Arc<Image>)>,
@@ -368,6 +374,7 @@ impl Conversation {
             backend,
             avatars,
             photos,
+            voice,
             peer,
             active,
             unread,
@@ -411,6 +418,16 @@ impl Conversation {
             // A picture arrived: the header and the bubbles repaint.
             cx.observe(&avatars, |_, _, cx| cx.notify()),
             cx.observe(&photos, |_, _, cx| cx.notify()),
+            // The note playing, scrubbed or paused changes its bubble.
+            cx.observe(&voice, |this: &mut Self, _, cx| {
+                this.rows_dirty = true;
+                cx.notify();
+            }),
+            cx.subscribe(&voice, |this, _, event, cx| {
+                if let VoiceEvent::Started(key) = event {
+                    this.on_voice_started(key, cx);
+                }
+            }),
         ];
         let mut this = Self {
             timeline: Timeline::new(chat.clone()),
@@ -433,6 +450,7 @@ impl Conversation {
             media_cache: Vec::new(),
             media_loading: HashSet::new(),
             media_failed: HashSet::new(),
+            played: HashSet::new(),
             saving: None,
             exporting: None,
             strip: None,
@@ -454,6 +472,7 @@ impl Conversation {
             notice: None,
             avatars,
             photos,
+            voice,
             peer,
             thumbs: Vec::new(),
             thumbs_loading: HashSet::new(),
@@ -1887,6 +1906,48 @@ impl Conversation {
         }
     }
 
+    /// A voice note began playing: an incoming one is reported as played once.
+    fn on_voice_started(&mut self, key: &str, cx: &mut Context<Self>) {
+        let Some(id) = key.strip_prefix("wa:") else {
+            return;
+        };
+        if self.played.contains(id) {
+            return;
+        }
+        let Some(message) = self
+            .timeline
+            .items()
+            .iter()
+            .map(|item| &item.message)
+            .find(|m| m.id == id && !m.from_me)
+        else {
+            return;
+        };
+        let requests = read_requests(
+            self.timeline.chat(),
+            [(message.sender.as_deref(), message.id.as_str())],
+        );
+        self.played.insert(id.to_owned());
+        for request in requests {
+            let gateway = self.gateway.clone();
+            let task = cx
+                .background_executor()
+                .spawn(async move { gateway.mark_played(&request) });
+            let id = id.to_owned();
+            cx.spawn(async move |this, cx| {
+                if let Err(error) = task.await {
+                    log::warn!("marking a voice note played failed: {error}");
+                    // Forget it so the next play tries again.
+                    this.update(cx, |this, _| {
+                        this.played.remove(&id);
+                    })
+                    .ok();
+                }
+            })
+            .detach();
+        }
+    }
+
     fn send_read(&self, request: MarkRead, cx: &mut Context<Self>) {
         let gateway = self.gateway.clone();
         let task = cx.background_executor().spawn(async move {
@@ -2929,7 +2990,26 @@ impl Conversation {
         let downloadable = matches!(kind, MediaKind::Image | MediaKind::Sticker);
         let save_here = !downloadable && saveable(*kind);
         let mut card = div().flex().flex_col().gap(px(4.0));
-        if let Some(image) = self.cached_image(&message.id) {
+        if *kind == MediaKind::Audio {
+            // Play here; Save is in the strip under a tap on the bubble.
+            let seconds = media.and_then(|m| m.seconds).unwrap_or(0);
+            let speed = self.backend.read(cx).prefs().voice_speed;
+            card = card.child(player_row(
+                &self.voice,
+                &message.id,
+                format!("wa:{}", message.id),
+                VoiceSource::Gateway {
+                    gateway: self.gateway.clone(),
+                    id: message.id.clone(),
+                    mime: mime.clone(),
+                },
+                u64::from(seconds) * 1000,
+                speed,
+                text,
+                quiet,
+                cx,
+            ));
+        } else if let Some(image) = self.cached_image(&message.id) {
             let tapped = message.id.clone();
             card = card.child(
                 img(image)

@@ -30,10 +30,14 @@ pub mod contact_edit;
 /// Calls with one contact on the card: limits, header, permission text.
 pub mod contact_history;
 pub mod contact_photo;
+/// Select mode in the Contacts list: export ids, group changes, notices, contact text.
+/// Quick actions on a contact row.
+pub mod contact_quick;
 /// Scan to add: QR decoding and the payload parser.
 pub mod contact_scan;
-/// Select mode in the Contacts list: export ids, group changes, notices, contact text.
 pub mod contact_select;
+/// Counts over the whole address book.
+pub mod contact_stats;
 /// Local trash for deleted contacts: retention, restore, texts.
 pub mod contact_trash;
 pub mod contacts_prefs;

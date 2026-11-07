@@ -100,9 +100,33 @@ fn after_country_code(digits: &str, rest: &str) -> bool {
     (0..=3).any(|k| digits.get(k..).is_some_and(|d| d.starts_with(rest)))
 }
 
+/// Folded words of a name, split on anything that is not alphanumeric.
+fn name_words(name: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in fold(name).split(|c: char| !c.is_alphanumeric()) {
+        if !w.is_empty() && !out.iter().any(|o| o == w) {
+            out.push(w.to_owned());
+        }
+    }
+    out
+}
+
+/// First letter of every word, folded and joined.
+fn initials_of(name: &str) -> String {
+    fold(name)
+        .split(|c: char| !c.is_alphanumeric())
+        .filter_map(|w| w.chars().next())
+        .collect()
+}
+
 pub(crate) struct Entry {
     pub(crate) contact: WireContact,
     folded_name: String,
+    /// Folded name words of the name and, when it differs, the alternative.
+    words: Vec<String>,
+    /// Folded first letters of the words of the name, and of the alternative.
+    initials: String,
+    initials_alt: Option<String>,
     /// Folded, trimmed email; `None` when the contact has none.
     folded_email: Option<String>,
     /// Digits only, per number.
@@ -162,9 +186,28 @@ impl ContactIndex {
                     .iter()
                     .map(|n| PhoneNumber::parse(&n.raw).ok())
                     .collect();
+                let alt = contact
+                    .display_name_alt
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|alt| !alt.is_empty() && *alt != contact.display_name.trim());
+                let mut words = name_words(&contact.display_name);
+                let mut initials_alt = None;
+                if let Some(alt) = alt {
+                    for w in name_words(alt) {
+                        if !words.contains(&w) {
+                            words.push(w);
+                        }
+                    }
+                    initials_alt = Some(initials_of(alt));
+                }
+                let initials = initials_of(&contact.display_name);
                 Entry {
                     contact,
                     folded_name,
+                    words,
+                    initials,
+                    initials_alt,
                     folded_email,
                     digits,
                     parsed,
@@ -250,6 +293,61 @@ impl ContactIndex {
                 .map(|e| &e.contact)
                 .collect(),
         }
+    }
+
+    /// Like [`search`](Self::search) but forgiving for names: after the
+    /// substring hits come contacts whose name words start with every query
+    /// word (any order), then contacts whose initials start with the query
+    /// ("ay" finds Ayse Yilmaz). Each tier keeps provider order; no duplicates.
+    pub fn search_loose(&self, query: &str) -> Vec<&WireContact> {
+        let folded = match Query::parse(query) {
+            Query::Text(f) => f,
+            _ => return self.search(query),
+        };
+        let mut seen = vec![false; self.entries.len()];
+        let mut out: Vec<&WireContact> = Vec::new();
+        let mut push_tier = |pred: &dyn Fn(&Entry) -> bool| {
+            for (i, e) in self.entries.iter().enumerate() {
+                if !seen[i] && pred(e) {
+                    seen[i] = true;
+                    out.push(&e.contact);
+                }
+            }
+        };
+        push_tier(&|e| {
+            e.folded_name.contains(&folded)
+                || e.folded_email
+                    .as_deref()
+                    .is_some_and(|m| m.contains(&folded))
+        });
+        let q_words: Vec<&str> = folded.split_whitespace().collect();
+        push_tier(&|e| {
+            let mut used = vec![false; e.words.len()];
+            q_words.iter().all(|q| {
+                match e
+                    .words
+                    .iter()
+                    .enumerate()
+                    .find(|(i, w)| !used[*i] && w.starts_with(q))
+                {
+                    Some((i, _)) => {
+                        used[i] = true;
+                        true
+                    }
+                    None => false,
+                }
+            })
+        });
+        let n = folded.chars().count();
+        if q_words.len() == 1 && (2..=5).contains(&n) && folded.chars().all(char::is_alphabetic) {
+            push_tier(&|e| {
+                e.initials.starts_with(&folded)
+                    || e.initials_alt
+                        .as_deref()
+                        .is_some_and(|i| i.starts_with(&folded))
+            });
+        }
+        out
     }
 
     /// The contact owning `number` (typed or from a call), by
@@ -522,6 +620,118 @@ mod tests {
         }
         assert!(idx.search("@").len() == 1, "only the contact with an email");
         assert!(idx.search("nobody@").is_empty());
+    }
+
+    fn people() -> ContactIndex {
+        let mut c4 = contact(4, "Yılmaz Ayşe", &[]);
+        c4.display_name_alt = Some("Ayşe Yılmaz".to_owned());
+        ContactIndex::new(vec![
+            contact(1, "Ayşe Yılmaz", &["0555 111 22 33"]),
+            contact(2, "Ayla", &[]),
+            contact(3, "Mehmet Ay Kaya", &[]),
+            c4,
+            contact(5, "Zeynep Çelik", &[]),
+        ])
+    }
+
+    fn ids(hits: &[&WireContact]) -> Vec<i64> {
+        hits.iter().map(|c| c.id).collect()
+    }
+
+    #[test]
+    fn loose_initials_find_first_and_last_name() {
+        let idx = people();
+        // Substring hits first (1,2,3,4), no initials-only extras here.
+        assert_eq!(ids(&idx.search_loose("ay")), [1, 2, 3, 4]);
+        assert_eq!(ids(&idx.search_loose("yc")), [] as [i64; 0]);
+        let idx = ContactIndex::new(vec![contact(1, "Ayşe Yılmaz", &[])]);
+        assert_eq!(ids(&idx.search_loose("ay")), [1]);
+        assert_eq!(ids(&idx.search_loose("AY")), [1]);
+        let idx = ContactIndex::new(vec![contact(7, "Bora Yıldız", &[])]);
+        assert!(idx.search_loose("ay").is_empty());
+    }
+
+    #[test]
+    fn loose_turkish_folding_in_initials() {
+        let idx = ContactIndex::new(vec![contact(1, "Çağla Şahin", &[])]);
+        assert_eq!(ids(&idx.search_loose("cs")), [1]);
+        assert_eq!(ids(&idx.search_loose("ÇŞ")), [1]);
+    }
+
+    #[test]
+    fn loose_alt_name_initials() {
+        let mut c = contact(1, "Ayşe Yılmaz", &[]);
+        c.display_name_alt = Some("Yılmaz, Ayşe".to_owned());
+        let idx = ContactIndex::new(vec![c]);
+        assert_eq!(ids(&idx.search_loose("ya")), [1]);
+        assert_eq!(ids(&idx.search_loose("ay")), [1]);
+    }
+
+    #[test]
+    fn loose_words_in_any_order() {
+        let idx = people();
+        assert_eq!(ids(&idx.search_loose("yilmaz ay")), [4, 1]);
+        assert_eq!(ids(&idx.search_loose("kay meh")), [3]);
+        assert_eq!(ids(&idx.search_loose("ay kay")), [3]);
+        assert!(
+            idx.search_loose("ay ay").is_empty(),
+            "words must be distinct"
+        );
+        assert!(idx.search_loose("celik zeynepp").is_empty());
+    }
+
+    #[test]
+    fn loose_tier_order_and_dedup() {
+        let idx = ContactIndex::new(vec![
+            contact(1, "Ali Yay", &[]),
+            contact(2, "Ayla", &[]),
+            contact(3, "Banu Kaya", &[]),
+            contact(4, "Ahmet Yilmaz", &[]),
+            contact(5, "Yasar Ay", &[]),
+        ]);
+        // 1, 2, 5 contain "ay"; 4 matches only by initials.
+        assert_eq!(ids(&idx.search_loose("ay")), [1, 2, 3, 5, 4]);
+        // Word tier then substring: "ya" substrings 1,3,5; word-prefix adds 4.
+        let hits = ids(&idx.search_loose("ya"));
+        let mut dedup = hits.clone();
+        dedup.dedup();
+        assert_eq!(hits, dedup);
+        assert_eq!(hits, [1, 3, 5]);
+        // Word tier after substring tier.
+        let idx = ContactIndex::new(vec![
+            contact(1, "Ali Veli", &[]),
+            contact(2, "Velioglu Ali", &[]),
+        ]);
+        assert_eq!(ids(&idx.search_loose("ali veli")), [1, 2]);
+    }
+
+    #[test]
+    fn loose_single_letter_and_long_queries_skip_initials() {
+        let idx = ContactIndex::new(vec![contact(1, "Ali Ben Can Dan Eda Fil", &[])]);
+        assert!(idx.search_loose("abcdef").is_empty(), "six letters");
+        assert_eq!(ids(&idx.search_loose("abcde")), [1]);
+        assert!(idx.search_loose("a b").len() == 1, "words, not initials");
+        // A single letter that is only an initial of a later word: "z" is no
+        // substring of "Mary Jo", and "j" matches the name itself.
+        let idx = ContactIndex::new(vec![contact(1, "Xan Yo", &[])]);
+        assert!(idx.search_loose("z").is_empty());
+        assert_eq!(ids(&idx.search_loose("xy")), [1]);
+    }
+
+    #[test]
+    fn loose_digits_and_empty_match_search() {
+        let idx = people();
+        assert_eq!(ids(&idx.search_loose("")), ids(&idx.search("")));
+        assert_eq!(ids(&idx.search_loose("555 111")), [1]);
+        assert_eq!(ids(&idx.search_loose("0555")), ids(&idx.search("0555")));
+    }
+
+    #[test]
+    fn search_stays_strict() {
+        let idx = ContactIndex::new(vec![contact(1, "Ayşe Yılmaz", &[])]);
+        assert!(idx.search("ya yi").is_empty());
+        assert!(idx.search("yilmaz ayse").is_empty());
+        assert_eq!(ids(&idx.search("ayse y")), [1]);
     }
 
     #[test]

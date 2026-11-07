@@ -10,6 +10,38 @@ pub const MIN_METRES_PER_PX: f64 = 0.5;
 pub const MAX_METRES_PER_PX: f64 = 2000.0;
 const MAX_LAT: f64 = 85.0;
 
+/// How the map follows the device position.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FollowMode {
+    #[default]
+    Off,
+    /// Centred on the last fix once.
+    Centred,
+    /// Re-centres on every live fix.
+    Following,
+}
+
+impl FollowMode {
+    /// Next mode after a tap on the Me button.
+    pub fn on_me_tap(self, has_fix: bool) -> FollowMode {
+        match (self, has_fix) {
+            (FollowMode::Centred, true) => FollowMode::Following,
+            (FollowMode::Following, true) => FollowMode::Off,
+            _ => FollowMode::Centred,
+        }
+    }
+
+    /// Any manual pan or zoom ends following.
+    pub fn on_pan(self) -> FollowMode {
+        FollowMode::Off
+    }
+
+    /// Whether live location updates are needed.
+    pub fn watches(self) -> bool {
+        self == FollowMode::Following
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Viewport {
     pub center: Coord,
@@ -127,6 +159,21 @@ impl Viewport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn follow_mode_table() {
+        use FollowMode::*;
+        assert_eq!(Off.on_me_tap(true), Centred);
+        assert_eq!(Off.on_me_tap(false), Centred);
+        assert_eq!(Centred.on_me_tap(true), Following);
+        assert_eq!(Centred.on_me_tap(false), Centred);
+        assert_eq!(Following.on_me_tap(true), Off);
+        assert_eq!(Following.on_me_tap(false), Centred);
+        for m in [Off, Centred, Following] {
+            assert_eq!(m.on_pan(), Off);
+            assert_eq!(m.watches(), m == Following);
+        }
+    }
 
     const IST: Coord = Coord::new(41.0082, 28.9784);
 

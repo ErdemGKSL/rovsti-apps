@@ -42,9 +42,12 @@ pub use notice::{DEFAULT_TEMPLATE, TemplateError};
 pub use prefs::{
     AlarmSound, Appearance, NOTICE_MINUTES, NoticePrefs, NoticeWhen, SNOOZE_CHOICES, StopsPrefs,
 };
-pub use saved_stops::{LoadedStops, SavedStop, SavedStopError, SavedStops};
+pub use saved_stops::{
+    LoadedStops, SavedStop, SavedStopError, SavedStops, StopShortcut, shortcut_spec,
+};
 pub use session::{
     ActiveTrip, FixIn, FixOut, FixOutcome, FixPos, NoticeDelivery, NoticeState, Track,
+    format_distance, status_share_text,
 };
 pub use trip::{Fix, TripState};
-pub use view::Viewport;
+pub use view::{FollowMode, Viewport};

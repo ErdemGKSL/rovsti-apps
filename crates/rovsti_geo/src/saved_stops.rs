@@ -19,6 +19,31 @@ pub const DUPLICATE_GATE_M: f64 = 25.0;
 /// How far from the gate midpoint a GTFS stop may be to suggest its name.
 pub const NAME_SEARCH_M: f64 = 300.0;
 
+/// Longest launcher shortcut labels, in characters.
+pub const SHORTCUT_SHORT_CHARS: usize = 10;
+pub const SHORTCUT_LONG_CHARS: usize = 25;
+
+/// What the launcher needs to pin a shortcut that starts a saved stop's trip.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct StopShortcut {
+    pub id: String,
+    pub short_label: String,
+    pub long_label: String,
+    pub stop_id: u64,
+}
+
+/// Shortcut description for `stop`; labels are cut on character boundaries.
+pub fn shortcut_spec(stop: &SavedStop) -> StopShortcut {
+    let name = stop.name.trim();
+    let name = if name.is_empty() { "Stop" } else { name };
+    StopShortcut {
+        id: format!("stop-{}", stop.id),
+        short_label: name.chars().take(SHORTCUT_SHORT_CHARS).collect(),
+        long_label: name.chars().take(SHORTCUT_LONG_CHARS).collect(),
+        stop_id: stop.id,
+    }
+}
+
 /// One saved stop: a name and the two points that define its gate.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SavedStop {
@@ -313,6 +338,31 @@ pub fn suggest_name(feed: Option<&Feed>, a: &Endpoint, b: &Endpoint) -> String {
 mod tests {
     use super::*;
     use crate::Stop;
+
+    #[test]
+    fn shortcut_spec_truncates_on_chars() {
+        let stop = SavedStop {
+            id: 7,
+            name: "Kadıköy İskele Çarşı Meydanı Durağı".into(),
+            a: ep("A", 41.0, 29.0),
+            b: ep("B", 41.001, 29.0),
+            created_ms: 0,
+        };
+        let sp = shortcut_spec(&stop);
+        assert_eq!(sp.id, "stop-7");
+        assert_eq!(sp.short_label.chars().count(), 10);
+        assert_eq!(sp.long_label.chars().count(), 25);
+        assert!(stop.name.starts_with(&sp.short_label));
+        let v = serde_json::to_value(&sp).unwrap();
+        for k in ["id", "short_label", "long_label", "stop_id"] {
+            assert!(v.get(k).is_some(), "{k}");
+        }
+        let empty = SavedStop {
+            name: "  ".into(),
+            ..stop
+        };
+        assert_eq!(shortcut_spec(&empty).short_label, "Stop");
+    }
 
     fn ep(label: &str, lat: f64, lon: f64) -> Endpoint {
         Endpoint {

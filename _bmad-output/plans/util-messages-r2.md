@@ -48,13 +48,13 @@ Round 1 (`util-messages.md`, commits 5d053ee..20cf993) shipped M1-M8: `media_vie
 | M6 | Export chat as .txt / Share as text | done R1 |
 | M7 | Mark all read (confirm, count pill, Undo for WA) | done R1 |
 | M8 | Phone/email detection pills (Call, Message, Email, Copy) | done R1 |
-| M9 | Forward a message (text, caption, picture) to any chat via a chooser; also from the viewer | R2 step 3 |
-| M10 | Starred messages list per WhatsApp chat, tap jumps, Unstar in the list | R2 step 4 |
-| M12 | Scroll-to-bottom button with new-message count, "N unread messages" divider on open | R2 step 5 |
-| M11 | Quick reply templates (Settings list, composer chip row, insert) | R2 step 6 |
-| M14 | Message info sheet (sent/received time, ticks, edited, forwarded, SIM, length/segments, media) | R2 step 7 |
-| M16 | Select text sheet (selectable text, Copy selection / Copy all) | R2 step 7 |
-| M21 | Inbox avatar tap opens the profile photo viewer | R2 step 8 |
+| M9 | Forward a message (text, caption, picture) to any chat via a chooser; also from the viewer | done R2 |
+| M10 | Starred messages list per WhatsApp chat, tap jumps, Unstar in the list | done R2 |
+| M12 | Scroll-to-bottom button with new-message count, "N unread messages" divider on open | done R2 |
+| M11 | Quick reply templates (Settings list, composer chip row, insert) | done R2 |
+| M14 | Message info sheet (sent/received time, ticks, edited, forwarded, SIM, length/segments, media) | done R2 |
+| M16 | Select text sheet (selectable text, Copy selection / Copy all) | done R2 |
+| M21 | Inbox avatar tap opens the profile photo viewer | done R2 |
 | M13 | Per-chat media/links/docs gallery (grid of images, link list, files) | open |
 | M15 | Delete a single SMS/MMS (confirm + Undo window), Kotlin `deleteMessage` seam | open |
 | M17 | Voice note playback with speed (1x/1.5x/2x) and scrubbing (Kotlin MediaPlayer seam) | open |
@@ -275,6 +275,11 @@ happened; `rovsti_android::Error::Unsupported` -> "That needs an Android phone."
 - Pages emit `ConversationEvent::Info(InfoSheet)` / `SmsConversationEvent::Info(..)` or own the
   sheet themselves; prefer the page owning it (like `delete_confirm`), closed by Back first.
 - Commit: `Rovsti messages: UI: message info and select text (M14, M16)`.
+
+### Deferred / notes (after step 8)
+- Round 3: M13, M15, M17-M20, M22-M27 stay open (see backlog table).
+- M21: the inbox avatar tap opens the viewer only once the picture has loaded; before that, and for initials, it opens the chat.
+- Manual acceptance rows 95-106 in `docs/messages-acceptance.md` cover M9-M12, M14, M16, M21; none could be run without a device.
 
 ### Step 8. UI: inbox avatar viewer (M21), docs and backlog
 - `inbox.rs` row avatar (the element built from `RowAvatar`): own id + `on_click` that stops

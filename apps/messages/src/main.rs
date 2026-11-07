@@ -3610,19 +3610,27 @@ impl MessagesApp {
     }
 
     /// The picture a row's avatar shows: the contact photo, else the
-    /// WhatsApp picture (both fetched only for rows on screen).
-    fn row_photo(&self, row: &RowView, cx: &mut Context<Self>) -> Option<(Arc<RenderImage>, f32)> {
+    /// WhatsApp picture (both fetched only for rows on screen), with the
+    /// viewer source of the picture it found.
+    fn row_photo_source(
+        &self,
+        row: &RowView,
+        cx: &mut Context<Self>,
+    ) -> Option<((Arc<RenderImage>, f32), media_viewer::ViewerSource)> {
         if let Some(uri) = &row.avatar.photo_uri {
             self.photos.update(cx, |photos, cx| photos.want(uri, cx));
             if let Some(photo) = self.photos.read(cx).photo(uri) {
-                return Some(photo);
+                let source = row.avatar.viewer_source(true, false)?;
+                return Some((photo, source));
             }
         }
         let jid = row.avatar.wa_jid.as_ref()?;
         let picture_id = row.avatar.picture_id.as_deref();
         self.avatars
             .update(cx, |avatars, cx| avatars.want(jid, picture_id, cx));
-        self.avatars.read(cx).picture(jid)
+        let photo = self.avatars.read(cx).picture(jid)?;
+        let source = row.avatar.viewer_source(false, true)?;
+        Some((photo, source))
     }
 
     fn inbox_row(
@@ -3636,7 +3644,27 @@ impl MessagesApp {
         let title = row.title.clone();
         let code = row.otp.clone();
         let copied = code.is_some() && self.copied == code;
-        let photo = self.row_photo(row, cx);
+        let found = self.row_photo_source(row, cx);
+        let open_avatar = found.as_ref().map(|((image, _), source)| {
+            let item = media_viewer::ViewerItem {
+                key: "avatar".to_owned(),
+                title: row.title.clone(),
+                mime: if matches!(source, media_viewer::ViewerSource::ContactPhoto { .. }) {
+                    "image/png"
+                } else {
+                    "image/jpeg"
+                }
+                .to_owned(),
+                source: source.clone(),
+                at_ms: 0,
+                placeholder: None,
+                avatar: Some(Arc::clone(image)),
+            };
+            Box::new(cx.listener(move |this, _, _, cx| {
+                this.open_media_viewer(vec![item.clone()], 0, cx);
+            })) as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)>
+        });
+        let photo = found.map(|(photo, _)| photo);
         let has_menu = row.wa_chat.is_some() || row.sms_thread.is_some();
         let menu = has_menu.then(|| {
             let title = row.title.clone();
@@ -3671,6 +3699,7 @@ impl MessagesApp {
                         this.copy_code(code, cx);
                     }
                 })),
+                open_avatar,
                 menu,
             },
         )

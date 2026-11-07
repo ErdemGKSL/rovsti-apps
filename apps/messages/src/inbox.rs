@@ -110,6 +110,30 @@ pub struct RowAvatar {
     pub picture_id: Option<SharedString>,
 }
 
+impl RowAvatar {
+    /// The source the full-screen viewer loads for this avatar: the contact
+    /// photo when it is loaded, else the WhatsApp picture when it is loaded.
+    /// `None` shows initials only, and the tap opens the chat.
+    pub fn viewer_source(
+        &self,
+        contact_loaded: bool,
+        wa_loaded: bool,
+    ) -> Option<crate::media_viewer::ViewerSource> {
+        use crate::media_viewer::ViewerSource;
+        if contact_loaded && let Some(uri) = &self.photo_uri {
+            return Some(ViewerSource::ContactPhoto {
+                uri: uri.to_string(),
+            });
+        }
+        if wa_loaded && let Some(jid) = &self.wa_jid {
+            return Some(ViewerSource::WaPicture {
+                jid: jid.to_string(),
+            });
+        }
+        None
+    }
+}
+
 impl RowView {
     /// The thread a tap opens.
     pub fn newest(&self) -> Option<&ThreadId> {
@@ -992,6 +1016,9 @@ pub struct RowExtras {
     pub copied: bool,
     pub open: Handler,
     pub copy_code: Handler,
+    /// Tap on the avatar: the profile photo viewer. `None` without a photo,
+    /// then the tap opens the chat like the rest of the row.
+    pub open_avatar: Option<Handler>,
     /// Long press: the chat menu (WhatsApp rows only).
     pub menu: Option<PressHandler>,
 }
@@ -1014,6 +1041,7 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
         copied,
         open,
         copy_code,
+        open_avatar,
         menu,
     } = extras;
     let colors = theme::colors(theme);
@@ -1048,13 +1076,19 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
         .flex()
         .items_center()
         .gap(px(12.0))
-        .child(photo_avatar(
-            theme,
-            view.initials.clone(),
-            44.0,
-            tint,
-            photo,
-        ))
+        .child({
+            let avatar = photo_avatar(theme, view.initials.clone(), 44.0, tint, photo);
+            match open_avatar {
+                Some(open_avatar) => avatar
+                    .id(("inbox-avatar", index))
+                    .on_click(move |event, window, cx| {
+                        cx.stop_propagation();
+                        open_avatar(event, window, cx);
+                    })
+                    .into_any_element(),
+                None => avatar.into_any_element(),
+            }
+        })
         .child(
             div()
                 .flex_1()
@@ -1189,6 +1223,30 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn avatar_viewer_source_prefers_contact_photo() {
+        use crate::media_viewer::ViewerSource;
+        let avatar = RowAvatar {
+            photo_uri: Some("content://p/1".into()),
+            wa_jid: Some("90555@s.whatsapp.net".into()),
+            picture_id: None,
+        };
+        assert_eq!(
+            avatar.viewer_source(true, true),
+            Some(ViewerSource::ContactPhoto {
+                uri: "content://p/1".into()
+            })
+        );
+        assert_eq!(
+            avatar.viewer_source(false, true),
+            Some(ViewerSource::WaPicture {
+                jid: "90555@s.whatsapp.net".into()
+            })
+        );
+        assert_eq!(avatar.viewer_source(false, false), None);
+        assert_eq!(RowAvatar::default().viewer_source(true, true), None);
+    }
 
     #[test]
     fn undo_reverses_archive_pin_and_mute() {

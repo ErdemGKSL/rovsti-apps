@@ -45,6 +45,8 @@ pub mod contact_photo;
 /// Select mode in the Contacts list: export ids, group changes, notices, contact text.
 /// Quick actions on a contact row.
 pub mod contact_quick;
+/// Recently added / edited contacts and the recently viewed list.
+pub mod contact_recent;
 /// Scan to add: QR decoding and the payload parser.
 pub mod contact_scan;
 pub mod contact_select;

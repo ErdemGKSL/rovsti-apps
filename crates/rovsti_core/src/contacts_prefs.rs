@@ -5,7 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{contacts_view::NameStyle, settings::SortBy, wire::NameFormat};
+use crate::{
+    contact_recent::AddedMark, contacts_view::NameStyle, settings::SortBy, wire::NameFormat,
+};
 
 /// The schema this build writes.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -50,6 +52,15 @@ pub struct ContactsPrefs {
     /// Lookup keys of the emergency contacts in the user's order.
     #[serde(default)]
     pub emergency: Vec<String>,
+    /// Highest contact id seen at the last pull (seeds "recently added").
+    #[serde(default)]
+    pub known_max_id: Option<i64>,
+    /// Local first-seen marks of recently added contacts.
+    #[serde(default)]
+    pub added: Vec<AddedMark>,
+    /// Lookup keys of the recently viewed contacts, newest first.
+    #[serde(default)]
+    pub viewed: Vec<String>,
 }
 
 fn default_hour() -> u8 {
@@ -99,6 +110,9 @@ impl Default for ContactsPrefs {
             favorites_order: Vec::new(),
             my_card: None,
             emergency: Vec::new(),
+            known_max_id: None,
+            added: Vec::new(),
+            viewed: Vec::new(),
         }
     }
 }
@@ -124,6 +138,9 @@ impl ContactsPrefs {
             favorites_order: Vec::new(),
             my_card: None,
             emergency: Vec::new(),
+            known_max_id: None,
+            added: Vec::new(),
+            viewed: Vec::new(),
         }
     }
 }
@@ -131,6 +148,28 @@ impl ContactsPrefs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn r5_prefs_json_still_parses() {
+        let old = r#"{"schema_version":1,"name_format":"FirstLast","sort_by":"FirstName","favorites_order":["a"]}"#;
+        let p: ContactsPrefs = serde_json::from_str(old).expect("parses");
+        assert_eq!(p.favorites_order, vec!["a".to_owned()]);
+        assert_eq!(p.known_max_id, None);
+        assert!(p.added.is_empty() && p.viewed.is_empty());
+    }
+
+    #[test]
+    fn recent_fields_round_trip() {
+        let p = ContactsPrefs {
+            known_max_id: Some(7),
+            added: vec![AddedMark { id: 7, ms: 1 }],
+            viewed: vec!["k".to_owned()],
+            ..ContactsPrefs::default()
+        };
+        let json = serde_json::to_string(&p).expect("serialises");
+        let back: ContactsPrefs = serde_json::from_str(&json).expect("parses");
+        assert_eq!(back, p);
+    }
 
     #[test]
     fn defaults_match_the_default_style() {

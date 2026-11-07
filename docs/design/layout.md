@@ -212,10 +212,13 @@ search result.
 
 ### 2.7 Avatar stack
 
-Avatars of 28 dp, overlap 10 dp, ring 2 dp. Width = `size + (n - 1) * (size - overlap)`
-plus `2 * ring` for the outer rings, so 3 avatars take `28 + 2 * 18 + 4 = 68` dp. The
-slot reserves exactly this width and the text column starts 12 dp after it, so the stack
-can never cover its neighbours. More than 3 shows a "+n" disc as the last element.
+The stack lives in the same fixed 48 dp leading slot as every other avatar, so the text
+column always starts at 76 dp (`row::text_inset()` = `MARGIN + AVATAR + space::M`, unit
+tested for avatar, stack and icon tile). `geom::stack_fit(n, slot)` returns the disc size
+and step so that `n` discs ("+k" counts as a disc, `STACK_MAX` = 3) fit exactly in the slot
+with a minimum disc of 24 dp: 3 discs in 48 dp are 24 + 12 + 12 (size 24, step 12). The
+stack can never reach the text. More than 3 entries show a "+k" disc as the last element
+(Caption2, 11 dp, weight 600). `row::avatar_stack` takes the `slot`, not size and overlap.
 
 ### 2.8 Page header
 
@@ -285,26 +288,68 @@ the real kit values with the WCAG relative-luminance formula:
 
 | Role | Light | Dark |
 |------|-------|------|
-| Label (primary text) | `#000000` on `#FFFFFF`: 21.0 | `#FFFFFF` on `#000000`: 21.0 |
-| Secondary label (preview, time, captions) | kit `3C3C43` at 60% = `#8A8A8E`, 3.4:1 on white: **fails** | kit `EBEBF5` at 70% = `#A5A5AC`, 8.6:1 on black and 7.6:1 on `#1C1C1E`: passes |
-| Secondary label, system value | `#6C6C70` opaque: 5.2:1 on white, 4.7:1 on `#F2F2F7` | keep kit value |
-| Tertiary label | decorative only (chevrons, disabled), never for text that must be read: 1.7:1 | 2.3:1, the same |
-| Accent text and links | kit `#007AFF` on white: 4.0:1, **fails**; use `#0062CC`: 5.8:1 (5.2:1 on `#F2F2F7`) | kit `#0A84FF` on black: 5.8:1, on `#1C1C1E`: 4.7:1, passes |
-| Accent fill with white text (selected chip, unread badge, primary button) | `accent_solid #0062CC`: white on it 5.8:1 (kit `#007AFF`: 4.0, fails) | `accent_solid #0B6EF5`: white on it 4.6:1 (kit `#0A84FF`: 3.6, fails) |
-| Success text | `#248A3D` on white: 4.4:1 (use only at 16 dp w600 or larger, or darken to `#1E7A34`: 5.4:1) | `#30D158` on black: 10.4:1 |
-| Danger text | `#D70015` on white: 5.4:1 (not kit `#FF3B30`, 3.5:1) | `#FF453A` on black: 6.2:1 |
-| Warning text | `#B25000` | `#FF9F0A` |
+| Label | `#000000` on `#FFFFFF` 21.0, on `#F2F2F7` 18.8, on wash peak `#E6F2FF` 18.5 | `#FFFFFF` on `#000000` 21.0, on `#1C1C1E` 17.0, on wash peak `#011224` 18.8 |
+| Secondary label (preview, time, captions) | kit `3C3C43` raised from 60 % to 82 % alpha: `#5F5F65` on white 6.33, `#5D5D63` on `#F2F2F7` 5.88, `#5B5D65` on wash peak 5.80 | kit `EBEBF5` 70 %: `#A5A5AC` on black 8.57, `#ADADB5` on `#1C1C1E` 7.66, `#A5AAB7` on wash peak 8.13 |
+| Accent text and links (`theme::accent_text`) | `#0069DB` on white 5.19, on `#F2F2F7` 4.65, on wash peak 4.56 | kit `#0A84FF` unchanged: on black 5.76, on `#1C1C1E` 4.66, on wash peak 5.16 |
+| Chip label, unselected | `#000000` on chip fill `#E4E4E6` 16.53 (over wash `#D0D9E6` 14.77) | `#FFFFFF` on `#2B2B2E` 14.06 (over wash `#2C3745` 12.05) |
+| Chip count badge, unselected | `#3C3C43` on `#DDDDDF` 8.07 (over wash 7.23) | `#EBEBF5` on `#323235` 10.79 (over wash 9.24) |
+| Chip label, selected (accent fill) | `#FFFFFF` on `#006EE6` 4.80 | `#FFFFFF` on `#0071E3` 4.69 |
+| Chip count badge, selected | `#FFFFFF` on `#0056B4` 7.04 | `#FFFFFF` on `#0058B1` 6.91 |
+| Tertiary label | icons only, never text: alpha 0.62 gives at least 3:1 | alpha 0.55 gives at least 3:1 |
+| Success, danger, warning text | `#1E7A34`, `#D70015`, `#B25000` | `#30D158`, `#FF453A`, `#FF9F0A` |
 | Separator | kit separator, decorative | kit separator, decorative |
+
+The ratios above are the output of the unit test `theme::tests::text_roles_reach_4_5_on_every_surface`,
+which checks every text role against every surface it sits on (`background`,
+`grouped_background`, `secondary_background`, the backdrop wash at its peak, the chip
+fills composited over the wash) in both themes, blending alpha first, and fails below 4.5.
+The shot tests assert the same on pixels with `color::contrast_in` (preview, time, chip
+count and Spam badge rects in `messages/01-inbox-*`).
 
 Rules that follow:
 
-1. Secondary text in light mode uses `#6C6C70`, not the translucent kit colour. The change is
-   made in `rovsti_ui::theme::colors`, not by apps.
-2. A solid accent fill with white text uses `accent_solid`, never the plain accent. The
-   plain accent stays for text and icons on the page background.
+1. Secondary text in light mode uses the kit colour at 82 % alpha (about `#5F5F65` on white),
+   not the translucent 60 % kit value. The change is made in `rovsti_ui::theme::colors`, not
+   by apps.
+2. A solid accent fill with white text uses `accent_solid`, never the plain accent. Accent as text uses
+   `theme::accent_text(theme)` (the accent adjusted with `geom::ensure_contrast`, which keeps
+   the hue and moves lightness in 1 % steps until 4.5:1); the plain accent stays for icons
+   and fills.
 3. Colour is restrained: one accent, grey for secondary things. Green and orange are for
    state (answer, warning), never decoration. An avatar's hue comes from `hue_pair`.
 4. Tinted pills at 22% opacity are no longer used for selected states.
+
+### 2.12a Avatar initials
+
+`geom::initials_size(avatar) = (avatar * 0.36).round()`: 17 dp at 48, 14 dp at 40, 10 dp
+at 28, weight 600 (not Headline bold). `rovsti_core::avatar` takes at most 2 graphemes and
+keeps Turkish dotted capitals ("İG", "Şİ"). The source badge centre sits on the avatar rim
+at 45 degrees (`geom::source_badge_offset`, at least `avatar / 2 * 0.95` from the avatar
+centre), so two-letter initials keep clear of it.
+
+### 2.12b Backdrop wash
+
+`components::backdrop` draws a vertical (180 degree) accent wash over the top
+`content_top + 200` dp only (`wash_height()`), in three stops: peak, peak / 3, 0 (two
+stacked gradient divs, because the gradient supports two stops). Peak alpha is 0.14 in dark
+and 0.10 in light (`theme::wash_alpha`). Below the wash the page is the plain background.
+The old 160 degree wash at 0.28 showed a diagonal band; the shot test asserts that column
+x = 8 px never steps by more than 2 levels between neighbouring rows
+(`color::max_vertical_step`).
+
+### 2.12c Tab bar glass
+
+See 2.3: bar blur 12 px, tint = background at 0.72 (light) / 0.60 (dark), puck on the plain
+chrome spec. The row behind the bar is blurred past reading; icons and puck stay crisp.
+
+### 2.12d Colour pipeline of the shots
+
+`gpui_wgpu`'s offscreen target is `Rgba8UnormSrgb` while GPUI already writes sRGB-encoded
+values, so the raw readback was encoded twice and far too light (accent `#0A84FF` read as
+(56,190,255)). `WgpuHeadless` now decodes the readback once with an sRGB-to-linear table on
+R, G and B (`shots/color.rs`, `srgb_decode_lut`). Shots match the device colours, so contrast
+can be measured on them. Shots made before that fix are too light and must not be compared
+with new ones; this is why all four baselines were refreshed.
 
 ### 2.13 Component checklist
 
@@ -323,11 +368,16 @@ Rules that follow:
 
 | Screen | State | Shots |
 |--------|-------|-------|
-| Messages inbox (header, Status row, chips, Spam row, chat rows, end inset) | Done: `PageHeader`, `ListRow`, `avatar_stack`, `filter_chip_row`, `source_badge`, `content_bottom_inset` | `messages/01-inbox`, `02-unread-filter`, `03-inbox-empty`, `09-status`, `10-inbox-end` |
+| Messages inbox (header, Status row, chips, Spam row, chat rows, end inset) | Done: `PageHeader`, `ListRow`, `avatar_stack` (48 dp slot), `filter_chip_row`, `source_badge`, `content_bottom_inset`, calm backdrop, frosted tab bar | `messages/01-inbox`, `02-unread-filter`, `03-inbox-empty`, `10-inbox-end` |
+| Messages Status screen (stack row, header, sections) | Done: shares the 76 dp text column and `accent_text` | `messages/09-status` |
 | Messages other screens (conversation, composer, search, settings) | Left to the Messages per-app unit | |
 | Phone (all screens) | Left to the Phone per-app unit | |
 | Contacts (all screens) | Left to the Contacts per-app unit | |
 | Stops (all screens) | Left to the Stops per-app unit | |
 
-The refreshed `docs/screenshots/baseline/messages.png` shows the Messages inbox on the
-system; the other three baselines are still the "before" pictures.
+All four `docs/screenshots/baseline/*.png` were re-rendered after the colour-pipeline fix.
+`messages.png` shows the Messages inbox on the system; Phone, Contacts and Stops are still
+the per-app "before" layouts, now with correct colours. Verified in the final shots: the
+Status row's title starts at 76 dp like every other row, chips sit on one scrolling row, the
+source is a corner badge, the last row clears the tab bar (`10-inbox-end-*`), and the
+header wash has no visible edge.

@@ -94,8 +94,19 @@ already writes sRGB-encoded values, so the hardware encodes them twice and the r
 is too light (accent `#0A84FF` came out as (56,190,255)). `WgpuHeadless` therefore decodes
 the readback once with an sRGB-to-linear table on R, G and B (not alpha), see
 `crates/rovsti_ui/src/shots/color.rs`. Shots now match the device's colours, so contrast
-can be measured on them (`color::contrast_in`, `color::max_vertical_step`). Shots made
-before this change are too light and must not be compared with new ones. Guard:
+can be measured on them. Judge contrast only on shots made after this fix; earlier ones
+are too light and must not be compared with new ones.
+
+Helpers in `crates/rovsti_ui/src/shots/color.rs` (pure, unit-tested):
+
+- `color_probe` (ignored test): renders solid `#007AFF`, `#0A84FF` and `#3C3C43` at 74 %
+  over white and asserts the centre pixels are within 3 levels.
+- `contrast_in(img, (x, y, w, h))`: WCAG ratio between the darkest and lightest pixel in
+  a rect (px). Use it on text rects; the Messages test asserts at least 4.5 on the
+  preview, time, chip count and Spam badge rects.
+- `max_vertical_step(img, x, y0, y1)`: largest per-channel jump between neighbouring rows
+  in one column. The Messages test uses it at x = 8 px (inside the margin) to prove the
+  backdrop wash has no visible edge (at most 2 levels). Guard:
 `cargo test -p rovsti_ui --features shots color -- --include-ignored` (`color_probe` checks
 three known colours to within 3 levels).
 
@@ -177,11 +188,10 @@ Refresh a baseline only when the layout was changed on purpose.
   the same dp layout with finer lines. There is no way to test other scales here.
 - **Glass.** Lavapipe renders the refraction and blur shaders, but edges can differ in the
   last pixel from a GPU. Do not tune rim or highlight alpha from a shot alone.
-- **Backdrop wash.** In dark mode the accent wash from `components::backdrop` (a 160 deg
-  gradient, alpha 0.28 fading to 0 at stop 0.55) shows a diagonal band at about 500 dp.
-  This is the gradient itself (a linear ramp that ends abruptly, a Mach band), not
-  lavapipe: a device on a dark background draws the same. Treat it as a design issue, not
-  a harness artifact.
+- **Backdrop wash.** The wash is a vertical 3-stop fade over the header only (see
+  `docs/design/layout.md` 2.12b). It used to be a 160 deg gradient that showed a diagonal
+  Mach band in dark mode; that was the gradient, not lavapipe. If a band reappears,
+  `max_vertical_step` in the Messages shots test fails.
 - **Window insets.** There is no status bar, no navigation bar and no keyboard. Insets are
   the app's own defaults. The soft keyboard is not shown, so check composer and field
   layouts with the keyboard on a device.

@@ -249,6 +249,72 @@ pub fn tiles_for_circle(
     out
 }
 
+/// Lowest zoom of an offline map area download.
+pub const AREA_MIN_ZOOM: u8 = 8;
+/// Most tiles one offline area download may request.
+pub const AREA_TILE_BUDGET: usize = 2500;
+/// Rough average size of one cached vector tile, for estimates.
+pub const AVG_TILE_BYTES: u64 = 30_000;
+
+/// Estimated download size of `tiles` tiles in bytes.
+pub fn estimate_bytes(tiles: usize) -> u64 {
+    (tiles as u64).saturating_mul(AVG_TILE_BYTES)
+}
+
+/// Tiles of an offline map area, see [`tiles_for_area`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AreaPlan {
+    /// Coarse zooms first, nearest the centre first within a zoom.
+    pub tiles: Vec<TileId>,
+    /// Highest zoom included (the lowest zoom when nothing fits).
+    pub top_zoom: u8,
+    /// Stopped below `min(max_zoom, MAX_TILE_ZOOM)` because of the budget.
+    pub capped: bool,
+}
+
+/// Tiles covering the box around `corners` (longitude may be unwrapped across
+/// the antimeridian) for every zoom from `min_zoom` up to the highest zoom
+/// (at most 14, at most `max_zoom`) whose cumulative count fits `budget`. If
+/// even the lowest zoom exceeds the budget, only its nearest `budget` tiles
+/// are returned.
+pub fn tiles_for_area(corners: &[Coord], min_zoom: u8, max_zoom: u8, budget: usize) -> AreaPlan {
+    let hi = max_zoom.min(MAX_TILE_ZOOM);
+    let lo = min_zoom.min(hi);
+    let mut plan = AreaPlan {
+        tiles: Vec::new(),
+        top_zoom: lo,
+        capped: false,
+    };
+    if corners.is_empty() {
+        return plan;
+    }
+    let n = corners.len() as f64;
+    let centre = Coord::new(
+        corners.iter().map(|c| c.lat).sum::<f64>() / n,
+        corners.iter().map(|c| c.lon).sum::<f64>() / n,
+    );
+    for z in lo..=hi {
+        let span = Span::around(corners, z, 0);
+        let c = raw_frac(centre, z);
+        match span.tiles_if(z, c, budget - plan.tiles.len().min(budget)) {
+            Some(t) => {
+                plan.tiles.extend(t);
+                plan.top_zoom = z;
+            }
+            None => {
+                if plan.tiles.is_empty() {
+                    let mut t = span.tiles(z, c);
+                    t.truncate(budget);
+                    plan.tiles = t;
+                }
+                plan.capped = true;
+                break;
+            }
+        }
+    }
+    plan
+}
+
 impl Span {
     /// Like [`Self::tiles`] but `None` when more than `room` tiles.
     fn tiles_if(&self, z: u8, centre: (f64, f64), room: usize) -> Option<Vec<TileId>> {
@@ -408,5 +474,80 @@ mod tests {
         let one = tiles_for_circle(IST, 50_000.0, 0.0, 10, 3);
         assert_eq!(one.len(), 3);
         assert_eq!(one[0], tile_containing(IST, 10));
+    }
+
+    fn bbox(lat0: f64, lon0: f64, lat1: f64, lon1: f64) -> [Coord; 4] {
+        [
+            Coord::new(lat0, lon0),
+            Coord::new(lat0, lon1),
+            Coord::new(lat1, lon0),
+            Coord::new(lat1, lon1),
+        ]
+    }
+
+    fn no_dupes(tiles: &[TileId]) -> bool {
+        let set: std::collections::BTreeSet<_> = tiles.iter().collect();
+        set.len() == tiles.len()
+    }
+
+    #[test]
+    fn area_city_reaches_max_zoom() {
+        let plan = tiles_for_area(
+            &bbox(40.99, 28.95, 41.03, 29.01),
+            AREA_MIN_ZOOM,
+            MAX_TILE_ZOOM,
+            AREA_TILE_BUDGET,
+        );
+        assert_eq!(plan.top_zoom, 14);
+        assert!(!plan.capped);
+        assert!(plan.tiles.len() <= AREA_TILE_BUDGET);
+        assert!(no_dupes(&plan.tiles));
+        assert!(plan.tiles.windows(2).all(|w| w[0].z <= w[1].z));
+        assert_eq!(plan.tiles[0].z, AREA_MIN_ZOOM);
+    }
+
+    #[test]
+    fn area_country_is_capped_within_budget() {
+        let plan = tiles_for_area(
+            &bbox(36.0, 26.0, 42.0, 45.0),
+            AREA_MIN_ZOOM,
+            MAX_TILE_ZOOM,
+            AREA_TILE_BUDGET,
+        );
+        assert!(plan.capped);
+        assert!(plan.top_zoom < 14);
+        assert!(plan.tiles.len() <= AREA_TILE_BUDGET);
+        assert!(no_dupes(&plan.tiles));
+        let tiny = tiles_for_area(&bbox(0.0, 0.0, 40.0, 60.0), 8, 14, 50);
+        assert!(tiny.capped && tiny.tiles.len() == 50);
+        assert_eq!(tiny.top_zoom, 8);
+        let none = tiles_for_area(&bbox(0.0, 0.0, 1.0, 1.0), 8, 14, 0);
+        assert!(none.tiles.is_empty() && none.capped);
+    }
+
+    #[test]
+    fn area_across_antimeridian_and_single_point() {
+        let plan = tiles_for_area(&bbox(-0.05, 179.95, 0.05, 180.05), 8, 12, 2500);
+        assert_eq!(plan.top_zoom, 12);
+        assert!(no_dupes(&plan.tiles));
+        let n = 1u32 << 12;
+        let z12: Vec<_> = plan.tiles.iter().filter(|t| t.z == 12).collect();
+        assert!(z12.iter().any(|t| t.x == 0) && z12.iter().any(|t| t.x == n - 1));
+        assert!(plan.tiles.iter().all(|t| t.x < 1 << t.z));
+
+        let one = tiles_for_area(&[IST], 8, 14, 2500);
+        assert_eq!(one.tiles.len(), 7);
+        assert_eq!(one.top_zoom, 14);
+        assert!(!one.capped && no_dupes(&one.tiles));
+        assert!(one.tiles.contains(&tile_containing(IST, 14)));
+    }
+
+    #[test]
+    fn area_edge_inputs() {
+        assert!(tiles_for_area(&[], 8, 14, 100).tiles.is_empty());
+        let p = tiles_for_area(&[IST], 12, 9, 100);
+        assert_eq!(p.top_zoom, 9);
+        assert_eq!(p.tiles.len(), 1);
+        assert_eq!(estimate_bytes(10), 300_000);
     }
 }

@@ -52,6 +52,14 @@ impl FetchQueue {
             .retain(|(id, p)| *p != Priority::View || ids.contains(id));
     }
 
+    /// Drops every queued `Prefetch` item (an offline download was cancelled);
+    /// `View` items and in-flight downloads stay. Returns how many were dropped.
+    pub fn drop_prefetch(&mut self) -> usize {
+        let before = self.wanted.len();
+        self.wanted.retain(|(_, p)| *p != Priority::Prefetch);
+        before - self.wanted.len()
+    }
+
     /// The next tile to download, or `None` at `MAX_IN_FLIGHT` or when nothing is eligible.
     pub fn next(&mut self, now_ms: i64) -> Option<TileId> {
         if self.in_flight.len() >= MAX_IN_FLIGHT {
@@ -200,5 +208,18 @@ mod tests {
         assert_eq!((q.pending(), q.in_flight()), (0, 0));
         q.want([a], Priority::View, 1);
         assert_eq!(q.next(1), Some(a));
+    }
+
+    #[test]
+    fn drop_prefetch_keeps_view() {
+        let mut q = FetchQueue::new();
+        q.want([t(1), t(2)], Priority::View, 0);
+        q.want([t(3), t(4), t(5)], Priority::Prefetch, 0);
+        assert_eq!(q.drop_prefetch(), 3);
+        assert_eq!(q.pending(), 2);
+        assert_eq!(q.next(0), Some(t(1)));
+        assert_eq!(q.next(0), Some(t(2)));
+        assert_eq!(q.next(0), None);
+        assert_eq!(q.drop_prefetch(), 0);
     }
 }

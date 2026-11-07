@@ -23,6 +23,7 @@ use rovsti_core::{
     chat_find::{self, FindCursor},
     recents::LocaleTime,
     starred::{self, StarCandidate, StarredRow},
+    unread_jump::{self, JumpState},
     wire::DocumentOp,
 };
 use rovsti_ui::{
@@ -169,6 +170,8 @@ pub struct Setup {
     pub peer: Peer,
     /// The window is in front of the user (see [`Conversation::set_active`]).
     pub active: bool,
+    /// Unread incoming messages when the chat was opened (the divider's count).
+    pub unread: u32,
 }
 
 /// The message the composer answers.
@@ -219,6 +222,8 @@ enum Entry {
     Day(i64),
     /// The timeline item at this index.
     Message(usize),
+    /// The "N unread messages" divider.
+    Unread(u32),
 }
 
 pub struct Conversation {
@@ -315,6 +320,12 @@ pub struct Conversation {
     find: Option<FindState<String>>,
     /// The "Starred messages" sheet is open.
     starred_open: bool,
+    /// The scroll-to-bottom button and its count of new messages.
+    jump: JumpState,
+    /// Unread count the chat opened with, until the first page decides the divider.
+    opening_unread: Option<u32>,
+    /// The divider: the id of the first unread message and how many follow it.
+    divider: Option<(String, u32)>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -334,6 +345,7 @@ impl Conversation {
             photos,
             peer,
             active,
+            unread,
         } = setup;
         let composer = cx.new(|cx| {
             let mut field =
@@ -428,6 +440,9 @@ impl Conversation {
             hidden: HashSet::new(),
             delete_confirm: None,
             starred_open: false,
+            jump: JumpState::default(),
+            opening_unread: (unread > 0).then_some(unread),
+            divider: None,
             highlight: None,
             find: None,
             _subscriptions: subscriptions,
@@ -1618,7 +1633,7 @@ impl Conversation {
                             }
                             this.refind(asked, asked, cx);
                         }
-                        if before_ms.is_none() {
+                        if before_ms.is_none() && !this.reveal_unread() {
                             this.list.scroll_to_end();
                         }
                         this.mark_unread(cx);
@@ -1751,13 +1766,53 @@ impl Conversation {
             }
             _ => {}
         }
+        let incoming =
+            matches!(event, GatewayEvent::Message(m) if m.chat == self.chat && !m.from_me);
         if self.timeline.apply_event(event) {
+            if incoming {
+                self.jump.arrived(1);
+            }
             // A reader at the bottom follows the new message (the list is
             // bottom-aligned); one reading older messages keeps their place.
             self.rows_dirty = true;
             self.mark_unread(cx);
             cx.notify();
         }
+    }
+
+    /// On the first page only: puts the unread divider before the first unread
+    /// message and shows it instead of the end. False when there is none.
+    fn reveal_unread(&mut self) -> bool {
+        let Some(unread) = self.opening_unread.take() else {
+            return false;
+        };
+        let items = self.timeline.items();
+        let incoming: Vec<bool> = items.iter().map(|i| !i.message.from_me).collect();
+        let Some(at) = unread_jump::unread_divider(&incoming, unread) else {
+            return false;
+        };
+        let count = incoming[at..].iter().filter(|&&inc| inc).count();
+        self.divider = Some((
+            items[at].message.id.clone(),
+            u32::try_from(count).unwrap_or(u32::MAX),
+        ));
+        self.sync_rows();
+        let Some(position) = self
+            .entries
+            .iter()
+            .position(|e| matches!(e, Entry::Unread(_)))
+        else {
+            return false;
+        };
+        // Item 0 of the list is the "Load earlier" slot.
+        self.list.reveal(position + 1);
+        true
+    }
+
+    /// Sending answers the chat: the divider has done its job.
+    fn drop_divider(&mut self) {
+        self.opening_unread = None;
+        self.divider = None;
     }
 
     /// "typing…", "online" or "last seen …" under the title.
@@ -1863,6 +1918,7 @@ impl Conversation {
             now_ms(),
         );
         self.pending_paths.insert(local_id, attached.path.clone());
+        self.drop_divider();
         self.sync_rows();
         self.list.scroll_to_end();
         self.dispatch_media(
@@ -1997,6 +2053,7 @@ impl Conversation {
         self.next_local += 1;
         self.take_reply(local_id);
         self.timeline.push_pending(local_id, text.clone(), now_ms());
+        self.drop_divider();
         self.sync_rows();
         self.list.scroll_to_end();
         self.dispatch(local_id, text, cx);
@@ -2122,6 +2179,13 @@ impl Conversation {
             if let Some(day_ms) = day {
                 entries.push(Entry::Day(day_ms));
             }
+            if let Some((_, count)) = self
+                .divider
+                .as_ref()
+                .filter(|(id, _)| *id == item.message.id)
+            {
+                entries.push(Entry::Unread(*count));
+            }
             entries.push(Entry::Message(index));
         }
         // The "Load earlier" slot keeps one key: it is measured while on screen.
@@ -2129,6 +2193,7 @@ impl Conversation {
             .chain(entries.iter().map(|entry| match *entry {
                 Entry::Day(day_ms) => key_of((1u8, day_ms)),
                 Entry::Message(index) => self.message_key(&items[index]),
+                Entry::Unread(count) => key_of((3u8, count)),
             }))
             .collect();
         self.list.sync(keys);
@@ -2202,6 +2267,7 @@ impl Conversation {
                 .text_color(colors.secondary_label)
                 .child(day_label(day_ms, now, offset))
                 .into_any_element(),
+            Some(Some(Entry::Unread(count))) => unread_divider_row(theme, count),
             Some(Some(Entry::Message(at))) => {
                 // A preview image is fetched only for bubbles on screen.
                 let wants_thumb = self.timeline.items().get(at).and_then(|item| {
@@ -3265,6 +3331,7 @@ impl Render for Conversation {
         if self.rows_dirty {
             self.sync_rows();
         }
+        self.jump.scrolled(self.list.at_end());
         let timeline = list(
             self.list.state().clone(),
             cx.processor(|this, index: usize, window, cx| this.list_item(index, window, cx)),
@@ -3272,6 +3339,25 @@ impl Render for Conversation {
         .flex_1()
         .min_h_0()
         .w_full();
+        let jump = jump_button(
+            theme,
+            &self.jump,
+            "conv-jump",
+            cx.listener(|this, _, _, cx| {
+                this.list.scroll_to_end();
+                this.jump = JumpState::default();
+                cx.notify();
+            }),
+        );
+        let timeline = div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(timeline)
+            .children(jump);
 
         let back = glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
             .id("conv-back")
@@ -3421,6 +3507,63 @@ impl Render for Conversation {
             .children(overlay)
             .children(starred_sheet)
     }
+}
+
+/// The centred capsule "5 unread messages" of a conversation list.
+pub(crate) fn unread_divider_row(theme: Theme, count: u32) -> AnyElement {
+    let colors = theme::colors(theme);
+    div()
+        .flex()
+        .justify_center()
+        .py(px(6.0))
+        .child(
+            div()
+                .px(px(12.0))
+                .py(px(4.0))
+                .rounded_full()
+                .bg(colors.accent.opacity(0.15))
+                .text_size(typography::CAPTION.size)
+                .text_color(colors.accent)
+                .child(unread_jump::divider_label(count)),
+        )
+        .into_any_element()
+}
+
+/// The round "scroll to the newest message" button with its count of new
+/// messages, drawn at the bottom-right of the list; `None` while at the end.
+pub(crate) fn jump_button(
+    theme: Theme,
+    jump: &JumpState,
+    id: &'static str,
+    on_tap: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> Option<AnyElement> {
+    if !jump.visible() {
+        return None;
+    }
+    let badge = jump.badge().map(|text| {
+        glass_pill(theme, text)
+            .absolute()
+            .top(px(-2.0))
+            .right(px(-2.0))
+            .h(px(20.0))
+            .px(px(6.0))
+            .text_size(typography::CAPTION.size)
+    });
+    Some(
+        div()
+            .absolute()
+            .bottom(px(8.0))
+            .right(px(12.0))
+            .child(
+                div().relative().child(
+                    glass_icon_button(theme, Icon::LucideArrowDown, 0.0, false)
+                        .id(id)
+                        .on_click(on_tap),
+                ),
+            )
+            .children(badge)
+            .into_any_element(),
+    )
 }
 
 /// Midnight (local) of the day that holds `ms`, as UTC milliseconds.

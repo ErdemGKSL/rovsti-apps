@@ -18,6 +18,7 @@ use rovsti_core::{
     chat_find::{self, FindCursor},
     sms::{DeliveryState, SmsSend, SmsSimsPayload, SmsStatus, segments},
     sms_timeline::{SmsItem, SmsKey, SmsTimeline},
+    unread_jump::{self, JumpState},
     wire::{DocumentOp, DocumentResult},
 };
 use rovsti_ui::{
@@ -32,7 +33,10 @@ use rovsti_wa_ui::photo_avatar;
 
 use crate::{
     backend::{Backend, BackendEvent, now_ms, sim_for},
-    conversation::{HIGHLIGHT_FOR, clock, composer_bar, day_label, header_bar_with},
+    conversation::{
+        HIGHLIGHT_FOR, clock, composer_bar, day_label, header_bar_with, jump_button,
+        unread_divider_row,
+    },
     find_ui::{FindActions, FindState, find_bar},
     inbox::Badge,
     keyed_list::{KeyedList, key_of},
@@ -114,6 +118,8 @@ enum Entry {
     Day(usize),
     /// The timeline item at this index.
     Message(usize),
+    /// The "N unread messages" divider.
+    Unread(u32),
 }
 
 pub struct SmsConversation {
@@ -171,6 +177,12 @@ pub struct SmsConversation {
     find: Option<FindState<SmsKey>>,
     /// The hit that glows for a moment.
     highlight: Option<SmsKey>,
+    /// The scroll-to-bottom button and its count of new messages.
+    jump: JumpState,
+    /// Unread count the thread opened with, until the first page decides the divider.
+    opening_unread: Option<u32>,
+    /// The divider: the first unread message and how many follow it.
+    divider: Option<(SmsKey, u32)>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -180,6 +192,7 @@ impl SmsConversation {
         thread_id: i64,
         title: impl Into<SharedString>,
         recipients: Vec<String>,
+        unread: u32,
         cx: &mut Context<Self>,
     ) -> Self {
         let composer = cx.new(|cx| {
@@ -237,6 +250,9 @@ impl SmsConversation {
             peer_photo: None,
             find: None,
             highlight: None,
+            jump: JumpState::default(),
+            opening_unread: (unread > 0).then_some(unread),
+            divider: None,
             _subscriptions: subscriptions,
         };
         this.fill_from_thread(cx);
@@ -693,7 +709,13 @@ impl SmsConversation {
                     Ok(page) => {
                         this.error = None;
                         let first = this.timeline.items().is_empty();
+                        let before = this.timeline.items().iter().filter(|i| !i.outgoing).count();
                         this.timeline.apply_page(page);
+                        if before_ms.is_none() && !first {
+                            let after =
+                                this.timeline.items().iter().filter(|i| !i.outgoing).count();
+                            this.jump.arrived(unread_jump::newly_arrived(before, after));
+                        }
                         this.sync_rows();
                         if this.find.is_some() && before_ms.is_some() {
                             // Asked on the find bar: move on to the next older hit.
@@ -707,7 +729,7 @@ impl SmsConversation {
                             }
                             this.refind(asked, asked, cx);
                         }
-                        if before_ms.is_none() {
+                        if before_ms.is_none() && !this.reveal_unread() {
                             this.list.scroll_to_end();
                         }
                         // Read only while someone looks: the app in the
@@ -793,6 +815,32 @@ impl SmsConversation {
         sendable
     }
 
+    /// On the first page only: puts the unread divider before the first unread
+    /// message and shows it instead of the end. False when there is none.
+    fn reveal_unread(&mut self) -> bool {
+        let Some(unread) = self.opening_unread.take() else {
+            return false;
+        };
+        let items = self.timeline.items();
+        let incoming: Vec<bool> = items.iter().map(|i| !i.outgoing).collect();
+        let Some(at) = unread_jump::unread_divider(&incoming, unread) else {
+            return false;
+        };
+        let count = incoming[at..].iter().filter(|&&inc| inc).count();
+        self.divider = Some((items[at].key, u32::try_from(count).unwrap_or(u32::MAX)));
+        self.sync_rows();
+        let Some(position) = self
+            .entries
+            .iter()
+            .position(|e| matches!(e, Entry::Unread(_)))
+        else {
+            return false;
+        };
+        // Item 0 of the list is the "Load earlier" slot.
+        self.list.reveal(position + 1);
+        true
+    }
+
     /// Puts the bubble in the timeline and hands the send to the backend.
     fn dispatch(&mut self, text: String, attachment: Option<String>, cx: &mut Context<Self>) {
         let sub_id = self.current_sim(cx);
@@ -806,6 +854,9 @@ impl SmsConversation {
         };
         self.timeline
             .push_pending(local_id, shown, sub_id, now_ms());
+        // Sending answers the thread: the unread divider has done its job.
+        self.opening_unread = None;
+        self.divider = None;
         self.sync_rows();
         self.list.scroll_to_end();
         let to = self.recipients.clone();
@@ -1030,9 +1081,12 @@ impl SmsConversation {
         let starts = day_starts(items, offset);
         let mut entries = Vec::with_capacity(items.len() + starts.len());
         let mut next_start = starts.iter().peekable();
-        for index in 0..items.len() {
+        for (index, item) in items.iter().enumerate() {
             if next_start.next_if(|&&at| at == index).is_some() {
                 entries.push(Entry::Day(index));
+            }
+            if let Some((_, count)) = self.divider.as_ref().filter(|(key, _)| *key == item.key) {
+                entries.push(Entry::Unread(*count));
             }
             entries.push(Entry::Message(index));
         }
@@ -1041,6 +1095,7 @@ impl SmsConversation {
         let keys = std::iter::once(key_of(0u8))
             .chain(entries.iter().map(|entry| match *entry {
                 Entry::Day(index) => key_of((1u8, day(items[index].at_ms))),
+                Entry::Unread(count) => key_of((3u8, count)),
                 Entry::Message(index) => {
                     let base = message_key(&items[index]);
                     key_of((base, self.selected == Some(base)))
@@ -1081,6 +1136,7 @@ impl SmsConversation {
                     .into_any_element(),
                 None => div().into_any_element(),
             },
+            Some(Some(Entry::Unread(count))) => unread_divider_row(theme, count),
             Some(Some(Entry::Message(at))) => match items.get(at) {
                 Some(item) => self.bubble(theme, item, now, offset, at, cx),
                 None => div().into_any_element(),
@@ -1453,6 +1509,26 @@ impl Render for SmsConversation {
         .flex_1()
         .min_h_0()
         .w_full();
+        self.jump.scrolled(self.list.at_end());
+        let jump = jump_button(
+            theme,
+            &self.jump,
+            "sms-jump",
+            cx.listener(|this, _, _, cx| {
+                this.list.scroll_to_end();
+                this.jump = JumpState::default();
+                cx.notify();
+            }),
+        );
+        let timeline = div()
+            .relative()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(timeline)
+            .children(jump);
 
         let back = glass_icon_button(theme, Icon::LucideChevronLeft, 0.0, false)
             .id("sms-back")

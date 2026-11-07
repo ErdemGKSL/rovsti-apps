@@ -63,6 +63,12 @@ pub fn unread_divider(incoming: &[bool], unread: u32) -> Option<usize> {
 }
 
 /// Text of the unread divider.
+/// How many items a page reload added after the ones already shown, for
+/// [`JumpState::arrived`] (a reload that dropped items adds none).
+pub fn newly_arrived(before: usize, after: usize) -> u32 {
+    u32::try_from(after.saturating_sub(before)).unwrap_or(u32::MAX)
+}
+
 pub fn divider_label(unread: u32) -> String {
     if unread == 1 {
         "1 unread message".to_string()
@@ -127,6 +133,13 @@ mod tests {
         assert_eq!(unread_divider(&items, 10), Some(1));
         assert_eq!(unread_divider(&[false, false], 3), None);
         assert_eq!(unread_divider(&[], 1), None);
+    }
+
+    #[test]
+    fn newly_arrived_counts_growth_only() {
+        assert_eq!(newly_arrived(3, 5), 2);
+        assert_eq!(newly_arrived(5, 5), 0);
+        assert_eq!(newly_arrived(5, 3), 0);
     }
 
     #[test]

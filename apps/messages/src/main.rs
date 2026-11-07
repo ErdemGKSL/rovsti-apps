@@ -1084,6 +1084,12 @@ impl MessagesApp {
             picture_id: meta.picture_id.clone().map(SharedString::from),
         };
         let chat = jid.clone();
+        // What was unread when the chat opened (it is read once the page is up).
+        let unread = self
+            .wa_threads
+            .iter()
+            .find(|t| t.id == ThreadId::WhatsApp(jid.clone()))
+            .map_or(0, |t| t.unread);
         let backend = self.backend.clone();
         let avatars = self.avatars.clone();
         let photos = self.photos.clone();
@@ -1100,6 +1106,7 @@ impl MessagesApp {
                     photos,
                     peer,
                     active: self.window_active,
+                    unread,
                 },
                 cx,
             )
@@ -1168,8 +1175,15 @@ impl MessagesApp {
     ) {
         self.leave_page(cx);
         let backend = self.backend.clone();
+        let unread = self
+            .backend
+            .read(cx)
+            .threads()
+            .iter()
+            .find(|t| t.thread_id == thread_id)
+            .map_or(0, |t| t.unread);
         let conversation =
-            cx.new(|cx| SmsConversation::new(backend, thread_id, title, recipients, cx));
+            cx.new(|cx| SmsConversation::new(backend, thread_id, title, recipients, unread, cx));
         let row = self
             .view
             .all_rows()

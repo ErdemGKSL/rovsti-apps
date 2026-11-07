@@ -118,6 +118,11 @@ impl KeyedList {
         self.keys = keys;
     }
 
+    /// Whether the reader is at the end (also when the list does not scroll or is not measured yet).
+    pub(crate) fn at_end(&self) -> bool {
+        self.state.is_scrolled_to_end().unwrap_or(true)
+    }
+
     /// Shows the end of the list (a bottom-aligned list then follows new items).
     pub(crate) fn scroll_to_end(&self) {
         self.state.scroll_to_end();

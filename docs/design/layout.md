@@ -29,6 +29,7 @@ Xiaomi, gesture navigation).
 | X7 | Selected states in light mode are pale accent on near-white (about 2.5:1), for chips, segmented controls and the selected tab. | `messages/01-inbox-light.png` ("All"), `phone/04-recents-missed-filter-light.png`, `phone/12-settings-light.png` (Haptics), `stops/09-map-options-light.png` |
 | X8 | Empty states are a bare line of text with no icon, no hierarchy and no action. | `messages/03-inbox-empty-dark.png`, `contacts/10-trash-empty-dark.png`, `phone/06-contacts-search-typing-dark.png` |
 | X9 | Sheets and dialogs differ per app (grabber present or missing, radii, margins, action heights). | `phone/13-setup-sheet-dark.png`, `stops/07-saved-stop-sheet-dark.png`, `stops/12-qr-sheet-dark.png`, `contacts/12-qr-sheet-dark.png`, `messages/11-row-menu-dark.png` |
+| X10 | Every overlay (row menu, delete confirm, sheets, call details, setup) is see-through: the blurred content behind is readable through the panel and competes with its text. Overlays move to the `thick` material (2.15). | `messages/11-row-menu-dark.png`, `phone/09-call-details-dark.png`, `phone/13-setup-sheet-dark.png`, `stops/07-saved-stop-sheet-dark.png`, `contacts/12-qr-sheet-dark.png` |
 
 ### Messages
 
@@ -47,6 +48,7 @@ Xiaomi, gesture navigation).
 | M11 | Settings page: group labels and descriptions are tiny and low contrast, and rows are denser than elsewhere. | `messages/12-settings-dark.png`, `messages/12-settings-light.png`, `messages/13-whatsapp-link-dark.png` |
 | M12 | Conversation screens: the header chips ("WhatsApp", mute, more) are cramped, and the last bubble is close to the composer. | `messages/04-conversation-sms-dark.png`, `messages/05-conversation-whatsapp-group-dark.png`, `messages/06-composer-typing-dark.png` |
 | M13 | Row context menu is a long unstructured list over a blurred inbox, and has no grabber or spacing groups. | `messages/11-row-menu-dark.png`, `messages/11-row-menu-light.png` |
+| M14 | Row menu lists duplicate items for merged threads (a WhatsApp and an SMS thread of one person each add Mute, Mark read, Delete, ...), so the same label appears twice. Keys must be unique per menu; merge the two sources with `MenuModel::dedup_by_key` (2.15). | `messages/11-row-menu-dark.png`, `messages/11-row-menu-light.png` |
 
 ### Phone
 
@@ -63,6 +65,7 @@ Xiaomi, gesture navigation).
 | P9 | In-call and incoming screens: control labels are about 10 dp and secondary text is faint. Layout is otherwise fine and is out of scope for the grid except margins. | `phone/10-incall-dark.png`, `phone/11-incoming-dark.png` |
 | P10 | Settings: row captions are tiny and low contrast, groups run into the bottom bar with no inset, segmented controls are low contrast in light. | `phone/12-settings-dark.png`, `phone/12-settings-light.png` |
 | P11 | Setup sheet: card list on a blurred keypad, row subtitles under 12 dp, and the checkmark circles are very faint. | `phone/13-setup-sheet-dark.png`, `phone/13-setup-sheet-light.png` |
+| P12 | Call-details sheet is see-through (the keypad and recents show through the panel, text is hard to read) and its actions are text links ("Delete call history" and the rest) with no 44 dp target. Actions become a button group (2.16) and a "..." popover (2.15), on the `thick` material. | `phone/09-call-details-dark.png`, `phone/09-call-details-light.png` |
 
 ### Contacts
 
@@ -79,7 +82,8 @@ Xiaomi, gesture navigation).
 | C9 | Dupes and Trash: tiny text, no empty-state hierarchy ("Trash Is Empty" is a bare line in the middle). | `contacts/09-dupes-dark.png`, `contacts/10-trash-empty-dark.png`, `contacts/10-trash-empty-light.png` |
 | C10 | Select mode: the selection check circles are small and faint (under 24 dp), and the action bar floats over the list with no inset. | `contacts/11-select-mode-dark.png`, `contacts/11-select-mode-light.png` |
 | C11 | QR sheet: grabber missing or faint, QR card margins differ from other sheets. | `contacts/12-qr-sheet-dark.png`, `contacts/12-qr-sheet-light.png` |
-| C12 | Settings: same tiny captions and low-contrast groups as the other apps. | `contacts/13-settings-dark.png`, `contacts/13-settings-light.png` |
+| C12 | Contact detail: a field's "..." opens a bottom sheet for a three-item action list instead of a popover, and the WhatsApp connect row at the bottom of that screen is clipped by the card edge. | `contacts/05-detail-dark.png`, `contacts/05-detail-light.png` |
+| C13 | Settings: same tiny captions and low-contrast groups as the other apps. | `contacts/13-settings-dark.png`, `contacts/13-settings-light.png` |
 
 ### Stops
 
@@ -97,6 +101,8 @@ Xiaomi, gesture navigation).
 | S10 | Settings: captions below 12 dp, the right-hand values ("On", "5 min") faint, and the last rows under the tab bar. | `stops/11-settings-dark.png`, `stops/11-settings-light.png` |
 | S11 | Alarm screen: fine hierarchy but the secondary line ("Now on the right side") is faint on the red wash in light. | `stops/05-alarm-ringing-dark.png`, `stops/05-alarm-ringing-light.png` |
 | S12 | QR sheet: same as C11. | `stops/12-qr-sheet-dark.png`, `stops/12-qr-sheet-light.png` |
+| S13 | Saved list: tapping a row expands it in place and inserts a wrapping row of about 12 text pills (Up, Down, Show on map, Open in maps, Start, Share, Copy as, QR, Home screen, Rename, Delete, colour) into the list, pushing every row below it down. `apps/stops/src/saved_ui.rs` (`expanded`). | `stops/06-saved-list-dark.png`, `stops/07-saved-stop-sheet-dark.png` |
+| S14 | Saved list header is a wall of buttons ("Export GPX", "Export JSON", "Import", "Copy list", "Sort: ...") that wraps over two rows. One "..." popover holds import/export/copy; Sort is a popover too. | `stops/06-saved-list-dark.png`, `stops/06-saved-list-light.png` |
 
 ---
 
@@ -351,6 +357,150 @@ R, G and B (`shots/color.rs`, `srgb_decode_lut`). Shots match the device colours
 can be measured on them. Shots made before that fix are too light and must not be compared
 with new ones; this is why all four baselines were refreshed.
 
+### 2.15 Menus, popovers and confirms
+
+**Rule: a tap never inserts controls into list or page content.** Rows do not grow
+buttons, pill rows do not appear under a title, and a confirmation is never inline text in
+a list. Use exactly one of these.
+
+| Kind | Use for | Anchor |
+|------|---------|--------|
+| Popover menu | Up to 8 short actions about one element: a row long-press, a "..." button, a header "more" button | The element, or the press point |
+| Sheet | Rich content (details, forms, QR, pickers) or more than 8 actions | Bottom, with grabber |
+| Confirm | A destructive confirmation | Inside the same popover |
+| Submenu | A choice list under one item ("Mute for ...") | Inside the same popover |
+
+**Geometry (dp).**
+
+- Width = `clamp(longest label + 16 + 20 + 12 + 16, 220, 280)`, never wider than the
+  viewport minus 2 x 16.
+- Rows are 44 high. The icon is leading: 20 dp at x 16, the label at x 48, the same icon
+  column as `ListRow`. Destructive rows use the red role for icon and label.
+- Groups are split by an 8 dp band in `separator` colour at 0.5 alpha. Items inside a group
+  are split by a 0.5 dp hairline inset 48. 6 dp padding above the first and below the last row.
+- Corner radius 14. Height = 44 x items + 8 x (groups - 1) + 2 x 6.
+- The menu sits 8 dp from the anchor, below it when it fits, otherwise flipped above.
+  Horizontally it is right-aligned to the anchor when the anchor is in the right half of
+  the viewport, left-aligned otherwise, and clamped to the 16 dp margins. A zero-size anchor
+  (a long-press point) uses the same rules.
+- Limits: top = `safe.top + 8`, bottom = `viewport - content_bottom_inset()`, so a menu never
+  covers the tab bar. If neither side fits, the menu caps its height to the larger side and
+  scrolls.
+- Submenu and confirm pages render inside the popover. A submenu pushes with a 44 dp
+  "< Mute" back row and slides 24 dp horizontally, so the popover does not jump. A confirm
+  page is a title line, the red action and Cancel.
+
+```
+ anchor (header "..." button)
+              [ ... ]
+   gap 8      +--------------------------+  radius 14, thick glass
+              | 6                        |
+              | (i)   Contact info       |  44 dp row: icon x16 (20 dp), label x48
+              |       ------------------ |  0.5 dp hairline, inset 48
+              | (*)   Starred messages   |
+              | ======================== |  8 dp group band
+              | (x)   Mute for        >  |  submenu: pushes inside the popover
+              |       ------------------ |
+              | (t)   Delete chat        |  red role
+              | 6                        |
+              +--------------------------+
+   16 dp margin                          16 dp margin
+   ---- bottom limit = viewport - content_bottom_inset() (tab bar stays free) ----
+```
+
+**Material.** Menu, sheet and action sheet use `GlassSpec::thick`: the `sheet` optics, blur
+24, tint = `background` at 0.86 (dark) / 0.82 (light). Content behind is no longer
+readable through the panel (X10). The scrim behind a popover is transparent but catches taps
+(tap outside dismisses). The scrim behind a sheet keeps its current alpha.
+
+#### 2.15a Inventory
+
+Built by grepping `menu_card`, `expanded`, `confirm_delete`, `_choices`, `glass_pill(` and
+`open_field_sheet` in `apps/`. "menu_card" is the Messages bottom card (`menu_item` rows
+under a title); every caller moves to the popover or sheet. Line numbers are at the time of
+writing. The per-app units work from this table. `glass_pill(` sites that are plain toolbar
+buttons (Select, Cancel, Done) are covered by 2.16 and are not listed one by one except where
+they act as an action list.
+
+| Site (file:line) | Behaviour today | Target | Unit |
+|------------------|-----------------|--------|------|
+| `apps/messages/src/main.rs:3768` `menu_card` "row-menu" | Inbox row long-press opens a long bottom card of actions (M13, M14), with the Mute lengths swapped into the same card (`mute_choices`, main.rs:1901, 3583) | Popover at the press point with groups; "Mute for" is a submenu; Delete is a confirm page | messages |
+| `apps/messages/src/main.rs:1752` `menu_card` "mute-menu" | Separate bottom card for "Mute for" lengths | Submenu page inside the row popover | messages |
+| `apps/messages/src/main.rs:3266` `menu_card` "bulk-mute-menu" | Select mode, "Mute for" bottom card | Popover anchored to the bulk bar "more" button, submenu page | messages |
+| `apps/messages/src/main.rs:3286` `menu_card` "bulk-delete-menu" | Select mode delete confirm in a bottom card | Confirm page inside the popover (`confirm_delete_thread`, main.rs:2634) | messages |
+| `apps/messages/src/main.rs:3528` `menu_card` "channel-pick" | Choosing WhatsApp or SMS for a recipient in a bottom card | Popover anchored to the recipient row (2 items) | messages |
+| `apps/messages/src/conversation.rs:1786` `menu_card` "starred-sheet" | Starred messages list in a menu card | Sheet (rich content) | messages |
+| `apps/messages/src/conversation.rs:4849` `menu_card` "select-delete-menu" | Delete selected messages confirm as a second card | Confirm page inside the select-bar popover | messages |
+| `apps/messages/src/conversation.rs:4903` `menu_card` "delete-menu" | "Delete message?" as a bottom card | Confirm page inside the message popover | messages |
+| `apps/messages/src/conversation.rs:4535-4542` `header_choices`, `header_sheet` | Header "more" opens a copy-choices sheet | Popover anchored to the header "more" button | messages |
+| `apps/messages/src/conversation.rs:5043-5048` `strip_expanded` | Schedule strip grows in place when tapped | Sheet listing all scheduled items | messages |
+| `apps/messages/src/conversation.rs:4968`, `5114`, `5218`, `5359` `glass_pill(` | Header chips (channel badge, mute, more) as text pills (M12) | Icon buttons (2.16 Small) plus a header "more" popover | messages |
+| `apps/messages/src/sms_conversation.rs:2337` `menu_card` "sms-delete-menu" | Single message delete confirm in a card | Confirm page inside the message popover | messages |
+| `apps/messages/src/sms_conversation.rs:2433` `menu_card` "sms-select-delete-menu" | Select-mode delete confirm in a card | Confirm page inside the select-bar popover | messages |
+| `apps/messages/src/sms_conversation.rs:2590` `menu_card` "sms-starred-sheet" | Starred messages in a menu card | Sheet | messages |
+| `apps/messages/src/sms_conversation.rs:1548` `confirm_delete` and `2325` | Thread delete confirm as a button inside the page | Confirm page inside the header "more" popover | messages |
+| `apps/messages/src/sms_conversation.rs:2926-3227` about 25 `glass_pill(` | Tapping a bubble inserts a wrapping row of pills (Copy, Share, Forward, Select text, Remind me, Info, links, maps, calendar, OTP) below it | Popover anchored to the bubble: actions grouped (Reply / Copy / Forward, then link actions, then Delete as red role) | messages |
+| `apps/messages/src/sms_conversation.rs:2608` `header_choices` | Header copy choices sheet | Popover on the header "more" button | messages |
+| `apps/messages/src/sms_conversation.rs:3404-3409` `strip_expanded` | Schedule strip grows in place | Sheet | messages |
+| `apps/messages/src/remind_ui.rs:176`, `210` `menu_card` "remind-sheet" | "Remind me" times (and "Keep it" for an existing one) in a bottom card | Submenu page of the bubble popover for 4 presets; Sheet for the custom date/time picker | messages |
+| `apps/messages/src/date_jump_ui.rs:173` `menu_card` "date-sheet" | "Jump to date" picker in a bottom card with Cancel | Sheet | messages |
+| `apps/messages/src/info_ui.rs:290-306` `choices`, `glass_pill(` | Copy choices as a column of pills with a Close pill | Popover (up to 8 items), no Close row | messages |
+| `apps/messages/src/settings_ui.rs:838-842` "Reset"/"Cancel" pills | Inline reset confirm | Confirm page in a popover anchored to the Reset button | messages |
+| `apps/phone/src/history_ui.rs:145`, `235` `confirm_delete`, `confirm_delete_sheet` | Call history delete confirm in a bottom sheet (callers: `recents.rs:1217`, `settings_ui.rs:1163`, `prune_ui.rs:84`) | Confirm page inside the popover of the Recents "more" button; the settings and prune callers stay a sheet with 2.16 buttons | phone |
+| `apps/phone/src/recents.rs:1536`, `3429` `glass_pill(` | Select-mode header actions and per-row text pills | Header buttons (2.16 Small); row actions in a long-press popover | phone |
+| `apps/phone/src/person_ui.rs:61` `reply_choices` | Quick reply list in a sheet (P12 family, call-details transparency) | Popover from the "Message" action (up to 8 replies) | phone |
+| `apps/phone/src/keypad.rs:870`, `1152`, `1977` `glass_pill(` | Suggestion actions, WhatsApp and Paste pills near the number field | 2.16 Small tinted buttons, or a "..." popover for more than 3 | phone |
+| `apps/stops/src/saved_ui.rs:326`, `447`, `465` `expanded` | Tapping a saved stop expands the row and inserts about 12 pills into the list (S13) | Row tap opens the stop sheet; the actions move into a "..." popover on the row (Share, Copy as, QR, Home screen, Rename, colour; Delete as a confirm page) | stops |
+| `apps/stops/src/saved_ui.rs:327`, `475`, `596`, `619` `confirm_delete`, "Cancel" pill | Delete arms in place ("Tap again") with a Cancel pill appended to the row | Confirm page inside the popover | stops |
+| `apps/stops/src/saved_ui.rs:361-387` "Export GPX", "Export JSON", "Import", "Copy list" | Header button wall over two rows (S14) | One "..." header button with a popover (2 groups: Import / Export, then Copy list) | stops |
+| `apps/stops/src/saved_ui.rs:415` `glass_pill(` "Sort: ..." | Pill that cycles the sort order | Popover with the sort choices and a check mark on the current one | stops |
+| `apps/stops/src/saved_ui.rs:977-982`, `1083-1088` "Replace everything", "Add n" | Import confirm as two pills in a card | Sheet with 2.16 Large and Gray buttons | stops |
+| `apps/stops/src/settings_ui.rs:1077-1128` history row pills | Start again, Save as stop, Use, Share, Copy, Delete as pills inside the history row | Long-press popover on the trip row; Delete as a confirm page | stops |
+| `apps/stops/src/settings_ui.rs:1160-1171`, `1210`, `1226-1233` | Clear history, "Show: ..." filter and Export CSV/GPX pills in a header | "Show" popover; Export in the header "..." popover | stops |
+| `apps/stops/src/settings_ui.rs:1332` `expanded = None` | Resets the shared expanded state when leaving the screen | Removed with the expand pattern | stops |
+| `apps/stops/src/qr_sheet.rs:142-148` Save, Share | Two pills at the bottom of the QR sheet | 2.16 Regular buttons in a row of equal widths | stops |
+| `apps/contacts/src/detail.rs:359` `open_field_sheet` (callers at 1416-1719, 12 sites, press and "..." paths) | A field's "..." and its long-press open a bottom sheet for a 3-item action list (C12); `more_target` is the "..." path | Popover anchored to the "..." button or the press point (Copy, Share, Send message ...) | contacts |
+| `apps/contacts/src/detail.rs:265`, `572` `share_choices` | Share choices in a sheet | Popover from the Share action (up to 8 items) | contacts |
+| `apps/contacts/src/editor.rs:848` `photo_source_choices` | Photo source list (Take, Choose, Crop, Remove) as a sheet | Popover anchored to the avatar | contacts |
+| `apps/contacts/src/trash.rs:385-535`, `select.rs:528-583`, `cleanup.rs:252-410` `glass_pill(` | Select mode and action bars as a row of text pills (C10) | 2.16 buttons; actions beyond 3 go in a "..." popover; delete is a confirm page | contacts |
+| `apps/contacts/src/main.rs:1702-1922` `glass_pill(` | Permission, empty-state and header text pills (Select, Edit, Done, Create Contact) | 2.16 buttons and `EmptyState` actions | contacts |
+| `apps/contacts/src/ui.rs:253` `glass_pill(` | Shared contacts pill helper | Replaced by `rovsti_ui::button`; delete the helper | contacts |
+
+### 2.16 Buttons
+
+One set in `rovsti_ui::button`. Text pills built with `glass_pill(` and loose text links
+are replaced by it; `glass_pill` stays only as the chrome of floating controls (header
+circles, tab bar).
+
+**Styles.**
+
+| Style | Fill | Ink | Use |
+|-------|------|-----|-----|
+| Filled | accent | `readable_on(accent)` | The one primary action of a screen or sheet |
+| Tinted | accent at 0.16 alpha | `accent_text` | Secondary actions next to a primary |
+| Gray | `secondary_background` | `label` | Neutral actions, Cancel |
+| Plain | none | `accent_text` | Low-emphasis actions (Skip, See all) |
+
+`Destructive` is a role, not a style: it swaps accent for the red colour in any style, so
+"Delete" is Filled+Destructive in a confirm and Plain+Destructive in a list footer.
+
+**Sizes.**
+
+| Size | Height | Radius | Type |
+|------|--------|--------|------|
+| Large | 50 | 14 | Headline |
+| Regular | 44 | 12 | Body, weight 600 |
+| Small | 32 visual | full | Subheadline, weight 600 |
+
+Small keeps a 44 dp hit area (2.4): the visual 32 dp pill sits inside a 44 dp tall tap
+target. Content is an optional 18 dp icon, a gap of 8, then the label, centred.
+`full_width()` makes the button fill its parent.
+
+**Groups.** A row of buttons uses equal widths and a gap of 8. At most 3 secondary actions
+are ever shown as buttons; beyond that they go in a "..." popover (2.15). A disabled
+button drops to 0.4 opacity, keeps its size and does not take taps. Contrast of every ink on
+its fill is at least 4.5:1 in both themes (2.12).
+
 ### 2.13 Component checklist
 
 | Component | Replaces | Defined by |
@@ -363,6 +513,8 @@ with new ones; this is why all four baselines were refreshed.
 | `filter_chip_row` | `ChatItem::Filters` wrapped chips | 2.9 |
 | `section_header`, `empty_state` | per-app text | 2.10 |
 | `layout::content_bottom_inset` | `content_bottom_inset` and `content_bottom_inset_with` | 2.3 |
+| `Menu` popover, `GlassSpec::thick` | `menu_card`, inline pill rows, `open_field_sheet` for short lists | 2.15 |
+| `rovsti_ui::button` | `glass_pill(` text pills, text links | 2.16 |
 
 ### 2.14 Migrated screens
 

@@ -78,15 +78,15 @@ is empty. Re-checked by grep for the open rows:
 | M26 | Shared contact card: View contact, Add with all fields, Save .vcf, Share; MMS vCards | done R4 |
 | M28 | Share a single non-image file (MMS part; WA document/audio/video) | done R4 |
 | M27 | Clear chat | cut, stays cut (SMS = Delete conversation; WA = Select all + Delete for me; no gateway endpoint) |
-| M30 | Inbox filter chips: All / Unread / WhatsApp / SMS / Groups, count in each, empty text | done (R5 S1, S4) |
-| M36 | Pin SMS conversations (local, up to 5 local pins), pinned rows lead with a pin glyph | done (R5 S1, S4) |
-| M37 | Archive SMS conversations (local); a mixed person row archives both channels; Undo | done (R5 S1, S4) |
-| M38 | Mark an SMS conversation unread (local dot), cleared on open / Mark read / Mark all read | done (R5 S1, S4) |
-| M31 | Swipe a WA bubble right to reply (axis lock, spring snap-back, haptic tick at threshold) | open (R5 S2, S5) |
-| M32 | Double-tap a WA text bubble to react 👍 (again removes it), pill on failure | open (R5 S2, S5) |
-| M33 | "Remind me" on a message: 15 min / 1 h / tonight / tomorrow; local notification opens the chat and glows the message; Cancel reminder | open (R5 S2, S3, S6) |
-| M34 | Chat text size: Small / Default / Large / Larger in Settings, applied to bubbles | open (R5 S2, S7) |
-| M35 | Location card: Share location (name, address, OpenStreetMap link), Copy link | open (R5 S2, S7) |
+| M30 | Inbox filter chips: All / Unread / WhatsApp / SMS / Groups, count in each, empty text | done R5 |
+| M36 | Pin SMS conversations (local, up to 5 local pins), pinned rows lead with a pin glyph | done R5 |
+| M37 | Archive SMS conversations (local); a mixed person row archives both channels; Undo | done R5 |
+| M38 | Mark an SMS conversation unread (local dot), cleared on open / Mark read / Mark all read | done R5 |
+| M31 | Swipe a WA bubble right to reply (axis lock, spring snap-back, haptic tick at threshold) | done R5 |
+| M32 | Double-tap a WA text bubble to react 👍 (again removes it), pill on failure | done R5 |
+| M33 | "Remind me" on a message: 15 min / 1 h / tonight / tomorrow; local notification opens the chat and glows the message; Cancel reminder | done R5 |
+| M34 | Chat text size: Small / Default / Large / Larger in Settings, applied to bubbles | done R5 |
+| M35 | Location card: Share location (name, address, OpenStreetMap link), Copy link | done R5 |
 | M39 | Inbox select mode: tick chats; Mark read, Mute, Archive, Pin, Delete (SMS) in bulk | open (R6) |
 | M40 | Maps link / coordinate detection in message text -> Open in Maps / Copy | open (R6) |
 | M41 | "Remind me in 1 hour" action on message notifications | open (R6) |
@@ -360,6 +360,10 @@ commit per step (others push to main in parallel).
 - `docs/messages-acceptance.md`: make sure rows exist for M30-M38 with the
   confirm/undo/pill expectations above.
 - This file: mark shipped rows "done R5", note deferrals; round 6 backlog is M39-M44.
+- Status (done): acceptance rows 138-150 cover M30-M38 (confirm on Cancel reminder,
+  Undo on SMS archive, pills on every action, desktop Unsupported pills). All of
+  M30-M38 shipped in R5; nothing deferred. Device verification of the gesture rows
+  (142, 143) and the reminder notification (147) is still pending (no device).
 - Commit: `Rovsti messages: utilities R5 docs and backlog`.
 
 ## Round 6 backlog

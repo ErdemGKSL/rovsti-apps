@@ -49,6 +49,7 @@ pub struct EditBuffer {
     head: usize,
     marked: Option<Range<usize>>,
     multiline: bool,
+    max_chars: Option<usize>,
 }
 
 impl EditBuffer {
@@ -99,9 +100,44 @@ impl EditBuffer {
         &self.text[self.selection()]
     }
 
+    pub fn max_chars(&self) -> Option<usize> {
+        self.max_chars
+    }
+
+    /// Limit the text to `max` chars (`None` = unlimited). Text that is already
+    /// longer stays; the limit only blocks growth.
+    pub fn set_max_chars(&mut self, max: Option<usize>) {
+        self.max_chars = max;
+    }
+
+    /// Longest prefix of `text` that ends on a grapheme boundary and fits in the
+    /// room left once `range` is replaced. Deletions never go through here.
+    fn fit<'a>(&self, range: &Range<usize>, text: &'a str) -> &'a str {
+        let Some(max) = self.max_chars else {
+            return text;
+        };
+        let outside =
+            self.text[..range.start].chars().count() + self.text[range.end..].chars().count();
+        let room = max.saturating_sub(outside);
+        if text.chars().count() <= room {
+            return text;
+        }
+        let mut end = 0;
+        let mut used = 0;
+        for g in text.graphemes(true) {
+            used += g.chars().count();
+            if used > room {
+                break;
+            }
+            end += g.len();
+        }
+        &text[..end]
+    }
+
     /// Replace everything, caret at the end, no marked range.
     pub fn set_text(&mut self, text: &str) {
-        self.text = self.sanitize(text).into_owned();
+        let t = self.sanitize(text);
+        self.text = self.fit(&(0..self.text.len()), &t).to_owned();
         self.anchor = self.text.len();
         self.head = self.anchor;
         self.marked = None;
@@ -336,7 +372,8 @@ impl EditBuffer {
     /// replaces the whole marked range commits it; one inside it keeps it marked.
     pub fn replace(&mut self, range: Range<usize>, text: &str) {
         let r = self.clamp_range(range);
-        let t = self.sanitize(text).into_owned();
+        let t = self.sanitize(text);
+        let t = self.fit(&r, &t).to_owned();
         self.edit(r.clone(), &t);
         self.set_caret(r.start + t.len());
     }
@@ -355,7 +392,8 @@ impl EditBuffer {
         sel_in_new: Option<Range<usize>>,
     ) {
         let r = self.clamp_range(range);
-        let t = self.sanitize(text).into_owned();
+        let t = self.sanitize(text);
+        let t = self.fit(&r, &t).to_owned();
         self.edit(r.clone(), &t);
         let end = r.start + t.len();
         self.marked = (!t.is_empty()).then_some(r.start..end);
@@ -1060,5 +1098,94 @@ mod tests {
         typed(&mut h, &mut b, "ab");
         h.reset();
         assert!(!h.can_undo() && !h.can_redo());
+    }
+
+    #[test]
+    fn max_chars_insert_at_limit_is_noop() {
+        let mut b = buf("abc");
+        b.set_max_chars(Some(3));
+        b.set_caret(1);
+        b.replace_selection("x");
+        assert_eq!((b.text(), b.head()), ("abc", 1));
+    }
+
+    #[test]
+    fn max_chars_clips_paste_to_room() {
+        let mut b = buf("ab");
+        b.set_max_chars(Some(5));
+        b.replace_selection("0123456789");
+        assert_eq!(b.text(), "ab012");
+        assert_eq!(b.head(), 5);
+    }
+
+    #[test]
+    fn max_chars_selection_frees_room() {
+        let mut b = buf("abcde");
+        b.set_max_chars(Some(5));
+        b.set_selection(1, 4);
+        b.replace_selection("XYZW");
+        assert_eq!(b.text(), "aXYZe");
+    }
+
+    #[test]
+    fn max_chars_never_splits_graphemes() {
+        let mut b = buf("ab");
+        b.set_max_chars(Some(3));
+        b.replace_selection("🇹🇷");
+        assert_eq!(b.text(), "ab");
+        let mut b = buf("ab");
+        b.set_max_chars(Some(4));
+        b.replace_selection("🇹🇷");
+        assert_eq!(b.text(), "ab🇹🇷");
+        let mut b = buf("a");
+        b.set_max_chars(Some(2));
+        b.replace_selection("e\u{301}x");
+        assert_eq!(b.text(), "a");
+        b.set_max_chars(Some(3));
+        b.replace_selection("e\u{301}x");
+        assert_eq!(b.text(), "ae\u{301}");
+    }
+
+    #[test]
+    fn max_chars_clips_composing_text_and_set_text() {
+        let mut b = buf("ab");
+        b.set_max_chars(Some(4));
+        b.replace_and_mark(2..2, "cdefg", None);
+        assert_eq!(b.text(), "abcd");
+        assert_eq!(b.marked(), Some(2..4));
+        b.set_text("0123456789");
+        assert_eq!(b.text(), "0123");
+    }
+
+    #[test]
+    fn max_chars_lowering_keeps_text_and_deletes_work() {
+        let mut b = buf("abcdef");
+        b.set_max_chars(Some(3));
+        assert_eq!(b.text(), "abcdef");
+        b.replace_selection("x");
+        assert_eq!(b.text(), "abcdef");
+        assert!(b.delete_backward());
+        assert_eq!(b.text(), "abcde");
+    }
+
+    #[test]
+    fn max_chars_undo_after_clipped_paste_restores() {
+        let mut b = buf("ab");
+        b.set_max_chars(Some(4));
+        let mut h = History::new();
+        let before = b.snapshot();
+        b.replace_selection("0123456789");
+        h.record(None, &before, &b);
+        assert_eq!(b.text(), "ab01");
+        assert!(h.undo(&mut b));
+        assert_eq!((b.text(), b.head()), ("ab", 2));
+    }
+
+    #[test]
+    fn max_chars_none_is_unlimited() {
+        let mut b = buf("");
+        b.replace_selection(&"x".repeat(5000));
+        assert_eq!(b.text().len(), 5000);
+        assert_eq!(b.max_chars(), None);
     }
 }

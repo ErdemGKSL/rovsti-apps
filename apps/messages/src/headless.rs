@@ -13,6 +13,7 @@
 //! | `mms_send_req`     | `{local_id, to[], text?, image_path?, sub_id?}`           | `{ok, pdu_b64}`                              |
 //! | `wa_digest`        | `{dir, chat}`                                             | a `NotificationSpec`, or `{}`                |
 //! | `wa_reply`         | `{dir, chat, text}`                                       | `{ok}`                                       |
+//! | `msg_remind`       | `{tag, title, body, minutes?=60, now_ms, tz_offset_s}`    | `{ok, arm, toast}`                           |
 //!
 //! `dir` is the app data directory (`Headless.dataDir`), where the spam rules live in
 //! `messages-prefs.json` and the WhatsApp link in `whatsapp-link.json`.
@@ -48,6 +49,7 @@ pub fn handle(kind: &str, json: &str) -> String {
         ("mms_send_req", mms_send_req),
         ("wa_digest", wa_digest),
         ("wa_reply", wa_reply),
+        ("msg_remind", msg_remind),
     ];
     headless::dispatch(kind, json, TABLE)
 }
@@ -386,6 +388,48 @@ fn wa_reply(_: &str, json: &str) -> String {
     rovsti_wa_ui::headless::wa_reply(json)
 }
 
+// ------------------------------------------------------------------ chat reminder
+
+#[derive(Deserialize)]
+struct RemindIn {
+    #[serde(default)]
+    tag: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    body: String,
+    #[serde(default = "default_remind_minutes")]
+    minutes: i64,
+    now_ms: i64,
+    #[serde(default)]
+    tz_offset_s: i32,
+}
+
+fn default_remind_minutes() -> i64 {
+    60
+}
+
+/// "Remind me" on a notification: `{ok:true, arm, toast}` (`arm` is the object Kotlin
+/// arms), or `{ok:false}` for bad JSON, a blank tag or a non-positive delay.
+fn msg_remind(_: &str, json: &str) -> String {
+    let Ok(input) = serde_json::from_str::<RemindIn>(json) else {
+        return json!({ "ok": false }).to_string();
+    };
+    let Some(reminder) = rovsti_core::message_reminder::chat_reminder(
+        &input.tag,
+        &input.title,
+        &input.body,
+        input.minutes,
+        input.now_ms,
+    ) else {
+        return json!({ "ok": false }).to_string();
+    };
+    let arm: Value = serde_json::from_str(&rovsti_core::message_reminder::arm_json(&reminder))
+        .unwrap_or_default();
+    let toast = rovsti_core::message_reminder::set_text(&reminder, input.now_ms, input.tz_offset_s);
+    json!({ "ok": true, "arm": arm, "toast": toast }).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -423,6 +467,7 @@ mod tests {
             "mms_send_req",
             "wa_digest",
             "wa_reply",
+            "msg_remind",
         ] {
             assert!(!handle(kind, "not json").is_empty(), "{kind} fell through");
         }
@@ -672,5 +717,22 @@ mod tests {
         assert_eq!(handle("wa_reply", &request), "{\"ok\":false}");
         assert_eq!(handle("wa_digest", "garbage"), "{}");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn msg_remind_ok_blank_tag_and_bad_json() {
+        let out = parse(&handle(
+            "msg_remind",
+            r#"{"tag":"wa:abc","title":"Anna","body":"hi","now_ms":1700000000000,"tz_offset_s":0}"#,
+        ));
+        assert_eq!(out["ok"], true);
+        assert_eq!(out["arm"]["at_ms"], 1_700_000_000_000_i64 + 3_600_000);
+        assert_eq!(out["arm"]["message_id"], "");
+        assert_eq!(out["arm"]["notif_title"], "Reminder: Anna");
+        assert_eq!(out["toast"], "Reminder set for 23:13");
+        let out = parse(&handle("msg_remind", r#"{"tag":" ","now_ms":5}"#));
+        assert_eq!(out, json!({"ok": false}));
+        let out = parse(&handle("msg_remind", "garbage"));
+        assert_eq!(out, json!({"ok": false}));
     }
 }

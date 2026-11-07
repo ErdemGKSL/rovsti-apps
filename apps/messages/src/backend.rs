@@ -1183,8 +1183,11 @@ impl Backend {
         reminder: rovsti_core::message_reminder::MessageReminder,
         cx: &mut Context<Self>,
     ) {
-        self.message_reminders
-            .retain(|r| r.message_id != reminder.message_id);
+        // Chat reminders (empty message_id) never replace each other.
+        if !reminder.message_id.is_empty() {
+            self.message_reminders
+                .retain(|r| r.message_id != reminder.message_id);
+        }
         self.message_reminders.push(reminder);
         cx.emit(BackendEvent::RemindersChanged);
         cx.notify();

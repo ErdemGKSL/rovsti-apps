@@ -61,6 +61,31 @@ pub fn new_reminder(
     })
 }
 
+/// A reminder for a whole chat, made from a notification (`message_id` is empty).
+/// `None` for a blank tag or `minutes <= 0`. The id is `now_ms`.
+pub fn chat_reminder(
+    tag: &str,
+    title: &str,
+    preview: &str,
+    minutes: i64,
+    now_ms: i64,
+) -> Option<MessageReminder> {
+    let tag = tag.trim();
+    if tag.is_empty() || minutes <= 0 {
+        return None;
+    }
+    let title = title.trim();
+    Some(MessageReminder {
+        id: now_ms,
+        tag: tag.to_owned(),
+        message_id: String::new(),
+        message_at_ms: now_ms,
+        at_ms: now_ms.saturating_add(minutes.saturating_mul(60_000)),
+        title: if title.is_empty() { "Message" } else { title }.to_owned(),
+        preview: one_line(preview),
+    })
+}
+
 /// The struct plus the finished notification texts.
 pub fn arm_json(r: &MessageReminder) -> String {
     let mut value = serde_json::to_value(r).unwrap_or_default();
@@ -102,6 +127,9 @@ pub fn for_message<'a>(
     list: &'a [MessageReminder],
     message_id: &str,
 ) -> Option<&'a MessageReminder> {
+    if message_id.trim().is_empty() {
+        return None;
+    }
     list.iter().find(|r| r.message_id == message_id)
 }
 
@@ -200,6 +228,36 @@ mod tests {
         let list = vec![make(Slot::In15Min, 0)];
         assert!(for_message(&list, "ID1").is_some());
         assert!(for_message(&list, "other").is_none());
+    }
+
+    #[test]
+    fn chat_reminder_cases() {
+        let r = chat_reminder(" wa:abc ", " ", "a\n b", 30, NOW).expect("ok");
+        assert_eq!(r.tag, "wa:abc");
+        assert_eq!(r.title, "Message");
+        assert_eq!(r.message_id, "");
+        assert_eq!(r.id, NOW);
+        assert_eq!(r.message_at_ms, NOW);
+        assert_eq!(r.at_ms, NOW + 30 * 60_000);
+        assert_eq!(r.preview, "a b");
+        assert!(chat_reminder("  ", "t", "p", 30, NOW).is_none());
+        assert!(chat_reminder("sms:1", "t", "p", 0, NOW).is_none());
+        assert!(chat_reminder("sms:1", "t", "p", -5, NOW).is_none());
+    }
+
+    #[test]
+    fn for_message_ignores_blank_ids() {
+        let chat = chat_reminder("sms:1", "t", "p", 5, NOW).expect("ok");
+        let list = vec![chat];
+        assert!(for_message(&list, "").is_none());
+        assert!(for_message(&list, "  ").is_none());
+    }
+
+    #[test]
+    fn parse_list_keeps_chat_reminders() {
+        let chat = chat_reminder("sms:1", "t", "p", 5, NOW).expect("ok");
+        let json = serde_json::to_string(&vec![chat.clone()]).expect("ok");
+        assert_eq!(parse_list(&json), vec![chat]);
     }
 
     #[test]

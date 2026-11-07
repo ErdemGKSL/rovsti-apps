@@ -42,7 +42,7 @@ pub struct RemindSheet {
 /// Message id -> badge text ("Reminder 18:05") for the reminders of the open chat.
 pub fn badges(list: &[MessageReminder], tag: &str, tz_offset_s: i32) -> Vec<(String, String)> {
     list.iter()
-        .filter(|r| r.tag == tag)
+        .filter(|r| r.tag == tag && !r.message_id.is_empty())
         .map(|r| {
             (
                 r.message_id.clone(),

@@ -9,16 +9,18 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use gpui::MouseButton;
 use gpui::TextInputAction;
 use gpui::TextInputPurpose;
 use gpui::{
-    AnyElement, Context, Entity, EventEmitter, Image, ImageFormat, InteractiveElement, IntoElement,
-    ListAlignment, ObjectFit, ParentElement, Render, SharedString, StatefulInteractiveElement,
-    Styled, StyledImage, Window, div, img, list, prelude::*, px,
+    AnyElement, Context, Entity, EventEmitter, HapticFeedback, Image, ImageFormat,
+    InteractiveElement, IntoElement, ListAlignment, ObjectFit, ParentElement, Render, SharedString,
+    StatefulInteractiveElement, Styled, StyledImage, Window, div, img, list, prelude::*, px,
 };
 use rovsti_android::{Error as AndroidError, documents};
 use rovsti_core::{
     ThreadId,
+    bubble_gesture::{self, SwipeReply},
     chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
     multi_select::{self, Selection},
@@ -35,6 +37,8 @@ use rovsti_ui::{
     current_theme,
     field::{TextField, field_box},
     glass::{GlassSpec, glass},
+    motion_tokens,
+    spring::{FrameClock, Spring},
     theme,
     tokens::{Theme, radius, typography},
 };
@@ -292,6 +296,14 @@ pub struct Conversation {
     rows_dirty: bool,
     /// "Now" for the frame being drawn (the list builds rows after `render`).
     frame_now: i64,
+    /// The swipe-to-reply drag in progress (message id).
+    swipe: Option<(String, SwipeReply)>,
+    /// A released swipe returning to rest (message id).
+    swipe_back: Option<(String, Spring)>,
+    swipe_clock: FrameClock,
+    swipe_shift: f32,
+    /// The click that ends a swipe must not open anything.
+    swallow_click: bool,
     /// Decoded images by message id, oldest first (at most [`MEDIA_CACHE`]).
     media_cache: Vec<(String, Arc<Image>)>,
     media_loading: HashSet<String>,
@@ -480,6 +492,11 @@ impl Conversation {
             entries: Vec::new(),
             rows_dirty: true,
             frame_now: 0,
+            swipe: None,
+            swipe_back: None,
+            swipe_clock: FrameClock::default(),
+            swipe_shift: 0.0,
+            swallow_click: false,
             media_cache: Vec::new(),
             media_loading: HashSet::new(),
             media_failed: HashSet::new(),
@@ -843,6 +860,85 @@ impl Conversation {
     }
 
     /// Reply on a message's menu: the composer answers it.
+    /// The horizontal shift of a bubble while it is swiped or returning.
+    fn swipe_offset(&self, id: &str) -> f32 {
+        if let Some((open, _)) = &self.swipe
+            && open == id
+        {
+            return self.swipe_shift;
+        }
+        match &self.swipe_back {
+            Some((open, spring)) if open == id => spring.value,
+            _ => 0.0,
+        }
+    }
+
+    fn swipe_horizontal(&self) -> bool {
+        self.swipe.as_ref().is_some_and(|(_, s)| s.is_horizontal())
+    }
+
+    fn swipe_start(&mut self, id: &str, x: f32, y: f32) {
+        self.swallow_click = false;
+        self.swipe_back = None;
+        self.swipe_shift = 0.0;
+        self.swipe = Some((id.to_owned(), SwipeReply::new(x, y)));
+    }
+
+    fn swipe_move(&mut self, x: f32, y: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((_, swipe)) = &mut self.swipe else {
+            return;
+        };
+        let step = swipe.moved(x, y);
+        if !swipe.is_horizontal() {
+            return;
+        }
+        // Only a horizontal drag is ours; vertical ones keep scrolling the list.
+        cx.stop_propagation();
+        self.swallow_click = true;
+        self.strip = None;
+        self.swipe_shift = step.offset;
+        if step.crossed {
+            rovsti_ui::haptics::perform(window, HapticFeedback::Selection);
+        }
+        cx.notify();
+    }
+
+    fn swipe_end(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((id, swipe)) = self.swipe.take() else {
+            return;
+        };
+        if !swipe.is_horizontal() {
+            return;
+        }
+        cx.stop_propagation();
+        let from = self.swipe_shift;
+        self.swipe_shift = 0.0;
+        if !window.prefers_reduced_motion() && from > 0.0 {
+            let mut spring = Spring::new(from, motion_tokens::release()).with_epsilon(0.05);
+            spring.set_target(0.0);
+            self.swipe_back = Some((id.clone(), spring));
+            self.swipe_clock.reset();
+        }
+        if swipe.release() {
+            self.begin_reply(&id, cx);
+        }
+        cx.notify();
+    }
+
+    /// Advances the snap-back spring; call once per render.
+    fn tick_swipe_back(&mut self, window: &mut Window) {
+        let Some((_, spring)) = &mut self.swipe_back else {
+            return;
+        };
+        let dt = self.swipe_clock.tick();
+        if spring.tick(dt) {
+            window.request_animation_frame();
+        } else {
+            self.swipe_back = None;
+            self.swipe_clock.reset();
+        }
+    }
+
     fn begin_reply(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(item) = self.timeline.items().iter().find(|i| i.message.id == id) else {
             return;
@@ -3317,9 +3413,20 @@ impl Conversation {
             let map_url = (!revoked)
                 .then(|| meta.and_then(|m| m.location.as_ref()).map(geo_url))
                 .flatten();
-            bubble = bubble.on_click(cx.listener(move |this, _, _, cx| {
-                if this.select.is_some() {
+            let (from_me, sender) = (message.from_me, message.sender.clone());
+            let double_tap = (!revoked).then(|| id.clone());
+            bubble = bubble.on_click(cx.listener(move |this, event: &gpui::ClickEvent, _, cx| {
+                if std::mem::take(&mut this.swallow_click) {
+                    // The click that ended a swipe.
+                } else if this.select.is_some() {
                     // The row toggles the tick.
+                } else if event.click_count() >= 2
+                    && let Some(target) = &double_tap
+                {
+                    let own = this.timeline.own_reaction(target).map(str::to_owned);
+                    let emoji =
+                        bubble_gesture::double_tap_reaction(own.as_deref(), QUICK_EMOJIS[0]);
+                    this.react(target.clone(), from_me, sender.clone(), emoji, cx);
                 } else if this.strip.take().is_some() {
                     this.rows_dirty = true;
                     cx.notify();
@@ -3328,7 +3435,7 @@ impl Conversation {
                 }
             }));
             bubble = bubble.on_long_press(cx.listener(move |this, _, _, cx| {
-                if this.select.is_some() {
+                if this.select.is_some() || this.swipe_horizontal() || this.swallow_click {
                     return;
                 }
                 this.strip = Some(id.clone());
@@ -3357,10 +3464,83 @@ impl Conversation {
             }
             column = column.child(self.actions(theme, item, meta, now, cx));
         }
-        let row = div()
+        let mut row = div()
             .flex()
             .when(own, |row| row.justify_end())
             .child(column);
+        if self.select.is_none() && confirmed && !revoked {
+            let shift = self.swipe_offset(&message.id);
+            let (down, moved, up, out) = (
+                message.id.clone(),
+                message.id.clone(),
+                message.id.clone(),
+                message.id.clone(),
+            );
+            let mut swipeable = div()
+                .id(SharedString::from(format!("swipe-{}", message.id)))
+                .relative()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, _, _| {
+                        this.swipe_start(
+                            &down,
+                            f32::from(event.position.x),
+                            f32::from(event.position.y),
+                        );
+                    }),
+                )
+                .on_mouse_move(cx.listener(
+                    move |this, event: &gpui::MouseMoveEvent, window, cx| {
+                        let active = this.swipe.as_ref().is_some_and(|(id, _)| *id == moved);
+                        if active && event.pressed_button == Some(MouseButton::Left) {
+                            this.swipe_move(
+                                f32::from(event.position.x),
+                                f32::from(event.position.y),
+                                window,
+                                cx,
+                            );
+                        }
+                    },
+                ))
+                .on_mouse_up(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &gpui::MouseUpEvent, window, cx| {
+                        if this.swipe.as_ref().is_some_and(|(id, _)| *id == up) {
+                            this.swipe_end(window, cx);
+                        }
+                    }),
+                )
+                .on_mouse_up_out(
+                    MouseButton::Left,
+                    cx.listener(move |this, _: &gpui::MouseUpEvent, window, cx| {
+                        if this.swipe.as_ref().is_some_and(|(id, _)| *id == out) {
+                            this.swipe_end(window, cx);
+                        }
+                    }),
+                );
+            if shift > 0.0 {
+                let progress = (shift / bubble_gesture::COMMIT_PX).clamp(0.0, 1.0);
+                swipeable = swipeable.child(
+                    div()
+                        .absolute()
+                        .left(px(4.0))
+                        .top_0()
+                        .bottom_0()
+                        .flex()
+                        .items_center()
+                        .opacity(progress)
+                        .child(
+                            gpui::svg()
+                                .path(Icon::LucideReply.path())
+                                .size(px(20.0))
+                                .text_color(colors.secondary_label),
+                        ),
+                );
+            }
+            row = row.relative().left(px(shift));
+            let inner = swipeable.child(row);
+            return inner.into_any_element();
+        }
         let Some(selection) = &self.select else {
             return row.into_any_element();
         };
@@ -3508,7 +3688,9 @@ impl Conversation {
                     .rounded(radius::CARD)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         // An open strip is closed by the bubble's own tap.
-                        if this.strip.is_none() && this.select.is_none() {
+                        if std::mem::take(&mut this.swallow_click) {
+                            cx.stop_propagation();
+                        } else if this.strip.is_none() && this.select.is_none() {
                             cx.stop_propagation();
                             let (items, index) = this.viewer_items(&tapped);
                             cx.emit(ConversationEvent::OpenMedia { items, index });
@@ -4522,6 +4704,7 @@ impl Render for Conversation {
         let theme = current_theme(window);
         let now = now_ms();
         self.frame_now = now;
+        self.tick_swipe_back(window);
         let insets = window.insets();
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
         let offset = self.locale.tz_offset_s;

@@ -8,8 +8,10 @@ use gpui::{
 };
 use rovsti_geo::{
     Appearance,
+    coord_format::{map_view_share_text, osm_view_url},
     tiles::{
-        AREA_MIN_ZOOM, AREA_TILE_BUDGET, AreaPlan, MAX_TILE_ZOOM, estimate_bytes, tiles_for_area,
+        AREA_MIN_ZOOM, AREA_TILE_BUDGET, AreaPlan, MAX_TILE_ZOOM, display_zoom, estimate_bytes,
+        tiles_for_area,
     },
 };
 use rovsti_ui::{
@@ -32,6 +34,15 @@ pub fn theme_override(appearance: Appearance) -> Option<Theme> {
 /// The pill after an appearance change: "Appearance: Dark".
 pub fn appearance_pill(appearance: Appearance) -> String {
     format!("Appearance: {}", appearance.label())
+}
+
+/// The pill after flipping the saved-stop rings.
+pub fn saved_toggle_pill(on: bool) -> &'static str {
+    if on {
+        "Saved stops shown"
+    } else {
+        "Saved stops hidden"
+    }
 }
 
 /// Megabytes for an estimate, rounded, at least 1.
@@ -87,6 +98,15 @@ impl StopsApp {
         self.area_armed = false;
         self.sheet_mode = SheetMode::MapOptions;
         self.sheet.open();
+        cx.notify();
+    }
+
+    /// Shows or hides the saved-stop rings, remembering the choice.
+    fn toggle_saved_on_map(&mut self, cx: &mut Context<Self>) {
+        self.prefs.show_saved_on_map = !self.prefs.show_saved_on_map;
+        self.save_prefs(cx);
+        self.map.forget_scene();
+        self.show_pill(saved_toggle_pill(self.prefs.show_saved_on_map), None, cx);
         cx.notify();
     }
 
@@ -211,6 +231,48 @@ impl StopsApp {
             .on_click(cx.listener(|this, _, _, cx| this.tap_area_download(cx)))
             .into_any_element();
 
+        let centre = self.map.viewport.center;
+        let zoom = display_zoom(&self.map.viewport);
+        let copy_link = list_row(theme, None, "Copy map link", None, None)
+            .id("map-copy-link")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(osm_view_url(centre, zoom)));
+                this.sheet.close();
+                this.show_pill("Map link copied", None, cx);
+                cx.notify();
+            }))
+            .into_any_element();
+        let share_view = list_row(theme, None, "Share this view", None, None)
+            .id("map-share-view")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.sheet.close();
+                this.share_out("Map view".into(), map_view_share_text(centre, zoom), cx);
+                cx.notify();
+            }))
+            .into_any_element();
+        let copy_centre = list_row(theme, None, "Copy centre as", None, None)
+            .id("map-copy-centre")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.open_copy_as("Map centre".into(), centre, cx);
+            }))
+            .into_any_element();
+        let mut view_rows = vec![copy_link, share_view, copy_centre];
+        if !self.saved.stops.is_empty() {
+            let on = self.prefs.show_saved_on_map;
+            view_rows.push(
+                list_row(
+                    theme,
+                    None,
+                    "Saved stops on map",
+                    None,
+                    Some(if on { "On" } else { "Off" }.into()),
+                )
+                .id("map-saved-toggle")
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_saved_on_map(cx)))
+                .into_any_element(),
+            );
+        }
+
         let mut body = div()
             .flex()
             .flex_col()
@@ -218,7 +280,9 @@ impl StopsApp {
             .child(Self::sheet_title(theme, "Map options"))
             .child(Self::footnote(theme, "Appearance"))
             .child(appearance)
-            .child(section(theme, None, [download]));
+            .child(section(theme, None, [download]))
+            .child(Self::footnote(theme, "This view"))
+            .child(section(theme, None, view_rows));
         if let Some(row) = self.area_progress_row(theme, "map-area-cancel", cx) {
             body = body.child(row);
         }
@@ -268,6 +332,12 @@ mod tests {
             area_subtitle(&plan(1, 8, false)),
             "1 tile, about 1 MB, up to zoom 8"
         );
+    }
+
+    #[test]
+    fn the_saved_toggle_names_the_new_state() {
+        assert_eq!(saved_toggle_pill(true), "Saved stops shown");
+        assert_eq!(saved_toggle_pill(false), "Saved stops hidden");
     }
 
     #[test]

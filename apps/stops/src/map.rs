@@ -2033,7 +2033,12 @@ impl StopsApp {
                     (coord, d.gtfs_stop.is_some())
                 })
         });
-        let saved_coords: Vec<Coord> = self.saved.stops.iter().map(SavedStop::center).collect();
+        let show_saved = self.prefs.show_saved_on_map;
+        let saved_coords: Vec<Coord> = if show_saved {
+            self.saved.stops.iter().map(SavedStop::center).collect()
+        } else {
+            Vec::new()
+        };
         let key = SceneKey {
             viewport,
             size,
@@ -2042,7 +2047,11 @@ impl StopsApp {
             pins,
             trail: self.map.trail.revision(),
             measure: self.map.measure_points(),
-            saved: saved_key(&self.saved),
+            saved: if show_saved {
+                saved_key(&self.saved)
+            } else {
+                0
+            },
             feed: self.gtfs.as_ref().map_or(0, |f| Arc::as_ptr(f) as usize),
             pattern: self.map.pattern,
             cover,

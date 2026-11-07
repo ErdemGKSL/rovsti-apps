@@ -313,9 +313,15 @@ Rules that follow:
 | `section_header`, `empty_state` | per-app text | 2.10 |
 | `layout::content_bottom_inset` | `content_bottom_inset` and `content_bottom_inset_with` | 2.3 |
 
-### 2.14 Migration status
+### 2.14 Migrated screens
 
-| Screen | State |
-|--------|-------|
-| Messages inbox | proof screen for the system (see `_bmad-output/plans/layout-system.md`) |
-| Everything else | per-app units, using the components above |
+| Screen | State | Shots |
+|--------|-------|-------|
+| Messages inbox (header, Status row, chips, Spam row, chat rows, end inset) | Done: `PageHeader`, `ListRow`, `avatar_stack`, `filter_chip_row`, `source_badge`, `content_bottom_inset` | `messages/01-inbox`, `02-unread-filter`, `03-inbox-empty`, `09-status`, `10-inbox-end` |
+| Messages other screens (conversation, composer, search, settings) | Left to the Messages per-app unit | |
+| Phone (all screens) | Left to the Phone per-app unit | |
+| Contacts (all screens) | Left to the Contacts per-app unit | |
+| Stops (all screens) | Left to the Stops per-app unit | |
+
+The refreshed `docs/screenshots/baseline/messages.png` shows the Messages inbox on the
+system; the other three baselines are still the "before" pictures.

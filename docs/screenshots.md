@@ -25,6 +25,7 @@ The shared rig has a smoke test and the text-field state gallery:
 cargo test -p rovsti_ui --features shots shots -- --ignored --nocapture   # smoke + fields
 cargo test -p rovsti_ui --features shots fields -- --ignored --nocapture  # fields only
 cargo test -p rovsti_ui --features shots field_touch -- --ignored --nocapture  # handles + edit menu
+cargo test -p rovsti_ui --features shots layout -- --ignored --nocapture  # layout component gallery
 ```
 
 Each app test takes under a minute once built (about 0.5 to 2.5 s per shot). The first
@@ -65,6 +66,27 @@ The caret blinks (530 ms on/off) on a device. The shots must be stable, so the r
 `rovsti_ui::field::set_blink(false)` (the caret stays solid). Do the same in any new
 harness or test that captures a focused field.
 
+## Layout gallery
+
+`03-layout-{dark,light}.png` (in `target/shots/rovsti_ui/`) shows the shared layout
+building blocks on one page: page headers, a section header, the list-row variants (unread,
+muted and pinned, long title, OTP chip, avatar stack, merged SMS+WhatsApp contact), a
+filter chip row and an empty state. Thin guides mark the 16 dp margins so alignment can be
+judged by eye. The spec is `docs/design/layout.md`; the source is
+`crates/rovsti_ui/src/shots/layout.rs`.
+
+## Simulated safe area
+
+The test window has no status bar or home indicator, so `Rig::open` sets a simulated
+safe area for every shot with `rovsti_ui::layout::set_simulated_safe_area`: 24 dp on top
+and 16 dp at the bottom (`SIM_SAFE_TOP`, `SIM_SAFE_BOTTOM` in `crates/rovsti_ui/src/shots.rs`).
+Headers and `layout::content_bottom_inset` read it like the real window insets on a
+device, so a scrollable view that forgets the bottom inset shows its last row under the tab
+bar. Do not set it in app code.
+
+`messages/10-inbox-end-{dark,light}.png` guards this: the inbox is scrolled to the very
+end and the last row must sit fully above the floating tab bar.
+
 ## Output
 
 Files go to `target/shots/<app>/` (or `$CARGO_TARGET_DIR/shots/<app>/`):
@@ -81,7 +103,7 @@ path as it is written. `target/shots/rovsti_ui/` holds `00-smoke-*` and `01-fiel
 | App | Scenes | Files |
 | --- | --- | --- |
 | phone | 13 | 27 + sheet |
-| messages | 13 | 27 + sheet |
+| messages | 14 | 29 + sheet |
 | contacts | 13 | 27 + sheet |
 | stops | 12 | 25 + sheet |
 

@@ -34,6 +34,7 @@ use crate::{
     backend::{Backend, BackendEvent},
     inbox::duration_label,
     keyed_list::{KeyedList, key_of},
+    media_viewer::{ViewerItem, ViewerSource},
     photos::ContactPhotos,
     schedule_ui::{self, StripItem, StripKey},
     ticks::{Tick, read_color, ticks},
@@ -110,6 +111,11 @@ pub enum ConversationEvent {
     Share(String),
     /// A short message for the page's pill (save results).
     Notice(String),
+    /// A loaded picture was tapped: the page opens the full-screen viewer.
+    OpenMedia {
+        items: Vec<ViewerItem>,
+        index: usize,
+    },
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
@@ -2086,11 +2092,36 @@ impl Conversation {
         let save_here = !downloadable && saveable(*kind);
         let mut card = div().flex().flex_col().gap(px(4.0));
         if let Some(image) = self.cached_image(&message.id) {
+            let item = ViewerItem {
+                key: message.id.clone(),
+                title: if message.from_me {
+                    "You".into()
+                } else {
+                    self.title.clone()
+                },
+                mime: mime.clone(),
+                source: ViewerSource::WaMedia {
+                    message_id: message.id.clone(),
+                },
+                at_ms: message.timestamp_ms,
+                placeholder: Some(image.clone()),
+            };
             card = card.child(
                 img(image)
+                    .id(SharedString::from(format!("image-{}", message.id)))
                     .max_w(px(240.0))
                     .max_h(px(320.0))
-                    .rounded(radius::CARD),
+                    .rounded(radius::CARD)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        // An open strip is closed by the bubble's own tap.
+                        if this.strip.is_none() {
+                            cx.stop_propagation();
+                            cx.emit(ConversationEvent::OpenMedia {
+                                items: vec![item.clone()],
+                                index: 0,
+                            });
+                        }
+                    })),
             );
         } else {
             let status = if self.media_loading.contains(&message.id) {
@@ -3343,7 +3374,7 @@ fn saveable(kind: MediaKind) -> bool {
 }
 
 /// A message id as a safe cache file stem.
-fn cache_stem(id: &str) -> String {
+pub(crate) fn cache_stem(id: &str) -> String {
     id.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
         .collect()

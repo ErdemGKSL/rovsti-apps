@@ -16,6 +16,7 @@ mod files;
 mod headless;
 mod inbox;
 mod keyed_list;
+mod media_viewer;
 mod new_conversation;
 mod notifications;
 mod photos;
@@ -240,6 +241,8 @@ struct MessagesApp {
     remote_scheduled: Vec<ScheduledText>,
     /// GPUI asked the host for the Back key (a sheet is open).
     back_enabled: bool,
+    /// The full-screen picture viewer, over the open chat.
+    media_viewer: Option<media_viewer::MediaViewer>,
     /// The gateway's chats as inbox threads (SMS comes from the backend).
     /// Change it through [`Self::wa_threads_mut`], which marks the inbox stale.
     drafts: drafts::Drafts,
@@ -491,6 +494,7 @@ impl MessagesApp {
             digests: Digests::default(),
             remote_scheduled: Vec::new(),
             back_enabled: false,
+            media_viewer: None,
             drafts: drafts::Drafts::default(),
             drafts_loading: false,
             drafts_loaded: false,
@@ -1113,6 +1117,9 @@ impl MessagesApp {
             ConversationEvent::Notice(text) => {
                 this.show_pill(text.clone());
                 cx.notify();
+            }
+            ConversationEvent::OpenMedia { items, index } => {
+                this.open_media_viewer(items.clone(), *index, cx);
             }
         })
         .detach();
@@ -2361,7 +2368,8 @@ impl MessagesApp {
     /// message page, a step inside the WhatsApp settings, or any tab but the first (Chats). When
     /// it has not, Back leaves the app.
     fn can_go_back(&self, cx: &App) -> bool {
-        self.schedule.is_open()
+        self.media_viewer.is_some()
+            || self.schedule.is_open()
             || self.row_menu.is_some()
             || self.channel_pick.is_some()
             || self.search_open
@@ -2375,7 +2383,9 @@ impl MessagesApp {
 
     /// System Back: one step out of the top-most layer.
     fn go_back(&mut self, cx: &mut Context<Self>) {
-        if self.schedule.is_open() {
+        if self.back_media_viewer(cx) {
+            // The picture viewer closed first.
+        } else if self.schedule.is_open() {
             self.close_schedule(cx);
         } else if self.channel_pick.is_some() {
             self.channel_pick = None;
@@ -3057,6 +3067,9 @@ impl MessagesApp {
         }
         let offset = self.backend.read(cx).locale().tz_offset_s;
         let mut out = Vec::new();
+        self.sync_media_viewer(window);
+        // The pill is drawn after the viewer so it stays visible over it.
+        out.extend(self.media_viewer_overlay(theme, window, cx));
         out.extend(self.pill.render(theme, self.pill_bottom(cx), {
             let entity = cx.entity();
             move |pointer, position, _, cx| {
@@ -3857,6 +3870,7 @@ impl Render for MessagesApp {
                 | self.schedule.sheet.tick(dt)
                 | self.schedule.sheet.tick_real(real)
                 | self.pill.tick(dt)
+                | self.media_viewer.as_mut().is_some_and(|v| v.tick(dt))
                 | fading
         });
         self.motion = motion;

@@ -11,6 +11,8 @@ use crate::{ActiveTrip, Coord, Endpoint};
 pub const MAX_RECORDS: usize = 500;
 /// Points closer than this count as the same one in "recent".
 pub const RECENT_DEDUPE_M: f64 = 100.0;
+/// A finished trip is offered as the "last trip" card for this long.
+pub const LAST_TRIP_CARD_MS: i64 = 12 * 3_600_000;
 const DAY_MS: i64 = 86_400_000;
 const TOP_LEN: usize = 3;
 
@@ -124,6 +126,62 @@ impl TripRecord {
     }
 }
 
+/// "under 1 min", "18 min", "1 h 05 min".
+pub fn format_duration(ms: u64) -> String {
+    let minutes = ms / 60_000;
+    match minutes {
+        0 => "under 1 min".to_owned(),
+        1..=59 => format!("{minutes} min"),
+        _ => format!("{} h {:02} min", minutes / 60, minutes % 60),
+    }
+}
+
+/// "1 snooze", "3 snoozes"; `None` without snoozes.
+pub fn snoozes_text(n: u8) -> Option<String> {
+    match n {
+        0 => None,
+        1 => Some("1 snooze".to_owned()),
+        n => Some(format!("{n} snoozes")),
+    }
+}
+
+impl TripRecord {
+    /// "A – B" from the end labels (empty ones read Point A / Point B), the
+    /// label of a legacy record, or "Trip".
+    pub fn title(&self) -> String {
+        if self.a.is_some() || self.b.is_some() {
+            let name = |e: &Option<Endpoint>, fallback: &str| {
+                e.as_ref()
+                    .map(|e| e.label.trim())
+                    .filter(|l| !l.is_empty())
+                    .unwrap_or(fallback)
+                    .to_owned()
+            };
+            return format!(
+                "{} \u{2013} {}",
+                name(&self.a, "Point A"),
+                name(&self.b, "Point B")
+            );
+        }
+        let label = self.label.trim();
+        if label.is_empty() {
+            "Trip".to_owned()
+        } else {
+            label.to_owned()
+        }
+    }
+
+    /// "18 min \u{b7} 3.4 km \u{b7} 1 snooze" (no snooze part at 0).
+    pub fn summary_line(&self) -> String {
+        let mut parts = vec![
+            format_duration(self.duration_ms()),
+            crate::session::format_distance(self.travelled_m.max(0.0)),
+        ];
+        parts.extend(snoozes_text(self.snoozes));
+        parts.join(" \u{b7} ")
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct History {
@@ -158,6 +216,14 @@ impl Stats {
 }
 
 impl History {
+    /// The newest record when it ended at most [`LAST_TRIP_CARD_MS`] before
+    /// `now_ms` (a future end time does not count).
+    pub fn last_finished(&self, now_ms: i64) -> Option<&TripRecord> {
+        let r = self.records.first()?;
+        let age = now_ms.checked_sub(r.ended_ms)?;
+        (0..=LAST_TRIP_CARD_MS).contains(&age).then_some(r)
+    }
+
     /// Adds a record at the front and drops the oldest beyond the cap.
     pub fn push(&mut self, record: TripRecord) {
         self.records.insert(0, record);
@@ -291,6 +357,81 @@ impl History {
 mod tests {
     use super::*;
     use crate::{NoticeRule, session::NoticeState};
+
+    fn named(label: &str) -> Endpoint {
+        Endpoint {
+            label: label.into(),
+            coord: Coord::new(41.0, 29.0),
+        }
+    }
+
+    fn pair_record(a: &str, b: &str) -> TripRecord {
+        TripRecord {
+            a: Some(named(a)),
+            b: Some(named(b)),
+            started_ms: 0,
+            ended_ms: 18 * 60_000,
+            travelled_m: 3_400.0,
+            ..TripRecord::default()
+        }
+    }
+
+    #[test]
+    fn format_duration_edges() {
+        assert_eq!(format_duration(0), "under 1 min");
+        assert_eq!(format_duration(59_999), "under 1 min");
+        assert_eq!(format_duration(60_000), "1 min");
+        assert_eq!(format_duration(59 * 60_000), "59 min");
+        assert_eq!(format_duration(60 * 60_000), "1 h 00 min");
+        assert_eq!(format_duration(65 * 60_000), "1 h 05 min");
+    }
+
+    #[test]
+    fn snoozes_text_pluralises() {
+        assert_eq!(snoozes_text(0), None);
+        assert_eq!(snoozes_text(1).as_deref(), Some("1 snooze"));
+        assert_eq!(snoozes_text(3).as_deref(), Some("3 snoozes"));
+    }
+
+    #[test]
+    fn titles() {
+        assert_eq!(pair_record("Home", "Work").title(), "Home \u{2013} Work");
+        assert_eq!(pair_record("", " ").title(), "Point A \u{2013} Point B");
+        let legacy = TripRecord {
+            label: "Kadikoy".into(),
+            destination: Some(Coord::new(41.0, 29.0)),
+            ..TripRecord::default()
+        };
+        assert_eq!(legacy.title(), "Kadikoy");
+        assert_eq!(TripRecord::default().title(), "Trip");
+    }
+
+    #[test]
+    fn summary_lines() {
+        let mut r = pair_record("A", "B");
+        assert_eq!(r.summary_line(), "18 min \u{b7} 3.4 km");
+        r.snoozes = 2;
+        assert_eq!(r.summary_line(), "18 min \u{b7} 3.4 km \u{b7} 2 snoozes");
+    }
+
+    #[test]
+    fn last_finished_window() {
+        let now = 100 * 3_600_000;
+        let rec = |ended_ms| TripRecord {
+            ended_ms,
+            ..TripRecord::default()
+        };
+        let mut h = History::default();
+        assert!(h.last_finished(now).is_none());
+        h.push(rec(now - 60_000));
+        assert!(h.last_finished(now).is_some());
+        h.records[0].ended_ms = now - 13 * 3_600_000;
+        assert!(h.last_finished(now).is_none());
+        h.records[0].ended_ms = now - LAST_TRIP_CARD_MS;
+        assert!(h.last_finished(now).is_some());
+        h.records[0].ended_ms = now + 1;
+        assert!(h.last_finished(now).is_none());
+    }
 
     #[test]
     fn take_and_put_back_round_trip_the_order() {

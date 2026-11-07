@@ -119,6 +119,37 @@ pub fn to_gpx(records: &[TripRecord]) -> String {
     out
 }
 
+/// Shareable summary of a finished trip; a second line with a geo link to B
+/// follows when B is known. Times are local (`tz_offset_s` east of UTC).
+pub fn share_text(record: &TripRecord, tz_offset_s: i32) -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let (y, m, d) = rovsti_core::contact_dates::local_ymd(record.ended_ms, tz_offset_s);
+    let secs = (record.ended_ms.div_euclid(1000) + i64::from(tz_offset_s)).rem_euclid(DAY_S);
+    let when = format!(
+        "{d} {} {y}, {:02}:{:02}",
+        MONTHS[usize::from(m.clamp(1, 12) - 1)],
+        secs / 3600,
+        secs % 3600 / 60
+    );
+    let title = record.title();
+    let mut out = match record.outcome {
+        Outcome::Arrived => format!("Arrived at {title} on {when}. {}.", record.summary_line()),
+        Outcome::Cancelled => {
+            format!(
+                "Trip to {title} stopped on {when}. {}.",
+                record.summary_line()
+            )
+        }
+    };
+    if let Some(b) = &record.b {
+        out.push('\n');
+        out.push_str(&crate::dest::point_qr_payload(b.coord, Some(&title)));
+    }
+    out
+}
+
 /// `rovsti-stops-history-2026-11-07.csv` for `("csv", "2026-11-07")`.
 pub fn export_file_name(ext: &str, today: &str) -> String {
     format!(
@@ -245,5 +276,40 @@ mod tests {
             export_file_name(".gpx", "2026-11-07"),
             "rovsti-stops-history-2026-11-07.gpx"
         );
+    }
+
+    #[test]
+    fn share_text_variants() {
+        // 2026-11-05 15:42 UTC is 18:42 at +03:00.
+        let ended = 1_793_893_320_000;
+        let mut r = TripRecord {
+            a: Some(ep("Home", 41.0, 29.0)),
+            b: Some(ep("Work", 41.1, 29.1)),
+            started_ms: ended - 18 * 60_000,
+            ended_ms: ended,
+            travelled_m: 3_400.0,
+            ..TripRecord::default()
+        };
+        let text = share_text(&r, 3 * 3600);
+        let (first, link) = text.split_once('\n').unwrap();
+        assert_eq!(
+            first,
+            "Arrived at Home \u{2013} Work on 5 Nov 2026, 18:42. 18 min \u{b7} 3.4 km."
+        );
+        assert!(link.starts_with("geo:41.100000,29.100000"), "{link}");
+
+        r.outcome = Outcome::Cancelled;
+        let text = share_text(&r, 3 * 3600);
+        assert!(text.starts_with("Trip to Home \u{2013} Work stopped on 5 Nov 2026, 18:42."));
+
+        let legacy = TripRecord {
+            label: "Kadikoy".into(),
+            destination: Some(Coord::new(41.0, 29.0)),
+            ended_ms: ended,
+            ..TripRecord::default()
+        };
+        let text = share_text(&legacy, 3 * 3600);
+        assert!(text.starts_with("Arrived at Kadikoy on 5 Nov 2026, 18:42."));
+        assert!(!text.contains('\n'));
     }
 }

@@ -137,12 +137,7 @@ const SEARCH_FROM: usize = 8;
 
 /// "under 1 min", "18 min", "1 h 05 min".
 pub fn duration_text(ms: u64) -> String {
-    let minutes = ms / 60_000;
-    match minutes {
-        0 => "under 1 min".to_owned(),
-        1..=59 => format!("{minutes} min"),
-        _ => format!("{} h {:02} min", minutes / 60, minutes % 60),
-    }
+    rovsti_geo::history::format_duration(ms)
 }
 
 /// "850 m" under a kilometre, then "3.4 km", "152 km" from 100 km.

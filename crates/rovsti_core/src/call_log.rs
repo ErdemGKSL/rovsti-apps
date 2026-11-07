@@ -551,9 +551,32 @@ pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Inverse of [`civil_from_days`]: (year, month, day) to days since 1970-01-01.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let mp = i64::from(if m > 2 { m - 3 } else { m + 9 });
+    let doy = (153 * mp + 2) / 5 + i64::from(d) - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn civil_round_trip() {
+        assert_eq!(days_from_civil(1970, 1, 1), 0);
+        let start = days_from_civil(1970, 1, 1);
+        let end = days_from_civil(2100, 12, 31);
+        for day in (start..=end).step_by(7).chain([end]) {
+            let (y, m, d) = civil_from_days(day);
+            assert_eq!(days_from_civil(y, m, d), day);
+        }
+    }
 
     #[test]
     fn duration_formats() {

@@ -37,6 +37,8 @@ pub mod contact_frequent;
 pub mod contact_history;
 /// Contacts shared to the app: .vcf files and text.
 pub mod contact_intake;
+/// My card and emergency contacts: lookup, row texts, toggle, share text.
+pub mod contact_me;
 /// Per-contact ringtone and voicemail options, and the Home screen shortcut spec.
 pub mod contact_options;
 pub mod contact_photo;

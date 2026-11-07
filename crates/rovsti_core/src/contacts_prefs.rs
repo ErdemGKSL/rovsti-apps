@@ -16,6 +16,9 @@ pub const MAX_FILE_BYTES: usize = 64 * 1024;
 /// Most favorites keys kept in the saved order.
 pub const MAX_ORDER: usize = 300;
 
+/// Most emergency contacts.
+pub const MAX_EMERGENCY: usize = 5;
+
 fn schema() -> u32 {
     SCHEMA_VERSION
 }
@@ -41,6 +44,12 @@ pub struct ContactsPrefs {
     /// Lookup keys of the favorites in the user's order.
     #[serde(default)]
     pub favorites_order: Vec<String>,
+    /// Lookup key of the contact that is the user.
+    #[serde(default)]
+    pub my_card: Option<String>,
+    /// Lookup keys of the emergency contacts in the user's order.
+    #[serde(default)]
+    pub emergency: Vec<String>,
 }
 
 fn default_hour() -> u8 {
@@ -65,6 +74,19 @@ impl ContactsPrefs {
     }
 }
 
+impl ContactsPrefs {
+    /// The emergency keys: no empty or repeated keys, at most `MAX_EMERGENCY`.
+    pub fn emergency_keys(&self) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        self.emergency
+            .iter()
+            .filter(|k| !k.is_empty() && seen.insert(k.as_str()))
+            .take(MAX_EMERGENCY)
+            .cloned()
+            .collect()
+    }
+}
+
 impl Default for ContactsPrefs {
     fn default() -> Self {
         Self {
@@ -75,6 +97,8 @@ impl Default for ContactsPrefs {
             birthday_reminders: false,
             reminder_hour: default_hour(),
             favorites_order: Vec::new(),
+            my_card: None,
+            emergency: Vec::new(),
         }
     }
 }
@@ -98,6 +122,8 @@ impl ContactsPrefs {
             birthday_reminders: false,
             reminder_hour: default_hour(),
             favorites_order: Vec::new(),
+            my_card: None,
+            emergency: Vec::new(),
         }
     }
 }
@@ -183,6 +209,32 @@ mod tests {
         };
         assert_eq!(many.order().len(), MAX_ORDER);
         assert_eq!(many.order()[299], "k299");
+    }
+
+    #[test]
+    fn my_card_and_emergency_default_empty_and_old_json_loads() {
+        let d = ContactsPrefs::default();
+        assert_eq!(d.my_card, None);
+        assert!(d.emergency_keys().is_empty());
+        let p: ContactsPrefs = serde_json::from_str(r#"{"favorites_order":["a"]}"#).expect("ok");
+        assert_eq!(p.my_card, None);
+        assert!(p.emergency.is_empty());
+        let p: ContactsPrefs =
+            serde_json::from_str(r#"{"my_card":"k1","emergency":["a"]}"#).expect("ok");
+        assert_eq!(p.my_card.as_deref(), Some("k1"));
+        assert_eq!(p.emergency_keys(), ["a"]);
+    }
+
+    #[test]
+    fn emergency_keys_dedup_drop_empty_and_cap() {
+        let p = ContactsPrefs {
+            emergency: ["a", "", "b", "a", "c", "d", "e", "f", "g"]
+                .map(String::from)
+                .to_vec(),
+            ..ContactsPrefs::default()
+        };
+        assert_eq!(p.emergency_keys(), ["a", "b", "c", "d", "e"]);
+        assert_eq!(p.emergency_keys().len(), MAX_EMERGENCY);
     }
 
     #[test]

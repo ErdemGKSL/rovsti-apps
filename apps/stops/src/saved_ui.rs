@@ -31,6 +31,34 @@ pub const SEARCH_ABOVE: usize = 5;
 /// Imported stops listed on the confirm sheet before "and N more".
 const PREVIEW_ROWS: usize = 5;
 
+/// Which export the system save dialog is for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ExportKind {
+    #[default]
+    SavedStops,
+    History,
+}
+
+/// The pill for the answer of a save dialog: `None` when it was cancelled.
+pub fn export_pill(kind: ExportKind, ok: bool, error: bool) -> Option<String> {
+    if ok {
+        Some(
+            match kind {
+                ExportKind::SavedStops => "Saved stops exported",
+                ExportKind::History => "History exported",
+            }
+            .to_owned(),
+        )
+    } else {
+        error.then(|| "Can't export: the file was not saved".to_owned())
+    }
+}
+
+/// Whether History shows its search field for `count` trips.
+pub fn history_field_visible(count: usize) -> bool {
+    count > SEARCH_ABOVE
+}
+
 /// Whether the Saved tab shows its search field for `count` stops.
 pub fn show_search(count: usize) -> bool {
     count > SEARCH_ABOVE
@@ -602,7 +630,9 @@ impl StopsApp {
         let stamp = export_stamp(crate::store::now_ms(), self.tz_offset_s);
         let name = places_io::export_file_name(ext, &stamp);
         // The system dialog is the feedback; its answer comes as a document result.
+        self.pending_export = Some(ExportKind::SavedStops);
         if let Err(words) = backend::export_text(&name, mime, &text) {
+            self.pending_export = None;
             self.show_pill(format!("Can't export: {words}"), None, cx);
         }
     }
@@ -886,6 +916,26 @@ mod tests {
         assert_eq!(add_label(12), "Add 12 stops");
         assert_eq!(more_text(5), None);
         assert_eq!(more_text(8).as_deref(), Some("and 3 more"));
+    }
+
+    #[test]
+    fn export_pills_name_the_export() {
+        assert_eq!(
+            export_pill(ExportKind::History, true, false).as_deref(),
+            Some("History exported")
+        );
+        assert_eq!(
+            export_pill(ExportKind::SavedStops, true, false).as_deref(),
+            Some("Saved stops exported")
+        );
+        assert!(export_pill(ExportKind::History, false, true).is_some());
+        assert_eq!(export_pill(ExportKind::History, false, false), None);
+    }
+
+    #[test]
+    fn history_field_shows_above_five_trips() {
+        assert!(!history_field_visible(5));
+        assert!(history_field_visible(6));
     }
 
     #[test]

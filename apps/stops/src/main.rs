@@ -90,6 +90,8 @@ pub(crate) enum PillAction {
     /// The saved stops as they were before an import.
     RestoreSaved(SavedStops),
     RestoreAlarmSound(Option<rovsti_geo::prefs::AlarmSound>),
+    /// Takes back "Save as stop": the saved stop with this id.
+    UndoSave(u64),
 }
 
 pub(crate) struct StopsApp {
@@ -180,6 +182,15 @@ pub(crate) struct StopsApp {
     pub(crate) confirm_clear: bool,
     /// The History row whose actions (Use, Delete) are showing.
     pub(crate) history_open: Option<usize>,
+    /// What the History search field holds; not persisted.
+    pub(crate) history_query: String,
+    pub(crate) history_field: Entity<TextField>,
+    /// Which outcomes History lists; not persisted.
+    pub(crate) history_filter: rovsti_geo::OutcomeFilter,
+    /// The record indices History shows now (`History::matching`).
+    pub(crate) history_view: Vec<usize>,
+    /// The export whose save dialog is open, so its answer is worded right.
+    pub(crate) pending_export: Option<saved_ui::ExportKind>,
     /// The first tap on "Remove transit data" has armed the second.
     pub(crate) confirm_remove_feed: bool,
     /// The phone's time zone, seconds east of UTC, for the dates in History.
@@ -206,6 +217,17 @@ impl StopsApp {
         let saved_field = cx.new(TextField::new);
         cx.observe(&saved_field, |this, field, cx| {
             this.saved_query = field.read(cx).text().to_owned();
+            cx.notify();
+        })
+        .detach();
+        let history_field = cx.new(TextField::new);
+        cx.observe(&history_field, |this, field, cx| {
+            let text = field.read(cx).text();
+            if text != this.history_query {
+                this.history_query = text.to_owned();
+                this.history_open = None;
+                this.history_list.scroll_to_top();
+            }
             cx.notify();
         })
         .detach();
@@ -357,6 +379,11 @@ impl StopsApp {
             chat_view: Vec::new(),
             confirm_clear: false,
             history_open: None,
+            history_query: String::new(),
+            history_field,
+            history_filter: rovsti_geo::OutcomeFilter::All,
+            history_view: Vec::new(),
+            pending_export: None,
             confirm_remove_feed: false,
             tz_offset_s: 0,
             tile_usage: None,
@@ -501,10 +528,11 @@ impl StopsApp {
                 }
                 Ok(result) if result.op == DocumentOp::ExportMessages => {
                     // A cancelled save dialog is not an error: say nothing.
-                    if result.ok {
-                        self.show_pill("Saved stops exported", None, cx);
-                    } else if result.error.is_some() {
-                        self.show_pill("Can't export: the file was not saved", None, cx);
+                    let kind = self.pending_export.take().unwrap_or_default();
+                    if let Some(text) =
+                        saved_ui::export_pill(kind, result.ok, result.error.is_some())
+                    {
+                        self.show_pill(text, None, cx);
                     }
                 }
                 Ok(result) if result.op == DocumentOp::ImportMessages => {
@@ -659,6 +687,7 @@ impl StopsApp {
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
             PillAction::RestoreSaved(saved) => self.restore_saved(saved, cx),
             PillAction::RestoreAlarmSound(sound) => self.restore_alarm_sound(sound, cx),
+            PillAction::UndoSave(id) => self.undo_save(id, cx),
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);
                 self.map.follow = true;

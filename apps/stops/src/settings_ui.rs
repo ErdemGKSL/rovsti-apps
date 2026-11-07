@@ -885,36 +885,64 @@ impl StopsApp {
             .into_any_element();
             return Page::Flow(self.settings_subpage(theme, "History", body, cx));
         }
-        let records = self.history.records.len();
-        // The statistics change height with the records behind them.
-        let keys = [
+        // A hidden field must not keep filtering.
+        let query = if crate::saved_ui::history_field_visible(self.history.records.len()) {
+            self.history_query.as_str()
+        } else {
+            ""
+        };
+        self.history_view = self.history.matching(query, self.history_filter);
+        let shown = self.history_view.len();
+        // The statistics change height with the records behind them; the controls with
+        // the field being there.
+        let controls = u64::from(crate::saved_ui::history_field_visible(
+            self.history.records.len(),
+        ));
+        let mut keys = vec![
             lists::key(0, 0),
-            lists::key(1, records as u64),
-            lists::key(2, 0),
-        ]
-        .into_iter()
-        .chain(self.history.records.iter().enumerate().map(|(i, r)| {
+            lists::key(1, self.history.records.len() as u64),
+            lists::key(2, controls),
+        ];
+        if shown == 0 {
+            keys.push(lists::key(6, 0));
+        }
+        keys.extend(self.history_view.iter().map(|&i| {
+            let r = &self.history.records[i];
             // An open row is taller: a new key makes the list measure it again.
             let kind = if self.history_open == Some(i) { 5 } else { 3 };
             lists::key(kind, r.id)
-        }))
-        .chain([lists::key(4, 0)])
-        .collect();
+        }));
+        keys.push(lists::key(4, 0));
         let state = self.history_list.sync(keys);
         Page::List(Box::new(list(
             state,
             cx.processor(move |this, ix: usize, window, cx| {
                 let theme = rovsti_ui::current_theme(window);
-                this.history_item(theme, ix, cx)
+                this.history_item(theme, ix, window, cx)
             }),
         )))
     }
 
     /// Item `ix` of the History list: header, statistics, "Trips", the
     /// records, Clear.
-    fn history_item(&mut self, theme: Theme, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+    fn history_item(
+        &mut self,
+        theme: Theme,
+        ix: usize,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         const RECORDS_FROM: usize = 3;
-        let count = self.history.records.len();
+        let count = self.history_view.len();
+        if count == 0 && ix == RECORDS_FROM {
+            return empty_state(
+                theme,
+                "No trips match",
+                "Try another word, or show All trips.",
+            )
+            .into_any_element();
+        }
+
         match ix {
             0 => Self::subpage_header(theme, "History", cx),
             1 => {
@@ -924,9 +952,10 @@ impl StopsApp {
                 });
                 section(theme, Some("Statistics".into()), rows).into_any_element()
             }
-            2 => lists::section_header(theme, "Trips", 20.0),
+            2 => self.history_controls(theme, window, cx),
             ix if ix - RECORDS_FROM < count => {
-                let i = ix - RECORDS_FROM;
+                let place_at = ix - RECORDS_FROM;
+                let i = self.history_view[place_at];
                 let r = &self.history.records[i];
                 let open = self.history_open == Some(i);
                 let pair = match (&r.a, &r.b) {
@@ -956,14 +985,37 @@ impl StopsApp {
                     };
                     cx.notify();
                 }));
-                let place = lists::Place::of(i, count);
+                let place = lists::Place::of(place_at, count);
                 let grouped = lists::grouped(theme, place, row);
                 if !open {
                     return grouped.into_any_element();
                 }
                 let colors = theme::colors(theme);
-                let mut pills = div().px(px(16.0)).pt(px(8.0)).flex().gap(px(12.0));
+                let mut pills = div()
+                    .px(px(16.0))
+                    .pt(px(8.0))
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(12.0));
                 if let Some((a, b)) = pair {
+                    let (again_a, again_b) = (a.clone(), b.clone());
+                    pills = pills
+                        .child(
+                            glass_pill(theme, "Start again")
+                                .id(("history-again", i))
+                                .text_color(colors.accent)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.start_again(&again_a, &again_b, cx);
+                                })),
+                        )
+                        .child(
+                            glass_pill(theme, "Save as stop")
+                                .id(("history-save", i))
+                                .text_color(colors.accent)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.save_record_as_stop(i, cx);
+                                })),
+                        );
                     pills = pills.child(
                         glass_pill(theme, "Use")
                             .id(("history-use", i))
@@ -1007,6 +1059,161 @@ impl StopsApp {
                     .into_any_element()
             }
         }
+    }
+
+    /// "Trips", the search field, the outcome filter and the export pills.
+    fn history_controls(
+        &mut self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        let mut row = div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(16.0))
+            .pb(px(8.0));
+        if crate::saved_ui::history_field_visible(self.history.records.len()) {
+            row = row.child(div().flex_1().child(field_box(
+                theme,
+                "history-search",
+                &self.history_field,
+                "Search trips",
+                window,
+                cx,
+            )));
+        } else {
+            row = row.child(div().flex_1());
+        }
+        row = row.child(
+            glass_pill(theme, format!("Show: {}", self.history_filter.label()))
+                .id("history-filter")
+                .text_color(colors.accent)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.history_filter = this.history_filter.next();
+                    this.history_open = None;
+                    this.history_list.scroll_to_top();
+                    cx.notify();
+                })),
+        );
+        let export = div()
+            .flex()
+            .gap(px(8.0))
+            .px(px(16.0))
+            .pb(px(8.0))
+            .child(
+                glass_pill(theme, "Export CSV")
+                    .id("history-export-csv")
+                    .flex_1()
+                    .text_color(colors.accent)
+                    .on_click(cx.listener(|this, _, _, cx| this.export_history(false, cx))),
+            )
+            .child(
+                glass_pill(theme, "Export GPX")
+                    .id("history-export-gpx")
+                    .flex_1()
+                    .text_color(colors.accent)
+                    .on_click(cx.listener(|this, _, _, cx| this.export_history(true, cx))),
+            );
+        div()
+            .child(lists::section_header(theme, "Trips", 20.0))
+            .child(row)
+            .child(export)
+            .into_any_element()
+    }
+
+    /// Writes the trips on screen to a file the user picks the place of.
+    fn export_history(&mut self, gpx: bool, cx: &mut Context<Self>) {
+        let records: Vec<TripRecord> = self
+            .history_view
+            .iter()
+            .filter_map(|&i| self.history.records.get(i).cloned())
+            .collect();
+        if records.is_empty() {
+            self.show_pill("No trips to export", None, cx);
+            return;
+        }
+        let (ext, mime, text) = if gpx {
+            (
+                "gpx",
+                "application/gpx+xml",
+                rovsti_geo::history_io::to_gpx(&records),
+            )
+        } else {
+            (
+                "csv",
+                "text/csv",
+                rovsti_geo::history_io::to_csv(&records, self.tz_offset_s),
+            )
+        };
+        let stamp = crate::saved_ui::export_stamp(now_ms(), self.tz_offset_s);
+        let name = rovsti_geo::history_io::export_file_name(ext, &stamp);
+        self.pending_export = Some(crate::saved_ui::ExportKind::History);
+        if let Err(words) = backend::export_text(&name, mime, &text) {
+            self.pending_export = None;
+            self.show_pill(format!("Can't export: {words}"), None, cx);
+        }
+    }
+
+    /// "Start again": the same rule as starting a saved stop.
+    fn start_again(
+        &mut self,
+        a: &rovsti_geo::Endpoint,
+        b: &rovsti_geo::Endpoint,
+        cx: &mut Context<Self>,
+    ) {
+        if self.trip.is_some() {
+            self.show_pill("Not while a trip is running", None, cx);
+            return;
+        }
+        let a = crate::pick::dest_from_endpoint(a);
+        let b = crate::pick::dest_from_endpoint(b);
+        self.tabs.jump_to(0);
+        self.request_start(a, b, cx);
+    }
+
+    /// "Save as stop": keeps the trip's A and B in Saved; the pill offers Undo.
+    fn save_record_as_stop(&mut self, i: usize, cx: &mut Context<Self>) {
+        let Some(r) = self.history.records.get(i) else {
+            return;
+        };
+        let (Some(a), Some(b)) = (r.a.clone(), r.b.clone()) else {
+            return;
+        };
+        let mut name = rovsti_geo::saved_stops::suggest_name(self.gtfs.as_deref(), &a, &b);
+        if name.trim().is_empty() {
+            name = r.label.clone();
+        }
+        match self.saved.add(&name, a, b, now_ms()) {
+            Ok(id) => {
+                self.save_stops(cx);
+                let name = name.trim().to_owned();
+                self.show_pill(
+                    format!("Saved as {name}"),
+                    Some(crate::PillAction::UndoSave(id)),
+                    cx,
+                );
+            }
+            Err(rovsti_geo::SavedStopError::Duplicate(id)) => {
+                let name = self
+                    .saved
+                    .get(id)
+                    .map_or_else(String::new, |s| s.name.clone());
+                self.show_pill(format!("Already saved as {name}"), None, cx);
+            }
+            Err(error) => self.show_pill(error.message(), None, cx),
+        }
+    }
+
+    /// Undo on the pill: the stop saved from a trip goes again.
+    pub(crate) fn undo_save(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self.saved.remove(id) {
+            self.expanded = None;
+            self.save_stops(cx);
+        }
+        cx.notify();
     }
 
     /// Two taps: the first asks, the second clears.

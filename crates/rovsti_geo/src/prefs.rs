@@ -13,6 +13,8 @@ use crate::tiles::TileSource;
 
 /// Snooze lengths the Settings row cycles through, minutes.
 pub const SNOOZE_CHOICES: [u8; 5] = [1, 3, 5, 10, 15];
+/// Tile cache size choices the Settings row cycles through, megabytes.
+pub const TILE_CACHE_CHOICES_MB: [u32; 4] = [128, 256, 512, 1024];
 /// "Minutes before" choices for the arriving-soon message.
 pub const NOTICE_MINUTES: [u8; 3] = [5, 10, 15];
 
@@ -146,6 +148,13 @@ pub struct StopsPrefs {
     pub volume_pct: u8,
     /// `None`: the system default alarm sound.
     pub alarm_sound: Option<AlarmSound>,
+    /// Tile cache cap, megabytes (one of [`TILE_CACHE_CHOICES_MB`]).
+    #[serde(default = "default_tile_cache_mb")]
+    pub tile_cache_mb: u32,
+}
+
+fn default_tile_cache_mb() -> u32 {
+    TILE_CACHE_CHOICES_MB[0]
 }
 
 impl Default for StopsPrefs {
@@ -160,6 +169,7 @@ impl Default for StopsPrefs {
             vibration: VibrationPattern::default(),
             volume_pct: MIN_ALARM_VOLUME_PCT,
             alarm_sound: None,
+            tile_cache_mb: default_tile_cache_mb(),
         }
     }
 }
@@ -223,6 +233,22 @@ impl StopsPrefs {
         self.alarm_sound
             .as_ref()
             .map_or_else(|| "Default alarm".to_owned(), |s| s.title.clone())
+    }
+
+    /// The next cache size in [`TILE_CACHE_CHOICES_MB`] (wrapping); a stored
+    /// value not on the list snaps to the first choice.
+    pub fn next_tile_cache(&self) -> u32 {
+        TILE_CACHE_CHOICES_MB
+            .iter()
+            .position(|m| *m == self.tile_cache_mb)
+            .map_or(TILE_CACHE_CHOICES_MB[0], |i| {
+                TILE_CACHE_CHOICES_MB[(i + 1) % TILE_CACHE_CHOICES_MB.len()]
+            })
+    }
+
+    /// The tile cache cap in bytes.
+    pub fn tile_cache_bytes(&self) -> u64 {
+        u64::from(self.tile_cache_mb) * 1024 * 1024
     }
 
     /// The next snooze length in [`SNOOZE_CHOICES`] (wrapping); a stored
@@ -427,5 +453,22 @@ mod tests {
     fn old_prefs_json_has_no_tile_url() {
         let p: StopsPrefs = serde_json::from_str(r#"{"sound":false}"#).unwrap();
         assert_eq!(p.tile_url, None);
+    }
+
+    #[test]
+    fn tile_cache_default_cycle_and_snap() {
+        let mut p = StopsPrefs::default();
+        assert_eq!(p.tile_cache_mb, 128);
+        assert_eq!(p.tile_cache_bytes(), 128 * 1024 * 1024);
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            p.tile_cache_mb = p.next_tile_cache();
+            seen.push(p.tile_cache_mb);
+        }
+        assert_eq!(seen, [256, 512, 1024, 128, 256]);
+        p.tile_cache_mb = 300;
+        assert_eq!(p.next_tile_cache(), 128);
+        let old: StopsPrefs = serde_json::from_str(r#"{"sound":false}"#).unwrap();
+        assert_eq!(old.tile_cache_mb, 128);
     }
 }

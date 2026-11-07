@@ -78,10 +78,10 @@ is empty. Re-checked by grep for the open rows:
 | M26 | Shared contact card: View contact, Add with all fields, Save .vcf, Share; MMS vCards | done R4 |
 | M28 | Share a single non-image file (MMS part; WA document/audio/video) | done R4 |
 | M27 | Clear chat | cut, stays cut (SMS = Delete conversation; WA = Select all + Delete for me; no gateway endpoint) |
-| M30 | Inbox filter chips: All / Unread / WhatsApp / SMS / Groups, count in each, empty text | open (R5 S1, S4) |
-| M36 | Pin SMS conversations (local, up to 5 local pins), pinned rows lead with a pin glyph | open (R5 S1, S4) |
-| M37 | Archive SMS conversations (local); a mixed person row archives both channels; Undo | open (R5 S1, S4) |
-| M38 | Mark an SMS conversation unread (local dot), cleared on open / Mark read / Mark all read | open (R5 S1, S4) |
+| M30 | Inbox filter chips: All / Unread / WhatsApp / SMS / Groups, count in each, empty text | done (R5 S1, S4) |
+| M36 | Pin SMS conversations (local, up to 5 local pins), pinned rows lead with a pin glyph | done (R5 S1, S4) |
+| M37 | Archive SMS conversations (local); a mixed person row archives both channels; Undo | done (R5 S1, S4) |
+| M38 | Mark an SMS conversation unread (local dot), cleared on open / Mark read / Mark all read | done (R5 S1, S4) |
 | M31 | Swipe a WA bubble right to reply (axis lock, spring snap-back, haptic tick at threshold) | open (R5 S2, S5) |
 | M32 | Double-tap a WA text bubble to react 👍 (again removes it), pill on failure | open (R5 S2, S5) |
 | M33 | "Remind me" on a message: 15 min / 1 h / tonight / tomorrow; local notification opens the chat and glows the message; Cancel reminder | open (R5 S2, S3, S6) |

@@ -51,6 +51,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, TextInputAction,
     TextInputPurpose, Window, WindowBounds, WindowOptions, div, list, px, size,
 };
+use rovsti_core::inbox_filter::{self, InboxFilter};
 use rovsti_core::mute::MuteFor;
 use rovsti_core::{
     Message, MessageDirection, PhoneNumber, ThreadId, blocklist,
@@ -154,6 +155,10 @@ struct SmsRowMenu {
     sender_is_number: bool,
     /// The row is SMS-only, so it may be moved into Spam.
     can_be_spam: bool,
+    /// Local marks of the thread.
+    pinned: bool,
+    archived: bool,
+    marked_unread: bool,
 }
 
 /// Whether a sender is a blockable phone number (not missing or alphanumeric).
@@ -179,10 +184,14 @@ fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
         can_be_spam: sms.can_be_spam,
         blocked: sms.blocked,
         on_page: sms.on_page,
+        pinned: sms.pinned,
+        archived: sms.archived,
+        marked_unread: sms.marked_unread,
     });
-    // A new conversation has no provider thread to delete yet.
+    // A new conversation has no provider thread to delete or mark yet.
     if sms.thread_id < 0 {
-        actions.retain(|a| *a != sms_actions::SmsAction::Delete);
+        use sms_actions::SmsAction as A;
+        actions.retain(|a| !matches!(a, A::Delete | A::Archive | A::MarkUnread));
     }
     actions
 }
@@ -223,6 +232,8 @@ enum PillAction {
     OpenThread { thread: ThreadId, title: String },
     /// Brings back an SMS/MMS deleted a moment ago.
     UndoSmsDelete(Vec<rovsti_core::sms_timeline::SmsKey>),
+    /// Sets an SMS thread's local archive mark back.
+    SmsArchive { thread: i64, archived: bool },
 }
 
 /// The page pushed over the tabs.
@@ -284,6 +295,8 @@ struct MessagesApp {
     contacts_seen: usize,
     /// The archived chats are showing instead of the inbox.
     show_archived: bool,
+    /// The inbox filter chip picked (session only).
+    inbox_filter: InboxFilter,
     /// The scheduled-messages overview is showing instead of the inbox.
     show_scheduled: bool,
     /// Everything waiting to be sent (both queues), as of the last list sync.
@@ -354,6 +367,7 @@ struct ChatLayout {
     show_spam: bool,
     show_archived: bool,
     show_scheduled: bool,
+    filter: InboxFilter,
     /// The scheduled entries: count, failed count, soonest time.
     scheduled: (usize, usize, i64),
     /// Whether a non-blank query filters the list, and its field's edit count.
@@ -401,6 +415,10 @@ enum ChatItem {
     ArchivedBack,
     /// The "Archived" entry row.
     ArchivedFilter,
+    /// The filter chips (All, Unread, WhatsApp, SMS, Groups).
+    Filters,
+    /// Nothing matches the picked filter.
+    FilterEmpty,
     /// The "Scheduled" entry row.
     ScheduledFilter,
     /// Back from the scheduled overview to the inbox.
@@ -554,6 +572,7 @@ impl MessagesApp {
             statuses,
             contacts_seen: 0,
             show_archived: false,
+            inbox_filter: InboxFilter::All,
             show_scheduled: false,
             scheduled_entries: Vec::new(),
             row_menu: None,
@@ -690,6 +709,7 @@ impl MessagesApp {
                         rules: backend.spam_rules(),
                         blocked: backend.blocked(),
                         muted: &backend.prefs().muted,
+                        sms_marks: &backend.prefs().sms_marks,
                         locale,
                         now_ms: now,
                     },
@@ -1240,6 +1260,7 @@ impl MessagesApp {
         cx: &mut Context<Self>,
     ) {
         self.leave_page(cx);
+        self.clear_sms_unread(thread_id, cx);
         let backend = self.backend.clone();
         let unread = self
             .backend
@@ -1544,7 +1565,8 @@ impl MessagesApp {
                 unread: backend
                     .threads()
                     .iter()
-                    .any(|t| t.thread_id == thread_id && t.unread > 0),
+                    .any(|t| t.thread_id == thread_id && t.unread > 0)
+                    || backend.prefs().sms_marks.is_marked_unread(thread_id),
                 muted: backend
                     .prefs()
                     .is_muted(&notifications::thread_tag(&ThreadId::Sms(thread_id))),
@@ -1554,6 +1576,9 @@ impl MessagesApp {
                 blocked,
                 sender_is_number,
                 can_be_spam,
+                pinned: backend.prefs().sms_marks.is_pinned(thread_id),
+                archived: backend.prefs().sms_marks.is_archived(thread_id),
+                marked_unread: backend.prefs().sms_marks.is_marked_unread(thread_id),
             }
         });
         self.row_menu = Some(RowMenu {
@@ -1661,6 +1686,41 @@ impl MessagesApp {
         self.show_pill_action(text, "Undo", PillAction::SmsMute(id, !mute), cx);
     }
 
+    /// Archives or unarchives an SMS thread (local mark); `undo` is set when
+    /// this call is itself an Undo, which shows no new Undo.
+    fn set_sms_archived(&mut self, id: i64, archived: bool, undo: bool, cx: &mut Context<Self>) {
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| {
+                p.sms_marks.set_archived(id, archived);
+            })
+        });
+        let text = rovsti_core::thread_marks::archive_notice(archived);
+        if undo {
+            self.show_pill(text);
+        } else {
+            self.show_pill_action(
+                text,
+                "Undo",
+                PillAction::SmsArchive {
+                    thread: id,
+                    archived: !archived,
+                },
+                cx,
+            );
+        }
+    }
+
+    /// Drops the "marked unread" dot of an SMS thread, when it has one.
+    fn clear_sms_unread(&mut self, id: i64, cx: &mut Context<Self>) {
+        if self.backend.read(cx).prefs().sms_marks.is_marked_unread(id) {
+            self.backend.update(cx, |backend, cx| {
+                backend.update_prefs(cx, |p| {
+                    p.sms_marks.clear_unread(id);
+                })
+            });
+        }
+    }
+
     /// Move to Spam: a sender rule and off the allow list, with Undo.
     fn move_to_spam(&mut self, sender: String, title: SharedString, cx: &mut Context<Self>) {
         let mut result = None;
@@ -1705,8 +1765,50 @@ impl MessagesApp {
             }
             SmsAction::MarkRead => {
                 self.row_menu = None;
+                self.clear_sms_unread(id, cx);
                 self.backend
                     .update(cx, |backend, cx| backend.mark_read(id, cx));
+            }
+            SmsAction::Pin | SmsAction::Unpin => {
+                self.row_menu = None;
+                let pin = action == SmsAction::Pin;
+                let mut result = Ok(true);
+                self.backend.update(cx, |backend, cx| {
+                    backend.update_prefs(cx, |p| result = p.sms_marks.set_pinned(id, pin))
+                });
+                match result {
+                    Ok(_) => {
+                        let text = rovsti_core::thread_marks::pin_notice(pin);
+                        self.show_pill(text);
+                    }
+                    Err(_) => self.show_pill(rovsti_core::thread_marks::TOO_MANY_PINS),
+                }
+            }
+            SmsAction::Archive | SmsAction::Unarchive => {
+                let on_page = self
+                    .row_menu
+                    .take()
+                    .is_some_and(|m| m.sms.as_ref().is_some_and(|s| s.on_page));
+                let archive = action == SmsAction::Archive;
+                if on_page && archive {
+                    self.close_page(cx);
+                }
+                self.set_sms_archived(id, archive, false, cx);
+            }
+            SmsAction::MarkUnread => {
+                let on_page = self
+                    .row_menu
+                    .take()
+                    .is_some_and(|m| m.sms.as_ref().is_some_and(|s| s.on_page));
+                self.backend.update(cx, |backend, cx| {
+                    backend.update_prefs(cx, |p| {
+                        p.sms_marks.set_unread(id, true);
+                    })
+                });
+                if on_page {
+                    self.close_page(cx);
+                }
+                self.show_pill(rovsti_core::thread_marks::unread_notice());
             }
             SmsAction::Mute => {
                 // The lengths show in the same menu.
@@ -1954,7 +2056,7 @@ impl MessagesApp {
         let in_spam = self.view.in_spam(&ThreadId::Sms(thread_id));
         let can_be_spam = self.view.sms_only(&ThreadId::Sms(thread_id));
         let sender_is_number = is_number_sender(sender.as_deref());
-        let (contact_id, blocked, muted) = {
+        let (contact_id, blocked, muted, archived, marked_unread) = {
             let backend = self.backend.read(cx);
             (
                 sender
@@ -1966,6 +2068,8 @@ impl MessagesApp {
                 backend
                     .prefs()
                     .is_muted(&notifications::thread_tag(&ThreadId::Sms(thread_id))),
+                backend.prefs().sms_marks.is_archived(thread_id),
+                backend.prefs().sms_marks.is_marked_unread(thread_id),
             )
         };
         self.row_menu = Some(RowMenu {
@@ -1986,6 +2090,9 @@ impl MessagesApp {
                 blocked,
                 sender_is_number,
                 can_be_spam,
+                pinned: false,
+                archived,
+                marked_unread,
             }),
             delete_confirm: false,
             page_number: None,
@@ -2228,6 +2335,7 @@ impl MessagesApp {
         let undo = targets.undoable().then(|| targets.wa_chats.clone());
         for id in &targets.sms_threads {
             let id = *id;
+            self.clear_sms_unread(id, cx);
             self.backend
                 .update(cx, |backend, cx| backend.mark_read(id, cx));
         }
@@ -2282,6 +2390,9 @@ impl MessagesApp {
             PillAction::Settings(undo) => self.undo_settings(undo, cx),
             PillAction::Chat(jid, undo) => self.chat_action(&jid, undo, true, cx),
             PillAction::SmsMute(id, mute) => self.set_sms_mute(id, mute, cx),
+            PillAction::SmsArchive { thread, archived } => {
+                self.set_sms_archived(thread, archived, true, cx)
+            }
             PillAction::ReloadChats => self.load_chats(cx),
             PillAction::MarkAll(targets) => self.mark_all_read(targets, cx),
             PillAction::UnmarkAll(chats) => {
@@ -2461,6 +2572,11 @@ impl MessagesApp {
             self.close_page(cx);
         }
         self.drafts.forget(&thread);
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| {
+                p.sms_marks.forget(thread_id);
+            })
+        });
         self.dismiss_notification(&thread, cx);
         self.show_pill("Conversation deleted");
         cx.notify();
@@ -2494,6 +2610,21 @@ impl MessagesApp {
             cx.notify();
             return;
         };
+        // A person who also texts leaves the inbox only when both channels
+        // are archived (and returns with both on Undo).
+        if let ChatActionKind::Archive { archived } = action
+            && let Some(sms_thread) = self
+                .view
+                .all_rows()
+                .find(|r| r.wa_chat.as_deref() == Some(jid))
+                .and_then(|r| r.sms_thread)
+        {
+            self.backend.update(cx, |backend, cx| {
+                backend.update_prefs(cx, |p| {
+                    p.sms_marks.set_archived(sms_thread, archived);
+                })
+            });
+        }
         let id = ThreadId::WhatsApp(jid.to_owned());
         let mut unread = self
             .wa_threads
@@ -2978,6 +3109,11 @@ impl MessagesApp {
                         sms_actions::SmsAction::Unblock => Icon::LucideCircleCheck,
                         sms_actions::SmsAction::OpenContact => Icon::LucideUser,
                         sms_actions::SmsAction::MoveToSpam => Icon::LucideShieldAlert,
+                        sms_actions::SmsAction::Pin => Icon::LucidePin,
+                        sms_actions::SmsAction::Unpin => Icon::LucidePinOff,
+                        sms_actions::SmsAction::Archive => Icon::LucideArchive,
+                        sms_actions::SmsAction::Unarchive => Icon::LucideArchiveRestore,
+                        sms_actions::SmsAction::MarkUnread => Icon::LucideMail,
                         _ => Icon::LucideTrash2,
                     };
                     items.push(
@@ -3141,6 +3277,7 @@ impl MessagesApp {
             || self.show_archived
             || self.show_spam
             || self.show_scheduled
+            || self.inbox_filter != InboxFilter::All
             || !matches!(self.open, Open::None)
             || (self.tabs.selected() == WHATSAPP_TAB && self.whatsapp.read(cx).can_go_back())
             || self.tabs.selected() != CHATS_TAB
@@ -3194,6 +3331,10 @@ impl MessagesApp {
             self.show_archived = false;
             self.show_scheduled = false;
             self.show_spam = false;
+            self.chat_list.scroll_to_top();
+            cx.notify();
+        } else if self.inbox_filter != InboxFilter::All && self.tabs.selected() == CHATS_TAB {
+            self.inbox_filter = InboxFilter::All;
             self.chat_list.scroll_to_top();
             cx.notify();
         } else if self.tabs.selected() == WHATSAPP_TAB
@@ -4190,6 +4331,7 @@ impl MessagesApp {
             show_spam: self.show_spam,
             show_archived: self.show_archived,
             show_scheduled: self.show_scheduled,
+            filter: self.inbox_filter,
             scheduled,
             searching: !query.is_empty(),
             search_edits: if self.search_open {
@@ -4208,6 +4350,18 @@ impl MessagesApp {
             return;
         }
         self.chat_layout = Some(layout);
+        let normal =
+            query.is_empty() && !self.show_spam && !self.show_archived && !self.show_scheduled;
+        let facts: Vec<inbox_filter::RowFacts> =
+            self.view.rows.iter().map(inbox::row_facts).collect();
+        let counts = inbox_filter::counts(&facts);
+        let chips = inbox_filter::visible(&counts);
+        // A filter whose chip is gone (the rows changed) shows everything.
+        let filter = if normal && chips.contains(&self.inbox_filter) {
+            self.inbox_filter
+        } else {
+            InboxFilter::All
+        };
         let mut items = vec![ChatItem::Title];
         if self.search_open {
             items.push(ChatItem::Search);
@@ -4232,6 +4386,9 @@ impl MessagesApp {
             if statuses.0 > 0 {
                 items.push(ChatItem::Status);
             }
+            if !chips.is_empty() {
+                items.push(ChatItem::Filters);
+            }
             if !self.view.archived.is_empty() {
                 items.push(ChatItem::ArchivedFilter);
             }
@@ -4255,7 +4412,13 @@ impl MessagesApp {
                 archived_matches = inbox::filter_rows(&self.view.archived, &query);
             }
         } else {
-            items.extend((0..rows.len()).map(ChatItem::Row));
+            let shown: Vec<usize> = (0..rows.len())
+                .filter(|&i| !normal || inbox_filter::matches(filter, facts[i]))
+                .collect();
+            if normal && shown.is_empty() && filter != InboxFilter::All {
+                items.push(ChatItem::FilterEmpty);
+            }
+            items.extend(shown.into_iter().map(ChatItem::Row));
         }
         no_match_empty = no_match_empty && archived_matches.is_empty();
         items.extend(archived_matches.into_iter().map(ChatItem::ArchivedMatch));
@@ -4282,9 +4445,13 @@ impl MessagesApp {
         let keys = items
             .iter()
             .map(|item| match *item {
-                ChatItem::Row(index) => {
-                    key_of((1u8, self.show_spam, self.show_archived, &rows[index]))
-                }
+                ChatItem::Row(index) => key_of((
+                    1u8,
+                    self.show_spam,
+                    self.show_archived,
+                    filter,
+                    &rows[index],
+                )),
                 ChatItem::ArchivedMatch(index) => key_of((17u8, &self.view.archived[index])),
                 ChatItem::MessagesHeader => key_of(18u8),
                 ChatItem::Hit(index) => {
@@ -4299,6 +4466,8 @@ impl MessagesApp {
                     key_of((7u8, self.view.archived.len(), self.view.archived_unread()))
                 }
                 ChatItem::ArchivedBack => key_of(8u8),
+                ChatItem::Filters => key_of((21u8, filter, counts)),
+                ChatItem::FilterEmpty => key_of((22u8, filter)),
                 ChatItem::ScheduledFilter => key_of((
                     14u8,
                     scheduled.0,
@@ -4650,6 +4819,63 @@ impl MessagesApp {
                 .on_click(cx.listener(|this, _, _, cx| this.open_status(cx)))
                 .into_any_element()
             }
+            ChatItem::Filters => {
+                let facts: Vec<inbox_filter::RowFacts> =
+                    self.view.rows.iter().map(inbox::row_facts).collect();
+                let counts = inbox_filter::counts(&facts);
+                let selected = self.inbox_filter;
+                div()
+                    .px(px(16.0))
+                    .py(px(6.0))
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(8.0))
+                    .children(inbox_filter::visible(&counts).into_iter().enumerate().map(
+                        |(i, filter)| {
+                            let count = counts[inbox_filter::ALL
+                                .iter()
+                                .position(|f| *f == filter)
+                                .unwrap_or(0)];
+                            let on = filter == selected;
+                            let chip = glass_pill(theme, inbox_filter::chip_label(filter, count))
+                                .id(("inbox-filter", i))
+                                .text_size(typography::SUBHEADLINE.size);
+                            let chip = if on {
+                                chip.bg(colors.accent.opacity(0.22))
+                                    .text_color(colors.accent)
+                            } else {
+                                chip
+                            };
+                            chip.on_click(cx.listener(move |this, _, _, cx| {
+                                this.inbox_filter = filter;
+                                this.chat_list.scroll_to_top();
+                                cx.notify();
+                            }))
+                        },
+                    ))
+                    .into_any_element()
+            }
+            ChatItem::FilterEmpty => div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(12.0))
+                .py(px(32.0))
+                .child(
+                    div()
+                        .text_size(typography::SUBHEADLINE.size)
+                        .text_color(colors.secondary_label)
+                        .child(inbox_filter::empty_text(self.inbox_filter)),
+                )
+                .child(
+                    glass_pill(theme, InboxFilter::All.label())
+                        .id("inbox-filter-all")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.inbox_filter = InboxFilter::All;
+                            cx.notify();
+                        })),
+                )
+                .into_any_element(),
             ChatItem::SpamFilter => {
                 let unread = self.view.spam_unread();
                 let count = self.view.spam.len();
@@ -5033,6 +5259,9 @@ mod tests {
             blocked: false,
             sender_is_number: true,
             can_be_spam: false,
+            pinned: false,
+            archived: false,
+            marked_unread: false,
         }
     }
 
@@ -5073,11 +5302,11 @@ mod tests {
     fn row_menu_offers_not_spam_and_block() {
         assert_eq!(
             row_sms_actions(&menu(true, false, false)),
-            vec![MarkRead, Mute, Block, Delete]
+            vec![MarkRead, Pin, Mute, Archive, Block, Delete]
         );
         assert_eq!(
             row_sms_actions(&menu(false, true, true)),
-            vec![Unmute, NotSpam, Block, Delete]
+            vec![MarkUnread, Unmute, NotSpam, Block, Delete]
         );
     }
 
@@ -5089,7 +5318,7 @@ mod tests {
         };
         assert_eq!(
             row_sms_actions(&page),
-            vec![NotSpam, Call, AddContact, Block, Delete]
+            vec![MarkUnread, NotSpam, Call, AddContact, Block, Delete]
         );
     }
 
@@ -5102,11 +5331,11 @@ mod tests {
         };
         assert_eq!(
             row_sms_actions(&blocked(false)),
-            vec![Mute, Unblock, Delete]
+            vec![MarkUnread, Pin, Mute, Archive, Unblock, Delete]
         );
         assert_eq!(
             row_sms_actions(&blocked(true)),
-            vec![Call, AddContact, Unblock, Delete]
+            vec![Archive, MarkUnread, Call, AddContact, Unblock, Delete]
         );
     }
 
@@ -5119,16 +5348,21 @@ mod tests {
         };
         assert_eq!(
             row_sms_actions(&page(false)),
-            vec![Call, AddContact, Block, Delete]
+            vec![Archive, MarkUnread, Call, AddContact, Block, Delete]
         );
         assert_eq!(
             row_sms_actions(&page(true)),
-            vec![Call, OpenContact, Block, Delete]
+            vec![Archive, MarkUnread, Call, OpenContact, Block, Delete]
         );
         let draft = SmsRowMenu {
             thread_id: -1,
             ..page(false)
         };
         assert_eq!(row_sms_actions(&draft), vec![Call, AddContact, Block]);
+        let new_row = SmsRowMenu {
+            thread_id: -1,
+            ..menu(false, false, false)
+        };
+        assert_eq!(row_sms_actions(&new_row), vec![Pin, Mute, Block]);
     }
 }

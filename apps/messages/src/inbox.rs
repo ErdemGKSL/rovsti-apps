@@ -18,11 +18,13 @@ use rovsti_core::{
     Channel, PhoneNumber, ThreadId,
     blocklist::BlockSet,
     inbox::{InboxRow, InboxThread, PersonKey, merge},
+    inbox_filter::RowFacts,
     otp,
     recents::LocaleTime,
     search::{self, ContactIndex},
     sms::SmsThreadRow,
     spam::{self, SpamRules},
+    thread_marks::SmsMarks,
 };
 use rovsti_ui::{
     Icon, theme,
@@ -518,6 +520,8 @@ pub struct Inputs<'a> {
     pub blocked: &'a BlockSet,
     /// Muted notification tags (`sms:<id>`, `wa:<jid>`).
     pub muted: &'a BTreeSet<String>,
+    /// Local pins, archive and unread marks of SMS threads.
+    pub sms_marks: &'a SmsMarks,
     pub locale: LocaleTime,
     pub now_ms: i64,
 }
@@ -549,7 +553,7 @@ pub fn build(sms: &[SmsThreadRow], wa: &[InboxThread], inputs: &Inputs<'_>) -> I
     let mut view = InboxView::default();
     for row in merge(sms, wa, inputs.contacts) {
         let spam = is_spam(&row, &index, inputs);
-        let archived = is_archived(&row, inputs.wa);
+        let archived = is_archived(&row, inputs.wa, inputs.sms_marks);
         let shown = row_view(&row, &index, inputs);
         if spam {
             view.spam.push(shown);
@@ -564,12 +568,12 @@ pub fn build(sms: &[SmsThreadRow], wa: &[InboxThread], inputs: &Inputs<'_>) -> I
     view
 }
 
-/// A row is archived when every thread of it is an archived WhatsApp chat:
-/// an SMS thread of the same person keeps it in the inbox.
-fn is_archived(row: &InboxRow, wa: &HashMap<String, WaChatInfo>) -> bool {
+/// A row is archived when every thread of it is archived: a WhatsApp chat
+/// by the gateway's meta, an SMS thread by its local mark.
+fn is_archived(row: &InboxRow, wa: &HashMap<String, WaChatInfo>, marks: &SmsMarks) -> bool {
     row.threads.iter().all(|t| match &t.id {
         ThreadId::WhatsApp(jid) => wa.get(jid).is_some_and(|i| i.meta.archived),
-        ThreadId::Sms(_) => false,
+        ThreadId::Sms(id) => marks.is_archived(*id),
     })
 }
 
@@ -850,12 +854,29 @@ fn row_view(row: &InboxRow, sms: &SmsIndex<'_>, inputs: &Inputs<'_>) -> RowView 
                 .map(SharedString::from),
         },
         wa_chat: wa_chat.map(|jid| SharedString::from(jid.to_owned())),
-        pinned: meta.is_some_and(|m| m.pinned),
+        pinned: meta.is_some_and(|m| m.pinned)
+            || row.threads.iter().any(|t| match t.id {
+                ThreadId::Sms(id) => inputs.sms_marks.is_pinned(id),
+                ThreadId::WhatsApp(_) => false,
+            }),
         muted: sms_muted || wa_muted(meta, wa_local, inputs.now_ms),
-        marked_unread: meta.is_some_and(|m| m.marked_unread),
+        marked_unread: meta.is_some_and(|m| m.marked_unread)
+            || sms_thread.is_some_and(|id| inputs.sms_marks.is_marked_unread(id)),
         tick,
         sms_thread,
         sms_sender,
+    }
+}
+
+/// What the inbox filters need to know about a row.
+pub fn row_facts(row: &RowView) -> RowFacts {
+    let wa_group = row.wa_chat.as_ref().is_some_and(|j| j.ends_with("@g.us"));
+    let sms_group = row.sms_thread.is_some() && row.sms_sender.is_none();
+    RowFacts {
+        unread: row.unread > 0 || row.marked_unread,
+        whatsapp: row.wa_chat.is_some() || row.badges.contains(&Badge::WhatsApp),
+        sms: row.sms_thread.is_some(),
+        group: wa_group || sms_group,
     }
 }
 
@@ -1461,6 +1482,26 @@ mod tests {
         blocked: &BlockSet,
         infos: &HashMap<String, WaChatInfo>,
     ) -> InboxView {
+        build_marks(
+            sms,
+            wa,
+            contacts,
+            rules,
+            blocked,
+            infos,
+            &SmsMarks::default(),
+        )
+    }
+
+    fn build_marks(
+        sms: &[SmsThreadRow],
+        wa: &[InboxThread],
+        contacts: Vec<WireContact>,
+        rules: &SpamRules,
+        blocked: &BlockSet,
+        infos: &HashMap<String, WaChatInfo>,
+        marks: &SmsMarks,
+    ) -> InboxView {
         let index = ContactIndex::new(contacts);
         build(
             sms,
@@ -1471,6 +1512,7 @@ mod tests {
                 rules,
                 blocked,
                 muted: &BTreeSet::new(),
+                sms_marks: marks,
                 locale: LocaleTime::default(),
                 now_ms: NOW,
             },
@@ -1495,6 +1537,7 @@ mod tests {
                 rules: &rules(),
                 blocked: &BlockSet::default(),
                 muted,
+                sms_marks: &SmsMarks::default(),
                 locale: LocaleTime::default(),
                 now_ms: NOW,
             },
@@ -1666,6 +1709,128 @@ mod tests {
         assert_eq!(row.time, "14:00");
     }
 
+    fn marked(
+        sms: &[SmsThreadRow],
+        wa: &[InboxThread],
+        contacts: Vec<WireContact>,
+        marks: &SmsMarks,
+    ) -> InboxView {
+        build_marks(
+            sms,
+            wa,
+            contacts,
+            &rules(),
+            &BlockSet::default(),
+            &HashMap::new(),
+            marks,
+        )
+    }
+
+    #[test]
+    fn archived_sms_row_leaves_the_inbox_and_mixed_needs_both() {
+        let mut marks = SmsMarks::default();
+        marks.set_archived(1, true);
+        let view = marked(
+            &[sms(1, &["+905559876543"], "hi", MIN, 0)],
+            &[],
+            vec![],
+            &marks,
+        );
+        assert!(view.rows.is_empty());
+        assert_eq!(view.archived.len(), 1);
+
+        let jid = "905321234567@s.whatsapp.net";
+        let sms_rows = [sms(1, &["+905321234567"], "hi", MIN, 0)];
+        let wa_rows = [wa(jid, "Ayse", 2 * MIN, 0)];
+        let people = vec![contact(7, "Ayşe", "+905321234567")];
+        let view = marked(&sms_rows, &wa_rows, people.clone(), &marks);
+        assert_eq!(view.rows.len(), 1, "the WhatsApp chat keeps the row");
+        let mut infos = HashMap::new();
+        infos.insert(
+            jid.to_owned(),
+            info(
+                ChatMeta {
+                    archived: true,
+                    ..ChatMeta::default()
+                },
+                None,
+                false,
+            ),
+        );
+        let view = build_marks(
+            &sms_rows,
+            &wa_rows,
+            people,
+            &rules(),
+            &BlockSet::default(),
+            &infos,
+            &marks,
+        );
+        assert!(view.rows.is_empty());
+        assert_eq!(view.archived.len(), 1);
+    }
+
+    #[test]
+    fn local_pin_leads_and_unread_mark_counts() {
+        let mut marks = SmsMarks::default();
+        marks.set_pinned(2, true).expect("room to pin");
+        marks.set_unread(2, true);
+        let view = marked(
+            &[
+                sms(1, &["+905559876543"], "new", MIN, 0),
+                sms(2, &["+905551112233"], "old", 9 * MIN, 0),
+            ],
+            &[],
+            vec![],
+            &marks,
+        );
+        assert_eq!(view.rows[0].sms_thread, Some(2));
+        assert!(view.rows[0].pinned && view.rows[0].marked_unread);
+        assert!(!view.rows[1].pinned);
+        let targets = mark_all_targets(&view.rows);
+        assert_eq!(targets.sms_threads, vec![2]);
+    }
+
+    #[test]
+    fn row_facts_tell_groups_and_channels() {
+        let view = build_with(
+            &[
+                sms(1, &["+905321112233", "+905322223344"], "grp", MIN, 1),
+                sms(2, &["+905559876543"], "one", 2 * MIN, 0),
+            ],
+            &[
+                wa("1203@g.us", "Team", 3 * MIN, 0),
+                wa("905361112233@s.whatsapp.net", "Can", 4 * MIN, 0),
+            ],
+            vec![],
+            &rules(),
+            &BlockSet::default(),
+        );
+        let facts: Vec<RowFacts> = view.rows.iter().map(row_facts).collect();
+        assert_eq!(
+            facts[0],
+            RowFacts {
+                unread: true,
+                sms: true,
+                group: true,
+                ..RowFacts::default()
+            }
+        );
+        assert!(facts[1].sms && !facts[1].group && !facts[1].whatsapp);
+        assert!(facts[2].whatsapp && facts[2].group && !facts[2].sms);
+        assert!(facts[3].whatsapp && !facts[3].group);
+
+        let mixed = build_with(
+            &[sms(1, &["+905321234567"], "hi", MIN, 0)],
+            &[wa("905321234567@s.whatsapp.net", "A", 2 * MIN, 0)],
+            vec![contact(7, "Ayşe", "+905321234567")],
+            &rules(),
+            &BlockSet::default(),
+        );
+        let f = row_facts(&mixed.rows[0]);
+        assert!(f.sms && f.whatsapp && !f.group);
+    }
+
     #[test]
     fn single_channel_rows_get_one_badge() {
         let view = build_with(
@@ -1768,6 +1933,7 @@ mod tests {
                     rules: &rules(),
                     blocked: &BlockSet::default(),
                     muted,
+                    sms_marks: &SmsMarks::default(),
                     locale: LocaleTime::default(),
                     now_ms: NOW,
                 },

@@ -14,6 +14,11 @@ pub enum SmsAction {
     Call,
     AddContact,
     OpenContact,
+    Pin,
+    Unpin,
+    Archive,
+    Unarchive,
+    MarkUnread,
     Delete,
 }
 
@@ -33,6 +38,12 @@ pub struct SmsActionContext {
     pub blocked: bool,
     /// The menu is the conversation page's, not an inbox row's.
     pub on_page: bool,
+    /// The thread is pinned (local mark).
+    pub pinned: bool,
+    /// The thread is archived (local mark).
+    pub archived: bool,
+    /// The thread is marked unread by hand.
+    pub marked_unread: bool,
 }
 
 /// The actions to list, in order, the destructive ones last.
@@ -41,6 +52,16 @@ pub fn actions(ctx: &SmsActionContext) -> Vec<SmsAction> {
     let numeric = ctx.single_sender && ctx.sender_is_number;
     let can_spam = ctx.single_sender && ctx.can_be_spam && !ctx.in_spam && !ctx.known_contact;
     if ctx.on_page {
+        if !ctx.in_spam {
+            out.push(if ctx.archived {
+                SmsAction::Unarchive
+            } else {
+                SmsAction::Archive
+            });
+        }
+        if !ctx.marked_unread {
+            out.push(SmsAction::MarkUnread);
+        }
         if ctx.in_spam && ctx.single_sender {
             out.push(SmsAction::NotSpam);
         }
@@ -58,12 +79,28 @@ pub fn actions(ctx: &SmsActionContext) -> Vec<SmsAction> {
     } else {
         if ctx.unread {
             out.push(SmsAction::MarkRead);
+        } else if !ctx.marked_unread {
+            out.push(SmsAction::MarkUnread);
+        }
+        if !ctx.in_spam {
+            out.push(if ctx.pinned {
+                SmsAction::Unpin
+            } else {
+                SmsAction::Pin
+            });
         }
         out.push(if ctx.muted {
             SmsAction::Unmute
         } else {
             SmsAction::Mute
         });
+        if !ctx.in_spam {
+            out.push(if ctx.archived {
+                SmsAction::Unarchive
+            } else {
+                SmsAction::Archive
+            });
+        }
         if can_spam {
             out.push(SmsAction::MoveToSpam);
         }
@@ -94,6 +131,11 @@ pub fn label(action: SmsAction) -> &'static str {
         SmsAction::Call => "Call",
         SmsAction::AddContact => "Add to contacts",
         SmsAction::OpenContact => "Open contact",
+        SmsAction::Pin => "Pin",
+        SmsAction::Unpin => "Unpin",
+        SmsAction::Archive => "Archive",
+        SmsAction::Unarchive => "Unarchive",
+        SmsAction::MarkUnread => "Mark as unread",
         SmsAction::Delete => "Delete conversation",
     }
 }
@@ -192,7 +234,10 @@ mod tests {
 
     #[test]
     fn row_actions_follow_the_state() {
-        assert_eq!(actions(&row()), vec![Mute, MoveToSpam, Block, Delete]);
+        assert_eq!(
+            actions(&row()),
+            vec![MarkUnread, Pin, Mute, Archive, MoveToSpam, Block, Delete]
+        );
         let c = SmsActionContext {
             unread: true,
             muted: true,
@@ -200,19 +245,22 @@ mod tests {
         };
         assert_eq!(
             actions(&c),
-            vec![MarkRead, Unmute, MoveToSpam, Block, Delete]
+            vec![MarkRead, Pin, Unmute, Archive, MoveToSpam, Block, Delete]
         );
         let c = SmsActionContext {
             in_spam: true,
             ..row()
         };
-        assert_eq!(actions(&c), vec![Mute, NotSpam, Block, Delete]);
+        assert_eq!(actions(&c), vec![MarkUnread, Mute, NotSpam, Block, Delete]);
         let c = SmsActionContext {
             blocked: true,
             in_spam: true,
             ..row()
         };
-        assert_eq!(actions(&c), vec![Mute, NotSpam, Unblock, Delete]);
+        assert_eq!(
+            actions(&c),
+            vec![MarkUnread, Mute, NotSpam, Unblock, Delete]
+        );
     }
 
     #[test]
@@ -221,7 +269,10 @@ mod tests {
             blocked: true,
             ..row()
         };
-        assert_eq!(actions(&c), vec![Mute, MoveToSpam, Unblock, Delete]);
+        assert_eq!(
+            actions(&c),
+            vec![MarkUnread, Pin, Mute, Archive, MoveToSpam, Unblock, Delete]
+        );
         assert!(!actions(&c).contains(&Block));
     }
 
@@ -234,6 +285,11 @@ mod tests {
             ..SmsActionContext::default()
         };
         assert_eq!(actions(&c), vec![MarkRead, Mute, Delete]);
+        let g = SmsActionContext {
+            in_spam: false,
+            ..c
+        };
+        assert_eq!(actions(&g), vec![MarkRead, Pin, Mute, Archive, Delete]);
     }
 
     #[test]
@@ -246,27 +302,34 @@ mod tests {
         };
         assert_eq!(
             actions(&page),
-            vec![Call, AddContact, MoveToSpam, Block, Delete]
+            vec![
+                Archive, MarkUnread, Call, AddContact, MoveToSpam, Block, Delete
+            ]
         );
         assert!(!actions(&page).contains(&OpenContact));
         let known = SmsActionContext {
             known_contact: true,
             ..page
         };
-        assert_eq!(actions(&known), vec![Call, OpenContact, Block, Delete]);
+        assert_eq!(
+            actions(&known),
+            vec![Archive, MarkUnread, Call, OpenContact, Block, Delete]
+        );
         let blocked = SmsActionContext {
             blocked: true,
             ..page
         };
         assert_eq!(
             actions(&blocked),
-            vec![Call, AddContact, MoveToSpam, Unblock, Delete]
+            vec![
+                Archive, MarkUnread, Call, AddContact, MoveToSpam, Unblock, Delete
+            ]
         );
         let group = SmsActionContext {
             single_sender: false,
             ..page
         };
-        assert_eq!(actions(&group), vec![Delete]);
+        assert_eq!(actions(&group), vec![Archive, MarkUnread, Delete]);
     }
 
     #[test]
@@ -278,13 +341,13 @@ mod tests {
         };
         assert_eq!(
             actions(&page),
-            vec![NotSpam, Call, AddContact, Block, Delete]
+            vec![MarkUnread, NotSpam, Call, AddContact, Block, Delete]
         );
         let group = SmsActionContext {
             single_sender: false,
             ..page
         };
-        assert_eq!(actions(&group), vec![Delete]);
+        assert_eq!(actions(&group), vec![MarkUnread, Delete]);
         let clean = SmsActionContext {
             in_spam: false,
             ..page
@@ -305,6 +368,11 @@ mod tests {
             Call,
             AddContact,
             OpenContact,
+            Pin,
+            Unpin,
+            Archive,
+            Unarchive,
+            MarkUnread,
             Delete,
         ];
         let labels: std::collections::HashSet<_> = all.iter().map(|a| label(*a)).collect();
@@ -359,9 +427,15 @@ mod tests {
             sender_is_number: false,
             ..row()
         };
-        assert_eq!(actions(&c), vec![Mute, MoveToSpam, Delete]);
+        assert_eq!(
+            actions(&c),
+            vec![MarkUnread, Pin, Mute, Archive, MoveToSpam, Delete]
+        );
         let page = SmsActionContext { on_page: true, ..c };
-        assert_eq!(actions(&page), vec![MoveToSpam, Delete]);
+        assert_eq!(
+            actions(&page),
+            vec![Archive, MarkUnread, MoveToSpam, Delete]
+        );
         assert_eq!(label(MoveToSpam), "Move to Spam");
     }
 
@@ -394,8 +468,34 @@ mod tests {
         };
         assert_eq!(
             actions(&page),
-            vec![Call, AddContact, MoveToSpam, Block, Delete]
+            vec![
+                Archive, MarkUnread, Call, AddContact, MoveToSpam, Block, Delete
+            ]
         );
+    }
+
+    #[test]
+    fn pin_archive_and_unread_follow_the_marks() {
+        let c = SmsActionContext {
+            pinned: true,
+            archived: true,
+            marked_unread: true,
+            ..row()
+        };
+        assert_eq!(
+            actions(&c),
+            vec![Unpin, Mute, Unarchive, MoveToSpam, Block, Delete]
+        );
+        let page = SmsActionContext { on_page: true, ..c };
+        assert_eq!(
+            actions(&page),
+            vec![Unarchive, Call, AddContact, MoveToSpam, Block, Delete]
+        );
+        assert_eq!(
+            (label(Pin), label(Unpin), label(MarkUnread)),
+            ("Pin", "Unpin", "Mark as unread")
+        );
+        assert_eq!((label(Archive), label(Unarchive)), ("Archive", "Unarchive"));
     }
 
     #[test]

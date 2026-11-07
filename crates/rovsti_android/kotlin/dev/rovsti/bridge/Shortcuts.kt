@@ -56,24 +56,26 @@ object Shortcuts {
     }
 
     /** [specJson] is `rovsti_geo::StopShortcut` (`id`, `short_label`, `long_label`, `stop_id`); app icon. */
-    fun pinStop(ctx: Context, specJson: String): Boolean = try {
-        val manager = ctx.getSystemService(ShortcutManager::class.java) ?: return false
-        if (!manager.isRequestPinShortcutSupported) return false
-        val spec = JSONObject(specJson)
-        val stopId = spec.getLong("stop_id")
-        val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return false
-        launch.setAction(Intent.ACTION_MAIN)
-            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            .putExtra(EXTRA_STOP_ID, stopId)
-        val info = ShortcutInfo.Builder(ctx, spec.getString("id"))
-            .setShortLabel(spec.getString("short_label"))
-            .setLongLabel(spec.optString("long_label", spec.getString("short_label")))
-            .setIcon(icon(ctx, null))
-            .setIntent(launch)
-            .build()
-        manager.requestPinShortcut(info, null)
-    } catch (_: RuntimeException) {
-        false
+    fun pinStop(ctx: Context, specJson: String): Boolean {
+        return try {
+            val manager = ctx.getSystemService(ShortcutManager::class.java) ?: return false
+            if (!manager.isRequestPinShortcutSupported) return false
+            val spec = JSONObject(specJson)
+            val stopId = spec.getLong("stop_id")
+            val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return false
+            launch.setAction(Intent.ACTION_MAIN)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra(EXTRA_STOP_ID, stopId)
+            val info = ShortcutInfo.Builder(ctx, spec.getString("id"))
+                .setShortLabel(spec.getString("short_label"))
+                .setLongLabel(spec.optString("long_label", spec.getString("short_label")))
+                .setIcon(icon(ctx, null))
+                .setIntent(launch)
+                .build()
+            manager.requestPinShortcut(info, null)
+        } catch (_: RuntimeException) {
+            false
+        }
     }
 
     private fun icon(ctx: Context, path: String?): Icon {

@@ -398,7 +398,8 @@ mod hand_off {
 
     /// Opens the share sheet with `text` as a `.vcf` file called `name`.
     pub(crate) fn share_vcf(name: &str, text: &str) -> Result<(), String> {
-        let file = format!("{}.vcf", safe_name(name));
+        let stem = name.strip_suffix(".vcf").unwrap_or(name);
+        let file = format!("{}.vcf", safe_name(stem));
         let path = write_temp(&file, text.as_bytes())?;
         done(media::share_file(
             &path.to_string_lossy(),
@@ -407,9 +408,16 @@ mod hand_off {
         ))
     }
 
+    /// Saves `bytes` (a PNG) to the gallery as `name`.
+    pub(crate) fn save_png(name: &str, bytes: &[u8]) -> Result<(), String> {
+        let path = write_temp(name, bytes)?;
+        save_to_gallery(&path, name)
+    }
+
     /// Opens the share sheet with `bytes` as a PNG file called `name`.
     pub(crate) fn share_png(name: &str, bytes: &[u8]) -> Result<(), String> {
-        let file = format!("{}.png", safe_name(name));
+        let stem = name.strip_suffix(".png").unwrap_or(name);
+        let file = format!("{}.png", safe_name(stem));
         let path = write_temp(&file, bytes)?;
         done(media::share_image(
             &path.to_string_lossy(),
@@ -430,6 +438,11 @@ mod tests {
         let json = r#"{"v":1,"ok":false,"error":"permission"}"#;
         let result = decode::<ContactsPayload>(Ok(json.to_owned()));
         assert!(matches!(result, Err(Failed::Wire(WireError::Permission))));
+    }
+
+    #[test]
+    fn save_png_is_unsupported_on_desktop() {
+        assert!(save_png("qr.png", &[1]).is_err());
     }
 
     #[test]

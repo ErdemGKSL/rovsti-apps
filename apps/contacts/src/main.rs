@@ -17,6 +17,7 @@ mod photo_viewer;
 mod photos;
 mod picker;
 mod prefs;
+mod qr_sheet;
 mod sample;
 mod transfer;
 mod ui;
@@ -280,6 +281,10 @@ struct ContactsApp {
     viewer: Option<photo_viewer::PhotoViewer>,
     /// The per-field actions sheet over the contact card, and what it acts on.
     field_sheet: Sheet,
+    /// The card's Share menu and the QR code sheet it opens.
+    share_sheet: Sheet,
+    qr_sheet: Sheet,
+    qr_card: Option<qr_sheet::QrCard>,
     field_target: Option<detail::FieldTarget>,
     /// System Back is routed to the app (a sheet is open).
     back_enabled: bool,
@@ -440,6 +445,9 @@ impl ContactsApp {
             photo_sheet: Sheet::new(),
             viewer: None,
             field_sheet: Sheet::new(),
+            share_sheet: Sheet::new(),
+            qr_sheet: Sheet::new(),
+            qr_card: None,
             field_target: None,
             back_enabled: false,
             whatsapp,
@@ -678,6 +686,8 @@ impl ContactsApp {
         self.confirm.is_some()
             || self.photo_sheet.is_open()
             || self.field_sheet.is_open()
+            || self.share_sheet.is_open()
+            || self.qr_sheet.is_open()
             || self.viewer.as_ref().is_some_and(|v| !v.is_closing())
             || self.picker.is_some()
             || self.editor.is_some()
@@ -695,6 +705,10 @@ impl ContactsApp {
             self.answer(false, cx);
         } else if self.photo_sheet.is_open() {
             self.close_photo_sheet(cx);
+        } else if self.qr_sheet.is_open() {
+            self.close_qr_sheet(cx);
+        } else if self.share_sheet.is_open() {
+            self.close_share_sheet(cx);
         } else if self.field_sheet.is_open() {
             self.close_field_sheet(cx);
         } else if self.viewer.as_ref().is_some_and(|v| !v.is_closing()) {
@@ -1619,6 +1633,10 @@ impl Render for ContactsApp {
                 | self.photo_sheet.tick_real(real)
                 | self.field_sheet.tick(dt)
                 | self.field_sheet.tick_real(real)
+                | self.share_sheet.tick(dt)
+                | self.share_sheet.tick_real(real)
+                | self.qr_sheet.tick(dt)
+                | self.qr_sheet.tick_real(real)
         });
         self.motion = motion;
         self.drop_finished_viewer();
@@ -1758,6 +1776,8 @@ impl Render for ContactsApp {
             .children(self.confirm_view(theme, cx))
             .children(self.photo_sheet_view(theme, window, cx))
             .children(self.field_sheet_view(theme, window, cx))
+            .children(self.share_sheet_view(theme, window, cx))
+            .children(self.qr_sheet_view(theme, window, cx))
     }
 }
 

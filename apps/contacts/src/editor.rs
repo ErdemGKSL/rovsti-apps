@@ -11,8 +11,12 @@ use gpui::{
     AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::contact_edit::{
-    Account, ContactDraft, DraftField, FieldKind, MAX_FIELDS, account_label, retain_account_groups,
+use rovsti_core::{
+    contact_dates,
+    contact_edit::{
+        Account, ContactDraft, DraftEvent, DraftField, EventKind, FieldKind, MAX_FIELDS,
+        account_label, retain_account_groups,
+    },
 };
 use rovsti_ui::{
     Icon,
@@ -47,6 +51,55 @@ impl FieldRow {
     }
 }
 
+/// Which list of rows a button works on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Set {
+    Numbers,
+    Emails,
+    Addresses,
+}
+
+impl Set {
+    fn config(self) -> Config {
+        match self {
+            Self::Numbers => Config::PHONE,
+            Self::Emails => Config::EMAIL,
+            Self::Addresses => Config::NOTE,
+        }
+    }
+
+    fn kinds(self) -> &'static [FieldKind; 3] {
+        match self {
+            Self::Numbers => &FieldKind::NUMBER_KINDS,
+            Self::Emails => &FieldKind::EMAIL_KINDS,
+            Self::Addresses => &FieldKind::ADDRESS_KINDS,
+        }
+    }
+
+    fn first_kind(self) -> FieldKind {
+        self.kinds()[0]
+    }
+}
+
+/// One dated event being edited: the box holds `YYYY-MM-DD` or `MM-DD`.
+pub(crate) struct EventRow {
+    text: Entity<TextField>,
+    kind: EventKind,
+    label: Option<String>,
+}
+
+impl EventRow {
+    fn title(&self) -> SharedString {
+        DraftEvent {
+            date: String::new(),
+            kind: self.kind,
+            label: self.label.clone(),
+        }
+        .title()
+        .into()
+    }
+}
+
 /// The form for one contact.
 pub(crate) struct Editor {
     /// `None` while creating.
@@ -67,9 +120,8 @@ pub(crate) struct Editor {
     pending_photo: Option<String>,
     /// The form as it opened: leaving with anything else asks first.
     initial: ContactDraft,
-    /// Not editable here yet; carried through so a save keeps them.
-    events: Vec<rovsti_core::contact_edit::DraftEvent>,
-    addresses: Vec<DraftField>,
+    events: Vec<EventRow>,
+    addresses: Vec<FieldRow>,
 }
 
 /// The account a new contact starts in: the remembered one while it is still
@@ -135,8 +187,16 @@ impl Editor {
             saving: false,
             pending_photo: None,
             initial: ContactDraft::default(),
-            events: draft.events.clone(),
-            addresses: draft.addresses.clone(),
+            events: draft
+                .events
+                .iter()
+                .map(|e| EventRow {
+                    text: make_field(Config::TEXT, &contact_dates::input_text(&e.date), cx),
+                    kind: e.kind,
+                    label: e.label.clone(),
+                })
+                .collect(),
+            addresses: make_rows(&draft.addresses, Config::NOTE, cx),
         };
         // Read back from the form (with its blank first number), so an
         // untouched form compares equal.
@@ -168,19 +228,27 @@ impl Editor {
             note: self.note.read(cx).text().to_owned(),
             numbers: rows(&self.numbers),
             emails: rows(&self.emails),
-            addresses: self.addresses.clone(),
-            events: self.events.clone(),
+            addresses: rows(&self.addresses),
+            events: self
+                .events
+                .iter()
+                .map(|e| DraftEvent {
+                    date: contact_dates::normalize_input(e.text.read(cx).text()),
+                    kind: e.kind,
+                    label: e.label.clone(),
+                })
+                .collect(),
             groups: self.groups.iter().copied().collect(),
             starred: self.starred,
             account: self.account.clone(),
         }
     }
 
-    fn rows_mut(&mut self, numbers: bool) -> &mut Vec<FieldRow> {
-        if numbers {
-            &mut self.numbers
-        } else {
-            &mut self.emails
+    fn rows_mut(&mut self, set: Set) -> &mut Vec<FieldRow> {
+        match set {
+            Set::Numbers => &mut self.numbers,
+            Set::Emails => &mut self.emails,
+            Set::Addresses => &mut self.addresses,
         }
     }
 }
@@ -265,41 +333,26 @@ impl ContactsApp {
         cx.notify();
     }
 
-    fn cycle_kind(&mut self, numbers: bool, index: usize, cx: &mut Context<Self>) {
+    fn cycle_kind(&mut self, set: Set, index: usize, cx: &mut Context<Self>) {
         if let Some(row) = self
             .editor
             .as_mut()
-            .and_then(|e| e.rows_mut(numbers).get_mut(index))
+            .and_then(|e| e.rows_mut(set).get_mut(index))
         {
-            let kinds = if numbers {
-                &FieldKind::NUMBER_KINDS
-            } else {
-                &FieldKind::EMAIL_KINDS
-            };
-            row.kind = row.kind.next_in(kinds);
+            row.kind = row.kind.next_in(set.kinds());
             row.label = None;
             cx.notify();
         }
     }
 
-    fn add_row(&mut self, numbers: bool, cx: &mut Context<Self>) {
-        let config = if numbers {
-            Config::PHONE
-        } else {
-            Config::EMAIL
-        };
-        let kind = if numbers {
-            FieldKind::Mobile
-        } else {
-            FieldKind::Home
-        };
-        let text = make_field(config, "", cx);
+    fn add_row(&mut self, set: Set, cx: &mut Context<Self>) {
+        let text = make_field(set.config(), "", cx);
         if let Some(editor) = self.editor.as_mut() {
-            let rows = editor.rows_mut(numbers);
+            let rows = editor.rows_mut(set);
             if rows.len() < MAX_FIELDS {
                 rows.push(FieldRow {
                     text,
-                    kind,
+                    kind: set.first_kind(),
                     label: None,
                 });
             }
@@ -307,12 +360,49 @@ impl ContactsApp {
         cx.notify();
     }
 
-    fn remove_row(&mut self, numbers: bool, index: usize, cx: &mut Context<Self>) {
+    fn remove_row(&mut self, set: Set, index: usize, cx: &mut Context<Self>) {
         if let Some(editor) = self.editor.as_mut() {
-            let rows = editor.rows_mut(numbers);
+            let rows = editor.rows_mut(set);
             if index < rows.len() {
                 rows.remove(index);
             }
+        }
+        cx.notify();
+    }
+
+    fn cycle_event_kind(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(row) = self.editor.as_mut().and_then(|e| e.events.get_mut(index)) {
+            row.kind = contact_dates::next_event_kind(row.kind);
+            row.label = None;
+            cx.notify();
+        }
+    }
+
+    fn add_event(&mut self, cx: &mut Context<Self>) {
+        let text = make_field(Config::TEXT, "", cx);
+        if let Some(editor) = self.editor.as_mut()
+            && editor.events.len() < MAX_FIELDS
+        {
+            // The first event is a birthday; the next ones cycle on from there.
+            let kind = if editor.events.is_empty() {
+                EventKind::Birthday
+            } else {
+                EventKind::Anniversary
+            };
+            editor.events.push(EventRow {
+                text,
+                kind,
+                label: None,
+            });
+        }
+        cx.notify();
+    }
+
+    fn remove_event(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(editor) = self.editor.as_mut()
+            && index < editor.events.len()
+        {
+            editor.events.remove(index);
         }
         cx.notify();
     }
@@ -690,8 +780,10 @@ impl ContactsApp {
         };
 
         let photo_head = self.photo_head(theme, editor, cx);
-        let numbers = self.field_section(theme, true, window, cx);
-        let emails = self.field_section(theme, false, window, cx);
+        let numbers = self.field_section(theme, Set::Numbers, window, cx);
+        let emails = self.field_section(theme, Set::Emails, window, cx);
+        let dates = self.event_section(theme, window, cx);
+        let addresses = self.field_section(theme, Set::Addresses, window, cx);
 
         let groups: Vec<AnyElement> = self
             .groups
@@ -774,6 +866,8 @@ impl ContactsApp {
             .child(save_to)
             .child(numbers)
             .child(emails)
+            .child(dates)
+            .child(addresses)
             .child(section(
                 theme,
                 Some("Groups".into()),
@@ -797,11 +891,12 @@ impl ContactsApp {
             .into_any_element()
     }
 
-    /// The Phone or Email section: kind button, box and remove button per row.
+    /// The Phone, Email or Addresses section: kind button, box and remove
+    /// button per row.
     fn field_section(
         &self,
         theme: Theme,
-        numbers: bool,
+        set: Set,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -810,8 +905,8 @@ impl ContactsApp {
         };
         let colors = theme::colors(theme);
         let (rows, header, placeholder, kind_key, field_key, remove_key, add_key, add_label) =
-            if numbers {
-                (
+            match set {
+                Set::Numbers => (
                     &editor.numbers,
                     "Phone",
                     "Phone number",
@@ -820,9 +915,8 @@ impl ContactsApp {
                     "num-remove",
                     "num-add",
                     "Add phone",
-                )
-            } else {
-                (
+                ),
+                Set::Emails => (
                     &editor.emails,
                     "Email",
                     "Email address",
@@ -831,13 +925,24 @@ impl ContactsApp {
                     "mail-remove",
                     "mail-add",
                     "Add email",
-                )
+                ),
+                Set::Addresses => (
+                    &editor.addresses,
+                    "Addresses",
+                    "Street, city, postcode",
+                    "addr-kind",
+                    "addr-field",
+                    "addr-remove",
+                    "addr-add",
+                    "Add address",
+                ),
             };
+        let multiline = set == Set::Addresses;
         let mut children: Vec<AnyElement> = rows
             .iter()
             .enumerate()
             .map(|(i, row)| {
-                let can_remove = numbers && rows.len() > 1 || !numbers;
+                let can_remove = set != Set::Numbers || rows.len() > 1;
                 form_row(theme)
                     .child(
                         div()
@@ -851,7 +956,7 @@ impl ContactsApp {
                             .text_color(colors.accent)
                             .child(row.title(cx))
                             .on_click(
-                                cx.listener(move |this, _, _, cx| this.cycle_kind(numbers, i, cx)),
+                                cx.listener(move |this, _, _, cx| this.cycle_kind(set, i, cx)),
                             ),
                     )
                     .child(field_box(
@@ -859,28 +964,11 @@ impl ContactsApp {
                         (field_key, i),
                         &row.text,
                         placeholder,
-                        false,
+                        multiline,
                         window,
                         cx,
                     ))
-                    .children(can_remove.then(|| {
-                        div()
-                            .id((remove_key, i))
-                            .flex_none()
-                            .size(metrics::MIN_HIT)
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(
-                                svg()
-                                    .path(Icon::LucideX.path())
-                                    .size(px(16.0))
-                                    .text_color(colors.secondary_label),
-                            )
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.remove_row(numbers, i, cx);
-                            }))
-                    }))
+                    .children(can_remove.then(|| remove_button(theme, (remove_key, i), cx, set, i)))
                     .into_any_element()
             })
             .collect();
@@ -893,12 +981,111 @@ impl ContactsApp {
                     add_label,
                     Tone::Accent,
                 )
-                .on_click(cx.listener(move |this, _, _, cx| this.add_row(numbers, cx)))
+                .on_click(cx.listener(move |this, _, _, cx| this.add_row(set, cx)))
                 .into_any_element(),
             );
         }
         section(theme, Some(header.into()), children).into_any_element()
     }
+
+    /// The Birthday & dates section: kind button, date box and remove button
+    /// per row.
+    fn event_section(&self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let Some(editor) = &self.editor else {
+            return div().into_any_element();
+        };
+        let colors = theme::colors(theme);
+        let mut children: Vec<AnyElement> = editor
+            .events
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                form_row(theme)
+                    .child(
+                        div()
+                            .id(("date-kind", i))
+                            .flex_none()
+                            .w(px(88.0))
+                            .h(metrics::MIN_HIT)
+                            .flex()
+                            .items_center()
+                            .text_size(typography::FOOTNOTE.size)
+                            .text_color(colors.accent)
+                            .child(row.title())
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.cycle_event_kind(i, cx)),
+                            ),
+                    )
+                    .child(field_box(
+                        theme,
+                        ("date-field", i),
+                        &row.text,
+                        "e.g. 1994-05-12 or 05-12",
+                        false,
+                        window,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .id(("date-remove", i))
+                            .flex_none()
+                            .size(metrics::MIN_HIT)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                svg()
+                                    .path(Icon::LucideX.path())
+                                    .size(px(16.0))
+                                    .text_color(colors.secondary_label),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_event(i, cx);
+                            })),
+                    )
+                    .into_any_element()
+            })
+            .collect();
+        if editor.events.len() < MAX_FIELDS {
+            children.push(
+                tap_row(
+                    theme,
+                    "date-add",
+                    Some(Icon::LucidePlus),
+                    "Add birthday or date",
+                    Tone::Accent,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.add_event(cx)))
+                .into_any_element(),
+            );
+        }
+        section(theme, Some("Birthday & dates".into()), children).into_any_element()
+    }
+}
+
+/// The round remove button at the end of a field row.
+fn remove_button(
+    theme: Theme,
+    id: (&'static str, usize),
+    cx: &mut Context<ContactsApp>,
+    set: Set,
+    index: usize,
+) -> gpui::Stateful<gpui::Div> {
+    let colors = theme::colors(theme);
+    div()
+        .id(id)
+        .flex_none()
+        .size(metrics::MIN_HIT)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            svg()
+                .path(Icon::LucideX.path())
+                .size(px(16.0))
+                .text_color(colors.secondary_label),
+        )
+        .on_click(cx.listener(move |this, _, _, cx| this.remove_row(set, index, cx)))
 }
 
 #[cfg(test)]

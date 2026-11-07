@@ -7,7 +7,7 @@
 //! Everything is pure.
 
 use crate::call_log::{civil_from_days, days_from_civil};
-use crate::contact_edit::{ContactDraft, DraftEvent, EventKind};
+use crate::contact_edit::{ContactDraft, DraftEvent, EVENT_KINDS, EventKind};
 
 const SECS_PER_DAY: i64 = 86_400;
 const MONTHS: [&str; 12] = [
@@ -192,11 +192,29 @@ pub fn when_text(in_days: i64) -> String {
     }
 }
 
+/// Days since 1970-01-01 of the local day `now_ms` falls on.
+pub fn local_day(now_ms: i64, tz_offset_s: i32) -> i64 {
+    (now_ms.div_euclid(1000) + i64::from(tz_offset_s)).div_euclid(SECS_PER_DAY)
+}
+
+/// The local calendar date of `now_ms` as (year, month, day).
+pub fn local_ymd(now_ms: i64, tz_offset_s: i32) -> (i32, u8, u8) {
+    let (y, m, d) = civil_from_days(local_day(now_ms, tz_offset_s));
+    (y as i32, m as u8, d as u8)
+}
+
+/// How old the person turns on the next occurrence of `event` (today counts),
+/// or `None` for an event without a year.
+pub fn turning(event: &DraftEvent, today: i64) -> Option<i64> {
+    let date = parse(&event.date)?;
+    age_on(date, next_occurrence(date.md, today))
+}
+
 /// The line for an event on a contact card: "Birthday · 7 Mar 1990 · In 5 days".
 /// `None` when the date is unreadable.
 pub fn card_line(event: &DraftEvent, today_ms: i64, tz_offset_s: i32) -> Option<String> {
     let date = parse(&event.date)?;
-    let today = (today_ms.div_euclid(1000) + i64::from(tz_offset_s)).div_euclid(SECS_PER_DAY);
+    let today = local_day(today_ms, tz_offset_s);
     Some(format!(
         "{} · {} · {}",
         event.title(),
@@ -232,6 +250,44 @@ pub fn wish_text(name: &str, kind: EventKind, turning: Option<i64>) -> String {
         (EventKind::Anniversary, None) => format!("Happy anniversary{to}!"),
         _ => format!("Thinking of you{to}!"),
     }
+}
+
+/// Reads what the editor's date box holds: `YYYY-MM-DD`, `MM-DD` (or `/` as
+/// the separator, one-digit parts allowed) and everything [`parse`] takes.
+pub fn parse_input(text: &str) -> Option<EventDate> {
+    let text = text.trim();
+    let parts: Vec<&str> = text.split(['-', '/']).collect();
+    let num = |s: &str| {
+        (!s.is_empty() && s.len() <= 2 && s.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| format!("{s:0>2}"))
+    };
+    match parts.as_slice() {
+        [m, d] if !text.starts_with("--") => parse(&format!("--{}-{}", num(m)?, num(d)?)),
+        [y, m, d] if y.len() == 4 => parse(&format!("{y}-{}-{}", num(m)?, num(d)?)),
+        _ => parse(text),
+    }
+}
+
+/// The text to store for the editor's date box: the Android form when the
+/// box holds a real date, else the trimmed text (which `finish` then refuses
+/// as a bad date, or drops when blank).
+pub fn normalize_input(text: &str) -> String {
+    parse_input(text).map_or_else(|| text.trim().to_owned(), EventDate::to_android)
+}
+
+/// What the editor's date box shows for a stored date: `YYYY-MM-DD` or `MM-DD`.
+pub fn input_text(date: &str) -> String {
+    match parse(date) {
+        Some(EventDate { year: None, md, .. }) => format!("{:02}-{:02}", md.month, md.day),
+        Some(d) => d.to_android(),
+        None => date.to_owned(),
+    }
+}
+
+/// The kind after `kind` in [`EVENT_KINDS`] (the first when it is not in it).
+pub fn next_event_kind(kind: EventKind) -> EventKind {
+    let i = EVENT_KINDS.iter().position(|k| *k == kind);
+    EVENT_KINDS[i.map_or(0, |i| (i + 1) % EVENT_KINDS.len())]
 }
 
 /// A `geo:` link that opens `address` in any maps app, or `None` for a blank
@@ -491,6 +547,55 @@ mod tests {
         assert_eq!(
             maps_url("a=b?c#d").as_deref(),
             Some("geo:0,0?q=a%3Db%3Fc%23d")
+        );
+    }
+
+    #[test]
+    fn editor_input_is_normalised() {
+        assert_eq!(normalize_input(" 1994-05-12 "), "1994-05-12");
+        assert_eq!(normalize_input("05-12"), "--05-12");
+        assert_eq!(normalize_input("5/2"), "--05-02");
+        assert_eq!(normalize_input("1994-5-2"), "1994-05-02");
+        assert_eq!(normalize_input("--05-12"), "--05-12");
+        assert_eq!(normalize_input("02-30"), "02-30");
+        assert_eq!(normalize_input("soon"), "soon");
+        assert_eq!(normalize_input("  "), "");
+        assert!(parse_input("02-29").is_some());
+        assert!(parse_input("1993-02-29").is_none());
+    }
+
+    #[test]
+    fn editor_shows_stored_dates_without_dashes_prefix() {
+        assert_eq!(input_text("--03-04"), "03-04");
+        assert_eq!(input_text("1990-03-04"), "1990-03-04");
+        assert_eq!(input_text("junk"), "junk");
+        assert_eq!(normalize_input(&input_text("--03-04")), "--03-04");
+    }
+
+    #[test]
+    fn event_kind_cycles_through_the_editor_kinds() {
+        assert_eq!(next_event_kind(EventKind::Birthday), EventKind::Anniversary);
+        assert_eq!(next_event_kind(EventKind::Anniversary), EventKind::Custom);
+        assert_eq!(next_event_kind(EventKind::Custom), EventKind::Birthday);
+        assert_eq!(next_event_kind(EventKind::Other), EventKind::Birthday);
+    }
+
+    #[test]
+    fn local_day_and_turning() {
+        // 2024-03-07 23:30 UTC is already 8 March at +02:00.
+        let ms = 1_709_854_200_000;
+        assert_eq!(local_ymd(ms, 0), (2024, 3, 7));
+        assert_eq!(local_ymd(ms, 7200), (2024, 3, 8));
+        let today = local_day(ms, 7200);
+        let e = DraftEvent::new("1990-03-08", EventKind::Birthday);
+        assert_eq!(turning(&e, today), Some(34));
+        assert_eq!(
+            turning(&DraftEvent::new("--03-08", EventKind::Birthday), today),
+            None
+        );
+        assert_eq!(
+            turning(&DraftEvent::new("junk", EventKind::Birthday), today),
+            None
         );
     }
 }

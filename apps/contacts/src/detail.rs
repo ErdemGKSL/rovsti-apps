@@ -6,7 +6,12 @@ use gpui::{
     AnyElement, ClipboardItem, Context, InteractiveElement, IntoElement, ParentElement,
     RenderImage, Role, SharedString, StatefulInteractiveElement, Styled, div, px, svg,
 };
-use rovsti_core::{contact_card::ContactCard, contact_edit::ContactDraft};
+use rovsti_core::{
+    contact_card::ContactCard,
+    contact_dates,
+    contact_edit::{ContactDraft, DraftEvent, EventKind},
+    vcard,
+};
 use rovsti_ui::{
     Icon,
     components::{glass_icon_button, section},
@@ -16,7 +21,7 @@ use rovsti_ui::{
 };
 
 use crate::{
-    ContactsApp,
+    ContactsApp, backend,
     photos::photo_avatar,
     ui::{Tone, tap_row},
 };
@@ -24,9 +29,157 @@ use crate::{
 /// What the field sheet acts on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum FieldTarget {
-    Number { raw: String, display: String },
+    Number {
+        raw: String,
+        display: String,
+    },
     Email(String),
     Note(String),
+    /// A postal address (may span lines).
+    Address(String),
+    /// A dated event as copyable text ("Birthday · 7 Mar 1990").
+    Date(String),
+}
+
+/// One row of the field sheet.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FieldAction {
+    Call,
+    Message,
+    SendEmail,
+    Copy(&'static str),
+    Share(&'static str),
+    OpenMaps,
+}
+
+impl FieldAction {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Call => "Call",
+            Self::Message => "Message",
+            Self::SendEmail => "Send Email",
+            Self::Copy(label) | Self::Share(label) => label,
+            Self::OpenMaps => "Open in Maps",
+        }
+    }
+
+    fn icon(self) -> Icon {
+        match self {
+            Self::Call => Icon::LucidePhone,
+            Self::Message => Icon::LucideMessageCircle,
+            Self::SendEmail => Icon::LucideMail,
+            Self::Copy(_) => Icon::LucideCopy,
+            Self::Share(_) => Icon::LucideUpload,
+            Self::OpenMaps => Icon::LucideMapPin,
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::Call => "field-call",
+            Self::Message => "field-sms",
+            Self::SendEmail => "field-email",
+            Self::Copy(_) => "field-copy",
+            Self::Share(_) => "field-share",
+            Self::OpenMaps => "field-maps",
+        }
+    }
+}
+
+impl FieldTarget {
+    /// The rows the field sheet offers, top to bottom.
+    pub(crate) fn actions(&self) -> Vec<FieldAction> {
+        match self {
+            Self::Number { .. } => vec![
+                FieldAction::Call,
+                FieldAction::Message,
+                FieldAction::Copy("Copy Number"),
+                FieldAction::Share("Share Number"),
+            ],
+            Self::Email(_) => vec![FieldAction::SendEmail, FieldAction::Copy("Copy Email")],
+            Self::Note(_) => vec![FieldAction::Copy("Copy Note")],
+            Self::Address(_) => vec![
+                FieldAction::Copy("Copy Address"),
+                FieldAction::Share("Share Address"),
+                FieldAction::OpenMaps,
+            ],
+            Self::Date(_) => vec![FieldAction::Copy("Copy Date")],
+        }
+    }
+
+    /// What Copy and Share send.
+    fn text(&self) -> &str {
+        match self {
+            Self::Number { display, .. } => display,
+            Self::Email(text) | Self::Note(text) | Self::Address(text) | Self::Date(text) => text,
+        }
+    }
+
+    /// What Call and Message dial.
+    fn dial(&self) -> &str {
+        match self {
+            Self::Number { raw, .. } => raw,
+            other => other.text(),
+        }
+    }
+
+    /// The sheet's heading.
+    fn title(&self) -> SharedString {
+        match self {
+            Self::Note(_) => "Note".into(),
+            Self::Address(a) => a
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("Address")
+                .to_owned()
+                .into(),
+            Self::Date(_) => "Date".into(),
+            other => other.text().to_owned().into(),
+        }
+    }
+}
+
+/// An entry of the card's Share menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ShareChoice {
+    Text,
+    Vcf,
+    Qr,
+}
+
+impl ShareChoice {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Text => "Share as text",
+            Self::Vcf => "Share contact file (.vcf)",
+            Self::Qr => "Show QR code",
+        }
+    }
+
+    fn icon(self) -> Icon {
+        match self {
+            Self::Text => Icon::LucideUpload,
+            Self::Vcf => Icon::LucideContact,
+            Self::Qr => Icon::LucideQrCode,
+        }
+    }
+}
+
+/// The Share menu entries: the QR code needs a number or an email to carry.
+pub(crate) fn share_choices(has_numbers: bool, has_emails: bool) -> Vec<ShareChoice> {
+    let mut choices = vec![ShareChoice::Text, ShareChoice::Vcf];
+    if has_numbers || has_emails {
+        choices.push(ShareChoice::Qr);
+    }
+    choices
+}
+
+/// The copyable text of a dated event ("Birthday · 7 Mar 1990"), or `None`
+/// when the date is unreadable.
+pub(crate) fn date_copy_text(event: &DraftEvent) -> Option<String> {
+    let date = contact_dates::parse(&event.date)?;
+    Some(format!("{} · {}", event.title(), date.text()))
 }
 
 /// The first email address of the full contact that is not blank.
@@ -44,6 +197,9 @@ impl ContactsApp {
     pub(crate) fn close_field_sheet_now(&mut self) {
         self.field_sheet.close();
         self.field_target = None;
+        self.share_sheet.close();
+        self.qr_sheet.close();
+        self.qr_card = None;
     }
 
     pub(crate) fn open_field_sheet(&mut self, target: FieldTarget, cx: &mut Context<Self>) {
@@ -76,6 +232,164 @@ impl ContactsApp {
         cx.notify();
     }
 
+    /// The card's Share button: the choice sheet.
+    fn open_share_sheet(&mut self, cx: &mut Context<Self>) {
+        self.share_sheet.open();
+        cx.notify();
+    }
+
+    pub(crate) fn close_share_sheet(&mut self, cx: &mut Context<Self>) {
+        self.share_sheet.close();
+        cx.notify();
+    }
+
+    /// Runs one entry of the Share menu.
+    fn run_share_choice(&mut self, choice: ShareChoice, text: String, cx: &mut Context<Self>) {
+        match choice {
+            ShareChoice::Text => {
+                self.share_sheet.close();
+                self.act(
+                    "share",
+                    move || rovsti_android::telecom::share_text(&text),
+                    cx,
+                );
+                cx.notify();
+            }
+            ShareChoice::Vcf => {
+                self.share_sheet.close();
+                let Some(draft) = self.open_draft.clone() else {
+                    self.notice = Some("The contact is still loading.".into());
+                    cx.notify();
+                    return;
+                };
+                let today = contact_dates::local_ymd(crate::whatsapp::now_ms(), self.wa.offset_s);
+                let name = vcard::export_name(std::slice::from_ref(&draft), today);
+                let outcome = backend::share_vcf(&name, &vcard::write(&[draft]));
+                if let Err(words) = outcome {
+                    self.notice = Some(format!("Can't share the contact file: {words}.").into());
+                }
+                cx.notify();
+            }
+            ShareChoice::Qr => self.open_qr(cx),
+        }
+    }
+
+    /// The Share menu over the card, once it is visible.
+    pub(crate) fn share_sheet_view(
+        &mut self,
+        theme: Theme,
+        window: &gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        self.share_sheet
+            .set_reduced(window.prefers_reduced_motion());
+        self.share_sheet.set_viewport(window.viewport_size());
+        let card = self.open.as_ref()?;
+        let colors = theme::colors(theme);
+        let choices = share_choices(
+            !card.numbers.is_empty(),
+            first_email(self.open_draft.as_ref()).is_some(),
+        );
+        let text = card.share_text();
+        let rows: Vec<AnyElement> = choices
+            .into_iter()
+            .map(|choice| {
+                let text = text.clone();
+                tap_row(
+                    theme,
+                    match choice {
+                        ShareChoice::Text => "share-text",
+                        ShareChoice::Vcf => "share-vcf",
+                        ShareChoice::Qr => "share-qr",
+                    },
+                    Some(choice.icon()),
+                    choice.label(),
+                    Tone::Plain,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_share_choice(choice, text.clone(), cx);
+                }))
+                .into_any_element()
+            })
+            .collect();
+        let body = div()
+            .flex()
+            .flex_col()
+            .pb(px(12.0))
+            .child(
+                div()
+                    .px(px(20.0))
+                    .pb(px(8.0))
+                    .text_size(typography::TITLE3.size)
+                    .font_weight(typography::TITLE3.weight)
+                    .text_color(colors.label)
+                    .child("Share contact"),
+            )
+            .children(rows);
+        let entity = cx.entity();
+        let drag = entity.clone();
+        self.share_sheet.render(
+            theme,
+            window,
+            "Share contact",
+            body,
+            move |_, cx| entity.update(cx, |this, cx| this.close_share_sheet(cx)),
+            move |phase, y, _, cx| {
+                drag.update(cx, |this, cx| {
+                    this.share_sheet.drag_touch(phase, y);
+                    cx.notify();
+                });
+            },
+        )
+    }
+
+    /// Runs one row of the field sheet.
+    fn run_field_action(
+        &mut self,
+        target: &FieldTarget,
+        action: FieldAction,
+        cx: &mut Context<Self>,
+    ) {
+        let text = target.text().to_owned();
+        match action {
+            FieldAction::Call => {
+                let number = target.dial().to_owned();
+                self.field_act(
+                    "call",
+                    move || rovsti_android::telecom::place_call(&number),
+                    cx,
+                );
+            }
+            FieldAction::Message => {
+                let number = target.dial().to_owned();
+                self.field_act(
+                    "send a message",
+                    move || rovsti_android::telecom::send_sms_to(&number),
+                    cx,
+                );
+            }
+            FieldAction::SendEmail => self.field_act(
+                "send an email",
+                move || rovsti_android::telecom::send_email_to(&text),
+                cx,
+            ),
+            FieldAction::Copy(_) => self.copy_field(text, cx),
+            FieldAction::Share(_) => self.field_act(
+                "share",
+                move || rovsti_android::telecom::share_text(&text),
+                cx,
+            ),
+            FieldAction::OpenMaps => {
+                self.field_sheet.close();
+                match contact_dates::maps_url(&text) {
+                    Some(url) => cx.open_url(&url),
+                    None => self.notice = Some("There is no address to open.".into()),
+                }
+                cx.notify();
+            }
+        }
+    }
+
     /// The field sheet over the card, once it is visible.
     pub(crate) fn field_sheet_view(
         &mut self,
@@ -88,11 +402,7 @@ impl ContactsApp {
         self.field_sheet.set_viewport(window.viewport_size());
         let target = self.field_target.clone()?;
         let colors = theme::colors(theme);
-        let title: SharedString = match &target {
-            FieldTarget::Number { display, .. } => display.clone().into(),
-            FieldTarget::Email(email) => email.clone().into(),
-            FieldTarget::Note(_) => "Note".into(),
-        };
+        let title = target.title();
         let mut body = div().flex().flex_col().pb(px(12.0)).child(
             div()
                 .px(px(20.0))
@@ -102,123 +412,24 @@ impl ContactsApp {
                 .text_color(colors.label)
                 .child(title.clone()),
         );
-        let mut rows: Vec<AnyElement> = Vec::new();
-        match target {
-            FieldTarget::Number { raw, display } => {
-                let (call, sms) = (raw.clone(), raw.clone());
-                rows.push(
-                    tap_row(
-                        theme,
-                        "field-call",
-                        Some(Icon::LucidePhone),
-                        "Call",
-                        Tone::Plain,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let number = call.clone();
-                        this.field_act(
-                            "call",
-                            move || rovsti_android::telecom::place_call(&number),
-                            cx,
-                        );
-                    }))
-                    .into_any_element(),
-                );
-                rows.push(
-                    tap_row(
-                        theme,
-                        "field-sms",
-                        Some(Icon::LucideMessageCircle),
-                        "Message",
-                        Tone::Plain,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let number = sms.clone();
-                        this.field_act(
-                            "send a message",
-                            move || rovsti_android::telecom::send_sms_to(&number),
-                            cx,
-                        );
-                    }))
-                    .into_any_element(),
-                );
-                let copy = display.clone();
-                rows.push(
-                    tap_row(
-                        theme,
-                        "field-copy",
-                        Some(Icon::LucideCopy),
-                        "Copy Number",
-                        Tone::Plain,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.copy_field(copy.clone(), cx)))
-                    .into_any_element(),
-                );
-                rows.push(
-                    tap_row(
-                        theme,
-                        "field-share",
-                        Some(Icon::LucideUpload),
-                        "Share Number",
-                        Tone::Plain,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let text = display.clone();
-                        this.field_act(
-                            "share",
-                            move || rovsti_android::telecom::share_text(&text),
-                            cx,
-                        );
-                    }))
-                    .into_any_element(),
-                );
-            }
-            FieldTarget::Email(email) => {
-                let (send, copy) = (email.clone(), email);
-                rows.push(
-                    tap_row(
-                        theme,
-                        "field-email",
-                        Some(Icon::LucideMail),
-                        "Send Email",
-                        Tone::Plain,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        let address = send.clone();
-                        this.field_act(
-                            "send an email",
-                            move || rovsti_android::telecom::send_email_to(&address),
-                            cx,
-                        );
-                    }))
-                    .into_any_element(),
-                );
-                rows.push(
-                    tap_row(
-                        theme,
-                        "field-copy",
-                        Some(Icon::LucideCopy),
-                        "Copy Email",
-                        Tone::Plain,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.copy_field(copy.clone(), cx)))
-                    .into_any_element(),
-                );
-            }
-            FieldTarget::Note(note) => {
-                rows.push(
-                    tap_row(
-                        theme,
-                        "field-copy",
-                        Some(Icon::LucideCopy),
-                        "Copy Note",
-                        Tone::Plain,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| this.copy_field(note.clone(), cx)))
-                    .into_any_element(),
-                );
-            }
-        }
+        let rows: Vec<AnyElement> = target
+            .actions()
+            .into_iter()
+            .map(|action| {
+                let target = target.clone();
+                tap_row(
+                    theme,
+                    action.key(),
+                    Some(action.icon()),
+                    action.label(),
+                    Tone::Plain,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_field_action(&target, action, cx);
+                }))
+                .into_any_element()
+            })
+            .collect();
         body = body.children(rows);
         let entity = cx.entity();
         let drag = entity.clone();
@@ -309,6 +520,41 @@ impl ContactsApp {
             .child(main)
             .child(more)
             .into_any_element()
+    }
+
+    /// Like [`Self::field_line`] with several trailing items.
+    fn field_line_with(
+        theme: Theme,
+        main: gpui::Stateful<gpui::Div>,
+        trailing: impl IntoIterator<Item = gpui::Stateful<gpui::Div>>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        div()
+            .flex()
+            .items_center()
+            .pr(px(4.0))
+            .border_b(metrics::SEPARATOR)
+            .border_color(colors.separator)
+            .child(main)
+            .children(trailing)
+            .into_any_element()
+    }
+
+    /// The "Wish" chip of a birthday row.
+    fn wish_chip(theme: Theme, index: usize) -> gpui::Stateful<gpui::Div> {
+        let colors = theme::colors(theme);
+        div()
+            .id(("wish", index))
+            .flex_none()
+            .h(px(32.0))
+            .px(px(14.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .bg(colors.accent.opacity(0.14))
+            .text_size(typography::FOOTNOTE.size)
+            .text_color(colors.accent)
+            .child("Wish")
     }
 
     /// A round glass action with a caption (Call, Message, Share).
@@ -626,66 +872,58 @@ impl ContactsApp {
         let email_only = if has_number { None } else { first_email(full) };
         let call_number = primary.clone();
         let sms_number = primary;
-        let share = card.share_text();
-        let actions =
-            div()
-                .flex()
-                .justify_center()
-                .gap(px(28.0))
-                .pb(px(24.0))
-                .child(
-                    Self::action_button(theme, "call", Icon::LucidePhone, "Call", has_number)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if let Some(number) = call_number.clone() {
-                                this.act(
-                                    "call",
-                                    move || rovsti_android::telecom::place_call(&number),
-                                    cx,
-                                );
-                            }
-                        })),
-                )
-                .child(
-                    Self::action_button(
-                        theme,
-                        "message",
-                        Icon::LucideMessageCircle,
-                        "Message",
-                        has_number,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(number) = sms_number.clone() {
+        let actions = div()
+            .flex()
+            .justify_center()
+            .gap(px(28.0))
+            .pb(px(24.0))
+            .child(
+                Self::action_button(theme, "call", Icon::LucidePhone, "Call", has_number).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        if let Some(number) = call_number.clone() {
                             this.act(
-                                "send a message",
-                                move || rovsti_android::telecom::send_sms_to(&number),
+                                "call",
+                                move || rovsti_android::telecom::place_call(&number),
                                 cx,
                             );
                         }
-                    })),
+                    }),
+                ),
+            )
+            .child(
+                Self::action_button(
+                    theme,
+                    "message",
+                    Icon::LucideMessageCircle,
+                    "Message",
+                    has_number,
                 )
-                .child(
-                    Self::action_button(theme, "share", Icon::LucideUpload, "Share", true)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let text = share.clone();
-                            this.act(
-                                "share",
-                                move || rovsti_android::telecom::share_text(&text),
-                                cx,
-                            );
-                        })),
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(number) = sms_number.clone() {
+                        this.act(
+                            "send a message",
+                            move || rovsti_android::telecom::send_sms_to(&number),
+                            cx,
+                        );
+                    }
+                })),
+            )
+            .child(
+                Self::action_button(theme, "share", Icon::LucideUpload, "Share", true)
+                    .on_click(cx.listener(|this, _, _, cx| this.open_share_sheet(cx))),
+            )
+            .children(email_only.map(|address| {
+                Self::action_button(theme, "email", Icon::LucideMail, "Email", true).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        let address = address.clone();
+                        this.act(
+                            "send an email",
+                            move || rovsti_android::telecom::send_email_to(&address),
+                            cx,
+                        );
+                    }),
                 )
-                .children(email_only.map(|address| {
-                    Self::action_button(theme, "email", Icon::LucideMail, "Email", true).on_click(
-                        cx.listener(move |this, _, _, cx| {
-                            let address = address.clone();
-                            this.act(
-                                "send an email",
-                                move || rovsti_android::telecom::send_email_to(&address),
-                                cx,
-                            );
-                        }),
-                    )
-                }));
+            }));
 
         let numbers: Vec<AnyElement> = card
             .numbers
@@ -764,6 +1002,107 @@ impl ContactsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_field_sheet(more_target.clone(), cx);
                             }));
+                        Self::field_line(theme, main, more)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let now = crate::whatsapp::now_ms();
+        let today = contact_dates::local_day(now, self.wa.offset_s);
+        let wish_number = card.primary().map(|n| n.raw.clone());
+        let date_rows: Vec<AnyElement> = full
+            .map(|d| {
+                d.events
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, event)| {
+                        let line = contact_dates::card_line(event, now, self.wa.offset_s)?;
+                        let copy = date_copy_text(event)?;
+                        let target = FieldTarget::Date(copy);
+                        let (more_target, press_target) = (target.clone(), target);
+                        let (label, value) = line.split_once(" · ").unwrap_or(("", &line));
+                        let main = Self::field_main(
+                            theme,
+                            ("date", i),
+                            label.to_owned().into(),
+                            value.to_owned().into(),
+                            colors.label,
+                        )
+                        .on_long_press(cx.listener(
+                            move |this, _, _, cx| {
+                                this.open_field_sheet(press_target.clone(), cx);
+                            },
+                        ));
+                        let wish = (event.kind == EventKind::Birthday)
+                            .then(|| wish_number.clone())
+                            .flatten()
+                            .map(|number| {
+                                let text = contact_dates::wish_text(
+                                    &card.name,
+                                    event.kind,
+                                    contact_dates::turning(event, today),
+                                );
+                                Self::wish_chip(theme, i).on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        let (number, text) = (number.clone(), text.clone());
+                                        this.act(
+                                            "send a message",
+                                            move || {
+                                                rovsti_android::telecom::compose_sms(&number, &text)
+                                            },
+                                            cx,
+                                        );
+                                    },
+                                ))
+                            });
+                        let more = Self::field_more(theme, ("date-more", i), Icon::LucideCopy)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_field_sheet(more_target.clone(), cx);
+                            }));
+                        Some(match wish {
+                            Some(chip) => Self::field_line_with(theme, main, [chip, more]),
+                            None => Self::field_line(theme, main, more),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let address_rows: Vec<AnyElement> = full
+            .map(|d| {
+                d.addresses
+                    .iter()
+                    .filter(|a| !a.value.trim().is_empty())
+                    .enumerate()
+                    .map(|(i, addr)| {
+                        let text = addr.value.trim().to_owned();
+                        let target = FieldTarget::Address(text.clone());
+                        let (more_target, press_target) = (target.clone(), target);
+                        let main = Self::field_main(
+                            theme,
+                            ("address", i),
+                            addr.title().into(),
+                            text.clone().into(),
+                            colors.accent,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            match contact_dates::maps_url(&text) {
+                                Some(url) => cx.open_url(&url),
+                                None => this.notice = Some("There is no address to open.".into()),
+                            }
+                            cx.notify();
+                        }))
+                        .on_long_press(cx.listener(
+                            move |this, _, _, cx| {
+                                this.open_field_sheet(press_target.clone(), cx);
+                            },
+                        ));
+                        let more =
+                            Self::field_more(theme, ("address-more", i), Icon::LucideEllipsis)
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.open_field_sheet(more_target.clone(), cx);
+                                }));
                         Self::field_line(theme, main, more)
                     })
                     .collect()
@@ -883,6 +1222,13 @@ impl ContactsApp {
             .children(whatsapp)
             .children((!emails.is_empty()).then(|| section(theme, Some("Email".into()), emails)))
             .children(
+                (!date_rows.is_empty()).then(|| section(theme, Some("Dates".into()), date_rows)),
+            )
+            .children(
+                (!address_rows.is_empty())
+                    .then(|| section(theme, Some("Address".into()), address_rows)),
+            )
+            .children(
                 (!group_rows.is_empty()).then(|| section(theme, Some("Groups".into()), group_rows)),
             )
             .children(note.map(|note| section(theme, None, [note])))
@@ -919,5 +1265,60 @@ mod tests {
         assert_eq!(first_email(None), None);
         assert_eq!(first_email(Some(&draft(&[]))), None);
         assert_eq!(first_email(Some(&draft(&[" "]))), None);
+    }
+
+    #[test]
+    fn share_menu_offers_qr_only_with_something_to_encode() {
+        use ShareChoice::*;
+        assert_eq!(share_choices(false, false), vec![Text, Vcf]);
+        assert_eq!(share_choices(true, false), vec![Text, Vcf, Qr]);
+        assert_eq!(share_choices(false, true), vec![Text, Vcf, Qr]);
+    }
+
+    #[test]
+    fn field_sheet_actions_per_target() {
+        let number = FieldTarget::Number {
+            raw: "+90".into(),
+            display: "+90 1".into(),
+        };
+        assert_eq!(
+            number.actions(),
+            vec![
+                FieldAction::Call,
+                FieldAction::Message,
+                FieldAction::Copy("Copy Number"),
+                FieldAction::Share("Share Number")
+            ]
+        );
+        assert_eq!(number.dial(), "+90");
+        assert_eq!(number.text(), "+90 1");
+        assert_eq!(
+            FieldTarget::Email("a@b.c".into()).actions()[0],
+            FieldAction::SendEmail
+        );
+        assert_eq!(FieldTarget::Note("n".into()).actions().len(), 1);
+        let address = FieldTarget::Address("\n 1 Main St\nIzmir".into());
+        assert_eq!(
+            address.actions(),
+            vec![
+                FieldAction::Copy("Copy Address"),
+                FieldAction::Share("Share Address"),
+                FieldAction::OpenMaps
+            ]
+        );
+        assert_eq!(address.title(), "1 Main St");
+        let date = FieldTarget::Date("Birthday · 7 Mar".into());
+        assert_eq!(date.actions(), vec![FieldAction::Copy("Copy Date")]);
+        assert_eq!(date.title(), "Date");
+    }
+
+    #[test]
+    fn date_copy_text_names_the_event() {
+        let e = DraftEvent::new("1990-03-07", EventKind::Birthday);
+        assert_eq!(date_copy_text(&e).as_deref(), Some("Birthday · 7 Mar 1990"));
+        assert_eq!(
+            date_copy_text(&DraftEvent::new("junk", EventKind::Birthday)),
+            None
+        );
     }
 }

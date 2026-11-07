@@ -66,6 +66,10 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   `clear_all` back the downloaded size and the Clear button in Settings > Map tiles. An app keeps its
   WhatsApp link (`whatsapp-link.json`: gateway URL, instance id, connect key) there.
 
+- **QR scanning.** Contacts decodes a picked picture with `rqrr` (pure Rust, no
+  native code; licence `(MIT OR Apache-2.0) AND ISC`) in `rovsti_core::contact_scan`.
+  The payload parser reads vCard, MECARD, `tel:` and `mailto:`.
+
 ## What each app needs from Android
 
 | App | Role / service | Kotlin components (in the ejected host) |

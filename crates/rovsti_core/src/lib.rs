@@ -25,6 +25,8 @@ pub mod contact_dates;
 pub mod contact_dupes;
 pub mod contact_edit;
 pub mod contact_photo;
+/// Scan to add: QR decoding and the payload parser.
+pub mod contact_scan;
 /// Select mode in the Contacts list: export ids, group changes, notices, contact text.
 pub mod contact_select;
 /// Local trash for deleted contacts: retention, restore, texts.

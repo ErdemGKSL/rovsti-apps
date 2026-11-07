@@ -756,7 +756,7 @@ impl StopsApp {
                 (
                     st.id,
                     st.name.clone(),
-                    crate::saved_ui::stop_detail(st, here),
+                    crate::saved_ui::stop_detail(st, here, None),
                 )
             })
             .collect();

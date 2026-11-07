@@ -547,6 +547,7 @@ impl StopsApp {
     pub(crate) fn open_settings(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         self.settings_page = page;
         self.confirm_clear = false;
+        self.confirm_prune = None;
         self.history_open = None;
         self.confirm_remove_feed = false;
         self.confirm_clear_tiles = false;
@@ -1106,19 +1107,43 @@ impl StopsApp {
                 } else {
                     "Clear history"
                 };
-                div()
+                let now = crate::store::now_ms();
+                let mut col = div()
                     .pt(px(20.0))
                     .flex()
-                    .justify_center()
-                    .child(
-                        glass_pill(theme, clear_label)
-                            .id("history-clear")
+                    .flex_col()
+                    .items_center()
+                    .gap(px(12.0));
+                for days in rovsti_geo::PRUNE_CHOICES_DAYS {
+                    let n = self.history.older_than(now, days);
+                    if n == 0 {
+                        continue;
+                    }
+                    let label = if self.confirm_prune == Some(days) {
+                        format!("Tap again to delete {n} {}", trip_noun(n))
+                    } else {
+                        rovsti_geo::prune_label(n, days)
+                    };
+                    col = col.child(
+                        glass_pill(theme, label)
+                            .id(("history-prune", days as usize))
                             .px(px(24.0))
                             .h(px(48.0))
                             .text_color(colors.red)
-                            .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx))),
-                    )
-                    .into_any_element()
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.prune_history(days, cx)),
+                            ),
+                    );
+                }
+                col.child(
+                    glass_pill(theme, clear_label)
+                        .id("history-clear")
+                        .px(px(24.0))
+                        .h(px(48.0))
+                        .text_color(colors.red)
+                        .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx))),
+                )
+                .into_any_element()
             }
         }
     }
@@ -1295,6 +1320,29 @@ impl StopsApp {
         }
         self.show_pill(
             "History cleared",
+            Some(crate::PillAction::RestoreHistory(old)),
+            cx,
+        );
+    }
+
+    /// Two taps: the first arms, the second deletes trips older than `days`.
+    fn prune_history(&mut self, days: u32, cx: &mut Context<Self>) {
+        let (armed, delete) = prune_step(self.confirm_prune, days);
+        self.confirm_prune = armed;
+        if !delete {
+            cx.notify();
+            return;
+        }
+        let old = self.history.clone();
+        let n = self.history.remove_older_than(crate::store::now_ms(), days);
+        self.save_history_in_background(cx);
+        self.history_open = None;
+        if n == 0 {
+            cx.notify();
+            return;
+        }
+        self.show_pill(
+            prune_pill(n),
             Some(crate::PillAction::RestoreHistory(old)),
             cx,
         );
@@ -2069,11 +2117,44 @@ impl StopsApp {
     }
 }
 
+/// "trip" or "trips" for `n`.
+fn trip_noun(n: usize) -> &'static str {
+    if n == 1 { "trip" } else { "trips" }
+}
+
+/// A tap on a prune pill: the first arms `days`, the second on the same value
+/// confirms. Returns the armed value afterwards and whether to delete now.
+pub(crate) fn prune_step(armed: Option<u32>, days: u32) -> (Option<u32>, bool) {
+    if armed == Some(days) {
+        (None, true)
+    } else {
+        (Some(days), false)
+    }
+}
+
+/// "Deleted 12 old trips", "Deleted 1 old trip".
+pub(crate) fn prune_pill(n: usize) -> String {
+    format!("Deleted {n} old {}", trip_noun(n))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rovsti_geo::Coord;
+
+    #[test]
+    fn prune_taps_arm_then_confirm() {
+        assert_eq!(prune_step(None, 30), (Some(30), false));
+        assert_eq!(prune_step(Some(30), 30), (None, true));
+        assert_eq!(prune_step(Some(30), 90), (Some(90), false));
+    }
+
+    #[test]
+    fn prune_pill_plurals() {
+        assert_eq!(prune_pill(12), "Deleted 12 old trips");
+        assert_eq!(prune_pill(1), "Deleted 1 old trip");
+    }
 
     #[test]
     fn reload_plan_keeps_rows_and_skips_overlap() {

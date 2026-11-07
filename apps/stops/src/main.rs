@@ -195,6 +195,8 @@ pub(crate) struct StopsApp {
     pub(crate) chat_view: Vec<ChatRow>,
     /// Clear history was tapped once.
     pub(crate) confirm_clear: bool,
+    /// A prune pill (older than N days) was tapped once.
+    pub(crate) confirm_prune: Option<u32>,
     /// The History row whose actions (Use, Delete) are showing.
     pub(crate) history_open: Option<usize>,
     /// The record id whose "last trip" card was closed; in memory only.
@@ -411,6 +413,7 @@ impl StopsApp {
             chat_query,
             chat_view: Vec::new(),
             confirm_clear: false,
+            confirm_prune: None,
             history_open: None,
             last_trip_hidden: None,
             history_query: String::new(),
@@ -663,6 +666,7 @@ impl StopsApp {
             cx.notify();
         } else if self.tabs.select(0) {
             self.confirm_clear = false;
+            self.confirm_prune = None;
             self.map.end_measure();
             self.confirm_remove_feed = false;
             self.page.restart();
@@ -893,6 +897,7 @@ impl Render for StopsApp {
                             // Leaving disarms a half-done destructive tap and
                             // closes the pin menu nobody can see any more.
                             this.confirm_clear = false;
+                            this.confirm_prune = None;
                             this.confirm_remove_feed = false;
                             this.pick.close_menu();
                             this.map.end_measure();

@@ -209,14 +209,18 @@ pub fn export_stamp(now_ms: i64, tz_offset_s: i32) -> String {
 
 /// The row subtitle: the gate length, then how far its middle is when your
 /// position is known.
-pub fn stop_detail(stop: &SavedStop, here: Option<Coord>) -> String {
+pub fn stop_detail(stop: &SavedStop, here: Option<Coord>, usage: Option<&str>) -> String {
     let gate = format!("Gate {}", distance_text(stop.length_m()));
-    match here {
+    let base = match here {
         Some(h) => format!(
             "{gate}, {} away",
             distance_text(h.distance_m(stop.center()))
         ),
         None => gate,
+    };
+    match usage {
+        Some(u) => format!("{base} · {u}"),
+        None => base,
     }
 }
 
@@ -430,7 +434,11 @@ impl StopsApp {
         let reorder = reorderable(count, &self.saved_query, self.saved_sort);
         let colors = theme::colors(theme);
         let id = stop.id;
-        let detail = stop_detail(stop, self.map.position.map(|(c, _)| c));
+        let usage = self
+            .history
+            .usage_of(stop.a.coord, stop.b.coord)
+            .map(|u| rovsti_geo::usage_text(u, crate::store::now_ms(), self.tz_offset_s));
+        let detail = stop_detail(stop, self.map.position.map(|(c, _)| c), usage.as_deref());
         let open = self.expanded == Some(id);
         let row = list_row(
             theme,
@@ -1115,11 +1123,15 @@ mod tests {
     fn detail_names_the_gate_and_distance() {
         // 0.0038 degrees of latitude is about 420 m.
         let st = stop("Pier", 41.0038);
-        assert_eq!(stop_detail(&st, None), "Gate 420 m");
+        assert_eq!(stop_detail(&st, None, None), "Gate 420 m");
         let here = st.center();
-        assert_eq!(stop_detail(&st, Some(here)), "Gate 420 m, 0 m away");
+        assert_eq!(stop_detail(&st, Some(here), None), "Gate 420 m, 0 m away");
         let far = Coord::new(41.1, 29.0);
-        let text = stop_detail(&st, Some(far));
+        let text = stop_detail(&st, Some(far), None);
+        assert_eq!(
+            stop_detail(&st, None, Some("Used 4 times, last 5 Nov")),
+            "Gate 420 m · Used 4 times, last 5 Nov"
+        );
         assert!(
             text.starts_with("Gate 420 m, 10.") && text.ends_with(" km away"),
             "{text}"

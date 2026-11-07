@@ -298,6 +298,15 @@ pub fn scrubber_letters(rows: impl IntoIterator<Item = char>) -> Vec<char> {
     letters
 }
 
+/// Fewer rows than this need no scrubber.
+pub const SCRUBBER_MIN_ROWS: usize = 20;
+
+/// Whether the Contacts tab shows the letter column: no search text and more
+/// than [`SCRUBBER_MIN_ROWS`] rows.
+pub fn show_scrubber(rows: usize, query: &str) -> bool {
+    query.trim().is_empty() && rows > SCRUBBER_MIN_ROWS
+}
+
 /// The letter index under a touch at `y` on a strip of `height` split into
 /// `count` equal cells; out-of-range touches clamp to the ends.
 pub fn letter_at(y: f32, height: f32, count: usize) -> Option<usize> {
@@ -609,6 +618,15 @@ mod tests {
         let kept: Vec<i64> = without(&all, &[]).iter().map(|c| c.id).collect();
         assert_eq!(kept, [3, 1, 2]);
         assert!(without(&all, &[1, 2, 3]).is_empty());
+    }
+
+    #[test]
+    fn scrubber_shows_for_long_unfiltered_lists_only() {
+        assert!(super::show_scrubber(21, ""));
+        assert!(super::show_scrubber(21, "  "));
+        assert!(!super::show_scrubber(20, ""));
+        assert!(!super::show_scrubber(500, "an"));
+        assert!(!super::show_scrubber(0, ""));
     }
 
     #[test]

@@ -541,7 +541,7 @@ impl ContactsApp {
     }
 
     /// The "Wish" chip of a birthday row.
-    fn wish_chip(theme: Theme, index: usize) -> gpui::Stateful<gpui::Div> {
+    pub(crate) fn wish_chip(theme: Theme, index: usize) -> gpui::Stateful<gpui::Div> {
         let colors = theme::colors(theme);
         div()
             .id(("wish", index))

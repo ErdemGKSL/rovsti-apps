@@ -22,6 +22,7 @@ mod qr_sheet;
 mod sample;
 mod transfer;
 mod ui;
+mod upcoming;
 mod whatsapp;
 
 use std::{iter, path::PathBuf, sync::Arc};
@@ -81,6 +82,9 @@ const FAVORITES_TAB: usize = 1;
 const GROUPS_TAB: usize = 2;
 const SETTINGS_TAB: usize = 3;
 const FIELD_H: f32 = 44.0;
+/// The scrubber column starts below the title and search field.
+const SCRUBBER_TOP: f32 = 150.0;
+const SCRUBBER_BOTTOM_GAP: f32 = 8.0;
 /// A list row is about this tall: the height a virtualised list assumes for
 /// rows it has not measured yet (it measures the real one when drawn).
 const ROW_PX: f32 = 58.0;
@@ -281,6 +285,17 @@ struct ContactsApp {
     /// The merge that Undo would revert, and the Find duplicates page.
     merge_undo: Option<dupes::MergeUndo>,
     dupes: dupes::Dupes,
+    /// Birthdays and anniversaries within a year (soonest first), the first
+    /// number of each contact for the Wish chip, and the page showing them.
+    upcoming: Vec<rovsti_core::contact_dates::Upcoming>,
+    upcoming_numbers: std::collections::HashMap<i64, String>,
+    upcoming_loads: u64,
+    upcoming_open: bool,
+    /// The alphabet scrubber: the section letter of each Contacts row, the
+    /// letters shown, and the drag.
+    row_letters: Vec<char>,
+    scrub_letters: Vec<char>,
+    scrub: upcoming::Scrub,
     /// The contact whose delete waits for its Undo window.
     pending_delete: Option<PendingDelete>,
     /// The timer that clears `notice` (the text it was started for).
@@ -452,6 +467,13 @@ impl ContactsApp {
             wa_photo_busy: false,
             notice: None,
             notice_action: None,
+            upcoming: Vec::new(),
+            upcoming_numbers: std::collections::HashMap::new(),
+            upcoming_loads: 0,
+            upcoming_open: false,
+            row_letters: Vec::new(),
+            scrub_letters: Vec::new(),
+            scrub: upcoming::Scrub::default(),
             pending_delete: None,
             notice_timer: None,
             reveal_focus: None,
@@ -514,6 +536,7 @@ impl ContactsApp {
                     this.photos.forget_misses();
                     this.refresh_marks();
                     this.rebuild(cx);
+                    this.load_upcoming(cx);
                     if let Some(id) = this.pending_open.take() {
                         this.open_contact(id, cx);
                     }
@@ -616,6 +639,7 @@ impl ContactsApp {
             new_query,
         );
         self.built_query = query;
+        self.set_scrub_letters();
         cx.notify();
     }
 
@@ -715,6 +739,7 @@ impl ContactsApp {
             || self.whatsapp_open
             || self.dupes.open
             || self.dupes.sheet.is_open()
+            || self.upcoming_open
             || self.tabs.selected() != CONTACTS_TAB
             || !self.field.read(cx).text().is_empty()
     }
@@ -743,6 +768,8 @@ impl ContactsApp {
             self.close_contact(cx);
         } else if self.group_page.is_some() {
             self.close_group(cx);
+        } else if self.upcoming_open {
+            self.set_upcoming_open(false, cx);
         } else if self.dupes.sheet.is_open() {
             self.close_dupes_sheet(cx);
         } else if self.dupes.open {
@@ -1332,10 +1359,16 @@ impl ContactsApp {
                 .on_click(cx.listener(|this, _, _, cx| this.open_favorites_picker(cx)))
                 .into_any_element()
         });
+        let upcoming = if matches!(self.book, Book::Ready(_)) {
+            self.upcoming_section(theme, cx)
+        } else {
+            None
+        };
         div()
             .flex()
             .flex_col()
             .child(large_title(theme, TABS[FAVORITES_TAB], trailing))
+            .children(upcoming)
             .children(body)
             .into_any_element()
     }
@@ -1710,6 +1743,7 @@ impl Render for ContactsApp {
 
         // Lists that grow with the address book are virtualised and scroll
         // themselves; the other pages scroll as one block.
+        let mut scrubber = false;
         let (page, listed) = if picking {
             let page = Self::list_page(&self.picker_list, bottom, Self::picker_item, cx);
             (page, true)
@@ -1725,16 +1759,24 @@ impl Render for ContactsApp {
                 cx,
             );
             (page, true)
+        } else if self.upcoming_open && tab == FAVORITES_TAB {
+            (self.upcoming_page(theme, cx), false)
         } else if self.dupes.open && tab == SETTINGS_TAB {
             (self.dupes_page(theme, cx), false)
         } else if self.whatsapp_open && tab == SETTINGS_TAB {
             (self.whatsapp_page(theme, cx), false)
         } else {
             match tab {
-                CONTACTS_TAB => (
-                    Self::list_page(&self.contacts_list, bottom, Self::contacts_item, cx),
-                    true,
-                ),
+                CONTACTS_TAB => {
+                    let query = self.field.read(cx).text().to_owned();
+                    scrubber = matches!(self.book, Book::Ready(_))
+                        && !self.scrub_letters.is_empty()
+                        && contacts_view::show_scrubber(self.rows.len(), &query);
+                    (
+                        Self::list_page(&self.contacts_list, bottom, Self::contacts_item, cx),
+                        true,
+                    )
+                }
                 FAVORITES_TAB => (
                     Self::list_page(&self.favorites_list, bottom, Self::favorites_item, cx),
                     true,
@@ -1802,7 +1844,9 @@ impl Render for ContactsApp {
                                 || this.group_edit.is_some()
                                 || this.whatsapp_open
                                 || this.dupes.open
+                                || this.upcoming_open
                             {
+                                this.upcoming_open = false;
                                 this.whatsapp_open = false;
                                 this.dupes.open = false;
                                 this.dupes.sheet.close();
@@ -1824,6 +1868,19 @@ impl Render for ContactsApp {
                     },
                 )
             }))
+            .children(
+                scrubber
+                    .then(|| {
+                        let top = SCRUBBER_TOP;
+                        let height = f32::from(window.viewport_size().height)
+                            - top
+                            - f32::from(bottom)
+                            - SCRUBBER_BOTTOM_GAP;
+                        self.scrubber_view(theme, top, height.max(120.0), cx)
+                    })
+                    .into_iter()
+                    .flatten(),
+            )
             .children(self.photo_viewer_overlay(theme, window, cx))
             // The pill sits above the viewer, which hides the one under the page.
             .children(if self.viewer.is_some() {

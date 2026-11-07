@@ -50,16 +50,16 @@ GPUI facts at the pinned checkout (`~/.cargo/git/checkouts/gpui-fusion-*/d6c8412
 
 | # | Utility | Status |
 |---|---------|--------|
-| C1 | Photo viewer: tap the card avatar, full screen, pinch / double-tap zoom, pan, swipe down to close, tap hides chrome | backlog R1 (S5) |
-| C2 | Save photo to gallery and Share photo from the viewer | backlog R1 (S5) |
-| C3 | Change / Remove photo from the viewer (Remove confirms, pill after) | backlog R1 (S5) |
-| C4 | Share contact as: Text, vCard file (.vcf), QR code (QR sheet with Save / Share image) | backlog R1 (S6) |
-| C5 | Birthdays and anniversaries: read, write, edit, show on the card with age ("turns 31 on 12 May") | backlog R1 (S2, S4, S6) |
-| C6 | Postal addresses: read, write, edit, show; tap opens maps (`geo:0,0?q=`), long-press copy/share | backlog R1 (S2, S4, S6) |
-| C7 | vCard 3/4 carries BDAY, ANNIVERSARY (and X-ANNIVERSARY), ADR on import and export | backlog R1 (S3) |
-| C8 | Find duplicates (same name, shared number, shared email) and Merge with confirm and Undo | backlog R1 (S1, S7) |
-| C9 | Upcoming birthdays: section on Favorites (next 3) and a full page (next 365 days), "Wish" quick SMS | backlog R1 (S2, S8) |
-| C10 | Alphabet scrubber on the Contacts tab (drag letters, haptic tick, letter bubble) | backlog R1 (S3, S8) |
+| C1 | Photo viewer: tap the card avatar, full screen, pinch / double-tap zoom, pan, swipe down to close, tap hides chrome | done R1 |
+| C2 | Save photo to gallery and Share photo from the viewer | done R1 |
+| C3 | Change / Remove photo from the viewer (Remove confirms, pill after) | done R1 |
+| C4 | Share contact as: Text, vCard file (.vcf), QR code (QR sheet with Save / Share image) | done R1 |
+| C5 | Birthdays and anniversaries: read, write, edit, show on the card with age ("turns 31 on 12 May") | done R1 |
+| C6 | Postal addresses: read, write, edit, show; tap opens maps (`geo:0,0?q=`), long-press copy/share | done R1 |
+| C7 | vCard 3/4 carries BDAY, ANNIVERSARY (and X-ANNIVERSARY), ADR on import and export | done R1 |
+| C8 | Find duplicates (same name, shared number, shared email) and Merge with confirm and Undo | done R1 |
+| C9 | Upcoming birthdays: section on Favorites (next 3) and a full page (next 365 days), "Wish" quick SMS | done R1 |
+| C10 | Alphabet scrubber on the Contacts tab (drag letters, haptic tick, letter bubble) | done R1 |
 | C11 | Select mode in the Contacts list: export selection (.vcf), share, add to group, star, delete (confirm + Undo) | backlog R2 |
 | C12 | Export one contact as .vcf to a file (system "save as") from the card menu | backlog R2 |
 | C13 | Photo crop / rotate before setting (user-moved square crop, quarter turns; extend `contact_photo::PhotoPlan`) | backlog R2 |

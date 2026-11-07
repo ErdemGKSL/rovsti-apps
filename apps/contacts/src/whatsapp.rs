@@ -264,7 +264,12 @@ impl ContactsApp {
                 .await;
             if let Some(locale) = raw.ok().and_then(|text| LocaleTime::parse(&text)) {
                 this.update(cx, |this, cx| {
+                    let changed = this.wa.offset_s != locale.tz_offset_s;
                     this.wa.offset_s = locale.tz_offset_s;
+                    if changed {
+                        // "Today" moves with the zone.
+                        this.load_upcoming(cx);
+                    }
                     cx.notify();
                 })
                 .ok();

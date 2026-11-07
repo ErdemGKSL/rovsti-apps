@@ -140,6 +140,14 @@ list in `docs/phone-acceptance.md`.
       when the delete commits; export says when there is nothing to export (done without a
       device)
 - [x] UX completeness pass, round 4: a search with no results offers Create Contact with the number, email or name filled in (done without a device)
+- [x] Utilities, round 1 (C1-C10, done without a device): full-screen contact photo viewer with
+      pinch / double-tap zoom, pan, Save to Photos, Share, Change and Remove; Share as text, `.vcf`
+      or QR code; birthdays, anniversaries and postal addresses on the card, in the editor and in
+      vCard 3/4 (`BDAY`, `ANNIVERSARY`, `ADR`), addresses open in maps; Find duplicates and Merge
+      with confirm and Undo; "Upcoming" birthdays on Favorites (next 3 within 30 days, "See all"
+      for 365 days, a "Wish" SMS chip); alphabet scrubber with haptic ticks and a letter bubble
+- [ ] Check the photo viewer gestures, the QR sheet, the calendar-event and address writes, and
+      the scrubber drag on a phone: written without a device
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
 - [ ] Check the group member write and the mailto handoff on a phone; a delete commits after 5 s or when leaving the app
 

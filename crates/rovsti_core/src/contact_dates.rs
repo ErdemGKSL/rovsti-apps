@@ -183,6 +183,41 @@ pub fn upcoming(
     out
 }
 
+/// How far ahead the Favorites tab looks.
+pub const FAVORITES_DAYS: i64 = 30;
+
+/// The entries the Favorites tab shows: the first `limit` of `items` (sorted
+/// soonest first) that fall within [`FAVORITES_DAYS`].
+pub fn favorites_upcoming(items: &[Upcoming], limit: usize) -> &[Upcoming] {
+    let end = items.partition_point(|u| u.in_days <= FAVORITES_DAYS);
+    &items[..end.min(limit)]
+}
+
+/// Splits `items` (sorted soonest first) into "This week" (the next 7 days),
+/// "This month" (up to 30 days) and "Later"; empty groups are left out.
+pub fn upcoming_groups(items: &[Upcoming]) -> Vec<(&'static str, &[Upcoming])> {
+    let week = items.partition_point(|u| u.in_days < 7);
+    let month = items.partition_point(|u| u.in_days <= FAVORITES_DAYS);
+    [
+        ("This week", &items[..week]),
+        ("This month", &items[week..month]),
+        ("Later", &items[month..]),
+    ]
+    .into_iter()
+    .filter(|(_, rows)| !rows.is_empty())
+    .collect()
+}
+
+/// "Turns 31" for a birthday, "31 years" for an anniversary; `None` without a year.
+pub fn turning_text(u: &Upcoming) -> Option<String> {
+    let n = u.turning.filter(|n| *n > 0)?;
+    Some(match u.kind {
+        EventKind::Birthday => format!("Turns {n}"),
+        _ if n == 1 => "1 year".to_owned(),
+        _ => format!("{n} years"),
+    })
+}
+
 /// "Today", "Tomorrow" or "In 5 days".
 pub fn when_text(in_days: i64) -> String {
     match in_days {
@@ -483,6 +518,64 @@ mod tests {
         ];
         let list = upcoming(&drafts, ms(2024, 3, 1, 0), 0, 30);
         assert_eq!(list[0].name, "Ada");
+    }
+
+    fn up(id: i64, in_days: i64, kind: EventKind, turning: Option<i64>) -> Upcoming {
+        Upcoming {
+            contact_id: id,
+            name: format!("P{id}"),
+            kind,
+            in_days,
+            date_text: String::new(),
+            turning,
+        }
+    }
+
+    #[test]
+    fn favorites_take_three_within_thirty_days() {
+        let items: Vec<Upcoming> = [0, 2, 9, 20, 30, 31, 90]
+            .iter()
+            .enumerate()
+            .map(|(i, d)| up(i as i64, *d, EventKind::Birthday, None))
+            .collect();
+        let shown = favorites_upcoming(&items, 3);
+        assert_eq!(shown.len(), 3);
+        assert_eq!(shown[2].in_days, 9);
+        assert_eq!(favorites_upcoming(&items[4..], 3).len(), 1);
+        assert!(favorites_upcoming(&items[5..], 3).is_empty());
+        assert!(favorites_upcoming(&[], 3).is_empty());
+        assert!(favorites_upcoming(&items, 0).is_empty());
+    }
+
+    #[test]
+    fn upcoming_groups_split_week_month_later() {
+        let items: Vec<Upcoming> = [0, 6, 7, 30, 31, 365]
+            .iter()
+            .enumerate()
+            .map(|(i, d)| up(i as i64, *d, EventKind::Birthday, None))
+            .collect();
+        let groups = upcoming_groups(&items);
+        let sizes: Vec<_> = groups.iter().map(|(n, r)| (*n, r.len())).collect();
+        assert_eq!(sizes, [("This week", 2), ("This month", 2), ("Later", 2)]);
+        assert_eq!(upcoming_groups(&items[4..])[0].0, "Later");
+        assert!(upcoming_groups(&[]).is_empty());
+    }
+
+    #[test]
+    fn turning_texts() {
+        assert_eq!(
+            turning_text(&up(1, 1, EventKind::Birthday, Some(31))).as_deref(),
+            Some("Turns 31")
+        );
+        assert_eq!(
+            turning_text(&up(1, 1, EventKind::Anniversary, Some(1))).as_deref(),
+            Some("1 year")
+        );
+        assert_eq!(
+            turning_text(&up(1, 1, EventKind::Anniversary, Some(5))).as_deref(),
+            Some("5 years")
+        );
+        assert_eq!(turning_text(&up(1, 1, EventKind::Birthday, None)), None);
     }
 
     #[test]

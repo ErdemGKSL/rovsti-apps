@@ -214,6 +214,33 @@ impl SavedStops {
     }
 }
 
+/// Order of the Saved list.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SavedSort {
+    /// The order the user arranged.
+    #[default]
+    Saved,
+    /// Alphabetical, ignoring case and diacritics.
+    Name,
+    /// Closest gate centre first.
+    Nearest,
+}
+
+/// `hits` in the requested order. `Nearest` without a position keeps saved order.
+pub fn sorted(mut hits: Vec<&SavedStop>, sort: SavedSort, here: Option<Coord>) -> Vec<&SavedStop> {
+    match (sort, here) {
+        (SavedSort::Name, _) => hits.sort_by_cached_key(|s| fold(&s.name)),
+        (SavedSort::Nearest, Some(here)) => {
+            hits.sort_by(|x, y| {
+                here.distance_m(x.center())
+                    .total_cmp(&here.distance_m(y.center()))
+            });
+        }
+        _ => {}
+    }
+    hits
+}
+
 /// Result of [`load_saved_stops`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadedStops {
@@ -434,6 +461,35 @@ mod tests {
         assert_eq!(s.search("").len(), 2);
         assert_eq!(s.search("kadikoy").len(), 1);
         assert_eq!(s.search("zzz").len(), 0);
+    }
+
+    #[test]
+    fn sort_orders() {
+        let mut s = SavedStops::default();
+        for (name, n) in [("Zeta", 0.0), ("çay", 0.2), ("Alpha", 0.1)] {
+            let (a, b) = gate(n);
+            s.add(name, a, b, 0).unwrap();
+        }
+        let names =
+            |v: Vec<&SavedStop>| -> Vec<String> { v.into_iter().map(|x| x.name.clone()).collect() };
+        let all = || s.search("");
+        assert_eq!(
+            names(sorted(all(), SavedSort::Saved, None)),
+            ["Zeta", "çay", "Alpha"]
+        );
+        assert_eq!(
+            names(sorted(all(), SavedSort::Name, None)),
+            ["Alpha", "çay", "Zeta"]
+        );
+        let here = Some(Coord::new(41.2, 29.0));
+        assert_eq!(
+            names(sorted(all(), SavedSort::Nearest, here)),
+            ["çay", "Alpha", "Zeta"]
+        );
+        assert_eq!(
+            names(sorted(all(), SavedSort::Nearest, None)),
+            ["Zeta", "çay", "Alpha"]
+        );
     }
 
     #[test]

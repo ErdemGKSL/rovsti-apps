@@ -15,6 +15,7 @@ pub mod gtfs;
 pub mod history;
 pub mod measure;
 pub mod notice;
+pub mod places_io;
 pub mod poll;
 pub mod prefs;
 pub mod saved_stops;

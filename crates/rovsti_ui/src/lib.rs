@@ -7,6 +7,7 @@
 pub mod components;
 pub mod field;
 pub mod haptics;
+pub mod layout;
 pub mod moments;
 pub mod motion;
 pub mod notice_pill;

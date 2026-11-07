@@ -13,7 +13,7 @@ use gpui::{
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
 use rovsti_geo::{
-    ActiveTrip, Diameter, FixOut, NoticeState, Side, TripState, tiles::tiles_for_circle,
+    ActiveTrip, Coord, Diameter, FixOut, NoticeState, Side, TripState, tiles::tiles_for_circle,
 };
 use rovsti_ui::{
     components::{backdrop, flat_glass, glass_pill, list_row, section},
@@ -42,6 +42,29 @@ pub fn distance_text(metres: f64) -> String {
     } else {
         format!("{:.1} km", metres / 1_000.0)
     }
+}
+
+/// An arrow glyph for the compass octant of a bearing (north is up).
+pub fn octant_arrow(deg: f64) -> &'static str {
+    const ARROWS: [&str; 8] = [
+        "\u{2191}", "\u{2197}", "\u{2192}", "\u{2198}", "\u{2193}", "\u{2199}", "\u{2190}",
+        "\u{2196}",
+    ];
+    let d = if deg.is_finite() {
+        deg.rem_euclid(360.0)
+    } else {
+        0.0
+    };
+    ARROWS[(((d + 22.5) / 45.0) as usize) % 8]
+}
+
+/// "NE, 1.2 km": the compass point and distance from `here` to `target`.
+pub fn bearing_text(here: Coord, target: Coord) -> String {
+    format!(
+        "{}, {}",
+        rovsti_geo::coord_format::cardinal(here.bearing_deg(target)),
+        distance_text(here.distance_m(target))
+    )
 }
 
 /// The line under the A and B rows: what the circle is and what wakes you.
@@ -457,6 +480,15 @@ impl StopsApp {
         if let Some(l) = tracking {
             details.extend(circle_text(l));
             details.extend(eta_text(l.eta_min));
+        }
+        if let Some((here, _)) = self.map.position {
+            let target = trip.trip.diameter.center();
+            let deg = here.bearing_deg(target);
+            details.push(format!(
+                "{} {}",
+                octant_arrow(deg),
+                bearing_text(here, target)
+            ));
         }
         if let Some(ms) = live.as_ref().and_then(|l| l.next_fix_ms) {
             details.push(format!("Next check in {}", wait_text(ms)));
@@ -1289,6 +1321,29 @@ mod tests {
         let live = Live::from_out(&out);
         assert_eq!(live.circle_m, Some(640.0));
         assert_eq!(circle_text(&live).as_deref(), Some("640 m to the circle"));
+    }
+
+    #[test]
+    fn arrows_follow_the_octants() {
+        assert_eq!(octant_arrow(0.0), "\u{2191}");
+        assert_eq!(octant_arrow(44.0), "\u{2197}");
+        assert_eq!(octant_arrow(90.0), "\u{2192}");
+        assert_eq!(octant_arrow(180.0), "\u{2193}");
+        assert_eq!(octant_arrow(270.0), "\u{2190}");
+        assert_eq!(octant_arrow(359.0), "\u{2191}");
+        assert_eq!(octant_arrow(-45.0), "\u{2196}");
+        assert_eq!(octant_arrow(f64::NAN), "\u{2191}");
+    }
+
+    #[test]
+    fn bearing_text_names_direction_and_distance() {
+        let here = Coord::new(41.0, 29.0);
+        let ne = Coord::new(41.008, 29.0106);
+        let text = bearing_text(here, ne);
+        assert!(text.starts_with("NE, "), "{text}");
+        assert!(text.ends_with(" km"), "{text}");
+        let north = Coord::new(41.003, 29.0);
+        assert_eq!(bearing_text(here, north), "N, 330 m");
     }
 
     #[test]

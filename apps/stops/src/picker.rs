@@ -919,6 +919,7 @@ impl StopsApp {
         let name = info.name.clone();
         let coord = info.coord;
         let gtfs_id = info.id.clone();
+        let code = gtfs_id.clone();
         let here = Destination {
             gtfs_stop: Some(gtfs_id),
             ..Destination::new(name.clone(), coord)
@@ -928,7 +929,14 @@ impl StopsApp {
             .flex_col()
             .gap(px(8.0))
             .child(Self::sheet_title(theme, name.clone()))
-            .child(Self::footnote(theme, pick::details_text(&here)));
+            .child(Self::footnote(
+                theme,
+                stop_subtitle(
+                    &pick::details_text(&here),
+                    self.map.position.map(|(c, _)| c),
+                    coord,
+                ),
+            ));
 
         let chosen = self.stop_pattern;
         let lines = self.stop_lines(&feed, stop);
@@ -981,10 +989,39 @@ impl StopsApp {
             ..here.clone()
         };
         let b_dest = a_dest.clone();
+        let (copy_name, copy_code) = (name.clone(), code.clone());
+        let (share_name, copy_label) = (name.clone(), name.clone());
         body = body.child(section(
             theme,
             Some("This stop".into()),
             [
+                list_row(theme, None, "Copy name", None, None)
+                    .id("stop-copy-name")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy_name.clone()));
+                        this.show_pill("Copied the stop name", None, cx);
+                    }))
+                    .into_any_element(),
+                list_row(theme, None, "Copy stop code", None, None)
+                    .id("stop-copy-code")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(copy_code.clone()));
+                        this.show_pill("Copied the stop code", None, cx);
+                    }))
+                    .into_any_element(),
+                list_row(theme, None, "Share", None, None)
+                    .id("stop-share")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let label = share_name.clone();
+                        this.share_point(label.clone(), coord, &label, cx);
+                    }))
+                    .into_any_element(),
+                list_row(theme, None, "Copy as", None, None)
+                    .id("stop-copy-as")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_copy_as(copy_label.clone(), coord, cx);
+                    }))
+                    .into_any_element(),
                 list_row(theme, None, "Use as A", None, None)
                     .id("stop-use-a")
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -1176,9 +1213,30 @@ fn looks_like_link(text: &str) -> bool {
             .is_some_and(|c| c.is_ascii_digit() || c == '-')
 }
 
+/// The stop sheet's subtitle: `details`, then how far the stop is from `here`.
+pub fn stop_subtitle(details: &str, here: Option<Coord>, stop: Coord) -> String {
+    match here {
+        Some(h) => format!(
+            "{details}, {} away",
+            crate::settings_ui::distance_text(h.distance_m(stop))
+        ),
+        None => details.to_owned(),
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use super::stop_subtitle;
+    use rovsti_geo::Coord;
+
+    #[test]
+    fn stop_subtitle_adds_distance_only_with_a_fix() {
+        let stop = Coord::new(41.0, 29.0);
+        assert_eq!(stop_subtitle("Stop", None, stop), "Stop");
+        assert_eq!(stop_subtitle("Stop", Some(stop), stop), "Stop, 0 m away");
+    }
+
     #[test]
     fn the_copied_pill_names_the_format() {
         use rovsti_geo::coord_format::CoordFormat;

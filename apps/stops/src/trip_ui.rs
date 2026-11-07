@@ -101,6 +101,35 @@ pub struct Live {
     pub notice_failed: bool,
 }
 
+/// The pill after an alarm was dismissed: its text and whether it offers
+/// Re-arm (only when the trip's ends were known).
+pub fn dismiss_pill(ends: Option<&(Destination, Destination)>) -> (&'static str, bool) {
+    ("Alarm dismissed", ends.is_some())
+}
+
+/// The trip's two ends as destinations, for Re-arm.
+fn trip_ends(trip: Option<&ActiveTrip>) -> Option<(Destination, Destination)> {
+    trip.map(|t| {
+        (
+            pick::dest_from_endpoint(&t.a),
+            pick::dest_from_endpoint(&t.b),
+        )
+    })
+}
+
+/// The pill text for the live card's status, from the pure helper.
+fn status_text(trip: &ActiveTrip, live: Option<&Live>, here: Option<Coord>) -> String {
+    let crossed = live.is_some_and(|l| l.state != TripState::Tracking);
+    rovsti_geo::status_share_text(
+        &trip.label(),
+        live.map(|l| l.line_m),
+        live.and_then(|l| l.eta_min),
+        here,
+        trip.trip.diameter.center(),
+        crossed,
+    )
+}
+
 /// The arrival-message line, if any. Sent wins over failed, failed over planned.
 pub fn notice_line(sent: bool, failed: bool, planned: bool) -> Option<&'static str> {
     if sent {
@@ -557,6 +586,22 @@ impl StopsApp {
                             .child(d)
                     }))
                     .child(
+                        div()
+                            .flex()
+                            .gap(px(8.0))
+                            .pt(px(8.0))
+                            .child(
+                                glass_pill(theme, "Copy status")
+                                    .id("copy-status")
+                                    .on_click(cx.listener(|this, _, _, cx| this.copy_status(cx))),
+                            )
+                            .child(
+                                glass_pill(theme, "Share status")
+                                    .id("share-status")
+                                    .on_click(cx.listener(|this, _, _, cx| this.share_status(cx))),
+                            ),
+                    )
+                    .child(
                         glass_pill(theme, if busy { "Stopping..." } else { "Stop" })
                             .id("stop")
                             .mt(px(12.0))
@@ -566,6 +611,33 @@ impl StopsApp {
                     ),
             )
             .into_any_element()
+    }
+
+    fn status_now(&self) -> Option<String> {
+        let trip = self.trip.as_ref()?;
+        let here = self.map.position.map(|(c, _)| c);
+        Some(status_text(trip, self.live.as_ref(), here))
+    }
+
+    /// Copy status: the trip's status text to the clipboard.
+    fn copy_status(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.status_now() else {
+            return;
+        };
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        self.show_pill("Status copied", None, cx);
+    }
+
+    /// Share status: the system share sheet; elsewhere a pill says so.
+    fn share_status(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.status_now() else {
+            return;
+        };
+        self.run_android(
+            "Share status",
+            move || rovsti_android::telecom::share_text(&text),
+            cx,
+        );
     }
 
     /// The arrival alarm, over everything, while the app is open.
@@ -1021,7 +1093,11 @@ impl StopsApp {
             TripAlarmEvent::Snoozed { at_ms } | TripAlarmEvent::TimedOut { at_ms } => {
                 self.on_snoozed(at_ms, cx);
             }
-            TripAlarmEvent::Dismissed => self.trip_over(cx),
+            TripAlarmEvent::Dismissed => {
+                let ends = trip_ends(self.trip.as_ref());
+                self.trip_over(cx);
+                self.dismissed(ends, cx);
+            }
         }
     }
 
@@ -1063,12 +1139,22 @@ impl StopsApp {
         cx.notify();
     }
 
+    /// The pill after Dismiss, with Re-arm when the ends are known.
+    fn dismissed(&mut self, ends: Option<(Destination, Destination)>, cx: &mut Context<Self>) {
+        let (text, offer) = dismiss_pill(ends.as_ref());
+        let action = ends
+            .filter(|_| offer)
+            .map(|(a, b)| crate::PillAction::Rearm(a, b));
+        self.show_pill(text, action, cx);
+    }
+
     /// Dismiss or Snooze on the alarm screen.
     pub(crate) fn alarm_action(&mut self, action: AlarmAction, cx: &mut Context<Self>) {
         let Some(dir) = self.dir.clone() else {
             return;
         };
         self.alarm = None;
+        let ends = trip_ends(self.trip.as_ref());
         cx.notify();
         cx.spawn(async move |this, cx| {
             let reply = cx
@@ -1077,7 +1163,11 @@ impl StopsApp {
                 .await;
             this.update(cx, |this, cx| match reply {
                 backend::AlarmReply::Snoozed { at_ms } => this.on_snoozed(at_ms, cx),
-                backend::AlarmReply::Dismissed | backend::AlarmReply::Ended => this.trip_over(cx),
+                backend::AlarmReply::Dismissed => {
+                    this.trip_over(cx);
+                    this.dismissed(ends, cx);
+                }
+                backend::AlarmReply::Ended => this.trip_over(cx),
                 // Kotlin answers with a `trip_alarm` event.
                 backend::AlarmReply::Sent => {}
                 backend::AlarmReply::Failed => {
@@ -1109,6 +1199,16 @@ mod tests {
             notice_sent: false,
             notice_failed: false,
         }
+    }
+
+    #[test]
+    fn dismiss_pill_offers_rearm_only_with_ends() {
+        assert_eq!(dismiss_pill(None), ("Alarm dismissed", false));
+        let ends = (
+            Destination::new("A", Coord::new(41.0, 29.0)),
+            Destination::new("B", Coord::new(41.1, 29.1)),
+        );
+        assert_eq!(dismiss_pill(Some(&ends)), ("Alarm dismissed", true));
     }
 
     #[test]

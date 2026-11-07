@@ -168,6 +168,31 @@ pub fn tile_cache_texts(usage: Option<u64>, armed: bool) -> (&'static str, Strin
     (title, subtitle)
 }
 
+/// Title and subtitle of the "Cache size" row.
+pub fn cache_size_text(cap_mb: u32, armed_mb: Option<u32>) -> (String, &'static str) {
+    match armed_mb {
+        Some(mb) => (
+            format!("Tap again to shrink to {mb} MB"),
+            "Older tiles are deleted now",
+        ),
+        None => (format!("{cap_mb} MB"), "Offline areas stay while they fit"),
+    }
+}
+
+/// Whether the current cache holds more than the new cap allows.
+pub fn needs_shrink_confirm(usage: u64, new_cap: u64) -> bool {
+    usage > new_cap
+}
+
+/// Bytes held by servers other than `current`.
+pub fn other_servers_bytes(sources: &[(String, u64)], current: &str) -> u64 {
+    sources
+        .iter()
+        .filter(|(key, _)| key != current)
+        .map(|(_, bytes)| bytes)
+        .sum()
+}
+
 /// Cache size: "None", "< 1 MB", "4.2 MB", "37 MB".
 pub fn bytes_text(bytes: u64) -> String {
     const MIB: u64 = 1024 * 1024;
@@ -530,6 +555,8 @@ impl StopsApp {
         self.history_open = None;
         self.confirm_remove_feed = false;
         self.confirm_clear_tiles = false;
+        self.shrink_armed = None;
+        self.confirm_clear_other = false;
         self.page.restart();
         self.history_list.scroll_to_top();
         self.notice_list.scroll_to_top();
@@ -1580,6 +1607,38 @@ impl StopsApp {
         .id("tiles-clear")
         .on_click(cx.listener(|this, _, _, cx| this.clear_tiles(cx)))
         .into_any_element();
+        let (size_title, size_sub) = cache_size_text(self.prefs.tile_cache_mb, self.shrink_armed);
+        let size_row = list_row(
+            theme,
+            None,
+            size_title,
+            Some(size_sub.into()),
+            Some("Change".into()),
+        )
+        .id("tiles-cap")
+        .on_click(cx.listener(|this, _, _, cx| this.cycle_tile_cache(cx)))
+        .into_any_element();
+        let other = other_servers_bytes(&self.tile_sources, &self.prefs.tile_source().key());
+        let mut cache_rows = vec![downloaded, size_row];
+        if other > 0 {
+            let title = if self.confirm_clear_other {
+                "Tap again to clear"
+            } else {
+                "Other servers"
+            };
+            cache_rows.push(
+                list_row(
+                    theme,
+                    None,
+                    title,
+                    Some(bytes_text(other).into()),
+                    Some("Clear".into()),
+                )
+                .id("tiles-clear-other")
+                .on_click(cx.listener(|this, _, _, cx| this.clear_other_tiles(cx)))
+                .into_any_element(),
+            );
+        }
         let progress = self.area_progress_row(theme, "tiles-area-cancel", cx);
         div()
             .flex()
@@ -1617,11 +1676,11 @@ impl StopsApp {
                 false,
             ))
             .child(section(theme, None, [save, reset]))
-            .child(section(theme, None, [downloaded]))
+            .child(section(theme, None, cache_rows))
             .children(progress)
             .child(note(
                 theme,
-                "Kept for offline use, up to 128 MB per map server.",
+                "Kept for offline use, up to the cache size per map server.",
                 false,
             ))
             .into_any_element()
@@ -1632,15 +1691,22 @@ impl StopsApp {
         self.tile_usage = None;
         let Some(root) = self.map_tiles.root() else {
             self.tile_usage = Some(0);
+            self.tile_sources.clear();
             return;
         };
         cx.spawn(async move |this, cx| {
             let bytes = cx
                 .background_executor()
-                .spawn(async move { rovsti_tiles::disk_usage(&root) })
+                .spawn(async move {
+                    (
+                        rovsti_tiles::disk_usage(&root),
+                        rovsti_tiles::usage_by_source(&root),
+                    )
+                })
                 .await;
             this.update(cx, |this, cx| {
-                this.tile_usage = Some(bytes);
+                this.tile_usage = Some(bytes.0);
+                this.tile_sources = bytes.1;
                 cx.notify();
             })
             .ok();
@@ -1664,6 +1730,64 @@ impl StopsApp {
             app.tile_usage = Some(0);
             app.show_pill("Downloaded maps cleared", None, cx);
         });
+        cx.notify();
+    }
+
+    /// Cache size row: the next size; shrinking below the current usage
+    /// asks for a second tap first.
+    fn cycle_tile_cache(&mut self, cx: &mut Context<Self>) {
+        let next = self.prefs.next_tile_cache();
+        let shrinking = next < self.prefs.tile_cache_mb;
+        let new_bytes = u64::from(next) * 1024 * 1024;
+        let usage = self.tile_usage.unwrap_or(0);
+        if shrinking && needs_shrink_confirm(usage, new_bytes) && self.shrink_armed != Some(next) {
+            self.shrink_armed = Some(next);
+            cx.notify();
+            return;
+        }
+        self.shrink_armed = None;
+        self.prefs.tile_cache_mb = next;
+        self.save_prefs(cx);
+        self.map_tiles.set_cap(new_bytes, cx);
+        self.show_pill(format!("Cache limit {next} MB"), None, cx);
+        self.measure_tiles(cx);
+        cx.notify();
+    }
+
+    /// Other servers row: two taps, then their cached tiles are deleted.
+    fn clear_other_tiles(&mut self, cx: &mut Context<Self>) {
+        if self.trip.is_some() {
+            self.show_pill("Not while a trip is running", None, cx);
+            return;
+        }
+        if !self.confirm_clear_other {
+            self.confirm_clear_other = true;
+            cx.notify();
+            return;
+        }
+        self.confirm_clear_other = false;
+        let Some(root) = self.map_tiles.root() else {
+            return;
+        };
+        let keep = self.prefs.tile_source().key();
+        cx.spawn(async move |this, cx| {
+            let freed = cx
+                .background_executor()
+                .spawn(async move { rovsti_tiles::clear_except(&root, &keep) })
+                .await;
+            this.update(cx, |this, cx| {
+                match freed {
+                    Ok(bytes) => this.show_pill(format!("Freed {}", bytes_text(bytes)), None, cx),
+                    Err(error) => {
+                        log::warn!("cannot clear other tile caches: {error}");
+                        this.show_pill("Could not clear. Try again.", None, cx);
+                    }
+                }
+                this.measure_tiles(cx);
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
     }
 
@@ -1928,6 +2052,24 @@ mod tests {
             group: false,
         };
         assert_eq!(reload_plan(&ChatList::Ready(vec![row])), (true, false));
+    }
+
+    #[test]
+    fn cache_size_helpers() {
+        assert_eq!(cache_size_text(256, None).0, "256 MB");
+        assert_eq!(
+            cache_size_text(1024, Some(128)).0,
+            "Tap again to shrink to 128 MB"
+        );
+        assert!(needs_shrink_confirm(200, 100));
+        assert!(!needs_shrink_confirm(100, 100));
+        let s = vec![
+            ("a".to_owned(), 5),
+            ("b".to_owned(), 7),
+            ("c".to_owned(), 1),
+        ];
+        assert_eq!(other_servers_bytes(&s, "b"), 6);
+        assert_eq!(other_servers_bytes(&[], "b"), 0);
     }
 
     #[test]

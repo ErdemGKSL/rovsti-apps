@@ -93,6 +93,18 @@ pub(crate) enum PillAction {
     RestoreAlarmSound(Option<rovsti_geo::prefs::AlarmSound>),
     /// Takes back "Save as stop": the saved stop with this id.
     UndoSave(u64),
+    /// Takes a dismissed alarm back: the same trip again.
+    Rearm(Destination, Destination),
+}
+
+impl PillAction {
+    /// The pill button's text.
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Rearm(..) => "Re-arm",
+            _ => "Undo",
+        }
+    }
 }
 
 pub(crate) struct StopsApp {
@@ -200,6 +212,12 @@ pub(crate) struct StopsApp {
     pub(crate) tile_usage: Option<u64>,
     /// The first tap on "Downloaded maps" has armed the second.
     pub(crate) confirm_clear_tiles: bool,
+    /// The cache size the first tap on "Cache size" asked to shrink to (MB).
+    pub(crate) shrink_armed: Option<u32>,
+    /// The first tap on "Other servers" has armed the second.
+    pub(crate) confirm_clear_other: bool,
+    /// Bytes per server directory, measured with `tile_usage`.
+    pub(crate) tile_sources: Vec<(String, u64)>,
     /// The first tap on "Download this area" has armed the second.
     pub(crate) area_armed: bool,
 }
@@ -303,7 +321,8 @@ impl StopsApp {
                 this.prefs = data.prefs;
                 this.apply_appearance(cx);
                 let source = this.prefs.tile_source();
-                this.map_tiles.attach(&dir, source, cx);
+                let cap = this.prefs.tile_cache_bytes();
+                this.map_tiles.attach(&dir, source, cap, cx);
                 this.saved = data.saved;
                 this.history = data.history;
                 this.set_feed(data.gtfs);
@@ -389,6 +408,9 @@ impl StopsApp {
             tz_offset_s: 0,
             tile_usage: None,
             confirm_clear_tiles: false,
+            shrink_armed: None,
+            confirm_clear_other: false,
+            tile_sources: Vec::new(),
             area_armed: false,
         };
         app.refresh_preflight_later(cx);
@@ -664,9 +686,8 @@ impl StopsApp {
         cx: &mut Context<Self>,
     ) {
         let undo = action.is_some();
-        let token = self
-            .pill
-            .show(text, undo.then(|| "Undo".into()), undo, false);
+        let label = action.as_ref().map(PillAction::label);
+        let token = self.pill.show(text, label.map(Into::into), undo, false);
         self.pill_action = action.map(|a| (token, a));
         cx.notify();
     }
@@ -683,7 +704,9 @@ impl StopsApp {
             PillAction::UndoDelete(stop, index) => self.undo_delete(stop, index, cx),
             PillAction::RestoreHistory(history) => self.restore_history(history, cx),
             PillAction::RestoreRecord(record, index) => self.restore_record(record, index, cx),
-            PillAction::RestartTrip(a, b) => self.request_start(a, b, cx),
+            PillAction::RestartTrip(a, b) | PillAction::Rearm(a, b) => {
+                self.request_start(a, b, cx);
+            }
             PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
             PillAction::RestoreSaved(saved) => self.restore_saved(saved, cx),

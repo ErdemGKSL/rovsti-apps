@@ -11,7 +11,9 @@ use std::{
     sync::Arc,
 };
 
-use rovsti_android::{Error, contacts_edit, documents, media, providers, reminders, telecom};
+use rovsti_android::{
+    Error, contacts_edit, documents, media, providers, reminders, shortcuts, telecom,
+};
 use rovsti_core::{
     birthday_reminder::{self, BirthdayAlarm},
     contact_dates::Upcoming,
@@ -21,9 +23,12 @@ use rovsti_core::{
         ImportPayload, MembersPayload, SavedPayload, SelectionChange,
     },
     contact_history::PULL_LIMIT,
+    contact_intake::{self, Intake},
+    contact_options::{self, ContactOptions, PinShortcut},
     contact_photo::{self, CropView, PhotoError},
     contact_scan::{self, Scanned},
     contact_select,
+    contact_stats::{self, Summary},
     contacts_prefs::ContactsPrefs,
     recents::{self, HistoryLine},
     search::{ContactIndex, fold},
@@ -594,6 +599,78 @@ mod hand_off {
 #[allow(unused_imports)]
 pub(crate) use hand_off::*;
 
+/// The contact's own ringtone and voicemail setting.
+#[allow(dead_code, reason = "used by the UI steps that follow")]
+pub(crate) fn options_of(contact_id: i64) -> Result<ContactOptions, String> {
+    let json = contacts_edit::contact_options(contact_id).map_err(|e| android_words(&e))?;
+    contact_options::parse(&json).map_err(|e| Failed::Other(e.to_string()).words())
+}
+
+/// Sets the contact's ringtone: `None` default, `Some("")` silent.
+#[allow(dead_code, reason = "used by the UI steps that follow")]
+pub(crate) fn set_ringtone(contact_id: i64, uri: Option<&str>) -> Result<(), String> {
+    done(contacts_edit::set_ringtone(contact_id, uri))
+}
+
+#[allow(dead_code, reason = "used by the UI steps that follow")]
+pub(crate) fn set_voicemail(contact_id: i64, on: bool) -> Result<(), String> {
+    done(contacts_edit::set_send_to_voicemail(contact_id, on))
+}
+
+/// Opens the system ringtone picker; the answer is the event `ringtone_picked`.
+#[allow(dead_code, reason = "used by the UI steps that follow")]
+pub(crate) fn pick_ringtone(current: Option<&str>) -> Result<(), String> {
+    done(contacts_edit::pick_ringtone(current))
+}
+
+/// Asks the launcher to pin a contact shortcut; `false` when it declined.
+#[allow(dead_code, reason = "used by the UI steps that follow")]
+pub(crate) fn pin_shortcut(spec: &PinShortcut) -> Result<bool, String> {
+    let json =
+        serde_json::to_string(spec).map_err(|error| Failed::Other(error.to_string()).words())?;
+    shortcuts::pin_contact(&json).map_err(|e| android_words(&e))
+}
+
+/// Whether the launcher can pin shortcuts.
+#[allow(dead_code, reason = "used by the UI steps that follow")]
+pub(crate) fn can_pin() -> bool {
+    shortcuts::can_pin().unwrap_or(false)
+}
+
+/// What a shared or opened file holds. Android copies the `content://` uri into
+/// the cache first; desktop reads a plain path.
+#[allow(dead_code, reason = "used by the UI steps that follow")]
+pub(crate) fn shared_file(uri: &str) -> Result<Intake, String> {
+    let max = contact_intake::MAX_SHARED_BYTES;
+    let (path, cached) = match documents::copy_shared(uri, max) {
+        Ok(path) if path.is_empty() => return Ok(Intake::TooBig),
+        Ok(path) => (PathBuf::from(path), true),
+        Err(Error::Unsupported) => (
+            PathBuf::from(uri.strip_prefix("file://").unwrap_or(uri)),
+            false,
+        ),
+        Err(error) => return Err(android_words(&error)),
+    };
+    let read = std::fs::read(&path);
+    if cached {
+        let _ = std::fs::remove_file(&path);
+    }
+    let Ok(bytes) = read else {
+        return Ok(Intake::Unreadable);
+    };
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    Ok(contact_intake::from_file(None, name, &bytes))
+}
+
+/// Counts over the whole address book.
+#[allow(dead_code, reason = "used by the UI steps that follow")]
+pub(crate) fn summary() -> Result<Summary, String> {
+    pull_full().map(|contacts| contact_stats::summarize(&contacts))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,6 +680,47 @@ mod tests {
         let json = r#"{"v":1,"ok":false,"error":"permission"}"#;
         let result = decode::<ContactsPayload>(Ok(json.to_owned()));
         assert!(matches!(result, Err(Failed::Wire(WireError::Permission))));
+    }
+
+    #[test]
+    fn option_wrappers_say_they_need_a_phone() {
+        let words = "this needs an Android phone";
+        assert_eq!(options_of(1).expect_err("desktop"), words);
+        assert_eq!(set_ringtone(1, None).expect_err("desktop"), words);
+        assert_eq!(set_voicemail(1, true).expect_err("desktop"), words);
+        assert_eq!(pick_ringtone(Some("")).expect_err("desktop"), words);
+        let spec = contact_options::shortcut(1, None, "Ayse Yilmaz", None);
+        assert_eq!(pin_shortcut(&spec).expect_err("desktop"), words);
+        assert!(!can_pin());
+    }
+
+    #[test]
+    fn shared_file_reads_a_plain_vcf_path() {
+        let dir = std::env::temp_dir().join(format!("rovsti-shared-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("one.vcf");
+        std::fs::write(
+            &path,
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ayse Yilmaz\r\nN:Yilmaz;Ayse;;;\r\nTEL:+905321112233\r\nEND:VCARD\r\n",
+        )
+        .expect("writes");
+        let intake = shared_file(path.to_str().expect("utf8")).expect("reads");
+        let Intake::Cards(cards) = intake else {
+            panic!("expected cards, got {intake:?}");
+        };
+        assert_eq!(cards.len(), 1);
+        let missing = dir.join("none.vcf");
+        assert_eq!(
+            shared_file(missing.to_str().expect("utf8")).expect("ok"),
+            Intake::Unreadable
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn summary_counts_the_sample_book_on_desktop() {
+        let s = summary().expect("sample");
+        assert!(s.total > 0);
     }
 
     #[test]

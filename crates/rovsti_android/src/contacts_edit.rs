@@ -101,6 +101,47 @@ pub fn delete_group(group_id: i64) -> Result<bool> {
     bridge::call_bool("deleteContactGroup", &[Arg::Str(&group_id.to_string())])
 }
 
+/// The contact's call options as plain JSON
+/// (`rovsti_core::contact_options::ContactOptions`); `{}` when unreadable.
+pub fn contact_options(contact_id: i64) -> Result<String> {
+    bridge::call_string("contactOptions", &[Arg::Str(&contact_id.to_string())])
+}
+
+/// Sets the contact's own ringtone: `None` is the system default, `Some("")`
+/// silent, else a ringtone uri. `false` when Android refused.
+pub fn set_ringtone(contact_id: i64, uri: Option<&str>) -> Result<bool> {
+    bridge::call_bool(
+        "setContactRingtone",
+        &[
+            Arg::Str(&contact_id.to_string()),
+            Arg::Str(uri.unwrap_or("")),
+            Arg::Bool(uri.is_some()),
+        ],
+    )
+}
+
+/// Sends the contact's calls straight to voicemail (or rings again).
+/// `false` when Android refused.
+pub fn set_send_to_voicemail(contact_id: i64, on: bool) -> Result<bool> {
+    bridge::call_bool(
+        "setContactVoicemail",
+        &[Arg::Str(&contact_id.to_string()), Arg::Bool(on)],
+    )
+}
+
+/// Opens the system ringtone picker showing `current` (`None` default,
+/// `Some("")` silent). The answer is the one-shot event `ringtone_picked
+/// {uri, cancelled}`: a null uri is the default, an empty one silent.
+pub fn pick_ringtone(current: Option<&str>) -> Result<bool> {
+    bridge::call_bool(
+        "pickRingtone",
+        &[
+            Arg::Str(current.unwrap_or("")),
+            Arg::Bool(current.is_some()),
+        ],
+    )
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -130,5 +171,12 @@ mod tests {
         ));
         assert!(matches!(remove_photo(1), Err(Error::Unsupported)));
         assert!(matches!(delete_group(1), Err(Error::Unsupported)));
+        assert!(matches!(contact_options(1), Err(Error::Unsupported)));
+        assert!(matches!(set_ringtone(1, None), Err(Error::Unsupported)));
+        assert!(matches!(
+            set_send_to_voicemail(1, true),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(pick_ringtone(Some("")), Err(Error::Unsupported)));
     }
 }

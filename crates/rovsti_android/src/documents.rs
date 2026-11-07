@@ -96,6 +96,14 @@ pub fn capture_photo() -> Result<bool> {
     bridge::call_bool0("capturePhoto")
 }
 
+/// Copies the shared `content://` file at `uri` into the app cache and returns
+/// the path of the copy. Empty when it could not be read or is longer than
+/// `max_bytes`.
+pub fn copy_shared(uri: &str, max_bytes: usize) -> Result<String> {
+    let max = i32::try_from(max_bytes).unwrap_or(i32::MAX);
+    bridge::call_string("readSharedUri", &[Arg::Str(uri), Arg::Int(max)])
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -124,5 +132,9 @@ mod tests {
         assert!(matches!(pick_contact_photo(), Err(Error::Unsupported)));
         assert!(matches!(capture_photo(), Err(Error::Unsupported)));
         assert!(matches!(pick_scan_image(), Err(Error::Unsupported)));
+        assert!(matches!(
+            copy_shared("content://x/1", 1024),
+            Err(Error::Unsupported)
+        ));
     }
 }

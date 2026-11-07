@@ -159,6 +159,7 @@ object RovstiBridge {
 
     /** `MainActivity.onActivityResult`: true when the request was a document picker's. */
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean =
+        ContactOptions.handle(requestCode, resultCode, data) { json -> postOneShot("ringtone_picked", json) } ||
         Documents.handle(app, requestCode, resultCode, data, documentExecutor) { json -> postOneShot("document_result", json) }
 
     private val documentExecutor: java.util.concurrent.ExecutorService by lazy {
@@ -310,6 +311,49 @@ object RovstiBridge {
         val activity = foreground ?: return false
         activity.runOnUiThread { Documents.startPhotoCapture(activity) }
         return true
+    }
+
+    // ---- Contact options, shortcuts, shared files (Rovsti Contacts) ----
+
+    /** [contactId] is a decimal string; the answer is `{ringtone_uri, ringtone_title, to_voicemail}` or `{}`. */
+    @JvmStatic fun contactOptions(contactId: String): String =
+        contactId.toLongOrNull()?.let { ContactOptions.read(app, it) } ?: "{}"
+
+    /** [hasUri] false = the default ringtone; [uri] "" = silent. */
+    @JvmStatic fun setContactRingtone(contactId: String, uri: String, hasUri: Boolean): Boolean =
+        contactId.toLongOrNull()?.let { ContactOptions.setRingtone(app, it, if (hasUri) uri else null) } ?: false
+
+    @JvmStatic fun setContactVoicemail(contactId: String, on: Boolean): Boolean =
+        contactId.toLongOrNull()?.let { ContactOptions.setVoicemail(app, it, on) } ?: false
+
+    /** The system ringtone picker; the answer is the one-shot event `ringtone_picked {uri, cancelled}`. */
+    @JvmStatic
+    fun pickRingtone(current: String, hasCurrent: Boolean): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { ContactOptions.pickRingtone(activity, if (hasCurrent) current else null) }
+        return true
+    }
+
+    @JvmStatic fun canPinShortcut(): Boolean = Shortcuts.canPin(app)
+
+    @JvmStatic fun pinContactShortcut(specJson: String): Boolean = Shortcuts.pinContact(app, specJson)
+
+    /** Copies the content [uri] (at most [maxBytes]) to `cacheDir/shared/`; its path, or "" on failure or when too big. */
+    @JvmStatic
+    fun readSharedUri(uri: String, maxBytes: Int): String {
+        var target: java.io.File? = null
+        return try {
+            val dir = java.io.File(app.cacheDir, "shared").apply { mkdirs() }
+            val file = java.io.File(dir, "shared-${System.currentTimeMillis()}.bin")
+            target = file
+            val fits = app.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
+                file.outputStream().use { Documents.copyLimited(input, it, maxBytes.coerceAtLeast(0)) }
+            }
+            if (fits == true) file.absolutePath else { file.delete(); "" }
+        } catch (_: Exception) {
+            target?.delete()
+            ""
+        }
     }
 
     /** Asks a signature-matching sibling app to handle [action] (WhatsApp call or chat); false when none does. */

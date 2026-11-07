@@ -28,6 +28,7 @@ pub mod providers;
 pub mod reminders;
 pub mod roles;
 pub mod settings;
+pub mod shortcuts;
 pub mod sms;
 pub mod telecom;
 pub mod trip;

@@ -20,6 +20,11 @@
         "android.permission.WRITE_CONTACTS"
       ],
       "project-dir": "platforms/android",
+      "share-mime-types": [
+        "text/x-vcard",
+        "text/vcard",
+        "text/directory"
+      ],
       "variables": {
         "min_sdk": "34",
         "target_sdk": "36"

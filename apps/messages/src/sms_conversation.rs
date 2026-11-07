@@ -171,6 +171,8 @@ pub struct SmsConversation {
     muted: bool,
     /// The bubble (by `message_key`) whose copy pills are showing.
     selected: Option<u64>,
+    /// The open Info or Select text sheet.
+    info_sheet: Option<crate::info_ui::InfoSheet>,
     /// A picture or file is being handed to the "Save as" sheet.
     saving: bool,
     /// An exported chat is at the "Save as" sheet; true when only part of it was loaded.
@@ -250,6 +252,7 @@ impl SmsConversation {
             muted: false,
             in_spam: false,
             selected: None,
+            info_sheet: None,
             saving: false,
             exporting: None,
             peer_photo: None,
@@ -382,6 +385,10 @@ impl SmsConversation {
     /// System Back inside the page: clears the selected bubble; `false` when
     /// nothing was selected.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.info_sheet.take().is_some() {
+            cx.notify();
+            return true;
+        }
         if self.find.take().is_some() {
             cx.notify();
             return true;
@@ -1243,6 +1250,100 @@ impl SmsConversation {
             .into_any_element()
     }
 
+    /// The Info rows of a message.
+    fn info_rows(&self, item: &SmsItem, cx: &gpui::App) -> Vec<rovsti_core::message_info::InfoRow> {
+        use rovsti_core::message_info::{InfoInput, rows};
+        let backend = self.backend.read(cx);
+        let sim = item.sub_id.and_then(|id| {
+            backend
+                .sims()
+                .sims
+                .iter()
+                .find(|s| s.sub_id == id)
+                .map(|s| s.label.clone())
+        });
+        let kinds: Vec<&str> = item
+            .parts
+            .iter()
+            .filter(|p| {
+                let t = p.content_type.trim().to_ascii_lowercase();
+                !t.starts_with("text/") && !t.starts_with("application/smil")
+            })
+            .map(|p| crate::info_ui::mime_label(&p.content_type))
+            .collect();
+        let media = (!kinds.is_empty()).then(|| kinds.join(", "));
+        let text = copy_text(item);
+        let author = (!item.outgoing).then(|| self.title.to_string());
+        let input = InfoInput {
+            channel: Some(crate::info_ui::sms_channel(
+                item.key,
+                !item.parts.is_empty(),
+            )),
+            at_ms: item.at_ms,
+            outgoing: item.outgoing,
+            state: crate::info_ui::sms_state(item.outgoing, item.state),
+            author: author.as_deref(),
+            sim: sim.as_deref(),
+            text: text.as_deref(),
+            media: media.as_deref(),
+            ..InfoInput::default()
+        };
+        rows(&input, backend.locale())
+    }
+
+    /// The Info or Select text sheet over the conversation.
+    fn info_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let sheet = self.info_sheet.as_ref()?;
+        let close = cx.listener(|this, _, _, cx| {
+            this.info_sheet = None;
+            cx.notify();
+        });
+        let copy_info = cx.listener(|this, _, _, cx| {
+            if let Some(sheet) = this.info_sheet.take() {
+                cx.emit(SmsConversationEvent::Copy {
+                    text: sheet.info_text(),
+                    sensitive: false,
+                });
+            }
+            cx.notify();
+        });
+        let copy_selection = cx.listener(|this, _, window, cx| {
+            let Some(sheet) = this.info_sheet.as_ref() else {
+                return;
+            };
+            match sheet.selected(window) {
+                Some(text) => {
+                    this.info_sheet = None;
+                    cx.emit(SmsConversationEvent::Copy {
+                        text,
+                        sensitive: false,
+                    });
+                }
+                None => cx.emit(SmsConversationEvent::Notice(crate::info_ui::SELECT_FIRST)),
+            }
+            cx.notify();
+        });
+        let copy_all = cx.listener(|this, _, _, cx| {
+            if let Some(sheet) = this.info_sheet.take()
+                && let Some(text) = sheet.text
+            {
+                cx.emit(SmsConversationEvent::Copy {
+                    text: text.to_string(),
+                    sensitive: false,
+                });
+            }
+            cx.notify();
+        });
+        Some(crate::info_ui::info_overlay(
+            theme,
+            sheet,
+            close,
+            copy_info,
+            copy_selection,
+            copy_all,
+        ))
+    }
+
     fn bubble(
         &self,
         theme: Theme,
@@ -1441,6 +1542,32 @@ impl SmsConversation {
                         })),
                 );
             }
+            if let Some(text) = copy_text(item)
+                && crate::info_ui::worth_selecting(&text)
+            {
+                pills = pills.child(
+                    glass_pill(theme, "Select text")
+                        .id(("sms-select", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            this.info_sheet = Some(crate::info_ui::InfoSheet::select(text.clone()));
+                            cx.notify();
+                        })),
+                );
+            }
+            let sheet_rows = self.info_rows(item, cx);
+            pills = pills.child(glass_pill(theme, "Info").id(("sms-info", index)).on_click(
+                cx.listener(move |this, _, _, cx| {
+                    this.selected = None;
+                    this.rows_dirty = true;
+                    this.info_sheet = Some(crate::info_ui::InfoSheet::info(
+                        "Message info",
+                        sheet_rows.clone(),
+                    ));
+                    cx.notify();
+                }),
+            ));
             let files = saveable_parts(item);
             let total = files.len();
             for (n, part) in files.into_iter().enumerate() {
@@ -1750,8 +1877,10 @@ impl Render for SmsConversation {
                 .into_any_element()
         };
 
+        let info_sheet = self.info_overlay(theme, cx);
         div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .child(header)
@@ -1760,6 +1889,7 @@ impl Render for SmsConversation {
             .children(strip)
             .children(has_info.then_some(info))
             .child(bottom)
+            .children(info_sheet)
     }
 }
 

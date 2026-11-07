@@ -319,6 +319,8 @@ pub struct Conversation {
     hidden: HashSet<String>,
     /// The Delete menu.
     delete_confirm: Option<DeleteTarget>,
+    /// The open Info or Select text sheet.
+    info_sheet: Option<crate::info_ui::InfoSheet>,
     /// The message a quote tap jumped to (it glows for a moment).
     highlight: Option<String>,
     /// The "Search in chat" bar.
@@ -445,6 +447,7 @@ impl Conversation {
             star_override: HashMap::new(),
             hidden: HashSet::new(),
             delete_confirm: None,
+            info_sheet: None,
             starred_open: false,
             jump: JumpState::default(),
             opening_unread: (unread > 0).then_some(unread),
@@ -521,7 +524,9 @@ impl Conversation {
     /// System Back inside the page: closes the Delete menu, a message's menu,
     /// or the edit or reply bar; `false` when there is none of them.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.starred_open {
+        if self.info_sheet.is_some() {
+            self.info_sheet = None;
+        } else if self.starred_open {
             self.starred_open = false;
         } else if self.find.is_some() {
             self.find = None;
@@ -3107,6 +3112,37 @@ impl Conversation {
                 );
             }
         }
+        if !revoked
+            && let Some(text) = copy_text_of(&message.body, meta)
+            && crate::info_ui::worth_selecting(&text)
+        {
+            row = row.child(
+                pill("select", Icon::LucideTextCursor, "Select text", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        this.info_sheet = Some(crate::info_ui::InfoSheet::select(text.clone()));
+                        cx.notify();
+                    },
+                )),
+            );
+        }
+        {
+            let sheet_rows = self.info_rows(item, meta, cx);
+            row = row.child(
+                pill("info", Icon::LucideInfo, "Info", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        this.info_sheet = Some(crate::info_ui::InfoSheet::info(
+                            "Message info",
+                            sheet_rows.clone(),
+                        ));
+                        cx.notify();
+                    },
+                )),
+            );
+        }
         if let MessageBody::Media { kind, mime, .. } = &message.body
             && saveable(*kind)
             && !revoked
@@ -3144,6 +3180,100 @@ impl Conversation {
             )),
         );
         row.into_any_element()
+    }
+
+    /// The Info rows of a message.
+    fn info_rows(
+        &self,
+        item: &Item,
+        meta: Option<&MessageMeta>,
+        cx: &gpui::App,
+    ) -> Vec<rovsti_core::message_info::InfoRow> {
+        use rovsti_core::message_info::{InfoChannel, InfoInput, rows};
+        let message = &item.message;
+        let state = (message.from_me || meta.is_some_and(|m| m.status.is_some())).then(|| {
+            crate::info_ui::wa_state(message.from_me, item.state, meta.and_then(|m| m.status))
+        });
+        let author = (self.is_group && !message.from_me)
+            .then(|| self.author(false, message.sender.as_deref(), meta, cx));
+        let text = copy_text_of(&message.body, meta);
+        let media = match &message.body {
+            MessageBody::Media { kind, .. } => {
+                let m = meta.and_then(|m| m.media.as_ref());
+                let label = if m.is_some_and(|m| m.voice_note) {
+                    "Voice note"
+                } else {
+                    media_label(*kind)
+                };
+                Some(crate::info_ui::media_desc(
+                    label,
+                    m.and_then(|m| m.width.zip(m.height)),
+                    m.and_then(|m| m.seconds),
+                    m.and_then(|m| m.file_name.as_deref()),
+                ))
+            }
+            _ => None,
+        };
+        let input = InfoInput {
+            channel: Some(InfoChannel::WhatsApp),
+            at_ms: message.timestamp_ms,
+            outgoing: message.from_me,
+            state,
+            author: author.as_deref(),
+            edited_ms: meta.and_then(|m| m.edited_ms),
+            forwarded: meta.is_some_and(|m| m.forwarded),
+            starred: self.starred(&message.id),
+            sim: None,
+            text: text.as_deref(),
+            media: media.as_deref(),
+        };
+        rows(&input, self.locale)
+    }
+
+    /// The Info or Select text sheet over the conversation.
+    fn info_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let sheet = self.info_sheet.as_ref()?;
+        let close = cx.listener(|this, _, _, cx| {
+            this.info_sheet = None;
+            cx.notify();
+        });
+        let copy_info = cx.listener(|this, _, _, cx| {
+            if let Some(sheet) = this.info_sheet.take() {
+                cx.emit(ConversationEvent::Copy(sheet.info_text()));
+            }
+            cx.notify();
+        });
+        let copy_selection = cx.listener(|this, _, window, cx| {
+            let Some(sheet) = this.info_sheet.as_ref() else {
+                return;
+            };
+            match sheet.selected(window) {
+                Some(text) => {
+                    this.info_sheet = None;
+                    cx.emit(ConversationEvent::Copy(text));
+                }
+                None => cx.emit(ConversationEvent::Notice(
+                    crate::info_ui::SELECT_FIRST.into(),
+                )),
+            }
+            cx.notify();
+        });
+        let copy_all = cx.listener(|this, _, _, cx| {
+            if let Some(sheet) = this.info_sheet.take()
+                && let Some(text) = sheet.text
+            {
+                cx.emit(ConversationEvent::Copy(text.to_string()));
+            }
+            cx.notify();
+        });
+        Some(crate::info_ui::info_overlay(
+            theme,
+            sheet,
+            close,
+            copy_info,
+            copy_selection,
+            copy_all,
+        ))
     }
 
     /// The header's avatar: the contact photo, else the WhatsApp picture,
@@ -3537,6 +3667,7 @@ impl Render for Conversation {
         let context = self.compose_context(theme, cx);
         let overlay = self.delete_overlay(theme, cx);
         let starred_sheet = self.starred_overlay(theme, cx);
+        let info_sheet = self.info_overlay(theme, cx);
 
         div()
             .size_full()
@@ -3553,6 +3684,7 @@ impl Render for Conversation {
             .child(composer)
             .children(overlay)
             .children(starred_sheet)
+            .children(info_sheet)
     }
 }
 

@@ -17,6 +17,7 @@ mod forward_ui;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod headless;
 mod inbox;
+mod info_ui;
 mod keyed_list;
 mod media_viewer;
 mod new_conversation;

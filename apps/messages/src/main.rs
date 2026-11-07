@@ -1121,6 +1121,9 @@ impl MessagesApp {
             ConversationEvent::OpenMedia { items, index } => {
                 this.open_media_viewer(items.clone(), *index, cx);
             }
+            ConversationEvent::OpenAvatar(item) => {
+                this.open_media_viewer(vec![item.clone()], 0, cx);
+            }
         })
         .detach();
         // Opening reads the chat.
@@ -1154,6 +1157,18 @@ impl MessagesApp {
         let backend = self.backend.clone();
         let conversation =
             cx.new(|cx| SmsConversation::new(backend, thread_id, title, recipients, cx));
+        let row = self
+            .view
+            .all_rows()
+            .find(|row| row.threads.contains(&ThreadId::Sms(thread_id)));
+        if let Some(row) = row
+            && let Some(uri) = row.avatar.photo_uri.clone()
+        {
+            let (photos, initials) = (self.photos.clone(), row.initials.clone());
+            conversation.update(cx, |page, cx| {
+                page.set_peer_photo(photos, uri, initials, cx)
+            });
+        }
         cx.subscribe(&conversation, |this, _, event, cx| match event {
             SmsConversationEvent::Back => this.close_page(cx),
             SmsConversationEvent::Switch(thread) => this.switch_to(thread.clone(), cx),
@@ -1170,6 +1185,9 @@ impl MessagesApp {
             SmsConversationEvent::NotSpam => this.open_page_not_spam(cx),
             SmsConversationEvent::OpenMedia { items, index } => {
                 this.open_media_viewer(items.clone(), *index, cx);
+            }
+            SmsConversationEvent::OpenAvatar(item) => {
+                this.open_media_viewer(vec![item.clone()], 0, cx);
             }
             SmsConversationEvent::Notice(text) => {
                 this.show_pill(*text);

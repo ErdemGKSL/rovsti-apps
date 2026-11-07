@@ -3,7 +3,7 @@
 //! pages and `sms_status` events is `rovsti_core::sms_timeline::SmsTimeline`;
 //! this module is the GPUI shell around it plus a few pure text helpers.
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ListAlignment,
@@ -25,13 +25,15 @@ use rovsti_ui::{
     theme,
     tokens::{Theme, radius, typography},
 };
+use rovsti_wa_ui::photo_avatar;
 
 use crate::{
     backend::{Backend, BackendEvent, now_ms, sim_for},
-    conversation::{clock, composer_bar, day_label, header_bar},
+    conversation::{clock, composer_bar, day_label, header_bar_with},
     inbox::Badge,
     keyed_list::{KeyedList, key_of},
     media_viewer::{ViewerItem, ViewerSource},
+    photos::ContactPhotos,
     schedule_ui::{self, StripItem, StripKey},
 };
 
@@ -80,9 +82,18 @@ pub enum SmsConversationEvent {
         items: Vec<ViewerItem>,
         index: usize,
     },
+    /// The header's contact photo was tapped: the page opens it full size.
+    OpenAvatar(ViewerItem),
 }
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
+
+/// The address-book photo behind the header avatar.
+struct PeerPhoto {
+    photos: Entity<ContactPhotos>,
+    uri: SharedString,
+    initials: SharedString,
+}
 
 /// One item of the timeline list after its "Load earlier" slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -140,6 +151,8 @@ pub struct SmsConversation {
     selected: Option<u64>,
     /// A picture or file is being handed to the "Save as" sheet.
     saving: bool,
+    /// The address-book photo of the person, for the header avatar.
+    peer_photo: Option<PeerPhoto>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -202,11 +215,66 @@ impl SmsConversation {
             in_spam: false,
             selected: None,
             saving: false,
+            peer_photo: None,
             _subscriptions: subscriptions,
         };
         this.fill_from_thread(cx);
         this.load(None, cx);
         this
+    }
+
+    /// Gives the header an avatar: the contact's photo at `uri`, with
+    /// `initials` until it has been read.
+    pub fn set_peer_photo(
+        &mut self,
+        photos: Entity<ContactPhotos>,
+        uri: SharedString,
+        initials: SharedString,
+        cx: &mut Context<Self>,
+    ) {
+        self._subscriptions
+            .push(cx.observe(&photos, |_, _, cx| cx.notify()));
+        self.peer_photo = Some(PeerPhoto {
+            photos,
+            uri,
+            initials,
+        });
+        cx.notify();
+    }
+
+    /// The header avatar, tappable once the photo has been read.
+    fn header_avatar(&self, theme: Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let peer = self.peer_photo.as_ref()?;
+        peer.photos
+            .update(cx, |photos, cx| photos.want(&peer.uri, cx));
+        let photo = peer.photos.read(cx).photo(&peer.uri);
+        let item = photo.as_ref().map(|(image, _)| ViewerItem {
+            key: "avatar".to_owned(),
+            title: self.title.clone(),
+            mime: "image/png".to_owned(),
+            source: ViewerSource::ContactPhoto {
+                uri: peer.uri.to_string(),
+            },
+            at_ms: 0,
+            placeholder: None,
+            avatar: Some(Arc::clone(image)),
+        });
+        let avatar = photo_avatar(
+            theme,
+            peer.initials.clone(),
+            36.0,
+            theme::colors(theme).green,
+            photo,
+        );
+        Some(match item {
+            Some(item) => avatar
+                .id("sms-avatar")
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(SmsConversationEvent::OpenAvatar(item.clone()));
+                }))
+                .into_any_element(),
+            None => avatar.into_any_element(),
+        })
     }
 
     pub fn thread(&self) -> ThreadId {
@@ -1111,9 +1179,11 @@ impl Render for SmsConversation {
             .child(mute)
             .child(more)
             .into_any_element();
-        let header = header_bar(
+        let avatar = self.header_avatar(theme, cx);
+        let header = header_bar_with(
             theme,
             back,
+            avatar,
             self.title.clone(),
             header_subtitle(&self.title, &self.recipients),
             Some(trailing),
@@ -1444,6 +1514,7 @@ fn viewer_items(
                 },
                 at_ms: message.at_ms,
                 placeholder: None,
+                avatar: None,
             });
         }
     }

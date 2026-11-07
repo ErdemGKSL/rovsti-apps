@@ -32,7 +32,7 @@ use rovsti_ui::{
     tokens::{Theme, shadow, typography},
     touch::{TAP_SLOP, TapGuard, drag_surface},
 };
-use rovsti_wa_client::Gateway;
+use rovsti_wa_client::{Gateway, Picture};
 
 use crate::{MessagesApp, conversation::cache_stem, files::ext_for_mime};
 
@@ -46,6 +46,8 @@ const DOUBLE_TAP_SLOP: f32 = 48.0;
 const STALE_SAMPLE: Duration = Duration::from_millis(80);
 /// The longest side a viewed picture is decoded at.
 const MAX_PX: u32 = 4096;
+/// The longest side asked of the address book for a contact's photo.
+const PHOTO_PX: u32 = 1024;
 
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
 
@@ -68,6 +70,19 @@ pub(crate) fn image_rect(view: ZoomView, natural: Size, viewport: Size) -> (f32,
 #[cfg(test)]
 fn save_name(title: &str, mime: &str, at_ms: i64) -> String {
     branded_name("WhatsApp", title, mime, at_ms)
+}
+
+/// The gallery name of a profile photo: `Ada-Lovelace-photo.jpg`. The
+/// extension follows `mime` (`jpg` when it is not a known type).
+pub(crate) fn photo_name(title: &str, mime: &str) -> String {
+    let ext = match ext_for_mime(mime) {
+        "bin" => "jpg",
+        ext => ext,
+    };
+    format!(
+        "{}-photo.{ext}",
+        rovsti_core::number_format::file_slug(title)
+    )
 }
 
 /// [`save_name`] with the file name's first word chosen by where the picture came from.
@@ -97,6 +112,25 @@ pub(crate) enum ViewerSource {
     WaMedia { message_id: String },
     /// A file on the phone (MMS pictures).
     File { path: PathBuf },
+    /// A WhatsApp profile picture (full size), fetched through the gateway.
+    WaPicture { jid: String },
+    /// An address-book photo, read through Android's content providers.
+    ContactPhoto { uri: String },
+}
+
+impl ViewerSource {
+    /// A profile photo rather than a message's picture.
+    pub(crate) fn is_profile(&self) -> bool {
+        matches!(self, Self::WaPicture { .. } | Self::ContactPhoto { .. })
+    }
+}
+
+/// Why a picture could not be shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoadError {
+    Failed,
+    /// The person has no profile photo (or hides it).
+    NoPhoto,
 }
 
 /// One picture in the viewer.
@@ -111,6 +145,8 @@ pub(crate) struct ViewerItem {
     pub at_ms: i64,
     /// The picture already on screen, shown while the full one loads.
     pub placeholder: Option<Arc<Image>>,
+    /// An already decoded picture (an avatar) shown while the full one loads.
+    pub avatar: Option<Arc<RenderImage>>,
 }
 
 /// How far the full picture has got.
@@ -159,6 +195,8 @@ pub(crate) struct MediaViewer {
     pub index: usize,
     /// The bubble's picture, drawn until the full one is decoded.
     placeholder: Option<Arc<Image>>,
+    /// The avatar already on screen, drawn until the full photo is decoded.
+    avatar: Option<Arc<RenderImage>>,
     /// The decoded full picture and the file it came from (what Save and
     /// Share send).
     pub full: Option<(Arc<RenderImage>, PathBuf)>,
@@ -214,6 +252,7 @@ impl MediaViewer {
     pub(crate) fn open(items: Vec<ViewerItem>, index: usize) -> Option<Self> {
         let current = items.get(index)?;
         let placeholder = current.placeholder.clone();
+        let avatar = current.avatar.clone();
         let tween = |value| Spring::new(value, motion_tokens::appear()).with_epsilon(0.002);
         let pixels = |value| Spring::new(value, motion_tokens::appear()).with_epsilon(0.05);
         let mut enter = tween(0.0);
@@ -222,6 +261,7 @@ impl MediaViewer {
             items,
             index,
             placeholder,
+            avatar,
             full: None,
             load: Load::Loading,
             natural: Size { w: 1.0, h: 1.0 },
@@ -331,6 +371,7 @@ impl MediaViewer {
         self.prefetching = None;
         self.token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
         self.placeholder = self.current().placeholder.clone();
+        self.avatar = self.current().avatar.clone();
         self.load = Load::Loading;
         self.natural = Size { w: 1.0, h: 1.0 };
         self.view = ZoomView::IDENTITY;
@@ -652,26 +693,69 @@ fn load_blocking(
     item: &ViewerItem,
     gateway: Option<&Gateway>,
     dir: &Path,
-) -> Option<(Arc<RenderImage>, PathBuf)> {
+) -> Result<(Arc<RenderImage>, PathBuf), LoadError> {
     let (bytes, path) = match &item.source {
         ViewerSource::WaMedia { message_id } => {
-            let bytes = gateway?
+            let bytes = gateway
+                .ok_or(LoadError::Failed)?
                 .media(message_id)
-                .map_err(|error| log::warn!("downloading a picture failed: {error}"))
-                .ok()?;
-            std::fs::create_dir_all(dir).ok()?;
-            let path = dir.join(format!(
-                "{}.{}",
-                cache_stem(message_id),
-                ext_for_mime(&item.mime)
-            ));
-            std::fs::write(&path, &bytes).ok()?;
+                .map_err(|error| {
+                    log::warn!("downloading a picture failed: {error}");
+                    LoadError::Failed
+                })?;
+            let name = format!("{}.{}", cache_stem(message_id), ext_for_mime(&item.mime));
+            let path = write_cached(dir, &name, &bytes)?;
             (bytes, path)
         }
-        ViewerSource::File { path } => (std::fs::read(path).ok()?, path.clone()),
+        ViewerSource::File { path } => (
+            std::fs::read(path).map_err(|_| LoadError::Failed)?,
+            path.clone(),
+        ),
+        ViewerSource::WaPicture { jid } => {
+            let picture = gateway
+                .ok_or(LoadError::Failed)?
+                .picture(jid, true, None)
+                .map_err(|error| {
+                    log::warn!("downloading a profile photo failed: {error}");
+                    LoadError::Failed
+                })?;
+            let Picture::Image { id, bytes } = picture else {
+                return Err(match picture {
+                    Picture::None => LoadError::NoPhoto,
+                    _ => LoadError::Failed,
+                });
+            };
+            let name = format!(
+                "photo-{}-{}.{}",
+                cache_stem(jid),
+                cache_stem(&id),
+                ext_for_mime(&item.mime)
+            );
+            let path = write_cached(dir, &name, &bytes)?;
+            (bytes, path)
+        }
+        ViewerSource::ContactPhoto { uri } => {
+            let path = match rovsti_android::providers::contact_photo(uri, PHOTO_PX) {
+                Ok(path) if path.is_empty() => return Err(LoadError::NoPhoto),
+                Ok(path) => PathBuf::from(path),
+                Err(error) => {
+                    log::warn!("reading a contact photo failed: {error}");
+                    return Err(LoadError::Failed);
+                }
+            };
+            (std::fs::read(&path).map_err(|_| LoadError::Failed)?, path)
+        }
     };
-    let image = rovsti_wa_ui::decode_image(&bytes, MAX_PX)?;
-    Some((image, path))
+    let image = rovsti_wa_ui::decode_image(&bytes, MAX_PX).ok_or(LoadError::Failed)?;
+    Ok((image, path))
+}
+
+/// Writes `bytes` to `dir/name` (creating `dir`) and returns the path.
+fn write_cached(dir: &Path, name: &str, bytes: &[u8]) -> Result<PathBuf, LoadError> {
+    std::fs::create_dir_all(dir).map_err(|_| LoadError::Failed)?;
+    let path = dir.join(name);
+    std::fs::write(&path, bytes).map_err(|_| LoadError::Failed)?;
+    Ok(path)
 }
 
 fn point_of(p: gpui::Point<gpui::Pixels>) -> Point {
@@ -739,8 +823,14 @@ impl MessagesApp {
                     && viewer.token == token
                 {
                     match loaded {
-                        Some((image, path)) => viewer.set_full(image, path),
-                        None => viewer.load = Load::Failed,
+                        Ok((image, path)) => viewer.set_full(image, path),
+                        Err(LoadError::NoPhoto) => {
+                            this.media_viewer = None;
+                            this.show_pill("No profile photo");
+                            cx.notify();
+                            return;
+                        }
+                        Err(LoadError::Failed) => viewer.load = Load::Failed,
                     }
                     this.prefetch_neighbour(cx);
                     cx.notify();
@@ -769,7 +859,7 @@ impl MessagesApp {
         cx.spawn(async move |this, cx| {
             let loaded = task.await;
             this.update(cx, |this, cx| {
-                if let (Some(viewer), Some((image, path))) = (&mut this.media_viewer, loaded) {
+                if let (Some(viewer), Ok((image, path))) = (&mut this.media_viewer, loaded) {
                     viewer.cache_put(&item.key, image, path);
                     cx.notify();
                 }
@@ -809,11 +899,15 @@ impl MessagesApp {
         let Some((path, item)) = self.viewer_target() else {
             return;
         };
-        let brand = match item.source {
-            ViewerSource::WaMedia { .. } => "WhatsApp",
-            ViewerSource::File { .. } => "MMS",
+        let name = match item.source {
+            ViewerSource::WaMedia { .. } => {
+                branded_name("WhatsApp", &item.title, &item.mime, item.at_ms)
+            }
+            ViewerSource::File { .. } => branded_name("MMS", &item.title, &item.mime, item.at_ms),
+            ViewerSource::WaPicture { .. } | ViewerSource::ContactPhoto { .. } => {
+                photo_name(&item.title, &item.mime)
+            }
         };
-        let name = branded_name(brand, &item.title, &item.mime, item.at_ms);
         let task = cx.background_executor().spawn(async move {
             rovsti_android::media::save_image_to_gallery(&path.to_string_lossy(), &name, &item.mime)
         });
@@ -1200,8 +1294,8 @@ impl MessagesApp {
                     .into_any_element()
             })
         } else {
-            viewer.placeholder.clone().map(|image| {
-                gpui::img(image)
+            let fit = |image: gpui::Img| {
+                image
                     .absolute()
                     .left(px(x + page))
                     .top(px(y + dy))
@@ -1209,7 +1303,12 @@ impl MessagesApp {
                     .h(px(h))
                     .object_fit(ObjectFit::Contain)
                     .into_any_element()
-            })
+            };
+            viewer
+                .placeholder
+                .clone()
+                .map(|image| fit(gpui::img(image)))
+                .or_else(|| viewer.avatar.clone().map(|image| fit(gpui::img(image))))
         };
         // Status over a picture that has not arrived (or never will).
         let status = (!ready).then(|| {
@@ -1251,10 +1350,13 @@ impl MessagesApp {
             div()
                 .id("media-viewer")
                 .role(Role::Dialog)
-                .aria_label(SharedString::from(format!(
-                    "Picture from {}",
-                    viewer.current().title
-                )))
+                .aria_label(SharedString::from(
+                    if viewer.current().source.is_profile() {
+                        format!("Profile photo of {}", viewer.current().title)
+                    } else {
+                        format!("Picture from {}", viewer.current().title)
+                    },
+                ))
                 .absolute()
                 .inset_0()
                 .occlude()
@@ -1291,6 +1393,7 @@ mod tests {
             },
             at_ms: 0,
             placeholder: None,
+            avatar: None,
         }
     }
 
@@ -1359,6 +1462,39 @@ mod tests {
         let (x, y, w, h) = image_rect(view, Size { w: 128.0, h: 128.0 }, VP);
         assert_eq!((w, h), (800.0, 800.0));
         assert_eq!((x, y), (-200.0 + 30.0, 0.0 - 10.0));
+    }
+
+    #[test]
+    fn profile_photos_are_named_after_the_person() {
+        assert_eq!(
+            photo_name("Ada Lovelace", "image/jpeg"),
+            "Ada-Lovelace-photo.jpg"
+        );
+        assert_eq!(photo_name("Ada", "image/png"), "Ada-photo.png");
+        assert_eq!(photo_name("Ada", "application/x-weird"), "Ada-photo.jpg");
+        assert_eq!(photo_name("???", "image/jpeg"), "contact-photo.jpg");
+    }
+
+    #[test]
+    fn only_photo_sources_are_profiles() {
+        assert!(
+            ViewerSource::WaPicture {
+                jid: "1@s.whatsapp.net".into()
+            }
+            .is_profile()
+        );
+        assert!(
+            ViewerSource::ContactPhoto {
+                uri: "content://x".into()
+            }
+            .is_profile()
+        );
+        assert!(
+            !ViewerSource::File {
+                path: PathBuf::new()
+            }
+            .is_profile()
+        );
     }
 
     #[test]

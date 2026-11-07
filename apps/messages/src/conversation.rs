@@ -116,6 +116,9 @@ pub enum ConversationEvent {
         items: Vec<ViewerItem>,
         index: usize,
     },
+    /// The header avatar was tapped (only when a photo shows): the page opens
+    /// the full-size profile photo.
+    OpenAvatar(ViewerItem),
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
@@ -947,6 +950,7 @@ impl Conversation {
                 },
                 at_ms: message.timestamp_ms,
                 placeholder: self.cached_image(&message.id),
+                avatar: None,
             });
         }
         (items, index)
@@ -2516,9 +2520,15 @@ impl Conversation {
     fn header_avatar(&self, theme: Theme, cx: &mut Context<Self>) -> gpui::AnyElement {
         let colors = theme::colors(theme);
         let mut photo = None;
+        let mut source = None;
         if let Some(uri) = &self.peer.photo_uri {
             self.photos.update(cx, |photos, cx| photos.want(uri, cx));
             photo = self.photos.read(cx).photo(uri);
+            if photo.is_some() {
+                source = Some(ViewerSource::ContactPhoto {
+                    uri: uri.to_string(),
+                });
+            }
         }
         if photo.is_none() {
             let picture_id = self.peer.picture_id.as_deref();
@@ -2526,13 +2536,43 @@ impl Conversation {
             self.avatars
                 .update(cx, |avatars, cx| avatars.want(chat, picture_id, cx));
             photo = self.avatars.read(cx).picture(chat);
+            if photo.is_some() {
+                source = Some(ViewerSource::WaPicture {
+                    jid: chat.to_owned(),
+                });
+            }
         }
         let monogram = if self.is_group {
             SharedString::default()
         } else {
             self.peer.initials.clone()
         };
-        photo_avatar(theme, monogram, 36.0, colors.green, photo).into_any_element()
+        let item = source
+            .zip(photo.as_ref())
+            .map(|(source, (image, _))| ViewerItem {
+                key: "avatar".to_owned(),
+                title: self.title.clone(),
+                mime: if matches!(source, ViewerSource::ContactPhoto { .. }) {
+                    "image/png"
+                } else {
+                    "image/jpeg"
+                }
+                .to_owned(),
+                source,
+                at_ms: 0,
+                placeholder: None,
+                avatar: Some(Arc::clone(image)),
+            });
+        let avatar = photo_avatar(theme, monogram, 36.0, colors.green, photo);
+        match item {
+            Some(item) => avatar
+                .id("conv-avatar")
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(ConversationEvent::OpenAvatar(item.clone()));
+                }))
+                .into_any_element(),
+            None => avatar.into_any_element(),
+        }
     }
 
     /// The bar above the composer while replying or editing.

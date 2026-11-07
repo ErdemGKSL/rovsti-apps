@@ -209,6 +209,9 @@ pub struct Backend {
     _tasks: Vec<Task<()>>,
 }
 
+/// The notice of a conversation delete that failed.
+pub const DELETE_FAILED: &str = "Couldn't delete that conversation";
+
 impl Backend {
     /// Starts a session: installs the sink, pulls everything, drains events.
     pub fn start(cx: &mut App) -> Entity<Self> {
@@ -896,9 +899,7 @@ impl Backend {
                     if let Err(error) = result {
                         log::warn!("deleting thread {thread_id} failed: {error}");
                     }
-                    cx.emit(BackendEvent::Notice(
-                        "Couldn't delete that conversation".into(),
-                    ));
+                    cx.emit(BackendEvent::Notice(DELETE_FAILED.into()));
                 }
             })
             .ok();

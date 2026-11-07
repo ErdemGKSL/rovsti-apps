@@ -53,7 +53,9 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Subscription, TextInputAction,
     TextInputPurpose, Window, WindowBounds, WindowOptions, div, list, px, size,
 };
+use rovsti_core::inbox_bulk::{self, BulkAction};
 use rovsti_core::inbox_filter::{self, InboxFilter};
+use rovsti_core::multi_select::{self, Selection};
 use rovsti_core::mute::MuteFor;
 use rovsti_core::{
     Message, MessageDirection, PhoneNumber, ThreadId, blocklist,
@@ -129,6 +131,8 @@ struct RowMenu {
     contact_id: Option<i64>,
     /// A conversation page's menu: "Send later" comes first.
     send_later: bool,
+    /// An inbox row's menu: the row's selection key, for the "Select" item.
+    select_key: Option<String>,
 }
 
 /// The phone number behind a 1:1 WhatsApp chat JID. Groups, channels and hidden-number (LID)
@@ -238,6 +242,37 @@ enum PillAction {
     SmsArchive { thread: i64, archived: bool },
     /// Cancels the message reminder just set.
     UndoReminder(i64),
+    /// Puts bulk-archived chats back: WhatsApp chats with the action that
+    /// reverses theirs, and SMS threads with their old archive mark.
+    BulkUndo(Vec<(String, ChatActionKind)>, Vec<(i64, bool)>),
+}
+
+/// A sheet over the inbox's select mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BulkSheet {
+    /// The mute lengths.
+    Mute,
+    /// The delete confirmation.
+    Delete,
+}
+
+/// A bulk delete waiting for the backend's answers.
+#[derive(Clone, Copy, Debug)]
+struct BulkDelete {
+    total: usize,
+    deleted: usize,
+    failed: usize,
+}
+
+/// The outcome of a bulk action on one row: whether the local part worked and
+/// the WhatsApp request in flight, if the row has a chat.
+struct BulkRow {
+    local_ok: bool,
+    wa: Option<gpui::Task<bool>>,
+    /// What reverses the row's WhatsApp change (archive only is offered).
+    wa_undo: Option<(String, ChatActionKind)>,
+    /// The old archive mark of the row's SMS thread, when it changed.
+    sms_undo: Option<(i64, bool)>,
 }
 
 /// The page pushed over the tabs.
@@ -307,6 +342,12 @@ struct MessagesApp {
     scheduled_entries: Vec<schedule_ui::ScheduledEntry>,
     /// The long-press menu of a WhatsApp row.
     row_menu: Option<RowMenu>,
+    /// Inbox select mode: the ticked rows, keyed by their newest thread's tag.
+    inbox_select: Option<Selection<String>>,
+    /// The mute lengths or the delete confirmation of the bulk bar.
+    bulk_sheet: Option<BulkSheet>,
+    /// A bulk delete in flight.
+    bulk_delete: Option<BulkDelete>,
     /// New message: the recipient being asked "SMS or WhatsApp".
     channel_pick: Option<Recipient>,
     /// The header bell's "Mute for" menu of the open chat.
@@ -374,6 +415,8 @@ struct ChatLayout {
     show_archived: bool,
     show_scheduled: bool,
     filter: InboxFilter,
+    /// Inbox select mode is on.
+    selecting: bool,
     /// The scheduled entries: count, failed count, soonest time.
     scheduled: (usize, usize, i64),
     /// Whether a non-blank query filters the list, and its field's edit count.
@@ -509,7 +552,11 @@ impl MessagesApp {
                 }
                 BackendEvent::Handoff(handoff) => this.on_handoff(handoff, cx),
                 BackendEvent::Notice(text) => {
-                    this.show_pill(text.clone());
+                    if text == backend::DELETE_FAILED && this.bulk_delete.is_some() {
+                        this.bulk_delete_step(false, cx);
+                    } else {
+                        this.show_pill(text.clone());
+                    }
                     cx.notify();
                 }
                 BackendEvent::ThreadDeleted(id) => this.on_thread_deleted(*id, cx),
@@ -591,6 +638,9 @@ impl MessagesApp {
             show_scheduled: false,
             scheduled_entries: Vec::new(),
             row_menu: None,
+            inbox_select: None,
+            bulk_sheet: None,
+            bulk_delete: None,
             channel_pick: None,
             mute_menu: None,
             remind: None,
@@ -1621,6 +1671,7 @@ impl MessagesApp {
             page_number: None,
             contact_id: None,
             send_later: false,
+            select_key: None,
         });
         cx.notify();
     }
@@ -2126,6 +2177,7 @@ impl MessagesApp {
             page_number: None,
             contact_id: None,
             send_later: true,
+            select_key: None,
         });
         cx.notify();
     }
@@ -2422,6 +2474,7 @@ impl MessagesApp {
             PillAction::SmsArchive { thread, archived } => {
                 self.set_sms_archived(thread, archived, true, cx)
             }
+            PillAction::BulkUndo(wa, sms) => self.bulk_undo(wa, sms, cx),
             PillAction::ReloadChats => self.load_chats(cx),
             PillAction::MarkAll(targets) => self.mark_all_read(targets, cx),
             PillAction::UnmarkAll(chats) => {
@@ -2607,7 +2660,11 @@ impl MessagesApp {
             })
         });
         self.dismiss_notification(&thread, cx);
-        self.show_pill("Conversation deleted");
+        if self.bulk_delete.is_some() {
+            self.bulk_delete_step(true, cx);
+        } else {
+            self.show_pill("Conversation deleted");
+        }
         cx.notify();
     }
 
@@ -2703,6 +2760,543 @@ impl MessagesApp {
         })
         .detach();
         cx.notify();
+    }
+
+    // ---- inbox select mode and bulk actions ------------------------------------
+
+    /// "Select" of a row menu: select mode starts with that row ticked.
+    fn begin_inbox_select(&mut self, key: String, cx: &mut Context<Self>) {
+        self.row_menu = None;
+        let mut selection = Selection::new();
+        selection.toggle(key);
+        self.inbox_select = Some(selection);
+        cx.notify();
+    }
+
+    /// Ticks or unticks a row.
+    fn toggle_inbox_row(&mut self, key: String, cx: &mut Context<Self>) {
+        if let Some(selection) = &mut self.inbox_select {
+            selection.toggle(key);
+        }
+        cx.notify();
+    }
+
+    /// Leaves select mode.
+    fn end_inbox_select(&mut self, cx: &mut Context<Self>) {
+        self.inbox_select = None;
+        self.bulk_sheet = None;
+        cx.notify();
+    }
+
+    /// Select mode only lives on the plain Chats list: it ends when a page or
+    /// another tab opens, and rows that vanished drop out of the selection.
+    fn sync_inbox_select(&mut self) {
+        if self.inbox_select.is_none() {
+            return;
+        }
+        if !matches!(self.open, Open::None) || self.tabs.selected() != CHATS_TAB {
+            self.inbox_select = None;
+            self.bulk_sheet = None;
+            return;
+        }
+        let present: std::collections::HashSet<String> =
+            self.view.all_rows().filter_map(inbox::select_key).collect();
+        if let Some(selection) = &mut self.inbox_select {
+            selection.retain(|key| present.contains(key));
+        }
+    }
+
+    /// The rows the list shows now, as the filter chip and search narrow them.
+    fn visible_rows(&self, cx: &App) -> Vec<&RowView> {
+        let rows = self.shown_rows();
+        let query = self.search_query(cx);
+        if !query.is_empty() {
+            return inbox::filter_rows(rows, &query)
+                .into_iter()
+                .map(|i| &rows[i])
+                .collect();
+        }
+        let normal = !self.show_spam && !self.show_archived && !self.show_scheduled;
+        rows.iter()
+            .filter(|r| !normal || inbox_filter::matches(self.inbox_filter, inbox::row_facts(r)))
+            .collect()
+    }
+
+    /// "Select all" ticks every row the list shows.
+    fn inbox_select_all(&mut self, cx: &mut Context<Self>) {
+        let keys: Vec<String> = self
+            .visible_rows(cx)
+            .into_iter()
+            .filter_map(inbox::select_key)
+            .collect();
+        if let Some(selection) = &mut self.inbox_select {
+            selection.select_all(keys);
+        }
+        cx.notify();
+    }
+
+    /// The ticked rows.
+    fn selected_rows(&self) -> Vec<RowView> {
+        let Some(selection) = &self.inbox_select else {
+            return Vec::new();
+        };
+        self.view
+            .all_rows()
+            .filter(|r| inbox::select_key(r).is_some_and(|k| selection.contains(&k)))
+            .cloned()
+            .collect()
+    }
+
+    /// The facts of each ticked row, for the bar's action list and the pin caps.
+    fn selected_facts(&self, rows: &[RowView], cx: &App) -> Vec<inbox_bulk::BulkFacts> {
+        let prefs = self.backend.read(cx).prefs();
+        rows.iter()
+            .map(|r| {
+                let sms_only = r.newest().is_some_and(|t| self.view.sms_only(t));
+                inbox::bulk_facts(r, prefs, sms_only)
+            })
+            .collect()
+    }
+
+    /// The glass bar at the bottom while select mode is on.
+    fn bulk_bar(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        use crate::select_ui::BarAction;
+        let rows = self.selected_rows();
+        let facts = self.selected_facts(&rows, cx);
+        let actions = inbox_bulk::actions(&facts, self.show_archived)
+            .into_iter()
+            .map(|action| {
+                let (id, icon) = match action {
+                    BulkAction::MarkRead => ("bulk-read", Icon::LucideMailOpen),
+                    BulkAction::MarkUnread => ("bulk-unread", Icon::LucideMail),
+                    BulkAction::Mute => ("bulk-mute", Icon::LucideBellOff),
+                    BulkAction::Unmute => ("bulk-unmute", Icon::LucideBell),
+                    BulkAction::Pin => ("bulk-pin", Icon::LucidePin),
+                    BulkAction::Unpin => ("bulk-unpin", Icon::LucidePinOff),
+                    BulkAction::Archive => ("bulk-archive", Icon::LucideArchive),
+                    BulkAction::Unarchive => ("bulk-unarchive", Icon::LucideArchiveRestore),
+                    BulkAction::Delete => ("bulk-delete", Icon::LucideTrash2),
+                };
+                BarAction {
+                    id,
+                    icon,
+                    label: action.label().to_owned(),
+                    danger: action.is_destructive(),
+                    on_click: Box::new(
+                        cx.listener(move |this, _, _, cx| this.run_bulk(action, cx)),
+                    ),
+                }
+            })
+            .collect();
+        crate::select_ui::bottom_bar(theme, actions)
+    }
+
+    /// A bar button was tapped.
+    fn run_bulk(&mut self, action: BulkAction, cx: &mut Context<Self>) {
+        let rows = self.selected_rows();
+        if rows.is_empty() {
+            return;
+        }
+        match action {
+            BulkAction::MarkRead => {
+                // The pill is the confirmation; its Mark button marks them.
+                let targets = inbox::mark_all_targets(&rows);
+                self.end_inbox_select(cx);
+                if targets.is_empty() {
+                    self.show_pill("Nothing to mark as read");
+                } else {
+                    let prompt = inbox::mark_all_prompt(&targets);
+                    self.show_pill_action(prompt, "Mark", PillAction::MarkAll(targets), cx);
+                }
+            }
+            BulkAction::Mute => {
+                self.bulk_sheet = Some(BulkSheet::Mute);
+                cx.notify();
+            }
+            BulkAction::Delete => {
+                let backend = self.backend.read(cx);
+                if !backend.sms_role_held() && !backend.is_preview() {
+                    self.end_inbox_select(cx);
+                    self.show_pill_action(
+                        sms_actions::NEEDS_ROLE,
+                        sms_actions::MAKE_DEFAULT,
+                        PillAction::RequestSmsRole,
+                        cx,
+                    );
+                } else {
+                    self.bulk_sheet = Some(BulkSheet::Delete);
+                    cx.notify();
+                }
+            }
+            BulkAction::Pin => {
+                let facts = self.selected_facts(&rows, cx);
+                let wa = self.wa_info.values().filter(|i| i.meta.pinned).count();
+                let sms = self.backend.read(cx).prefs().sms_marks.pinned.len();
+                if let Err(reason) = inbox_bulk::pin_room(wa, sms, &facts) {
+                    // Nothing changed: the selection stays to be adjusted.
+                    self.show_pill(reason);
+                    return;
+                }
+                self.apply_bulk(action, None, &rows, cx);
+            }
+            BulkAction::MarkUnread
+            | BulkAction::Unmute
+            | BulkAction::Unpin
+            | BulkAction::Archive
+            | BulkAction::Unarchive => self.apply_bulk(action, None, &rows, cx),
+        }
+    }
+
+    /// A mute length picked in the bulk sheet.
+    fn bulk_mute_for(&mut self, choice: MuteFor, cx: &mut Context<Self>) {
+        let rows = self.selected_rows();
+        self.bulk_sheet = None;
+        self.apply_bulk(BulkAction::Mute, choice.until_ms(now_ms()), &rows, cx);
+    }
+
+    /// Runs `action` on every row, then reports. `until` is the end of a mute.
+    fn apply_bulk(
+        &mut self,
+        action: BulkAction,
+        until: Option<i64>,
+        rows: &[RowView],
+        cx: &mut Context<Self>,
+    ) {
+        let mut results = Vec::with_capacity(rows.len());
+        for row in rows {
+            results.push(self.bulk_row(row, action, until, cx));
+        }
+        let archives = matches!(action, BulkAction::Archive | BulkAction::Unarchive);
+        let wa_undo: Vec<_> = results.iter().filter_map(|r| r.wa_undo.clone()).collect();
+        let sms_undo: Vec<_> = results.iter().filter_map(|r| r.sms_undo).collect();
+        let undo = (archives && !(wa_undo.is_empty() && sms_undo.is_empty()))
+            .then_some(PillAction::BulkUndo(wa_undo, sms_undo));
+        self.finish_bulk(Some(action), results, undo, cx);
+    }
+
+    /// Applies one bulk action to one row: the SMS part at once, the WhatsApp
+    /// part sent to the gateway quietly (the caller counts its answer).
+    fn bulk_row(
+        &mut self,
+        row: &RowView,
+        action: BulkAction,
+        until: Option<i64>,
+        cx: &mut Context<Self>,
+    ) -> BulkRow {
+        let mut out = BulkRow {
+            local_ok: true,
+            wa: None,
+            wa_undo: None,
+            sms_undo: None,
+        };
+        if let Some(id) = row.sms_thread.filter(|id| *id >= 0) {
+            let tag = notifications::thread_tag(&ThreadId::Sms(id));
+            let was_archived = self.backend.read(cx).prefs().sms_marks.is_archived(id);
+            let mut pinned = Ok(true);
+            self.backend.update(cx, |backend, cx| {
+                backend.update_prefs(cx, |p| match action {
+                    BulkAction::MarkUnread => {
+                        p.sms_marks.set_unread(id, true);
+                    }
+                    BulkAction::Mute => p.set_muted_until(&tag, until),
+                    BulkAction::Unmute => p.set_muted(&tag, false),
+                    BulkAction::Pin | BulkAction::Unpin => {
+                        pinned = p.sms_marks.set_pinned(id, action == BulkAction::Pin);
+                    }
+                    BulkAction::Archive | BulkAction::Unarchive => {
+                        p.sms_marks.set_archived(id, action == BulkAction::Archive);
+                    }
+                    BulkAction::MarkRead | BulkAction::Delete => {}
+                })
+            });
+            out.local_ok = pinned.is_ok();
+            if matches!(action, BulkAction::Archive | BulkAction::Unarchive)
+                && was_archived != (action == BulkAction::Archive)
+            {
+                out.sms_undo = Some((id, was_archived));
+            }
+        }
+        if let Some(jid) = &row.wa_chat {
+            let kind = match action {
+                BulkAction::MarkUnread => Some(ChatActionKind::MarkRead { read: false }),
+                BulkAction::Mute => Some(ChatActionKind::Mute { until_ms: until }),
+                BulkAction::Unmute => Some(ChatActionKind::Unmute),
+                BulkAction::Pin | BulkAction::Unpin => {
+                    let pinned = action == BulkAction::Pin;
+                    // Already as asked: nothing to send.
+                    let same = self
+                        .wa_info
+                        .get(jid.as_ref() as &str)
+                        .is_some_and(|i| i.meta.pinned == pinned);
+                    (!same).then_some(ChatActionKind::Pin { pinned })
+                }
+                BulkAction::Archive | BulkAction::Unarchive => Some(ChatActionKind::Archive {
+                    archived: action == BulkAction::Archive,
+                }),
+                BulkAction::MarkRead | BulkAction::Delete => None,
+            };
+            if let Some(kind) = kind {
+                match self.bulk_wa(jid, kind, cx) {
+                    Some((undo, task)) => {
+                        out.wa_undo = undo.map(|u| (jid.to_string(), u));
+                        out.wa = Some(task);
+                    }
+                    None => out.local_ok = false,
+                }
+            }
+        }
+        out
+    }
+
+    /// Like [`Self::chat_action`] without pills: the chat changes in the list
+    /// at once and the request goes to the gateway. Returns what reverses it
+    /// and the pending answer; `None` when WhatsApp is not connected.
+    fn bulk_wa(
+        &mut self,
+        jid: &str,
+        action: ChatActionKind,
+        cx: &mut Context<Self>,
+    ) -> Option<(Option<ChatActionKind>, gpui::Task<bool>)> {
+        let gateway = self.whatsapp.read(cx).gateway()?;
+        if matches!(action, ChatActionKind::Unmute) {
+            let tag = notifications::thread_tag(&ThreadId::WhatsApp(jid.to_owned()));
+            self.backend.update(cx, |backend, cx| {
+                if backend.prefs().is_muted(&tag) {
+                    backend.update_prefs(cx, |prefs| prefs.set_muted(&tag, false));
+                }
+            });
+        }
+        let id = ThreadId::WhatsApp(jid.to_owned());
+        let mut unread = self
+            .wa_threads
+            .iter()
+            .find(|t| t.id == id)
+            .map_or(0, |t| t.unread);
+        let info = self.wa_info_mut().entry(jid.to_owned()).or_default();
+        let before = info.meta.clone();
+        inbox::apply_action(&mut info.meta, &mut unread, &action);
+        for thread in self.wa_threads_mut().iter_mut().filter(|t| t.id == id) {
+            thread.unread = unread;
+        }
+        let undo = inbox::undo_of(&action, &before);
+        let request = ChatAction {
+            chat: jid.to_owned(),
+            action,
+        };
+        let task = cx.background_executor().spawn(async move {
+            gateway
+                .chat_action(&request)
+                .map_err(|error| log::warn!("a WhatsApp chat action failed: {error}"))
+                .is_ok()
+        });
+        Some((undo, task))
+    }
+
+    /// Leaves select mode and says how many rows worked once the gateway has
+    /// answered for every WhatsApp chat. `action` is `None` for an Undo.
+    fn finish_bulk(
+        &mut self,
+        action: Option<BulkAction>,
+        results: Vec<BulkRow>,
+        undo: Option<PillAction>,
+        cx: &mut Context<Self>,
+    ) {
+        self.rebuild(cx);
+        self.inbox_select = None;
+        self.bulk_sheet = None;
+        cx.spawn(async move |this, cx| {
+            let (mut done, mut failed) = (0usize, 0usize);
+            for row in results {
+                let wa_ok = match row.wa {
+                    Some(task) => task.await,
+                    None => true,
+                };
+                if row.local_ok && wa_ok {
+                    done += 1;
+                } else {
+                    failed += 1;
+                }
+            }
+            this.update(cx, |this, cx| {
+                let text = if failed > 0 {
+                    inbox_bulk::partial_notice(done, failed)
+                } else if let Some(action) = action {
+                    inbox_bulk::done_notice(action, done)
+                } else {
+                    let noun = if done == 1 { "chat" } else { "chats" };
+                    format!("Restored {done} {noun}")
+                };
+                match undo.filter(|_| done > 0) {
+                    Some(undo) => this.show_pill_action(text, "Undo", undo, cx),
+                    None => this.show_pill(text),
+                }
+                if failed > 0 {
+                    // The list shows what the gateway really has.
+                    this.load_chats(cx);
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Undo of a bulk archive: the chats go back as they were.
+    fn bulk_undo(
+        &mut self,
+        wa: Vec<(String, ChatActionKind)>,
+        sms: Vec<(i64, bool)>,
+        cx: &mut Context<Self>,
+    ) {
+        let mut results = Vec::new();
+        if !sms.is_empty() {
+            self.backend.update(cx, |backend, cx| {
+                backend.update_prefs(cx, |p| {
+                    for (id, archived) in &sms {
+                        p.sms_marks.set_archived(*id, *archived);
+                    }
+                })
+            });
+            results.extend(sms.iter().map(|_| BulkRow {
+                local_ok: true,
+                wa: None,
+                wa_undo: None,
+                sms_undo: None,
+            }));
+        }
+        for (jid, kind) in wa {
+            let task = self.bulk_wa(&jid, kind, cx).map(|(_, task)| task);
+            results.push(BulkRow {
+                local_ok: task.is_some(),
+                wa: task,
+                wa_undo: None,
+                sms_undo: None,
+            });
+        }
+        self.finish_bulk(None, results, None, cx);
+    }
+
+    /// The confirmed bulk delete: every SMS thread goes through the backend,
+    /// which answers one by one; the pill comes with the last answer.
+    fn confirm_bulk_delete(&mut self, cx: &mut Context<Self>) {
+        let ids: Vec<i64> = self
+            .selected_rows()
+            .iter()
+            .filter(|r| r.wa_chat.is_none())
+            .flat_map(|r| r.threads.iter())
+            .filter_map(|t| match t {
+                ThreadId::Sms(id) if *id >= 0 => Some(*id),
+                _ => None,
+            })
+            .collect();
+        self.end_inbox_select(cx);
+        if ids.is_empty() {
+            self.show_pill("Nothing to delete");
+            return;
+        }
+        self.bulk_delete = Some(BulkDelete {
+            total: ids.len(),
+            deleted: 0,
+            failed: 0,
+        });
+        for id in ids {
+            self.backend
+                .update(cx, |backend, cx| backend.delete_thread(id, cx));
+        }
+    }
+
+    /// One answer of a bulk delete; the last one shows the pill.
+    fn bulk_delete_step(&mut self, deleted: bool, cx: &mut Context<Self>) {
+        let Some(mut state) = self.bulk_delete else {
+            return;
+        };
+        if deleted {
+            state.deleted += 1;
+        } else {
+            state.failed += 1;
+        }
+        if state.deleted + state.failed >= state.total {
+            self.bulk_delete = None;
+            let text = if state.failed > 0 {
+                inbox_bulk::partial_notice(state.deleted, state.failed)
+            } else {
+                inbox_bulk::done_notice(BulkAction::Delete, state.deleted)
+            };
+            self.show_pill(text);
+        } else {
+            self.bulk_delete = Some(state);
+        }
+        cx.notify();
+    }
+
+    /// The mute lengths or the delete confirmation of the bulk bar.
+    fn bulk_sheet_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let sheet = self.bulk_sheet?;
+        let colors = theme::colors(theme);
+        let cancel = menu_item(
+            theme,
+            "bulk-sheet-cancel",
+            Icon::LucideX,
+            "Cancel".into(),
+            colors.label,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.bulk_sheet = None;
+            cx.notify();
+        }))
+        .into_any_element();
+        let dismiss = cx.listener(|this, _, _, cx| {
+            this.bulk_sheet = None;
+            cx.notify();
+        });
+        Some(match sheet {
+            BulkSheet::Mute => {
+                let mut items: Vec<AnyElement> = MuteFor::ALL
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, choice)| {
+                        menu_item(
+                            theme,
+                            ("bulk-mute-for", index),
+                            Icon::LucideBellOff,
+                            choice.label().into(),
+                            colors.label,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| this.bulk_mute_for(choice, cx)))
+                        .into_any_element()
+                    })
+                    .collect();
+                items.push(cancel);
+                menu_card(theme, "bulk-mute-menu", "Mute for".into(), items, dismiss)
+            }
+            BulkSheet::Delete => {
+                let n = self.inbox_select.as_ref().map_or(0, Selection::len);
+                let prompt = div()
+                    .px(px(16.0))
+                    .py(px(8.0))
+                    .text_size(typography::BODY.size)
+                    .text_color(colors.label)
+                    .child(inbox_bulk::delete_prompt(n))
+                    .into_any_element();
+                let delete = menu_item(
+                    theme,
+                    "bulk-delete-confirm",
+                    Icon::LucideTrash2,
+                    "Delete".into(),
+                    colors.red,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.confirm_bulk_delete(cx)))
+                .into_any_element();
+                menu_card(
+                    theme,
+                    "bulk-delete-menu",
+                    "Delete conversations".into(),
+                    vec![prompt, delete, cancel],
+                    dismiss,
+                )
+            }
+        })
     }
 
     // ---- forward -------------------------------------------------------------
@@ -3018,6 +3612,21 @@ impl MessagesApp {
                 );
             }
         } else {
+            if let Some(key) = menu.select_key.clone() {
+                items.push(
+                    menu_item(
+                        theme,
+                        "menu-select",
+                        Icon::LucideCircleCheck,
+                        "Select".into(),
+                        colors.label,
+                    )
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.begin_inbox_select(key.clone(), cx)),
+                    )
+                    .into_any_element(),
+                );
+            }
             if menu.send_later {
                 items.push(
                     menu_item(
@@ -3302,6 +3911,8 @@ impl MessagesApp {
             || self.row_menu.is_some()
             || self.channel_pick.is_some()
             || self.mute_menu.is_some()
+            || self.bulk_sheet.is_some()
+            || self.inbox_select.is_some()
             || self.remind.is_some()
             || self.search_open
             || self.show_archived
@@ -3326,6 +3937,9 @@ impl MessagesApp {
         } else if self.mute_menu.is_some() {
             self.mute_menu = None;
             cx.notify();
+        } else if self.bulk_sheet.is_some() {
+            self.bulk_sheet = None;
+            cx.notify();
         } else if self.channel_pick.is_some() {
             self.channel_pick = None;
             cx.notify();
@@ -3339,6 +3953,9 @@ impl MessagesApp {
                 self.row_menu = None;
             }
             cx.notify();
+        } else if self.inbox_select.is_some() {
+            // Select mode ends before anything else steps back.
+            self.end_inbox_select(cx);
         } else if let Open::WhatsApp(_, conversation) = &self.open
             && conversation.update(cx, |c, cx| c.go_back(cx))
         {
@@ -4062,7 +4679,14 @@ impl MessagesApp {
         if self.open_thread_id(cx).is_some() || !matches!(self.open, Open::None) {
             return GAP + 72.0;
         }
-        f32::from(metrics::TAB_BAR_MARGIN) + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1 + GAP
+        let bar = f32::from(metrics::TAB_BAR_MARGIN) + f32::from(metrics::TAB_BAR_HEIGHT) * 1.1;
+        // The bulk action bar is taller than the tab bar.
+        bar + GAP
+            + if self.inbox_select.is_some() {
+                56.0
+            } else {
+                0.0
+            }
     }
 
     /// The sheet and the pill, drawn last over whatever page is up.
@@ -4104,6 +4728,7 @@ impl MessagesApp {
         }
         out.extend(self.channel_pick_overlay(theme, cx));
         out.extend(self.mute_menu_overlay(theme, cx));
+        out.extend(self.bulk_sheet_overlay(theme, cx));
         out.extend(self.remind_overlay(theme, cx));
         out
     }
@@ -4229,6 +4854,11 @@ impl MessagesApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let thread = row.newest().cloned();
+        let select_key = inbox::select_key(row);
+        let select = self
+            .inbox_select
+            .as_ref()
+            .map(|sel| select_key.as_ref().is_some_and(|k| sel.contains(k)));
         let title = row.title.clone();
         let code = row.otp.clone();
         let copied = code.is_some() && self.copied == code;
@@ -4260,13 +4890,23 @@ impl MessagesApp {
             let sms = row
                 .sms_thread
                 .map(|id| (id, row.sms_sender.as_ref().map(|s| s.to_string())));
+            let key = select_key.clone();
             Box::new(cx.listener(move |this, _, _, cx| {
+                if this.inbox_select.is_some() {
+                    if let Some(key) = key.clone() {
+                        this.toggle_inbox_row(key, cx);
+                    }
+                    return;
+                }
                 this.open_row_menu(
                     jid.as_ref().map(|j| j.to_string()),
                     sms.clone(),
                     title.clone(),
                     cx,
                 );
+                if let Some(menu) = &mut this.row_menu {
+                    menu.select_key = key.clone();
+                }
             })) as Box<dyn Fn(&gpui::LongPressEvent, &mut Window, &mut App)>
         });
         let open_title = title.clone();
@@ -4278,7 +4918,11 @@ impl MessagesApp {
                 photo,
                 copied,
                 open: Box::new(cx.listener(move |this, _, _, cx| {
-                    if let Some(thread) = thread.clone() {
+                    if this.inbox_select.is_some() {
+                        if let Some(key) = select_key.clone() {
+                            this.toggle_inbox_row(key, cx);
+                        }
+                    } else if let Some(thread) = thread.clone() {
                         this.open_thread(thread, open_title.to_string(), cx);
                     }
                 })),
@@ -4289,6 +4933,7 @@ impl MessagesApp {
                 })),
                 open_avatar,
                 menu,
+                select,
             },
         )
     }
@@ -4400,6 +5045,7 @@ impl MessagesApp {
             show_archived: self.show_archived,
             show_scheduled: self.show_scheduled,
             filter: self.inbox_filter,
+            selecting: self.inbox_select.is_some(),
             scheduled,
             searching: !query.is_empty(),
             search_edits: if self.search_open {
@@ -4549,7 +5195,7 @@ impl MessagesApp {
                 }
                 ChatItem::Status => key_of((9u8, statuses)),
                 ChatItem::Empty => key_of((3u8, state)),
-                ChatItem::Title => key_of(0u8),
+                ChatItem::Title => key_of((0u8, self.inbox_select.is_some())),
                 ChatItem::Search => key_of(10u8),
                 ChatItem::NoResults => key_of((11u8, &query)),
                 ChatItem::RoleBanner => key_of(4u8),
@@ -4605,6 +5251,26 @@ impl MessagesApp {
                         cx.notify();
                     }))
                     .into_any_element();
+                if let Some(selection) = &self.inbox_select {
+                    let title = match selection.len() {
+                        0 => "Select chats".to_owned(),
+                        n => multi_select::title(n),
+                    };
+                    let cancel = glass_icon_button(theme, Icon::LucideX, 0.0, false)
+                        .id("inbox-select-cancel")
+                        .on_click(cx.listener(|this, _, _, cx| this.end_inbox_select(cx)));
+                    let all = glass_pill(theme, "Select all")
+                        .id("inbox-select-all")
+                        .on_click(cx.listener(|this, _, _, cx| this.inbox_select_all(cx)));
+                    let actions = div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(cancel)
+                        .child(all)
+                        .into_any_element();
+                    return large_title(theme, title, Some(actions)).into_any_element();
+                }
                 let mark_all = (!inbox::mark_all_targets(&self.view.rows).is_empty()).then(|| {
                     glass_icon_button(theme, Icon::LucideCheckCheck, 0.0, false)
                         .id("mark-all-read")
@@ -5047,6 +5713,7 @@ impl Render for MessagesApp {
                 | fading
         });
         self.motion = motion;
+        self.sync_inbox_select();
         let overlays = self.overlays(theme, window, cx);
         let (page, accent) = match &self.open {
             Open::None => (None, theme.colors().accent),
@@ -5118,6 +5785,31 @@ impl Render for MessagesApp {
                 .into_any_element()
         };
 
+        let bottom = if self.inbox_select.is_some() {
+            self.bulk_bar(theme, cx)
+        } else {
+            self.tabs
+                .render(
+                    theme,
+                    move |index, _, cx| {
+                        entity.update(cx, |this, cx| {
+                            this.tabs.press();
+                            if this.tabs.select(index) {
+                                this.page.restart();
+                            }
+                            cx.notify();
+                        });
+                    },
+                    move |phase, _, cx| {
+                        touch_entity.update(cx, |this, cx| {
+                            this.tabs.touch(phase);
+                            cx.notify();
+                        });
+                    },
+                )
+                .into_any_element()
+        };
+
         div()
             .size_full()
             .relative()
@@ -5133,24 +5825,7 @@ impl Render for MessagesApp {
                 theme.colors().accent,
             ))
             .child(page)
-            .child(self.tabs.render(
-                theme,
-                move |index, _, cx| {
-                    entity.update(cx, |this, cx| {
-                        this.tabs.press();
-                        if this.tabs.select(index) {
-                            this.page.restart();
-                        }
-                        cx.notify();
-                    });
-                },
-                move |phase, _, cx| {
-                    touch_entity.update(cx, |this, cx| {
-                        this.tabs.touch(phase);
-                        cx.notify();
-                    });
-                },
-            ))
+            .child(bottom)
             .children(overlays)
             .into_any_element()
     }

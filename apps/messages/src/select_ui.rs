@@ -40,7 +40,6 @@ pub fn select_bar(
     ends: BarEnds,
     actions: Vec<BarAction>,
 ) -> AnyElement {
-    let colors = theme::colors(theme);
     let close = glass_icon_button(theme, Icon::LucideX, 0.0, false)
         .id("sel-close")
         .on_click(ends.close)
@@ -49,6 +48,26 @@ pub fn select_bar(
         .id("sel-all")
         .on_click(ends.select_all)
         .into_any_element();
+    let row = action_row(theme, actions);
+    div()
+        .flex_none()
+        .flex()
+        .flex_col()
+        .child(header_bar_with(
+            theme,
+            close,
+            None,
+            title.into(),
+            None,
+            Some(all),
+            None,
+        ))
+        .child(row)
+        .into_any_element()
+}
+
+fn action_row(theme: Theme, actions: Vec<BarAction>) -> Div {
+    let colors = theme::colors(theme);
     let mut row = div()
         .flex()
         .flex_wrap()
@@ -77,20 +96,40 @@ pub fn select_bar(
                 .on_click(action.on_click),
         );
     }
+    row
+}
+
+/// The glass action bar at the bottom of the screen (in place of the tab bar)
+/// while rows are ticked: the same pills as [`select_bar`]. `actions` is empty
+/// while nothing is ticked, which leaves a hint.
+pub fn bottom_bar(theme: Theme, actions: Vec<BarAction>) -> AnyElement {
+    let colors = theme::colors(theme);
+    let body = if actions.is_empty() {
+        div()
+            .py(px(10.0))
+            .text_size(rovsti_ui::tokens::typography::SUBHEADLINE.size)
+            .text_color(colors.secondary_label)
+            .child("Tick chats to act on them")
+            .into_any_element()
+    } else {
+        action_row(theme, actions).pt(px(8.0)).into_any_element()
+    };
     div()
-        .flex_none()
+        .id("inbox-select-bar")
+        .absolute()
+        .bottom(rovsti_ui::tokens::metrics::TAB_BAR_MARGIN)
+        .left(px(8.0))
+        .right(px(8.0))
         .flex()
-        .flex_col()
-        .child(header_bar_with(
-            theme,
-            close,
-            None,
-            title.into(),
-            None,
-            Some(all),
-            None,
-        ))
-        .child(row)
+        .justify_center()
+        .rounded(rovsti_ui::tokens::radius::CARD)
+        .child(
+            rovsti_ui::components::flat_glass(theme, None)
+                .rounded(rovsti_ui::tokens::radius::CARD)
+                .flex()
+                .justify_center()
+                .child(body),
+        )
         .into_any_element()
 }
 

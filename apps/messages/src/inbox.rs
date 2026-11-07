@@ -888,6 +888,32 @@ pub fn row_facts(row: &RowView) -> RowFacts {
     }
 }
 
+/// What the bulk action bar knows about a selected row. `sms_only` is the
+/// view's verdict ([`InboxView::sms_only`]): only such rows may be deleted.
+pub fn bulk_facts(
+    row: &RowView,
+    prefs: &crate::prefs::MessagesPrefs,
+    sms_only: bool,
+) -> rovsti_core::inbox_bulk::BulkFacts {
+    rovsti_core::inbox_bulk::BulkFacts {
+        unread: row.unread > 0 || row.marked_unread,
+        muted: row.muted,
+        pinned: row.pinned,
+        archived: row
+            .sms_thread
+            .is_some_and(|id| prefs.sms_marks.is_archived(id)),
+        whatsapp: row.wa_chat.is_some(),
+        sms: row.sms_thread.is_some(),
+        sms_only,
+    }
+}
+
+/// The stable key of a row in the inbox selection: the tag of its newest
+/// thread (the index changes whenever the list does).
+pub fn select_key(row: &RowView) -> Option<String> {
+    row.newest().map(thread_tag)
+}
+
 /// The chat the header's "Next unread" chip opens, and how many other chats
 /// are unread: over `rows` (the normal inbox) as `filter` shows them, muted
 /// rows skipped. `current` is the open thread; any thread of its row counts
@@ -1078,6 +1104,8 @@ pub struct RowExtras {
     pub open_avatar: Option<Handler>,
     /// Long press: the chat menu (WhatsApp rows only).
     pub menu: Option<PressHandler>,
+    /// Select mode: `Some(ticked)` shows a check circle instead of the avatar.
+    pub select: Option<bool>,
 }
 
 fn small_icon(icon: Icon, color: gpui::Hsla) -> impl IntoElement {
@@ -1100,6 +1128,7 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
         copy_code,
         open_avatar,
         menu,
+        select,
     } = extras;
     let colors = theme::colors(theme);
     let tint = match view.channel {
@@ -1136,6 +1165,14 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
         .child({
             let avatar = photo_avatar(theme, view.initials.clone(), 44.0, tint, photo);
             match open_avatar {
+                _ if select.is_some() => div()
+                    .flex_none()
+                    .size(px(44.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(crate::select_ui::check_mark(theme, select == Some(true)))
+                    .into_any_element(),
                 Some(open_avatar) => avatar
                     .id(("inbox-avatar", index))
                     .on_click(move |event, window, cx| {
@@ -1630,6 +1667,40 @@ mod tests {
         row.title = title.to_owned().into();
         row.sms_sender = sender.map(|s| SharedString::from(s.to_owned()));
         row
+    }
+
+    #[test]
+    fn bulk_facts_read_the_row_and_marks() {
+        let mut prefs = crate::prefs::MessagesPrefs::default();
+        let mut row = row_for("A", "x", None);
+        row.unread = 2;
+        row.muted = true;
+        row.pinned = true;
+        let facts = bulk_facts(&row, &prefs, true);
+        assert!(facts.unread && facts.muted && facts.pinned);
+        assert!(facts.sms && !facts.whatsapp && facts.sms_only && !facts.archived);
+        prefs.sms_marks.set_archived(1, true);
+        assert!(bulk_facts(&row, &prefs, false).archived);
+        assert!(!bulk_facts(&row, &prefs, false).sms_only);
+        row.unread = 0;
+        row.marked_unread = true;
+        assert!(bulk_facts(&row, &prefs, false).unread);
+        row.sms_thread = None;
+        row.wa_chat = Some("1@s.whatsapp.net".into());
+        let wa = bulk_facts(&row, &prefs, false);
+        assert!(wa.whatsapp && !wa.sms && !wa.archived);
+    }
+
+    #[test]
+    fn select_key_is_the_newest_thread_tag() {
+        let mut row = row_for("A", "x", None);
+        row.threads = vec![
+            ThreadId::WhatsApp("1@s.whatsapp.net".into()),
+            ThreadId::Sms(1),
+        ];
+        assert_eq!(select_key(&row).as_deref(), Some("wa:1@s.whatsapp.net"));
+        row.threads.clear();
+        assert_eq!(select_key(&row), None);
     }
 
     #[test]

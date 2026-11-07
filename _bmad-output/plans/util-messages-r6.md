@@ -47,7 +47,7 @@ fixes") shipped M1-M26 and M28-M38 (M27 cut). `git stash list` is empty. The R6 
 | M40 | Maps links / coordinates in text -> Open in Maps / Copy coordinates | open (R6 S5) |
 | M42 | Header long-press: Copy name / Copy number / Copy WhatsApp id | open (R6 S5) |
 | M43 | "Next unread" header chip jumps to the next unread chat | open (R6 S6) |
-| M39 | Inbox select mode: tick chats; Mark read, Mark unread, Mute, Unmute, Pin, Unpin, Archive, Delete (SMS) in bulk | open (R6 S7) |
+| M39 | Inbox select mode: tick chats; Mark read, Mark unread, Mute, Unmute, Pin, Unpin, Archive, Delete (SMS) in bulk | done R6 |
 | M41 | "Remind me in 1 hour" action on message notifications | open (R6 S3/S4) |
 | M45 | Undo send for SMS: 4 s "Sending… Undo" hold before handing to the radio | open (R7) |
 | M46 | Paste an image from the clipboard into the composer (WA and MMS) | open (R7) |

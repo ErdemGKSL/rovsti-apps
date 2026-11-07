@@ -381,9 +381,23 @@ impl ContactsApp {
             cx.notify();
             return;
         };
+        // Android deletes the file it crops, and the viewer still needs this one
+        // for Save and Share: crop a copy.
+        let copy = std::env::temp_dir()
+            .join("rovsti-contacts")
+            .join(format!("crop-{id}.png"));
+        let copied = copy
+            .parent()
+            .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+            && std::fs::copy(&file, &copy).is_ok();
+        if !copied {
+            self.notice = Some("Can't change the photo: that image can't be read.".into());
+            cx.notify();
+            return;
+        }
         self.open_crop(
             CropTarget::Contact(id),
-            file.to_string_lossy().into_owned(),
+            copy.to_string_lossy().into_owned(),
             cx,
         );
     }

@@ -13,6 +13,7 @@ pub mod motion;
 pub mod notice_pill;
 pub mod page;
 pub mod perf;
+pub mod row;
 pub mod sheet;
 #[cfg(feature = "shots")]
 pub mod shots;

@@ -29,8 +29,21 @@ pub const BUTTON: f32 = 40.0;
 pub const HIT: f32 = 44.0;
 /// Filter chip visual height (hit area is [`HIT`]).
 pub const CHIP_H: f32 = 32.0;
-/// Source badge on an avatar corner.
+/// Source badge on an avatar corner (the disc; the ring is added outside).
 pub const SOURCE_BADGE: f32 = 16.0;
+/// Background ring around a source badge.
+pub const SOURCE_RING: f32 = 2.0;
+/// Overlap of neighbouring source badges on a merged contact.
+pub const SOURCE_OVERLAP: f32 = 6.0;
+/// Avatar diameter inside a stack, and how much neighbours overlap.
+pub const STACK_AVATAR: f32 = 28.0;
+pub const STACK_OVERLAP: f32 = 10.0;
+/// Most discs drawn in a stack; past it the last one is the "+n" disc.
+pub const STACK_MAX: usize = 3;
+/// Icon beside a row title (muted, pinned) and in front of a subtitle (tick).
+pub const ROW_ICON: f32 = 14.0;
+/// Smallest trailing badge side.
+pub const BADGE_MIN: f32 = 20.0;
 /// Glyph size inside a header action button.
 pub const HEADER_ICON: f32 = 22.0;
 /// Header actions shown at most; more belong in a menu.
@@ -183,6 +196,45 @@ pub mod geom {
         safe_top + TOP_GAP
     }
 
+    /// How many avatars a stack of `total` draws and how many it folds into
+    /// the "+n" disc. When folding, the disc takes the last of `max` slots,
+    /// so a stack never exceeds `max` discs.
+    pub fn stack_split(total: usize, max: usize) -> (usize, usize) {
+        if total <= max {
+            (total, 0)
+        } else {
+            let shown = max.saturating_sub(1);
+            (shown, total - shown)
+        }
+    }
+
+    /// Discs drawn for `total` avatars, the "+n" disc included.
+    pub fn stack_discs(total: usize, max: usize) -> usize {
+        let (shown, hidden) = stack_split(total, max);
+        shown + usize::from(hidden > 0)
+    }
+
+    /// Width of a trailing count badge with `chars` characters: a circle
+    /// for one digit, a pill that grows with the text after that.
+    pub fn badge_width(chars: usize) -> f32 {
+        const CHAR_W: f32 = 7.0;
+        const PAD: f32 = 12.0;
+        (chars as f32 * CHAR_W + PAD).max(BADGE_MIN)
+    }
+
+    /// Left edge of a row separator: under the text column, or the screen
+    /// edge when the row has no inset. `leading_w` is 0 without a leading.
+    pub fn separator_left(inset_text: bool, leading_w: f32, gap: f32) -> f32 {
+        if !inset_text {
+            return 0.0;
+        }
+        if leading_w <= 0.0 {
+            MARGIN
+        } else {
+            row_text_inset(MARGIN, leading_w, gap)
+        }
+    }
+
     /// WCAG relative luminance of an sRGB colour with channels in `0..=1`.
     fn luminance(rgb: [f32; 3]) -> f32 {
         let lin = |c: f32| {
@@ -280,6 +332,31 @@ mod tests {
         assert_eq!(avatar_stack_width(1, 26.0, 10.0), 26.0);
         // Overlap larger than the diameter cannot shrink below one avatar.
         assert_eq!(avatar_stack_width(3, 26.0, 40.0), 26.0);
+    }
+
+    #[test]
+    fn stack_folds_past_the_limit() {
+        assert_eq!(stack_split(0, 3), (0, 0));
+        assert_eq!(stack_split(3, 3), (3, 0));
+        assert_eq!(stack_split(4, 3), (2, 2));
+        assert_eq!(stack_split(9, 3), (2, 7));
+        assert_eq!(stack_discs(3, 3), 3);
+        assert_eq!(stack_discs(9, 3), 3);
+        assert_eq!(avatar_stack_width(stack_discs(9, 3), 28.0, 10.0), 64.0);
+    }
+
+    #[test]
+    fn badge_is_a_circle_then_a_pill() {
+        assert_eq!(badge_width(1), BADGE_MIN);
+        assert_eq!(badge_width(2), 26.0);
+        assert!(badge_width(3) > badge_width(2));
+    }
+
+    #[test]
+    fn separator_starts_under_the_text() {
+        assert_eq!(separator_left(true, AVATAR, space::M), 76.0);
+        assert_eq!(separator_left(true, 0.0, space::M), MARGIN);
+        assert_eq!(separator_left(false, AVATAR, space::M), 0.0);
     }
 
     #[test]

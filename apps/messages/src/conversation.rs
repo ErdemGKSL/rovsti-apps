@@ -22,6 +22,7 @@ use rovsti_core::{
     chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
     recents::LocaleTime,
+    starred::{self, StarCandidate, StarredRow},
     wire::DocumentOp,
 };
 use rovsti_ui::{
@@ -312,6 +313,8 @@ pub struct Conversation {
     highlight: Option<String>,
     /// The "Search in chat" bar.
     find: Option<FindState<String>>,
+    /// The "Starred messages" sheet is open.
+    starred_open: bool,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -424,6 +427,7 @@ impl Conversation {
             star_override: HashMap::new(),
             hidden: HashSet::new(),
             delete_confirm: None,
+            starred_open: false,
             highlight: None,
             find: None,
             _subscriptions: subscriptions,
@@ -496,7 +500,9 @@ impl Conversation {
     /// System Back inside the page: closes the Delete menu, a message's menu,
     /// or the edit or reply bar; `false` when there is none of them.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.find.is_some() {
+        if self.starred_open {
+            self.starred_open = false;
+        } else if self.find.is_some() {
             self.find = None;
         } else if self.delete_confirm.is_some() {
             self.delete_confirm = None;
@@ -830,6 +836,202 @@ impl Conversation {
             find.asked = true;
         }
         self.load(Some(oldest.saturating_add(1)), cx);
+    }
+
+    /// "Starred messages" on the page menu: opens the sheet.
+    pub fn open_starred(&mut self, cx: &mut Context<Self>) {
+        self.starred_open = true;
+        cx.notify();
+    }
+
+    /// The starred messages of the loaded pages, newest first.
+    fn starred_list(&self, cx: &gpui::App) -> Vec<StarredRow> {
+        let texts: Vec<(String, String)> = self
+            .timeline
+            .items()
+            .iter()
+            .filter(|item| {
+                let id = &item.message.id;
+                !self.hidden.contains(id) && !self.timeline.meta(id).is_some_and(|m| m.revoked)
+            })
+            .map(|item| {
+                let message = &item.message;
+                let meta = self.timeline.meta(&message.id);
+                let author = self.author(message.from_me, message.sender.as_deref(), meta, cx);
+                let preview = copy_text_of(&message.body, meta)
+                    .unwrap_or_else(|| preview_of(&message.body, meta));
+                (author, preview)
+            })
+            .collect();
+        let candidates: Vec<StarCandidate<'_>> = self
+            .timeline
+            .items()
+            .iter()
+            .filter(|item| {
+                let id = &item.message.id;
+                !self.hidden.contains(id) && !self.timeline.meta(id).is_some_and(|m| m.revoked)
+            })
+            .zip(&texts)
+            .map(|(item, (author, preview))| StarCandidate {
+                id: &item.message.id,
+                author,
+                preview,
+                at_ms: item.message.timestamp_ms,
+                starred: self.starred(&item.message.id),
+            })
+            .collect();
+        starred::starred_rows(&candidates)
+    }
+
+    /// The Starred messages sheet over the conversation.
+    fn starred_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if !self.starred_open {
+            return None;
+        }
+        let colors = theme::colors(theme);
+        let rows = self.starred_list(cx);
+        let now = self.frame_now;
+        let offset = self.locale.tz_offset_s;
+        let mut items: Vec<gpui::AnyElement> = Vec::new();
+        if rows.is_empty() {
+            let partial = self.timeline.has_older();
+            items.push(
+                div()
+                    .px(px(16.0))
+                    .py(px(12.0))
+                    .text_size(typography::BODY.size)
+                    .text_color(colors.secondary_label)
+                    .child(starred::empty_text(partial))
+                    .into_any_element(),
+            );
+            if partial {
+                items.push(
+                    crate::menu_item(
+                        theme,
+                        "starred-older",
+                        Icon::LucideChevronUp,
+                        if self.loading {
+                            "Loading…".into()
+                        } else {
+                            "Load earlier".into()
+                        },
+                        colors.accent,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(oldest) = this.timeline.oldest_ms() {
+                            this.load(Some(oldest.saturating_add(1)), cx);
+                        }
+                    }))
+                    .into_any_element(),
+                );
+            }
+        } else {
+            let list: Vec<gpui::AnyElement> = rows
+                .into_iter()
+                .enumerate()
+                .map(|(index, row)| {
+                    let jump_id = row.id.clone();
+                    let unstar_id = row.id.clone();
+                    let when = format!(
+                        "{} {}",
+                        day_label(day_start_ms(row.at_ms, offset), now, offset),
+                        clock(row.at_ms, offset)
+                    );
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .id(("starred-row", index))
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .px(px(16.0))
+                                .py(px(8.0))
+                                .min_h(rovsti_ui::tokens::metrics::MIN_HIT)
+                                .rounded(px(14.0))
+                                .hover(|s| s.bg(colors.label.opacity(0.06)))
+                                .child(
+                                    div()
+                                        .flex()
+                                        .justify_between()
+                                        .gap(px(8.0))
+                                        .text_size(typography::CAPTION.size)
+                                        .text_color(colors.secondary_label)
+                                        .child(div().truncate().child(row.author))
+                                        .child(div().flex_none().child(when)),
+                                )
+                                .child(
+                                    div()
+                                        .truncate()
+                                        .text_size(typography::BODY.size)
+                                        .text_color(colors.label)
+                                        .child(row.preview),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.starred_open = false;
+                                    this.jump_to(&jump_id, cx);
+                                })),
+                        )
+                        .child(
+                            div()
+                                .id(("starred-unstar", index))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .size(rovsti_ui::tokens::metrics::MIN_HIT)
+                                .child(
+                                    gpui::svg()
+                                        .path(Icon::LucideStar.path())
+                                        .size(px(20.0))
+                                        .text_color(colors.accent),
+                                )
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.set_starred(&unstar_id, false, cx);
+                                    cx.emit(ConversationEvent::Notice("Unstarred".into()));
+                                })),
+                        )
+                        .into_any_element()
+                })
+                .collect();
+            items.push(
+                div()
+                    .id("starred-list")
+                    .flex()
+                    .flex_col()
+                    .max_h(px(420.0))
+                    .overflow_y_scroll()
+                    .children(list)
+                    .into_any_element(),
+            );
+        }
+        items.push(
+            crate::menu_item(
+                theme,
+                "starred-close",
+                Icon::LucideX,
+                "Close".into(),
+                colors.label,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.starred_open = false;
+                cx.notify();
+            }))
+            .into_any_element(),
+        );
+        Some(crate::menu_card(
+            theme,
+            "starred-sheet",
+            "Starred messages".into(),
+            items,
+            cx.listener(|this, _, _, cx| {
+                this.starred_open = false;
+                cx.notify();
+            }),
+        ))
     }
 
     /// A tap on a quote: shows the quoted message and lets it glow.
@@ -3202,6 +3404,7 @@ impl Render for Conversation {
 
         let context = self.compose_context(theme, cx);
         let overlay = self.delete_overlay(theme, cx);
+        let starred_sheet = self.starred_overlay(theme, cx);
 
         div()
             .size_full()
@@ -3216,7 +3419,14 @@ impl Render for Conversation {
             .children(context)
             .child(composer)
             .children(overlay)
+            .children(starred_sheet)
     }
+}
+
+/// Midnight (local) of the day that holds `ms`, as UTC milliseconds.
+fn day_start_ms(ms: i64, offset_s: i32) -> i64 {
+    let offset_ms = i64::from(offset_s) * 1000;
+    (ms + offset_ms).div_euclid(86_400_000) * 86_400_000 - offset_ms
 }
 
 /// The strip above a conversation, shared by the WhatsApp and SMS views: back
@@ -4343,6 +4553,15 @@ mod tests {
             attach_chip_label("v.mp4", MediaKind::Video),
             "v.mp4 · Video"
         );
+    }
+
+    #[test]
+    fn day_start_is_local_midnight() {
+        let noon = 12 * 3_600_000;
+        assert_eq!(day_start_ms(noon, 0), 0);
+        // UTC+2: 23:00 UTC is already the next local day (starts at 22:00 UTC).
+        assert_eq!(day_start_ms(23 * 3_600_000, 7200), 22 * 3_600_000);
+        assert_eq!(day_start_ms(-1, 0), -86_400_000);
     }
 
     #[test]

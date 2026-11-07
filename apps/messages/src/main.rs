@@ -1599,6 +1599,15 @@ impl MessagesApp {
         cx.notify();
     }
 
+    /// "Starred messages" of a WhatsApp page menu: closes the menu and opens the sheet.
+    fn menu_starred(&mut self, cx: &mut Context<Self>) {
+        self.row_menu = None;
+        if let Open::WhatsApp(_, c) = &self.open {
+            c.update(cx, |c, cx| c.open_starred(cx));
+        }
+        cx.notify();
+    }
+
     /// "Export chat" / "Share as text" of a page menu: the open page writes or shares its
     /// loaded messages.
     fn menu_export(&mut self, share: bool, cx: &mut Context<Self>) {
@@ -2543,6 +2552,19 @@ impl MessagesApp {
                     .on_click(cx.listener(|this, _, window, cx| this.menu_find(window, cx)))
                     .into_any_element(),
                 );
+                if menu.jid.is_some() {
+                    items.push(
+                        menu_item(
+                            theme,
+                            "menu-starred",
+                            Icon::LucideStar,
+                            "Starred messages".into(),
+                            colors.label,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.menu_starred(cx)))
+                        .into_any_element(),
+                    );
+                }
                 items.push(
                     menu_item(
                         theme,

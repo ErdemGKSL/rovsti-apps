@@ -78,6 +78,14 @@ impl StatusFeed {
         self.rev
     }
 
+    /// Shows `list` without a gateway (screenshot tests).
+    #[cfg(all(test, feature = "shots"))]
+    pub fn set_list(&mut self, list: StatusList, cx: &mut Context<Self>) {
+        self.list = list;
+        self.rev += 1;
+        cx.notify();
+    }
+
     /// Unlinked: nothing to show.
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         if !self.list.is_empty() {

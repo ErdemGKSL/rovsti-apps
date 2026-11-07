@@ -230,3 +230,12 @@ Record this under "Known renderer differences" in docs/screenshots.md when that 
 Notes: `Rig::settle` has no GPUI "still animating" query, so it renders every 10 frames and stops when two
 consecutive captures are equal (max 240 frames). `Rig` field order matters (root before cx) or
 GPUI reports a leaked entity handle.
+
+## Step 4 result (Messages shots)
+
+`cargo test -p rovsti_messages --features shots shots -- --ignored --nocapture` writes 27 PNGs
+(13 scenes x dark/light at 412x915, plus `01-inbox-dark-small.png` at 360x640) and
+`target/shots/messages/contact_sheet.png`. Fixture: `backend/preview/shots_data.rs` (24 threads,
+badges 1/2/3/12/120, OTP, 3 spam, 3 status authors). Scenes 05 and 09 run against a loopback fake
+gateway (`src/shots/gateway.rs`). 03 is a no-match search (the Unread chip cannot be empty in the
+preview), and 08 shows the search row with "SMS search not available" on desktop.

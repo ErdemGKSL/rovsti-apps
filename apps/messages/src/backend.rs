@@ -230,7 +230,7 @@ impl Backend {
                 saving: false,
                 save_due: false,
                 message_reminders: Vec::new(),
-                preview: desktop.then(|| Preview::new(now_ms())),
+                preview: desktop.then(|| Preview::initial(now_ms())),
                 preview_sims: std::env::var("ROVSTI_PREVIEW_SIMS")
                     .ok()
                     .and_then(|v| v.parse().ok())
@@ -635,7 +635,13 @@ impl Backend {
                         Some(locale) => this.locale = locale,
                         None => log::warn!("unreadable local time info: {text:?}"),
                     },
-                    Err(Error::Unsupported) => {}
+                    Err(Error::Unsupported) => {
+                        // Desktop has no phone clock; the screenshots keep Istanbul time.
+                        #[cfg(test)]
+                        if preview::shots_data::enabled() {
+                            this.locale = preview::shots_data::locale();
+                        }
+                    }
                     Err(error) => log::warn!("pulling the local time failed: {error}"),
                 }
                 cx.notify();

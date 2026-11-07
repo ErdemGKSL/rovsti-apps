@@ -16,9 +16,12 @@ use rovsti_core::{
     wire::{WireContact, WireNumber},
 };
 
-const MINUTE: i64 = 60_000;
-const HOUR: i64 = 60 * MINUTE;
-const DAY: i64 = 24 * HOUR;
+#[cfg(test)]
+pub mod shots_data;
+
+pub(crate) const MINUTE: i64 = 60_000;
+pub(crate) const HOUR: i64 = 60 * MINUTE;
+pub(crate) const DAY: i64 = 24 * HOUR;
 
 /// How many extra, older messages Ayse's thread has (so "Load earlier" shows).
 const HISTORY: i64 = 110;
@@ -38,6 +41,16 @@ pub struct Preview {
 }
 
 impl Preview {
+    /// What the desktop backend starts with: the sample data, or (screenshot
+    /// tests only) the rich fixture.
+    pub fn initial(now_ms: i64) -> Self {
+        #[cfg(test)]
+        if shots_data::enabled() {
+            return Self::shots(now_ms);
+        }
+        Self::new(now_ms)
+    }
+
     pub fn new(now_ms: i64) -> Self {
         let mut preview = Self {
             rows: Vec::new(),
@@ -170,6 +183,10 @@ impl Preview {
     }
 
     pub fn contacts() -> Vec<WireContact> {
+        #[cfg(test)]
+        if shots_data::enabled() {
+            return Self::shots_contacts();
+        }
         let contact = |id: i64, name: &str, number: &str| WireContact {
             id,
             display_name: name.to_owned(),
@@ -321,6 +338,10 @@ impl Preview {
 /// The preview person's WhatsApp chat, older than their newest SMS so the
 /// merged row opens the SMS thread (WhatsApp needs a linked gateway).
 pub fn whatsapp_threads(now_ms: i64) -> Vec<InboxThread> {
+    #[cfg(test)]
+    if shots_data::enabled() {
+        return shots_data::wa_threads(now_ms);
+    }
     let id = ThreadId::WhatsApp(WHATSAPP_AYSE.to_owned());
     vec![InboxThread {
         last: Message {

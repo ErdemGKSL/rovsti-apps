@@ -32,6 +32,8 @@ mod remind_ui;
 mod schedule_ui;
 mod select_ui;
 mod settings_ui;
+#[cfg(all(test, feature = "shots"))]
+mod shots;
 mod sms_actions;
 mod sms_conversation;
 mod status_ui;

@@ -760,6 +760,12 @@ impl SmsConversation {
         self.composer.update(cx, |field, cx| field.set(text, cx));
     }
 
+    /// The composer's focus handle (screenshot tests focus it).
+    #[cfg(all(test, feature = "shots"))]
+    pub fn composer_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        self.composer.read(cx).focus_handle()
+    }
+
     /// The text was scheduled: the composer is done with it.
     pub fn clear_draft(&mut self, cx: &mut Context<Self>) {
         self.composer.update(cx, |field, cx| field.clear(cx));

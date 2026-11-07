@@ -118,6 +118,11 @@ impl KeyedList {
         self.keys = keys;
     }
 
+    /// Forgets every measured height, so the items are measured again.
+    pub(crate) fn remeasure_all(&self) {
+        self.state.remeasure_items(0..self.keys.len());
+    }
+
     /// Whether the reader is at the end (also when the list does not scroll or is not measured yet).
     pub(crate) fn at_end(&self) -> bool {
         self.state.is_scrolled_to_end().unwrap_or(true)

@@ -23,6 +23,7 @@ use rovsti_core::{
     bubble_gesture::{self, SwipeReply},
     chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
+    location_link,
     multi_select::{self, Selection},
     quick_replies,
     recents::LocaleTime,
@@ -44,6 +45,7 @@ use rovsti_ui::{
 };
 use rovsti_wa_client::Gateway;
 
+use crate::text_size::bubble_text;
 use crate::voice_ui::{VoiceEvent, VoiceSource, player_row};
 pub(crate) use rovsti_wa_proto::presence::{civil_from_days, clock, day_label, presence_label};
 use rovsti_wa_ui::{WaAvatars, display_name, photo_avatar};
@@ -296,6 +298,8 @@ pub struct Conversation {
     /// The virtualised, bottom-aligned timeline: item 0 is the "Load earlier"
     /// slot, then one item per [`Entry`].
     list: KeyedList,
+    /// The text size the list was last measured at.
+    measured_text_size: rovsti_core::text_scale::ChatTextSize,
     /// Day breaks and messages in timeline order, rebuilt when `rows_dirty`.
     entries: Vec<Entry>,
     /// The timeline, its media or the reaction strip changed since `entries`.
@@ -497,6 +501,7 @@ impl Conversation {
             error: None,
             load_error: None,
             list: KeyedList::new(ListAlignment::Bottom, 1),
+            measured_text_size: backend.read(cx).prefs().chat_text_size,
             entries: Vec::new(),
             rows_dirty: true,
             frame_now: 0,
@@ -3674,6 +3679,7 @@ impl Conversation {
         quiet: gpui::Hsla,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
+        let (body_size, body_line) = bubble_text(self.backend.read(cx).prefs().chat_text_size);
         let MessageBody::Media {
             kind,
             caption,
@@ -3682,7 +3688,8 @@ impl Conversation {
         } = &message.body
         else {
             return div()
-                .text_size(typography::BODY.size)
+                .text_size(body_size)
+                .line_height(body_line)
                 .text_color(text)
                 .child(body_text(&message.body))
                 .into_any_element();
@@ -3826,7 +3833,8 @@ impl Conversation {
         if let Some(caption) = caption.as_deref().filter(|c| !c.is_empty()) {
             card = card.child(
                 div()
-                    .text_size(typography::BODY.size)
+                    .text_size(body_size)
+                    .line_height(body_line)
                     .text_color(text)
                     .child(caption.to_owned()),
             );
@@ -3978,6 +3986,8 @@ impl Conversation {
                 CardAction::Message { .. } => (Icon::LucideMessageCircle, "Message"),
                 CardAction::AddContact(_) => (Icon::LucideUserPlus, "Add to contacts"),
                 CardAction::Copy(_) => (Icon::LucideCopy, "Copy"),
+                CardAction::ShareLocation(_) => (Icon::LucideShare2, "Share"),
+                CardAction::CopyLink(_) => (Icon::LucideCopy, "Copy link"),
             };
             row = row.child(
                 pill(&format!("card{n}"), icon, label, false).on_click(cx.listener(
@@ -3995,6 +4005,8 @@ impl Conversation {
                                 cx.emit(ConversationEvent::AddContactCard(card));
                             }
                             CardAction::Copy(t) => cx.emit(ConversationEvent::Copy(t)),
+                            CardAction::ShareLocation(t) => cx.emit(ConversationEvent::Share(t)),
+                            CardAction::CopyLink(u) => cx.emit(ConversationEvent::CopyLink(u)),
                         }
                         cx.notify();
                     },
@@ -4759,6 +4771,13 @@ impl Render for Conversation {
         let insets = window.insets();
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
         let offset = self.locale.tz_offset_s;
+        let text_size = self.backend.read(cx).prefs().chat_text_size;
+        if text_size != self.measured_text_size {
+            // Bubbles change height: measure every row again.
+            self.measured_text_size = text_size;
+            self.rows_dirty = true;
+            self.list.remeasure_all();
+        }
         if self.rows_dirty {
             self.sync_rows();
         }
@@ -5435,6 +5454,10 @@ pub enum CardAction {
     },
     AddContact(CardView),
     Copy(String),
+    /// Opens the share sheet with the place's name, address and map link.
+    ShareLocation(String),
+    /// Copies the OpenStreetMap link.
+    CopyLink(String),
 }
 
 /// Percent-encodes everything but ASCII alphanumerics and `-._~`.
@@ -5478,11 +5501,23 @@ pub fn card_actions(meta: Option<&MessageMeta>) -> Vec<CardAction> {
             .map(str::to_owned)
             .collect();
         lines.push(coordinates(location));
+        let copy = CardAction::Copy(lines.join("\n"));
+        let (lat, lon) = (location.latitude, location.longitude);
+        if !location_link::is_valid(lat, lon) {
+            return vec![copy];
+        }
         return vec![
             CardAction::OpenMap {
                 url: geo_url(location),
             },
-            CardAction::Copy(lines.join("\n")),
+            CardAction::ShareLocation(location_link::share_text(
+                location.name.as_deref(),
+                location.address.as_deref(),
+                lat,
+                lon,
+            )),
+            CardAction::CopyLink(location_link::osm_url(lat, lon)),
+            copy,
         ];
     }
     if let Some(contact) = &meta.contact {
@@ -5855,11 +5890,34 @@ mod tests {
             ..MessageMeta::default()
         };
         let acts = card_actions(Some(&place));
-        assert_eq!(acts.len(), 2);
+        assert_eq!(acts.len(), 4);
         assert!(
             matches!(&acts[0], CardAction::OpenMap { url } if url.starts_with("geo:41.008200"))
         );
-        assert_eq!(acts[1], CardAction::Copy("Cafe\n41.00820, 28.97840".into()));
+        assert_eq!(
+            acts[1],
+            CardAction::ShareLocation(location_link::share_text(
+                Some("Cafe"),
+                Some(" "),
+                41.0082,
+                28.9784
+            ))
+        );
+        assert_eq!(
+            acts[2],
+            CardAction::CopyLink(location_link::osm_url(41.0082, 28.9784))
+        );
+        assert_eq!(acts[3], CardAction::Copy("Cafe\n41.00820, 28.97840".into()));
+
+        let mut nowhere = place.clone();
+        if let Some(l) = nowhere.location.as_mut() {
+            l.latitude = 0.0;
+            l.longitude = 0.0;
+        }
+        assert_eq!(
+            card_actions(Some(&nowhere)),
+            vec![CardAction::Copy("Cafe\n0.00000, 0.00000".into())]
+        );
 
         let card = |vcard: &str| MessageMeta {
             contact: Some(rovsti_wa_proto::SharedContact {

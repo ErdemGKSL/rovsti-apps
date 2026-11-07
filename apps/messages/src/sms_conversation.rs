@@ -40,6 +40,7 @@ use rovsti_ui::{
 };
 use rovsti_wa_ui::photo_avatar;
 
+use crate::text_size::bubble_text;
 use crate::{
     backend::{Backend, BackendEvent, now_ms, sim_for},
     contact_ui::SheetAction,
@@ -178,6 +179,8 @@ pub struct SmsConversation {
     /// The virtualised, bottom-aligned timeline: item 0 is the "Load earlier"
     /// slot, then one item per [`Entry`].
     list: KeyedList,
+    /// The text size the list was last measured at.
+    measured_text_size: rovsti_core::text_scale::ChatTextSize,
     /// Day breaks and messages in timeline order, rebuilt when `rows_dirty`.
     entries: Vec<Entry>,
     /// The timeline changed since `entries`.
@@ -306,6 +309,7 @@ impl SmsConversation {
             }),
             cx.subscribe(&backend, |this, _, event, cx| this.on_backend(event, cx)),
         ];
+        let measured_text_size = backend.read(cx).prefs().chat_text_size;
         let mut this = Self {
             backend,
             voice,
@@ -316,6 +320,7 @@ impl SmsConversation {
             composer,
             seen_actions: 0,
             list: KeyedList::new(ListAlignment::Bottom, 1),
+            measured_text_size,
             entries: Vec::new(),
             rows_dirty: true,
             rows_offset: 0,
@@ -2633,6 +2638,7 @@ impl SmsConversation {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let (body_size, body_line) = bubble_text(self.backend.read(cx).prefs().chat_text_size);
         let colors = theme::colors(theme);
         let own = item.outgoing;
         let failed = item.state == DeliveryState::Failed && own;
@@ -2768,7 +2774,8 @@ impl SmsConversation {
         if !item.body.is_empty() {
             bubble = bubble.child(
                 div()
-                    .text_size(typography::BODY.size)
+                    .text_size(body_size)
+                    .line_height(body_line)
                     .text_color(text)
                     .child(item.body.clone()),
             );
@@ -3157,6 +3164,13 @@ impl Render for SmsConversation {
         let now = now_ms();
         let insets = window.insets();
         let keyboard = (insets.ime.bottom - insets.consumed.bottom).max(px(0.0));
+        let text_size = self.backend.read(cx).prefs().chat_text_size;
+        if text_size != self.measured_text_size {
+            // Bubbles change height: measure every row again.
+            self.measured_text_size = text_size;
+            self.rows_dirty = true;
+            self.list.remeasure_all();
+        }
         let (locale, role_held, sims) = {
             let backend = self.backend.read(cx);
             (

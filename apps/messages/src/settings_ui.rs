@@ -26,6 +26,7 @@ use rovsti_core::{
     quick_replies::{self, ReplyError},
     sms::SmsThreadRow,
     spam::SpamRule,
+    text_scale::ChatTextSize,
     wire::{DocumentOp, DocumentResult, EmergencyList},
 };
 use rovsti_ui::{
@@ -43,6 +44,7 @@ use crate::{
     backup_ui::{self, BackupState, Busy, Issue},
     notifications::parse_tag,
     prefs::MessagesPrefs,
+    text_size::bubble_text,
 };
 
 /// Said before "Reset settings" does anything.
@@ -760,6 +762,67 @@ impl SettingsView {
             .into_any_element()
     }
 
+    /// "Chats": the text size of message bubbles, with a live preview.
+    fn chats_section(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+        let colors = theme::colors(theme);
+        let current = self.backend.read(cx).prefs().chat_text_size;
+        let (size, line) = bubble_text(current);
+        let pills = ChatTextSize::ALL.iter().map(|&option| {
+            let selected = option == current;
+            div()
+                .id(SharedString::from(format!("text-size-{}", option.label())))
+                .h(px(36.0))
+                .px(px(12.0))
+                .flex()
+                .items_center()
+                .rounded_full()
+                .text_size(typography::SUBHEADLINE.size)
+                .bg(if selected { colors.accent } else { colors.fill })
+                .text_color(if selected {
+                    gpui::white()
+                } else {
+                    colors.label
+                })
+                .child(option.label())
+                .on_click(cx.listener(move |this, _, _, cx| this.set_text_size(option, cx)))
+        });
+        let preview = div().px(px(16.0)).py(px(8.0)).child(
+            div()
+                .px(px(12.0))
+                .py(px(8.0))
+                .rounded(px(18.0))
+                .bg(colors.fill)
+                .text_size(size)
+                .line_height(line)
+                .text_color(colors.label)
+                .child(ChatTextSize::preview_text()),
+        );
+        section(
+            theme,
+            Some("Chats".into()),
+            [
+                list_row(theme, None, "Text size", Some(current.label().into()), None)
+                    .into_any_element(),
+                Self::form_row(div().flex().flex_wrap().gap(px(8.0)).children(pills)),
+                preview.into_any_element(),
+            ],
+        )
+        .into_any_element()
+    }
+
+    fn set_text_size(&mut self, size: ChatTextSize, cx: &mut Context<Self>) {
+        if self.backend.read(cx).prefs().chat_text_size == size {
+            return;
+        }
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| p.chat_text_size = size)
+        });
+        cx.emit(SettingsEvent::Notice(
+            format!("Text size: {}", size.label()).into(),
+        ));
+        cx.notify();
+    }
+
     fn reset_section(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
         if self.backend.read(cx).prefs().is_reset() {
             return div().into_any_element();
@@ -1363,6 +1426,7 @@ impl Render for SettingsView {
             .pb(px(24.0))
             .child(self.default_app(theme, cx))
             .child(self.notifications(theme, cx))
+            .child(self.chats_section(theme, cx))
             .child(self.spam(theme, window, cx))
             .child(self.quick_replies_section(theme, window, cx))
             .child(self.backup_section(theme, window, cx))

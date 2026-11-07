@@ -35,6 +35,7 @@ mod settings_ui;
 mod sms_actions;
 mod sms_conversation;
 mod status_ui;
+mod text_size;
 mod ticks;
 mod voice_ui;
 

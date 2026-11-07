@@ -117,6 +117,44 @@ impl RowView {
     }
 }
 
+/// The chats a "mark all as read" touches.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MarkAllTargets {
+    pub sms_threads: Vec<i64>,
+    pub wa_chats: Vec<String>,
+}
+
+impl MarkAllTargets {
+    /// How many chats are touched.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn count(&self) -> usize {
+        self.sms_threads.len() + self.wa_chats.len()
+    }
+}
+
+/// The unread chats of `rows` (the normal rows: pass neither the Spam
+/// filter's nor the archived rows).
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn mark_all_targets(rows: &[RowView]) -> MarkAllTargets {
+    let mut out = MarkAllTargets::default();
+    for row in rows.iter().filter(|r| r.unread > 0 || r.marked_unread) {
+        if let Some(id) = row.sms_thread {
+            out.sms_threads.push(id);
+        }
+        if let Some(chat) = &row.wa_chat {
+            out.wa_chats.push(chat.to_string());
+        }
+    }
+    out
+}
+
+/// "Marked 3 chats as read", "Marked 1 chat as read".
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn mark_all_text(n: usize) -> String {
+    let noun = if n == 1 { "chat" } else { "chats" };
+    format!("Marked {n} {noun} as read")
+}
+
 /// The inbox, split into the normal rows, the Spam filter's rows and the
 /// archived WhatsApp chats.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1437,6 +1475,37 @@ mod tests {
         row.title = title.to_owned().into();
         row.sms_sender = sender.map(|s| SharedString::from(s.to_owned()));
         row
+    }
+
+    #[test]
+    fn mark_all_skips_read_and_spam_rows() {
+        let mut unread = row_for("A", "x", None);
+        unread.unread = 2;
+        unread.sms_thread = Some(7);
+        let read = row_for("B", "y", None);
+        let mut wa = row_for("C", "z", None);
+        wa.marked_unread = true;
+        wa.sms_thread = None;
+        wa.wa_chat = Some("1@s.whatsapp.net".into());
+        let view = InboxView {
+            rows: vec![unread, read, wa],
+            spam: vec![{
+                let mut r = row_for("S", "spam", None);
+                r.unread = 5;
+                r
+            }],
+            ..InboxView::default()
+        };
+        let t = mark_all_targets(&view.rows);
+        assert_eq!(t.sms_threads, [7]);
+        assert_eq!(t.wa_chats, ["1@s.whatsapp.net"]);
+        assert_eq!(t.count(), 2);
+    }
+
+    #[test]
+    fn mark_all_text_plural() {
+        assert_eq!(mark_all_text(3), "Marked 3 chats as read");
+        assert_eq!(mark_all_text(1), "Marked 1 chat as read");
     }
 
     #[test]

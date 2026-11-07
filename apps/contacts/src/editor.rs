@@ -28,6 +28,7 @@ use rovsti_ui::{
 use crate::{
     ContactsApp, backend,
     field::{Config, TextField},
+    photo_crop::PhotoSource,
     photos::photo_avatar,
     ui::{Tone, field_box, form_row, pill, tap_row},
 };
@@ -122,7 +123,7 @@ pub(crate) struct Editor {
     saving: bool,
     /// A picked image for a contact that is not saved yet; it becomes the
     /// photo once the first save returns the id.
-    pending_photo: Option<String>,
+    pub(crate) pending_photo: Option<(String, rovsti_core::contact_photo::CropView)>,
     /// The form as it opened: leaving with anything else asks first.
     initial: ContactDraft,
     events: Vec<EventRow>,
@@ -484,8 +485,8 @@ impl ContactsApp {
                     this.notice = Some("Saved.".into());
                     this.page.restart();
                     this.reload(cx);
-                    if let Some(path) = photo {
-                        this.apply_photo(id, path, cx);
+                    if let Some((path, view)) = photo {
+                        this.apply_photo_with(id, path, view, cx);
                     }
                 }
                 Err(words) => {
@@ -559,8 +560,9 @@ impl ContactsApp {
         cx.notify();
     }
 
-    /// "Choose photo": opens the system picker; the answer is a `document_result`.
-    fn choose_photo(&mut self, cx: &mut Context<Self>) {
+    /// "Choose from gallery" or "Take photo": opens the system picker or the
+    /// camera; the answer is a `document_result` that opens the crop page.
+    pub(crate) fn pick_photo(&mut self, camera: bool, cx: &mut Context<Self>) {
         self.photo_sheet.close();
         if self.transfer_busy {
             cx.notify();
@@ -572,18 +574,38 @@ impl ContactsApp {
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async { backend::start_pick_photo() })
+                .spawn(async move {
+                    if camera {
+                        backend::start_capture_photo()
+                    } else {
+                        backend::start_pick_photo()
+                    }
+                })
                 .await;
             this.update(cx, |this, cx| {
                 if let Err(words) = result {
                     this.transfer_busy = false;
-                    this.notice = Some(format!("Can't change the photo: {words}.").into());
+                    this.notice = Some(if camera {
+                        crate::photo_crop::capture_notice(&words).into()
+                    } else {
+                        format!("Can't change the photo: {words}.").into()
+                    });
                 }
                 cx.notify();
             })
             .ok();
         })
         .detach();
+    }
+
+    /// A row of the photo sheet was tapped.
+    fn photo_source(&mut self, choice: PhotoSource, cx: &mut Context<Self>) {
+        match choice {
+            PhotoSource::TakePhoto => self.pick_photo(true, cx),
+            PhotoSource::ChooseFromGallery => self.pick_photo(false, cx),
+            PhotoSource::CropCurrent => self.crop_current_photo(cx),
+            PhotoSource::Remove => self.remove_photo(cx),
+        }
     }
 
     /// "Remove photo": a saved contact asks first, a new one drops the
@@ -620,24 +642,27 @@ impl ContactsApp {
         cx.notify();
     }
 
-    /// An image was picked and copied to `path`: a saved contact gets it now,
-    /// a new one holds it until the first save returns the id.
+    /// An image was picked or captured and copied to `path`: the crop page
+    /// opens for it. A saved contact gets the result at once, a new one holds
+    /// it until the first save returns the id.
     pub(crate) fn photo_picked(&mut self, path: String, cx: &mut Context<Self>) {
-        let Some(editor) = self.editor.as_mut() else {
-            // Chosen from the viewer (or the card): the open contact gets it now.
-            let id = self.viewer.as_ref().map(|v| v.contact_id);
-            if let Some(id) = id.or_else(|| self.open.as_ref().map(|c| c.id)) {
-                self.apply_photo(id, path, cx);
-            }
-            return;
+        use crate::photo_crop::CropTarget;
+        let target = match self.editor.as_ref() {
+            Some(editor) => Some(
+                editor
+                    .id
+                    .map_or(CropTarget::NewContact, CropTarget::Contact),
+            ),
+            // Chosen from the viewer (or the card): the open contact gets it.
+            None => self
+                .viewer
+                .as_ref()
+                .map(|v| v.contact_id)
+                .or_else(|| self.open.as_ref().map(|c| c.id))
+                .map(CropTarget::Contact),
         };
-        match editor.id {
-            Some(id) => self.apply_photo(id, path, cx),
-            None => {
-                editor.pending_photo = Some(path);
-                self.notice = Some("The photo is saved with the contact.".into());
-                cx.notify();
-            }
+        if let Some(target) = target {
+            self.open_crop(target, path, cx);
         }
     }
 
@@ -662,31 +687,25 @@ impl ContactsApp {
                 .text_color(colors.label)
                 .child("Contact photo"),
         );
-        body = body.child(
-            tap_row(
+        let has_photo = self.editor_has_photo() || from_viewer;
+        let can_crop = from_viewer && self.viewer.as_ref().is_some_and(|v| v.file.is_some());
+        for choice in crate::photo_crop::photo_source_choices(has_photo) {
+            if choice == PhotoSource::CropCurrent && !can_crop {
+                continue;
+            }
+            let row = tap_row(
                 theme,
-                "photo-choose",
-                Some(Icon::LucideImagePlus),
-                if from_viewer {
-                    "Choose new photo"
+                choice.id(),
+                Some(choice.icon()),
+                choice.label(),
+                if choice == PhotoSource::Remove {
+                    Tone::Danger
                 } else {
-                    "Choose photo"
+                    Tone::Plain
                 },
-                Tone::Plain,
             )
-            .on_click(cx.listener(|this, _, _, cx| this.choose_photo(cx))),
-        );
-        if self.editor_has_photo() || from_viewer {
-            body = body.child(
-                tap_row(
-                    theme,
-                    "photo-remove",
-                    Some(Icon::LucideTrash2),
-                    "Remove photo",
-                    Tone::Danger,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.remove_photo(cx))),
-            );
+            .on_click(cx.listener(move |this, _, _, cx| this.photo_source(choice, cx)));
+            body = body.child(row);
         }
         let entity = cx.entity();
         let drag = entity.clone();

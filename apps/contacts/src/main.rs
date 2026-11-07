@@ -14,6 +14,7 @@ mod dupes;
 mod editor;
 mod field;
 mod groups;
+mod photo_crop;
 mod photo_viewer;
 mod photos;
 mod picker;
@@ -332,6 +333,8 @@ struct ContactsApp {
     photo_sheet: Sheet,
     /// The full-screen photo viewer, drawn above the card and under the sheets.
     viewer: Option<photo_viewer::PhotoViewer>,
+    /// The full-screen crop page for a picked or captured photo, above the viewer.
+    crop: Option<photo_crop::CropPage>,
     /// The per-field actions sheet over the contact card, and what it acts on.
     field_sheet: Sheet,
     /// The card's Share menu and the QR code sheet it opens.
@@ -507,6 +510,7 @@ impl ContactsApp {
             photos: Photos::new(),
             photo_sheet: Sheet::new(),
             viewer: None,
+            crop: None,
             field_sheet: Sheet::new(),
             share_sheet: Sheet::new(),
             qr_sheet: Sheet::new(),
@@ -746,6 +750,7 @@ impl ContactsApp {
     fn close_contact(&mut self, cx: &mut Context<Self>) {
         self.close_field_sheet_now();
         self.viewer = None;
+        self.crop = None;
         self.open = None;
         self.open_draft = None;
         self.page.restart();
@@ -762,6 +767,7 @@ impl ContactsApp {
             || self.field_sheet.is_open()
             || self.share_sheet.is_open()
             || self.qr_sheet.is_open()
+            || self.crop.is_some()
             || self.viewer.as_ref().is_some_and(|v| !v.is_closing())
             || self.picker.is_some()
             || self.editor.is_some()
@@ -793,6 +799,8 @@ impl ContactsApp {
             self.close_share_sheet(cx);
         } else if self.field_sheet.is_open() {
             self.close_field_sheet(cx);
+        } else if self.crop.is_some() {
+            self.crop_cancel(cx);
         } else if self.viewer.as_ref().is_some_and(|v| !v.is_closing()) {
             self.request_close_viewer(cx);
         } else if self.picker.is_some() {
@@ -1746,7 +1754,11 @@ impl ContactsApp {
                     content_bottom_inset()
                         + px(8.0)
                         // Above the viewer's bottom bar.
-                        + px(if self.viewer.is_some() { 88.0 } else { 0.0 })
+                        + px(if self.viewer.is_some() || self.crop.is_some() {
+                            88.0
+                        } else {
+                            0.0
+                        })
                         // Above the select bar.
                         + px(if self.select.is_some() { 76.0 } else { 0.0 }),
                 )
@@ -1906,7 +1918,7 @@ impl Render for ContactsApp {
                 theme::colors(theme).green,
             ))
             .child(scroller)
-            .children(if self.viewer.is_none() {
+            .children(if self.viewer.is_none() && self.crop.is_none() {
                 self.notice(theme, cx)
             } else {
                 None
@@ -1983,8 +1995,9 @@ impl Render for ContactsApp {
                     .flatten(),
             )
             .children(self.photo_viewer_overlay(theme, window, cx))
+            .children(self.photo_crop_overlay(theme, window, cx))
             // The pill sits above the viewer, which hides the one under the page.
-            .children(if self.viewer.is_some() {
+            .children(if self.viewer.is_some() || self.crop.is_some() {
                 self.notice(theme, cx)
             } else {
                 None

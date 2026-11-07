@@ -16,7 +16,10 @@ use gpui::{
     App, Context, Div, Hsla, ObjectFit, ParentElement, RenderImage, SharedString, Styled,
     StyledImage, px,
 };
-use rovsti_core::lru::Lru;
+use rovsti_core::{
+    lru::Lru,
+    zoom::{self, Size, ZoomView},
+};
 use rovsti_ui::tokens::Theme;
 use rovsti_ui::{Icon, components::avatar};
 
@@ -122,6 +125,19 @@ pub(crate) fn render_image(mut pixels: image::RgbaImage) -> RenderImage {
         pixel.swap(0, 2);
     }
     RenderImage::new(vec![image::Frame::new(pixels)])
+}
+
+/// The rectangle `(x, y, w, h)` the image is drawn in, in viewport pixels: the
+/// aspect-fitted size times the scale, centred, shifted by the view's offset.
+pub(crate) fn image_rect(view: ZoomView, natural: Size, viewport: Size) -> (f32, f32, f32, f32) {
+    let fitted = zoom::fit(natural, viewport);
+    let (w, h) = (fitted.w * view.scale, fitted.h * view.scale);
+    (
+        (viewport.w - w) / 2.0 + view.offset.x,
+        (viewport.h - h) / 2.0 + view.offset.y,
+        w,
+        h,
+    )
 }
 
 /// An avatar: the monogram on its tint, with `photo` faded in over it.

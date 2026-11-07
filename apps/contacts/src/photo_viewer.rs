@@ -7,7 +7,7 @@
 //! to the gallery, shares, or (for the contact's own photo) edits.
 //!
 //! The maths lives in `rovsti_core::zoom`. [`PhotoViewer`] holds the gesture
-//! state and the springs that animate it; [`image_rect`] is the one pure
+//! state and the springs that animate it; `photos::image_rect` is the one pure
 //! function that maps a view to the rectangle the image is drawn in. Adapted
 //! from Rovsti Phone's viewer, without the QR mode.
 
@@ -38,7 +38,7 @@ use rovsti_ui::{
     touch::{TAP_SLOP, TapGuard, drag_surface},
 };
 
-use crate::{ContactsApp, backend};
+use crate::{ContactsApp, backend, photos::image_rect};
 
 /// Height of the strip at the top and bottom where the chrome sits; a finger
 /// that lands there belongs to the buttons, not to the photo.
@@ -50,19 +50,6 @@ const DOUBLE_TAP_SLOP: f32 = 48.0;
 const STALE_SAMPLE: Duration = Duration::from_millis(80);
 
 static NEXT_TOKEN: AtomicU64 = AtomicU64::new(1);
-
-/// The rectangle `(x, y, w, h)` the image is drawn in, in viewport pixels: the
-/// aspect-fitted size times the scale, centred, shifted by the view's offset.
-pub(crate) fn image_rect(view: ZoomView, natural: Size, viewport: Size) -> (f32, f32, f32, f32) {
-    let fitted = zoom::fit(natural, viewport);
-    let (w, h) = (fitted.w * view.scale, fitted.h * view.scale);
-    (
-        (viewport.w - w) / 2.0 + view.offset.x,
-        (viewport.h - h) / 2.0 + view.offset.y,
-        w,
-        h,
-    )
-}
 
 /// A file name for the gallery: the person's name, safe for a file system.
 pub(crate) fn photo_file_name(title: &str) -> String {
@@ -439,14 +426,14 @@ impl PhotoViewer {
     }
 }
 
-fn point_of(p: gpui::Point<gpui::Pixels>) -> Point {
+pub(crate) fn point_of(p: gpui::Point<gpui::Pixels>) -> Point {
     Point {
         x: f32::from(p.x),
         y: f32::from(p.y),
     }
 }
 
-fn viewport_of(window: &Window) -> Size {
+pub(crate) fn viewport_of(window: &Window) -> Size {
     let size = window.viewport_size();
     Size {
         w: f32::from(size.width),

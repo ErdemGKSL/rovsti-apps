@@ -7,7 +7,8 @@
 use gpui::Context;
 use rovsti_android::events::{RawEvent, kind};
 use rovsti_core::{
-    contact_photo, import_plan, vcard,
+    contact_photo::{self, CropView},
+    import_plan, vcard,
     wire::{DocumentOp, DocumentResult, WireContact},
 };
 
@@ -172,12 +173,23 @@ impl ContactsApp {
     /// Crops, scales and stores the image at `path` as the photo of contact
     /// `id` on the background executor, then refreshes its thumbnail.
     pub(crate) fn apply_photo(&mut self, id: i64, path: String, cx: &mut Context<Self>) {
+        self.apply_photo_with(id, path, CropView::default(), cx);
+    }
+
+    /// Like [`Self::apply_photo`], with the crop the owner chose.
+    pub(crate) fn apply_photo_with(
+        &mut self,
+        id: i64,
+        path: String,
+        view: CropView,
+        cx: &mut Context<Self>,
+    ) {
         self.notice = Some("Saving the photo…".into());
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { backend::change_photo(id, &path) })
+                .spawn(async move { backend::change_photo_with(id, &path, view) })
                 .await;
             this.update(cx, |this, cx| {
                 this.photo_changed(id, result.map(|()| "Photo updated."), cx);

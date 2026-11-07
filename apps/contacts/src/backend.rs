@@ -252,10 +252,16 @@ pub(crate) fn start_pick_photo() -> Result<(), String> {
 
 /// Opens the camera for one photo. The answer is a `document_result`
 /// (`contact_photo`), like the picker's.
-#[allow(dead_code)] // used by the photo sheet (plan step S7)
 pub(crate) fn start_capture_photo() -> Result<(), String> {
-    done(documents::capture_photo())
+    match documents::capture_photo() {
+        // Android found nothing to handle the camera intent.
+        Ok(false) => Err(NO_CAMERA.to_owned()),
+        other => done(other),
+    }
 }
+
+/// What `start_capture_photo` says when no camera app answers.
+pub(crate) const NO_CAMERA: &str = "No camera app found";
 
 /// Removes the contact's photo.
 pub(crate) fn remove_photo(contact_id: i64) -> Result<(), String> {
@@ -299,19 +305,45 @@ fn photo_words(error: PhotoError) -> String {
     }
 }
 
-/// Sets the picked image at `path` as the photo of `contact_id`: asks for its
-/// size, plans the centred crop and has Android crop, scale and store it.
-pub(crate) fn change_photo(contact_id: i64, path: &str) -> Result<(), String> {
-    change_photo_with(contact_id, path, CropView::default())
-}
-
-/// Like [`change_photo`], with the crop the owner chose (turns, zoom, pan).
+/// Sets the picked image at `path` as the photo of `contact_id`, cropped as
+/// the owner chose (turns, zoom, pan): asks for its size, plans the crop and
+/// has Android crop, scale and store it.
 pub(crate) fn change_photo_with(contact_id: i64, path: &str, view: CropView) -> Result<(), String> {
     let (width, height) = decode_size(contacts_edit::photo_size(path)).map_err(|e| e.words())?;
     let plan = contact_photo::plan_for(width, height, view).map_err(photo_words)?;
     let plan =
         serde_json::to_string(&plan).map_err(|error| Failed::Other(error.to_string()).words())?;
     done(contacts_edit::set_photo(contact_id, path, &plan))
+}
+
+/// Longest side of the picture the crop page shows.
+pub(crate) const CROP_DISPLAY: u32 = 1440;
+
+/// Decodes the image at `path` (PNG, JPEG or WebP; the EXIF turn applied) for
+/// the crop page, downscaled so its longest side is at most [`CROP_DISPLAY`].
+/// Blocks: run it on the background executor.
+pub(crate) fn load_crop_image(path: &str) -> Option<image::RgbaImage> {
+    use image::ImageDecoder;
+    let reader = image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?;
+    let mut decoder = reader.into_decoder().ok()?;
+    let orientation = decoder.orientation().ok();
+    let mut picture = image::DynamicImage::from_decoder(decoder)
+        .map_err(|error| log::debug!("crop image {path}: {error}"))
+        .ok()?;
+    if let Some(orientation) = orientation {
+        picture.apply_orientation(orientation);
+    }
+    if picture.width().max(picture.height()) > CROP_DISPLAY {
+        picture = picture.resize(
+            CROP_DISPLAY,
+            CROP_DISPLAY,
+            image::imageops::FilterType::Triangle,
+        );
+    }
+    Some(picture.into_rgba8())
 }
 
 /// A contact photo thumbnail, decoded. Desktop paints nothing.
@@ -584,7 +616,10 @@ mod tests {
             words
         );
         assert_eq!(remove_photo(1).expect_err("no provider"), words);
-        assert_eq!(change_photo(1, "/c/p").expect_err("no provider"), words);
+        assert_eq!(
+            change_photo_with(1, "/c/p", CropView::default()).expect_err("no provider"),
+            words
+        );
         assert_eq!(Failed::Unreadable.words(), "that image can't be read");
     }
 
@@ -639,6 +674,19 @@ mod tests {
         assert_eq!(image.width(), FULL_PHOTO);
         assert!(path.exists());
         assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+    }
+
+    #[test]
+    fn the_crop_image_is_downscaled_and_missing_files_are_none() {
+        let dir = std::env::temp_dir().join("rovsti-contacts-crop-test");
+        std::fs::create_dir_all(&dir).expect("dir");
+        let path = dir.join("wide.png");
+        image::RgbaImage::new(2880, 1440)
+            .save_with_format(&path, image::ImageFormat::Png)
+            .expect("png");
+        let loaded = load_crop_image(&path.to_string_lossy()).expect("decodes");
+        assert_eq!((loaded.width(), loaded.height()), (1440, 720));
+        assert!(load_crop_image("/definitely/not/here.png").is_none());
     }
 
     #[test]

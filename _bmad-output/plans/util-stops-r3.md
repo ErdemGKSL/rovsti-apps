@@ -38,14 +38,14 @@ baseSha: 290550b818cc1a25913d9feab9f9f6edd431245a
 |---|---------|--------|
 | S1-S9 | Copy as, share stop, QR, open in maps, export/import stops, Saved search/sort, transit stop sheet, measure, bearing | done R1 |
 | S10-S16 | Offline area, appearance, vibration pattern, alarm sound, volume, history search/filter/start again/save, history export | done R2 |
-| S23 | Paste DMS / DDM / Plus Code (and `N 41 1.5 E 28 58.6`) in the picker | R3 step 1, 5 |
-| S25 | Share my current location: tap the blue dot -> Copy as / Share / QR / Use as A / Use as B | R3 step 5 |
-| S18 | Home screen shortcut for a saved stop that starts its trip | R3 steps 2, 4, 7 |
-| S20 | Copy / share the live trip status ("Kadikoy - Moda: 1.2 km to the line, about 4 min, NE") | R3 steps 2, 6 |
-| S21 | Re-arm after dismiss: pill "Alarm dismissed" with "Re-arm" (same A/B trip again) | R3 step 6 |
-| S26 | Measure: Copy result, Share as GPX, Save first + last point as a stop | R3 steps 2, 5 |
-| S17 | Follow-me: second tap on Me keeps the map centred on you (live fixes), pan or tap ends it | R3 steps 2, 4, 7 |
-| S22 | Tile cache size choice (128 / 256 / 512 / 1024 MB) and "Other servers" usage with Clear | R3 steps 3, 6 |
+| S23 | Paste DMS / DDM / Plus Code (and `N 41 1.5 E 28 58.6`) in the picker | done R3 |
+| S25 | Share my current location: tap the blue dot -> Copy as / Share / QR / Use as A / Use as B | done R3 |
+| S18 | Home screen shortcut for a saved stop that starts its trip | done R3 |
+| S20 | Copy / share the live trip status ("Kadikoy - Moda: 1.2 km to the line, about 4 min, NE") | done R3 |
+| S21 | Re-arm after dismiss: pill "Alarm dismissed" with "Re-arm" (same A/B trip again) | done R3 |
+| S26 | Measure: Copy result, Share as GPX, Save first + last point as a stop | done R3 |
+| S17 | Follow-me: second tap on Me keeps the map centred on you (live fixes), pan or tap ends it | done R3 |
+| S22 | Tile cache size choice (128 / 256 / 512 / 1024 MB) and "Other servers" usage with Clear | done R3 |
 | S19 | Reverse / Duplicate a saved stop | dropped (gate is direction-agnostic) |
 | S24 | Saved stops: pin favourites to top, colour tag | backlog R4 |
 | S27 | Trip summary after arrival (time, distance, snoozes) with Share and Save as stop | backlog R4 |

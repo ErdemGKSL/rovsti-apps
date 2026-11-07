@@ -1,5 +1,7 @@
-//! Contacts shared to the app or opened with it: a `.vcf` file or plain text.
+//! Contacts shared to the app or opened with it: a `.vcf` file, a contacts
+//! `.csv` (Google or Outlook) or plain text.
 
+use crate::contact_csv;
 use crate::contact_edit::ContactDraft;
 use crate::contact_scan::{self, Scanned};
 use crate::vcard;
@@ -50,7 +52,7 @@ pub fn decode(bytes: &[u8]) -> Option<String> {
     std::str::from_utf8(bytes).ok().map(str::to_owned)
 }
 
-/// Reads a shared or opened file.
+/// Reads a shared or opened file (vCard, contacts CSV or text).
 pub fn from_file(mime: Option<&str>, name: &str, bytes: &[u8]) -> Intake {
     if bytes.len() > MAX_SHARED_BYTES {
         return Intake::TooBig;
@@ -60,6 +62,14 @@ pub fn from_file(mime: Option<&str>, name: &str, bytes: &[u8]) -> Intake {
     let Some(text) = decode(bytes) else {
         return Intake::Unreadable;
     };
+    if !looks_vcard && contact_csv::looks_like_csv(mime, name, head) {
+        let cards = contact_csv::parse(&text).contacts;
+        return if cards.is_empty() {
+            Intake::NotContacts
+        } else {
+            Intake::Cards(cards)
+        };
+    }
     if !looks_vcard {
         return match from_text(&text) {
             Intake::Single(Scanned::Nothing) => Intake::NotContacts,
@@ -159,6 +169,26 @@ mod tests {
         assert_eq!(
             notice(&Intake::NotContacts),
             Some("This file has no contacts")
+        );
+    }
+
+    #[test]
+    fn csv_file_routes_to_cards() {
+        let csv = "First Name,Last Name,Phone 1 - Label,Phone 1 - Value\r\nAda,Lovelace,Mobile,+905551112233\r\n";
+        let Intake::Cards(cards) = from_file(Some("text/csv"), "c.csv", csv.as_bytes()) else {
+            panic!("cards");
+        };
+        assert_eq!(cards[0].display_name(), "Ada Lovelace");
+        assert_eq!(cards[0].numbers[0].value, "+905551112233");
+        // By header alone, with a BOM and an unhelpful name.
+        let bom = format!("\u{FEFF}{csv}");
+        assert!(matches!(
+            from_file(None, "export", bom.as_bytes()),
+            Intake::Cards(_)
+        ));
+        assert_eq!(
+            from_file(None, "a.csv", b"First Name,Last Name\r\n"),
+            Intake::NotContacts
         );
     }
 

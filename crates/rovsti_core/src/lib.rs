@@ -22,6 +22,8 @@ pub mod contact;
 pub mod contact_card;
 /// Clean up filters: contacts without a number, name, photo or group.
 pub mod contact_cleanup;
+/// Contacts as CSV (Google and Outlook): export, import, file name.
+pub mod contact_csv;
 /// Birthdays and anniversaries: parsing, next occurrence, upcoming list.
 pub mod contact_dates;
 /// Duplicate detection and merging of contacts.

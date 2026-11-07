@@ -5,18 +5,77 @@
 //! book accepts. Only what the app edits is carried: name, organisation,
 //! nickname (`NICKNAME`, the first of a comma list), job title (`TITLE`),
 //! numbers, emails, websites (`URL`), the note, the birthday and anniversary (`BDAY`,
-//! `ANNIVERSARY`, `X-ANNIVERSARY`) and postal addresses (`ADR`). Photos and
-//! other properties are skipped on import and not written; a date that does
-//! not parse is dropped without failing the card.
+//! `ANNIVERSARY`, `X-ANNIVERSARY`) and postal addresses (`ADR`). Other
+//! properties are skipped on import and not written; a date that does not
+//! parse is dropped without failing the card.
+//!
+//! Photos travel beside the draft, never inside it: [`photos`] reads the
+//! embedded `PHOTO` of every card (JPEG or PNG, at most [`MAX_PHOTO_BYTES`],
+//! `uri` photos are ignored because nothing is fetched) and [`write_one`]
+//! writes a single card with its photo. [`write`] stays photo-free so a bulk
+//! export stays small.
 //!
 //! Pure text in, pure values out: the file itself is read and written by the
 //! platform (Storage Access Framework), and the text is already UTF-8.
+
+use base64::Engine as _;
+use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 
 use crate::contact_dates;
 use crate::contact_edit::{ContactDraft, DraftEvent, DraftField, EventKind, FieldKind};
 
 /// Longest content line before folding, in bytes (RFC 6350 says 75 octets).
 const FOLD_AT: usize = 75;
+
+/// Largest photo kept from a card or written to one, in bytes.
+pub const MAX_PHOTO_BYTES: usize = 256 * 1024;
+
+/// Base64 as cards in the wild have it: padding is optional.
+const LENIENT_BASE64: GeneralPurpose = GeneralPurpose::new(
+    &base64::alphabet::STANDARD,
+    GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
+);
+
+/// The image formats a card photo can have.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhotoFormat {
+    Jpeg,
+    Png,
+}
+
+impl PhotoFormat {
+    pub fn mime(self) -> &'static str {
+        match self {
+            Self::Jpeg => "image/jpeg",
+            Self::Png => "image/png",
+        }
+    }
+
+    /// The format of `bytes` by its magic bytes, or `None` for anything else.
+    pub fn sniff(bytes: &[u8]) -> Option<Self> {
+        if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+            Some(Self::Jpeg)
+        } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            Some(Self::Png)
+        } else {
+            None
+        }
+    }
+
+    fn type_param(self) -> &'static str {
+        match self {
+            Self::Jpeg => "JPEG",
+            Self::Png => "PNG",
+        }
+    }
+}
+
+/// The photo of a card: encoded image bytes and their format.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CardPhoto {
+    pub format: PhotoFormat,
+    pub bytes: Vec<u8>,
+}
 
 /// What an import found.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -29,8 +88,21 @@ pub struct Parsed {
 
 /// Reads every `BEGIN:VCARD ... END:VCARD` block of `text`.
 pub fn parse(text: &str) -> Parsed {
+    parse_full(text).0
+}
+
+/// The embedded photo of every card [`parse`] returns, in the same order
+/// (skipped cards are not counted). `None` for a card without a usable
+/// photo: none, a `uri` photo, over [`MAX_PHOTO_BYTES`], bad base64 or an
+/// image that is neither JPEG nor PNG.
+pub fn photos(text: &str) -> Vec<Option<CardPhoto>> {
+    parse_full(text).1
+}
+
+fn parse_full(text: &str) -> (Parsed, Vec<Option<CardPhoto>>) {
     let lines = unfold(text);
     let mut parsed = Parsed::default();
+    let mut found: Vec<Option<CardPhoto>> = Vec::new();
     let mut current: Option<Builder> = None;
     for line in &lines {
         let Some(prop) = Property::parse(line) else {
@@ -41,9 +113,13 @@ pub fn parse(text: &str) -> Parsed {
                 current = Some(Builder::default());
             }
             ("END", Some(_)) if prop.value.eq_ignore_ascii_case("VCARD") => {
-                if let Some(builder) = current.take() {
+                if let Some(mut builder) = current.take() {
+                    let photo = builder.photo.take();
                     match builder.finish() {
-                        Ok(card) => parsed.contacts.push(card),
+                        Ok(card) => {
+                            parsed.contacts.push(card);
+                            found.push(photo);
+                        }
                         Err(_) => parsed.skipped += 1,
                     }
                 }
@@ -52,7 +128,7 @@ pub fn parse(text: &str) -> Parsed {
             _ => {}
         }
     }
-    parsed
+    (parsed, found)
 }
 
 /// A card being read: the draft plus the `FN`, which is used only when the
@@ -61,6 +137,9 @@ pub fn parse(text: &str) -> Parsed {
 struct Builder {
     draft: ContactDraft,
     full_name: Option<String>,
+    photo: Option<CardPhoto>,
+    /// An embedded photo was met; later ones are ignored.
+    photo_seen: bool,
 }
 
 impl Builder {
@@ -77,6 +156,14 @@ impl Builder {
                     .filter(|s| !s.is_empty())
                     .collect::<Vec<_>>()
                     .join(" ");
+            }
+            "PHOTO" => {
+                if !self.photo_seen
+                    && let Some(decoded) = decode_photo(prop)
+                {
+                    self.photo_seen = true;
+                    self.photo = decoded;
+                }
             }
             "FN" => self.full_name = Some(unescape(&prop.value)),
             "ORG" => {
@@ -212,6 +299,48 @@ impl Property {
             .filter(|t| !t.is_empty())
             .collect()
     }
+}
+
+/// The photo of a `PHOTO` property: `None` when it is not embedded (a `uri`
+/// or a form this module does not know, so it is ignored), `Some(None)` when
+/// it is embedded but unusable, `Some(Some(_))` when it is good.
+fn decode_photo(prop: &Property) -> Option<Option<CardPhoto>> {
+    let value = prop.value.trim();
+    let is_uri = prop
+        .params
+        .iter()
+        .any(|(k, v)| k == "VALUE" && v.eq_ignore_ascii_case("uri"));
+    let lower_start: String = value.chars().take(8).collect::<String>().to_lowercase();
+    let encoded = if lower_start.starts_with("data:") {
+        let (head, data) = value.split_once(',')?;
+        if !head.to_ascii_lowercase().contains(";base64") {
+            return None;
+        }
+        data
+    } else {
+        let base64_param = prop.params.iter().any(|(k, v)| {
+            k == "ENCODING" && (v.eq_ignore_ascii_case("b") || v.eq_ignore_ascii_case("base64"))
+        });
+        if is_uri || !base64_param {
+            return None;
+        }
+        value
+    };
+    Some(decode_photo_data(encoded))
+}
+
+fn decode_photo_data(encoded: &str) -> Option<CardPhoto> {
+    let clean: String = encoded.chars().filter(|c| !c.is_whitespace()).collect();
+    // Refuse before decoding: base64 is 4 characters for 3 bytes.
+    if clean.len() > MAX_PHOTO_BYTES / 3 * 4 + 8 {
+        return None;
+    }
+    let bytes = LENIENT_BASE64.decode(clean.as_bytes()).ok()?;
+    if bytes.len() > MAX_PHOTO_BYTES {
+        return None;
+    }
+    let format = PhotoFormat::sniff(&bytes)?;
+    Some(CardPhoto { format, bytes })
 }
 
 /// Adds a dated event; a date that does not parse is dropped.
@@ -428,12 +557,20 @@ fn hex(b: u8) -> Option<u8> {
 pub fn write(contacts: &[ContactDraft]) -> String {
     let mut out = String::new();
     for contact in contacts {
-        write_card(contact, &mut out);
+        write_card(contact, None, &mut out);
     }
     out
 }
 
-fn write_card(contact: &ContactDraft, out: &mut String) {
+/// Writes one card as [`write`] does, with `photo` embedded as
+/// `PHOTO;ENCODING=b;TYPE=JPEG|PNG` (folded like every line).
+pub fn write_one(contact: &ContactDraft, photo: Option<&CardPhoto>) -> String {
+    let mut out = String::new();
+    write_card(contact, photo, &mut out);
+    out
+}
+
+fn write_card(contact: &ContactDraft, photo: Option<&CardPhoto>, out: &mut String) {
     push_line(out, "BEGIN:VCARD");
     push_line(out, "VERSION:3.0");
     push_line(
@@ -507,6 +644,16 @@ fn write_card(contact: &ContactDraft, out: &mut String) {
         };
         // The whole text sits in the street component, so it reads back as is.
         push_line(out, &format!("ADR{kind}:;;{};;;;", escape(&address.value)));
+    }
+    if let Some(photo) = photo {
+        push_line(
+            out,
+            &format!(
+                "PHOTO;ENCODING=b;TYPE={}:{}",
+                photo.format.type_param(),
+                base64::engine::general_purpose::STANDARD.encode(&photo.bytes)
+            ),
+        );
     }
     push_line(out, "END:VCARD");
 }
@@ -667,7 +814,7 @@ PHOTO;ENCODING=b;TYPE=JPEG:AAAA\nBDAY:1990-01-01\nFN:Ayşe Can\nEND:VCARD\n";
         let parsed = parse(text);
         assert_eq!(parsed.contacts.len(), 1);
         assert_eq!(parsed.contacts[0].numbers[0].value, "5551112233");
-        // The birthday is now read; the photo is still skipped.
+        // The birthday is read; the photo is not a draft field.
         assert_eq!(
             parsed.contacts[0].events,
             vec![DraftEvent::new("1990-01-01", EventKind::Birthday)]
@@ -927,5 +1074,150 @@ BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Sam Lee\r\nBDAY;VALUE=date:--0229\r\nTEL:1\r\nE
             "rovsti-contacts-2-2026-01-09.vcf"
         );
         assert_eq!(export_name(&[], day), "rovsti-contacts-0-2026-11-07.vcf");
+    }
+
+    fn b64(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    fn jpeg(len: usize) -> Vec<u8> {
+        let mut v = vec![0xFF, 0xD8, 0xFF, 0xE0];
+        v.extend((0..len.saturating_sub(4)).map(|i| (i % 251) as u8));
+        v
+    }
+
+    fn png() -> Vec<u8> {
+        let mut v = b"\x89PNG\r\n\x1a\n".to_vec();
+        v.extend([1, 2, 3, 4, 5]);
+        v
+    }
+
+    fn card_with(photo_line: &str) -> String {
+        format!("BEGIN:VCARD\nFN:Ayşe Can\nTEL:555\n{photo_line}\nEND:VCARD\n")
+    }
+
+    #[test]
+    fn sniffs_formats() {
+        assert_eq!(PhotoFormat::sniff(&jpeg(10)), Some(PhotoFormat::Jpeg));
+        assert_eq!(PhotoFormat::sniff(&png()), Some(PhotoFormat::Png));
+        assert_eq!(PhotoFormat::sniff(b"GIF89a"), None);
+        assert_eq!(PhotoFormat::sniff(b""), None);
+        assert_eq!(PhotoFormat::Jpeg.mime(), "image/jpeg");
+        assert_eq!(PhotoFormat::Png.mime(), "image/png");
+    }
+
+    #[test]
+    fn reads_photos_of_every_version() {
+        let bytes = jpeg(300);
+        let want = Some(CardPhoto {
+            format: PhotoFormat::Jpeg,
+            bytes: bytes.clone(),
+        });
+        let enc = b64(&bytes);
+        let v21 = card_with(&format!("PHOTO;ENCODING=BASE64;JPEG:{enc}\n"));
+        let v3 = card_with(&format!("PHOTO;ENCODING=b;TYPE=JPEG:{enc}"));
+        let v4 = card_with(&format!("PHOTO:data:image/jpeg;base64,{enc}"));
+        let v4b = card_with(&format!(
+            "PHOTO;MEDIATYPE=image/jpeg:data:image/jpeg;base64,{enc}"
+        ));
+        for text in [v21, v3, v4, v4b] {
+            assert_eq!(photos(&text), vec![want.clone()], "{text}");
+        }
+    }
+
+    #[test]
+    fn photo_whitespace_and_missing_padding_are_fine() {
+        let bytes = jpeg(100);
+        let enc = b64(&bytes);
+        let spaced = format!("{} {}", &enc[..20], &enc[20..]);
+        let unpadded = enc.trim_end_matches('=');
+        for e in [spaced.as_str(), unpadded] {
+            let text = card_with(&format!("PHOTO;ENCODING=b;TYPE=JPEG:{e}"));
+            assert_eq!(photos(&text)[0].as_ref().map(|p| &p.bytes), Some(&bytes));
+        }
+    }
+
+    #[test]
+    fn folded_photo_lines_are_joined() {
+        let bytes = jpeg(500);
+        let line = format!("PHOTO;ENCODING=b;TYPE=JPEG:{}", b64(&bytes));
+        let mut folded = String::new();
+        push_line(&mut folded, &line);
+        assert!(folded.lines().count() > 3);
+        let text = format!("BEGIN:VCARD\r\nFN:A B\r\n{folded}END:VCARD\r\n");
+        assert_eq!(photos(&text)[0].as_ref().map(|p| &p.bytes), Some(&bytes));
+    }
+
+    #[test]
+    fn oversize_bad_and_uri_photos_are_none() {
+        let big = card_with(&format!(
+            "PHOTO;ENCODING=b;TYPE=JPEG:{}",
+            b64(&jpeg(MAX_PHOTO_BYTES + 1))
+        ));
+        assert_eq!(photos(&big), vec![None]);
+        let edge = card_with(&format!(
+            "PHOTO;ENCODING=b;TYPE=JPEG:{}",
+            b64(&jpeg(MAX_PHOTO_BYTES))
+        ));
+        assert!(photos(&edge)[0].is_some());
+        let bad = card_with("PHOTO;ENCODING=b;TYPE=JPEG:***not base64***");
+        assert_eq!(photos(&bad), vec![None]);
+        let gif = card_with(&format!("PHOTO;ENCODING=b;TYPE=GIF:{}", b64(b"GIF89a....")));
+        assert_eq!(photos(&gif), vec![None]);
+        let uri = card_with("PHOTO;VALUE=uri:https://example.com/a.jpg");
+        assert_eq!(photos(&uri), vec![None]);
+        let bare = card_with("PHOTO:https://example.com/a.jpg");
+        assert_eq!(photos(&bare), vec![None]);
+        let none = card_with("NOTE:hi");
+        assert_eq!(photos(&none), vec![None]);
+    }
+
+    #[test]
+    fn magic_bytes_beat_the_type_param() {
+        let text = card_with(&format!("PHOTO;ENCODING=b;TYPE=JPEG:{}", b64(&png())));
+        assert_eq!(
+            photos(&text)[0].as_ref().map(|p| p.format),
+            Some(PhotoFormat::Png)
+        );
+    }
+
+    #[test]
+    fn photos_line_up_with_contacts_when_cards_are_skipped() {
+        let enc = b64(&jpeg(50));
+        let text = format!(
+            "BEGIN:VCARD\nFN:One\nPHOTO;ENCODING=b;TYPE=JPEG:{enc}\nEND:VCARD\n\
+BEGIN:VCARD\nPHOTO;ENCODING=b;TYPE=JPEG:{enc}\nEND:VCARD\n\
+BEGIN:VCARD\nFN:Three\nEND:VCARD\n"
+        );
+        let parsed = parse(&text);
+        let found = photos(&text);
+        assert_eq!(parsed.contacts.len(), 2);
+        assert_eq!(parsed.skipped, 1);
+        assert_eq!(found.len(), 2);
+        assert!(found[0].is_some());
+        assert_eq!(found[1], None);
+        assert_eq!(parsed.contacts[1].display_name(), "Three");
+    }
+
+    #[test]
+    fn write_one_round_trips_with_its_photo() {
+        let mut draft = parse(SIMPLE).contacts.remove(0);
+        draft.clean();
+        let photo = CardPhoto {
+            format: PhotoFormat::Png,
+            bytes: png().into_iter().chain(0..=255).collect(),
+        };
+        let text = write_one(&draft, Some(&photo));
+        assert!(text.contains("PHOTO;ENCODING=b;TYPE=PNG:"));
+        assert!(text.lines().all(|l| l.len() <= FOLD_AT));
+        assert_eq!(parse(&text).contacts, vec![draft.clone()]);
+        assert_eq!(photos(&text), vec![Some(photo)]);
+        assert_eq!(write_one(&draft, None), write(std::slice::from_ref(&draft)));
+    }
+
+    #[test]
+    fn bulk_write_has_no_photo() {
+        let draft = parse(SIMPLE).contacts.remove(0);
+        assert!(!write(&[draft]).contains("PHOTO"));
     }
 }

@@ -8,6 +8,7 @@ description = "Platform-free domain types shared by every Rovsti app."
 
 [dependencies]
 aes-gcm.workspace = true
+base64.workspace = true
 pbkdf2.workspace = true
 rqrr.workspace = true
 serde.workspace = true

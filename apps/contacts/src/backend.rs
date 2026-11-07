@@ -411,6 +411,47 @@ pub(crate) fn add_contacts(cards: Vec<ContactDraft>) -> Result<u32, String> {
         .map_err(|error| error.words())
 }
 
+/// Adds the cards and sets the photos that came with them: `photos` is aligned
+/// with `cards`. Returns how many contacts were added and how many photos were
+/// set; a photo that cannot be set is only not counted.
+#[allow(dead_code)] // wired by the UI steps S5 and S7
+pub(crate) fn import_with_photos(
+    cards: &[ContactDraft],
+    photos: &[Option<CardPhoto>],
+) -> Result<(u32, usize), String> {
+    let json = serde_json::to_string(&FullPayload {
+        contacts: cards.to_vec(),
+    })
+    .map_err(|error| Failed::Other(error.to_string()).words())?;
+    let payload =
+        decode::<ImportPayload>(contacts_edit::import(&json)).map_err(|error| error.words())?;
+    let mut set = 0;
+    for (id, photo) in rovsti_core::import_plan::photo_targets(&payload.ids, photos) {
+        let Ok(path) = photo_file(photo) else {
+            continue;
+        };
+        if change_photo_with(id, &path.to_string_lossy(), CropView::default()).is_ok() {
+            set += 1;
+        }
+        let _ = std::fs::remove_file(&path);
+    }
+    Ok((payload.added, set))
+}
+
+/// Adds the numbers and emails of `add` to contact `id`. Returns the contact as
+/// it was (for Undo) and the pill's words.
+#[allow(dead_code)] // wired by the UI steps S5 and S7
+pub(crate) fn add_to_existing(
+    id: i64,
+    add: &contact_edit::Addition,
+) -> Result<(ContactDraft, String), String> {
+    let before = pull_detail(id)?;
+    let (after, n) = contact_edit::add_to_existing(&before, add).map_err(|e| e.to_string())?;
+    save(&after)?;
+    let notice = contact_edit::added_notice(&before.display_name(), add, n);
+    Ok((before, notice))
+}
+
 /// Opens the photo picker. The answer is a `document_result` (`contact_photo`).
 pub(crate) fn start_pick_photo() -> Result<(), String> {
     done(documents::pick_contact_photo())
@@ -687,6 +728,17 @@ mod hand_off {
         save_to_gallery(&path, name)
     }
 
+    /// Hands the calendar `text` to the save dialog as `name` (`text/calendar`).
+    pub(crate) fn export_ics(name: &str, text: &str) -> Result<(), String> {
+        let file = safe_name(name);
+        let path = write_temp(&file, text.as_bytes())?;
+        done(documents::export_file(
+            &file,
+            "text/calendar",
+            &path.to_string_lossy(),
+        ))
+    }
+
     /// Opens the share sheet with `bytes` as a PNG file called `name`.
     pub(crate) fn share_png(name: &str, bytes: &[u8]) -> Result<(), String> {
         let stem = name.strip_suffix(".png").unwrap_or(name);
@@ -824,6 +876,41 @@ mod tests {
         assert!(photo.bytes.len() <= vcard::MAX_PHOTO_BYTES);
         let decoded = image::load_from_memory(&photo.bytes).expect("ok");
         assert!(decoded.width().max(decoded.height()) <= 512);
+    }
+
+    #[test]
+    fn import_with_photos_says_it_needs_a_phone_on_desktop() {
+        let cards = vec![ContactDraft::blank()];
+        let photo = card_photo("content://x/3");
+        let error = import_with_photos(&cards, &[photo]).expect_err("no provider");
+        assert!(!error.is_empty());
+        assert_eq!(error, add_contacts(cards).expect_err("same words"));
+    }
+
+    #[test]
+    fn export_ics_says_it_needs_a_phone_on_desktop() {
+        let error =
+            export_ics("rovsti-birthdays-1.ics", "BEGIN:VCALENDAR\r\n").expect_err("no dialog");
+        assert!(!error.is_empty());
+    }
+
+    #[test]
+    fn add_to_existing_reports_new_and_known_details() {
+        let id = pull_full().expect("ok")[0].id.expect("sample id");
+        let known = pull_detail(id).expect("ok");
+        let number = known.numbers[0].value.clone();
+        let again = contact_edit::Addition {
+            numbers: vec![number],
+            emails: vec![],
+        };
+        let error = add_to_existing(id, &again).expect_err("already there");
+        assert!(error.contains("already has this"), "{error}");
+        let empty = contact_edit::Addition::default();
+        assert_eq!(
+            add_to_existing(id, &empty).expect_err("empty"),
+            "Nothing to add"
+        );
+        assert!(add_to_existing(-5, &again).is_err());
     }
 
     #[test]

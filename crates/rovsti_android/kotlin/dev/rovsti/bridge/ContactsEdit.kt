@@ -11,6 +11,7 @@ import android.provider.ContactsContract.CommonDataKinds.Email
 import android.provider.ContactsContract.CommonDataKinds.Event
 import android.provider.ContactsContract.CommonDataKinds.GroupMembership
 import android.provider.ContactsContract.CommonDataKinds.Nickname
+import android.provider.ContactsContract.CommonDataKinds.Relation
 import android.provider.ContactsContract.CommonDataKinds.Note
 import android.provider.ContactsContract.CommonDataKinds.Organization
 import android.provider.ContactsContract.CommonDataKinds.Phone
@@ -48,6 +49,7 @@ object ContactsEdit {
         StructuredPostal.CONTENT_ITEM_TYPE,
         Website.CONTENT_ITEM_TYPE,
         Nickname.CONTENT_ITEM_TYPE,
+        Relation.CONTENT_ITEM_TYPE,
     )
 
     private inline fun guard(block: () -> String): String = try {
@@ -130,6 +132,38 @@ object ContactsEdit {
         else -> Event.TYPE_OTHER
     }
 
+    private fun kindOfRelation(type: Int) = when (type) {
+        Relation.TYPE_SPOUSE -> "spouse"
+        Relation.TYPE_DOMESTIC_PARTNER -> "partner"
+        Relation.TYPE_CHILD -> "child"
+        Relation.TYPE_MOTHER -> "mother"
+        Relation.TYPE_FATHER -> "father"
+        Relation.TYPE_PARENT -> "parent"
+        Relation.TYPE_BROTHER -> "brother"
+        Relation.TYPE_SISTER -> "sister"
+        Relation.TYPE_RELATIVE -> "relative"
+        Relation.TYPE_FRIEND -> "friend"
+        Relation.TYPE_MANAGER -> "manager"
+        Relation.TYPE_ASSISTANT -> "assistant"
+        else -> "custom"
+    }
+
+    private fun typeOfRelation(kind: String) = when (kind) {
+        "spouse" -> Relation.TYPE_SPOUSE
+        "partner" -> Relation.TYPE_DOMESTIC_PARTNER
+        "child" -> Relation.TYPE_CHILD
+        "mother" -> Relation.TYPE_MOTHER
+        "father" -> Relation.TYPE_FATHER
+        "parent" -> Relation.TYPE_PARENT
+        "brother" -> Relation.TYPE_BROTHER
+        "sister" -> Relation.TYPE_SISTER
+        "relative" -> Relation.TYPE_RELATIVE
+        "friend" -> Relation.TYPE_FRIEND
+        "manager" -> Relation.TYPE_MANAGER
+        "assistant" -> Relation.TYPE_ASSISTANT
+        else -> Relation.TYPE_CUSTOM
+    }
+
     private fun kindOfPostal(type: Int) = when (type) {
         StructuredPostal.TYPE_HOME -> "home"
         StructuredPostal.TYPE_WORK -> "work"
@@ -177,6 +211,9 @@ object ContactsEdit {
         var org = ""
         var title = ""
         var nickname = ""
+        var phoneticGiven = ""
+        var phoneticFamily = ""
+        val relations = JSONArray()
         val websites = JSONArray()
         var note = ""
         var starred = false
@@ -193,6 +230,8 @@ object ContactsEdit {
                     given = listOf(c.getString(base + 2), c.getString(base + 4))
                         .filter { !it.isNullOrBlank() }.joinToString(" ")
                     family = c.getString(base + 3).orEmpty()
+                    phoneticGiven = c.getString(base + 7).orEmpty()
+                    phoneticFamily = c.getString(base + 8).orEmpty()
                 }
                 Phone.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) {
                     numbers.put(field(data1, kindOfPhone(c.getInt(base + 2)), c.getString(base + 3), c.getInt(base + 6) != 0))
@@ -214,6 +253,13 @@ object ContactsEdit {
                     if (org.isEmpty()) org = data1.orEmpty()
                     if (title.isEmpty()) title = c.getString(base + 5).orEmpty()
                 }
+                Relation.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) {
+                    val kind = kindOfRelation(c.getInt(base + 2))
+                    val o = JSONObject().put("name", data1.trim()).put("kind", kind)
+                    val label = c.getString(base + 3)
+                    if (kind == "custom" && !label.isNullOrBlank()) o.put("label", label)
+                    relations.put(o)
+                }
                 Website.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) websites.put(data1.trim())
                 Nickname.CONTENT_ITEM_TYPE -> if (nickname.isEmpty()) nickname = data1.orEmpty()
                 Note.CONTENT_ITEM_TYPE -> if (note.isEmpty()) note = data1.orEmpty()
@@ -231,13 +277,16 @@ object ContactsEdit {
             if (addresses.length() > 0) o.put("addresses", addresses)
             if (websites.length() > 0) o.put("websites", websites)
             if (nickname.isNotEmpty()) o.put("nickname", nickname)
+            if (phoneticGiven.isNotEmpty()) o.put("phonetic_given", phoneticGiven)
+            if (phoneticFamily.isNotEmpty()) o.put("phonetic_family", phoneticFamily)
+            if (relations.length() > 0) o.put("relations", relations)
             if (title.isNotEmpty()) o.put("title", title)
             if (account.isNotEmpty()) o.put("account", account)
             return o
         }
     }
 
-    private val DATA_PROJECTION = arrayOf(Data.MIMETYPE, Data.DATA1, Data.DATA2, Data.DATA3, Data.DATA5, Data.DATA4, Data.IS_SUPER_PRIMARY)
+    private val DATA_PROJECTION = arrayOf(Data.MIMETYPE, Data.DATA1, Data.DATA2, Data.DATA3, Data.DATA5, Data.DATA4, Data.IS_SUPER_PRIMARY, Data.DATA7, Data.DATA9)
     private val DATA_MIMES = EDITED_MIMES + GroupMembership.CONTENT_ITEM_TYPE
 
     private fun starred(context: Context, contactId: Long): Boolean =
@@ -291,11 +340,15 @@ object ContactsEdit {
         }
         val given = str(draft, "given")
         val family = str(draft, "family")
-        if (given.isNotEmpty() || family.isNotEmpty()) {
+        val phoneticGiven = str(draft, "phonetic_given")
+        val phoneticFamily = str(draft, "phonetic_family")
+        if (given.isNotEmpty() || family.isNotEmpty() || phoneticGiven.isNotEmpty() || phoneticFamily.isNotEmpty()) {
             ops.add(
                 insert(StructuredName.CONTENT_ITEM_TYPE)
                     .withValue(StructuredName.GIVEN_NAME, given.ifEmpty { null })
                     .withValue(StructuredName.FAMILY_NAME, family.ifEmpty { null })
+                    .withValue(StructuredName.PHONETIC_GIVEN_NAME, phoneticGiven.ifEmpty { null })
+                    .withValue(StructuredName.PHONETIC_FAMILY_NAME, phoneticFamily.ifEmpty { null })
                     .build(),
             )
         }
@@ -371,6 +424,20 @@ object ContactsEdit {
                         .withValue(Event.START_DATE, date)
                         .withValue(Event.TYPE, typeOfEvent(kind))
                         .withValue(Event.LABEL, if (kind == "custom") e.optString("label", "").ifEmpty { null } else null)
+                        .build(),
+                )
+            }
+        }
+        draft.optJSONArray("relations")?.let { relations ->
+            for (i in 0 until relations.length()) {
+                val rel = relations.optJSONObject(i) ?: continue
+                val name = str(rel, "name").takeIf { it.isNotEmpty() } ?: continue
+                val kind = rel.optString("kind", "custom")
+                ops.add(
+                    insert(Relation.CONTENT_ITEM_TYPE)
+                        .withValue(Relation.NAME, name)
+                        .withValue(Relation.TYPE, typeOfRelation(kind))
+                        .withValue(Relation.LABEL, if (kind == "custom") rel.optString("label", "").ifEmpty { null } else null)
                         .build(),
                 )
             }
@@ -502,26 +569,33 @@ object ContactsEdit {
         false
     }
 
-    /** Adds phone-only contacts from `{contacts: [ContactDraft]}`; the answer is `{added}`. */
+    /** Adds phone-only contacts from `{contacts: [ContactDraft]}`; the answer is `{added, ids}`, `ids` aligned with the drafts (0 when unknown). */
     fun importJson(context: Context, json: String): String = guard {
         val drafts = JSONObject(json).optJSONArray("contacts") ?: JSONArray()
         val local = groupIdsOf(context, "")
+        val ids = LongArray(drafts.length())
         var added = 0
         var start = 0
         while (start < drafts.length()) {
             val end = minOf(start + IMPORT_CHUNK, drafts.length())
             val ops = ArrayList<ContentProviderOperation>()
+            val rawIndexes = HashMap<Int, Int>()
             for (i in start until end) {
                 val draft = drafts.optJSONObject(i) ?: continue
-                appendNew(ops, draft, context, local)
+                rawIndexes[i] = appendNew(ops, draft, context, local)
             }
             if (ops.isNotEmpty()) {
-                context.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
-                added += end - start
+                val results = context.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
+                added += rawIndexes.size
+                for ((i, opIndex) in rawIndexes) {
+                    val uri = results.getOrNull(opIndex)?.uri ?: continue
+                    val rawId = try { ContentUris.parseId(uri) } catch (_: Exception) { continue }
+                    ids[i] = contactIdOfRaw(context, rawId) ?: 0L
+                }
             }
             start = end
         }
-        ProviderJson.ok(JSONObject().put("added", added))
+        ProviderJson.ok(JSONObject().put("added", added).put("ids", JSONArray(ids.toList())))
     }
 
     // ---- Groups -------------------------------------------------------------

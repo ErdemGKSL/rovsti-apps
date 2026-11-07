@@ -490,10 +490,11 @@ impl ContactsApp {
                 .await;
             this.update(cx, |this, cx| match result {
                 Ok(id) => {
-                    if let Some(account) = remember
-                        && this.save_to != account
-                    {
-                        this.save_to = account;
+                    if let Some(account) = remember {
+                        this.note_created(id);
+                        if this.save_to != account {
+                            this.save_to = account;
+                        }
                         this.save_prefs(cx);
                     }
                     this.photo_sheet.close();

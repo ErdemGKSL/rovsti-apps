@@ -416,6 +416,10 @@ struct ContactsApp {
     /// Lookup key of my card, and the emergency keys, as saved in the prefs.
     my_card: Option<String>,
     emergency: Vec<String>,
+    /// Recently added bookkeeping and recently viewed keys, as saved in the prefs.
+    known_max_id: Option<i64>,
+    added_marks: Vec<rovsti_core::contact_recent::AddedMark>,
+    viewed: Vec<String>,
     emergency_rows: Vec<me::EmergencyRow>,
     emergency_open: bool,
     /// The owner changed them before the prefs file was read.
@@ -615,7 +619,13 @@ impl ContactsApp {
                     this.emergency = saved.emergency_keys();
                     this.rebuild_emergency();
                 }
+                this.known_max_id = saved.known_max_id;
+                this.added_marks.clone_from(&saved.added);
+                this.viewed.clone_from(&saved.viewed);
                 this.prefs_ready = true;
+                if this.note_book() {
+                    this.save_prefs(cx);
+                }
                 this.rearm_and_sync_birthdays(cx);
                 if this.style_touched || this.birthday_touched {
                     // The owner chose before the file was read: theirs wins.
@@ -701,6 +711,9 @@ impl ContactsApp {
             recent_open: false,
             my_card: None,
             emergency: Vec::new(),
+            known_max_id: None,
+            added_marks: Vec::new(),
+            viewed: Vec::new(),
             emergency_rows: Vec::new(),
             emergency_open: false,
             me_touched: false,
@@ -792,6 +805,9 @@ impl ContactsApp {
                     }
                     this.groups = groups;
                     this.accounts = accounts;
+                    if this.note_book() {
+                        this.save_prefs(cx);
+                    }
                     if this.import_settle.take_if(|id| *id <= pull_id).is_some() {
                         this.transfer_busy = false;
                     }
@@ -1308,6 +1324,39 @@ impl ContactsApp {
         cx.notify();
     }
 
+    /// Folds the pulled book into the recently-added marks (once the prefs are
+    /// read). True when something changed and the prefs need saving.
+    fn note_book(&mut self) -> bool {
+        if !self.prefs_ready {
+            return false;
+        }
+        let Some(index) = self.index() else {
+            return false;
+        };
+        let ids: Vec<i64> = index.all().map(|c| c.id).collect();
+        let (max, marks) = rovsti_core::contact_recent::note_pull(
+            self.known_max_id,
+            &self.added_marks,
+            &ids,
+            whatsapp::now_ms(),
+        );
+        let seeded = if self.known_max_id.is_none() && max == 0 {
+            None
+        } else {
+            Some(max)
+        };
+        let changed = seeded != self.known_max_id || marks != self.added_marks;
+        self.known_max_id = seeded;
+        self.added_marks = marks;
+        changed
+    }
+
+    /// Marks a contact created in the app as recently added.
+    pub(crate) fn note_created(&mut self, id: i64) {
+        self.added_marks =
+            rovsti_core::contact_recent::note_created(&self.added_marks, id, whatsapp::now_ms());
+    }
+
     /// The preferences as they are now.
     fn prefs_snapshot(&self) -> ContactsPrefs {
         ContactsPrefs {
@@ -1317,6 +1366,9 @@ impl ContactsApp {
             favorites_order: self.favorites_order.clone(),
             my_card: self.my_card.clone(),
             emergency: self.emergency.clone(),
+            known_max_id: self.known_max_id,
+            added: self.added_marks.clone(),
+            viewed: self.viewed.clone(),
             ..ContactsPrefs::from_style(self.style)
         }
     }

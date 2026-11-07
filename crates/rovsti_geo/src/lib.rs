@@ -6,6 +6,7 @@
 //! diameter is far away.
 
 pub mod alarm;
+pub mod backup;
 mod coord;
 pub mod coord_format;
 mod crossing;

@@ -326,7 +326,16 @@ pub fn format_distance(metres: f64) -> String {
     }
 }
 
+/// Local `HH:MM` clock time of `now_ms` plus `eta_min` minutes (at least one).
+pub fn arrival_clock(now_ms: i64, eta_min: u32, tz_offset_s: i32) -> String {
+    let at_s = now_ms.div_euclid(1000) + i64::from(eta_min.max(1)) * 60 + i64::from(tz_offset_s);
+    let secs = at_s.rem_euclid(86_400);
+    format!("{:02}:{:02}", secs / 3600, secs % 3600 / 60)
+}
+
 /// Shareable status of a running trip, with a geo link on the second line.
+/// `arrive` is an optional local clock time (see [`arrival_clock`]) shown
+/// next to the ETA.
 pub fn status_share_text(
     label: &str,
     line_m: Option<f64>,
@@ -334,6 +343,7 @@ pub fn status_share_text(
     here: Option<Coord>,
     target: Coord,
     crossed: bool,
+    arrive: Option<&str>,
 ) -> String {
     let link = crate::point_qr_payload(target, Some(label));
     if crossed {
@@ -344,7 +354,10 @@ pub fn status_share_text(
         parts.push(format!("{} to the line", format_distance(m)));
     }
     if let Some(min) = eta_min {
-        parts.push(format!("about {} min", min.max(1)));
+        parts.push(match arrive {
+            Some(at) => format!("about {} min (around {at})", min.max(1)),
+            None => format!("about {} min", min.max(1)),
+        });
     }
     if let Some(h) = here {
         parts.push(format!(
@@ -369,20 +382,41 @@ mod tests {
     fn status_text_variants() {
         let t = Coord::new(41.0, 29.0);
         let here = Coord::new(40.99, 28.99);
-        let s = status_share_text("Moda", Some(1234.0), Some(4), Some(here), t, false);
+        let s = status_share_text("Moda", Some(1234.0), Some(4), Some(here), t, false, None);
         let mut lines = s.lines();
         assert_eq!(
             lines.next().unwrap(),
             "On my way to Moda: 1.2 km to the line, about 4 min, heading NE."
         );
         assert!(lines.next().unwrap().starts_with("geo:"));
-        let s = status_share_text("Moda", Some(300.0), None, None, t, false);
+        let s = status_share_text("Moda", Some(300.0), None, None, t, false, None);
         assert!(s.starts_with("On my way to Moda: 300 m to the line.\n"));
-        let s = status_share_text("Moda", None, None, None, t, false);
+        let s = status_share_text("Moda", None, None, None, t, false, None);
         assert!(s.starts_with("On my way to Moda.\ngeo:"));
-        let s = status_share_text("Moda", Some(5.0), Some(2), Some(here), t, true);
+        let s = status_share_text("Moda", Some(5.0), Some(2), Some(here), t, true, None);
         assert!(s.starts_with("Arrived at Moda.\ngeo:"));
         assert_eq!(s.lines().count(), 2);
+        let s = status_share_text("Moda", None, Some(4), None, t, false, Some("18:42"));
+        assert!(s.starts_with("On my way to Moda: about 4 min (around 18:42).\n"));
+        let s = status_share_text("Moda", None, None, None, t, false, Some("18:42"));
+        assert!(s.starts_with("On my way to Moda.\n"));
+    }
+
+    #[test]
+    fn arrival_clock_cases() {
+        // 2024-01-01 12:00:00 UTC
+        let noon = 1_704_110_400_000;
+        assert_eq!(arrival_clock(noon, 4, 0), "12:04");
+        assert_eq!(arrival_clock(noon, 0, 0), "12:01");
+        assert_eq!(arrival_clock(noon, 90, 0), "13:30");
+        // 23:30 UTC + 3h = 02:30 next day, +45 min = 03:15.
+        let late = noon + 11 * 3_600_000 + 30 * 60_000;
+        assert_eq!(arrival_clock(late, 45, 3 * 3600), "03:15");
+        // 00:10 UTC, -5h offset: previous day 19:10, +20 min = 19:30.
+        let early = noon - 12 * 3_600_000 + 10 * 60_000;
+        assert_eq!(arrival_clock(early, 20, -5 * 3600), "19:30");
+        // Before the epoch still wraps.
+        assert_eq!(arrival_clock(-60_000, 1, 0), "00:00");
     }
 
     #[test]

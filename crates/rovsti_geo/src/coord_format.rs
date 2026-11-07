@@ -419,10 +419,59 @@ pub fn from_you_text(here: Coord, to: Coord) -> String {
     )
 }
 
+/// OpenStreetMap link to a map view (`#map=z/lat/lon`), zoom rounded to 0..=19.
+pub fn osm_view_url(center: Coord, zoom: f64) -> String {
+    let z = zoom.round().clamp(0.0, 19.0) as u8;
+    format!(
+        "https://www.openstreetmap.org/#map={z}/{:.5}/{:.5}",
+        center.lat, center.lon
+    )
+}
+
+/// `geo:` URI for a map view, zoom rounded to 1..=19.
+pub fn geo_view_url(center: Coord, zoom: f64) -> String {
+    let z = zoom.round().clamp(1.0, 19.0) as u8;
+    format!("geo:{:.5},{:.5}?z={z}", center.lat, center.lon)
+}
+
+/// Share text for the current map view: a title line, then both links.
+pub fn map_view_share_text(center: Coord, zoom: f64) -> String {
+    format!(
+        "Map view\n{}\n{}",
+        osm_view_url(center, zoom),
+        geo_view_url(center, zoom)
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn view_urls_round_and_clamp() {
+        let c = Coord::new(41.0082, 28.9784);
+        assert_eq!(
+            osm_view_url(c, 14.6),
+            "https://www.openstreetmap.org/#map=15/41.00820/28.97840"
+        );
+        assert_eq!(geo_view_url(c, 14.6), "geo:41.00820,28.97840?z=15");
+        assert!(osm_view_url(c, 25.0).contains("#map=19/"));
+        assert!(geo_view_url(c, 25.0).ends_with("?z=19"));
+        assert!(osm_view_url(c, -3.0).contains("#map=0/"));
+        assert!(geo_view_url(c, -3.0).ends_with("?z=1"));
+        let s = Coord::new(-33.8688, -70.5);
+        assert_eq!(geo_view_url(s, 10.2), "geo:-33.86880,-70.50000?z=10");
+    }
+
+    #[test]
+    fn map_view_share_text_exact() {
+        let c = Coord::new(41.0082, 28.9784);
+        assert_eq!(
+            map_view_share_text(c, 12.0),
+            "Map view\nhttps://www.openstreetmap.org/#map=12/41.00820/28.97840\ngeo:41.00820,28.97840?z=12"
+        );
+    }
 
     #[test]
     fn dms_north_east() {

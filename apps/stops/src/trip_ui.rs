@@ -134,6 +134,7 @@ fn status_text(trip: &ActiveTrip, live: Option<&Live>, here: Option<Coord>) -> S
         here,
         trip.trip.diameter.center(),
         crossed,
+        None,
     )
 }
 

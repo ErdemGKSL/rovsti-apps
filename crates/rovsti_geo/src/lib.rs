@@ -51,7 +51,7 @@ pub use saved_stops::{
 };
 pub use session::{
     ActiveTrip, FixIn, FixOut, FixOutcome, FixPos, NoticeDelivery, NoticeState, Track,
-    format_distance, status_share_text,
+    arrival_clock, format_distance, status_share_text,
 };
 pub use trip::{Fix, TripState};
 pub use view::{FollowMode, Viewport};

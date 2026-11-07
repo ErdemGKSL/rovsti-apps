@@ -10,6 +10,7 @@
 mod backend;
 mod confirm;
 mod detail;
+mod dupes;
 mod editor;
 mod field;
 mod groups;
@@ -102,11 +103,17 @@ const REVEAL_MARGIN: f32 = 16.0;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum NoticeAction {
     UndoDelete,
+    UndoMerge,
 }
 
-/// Whether a notice button survives a clear: only the Undo of a waiting delete.
-fn keeps_undo(action: Option<NoticeAction>, pending: bool) -> bool {
-    action == Some(NoticeAction::UndoDelete) && pending
+/// Whether a notice button survives a clear: only the Undo of a waiting delete
+/// (`pending`) or of a merge that can still be undone (`merged`).
+fn keeps_undo(action: Option<NoticeAction>, pending: bool, merged: bool) -> bool {
+    match action {
+        Some(NoticeAction::UndoDelete) => pending,
+        Some(NoticeAction::UndoMerge) => merged,
+        None => false,
+    }
 }
 
 #[cfg(test)]
@@ -115,18 +122,24 @@ mod notice_tests {
 
     #[test]
     fn undo_is_kept_while_pending() {
-        assert!(keeps_undo(Some(NoticeAction::UndoDelete), true));
+        assert!(keeps_undo(Some(NoticeAction::UndoDelete), true, false));
     }
 
     #[test]
     fn undo_is_dropped_without_pending() {
-        assert!(!keeps_undo(Some(NoticeAction::UndoDelete), false));
+        assert!(!keeps_undo(Some(NoticeAction::UndoDelete), false, true));
+    }
+
+    #[test]
+    fn merge_undo_is_kept_while_it_can_be_undone() {
+        assert!(keeps_undo(Some(NoticeAction::UndoMerge), false, true));
+        assert!(!keeps_undo(Some(NoticeAction::UndoMerge), true, false));
     }
 
     #[test]
     fn no_action_is_dropped() {
-        assert!(!keeps_undo(None, true));
-        assert!(!keeps_undo(None, false));
+        assert!(!keeps_undo(None, true, true));
+        assert!(!keeps_undo(None, false, false));
     }
 }
 
@@ -265,6 +278,9 @@ struct ContactsApp {
     notice: Option<SharedString>,
     /// The button of `notice`, cleared with it or when another notice replaces it.
     notice_action: Option<NoticeAction>,
+    /// The merge that Undo would revert, and the Find duplicates page.
+    merge_undo: Option<dupes::MergeUndo>,
+    dupes: dupes::Dupes,
     /// The contact whose delete waits for its Undo window.
     pending_delete: Option<PendingDelete>,
     /// The timer that clears `notice` (the text it was started for).
@@ -452,6 +468,8 @@ impl ContactsApp {
             back_enabled: false,
             whatsapp,
             whatsapp_open: false,
+            merge_undo: None,
+            dupes: dupes::Dupes::new(),
             wa: whatsapp::WaPanel::default(),
             avatars,
         };
@@ -695,6 +713,8 @@ impl ContactsApp {
             || self.open.is_some()
             || self.group_page.is_some()
             || self.whatsapp_open
+            || self.dupes.open
+            || self.dupes.sheet.is_open()
             || self.tabs.selected() != CONTACTS_TAB
             || !self.field.read(cx).text().is_empty()
     }
@@ -723,6 +743,10 @@ impl ContactsApp {
             self.close_contact(cx);
         } else if self.group_page.is_some() {
             self.close_group(cx);
+        } else if self.dupes.sheet.is_open() {
+            self.close_dupes_sheet(cx);
+        } else if self.dupes.open {
+            self.set_dupes_open(false, cx);
         } else if self.whatsapp_open {
             // The WhatsApp settings step back inside themselves first.
             if !self
@@ -1452,6 +1476,15 @@ impl ContactsApp {
                     .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
                     .on_click(cx.listener(|this, _, _, cx| this.import_contacts(cx)))
                     .into_any_element(),
+                    tap_row(
+                        theme,
+                        "find-duplicates",
+                        Some(Icon::LucideUsers),
+                        "Find duplicates",
+                        Tone::Accent,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.set_dupes_open(true, cx)))
+                    .into_any_element(),
                 ],
             ))
             .child(section(
@@ -1520,18 +1553,31 @@ impl ContactsApp {
     /// Navigation and a new action clear the notice, except the Undo of a
     /// delete that is still waiting.
     pub(crate) fn clear_notice(&mut self) {
-        if keeps_undo(self.notice_action, self.pending_delete.is_some()) {
+        if keeps_undo(
+            self.notice_action,
+            self.pending_delete.is_some(),
+            self.merge_undo.is_some(),
+        ) {
             return;
         }
         self.notice = None;
         self.notice_action = None;
+        self.merge_undo = None;
     }
 
     /// Starts the timer that takes the notice away, once per new text. A
     /// notice ending in "…" says work is under way and stays until replaced.
     fn keep_notice_timer(&mut self, cx: &mut Context<Self>) {
         // The button belongs to the Undo notice only: any other text drops it.
-        if self.notice.as_deref() != Some(UNDO_NOTICE) {
+        let owns_button = match self.notice_action {
+            Some(NoticeAction::UndoDelete) => self.notice.as_deref() == Some(UNDO_NOTICE),
+            Some(NoticeAction::UndoMerge) => self
+                .merge_undo
+                .as_ref()
+                .is_some_and(|undo| Some(&undo.notice) == self.notice.as_ref()),
+            None => false,
+        };
+        if !owns_button {
             self.notice_action = None;
         }
         let Some(text) = self.notice.clone() else {
@@ -1561,6 +1607,7 @@ impl ContactsApp {
                 if this.notice.as_ref() == Some(&timed) {
                     this.notice = None;
                     this.notice_action = None;
+                    this.merge_undo = None;
                     cx.notify();
                 }
             })
@@ -1572,9 +1619,13 @@ impl ContactsApp {
     fn notice(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
         let colors = theme::colors(theme);
         let text = self.notice.clone()?;
-        let undo = (self.notice_action == Some(NoticeAction::UndoDelete)).then(|| {
-            crate::ui::pill(theme, "notice-undo", "Undo", false)
-                .on_click(cx.listener(|this, _, _, cx| this.undo_delete(cx)))
+        let undo = self.notice_action.map(|action| {
+            crate::ui::pill(theme, "notice-undo", "Undo", false).on_click(cx.listener(
+                move |this, _, _, cx| match action {
+                    NoticeAction::UndoDelete => this.undo_delete(cx),
+                    NoticeAction::UndoMerge => this.undo_merge(cx),
+                },
+            ))
         });
         Some(
             div()
@@ -1637,6 +1688,8 @@ impl Render for ContactsApp {
                 | self.share_sheet.tick_real(real)
                 | self.qr_sheet.tick(dt)
                 | self.qr_sheet.tick_real(real)
+                | self.dupes.sheet.tick(dt)
+                | self.dupes.sheet.tick_real(real)
         });
         self.motion = motion;
         self.drop_finished_viewer();
@@ -1672,6 +1725,8 @@ impl Render for ContactsApp {
                 cx,
             );
             (page, true)
+        } else if self.dupes.open && tab == SETTINGS_TAB {
+            (self.dupes_page(theme, cx), false)
         } else if self.whatsapp_open && tab == SETTINGS_TAB {
             (self.whatsapp_page(theme, cx), false)
         } else {
@@ -1746,8 +1801,11 @@ impl Render for ContactsApp {
                                 || this.group_page.is_some()
                                 || this.group_edit.is_some()
                                 || this.whatsapp_open
+                                || this.dupes.open
                             {
                                 this.whatsapp_open = false;
+                                this.dupes.open = false;
+                                this.dupes.sheet.close();
                                 this.open = None;
                                 this.open_draft = None;
                                 this.group_page = None;
@@ -1778,6 +1836,7 @@ impl Render for ContactsApp {
             .children(self.field_sheet_view(theme, window, cx))
             .children(self.share_sheet_view(theme, window, cx))
             .children(self.qr_sheet_view(theme, window, cx))
+            .children(self.dupes_sheet_view(theme, window, cx))
     }
 }
 

@@ -36,6 +36,12 @@ pub(crate) enum Confirm {
     },
     /// Cancel or Back on an edit form with unsaved changes.
     DiscardEdits,
+    /// Duplicates would become one contact: the others are deleted.
+    MergeContacts {
+        keeper: i64,
+        others: Vec<i64>,
+        name: SharedString,
+    },
     /// A vCard file was read: these cards would be added.
     Import {
         cards: Vec<ContactDraft>,
@@ -136,6 +142,7 @@ impl ContactsApp {
                 self.clear_photo(id, cx);
             }
             Confirm::DiscardEdits => self.close_editor(cx),
+            Confirm::MergeContacts { keeper, others, .. } => self.run_merge(keeper, others, cx),
             Confirm::Import { cards, .. } => self.add_imported(cards, cx),
         }
     }
@@ -280,6 +287,12 @@ impl ContactsApp {
                     vec![keep, yes("Discard", true, cx)],
                 )
             }
+            Confirm::MergeContacts { others, name, .. } => confirm_card(
+                theme,
+                crate::dupes::confirm_title(others.len() + 1, name),
+                crate::dupes::confirm_body(others.len()),
+                vec![cancel, yes("Merge", false, cx)],
+            ),
             Confirm::Import {
                 cards,
                 duplicates,

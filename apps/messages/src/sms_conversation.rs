@@ -31,6 +31,7 @@ use crate::{
     conversation::{clock, composer_bar, day_label, header_bar},
     inbox::Badge,
     keyed_list::{KeyedList, key_of},
+    media_viewer::{ViewerItem, ViewerSource},
     schedule_ui::{self, StripItem, StripKey},
 };
 
@@ -74,6 +75,11 @@ pub enum SmsConversationEvent {
     NotSpam,
     /// A short confirmation for the page's pill, such as "Message deleted".
     Notice(&'static str),
+    /// A picture part was tapped: the page opens the full-screen viewer.
+    OpenMedia {
+        items: Vec<ViewerItem>,
+        index: usize,
+    },
 }
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
@@ -871,17 +877,35 @@ impl SmsConversation {
         if failed {
             bubble = bubble.border_1().border_color(colors.red);
         }
-        for part in &item.parts {
+        for (part_index, part) in item.parts.iter().enumerate() {
             if let Some(path) = part
                 .path
                 .as_deref()
                 .filter(|_| is_image(&part.content_type))
             {
+                let tapped = (index, part_index);
                 bubble = bubble.child(
                     img(PathBuf::from(path))
+                        .id(("sms-image", index * 64 + part_index))
                         .max_w(px(240.0))
                         .max_h(px(320.0))
-                        .rounded(radius::CARD),
+                        .rounded(radius::CARD)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if this.selected.is_some() {
+                                // An open selection is closed by the bubble's own tap.
+                                return;
+                            }
+                            cx.stop_propagation();
+                            let (items, at) = viewer_items(
+                                this.timeline.items(),
+                                &this.title,
+                                tapped.0,
+                                tapped.1,
+                            );
+                            if !items.is_empty() {
+                                cx.emit(SmsConversationEvent::OpenMedia { items, index: at });
+                            }
+                        })),
                 );
             } else if part.text.is_none() {
                 bubble = bubble.child(
@@ -1389,6 +1413,43 @@ pub struct SavePart {
     pub path: String,
 }
 
+/// Every picture part of `items`, oldest first, and the position of part
+/// `part` of item `item` among them (0 when it is not a picture).
+fn viewer_items(
+    items: &[SmsItem],
+    title: &SharedString,
+    item: usize,
+    part: usize,
+) -> (Vec<ViewerItem>, usize) {
+    let mut out = Vec::new();
+    let mut index = 0;
+    for (at, message) in items.iter().enumerate() {
+        for (number, p) in message.parts.iter().enumerate() {
+            let Some(path) = p.path.as_deref().filter(|_| is_image(&p.content_type)) else {
+                continue;
+            };
+            if (at, number) == (item, part) {
+                index = out.len();
+            }
+            out.push(ViewerItem {
+                key: format!("{:?}-{number}", message.key),
+                title: if message.outgoing {
+                    "You".into()
+                } else {
+                    title.clone()
+                },
+                mime: p.content_type.trim().to_ascii_lowercase(),
+                source: ViewerSource::File {
+                    path: PathBuf::from(path),
+                },
+                at_ms: message.at_ms,
+                placeholder: None,
+            });
+        }
+    }
+    (out, index)
+}
+
 /// The parts of a message that are files (not text or the SMIL layout).
 pub fn saveable_parts(item: &SmsItem) -> Vec<SavePart> {
     item.parts
@@ -1626,6 +1687,43 @@ mod tests {
         assert!(parts[0].name.starts_with("mms-") && parts[0].name.ends_with("-1.jpg"));
         m.state = DeliveryState::Pending;
         assert!(!selectable(&m));
+    }
+
+    #[test]
+    fn the_viewer_gets_every_picture_part_oldest_first() {
+        let pic = |path: &str| MmsPart {
+            content_type: "image/jpeg".into(),
+            text: None,
+            path: Some(path.into()),
+        };
+        let mut first = item(false, DeliveryState::None, T);
+        first.parts = vec![pic("/c/a.jpg"), pic("/c/b.jpg")];
+        let plain = item(false, DeliveryState::None, T + 1);
+        let mut last = item(true, DeliveryState::Sent, T + 2);
+        last.parts = vec![
+            MmsPart {
+                content_type: "application/pdf".into(),
+                text: None,
+                path: Some("/c/d.pdf".into()),
+            },
+            pic("/c/c.jpg"),
+        ];
+        let items = [first, plain, last];
+        let title = SharedString::from("Ada");
+        let (list, at) = viewer_items(&items, &title, 2, 1);
+        assert_eq!(list.len(), 3);
+        assert_eq!(at, 2);
+        assert_eq!(list[0].title, "Ada");
+        assert_eq!(list[2].title, "You");
+        assert_eq!(
+            list[1].source,
+            ViewerSource::File {
+                path: PathBuf::from("/c/b.jpg")
+            }
+        );
+        assert_eq!(viewer_items(&items, &title, 0, 1).1, 1);
+        // Keys are unique per part.
+        assert_ne!(list[0].key, list[1].key);
     }
 
     #[test]

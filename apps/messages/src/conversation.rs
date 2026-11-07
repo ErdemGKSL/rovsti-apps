@@ -911,6 +911,47 @@ impl Conversation {
         cx.notify();
     }
 
+    /// Every picture of the loaded timeline, oldest first (revoked and
+    /// deleted-for-me ones left out), and where `tapped` sits among them.
+    fn viewer_items(&self, tapped: &str) -> (Vec<ViewerItem>, usize) {
+        let mut items = Vec::new();
+        let mut index = 0;
+        for item in self.timeline.items() {
+            let message = &item.message;
+            let MessageBody::Media {
+                kind: MediaKind::Image,
+                mime,
+                ..
+            } = &message.body
+            else {
+                continue;
+            };
+            if self.hidden.contains(&message.id)
+                || self.timeline.meta(&message.id).is_some_and(|m| m.revoked)
+            {
+                continue;
+            }
+            if message.id == tapped {
+                index = items.len();
+            }
+            items.push(ViewerItem {
+                key: message.id.clone(),
+                title: if message.from_me {
+                    "You".into()
+                } else {
+                    self.title.clone()
+                },
+                mime: mime.clone(),
+                source: ViewerSource::WaMedia {
+                    message_id: message.id.clone(),
+                },
+                at_ms: message.timestamp_ms,
+                placeholder: self.cached_image(&message.id),
+            });
+        }
+        (items, index)
+    }
+
     fn cached_image(&self, id: &str) -> Option<Arc<Image>> {
         self.media_cache
             .iter()
@@ -2092,20 +2133,7 @@ impl Conversation {
         let save_here = !downloadable && saveable(*kind);
         let mut card = div().flex().flex_col().gap(px(4.0));
         if let Some(image) = self.cached_image(&message.id) {
-            let item = ViewerItem {
-                key: message.id.clone(),
-                title: if message.from_me {
-                    "You".into()
-                } else {
-                    self.title.clone()
-                },
-                mime: mime.clone(),
-                source: ViewerSource::WaMedia {
-                    message_id: message.id.clone(),
-                },
-                at_ms: message.timestamp_ms,
-                placeholder: Some(image.clone()),
-            };
+            let tapped = message.id.clone();
             card = card.child(
                 img(image)
                     .id(SharedString::from(format!("image-{}", message.id)))
@@ -2116,10 +2144,8 @@ impl Conversation {
                         // An open strip is closed by the bubble's own tap.
                         if this.strip.is_none() {
                             cx.stop_propagation();
-                            cx.emit(ConversationEvent::OpenMedia {
-                                items: vec![item.clone()],
-                                index: 0,
-                            });
+                            let (items, index) = this.viewer_items(&tapped);
+                            cx.emit(ConversationEvent::OpenMedia { items, index });
                         }
                     })),
             );

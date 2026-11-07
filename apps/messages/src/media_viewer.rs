@@ -65,7 +65,13 @@ pub(crate) fn image_rect(view: ZoomView, natural: Size, viewport: Size) -> (f32,
 /// A file name for the gallery: `WhatsApp-Ada-20261107-101500.jpg`. The time
 /// is UTC (only there to keep names apart); the extension follows `mime`
 /// (`jpg` when it is not a known type).
-pub(crate) fn save_name(title: &str, mime: &str, at_ms: i64) -> String {
+#[cfg(test)]
+fn save_name(title: &str, mime: &str, at_ms: i64) -> String {
+    branded_name("WhatsApp", title, mime, at_ms)
+}
+
+/// [`save_name`] with the file name's first word chosen by where the picture came from.
+fn branded_name(brand: &str, title: &str, mime: &str, at_ms: i64) -> String {
     let (y, m, d) = rovsti_wa_proto::presence::civil_from_days(at_ms.div_euclid(86_400_000));
     let secs = at_ms.rem_euclid(86_400_000) / 1000;
     let stamp = format!(
@@ -79,8 +85,8 @@ pub(crate) fn save_name(title: &str, mime: &str, at_ms: i64) -> String {
         ext => ext,
     };
     match rovsti_core::number_format::file_slug_opt(title) {
-        Some(stem) => format!("WhatsApp-{stem}-{stamp}.{ext}"),
-        None => format!("WhatsApp-{stamp}.{ext}"),
+        Some(stem) => format!("{brand}-{stem}-{stamp}.{ext}"),
+        None => format!("{brand}-{stamp}.{ext}"),
     }
 }
 
@@ -89,8 +95,7 @@ pub(crate) fn save_name(title: &str, mime: &str, at_ms: i64) -> String {
 pub(crate) enum ViewerSource {
     /// A WhatsApp message's media, fetched through the gateway.
     WaMedia { message_id: String },
-    /// A file on the phone (MMS pictures, step 4).
-    #[allow(dead_code)]
+    /// A file on the phone (MMS pictures).
     File { path: PathBuf },
 }
 
@@ -123,14 +128,30 @@ pub(crate) enum Release {
     Tap,
     /// Swiped down far or fast enough: close.
     Close,
+    /// Swiped to another picture: the caller loads it.
+    Page,
 }
+
+/// Which way a drag has turned out to go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Axis {
+    Undecided,
+    Horizontal,
+    Vertical,
+}
+
+/// A decoded neighbour kept for the next swipe.
+type Decoded = (String, Arc<RenderImage>, PathBuf);
 
 struct Drag {
     start: Point,
     last: Point,
     at: Instant,
     velocity: f32,
+    /// Horizontal flick speed (px/s), for paging.
+    vx: f32,
     moved: f32,
+    axis: Axis,
 }
 
 pub(crate) struct MediaViewer {
@@ -146,6 +167,16 @@ pub(crate) struct MediaViewer {
     natural: Size,
     /// The gesture's own view; the springs below chase it.
     pub view: ZoomView,
+    /// Decoded neighbours (the picture just left, the one ahead).
+    cache: Vec<Decoded>,
+    /// The neighbour being decoded in the background, so it is asked once.
+    prefetching: Option<String>,
+    /// Which way the last swipe went (1 forward), for choosing the neighbour to prefetch.
+    heading: i8,
+    /// Horizontal shift of the picture while paging.
+    page: Spring,
+    /// Where `page` was when the finger went down.
+    page_base: f32,
     /// Identifies this opening and item, so a late load cannot land elsewhere.
     pub token: u64,
     drag: Option<Drag>,
@@ -195,6 +226,11 @@ impl MediaViewer {
             load: Load::Loading,
             natural: Size { w: 1.0, h: 1.0 },
             view: ZoomView::IDENTITY,
+            cache: Vec::new(),
+            prefetching: None,
+            heading: 1,
+            page: Spring::new(0.0, motion_tokens::release()).with_epsilon(0.05),
+            page_base: 0.0,
             token: NEXT_TOKEN.fetch_add(1, Ordering::Relaxed),
             drag: None,
             dismiss_dy: 0.0,
@@ -227,6 +263,91 @@ impl MediaViewer {
             self.full = Some((image, file));
         } else {
             self.load = Load::Failed;
+        }
+    }
+
+    /// "3 of 7" for the top bar; `None` for a lone picture.
+    pub(crate) fn caption(&self) -> Option<String> {
+        zoom::page_caption(self.index, self.items.len())
+    }
+
+    /// Horizontal shift of the picture and the placeholder (paging).
+    pub(crate) fn page_shift(&self) -> f32 {
+        self.page.value
+    }
+
+    /// Keeps a decoded neighbour. When it is the picture the viewer is
+    /// waiting on, it is shown at once.
+    pub(crate) fn cache_put(&mut self, key: &str, image: Arc<RenderImage>, file: PathBuf) {
+        if self.full.is_none() && self.current().key == key {
+            self.set_full(image, file);
+            return;
+        }
+        self.cache.retain(|(k, ..)| k != key);
+        self.cache.push((key.to_owned(), image, file));
+        self.prune();
+    }
+
+    /// Drops decoded pictures that are no longer a neighbour.
+    fn prune(&mut self) {
+        let near = |key: &str| {
+            let at = self.items.iter().position(|i| i.key == key);
+            at.is_some_and(|at| at.abs_diff(self.index) == 1)
+        };
+        let keep: Vec<bool> = self.cache.iter().map(|(k, ..)| near(k)).collect();
+        let mut keep = keep.into_iter();
+        self.cache.retain(|_| keep.next().unwrap_or(false));
+    }
+
+    /// The neighbour to decode ahead of a swipe (the one in the direction of
+    /// travel first), once.
+    pub(crate) fn next_prefetch(&mut self) -> Option<ViewerItem> {
+        if self.prefetching.is_some() {
+            return None;
+        }
+        let ahead = self.index as i64 + i64::from(self.heading);
+        let behind = self.index as i64 - i64::from(self.heading);
+        let item = [ahead, behind]
+            .into_iter()
+            .filter_map(|at| usize::try_from(at).ok())
+            .filter_map(|at| self.items.get(at))
+            .find(|item| !self.cache.iter().any(|(k, ..)| *k == item.key))?
+            .clone();
+        self.prefetching = Some(item.key.clone());
+        Some(item)
+    }
+
+    /// Moves to page `to`: the new picture slides in from the side the old one left to.
+    fn turn(&mut self, to: usize, width: f32, reduced: bool) {
+        let from = self.index;
+        let shift = self.page.value + if to > from { width } else { -width };
+        if let Some((image, file)) = self.full.take() {
+            let key = self.current().key.clone();
+            self.cache.retain(|(k, ..)| *k != key);
+            self.cache.push((key, image, file));
+        }
+        self.heading = if to > from { 1 } else { -1 };
+        self.index = to;
+        self.prefetching = None;
+        self.token = NEXT_TOKEN.fetch_add(1, Ordering::Relaxed);
+        self.placeholder = self.current().placeholder.clone();
+        self.load = Load::Loading;
+        self.natural = Size { w: 1.0, h: 1.0 };
+        self.view = ZoomView::IDENTITY;
+        self.snap_view();
+        self.dismiss_dy = 0.0;
+        self.last_tap = None;
+        let key = self.current().key.clone();
+        if let Some(at) = self.cache.iter().position(|(k, ..)| *k == key) {
+            let (_, image, file) = self.cache.remove(at);
+            self.set_full(image, file);
+        }
+        self.prune();
+        self.page.snap(shift);
+        if reduced {
+            self.page.snap(0.0);
+        } else {
+            self.page.set_target(0.0);
         }
     }
 
@@ -340,19 +461,24 @@ impl MediaViewer {
             return;
         }
         self.adopt();
+        self.page_base = self.page.value;
+        self.page.snap(self.page_base);
         self.drag = Some(Drag {
             start: pos,
             last: pos,
             at: now,
             velocity: 0.0,
+            vx: 0.0,
             moved: 0.0,
+            axis: Axis::Undecided,
         });
     }
 
-    /// The finger moved: pan when zoomed, else pull the picture down.
+    /// The finger moved: pan when zoomed; else page sideways or pull down.
     pub(crate) fn drag(&mut self, pos: Point, viewport: Size, now: Instant) {
         let fitted = self.fitted(viewport);
         let zoomed = self.view.is_zoomed();
+        let pages = self.items.len() > 1;
         let Some(d) = &mut self.drag else {
             return;
         };
@@ -360,13 +486,29 @@ impl MediaViewer {
         d.moved = (pos.x - d.start.x).hypot(pos.y - d.start.y);
         let elapsed = now.saturating_duration_since(d.at).as_secs_f32().max(0.004);
         d.velocity = d.velocity * 0.6 + (dy / elapsed) * 0.4;
+        d.vx = d.vx * 0.6 + (dx / elapsed) * 0.4;
         d.last = pos;
         d.at = now;
+        let (total_x, total_y) = (pos.x - d.start.x, pos.y - d.start.y);
+        let mut just_locked = false;
+        if !zoomed && d.axis == Axis::Undecided && d.moved > TAP_SLOP {
+            d.axis = if pages && total_x.abs() > total_y.abs() {
+                Axis::Horizontal
+            } else {
+                Axis::Vertical
+            };
+            just_locked = true;
+        }
+        let axis = d.axis;
         if zoomed {
             self.view.pan(dx, dy, fitted, viewport);
             self.snap_view();
-        } else {
-            self.dismiss_dy = (self.dismiss_dy + dy).max(0.0);
+        } else if axis == Axis::Horizontal {
+            let shown = zoom::page_drag(self.page_base + total_x, self.index, self.items.len());
+            self.page.snap(shown);
+        } else if axis == Axis::Vertical {
+            let pull = if just_locked { total_y } else { dy };
+            self.dismiss_dy = (self.dismiss_dy + pull).max(0.0);
             self.dismiss.snap(self.dismiss_dy);
         }
     }
@@ -385,11 +527,23 @@ impl MediaViewer {
                 Release::Nothing
             };
         }
-        let velocity = if now.saturating_duration_since(d.at) > STALE_SAMPLE {
-            0.0
-        } else {
-            d.velocity
-        };
+        let fresh = now.saturating_duration_since(d.at) <= STALE_SAMPLE;
+        if d.axis == Axis::Horizontal {
+            let vx = if fresh { d.vx } else { 0.0 };
+            let shown = self.page.value;
+            let to = zoom::page_after_release(self.index, self.items.len(), shown, vx, viewport.w);
+            if to == self.index {
+                if reduced {
+                    self.page.snap(0.0);
+                } else {
+                    self.page.set_target(0.0);
+                }
+                return Release::Nothing;
+            }
+            self.turn(to, viewport.w, reduced);
+            return Release::Page;
+        }
+        let velocity = if fresh { d.velocity } else { 0.0 };
         if zoom::should_dismiss(self.dismiss_dy, velocity) {
             return Release::Close;
         }
@@ -475,6 +629,7 @@ impl MediaViewer {
             &mut self.scale,
             &mut self.ox,
             &mut self.oy,
+            &mut self.page,
             &mut self.dismiss,
             &mut self.chrome,
             &mut self.enter,
@@ -550,18 +705,30 @@ impl MessagesApp {
         cx.notify();
     }
 
-    /// Fetches and decodes the current item off the UI thread.
-    pub(crate) fn load_viewer_item(&mut self, cx: &mut Context<Self>) {
-        let Some(viewer) = &mut self.media_viewer else {
-            return;
-        };
-        viewer.load = Load::Loading;
-        let (token, item) = (viewer.token, viewer.current().clone());
+    /// The gateway and the folder pictures are fetched with and kept in.
+    fn viewer_loader(&self, cx: &Context<Self>) -> (Option<Gateway>, PathBuf) {
         let gateway = self.whatsapp.read(cx).gateway();
         let dir = self.backend.read(cx).data_dir().map_or_else(
             || std::env::temp_dir().join("rovsti-viewer"),
             |dir| dir.join("cache").join("viewer"),
         );
+        (gateway, dir)
+    }
+
+    /// Fetches and decodes the current item off the UI thread (nothing to do
+    /// when a swipe already brought it decoded), then warms the neighbour.
+    pub(crate) fn load_viewer_item(&mut self, cx: &mut Context<Self>) {
+        let (gateway, dir) = self.viewer_loader(cx);
+        let Some(viewer) = &mut self.media_viewer else {
+            return;
+        };
+        if viewer.full.is_some() {
+            self.prefetch_neighbour(cx);
+            cx.notify();
+            return;
+        }
+        viewer.load = Load::Loading;
+        let (token, item) = (viewer.token, viewer.current().clone());
         let task = cx
             .background_executor()
             .spawn(async move { load_blocking(&item, gateway.as_ref(), &dir) });
@@ -575,6 +742,7 @@ impl MessagesApp {
                         Some((image, path)) => viewer.set_full(image, path),
                         None => viewer.load = Load::Failed,
                     }
+                    this.prefetch_neighbour(cx);
                     cx.notify();
                 }
             })
@@ -582,6 +750,33 @@ impl MessagesApp {
         })
         .detach();
         cx.notify();
+    }
+
+    /// Decodes the picture a swipe is most likely to land on next.
+    fn prefetch_neighbour(&mut self, cx: &mut Context<Self>) {
+        let (gateway, dir) = self.viewer_loader(cx);
+        let Some(item) = self
+            .media_viewer
+            .as_mut()
+            .and_then(MediaViewer::next_prefetch)
+        else {
+            return;
+        };
+        let task = cx.background_executor().spawn({
+            let item = item.clone();
+            async move { load_blocking(&item, gateway.as_ref(), &dir) }
+        });
+        cx.spawn(async move |this, cx| {
+            let loaded = task.await;
+            this.update(cx, |this, cx| {
+                if let (Some(viewer), Some((image, path))) = (&mut this.media_viewer, loaded) {
+                    viewer.cache_put(&item.key, image, path);
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     pub(crate) fn close_media_viewer(&mut self, window: &Window, cx: &mut Context<Self>) {
@@ -614,7 +809,11 @@ impl MessagesApp {
         let Some((path, item)) = self.viewer_target() else {
             return;
         };
-        let name = save_name(&item.title, &item.mime, item.at_ms);
+        let brand = match item.source {
+            ViewerSource::WaMedia { .. } => "WhatsApp",
+            ViewerSource::File { .. } => "MMS",
+        };
+        let name = branded_name(brand, &item.title, &item.mime, item.at_ms);
         let task = cx.background_executor().spawn(async move {
             rovsti_android::media::save_image_to_gallery(&path.to_string_lossy(), &name, &item.mime)
         });
@@ -695,8 +894,10 @@ impl MessagesApp {
             TouchPhase::Ended | TouchPhase::Cancelled => {
                 viewer.guard.finish(pos.x, pos.y);
                 // The tap itself arrives as the synthesised mouse press.
-                if viewer.release(viewport, now, reduced) == Release::Close {
-                    viewer.close(viewport, reduced);
+                match viewer.release(viewport, now, reduced) {
+                    Release::Close => viewer.close(viewport, reduced),
+                    Release::Page => self.load_viewer_item(cx),
+                    Release::Tap | Release::Nothing => {}
                 }
             }
         }
@@ -756,6 +957,7 @@ impl MessagesApp {
         match viewer.release(viewport, now, reduced) {
             Release::Close => viewer.close(viewport, reduced),
             Release::Tap => viewer.tap(pos, clicks, now, viewport, reduced),
+            Release::Page => self.load_viewer_item(cx),
             Release::Nothing => {}
         }
         cx.notify();
@@ -846,6 +1048,7 @@ impl MessagesApp {
         let viewport = viewport_of(window);
         let (x, y, w, h) = viewer.rect(viewport);
         let dy = viewer.dismiss_offset();
+        let page = viewer.page_shift();
         let backdrop = gpui::Hsla {
             a: 0.96 * (1.0 - 0.8 * viewer.dismiss_fade()),
             ..gpui::black()
@@ -922,12 +1125,24 @@ impl MessagesApp {
                 .child(
                     div()
                         .flex_1()
-                        .truncate()
+                        .min_w_0()
                         .pr(px(16.0))
-                        .text_size(typography::HEADLINE.size)
-                        .font_weight(typography::HEADLINE.weight)
-                        .text_color(colors.label)
-                        .child(viewer.current().title.clone()),
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(typography::HEADLINE.size)
+                                .font_weight(typography::HEADLINE.weight)
+                                .text_color(colors.label)
+                                .child(viewer.current().title.clone()),
+                        )
+                        .children(viewer.caption().map(|caption| {
+                            div()
+                                .text_size(typography::CAPTION.size)
+                                .text_color(colors.secondary_label)
+                                .child(caption)
+                        })),
                 );
             let bottom_bar = div()
                 .absolute()
@@ -977,7 +1192,7 @@ impl MessagesApp {
             (w > 0.0 && h > 0.0).then(|| {
                 gpui::img(image.clone())
                     .absolute()
-                    .left(px(x))
+                    .left(px(x + page))
                     .top(px(y + dy))
                     .w(px(w))
                     .h(px(h))
@@ -988,7 +1203,7 @@ impl MessagesApp {
             viewer.placeholder.clone().map(|image| {
                 gpui::img(image)
                     .absolute()
-                    .left(px(x))
+                    .left(px(x + page))
                     .top(px(y + dy))
                     .w(px(w))
                     .h(px(h))
@@ -1213,6 +1428,137 @@ mod tests {
         assert_eq!(
             v.release(VP, now + Duration::from_millis(40), true),
             Release::Tap
+        );
+    }
+
+    fn keyed(key: &str) -> ViewerItem {
+        ViewerItem {
+            key: key.to_owned(),
+            ..item()
+        }
+    }
+
+    fn gallery(n: usize, at: usize) -> MediaViewer {
+        let items = (0..n).map(|i| keyed(&format!("m{i}"))).collect();
+        MediaViewer::open(items, at).expect("a viewer")
+    }
+
+    fn swipe(v: &mut MediaViewer, dx: f32, ms: u64) -> Release {
+        let now = Instant::now();
+        v.press(pt(200.0, 400.0), now);
+        v.drag(pt(200.0 + dx, 405.0), VP, now + Duration::from_millis(ms));
+        v.release(VP, now + Duration::from_millis(ms + 10), false)
+    }
+
+    #[test]
+    fn a_long_sideways_swipe_turns_the_page() {
+        let mut v = gallery(3, 1);
+        assert_eq!(swipe(&mut v, -150.0, 300), Release::Page);
+        assert_eq!(v.index, 2);
+        assert_eq!(v.caption().as_deref(), Some("3 of 3"));
+        // The new picture starts off to the right and slides in.
+        assert!(v.page_shift() > 0.0);
+        settle(&mut v);
+        assert_eq!(v.page_shift(), 0.0);
+        assert_eq!(v.shown(), ZoomView::IDENTITY);
+        assert!(v.full.is_none());
+        assert_eq!(swipe(&mut v, 150.0, 300), Release::Page);
+        assert_eq!(v.index, 1);
+        assert!(v.page_shift() < 0.0);
+    }
+
+    #[test]
+    fn a_short_slow_swipe_springs_back() {
+        let mut v = gallery(3, 1);
+        assert_eq!(swipe(&mut v, -40.0, 600), Release::Nothing);
+        assert_eq!(v.index, 1);
+        settle(&mut v);
+        assert_eq!(v.page_shift(), 0.0);
+    }
+
+    #[test]
+    fn the_ends_rubber_band_and_stay() {
+        let mut v = gallery(3, 0);
+        let now = Instant::now();
+        v.press(pt(200.0, 400.0), now);
+        v.drag(pt(300.0, 402.0), VP, now + Duration::from_millis(50));
+        assert!(v.page_shift() > 0.0 && v.page_shift() < 100.0);
+        assert_eq!(
+            v.release(VP, now + Duration::from_millis(500), false),
+            Release::Nothing
+        );
+        assert_eq!(v.index, 0);
+        let mut last = gallery(3, 2);
+        assert_eq!(swipe(&mut last, -300.0, 300), Release::Nothing);
+        assert_eq!(last.index, 2);
+    }
+
+    #[test]
+    fn a_lone_picture_does_not_page_and_has_no_caption() {
+        let mut v = viewer();
+        assert_eq!(v.caption(), None);
+        assert_ne!(swipe(&mut v, -300.0, 300), Release::Page);
+        assert_eq!(v.index, 0);
+        assert_eq!(v.page_shift(), 0.0);
+    }
+
+    #[test]
+    fn a_mostly_vertical_drag_closes_instead_of_paging() {
+        let mut v = gallery(3, 1);
+        let now = Instant::now();
+        v.press(pt(200.0, 300.0), now);
+        v.drag(pt(230.0, 460.0), VP, now + Duration::from_millis(100));
+        assert_eq!(v.page_shift(), 0.0);
+        assert_eq!(
+            v.release(VP, now + Duration::from_millis(400), false),
+            Release::Close
+        );
+    }
+
+    #[test]
+    fn a_zoomed_picture_pans_instead_of_paging() {
+        let mut v = gallery(3, 1);
+        v.scale.snap(2.0);
+        assert_ne!(swipe(&mut v, -300.0, 300), Release::Page);
+        assert_eq!(v.index, 1);
+    }
+
+    #[test]
+    fn the_picture_just_left_is_kept_for_swiping_back() {
+        let mut v = gallery(3, 0);
+        const PNG: &[u8] = &[
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9c, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99,
+            0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+        let image = rovsti_wa_ui::decode_image(PNG, 64).expect("a picture");
+        v.set_full(image, PathBuf::from("a.jpg"));
+        assert_eq!(swipe(&mut v, -200.0, 300), Release::Page);
+        assert!(v.full.is_none());
+        settle(&mut v);
+        assert_eq!(swipe(&mut v, 200.0, 300), Release::Page);
+        // Back on m0, decoded again without a new load.
+        assert!(v.full.is_some());
+    }
+
+    #[test]
+    fn prefetch_asks_for_the_neighbour_ahead_once() {
+        let mut v = gallery(3, 1);
+        assert_eq!(v.next_prefetch().map(|i| i.key), Some("m2".to_owned()));
+        assert!(v.next_prefetch().is_none());
+        let mut first = gallery(2, 0);
+        assert_eq!(first.next_prefetch().map(|i| i.key), Some("m1".to_owned()));
+        let mut lone = viewer();
+        assert!(lone.next_prefetch().is_none());
+    }
+
+    #[test]
+    fn mms_pictures_are_named_mms() {
+        assert_eq!(
+            branded_name("MMS", "Ada", "image/png", 0),
+            "MMS-Ada-19700101-000000.png"
         );
     }
 }

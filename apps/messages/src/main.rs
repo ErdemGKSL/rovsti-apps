@@ -1168,6 +1168,9 @@ impl MessagesApp {
             SmsConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             SmsConversationEvent::Menu => this.open_page_menu(cx),
             SmsConversationEvent::NotSpam => this.open_page_not_spam(cx),
+            SmsConversationEvent::OpenMedia { items, index } => {
+                this.open_media_viewer(items.clone(), *index, cx);
+            }
             SmsConversationEvent::Notice(text) => {
                 this.show_pill(*text);
                 cx.notify();

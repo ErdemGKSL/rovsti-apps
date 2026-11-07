@@ -97,6 +97,8 @@ pub(crate) enum PillAction {
     RestorePrefs(Box<StopsPrefs>),
     /// Takes back "Save as stop": the saved stop with this id.
     UndoSave(u64),
+    /// Puts a saved stop's map colour back.
+    RestoreColour(u64, rovsti_geo::StopColour),
     /// Takes a dismissed alarm back: the same trip again.
     Rearm(Destination, Destination),
 }
@@ -767,6 +769,7 @@ impl StopsApp {
             PillAction::RestoreSaved(saved) => self.restore_saved(saved, cx),
             PillAction::RestoreAlarmSound(sound) => self.restore_alarm_sound(sound, cx),
             PillAction::RestorePrefs(prefs) => self.restore_prefs(*prefs, cx),
+            PillAction::RestoreColour(id, colour) => self.restore_colour(id, colour, cx),
             PillAction::UndoSave(id) => self.undo_save(id, cx),
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);

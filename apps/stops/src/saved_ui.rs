@@ -12,7 +12,7 @@ use gpui::{
 use rovsti_android::Error as AndroidError;
 use rovsti_core::wire::DocumentResult;
 use rovsti_geo::{
-    Coord, SavedStop, SavedStops,
+    Coord, SavedStop, SavedStops, StopColour,
     backup::{self, Backup},
     places_io::{self, MergePlan},
     saved_stops::{self, SavedSort},
@@ -128,6 +128,11 @@ pub fn favourite_pill(state: bool) -> &'static str {
     } else {
         "Removed from favourites"
     }
+}
+
+/// The colour pill's text, also the pill after a change.
+pub fn colour_label(c: StopColour) -> String {
+    format!("Colour: {}", c.label())
 }
 
 /// The pill after copying the visible list.
@@ -440,9 +445,16 @@ impl StopsApp {
             .map(|u| rovsti_geo::usage_text(u, crate::store::now_ms(), self.tz_offset_s));
         let detail = stop_detail(stop, self.map.position.map(|(c, _)| c), usage.as_deref());
         let open = self.expanded == Some(id);
+        let dot: Option<AnyElement> = (stop.colour != StopColour::Orange).then(|| {
+            div()
+                .size(px(10.0))
+                .rounded_full()
+                .bg(crate::map::stop_colour_hsla(theme, stop.colour))
+                .into_any_element()
+        });
         let row = list_row(
             theme,
-            None,
+            dot,
             row_title(stop),
             Some(detail.into()),
             Some(if open { "Close" } else { "" }.into()),
@@ -590,6 +602,17 @@ impl StopsApp {
                             })),
                     ),
             );
+            item = item.child(
+                pill_row().child(
+                    glass_pill(theme, colour_label(stop.colour))
+                        .id(("stop-colour", id as usize))
+                        .flex_1()
+                        .text_color(crate::map::stop_colour_hsla(theme, stop.colour))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.cycle_stop_colour(id, cx);
+                        })),
+                ),
+            );
             if armed {
                 item = item.child(
                     pill_row().child(
@@ -619,6 +642,30 @@ impl StopsApp {
             self.map.position.map(|(c, _)| c),
         );
         self.show_pill(favourite_pill(state), None, cx);
+    }
+
+    /// Moves the stop to its next map colour; Undo on the pill puts the old one back.
+    fn cycle_stop_colour(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(before) = self.saved.get(id).map(|s| s.colour) else {
+            return;
+        };
+        let Some(now) = self.saved.cycle_colour(id) else {
+            return;
+        };
+        self.save_stops(cx);
+        self.show_pill(
+            colour_label(now),
+            Some(crate::PillAction::RestoreColour(id, before)),
+            cx,
+        );
+    }
+
+    /// Undo of a colour change.
+    pub(crate) fn restore_colour(&mut self, id: u64, colour: StopColour, cx: &mut Context<Self>) {
+        if self.saved.set_colour(id, colour) {
+            self.save_stops(cx);
+        }
+        cx.notify();
     }
 
     pub(crate) fn open_stop_in_maps(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -1231,6 +1278,12 @@ mod tests {
         s.toggle_favourite(2);
         assert_eq!(row_title(s.get(1).unwrap()), "Zeta");
         assert_eq!(row_title(s.get(2).unwrap()), "\u{2605} alpha");
+    }
+
+    #[test]
+    fn colour_label_names_the_tag() {
+        assert_eq!(colour_label(StopColour::Orange), "Colour: Orange");
+        assert_eq!(colour_label(StopColour::Blue), "Colour: Blue");
     }
 
     #[test]

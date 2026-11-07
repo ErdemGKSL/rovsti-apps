@@ -29,6 +29,7 @@ use gpui::{
 use rovsti_android::location;
 use rovsti_geo::{
     Coord, Diameter, EARTH_RADIUS_M, Feed, History, Measure, SavedStop, SavedStops, Side, Stop,
+    StopColour,
     tiles::{
         ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileCover, TileGeometry,
         TileLayer, build_layer, line_width, tiles_for_view,
@@ -792,7 +793,7 @@ pub struct Scene {
     pub trail: Vec<(f32, f32)>,
     pub stops: Vec<(f32, f32)>,
     /// The middles of the saved stops in view (plus a margin), drawn as rings.
-    pub saved: Vec<(f32, f32)>,
+    pub saved: Vec<((f32, f32), StopColour)>,
     pub line: Vec<(f32, f32)>,
     /// The measure tool's points, in tap order.
     pub measure: Vec<(f32, f32)>,
@@ -868,7 +869,7 @@ pub struct SceneInput<'a> {
     pub feed: Option<&'a Feed>,
     pub pattern: Option<u32>,
     /// The middles of the saved stops.
-    pub saved: &'a [Coord],
+    pub saved: &'a [(Coord, StopColour)],
     /// The measure tool's points.
     pub measure: &'a [Coord],
     /// Loaded map tiles under the scene.
@@ -937,11 +938,11 @@ impl Scene {
             }
             None => (Vec::new(), Vec::new()),
         };
-        let saved: Vec<(f32, f32)> = input
+        let saved: Vec<((f32, f32), StopColour)> = input
             .saved
             .iter()
-            .map(|&c| vp.project(c))
-            .filter(|&p| in_view(p, input.size, SAVED_MARGIN_PX))
+            .map(|&(c, colour)| (vp.project(c), colour))
+            .filter(|&(p, _)| in_view(p, input.size, SAVED_MARGIN_PX))
             .collect();
         Self {
             position: input
@@ -978,7 +979,8 @@ pub struct Palette {
     left_wash: Hsla,
     right_wash: Hsla,
     halo: Hsla,
-    saved: Hsla,
+    /// Saved stop ring colours, in [`StopColour::ALL`] order.
+    saved: [Hsla; 4],
     measure: Hsla,
     /// The map tile colours: light is "colorful", dark is "eclipse".
     style: MapStyle,
@@ -992,6 +994,17 @@ pub fn side_color(theme: Theme, side: Option<Side>) -> Hsla {
         Some(Side::Left) => c.accent,
         Some(Side::Right) => c.green,
         None => c.secondary_label,
+    }
+}
+
+/// The map ring and row dot colour of a saved stop's tag.
+pub fn stop_colour_hsla(theme: Theme, c: StopColour) -> Hsla {
+    let colors = theme::colors(theme);
+    match c {
+        StopColour::Orange => colors.orange,
+        StopColour::Red => colors.red,
+        StopColour::Green => colors.green,
+        StopColour::Blue => colors.accent,
     }
 }
 
@@ -1016,7 +1029,7 @@ impl Palette {
             left_wash: with_alpha(c.accent, 0.18),
             right_wash: with_alpha(c.green, 0.18),
             halo: gpui::white(),
-            saved: c.orange,
+            saved: StopColour::ALL.map(|k| stop_colour_hsla(theme, k)),
             measure: c.label,
             style: match theme {
                 Theme::Light => MapStyle::Colorful,
@@ -1349,15 +1362,21 @@ fn scene_paths(scene: &Scene, dragging: Option<Slot>, pal: &Palette) -> Paths {
 
     // Saved stops: hollow rings at their middle, so they read as neither a stop dot nor the line.
     if !scene.saved.is_empty() {
-        for &p in &scene.saved {
+        for &(p, _) in &scene.saved {
             fill_circle(out, to_window(p), 6.5, pal.halo);
         }
-        let mut rings = PathBuilder::stroke(px(2.5));
-        for &p in &scene.saved {
-            add_circle(&mut rings, to_window(p), 5.0, false);
-        }
-        if let Ok(path) = rings.build() {
-            out.push((path, pal.saved));
+        for (k, colour) in StopColour::ALL.into_iter().enumerate() {
+            let mut rings = PathBuilder::stroke(px(2.5));
+            let mut any = false;
+            for &(p, c) in &scene.saved {
+                if c == colour {
+                    add_circle(&mut rings, to_window(p), 5.0, false);
+                    any = true;
+                }
+            }
+            if any && let Ok(path) = rings.build() {
+                out.push((path, pal.saved[k]));
+            }
         }
     }
 
@@ -2049,8 +2068,12 @@ impl StopsApp {
                 })
         });
         let show_saved = self.prefs.show_saved_on_map;
-        let saved_coords: Vec<Coord> = if show_saved {
-            self.saved.stops.iter().map(SavedStop::center).collect()
+        let saved_coords: Vec<(Coord, StopColour)> = if show_saved {
+            self.saved
+                .stops
+                .iter()
+                .map(|s| (s.center(), s.colour))
+                .collect()
         } else {
             Vec::new()
         };
@@ -3832,15 +3855,33 @@ mod tests {
     }
 
     #[test]
+    fn stop_colours_are_four_distinct_hues_in_both_themes() {
+        for theme in [Theme::Light, Theme::Dark] {
+            let all: Vec<Hsla> = StopColour::ALL
+                .iter()
+                .map(|&c| stop_colour_hsla(theme, c))
+                .collect();
+            for (i, a) in all.iter().enumerate() {
+                for b in &all[i + 1..] {
+                    assert_ne!(a, b);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn saved_stop_rings_in_view_are_projected() {
         let trail = Breadcrumb::default();
         let near_ring = near(100.0, 50.0).coord;
         let far_ring = near(50_000.0, 0.0).coord;
-        let rings = [near_ring, far_ring];
+        let rings = [(near_ring, StopColour::Red), (far_ring, StopColour::Blue)];
         let mut input = scene_input(&trail, None);
         input.saved = &rings;
         let scene = Scene::build(&input);
-        assert_eq!(scene.saved, vec![input.viewport.project(near_ring)]);
+        assert_eq!(
+            scene.saved,
+            vec![(input.viewport.project(near_ring), StopColour::Red)]
+        );
         assert!(in_view((212.0, 0.0), (400.0, 300.0), 24.0));
         assert!(!in_view((225.0, 0.0), (400.0, 300.0), 24.0));
     }

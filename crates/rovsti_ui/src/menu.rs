@@ -53,9 +53,9 @@ use liquid_glass_kit::{
 };
 
 use crate::{
+    button::{Button, ButtonStyle},
     layout::{self, geom},
     moments::Fade,
-    row::readable_on,
 };
 use model::{MenuItem, MenuModel, MenuRole};
 
@@ -152,6 +152,8 @@ pub struct MenuState {
     anchor: Option<Bounds<Pixels>>,
     reduced: bool,
     fade: Fade,
+    /// Final panel rectangle of the last render (dp, before the open scale).
+    panel: Cell<Option<geom::Rect>>,
 }
 
 impl Default for MenuState {
@@ -172,6 +174,7 @@ impl MenuState {
             anchor: None,
             reduced: false,
             fade: Fade::default(),
+            panel: Cell::new(None),
         }
     }
 
@@ -260,6 +263,12 @@ impl MenuState {
             self.slide.snap(0.0);
             self.slide.retarget(1.0, motion_tokens::appear());
         }
+    }
+
+    /// Where the panel was laid out last frame, in window dp. Shots use it to
+    /// check the popover against the safe limits.
+    pub fn panel_rect(&self) -> Option<geom::Rect> {
+        self.panel.get()
     }
 
     pub fn page(&self) -> MenuPage {
@@ -477,6 +486,7 @@ impl Menu {
             base.rect.w,
             h,
         );
+        state.panel.set(Some(rect));
         let origin_right = geo_anchor.x + geo_anchor.w / 2.0 >= vw / 2.0;
 
         let (opacity, scale) = state.look();
@@ -511,7 +521,7 @@ impl Menu {
                 }
             }
             MenuPage::Confirm(key) => match self.confirm_of(key) {
-                Some(c) => confirm_page(c, &colors, &on_select, &on_nav),
+                Some(c) => confirm_page(c, &colors, theme, &on_select, &on_nav),
                 None => div(),
             },
         };
@@ -631,14 +641,14 @@ impl Menu {
         item: &MenuItem,
         index: usize,
         colors: &Colors,
-        _theme: Theme,
+        theme: Theme,
         on_select: &Rc<impl Fn(&'static str, &mut Window, &mut App) + 'static>,
         on_nav: &Rc<impl Fn(MenuNav, &mut Window, &mut App) + 'static>,
     ) -> impl IntoElement {
         let key = item.key;
         let ink = match (item.enabled, item.role) {
             (false, _) => colors.tertiary_label,
-            (true, MenuRole::Destructive) => colors.red,
+            (true, MenuRole::Destructive) => crate::button::destructive_text(theme),
             (true, MenuRole::Normal) => colors.label,
         };
         let mut row = row_shell("menu-item", index, colors)
@@ -720,28 +730,13 @@ fn icon_slot(path: impl Into<SharedString>, color: gpui::Hsla) -> Div {
 fn confirm_page(
     spec: &ConfirmSpec,
     colors: &Colors,
+    theme: Theme,
     on_select: &Rc<impl Fn(&'static str, &mut Window, &mut App) + 'static>,
     on_nav: &Rc<impl Fn(MenuNav, &mut Window, &mut App) + 'static>,
 ) -> Div {
     let key = spec.key;
     let select = on_select.clone();
     let nav = on_nav.clone();
-    let button = |id: &'static str, fill: gpui::Hsla| {
-        div()
-            .id(id)
-            .debug_selector(move || id.to_string())
-            .role(Role::Button)
-            .w_full()
-            .h(px(geom::MENU_ROW_H))
-            .flex_none()
-            .rounded(radius::BUTTON)
-            .bg(fill)
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_size(typography::BODY.size)
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-    };
     div()
         .w_full()
         .p(px(PAD_X))
@@ -757,15 +752,21 @@ fn confirm_page(
                 .child(spec.prompt.clone()),
         )
         .child(
-            button("menu-confirm", colors.red)
-                .text_color(readable_on(colors.red))
-                .child(spec.action.clone())
+            Button::new("menu-confirm", spec.action.clone())
+                .destructive()
+                .full_width()
+                .build(theme)
+                .debug_selector(|| "menu-confirm".into())
+                .role(Role::Button)
                 .on_click(move |_, window, cx| select(key, window, cx)),
         )
         .child(
-            button("menu-cancel", colors.secondary_background)
-                .text_color(colors.label)
-                .child("Cancel")
+            Button::new("menu-cancel", "Cancel")
+                .style(ButtonStyle::Gray)
+                .full_width()
+                .build(theme)
+                .debug_selector(|| "menu-cancel".into())
+                .role(Role::Button)
                 .on_click(move |_, window, cx| nav(MenuNav::Back, window, cx)),
         )
 }

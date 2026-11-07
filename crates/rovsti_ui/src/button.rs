@@ -66,9 +66,21 @@ pub fn button_colors(theme: Theme, style: ButtonStyle, destructive: bool) -> (Hs
         }
         ButtonStyle::Gray => (
             if destructive { text } else { colors.label },
-            colors.secondary_background,
+            gray_fill(theme),
         ),
         ButtonStyle::Plain => (text, none),
+    }
+}
+
+/// Fill of a `Gray` button: one step off the page, in both themes (the light
+/// page and its `secondary_background` are both white, so light uses the
+/// grouped grey).
+pub(crate) fn gray_fill(theme: Theme) -> Hsla {
+    let c = crate::theme::colors(theme);
+    if theme.is_dark() {
+        c.secondary_background
+    } else {
+        c.grouped_background
     }
 }
 
@@ -83,7 +95,7 @@ fn tinted_ink(accent: Hsla, fill: Hsla, c: &liquid_glass_kit::tokens::Colors) ->
 }
 
 /// Red adjusted to read as text on the page surfaces.
-fn destructive_text(theme: Theme) -> Hsla {
+pub(crate) fn destructive_text(theme: Theme) -> Hsla {
     let c = crate::theme::colors(theme);
     crate::theme::accent_text_on(
         c.red,

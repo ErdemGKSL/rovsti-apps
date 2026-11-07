@@ -151,6 +151,12 @@ area). The shots simulate `safe.top = 24` and `safe.bottom = 16`.
 * Puck: sits inside the bar, so its rectangle is clamped to `[4, bar_w - 4]` horizontally
   and `[4, 56 - 4]` vertically, even at press scale 1.2 and stretch 1.3. Its centre is
   `4 + (index + 0.5) * 64`.
+* Bar glass: `GlassSpec::chrome(theme)` with only `blur`, `tint` changed: blur 12 px
+  (chrome default is 2 px, which left the row under the bar readable) and tint =
+  `colors.background` at alpha 0.72 in light, 0.60 in dark (the skill's tab bar recipe
+  gives no tint values, so the owner-brief numbers are used). The puck keeps the plain
+  chrome spec so it stays crisp. A unit test in `tab_bar.rs` checks that at rest, with 3
+  and 4 tabs, the puck centre equals the icon centre within 0.5 dp.
 * Content bottom inset for every scrollable view: `safe.bottom + 8 + 56 + 16 + keyboard`
   (= `safe.bottom + 80 + keyboard`). `keyboard` is the IME height not already consumed
   by the screen. There is exactly one function for this

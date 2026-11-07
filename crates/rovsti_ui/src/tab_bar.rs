@@ -337,6 +337,40 @@ impl gpui::Render for TabBarView {
     }
 }
 
+/// Backdrop blur of the bar body, in px. Strong enough that a list row under
+/// the bar is not readable, unlike the 2 px of ordinary chrome.
+const BAR_BLUR: f32 = 12.0;
+
+/// Strength of the page-coloured wash over the blurred backdrop.
+fn bar_tint_alpha(theme: Theme) -> f32 {
+    match theme {
+        Theme::Light => 0.72,
+        Theme::Dark => 0.60,
+    }
+}
+
+/// The frosted bar: chrome glass with a heavier blur and a page-coloured tint
+/// so rows scrolling under it dissolve while the icons and puck stay crisp.
+fn bar_spec(theme: Theme) -> GlassSpec {
+    let mut tint = crate::theme::colors(theme).background;
+    tint.a = bar_tint_alpha(theme);
+    GlassSpec {
+        blur: px(BAR_BLUR),
+        tint,
+        ..GlassSpec::chrome(theme)
+    }
+}
+
+/// `(bar_w, bar_h, tab_w)` for `count` tabs under `press` (0 = at rest). The
+/// bar swells a few px under the finger; the puck grows past it.
+fn bar_dims(count: usize, press: f32) -> (f32, f32, f32) {
+    let count = count.max(1) as f32;
+    let swell = 1.0 + 0.04 * press;
+    let bar_w = (TAB_WIDTH * count + BAR_PAD * 2.0) * swell;
+    let bar_h = f32::from(metrics::TAB_BAR_HEIGHT) * swell;
+    (bar_w, bar_h, (bar_w - BAR_PAD * 2.0) / count)
+}
+
 /// The glass bar itself: puck, icons, badges and the touch surface.
 fn bar_body(
     tab_list: &[Tab],
@@ -346,13 +380,8 @@ fn bar_body(
 ) -> Div {
     let theme = f.theme;
     let colors = crate::theme::colors(theme);
-    let count = tab_list.len().max(1) as f32;
     let press = f.press.max(0.0);
-    // The bar swells a few px under the finger; the puck grows past it.
-    let swell = 1.0 + 0.04 * press;
-    let bar_w = (TAB_WIDTH * count + BAR_PAD * 2.0) * swell;
-    let bar_h = f32::from(metrics::TAB_BAR_HEIGHT) * swell;
-    let tab_w = (bar_w - BAR_PAD * 2.0) / count;
+    let (bar_w, bar_h, tab_w) = bar_dims(tab_list.len(), press);
 
     let grow = 1.0 + (scale::PUCK_PRESSED - 1.0) * press.min(1.2) * 0.35;
     let (puck_x, puck_y, puck_w, puck_h) = layout::geom::puck_rect(
@@ -434,7 +463,7 @@ fn bar_body(
             })
     });
 
-    let bar = glass(GlassSpec::chrome(theme))
+    let bar = glass(bar_spec(theme))
         .relative()
         // The bar is above the page: a tap on it must not also reach the rows and buttons
         // that happen to sit under it.
@@ -504,6 +533,41 @@ mod tests {
         assert!((bar.puck.value - 2.0).abs() < 0.01);
         assert!((bar.puck_sx.value - 1.0).abs() < 0.01);
         assert!(!bar.tick(Duration::from_millis(8)));
+    }
+
+    #[test]
+    fn puck_is_centred_on_its_icon_at_rest() {
+        for count in [3usize, 4] {
+            let (bar_w, bar_h, tab_w) = bar_dims(count, 0.0);
+            for i in 0..count {
+                let (x, y, w, h) = layout::geom::puck_rect(
+                    bar_w,
+                    bar_h,
+                    BAR_PAD,
+                    count,
+                    i as f32,
+                    layout::geom::PuckScale::REST,
+                );
+                // Icons are centred in a tab_w slot starting at BAR_PAD, and
+                // vertically in the bar.
+                let icon = (BAR_PAD + (i as f32 + 0.5) * tab_w, bar_h / 2.0);
+                assert!(
+                    (x + w / 2.0 - icon.0).abs() < 0.5,
+                    "{count} tabs, tab {i}: x"
+                );
+                assert!(
+                    (y + h / 2.0 - icon.1).abs() < 0.5,
+                    "{count} tabs, tab {i}: y"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bar_tint_is_frosted() {
+        assert!((bar_tint_alpha(Theme::Light) - 0.72).abs() < 1e-6);
+        assert!((bar_tint_alpha(Theme::Dark) - 0.60).abs() < 1e-6);
+        assert_eq!(bar_spec(Theme::Light).blur, px(12.0));
     }
 
     #[test]

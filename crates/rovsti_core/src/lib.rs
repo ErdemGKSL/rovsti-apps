@@ -112,6 +112,7 @@ pub mod speed_dial;
 pub mod starred;
 pub mod t9;
 pub mod text_detect;
+pub mod text_edit;
 /// Chat text size setting.
 pub mod text_scale;
 pub mod thread;

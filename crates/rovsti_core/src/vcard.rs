@@ -102,11 +102,15 @@ impl Builder {
             "TEL" => {
                 let value = prop.value.trim();
                 let value = value.strip_prefix("tel:").unwrap_or(value);
-                card.numbers.push(DraftField::new(value, number_kind(prop)));
+                let mut field = DraftField::new(value, number_kind(prop));
+                field.primary = prop.is_pref();
+                card.numbers.push(field);
             }
-            "EMAIL" => card
-                .emails
-                .push(DraftField::new(unescape(&prop.value), email_kind(prop))),
+            "EMAIL" => {
+                let mut field = DraftField::new(unescape(&prop.value), email_kind(prop));
+                field.primary = prop.is_pref();
+                card.emails.push(field);
+            }
             "NOTE" => card.note = unescape(&prop.value),
             "BDAY" => push_event(card, &prop.value, EventKind::Birthday),
             "ANNIVERSARY" | "X-ANNIVERSARY" => {
@@ -187,6 +191,15 @@ impl Property {
             (k == "ENCODING" && v.eq_ignore_ascii_case("QUOTED-PRINTABLE"))
                 || (k == "TYPE" && v.eq_ignore_ascii_case("QUOTED-PRINTABLE"))
         })
+    }
+
+    /// `TYPE=pref` (3.0, also in a list) or `PREF=1` (4.0).
+    fn is_pref(&self) -> bool {
+        self.types().iter().any(|t| t == "PREF")
+            || self
+                .params
+                .iter()
+                .any(|(k, v)| k == "PREF" && v.trim() == "1")
     }
 
     /// Every TYPE token, upper case (`TYPE=work,voice` gives WORK and VOICE).
@@ -447,19 +460,25 @@ fn write_card(contact: &ContactDraft, out: &mut String) {
     for number in &contact.numbers {
         push_line(
             out,
-            &format!("TEL;TYPE={}:{}", tel_type(number), escape(&number.value)),
+            &format!(
+                "TEL;TYPE={}{}:{}",
+                tel_type(number),
+                pref_suffix(number),
+                escape(&number.value)
+            ),
         );
     }
     for email in &contact.emails {
         push_line(
             out,
             &format!(
-                "EMAIL;TYPE=INTERNET,{}:{}",
+                "EMAIL;TYPE=INTERNET,{}{}:{}",
                 match email.kind {
                     FieldKind::Home => "HOME",
                     FieldKind::Work => "WORK",
                     _ => "OTHER",
                 },
+                pref_suffix(email),
                 escape(&email.value)
             ),
         );
@@ -505,6 +524,10 @@ pub fn export_name(drafts: &[ContactDraft], today: (i32, u8, u8)) -> String {
             today.2
         ),
     }
+}
+
+fn pref_suffix(field: &DraftField) -> &'static str {
+    if field.primary { ",pref" } else { "" }
 }
 
 fn tel_type(number: &DraftField) -> &'static str {
@@ -714,6 +737,50 @@ BEGIN:VCARD\nFN:C D\nTEL:222\nEND:VCARD\n";
         let parsed = parse("BEGIN:VCARD\nVERSION:3.0\nFN:A B\nEMAIL:a@b.com\nEND:VCARD\n");
         assert_eq!(parsed.contacts.len(), 1);
         assert!(parsed.contacts[0].numbers.is_empty());
+    }
+
+    #[test]
+    fn default_number_and_email_round_trip() {
+        let mut card = named();
+        card.numbers = vec![
+            DraftField::new("111", FieldKind::Mobile),
+            DraftField::new("222", FieldKind::Work),
+        ];
+        card.emails = vec![
+            DraftField::new("a@b.com", FieldKind::Home),
+            DraftField::new("c@d.com", FieldKind::Work),
+        ];
+        card.numbers[1].primary = true;
+        card.emails[0].primary = true;
+        let text = write(&[card.clone()]);
+        assert!(text.contains("TEL;TYPE=WORK,pref:222"));
+        assert!(text.contains("EMAIL;TYPE=INTERNET,HOME,pref:a@b.com"));
+        let back = round_trip(card);
+        assert_eq!(back.numbers[1].kind, FieldKind::Work);
+        assert_eq!(crate::contact_edit::primary_of(&back.numbers), Some(1));
+        assert_eq!(crate::contact_edit::primary_of(&back.emails), Some(0));
+    }
+
+    #[test]
+    fn reads_pref_in_both_versions() {
+        let v3 = parse(
+            "BEGIN:VCARD\nVERSION:3.0\nFN:A B\nTEL;TYPE=CELL:1\nTEL;TYPE=WORK,PREF:2\nEND:VCARD",
+        );
+        assert_eq!(
+            crate::contact_edit::primary_of(&v3.contacts[0].numbers),
+            Some(1)
+        );
+        let v4 = parse(
+            "BEGIN:VCARD\nVERSION:4.0\nFN:A B\nTEL:1\nEMAIL;PREF=1:a@b.com\nEMAIL;PREF=2:c@d.com\nEND:VCARD",
+        );
+        assert_eq!(
+            crate::contact_edit::primary_of(&v4.contacts[0].numbers),
+            None
+        );
+        assert_eq!(
+            crate::contact_edit::primary_of(&v4.contacts[0].emails),
+            Some(0)
+        );
     }
 
     fn round_trip(card: ContactDraft) -> ContactDraft {

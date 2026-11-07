@@ -5,8 +5,9 @@
 
 pub mod audio;
 pub mod avatar;
-pub mod blocklist;
 /// Swipe-to-reply and double-tap gesture math for chat bubbles.
+pub mod birthday_reminder;
+pub mod blocklist;
 pub mod bubble_gesture;
 pub mod call;
 pub mod call_log;

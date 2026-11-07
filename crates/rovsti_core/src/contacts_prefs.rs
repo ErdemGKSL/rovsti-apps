@@ -29,6 +29,23 @@ pub struct ContactsPrefs {
     /// The account key new contacts are saved to (empty: on this phone).
     #[serde(default)]
     pub save_to: String,
+    /// Morning notifications for birthdays and anniversaries (opt in).
+    #[serde(default)]
+    pub birthday_reminders: bool,
+    /// Local hour of those notifications, 0..=23.
+    #[serde(default = "default_hour")]
+    pub reminder_hour: u8,
+}
+
+fn default_hour() -> u8 {
+    crate::birthday_reminder::DEFAULT_HOUR
+}
+
+impl ContactsPrefs {
+    /// The reminder hour, clamped to 0..=23 (a damaged file may hold more).
+    pub fn hour(&self) -> u8 {
+        self.reminder_hour.min(23)
+    }
 }
 
 impl Default for ContactsPrefs {
@@ -38,6 +55,8 @@ impl Default for ContactsPrefs {
             name_format: NameFormat::default(),
             sort_by: SortBy::default(),
             save_to: String::new(),
+            birthday_reminders: false,
+            reminder_hour: default_hour(),
         }
     }
 }
@@ -58,6 +77,8 @@ impl ContactsPrefs {
             name_format: style.format,
             sort_by: style.sort,
             save_to: String::new(),
+            birthday_reminders: false,
+            reminder_hour: default_hour(),
         }
     }
 }
@@ -107,6 +128,17 @@ mod tests {
         let with: ContactsPrefs =
             serde_json::from_str(r#"{"save_to":"com.google|a@b"}"#).expect("ok");
         assert_eq!(with.save_to, "com.google|a@b");
+    }
+
+    #[test]
+    fn reminders_default_off_at_nine_and_old_json_loads() {
+        let prefs: ContactsPrefs = serde_json::from_str(r#"{"save_to":"x"}"#).expect("ok");
+        assert!(!prefs.birthday_reminders);
+        assert_eq!(prefs.reminder_hour, 9);
+        let p: ContactsPrefs =
+            serde_json::from_str(r#"{"birthday_reminders":true,"reminder_hour":200}"#).expect("ok");
+        assert!(p.birthday_reminders);
+        assert_eq!(p.hour(), 23);
     }
 
     #[test]

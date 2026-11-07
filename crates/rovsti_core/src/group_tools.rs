@@ -17,12 +17,13 @@ pub enum Kind {
     Email,
 }
 
-/// The entry to use: the first mobile, else the first (S4 switches this to
-/// the default entry first). Blank values are ignored.
+/// The entry to use: the default one, else the first mobile, else the first.
+/// Blank values are ignored.
 fn pick(fields: &[DraftField]) -> Option<&str> {
     let usable = || fields.iter().filter(|f| !f.value.trim().is_empty());
     usable()
-        .find(|f| f.kind == FieldKind::Mobile)
+        .find(|f| f.primary)
+        .or_else(|| usable().find(|f| f.kind == FieldKind::Mobile))
         .or_else(|| usable().next())
         .map(|f| f.value.trim())
 }

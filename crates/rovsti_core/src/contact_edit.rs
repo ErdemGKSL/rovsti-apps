@@ -75,6 +75,9 @@ pub struct DraftField {
     /// The owner's own label, used when `kind` is [`FieldKind::Custom`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// The default number or email of its list (at most one per list).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub primary: bool,
 }
 
 impl DraftField {
@@ -83,6 +86,7 @@ impl DraftField {
             value: value.into(),
             kind,
             label: None,
+            primary: false,
         }
     }
 
@@ -527,6 +531,34 @@ fn clean_fields(fields: &mut Vec<DraftField>, key: impl Fn(&str) -> String) {
         !field.value.is_empty() && seen.insert(key(&field.value))
     });
     fields.truncate(MAX_FIELDS);
+    let keep = primary_of(fields);
+    set_primary(fields, keep);
+}
+
+/// Makes `index` the only default of `fields`; `None` (or an index out of
+/// range) clears the default.
+pub fn set_primary(fields: &mut [DraftField], index: Option<usize>) {
+    for (i, f) in fields.iter_mut().enumerate() {
+        f.primary = Some(i) == index;
+    }
+}
+
+/// The index of the default entry (the first flagged one).
+pub fn primary_of(fields: &[DraftField]) -> Option<usize> {
+    fields.iter().position(|f| f.primary)
+}
+
+/// The field sheet action for an entry: "Set as default" or "Clear default"
+/// (true when it clears), or `None` when the list has a single entry.
+pub fn default_action(is_primary: bool, count: usize) -> Option<(&'static str, bool)> {
+    if count < 2 {
+        return None;
+    }
+    Some(if is_primary {
+        ("Clear default", true)
+    } else {
+        ("Set as default", false)
+    })
 }
 
 /// Trims websites, drops empty and repeated ones (ignoring case), clips them
@@ -648,6 +680,63 @@ pub fn members_summary(title: &str, done: &MembersPayload) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn clean_keeps_one_primary_per_list() {
+        let mut d = ContactDraft {
+            given: "A".into(),
+            numbers: vec![
+                DraftField::new("111", FieldKind::Mobile),
+                DraftField::new("222", FieldKind::Home),
+                DraftField::new("333", FieldKind::Work),
+            ],
+            emails: vec![DraftField::new("a@b.com", FieldKind::Home)],
+            ..ContactDraft::default()
+        };
+        d.numbers[1].primary = true;
+        d.numbers[2].primary = true;
+        d.emails[0].primary = true;
+        d.clean();
+        assert_eq!(primary_of(&d.numbers), Some(1));
+        assert!(!d.numbers[2].primary);
+        assert_eq!(primary_of(&d.emails), Some(0));
+    }
+
+    #[test]
+    fn set_and_clear_primary() {
+        let mut f = vec![
+            DraftField::new("1", FieldKind::Mobile),
+            DraftField::new("2", FieldKind::Mobile),
+        ];
+        set_primary(&mut f, Some(0));
+        set_primary(&mut f, Some(1));
+        assert_eq!(primary_of(&f), Some(1));
+        assert!(!f[0].primary);
+        set_primary(&mut f, None);
+        assert_eq!(primary_of(&f), None);
+        set_primary(&mut f, Some(9));
+        assert_eq!(primary_of(&f), None);
+    }
+
+    #[test]
+    fn default_action_texts() {
+        assert_eq!(default_action(false, 1), None);
+        assert_eq!(default_action(true, 1), None);
+        assert_eq!(default_action(false, 2), Some(("Set as default", false)));
+        assert_eq!(default_action(true, 2), Some(("Clear default", true)));
+    }
+
+    #[test]
+    fn primary_serialises_only_when_set() {
+        let mut f = DraftField::new("1", FieldKind::Mobile);
+        assert!(!serde_json::to_string(&f).expect("json").contains("primary"));
+        f.primary = true;
+        let back: DraftField =
+            serde_json::from_str(&serde_json::to_string(&f).expect("json")).expect("json");
+        assert!(back.primary);
+        let old: DraftField = serde_json::from_str(r#"{"value":"1"}"#).expect("json");
+        assert!(!old.primary);
+    }
+
     use super::*;
 
     fn draft(given: &str, numbers: &[&str]) -> ContactDraft {

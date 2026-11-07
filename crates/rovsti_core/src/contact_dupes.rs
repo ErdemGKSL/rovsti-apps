@@ -220,6 +220,9 @@ pub fn merge(keeper: &ContactDraft, others: &[ContactDraft]) -> ContactDraft {
     }
     out.note = notes.join("\n\n");
     // New Vec fields of ContactDraft are merged here, in one place.
+    // The keeper's entries come first, so `clean` keeps the keeper's default
+    // and drops a merged-in one; with none on the keeper, the first merged-in
+    // default is kept.
     union_fields(
         &mut out.numbers,
         &others.iter().map(|o| &o.numbers).collect::<Vec<_>>(),
@@ -424,6 +427,20 @@ mod tests {
         assert_eq!(m.groups, vec![1, 2]);
         assert!(m.starred);
         assert!(m.validate().is_ok());
+    }
+
+    #[test]
+    fn keeper_primary_wins_over_merged_in_primary() {
+        let mut k = c(1, "K", &["111", "222"], &["k@x.com"]);
+        k.numbers[1].primary = true;
+        let mut o = c(2, "K", &["333"], &["o@x.com"]);
+        o.numbers[0].primary = true;
+        o.emails[0].primary = true;
+        let m = merge(&k, &[o.clone()]);
+        assert_eq!(crate::contact_edit::primary_of(&m.numbers), Some(1));
+        assert_eq!(m.numbers.iter().filter(|n| n.primary).count(), 1);
+        // The keeper has no default email: the merged-in one is kept.
+        assert_eq!(crate::contact_edit::primary_of(&m.emails), Some(1));
     }
 
     #[test]

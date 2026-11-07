@@ -46,6 +46,7 @@ impl FieldRow {
             value: self.text.read(cx).text().to_owned(),
             kind: self.kind,
             label: self.label.clone(),
+            primary: false,
         }
         .title()
         .into()
@@ -235,6 +236,7 @@ impl Editor {
                     value: r.text.read(cx).text().to_owned(),
                     kind: r.kind,
                     label: r.label.clone(),
+                    primary: false,
                 })
                 .collect()
         };

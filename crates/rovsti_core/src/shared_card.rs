@@ -87,6 +87,7 @@ fn draft_fields(src: &[CardField]) -> Vec<DraftField> {
                 value: f.value.clone(),
                 kind,
                 label,
+                primary: false,
             }
         })
         .collect()

@@ -183,12 +183,21 @@ list in `docs/phone-acceptance.md`.
       - C42 Frequently contacted on Favorites (local call log, last 30 days, not starred, read-only)
       - C43 Emergency contacts (up to 5): list in Settings, one-tap call, "Share emergency info" text; removing asks first
       - C44 Country of a foreign number shown on the card
+- [x] Utilities, round 6 (C45-C51, done without a device):
+      - C45 Recently added vs Recently edited: "Added / Edited" segmented page from a local first-seen mark (Android keeps no creation time)
+      - C46 Phonetic name and Relationship fields on the card, editor, vCard, CSV and search; a relation's name opens that contact
+      - C47 Share selected contacts as plain text or as a .vcf file (select mode Share sheet)
+      - C48 Importing many cards keeps their photos ("12 contacts added · 5 photos")
+      - C49 Add to a contact: a number or email from a no-results search or a scan goes into a picked contact, with Undo
+      - C50 Birthdays and anniversaries to a calendar file (.ics, yearly all-day events) from Upcoming and Settings
+      - C51 Recently viewed: last 8 opened cards above the list while the search is empty; Clear asks first
 - [ ] Check the photo viewer gestures, the QR sheet, the calendar-event and address writes, and
       the scrubber drag on a phone: written without a device
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
 - [ ] Check Scan to add, Trash restore, birthday notifications, the call-log permission, Clean up and the group SMS / email composers on a phone: written without a device
 - [ ] Check the group member write and the mailto handoff on a phone; a delete commits after 5 s or when leaving the app
 - [ ] Check vCard photos (share, save, import), CSV in Google Contacts, Frequently contacted, My card and Emergency contacts on a phone: written without a device
+- [ ] Check multi-card import photos, the .ics file in Google Calendar, Relation and phonetic rows written to the provider, Add to a contact with Undo and the Added / Edited tabs on a phone: written without a device
 
 ## Rovsti Stops
 

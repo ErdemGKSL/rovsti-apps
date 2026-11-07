@@ -46,13 +46,13 @@ Facts the R6 steps build on (checked at baseSha, do not re-create):
 | C19-C25 | Scan to add, Trash, card call history, birthday reminders, default number/email, Clean up, group utilities | done R3 |
 | C26-C32, C34, C36 | Favorites order, smarter search, paste to add, summary, quick actions, open shared .vcf, copy number as, ringtone/voicemail, Home screen shortcut | done R4 |
 | C33, C38-C44 | vCard PHOTO, CSV, undo last edit, search in details, frequently contacted, My card, emergency contacts, country on the card | done R5 |
-| C49 | Add to an existing contact: a number / email from a no-results search, paste or scan goes into a picked contact (Undo) | R6 |
-| C45 | Recently added vs Recently edited: segmented "Added / Edited" page from a local first-seen mark | R6 |
-| C51 | Recently viewed: last 8 opened cards above the list while the search is empty; Clear (confirm) | R6 |
-| C47 | Share selected contacts as plain text (select mode Share: ".vcf file" / "Text") | R6 |
-| C46 | Phonetic name and Relationship fields (card, editor, vCard, CSV, search); a relation's name opens that contact | R6 |
-| C48 | Multi-card import keeps photos (Kotlin import returns ids, photos set afterwards) | R6 |
-| C50 | Birthdays and anniversaries to a calendar file (`.ics`, yearly all-day events) from Upcoming | R6 |
+| C49 | Add to an existing contact: a number / email from a no-results search, paste or scan goes into a picked contact (Undo) | done R6 |
+| C45 | Recently added vs Recently edited: segmented "Added / Edited" page from a local first-seen mark | done R6 |
+| C51 | Recently viewed: last 8 opened cards above the list while the search is empty; Clear (confirm) | done R6 |
+| C47 | Share selected contacts as plain text (select mode Share: ".vcf file" / "Text") | done R6 |
+| C46 | Phonetic name and Relationship fields (card, editor, vCard, CSV, search); a relation's name opens that contact | done R6 |
+| C48 | Multi-card import keeps photos (Kotlin import returns ids, photos set afterwards) | done R6 |
+| C50 | Birthdays and anniversaries to a calendar file (`.ics`, yearly all-day events) from Upcoming | done R6 |
 | C52 | Age / years together on the card's date rows ("12 May 1990 · 36 years") if not already shown | backlog R7 (check first) |
 | C53 | Copy every number / email of the selection (select mode "Copy") | backlog R7 |
 | C54 | Contacts without a number / without a name filters in Clean up | backlog R7 (check `contact_cleanup` first) |

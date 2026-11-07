@@ -275,6 +275,16 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
   (`rovsti_core::contact_csv`). "My card" and the emergency contacts (up to 5) are lookup keys in
   `contacts-prefs.json` (`my_card`, `emergency`). Frequently contacted is computed from the call
   log, read-only, and never written back to the provider.
+- **AD-CT12 Round 6 data.** `contacts-prefs.json` also holds the first-seen marks
+  (`known_max_id`, `added`: at most 50 ids from the last 30 days, noted on each pull and on an
+  in-app create) and the Recently viewed lookup keys (`viewed`, at most 8); the worst-case file
+  stays far below the 64 KiB cap (unit-tested) and prefs are written on the background executor
+  only when they changed. `Relation` rows and the phonetic name parts are written and replaced
+  with the other edited mimes in `ContactsEdit.kt` (`EDITED_MIMES`). The Kotlin import answers
+  `{added, ids}` (ids aligned with the sent cards, 0 for a failure) so photos of a multi-card
+  import are set afterwards through the single-photo path. The calendar file
+  (`rovsti_core::contact_ics`) is written to the temp dir and handed to
+  `documents::export_file`; its answer arrives as `DocumentOp::ExportMessages`.
 
 ### Messages: decisions (AD-MSG1 to AD-MSG9)
 

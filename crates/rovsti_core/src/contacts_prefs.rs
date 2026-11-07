@@ -277,6 +277,28 @@ mod tests {
     }
 
     #[test]
+    fn a_full_file_stays_under_the_size_cap() {
+        use crate::contact_recent::{ADDED_KEEP, AddedMark, VIEWED_KEEP};
+        let key = |n: usize| format!("{n:04}{}", "k".repeat(140));
+        let prefs = ContactsPrefs {
+            favorites_order: (0..MAX_ORDER).map(key).collect(),
+            emergency: (0..MAX_EMERGENCY).map(key).collect(),
+            viewed: (0..VIEWED_KEEP).map(key).collect(),
+            my_card: Some(key(1)),
+            known_max_id: Some(i64::MAX),
+            added: (0..ADDED_KEEP as i64)
+                .map(|id| AddedMark {
+                    id: i64::MAX - id,
+                    ms: i64::MAX,
+                })
+                .collect(),
+            ..ContactsPrefs::default()
+        };
+        let json = serde_json::to_vec_pretty(&prefs).expect("serializes");
+        assert!(json.len() < MAX_FILE_BYTES, "{} bytes", json.len());
+    }
+
+    #[test]
     fn an_empty_object_is_the_default() {
         let prefs: ContactsPrefs = serde_json::from_str("{}").expect("ok");
         assert_eq!(prefs, ContactsPrefs::default());

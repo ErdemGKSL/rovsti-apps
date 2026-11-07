@@ -25,7 +25,7 @@ pub struct Plan {
     pub duplicates: usize,
 }
 
-fn number_key(raw: &str) -> Option<String> {
+pub(crate) fn number_key(raw: &str) -> Option<String> {
     let digits: Vec<char> = raw.chars().filter(char::is_ascii_digit).collect();
     if digits.is_empty() {
         return None;

@@ -19,6 +19,8 @@ pub mod chat_find;
 pub mod chat_gallery;
 pub mod contact;
 pub mod contact_card;
+/// Duplicate detection and merging of contacts.
+pub mod contact_dupes;
 pub mod contact_edit;
 pub mod contact_photo;
 pub mod contacts_prefs;

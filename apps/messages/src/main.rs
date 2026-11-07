@@ -208,6 +208,10 @@ enum PillAction {
     ReopenScheduled { to: String, body: String },
     /// Tries loading the WhatsApp chats again.
     ReloadChats,
+    /// Confirms "mark all as read" for these chats.
+    MarkAll(inbox::MarkAllTargets),
+    /// Marks WhatsApp chats unread again after "mark all as read".
+    UnmarkAll(Vec<String>),
     /// Opens a WhatsApp chat (its JID and title).
     OpenChat { jid: String, title: String },
 }
@@ -1574,6 +1578,30 @@ impl MessagesApp {
         cx.notify();
     }
 
+    /// "Export chat" / "Share as text" of a page menu: the open page writes or shares its
+    /// loaded messages.
+    fn menu_export(&mut self, share: bool, cx: &mut Context<Self>) {
+        self.row_menu = None;
+        match &self.open {
+            Open::WhatsApp(_, c) => c.update(cx, |c, cx| {
+                if share {
+                    c.share_chat(cx)
+                } else {
+                    c.export_chat(cx)
+                }
+            }),
+            Open::Sms(c) => c.update(cx, |c, cx| {
+                if share {
+                    c.share_chat(cx)
+                } else {
+                    c.export_chat(cx)
+                }
+            }),
+            _ => {}
+        }
+        cx.notify();
+    }
+
     /// "Send later" of a page menu: closes the menu and asks the open page to schedule its
     /// composer text; a blank composer gets the "type first" pill.
     fn menu_send_later(&mut self, cx: &mut Context<Self>) {
@@ -1821,6 +1849,38 @@ impl MessagesApp {
         .detach();
     }
 
+    /// The Chats title's check button: asks before marking every unread chat read.
+    fn ask_mark_all(&mut self, cx: &mut Context<Self>) {
+        let targets = inbox::mark_all_targets(&self.view.rows);
+        if targets.is_empty() {
+            self.show_pill("Nothing to mark as read");
+            return;
+        }
+        let prompt = inbox::mark_all_prompt(&targets);
+        self.show_pill_action(prompt, "Mark", PillAction::MarkAll(targets), cx);
+    }
+
+    /// Marks the confirmed chats read. SMS goes through the backend, which asks Android off
+    /// the UI thread; WhatsApp chats go to the gateway one by one. Only a WhatsApp-only set
+    /// can be undone.
+    fn mark_all_read(&mut self, targets: inbox::MarkAllTargets, cx: &mut Context<Self>) {
+        let count = targets.count();
+        let undo = targets.undoable().then(|| targets.wa_chats.clone());
+        for id in &targets.sms_threads {
+            let id = *id;
+            self.backend
+                .update(cx, |backend, cx| backend.mark_read(id, cx));
+        }
+        for jid in &targets.wa_chats {
+            self.chat_action(jid, ChatActionKind::MarkRead { read: true }, true, cx);
+        }
+        let text = inbox::mark_all_text(count);
+        match undo {
+            Some(chats) => self.show_pill_action(text, "Undo", PillAction::UnmarkAll(chats), cx),
+            None => self.show_pill(text),
+        }
+    }
+
     /// Shows the pill with a trailing button and remembers what it does.
     fn show_pill_action(
         &mut self,
@@ -1863,6 +1923,12 @@ impl MessagesApp {
             PillAction::Chat(jid, undo) => self.chat_action(&jid, undo, true, cx),
             PillAction::SmsMute(id, mute) => self.set_sms_mute(id, mute, cx),
             PillAction::ReloadChats => self.load_chats(cx),
+            PillAction::MarkAll(targets) => self.mark_all_read(targets, cx),
+            PillAction::UnmarkAll(chats) => {
+                for jid in chats {
+                    self.chat_action(&jid, ChatActionKind::MarkRead { read: false }, true, cx);
+                }
+            }
             PillAction::OpenChat { jid, title } => self.open_chat(jid, title, cx),
             PillAction::ReopenScheduled { to, body } => {
                 let title = self
@@ -2244,6 +2310,28 @@ impl MessagesApp {
                         colors.label,
                     )
                     .on_click(cx.listener(|this, _, _, cx| this.menu_send_later(cx)))
+                    .into_any_element(),
+                );
+                items.push(
+                    menu_item(
+                        theme,
+                        "menu-export",
+                        Icon::LucideDownload,
+                        "Export chat".into(),
+                        colors.label,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.menu_export(false, cx)))
+                    .into_any_element(),
+                );
+                items.push(
+                    menu_item(
+                        theme,
+                        "menu-share-text",
+                        Icon::LucideShare,
+                        "Share as text".into(),
+                        colors.label,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.menu_export(true, cx)))
                     .into_any_element(),
                 );
             }
@@ -3546,10 +3634,16 @@ impl MessagesApp {
                         cx.notify();
                     }))
                     .into_any_element();
+                let mark_all = (!inbox::mark_all_targets(&self.view.rows).is_empty()).then(|| {
+                    glass_icon_button(theme, Icon::LucideCheckCheck, 0.0, false)
+                        .id("mark-all-read")
+                        .on_click(cx.listener(|this, _, _, cx| this.ask_mark_all(cx)))
+                });
                 let actions = div()
                     .flex()
                     .items_center()
                     .gap(px(8.0))
+                    .children(mark_all)
                     .child(search)
                     .child(compose)
                     .into_any_element();

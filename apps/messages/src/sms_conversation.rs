@@ -13,6 +13,7 @@ use gpui::{
 use rovsti_android::{Error as AndroidError, documents};
 use rovsti_core::{
     ThreadId,
+    chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
     sms::{DeliveryState, SmsSend, SmsSimsPayload, SmsStatus, segments},
     sms_timeline::{SmsItem, SmsKey, SmsTimeline},
@@ -153,6 +154,8 @@ pub struct SmsConversation {
     selected: Option<u64>,
     /// A picture or file is being handed to the "Save as" sheet.
     saving: bool,
+    /// An exported chat is at the "Save as" sheet; true when only part of it was loaded.
+    exporting: Option<bool>,
     /// The address-book photo of the person, for the header avatar.
     peer_photo: Option<PeerPhoto>,
     /// The "Search in chat" bar.
@@ -221,6 +224,7 @@ impl SmsConversation {
             in_spam: false,
             selected: None,
             saving: false,
+            exporting: None,
             peer_photo: None,
             find: None,
             highlight: None,
@@ -548,7 +552,11 @@ impl SmsConversation {
                 if result.op == DocumentOp::ExportMessages && self.saving =>
             {
                 self.saving = false;
-                let notice = if result.ok { "Saved" } else { "Not saved" };
+                let notice = match self.exporting.take() {
+                    Some(partial) => chat_export::export_notice(result.ok, partial),
+                    None if result.ok => "Saved",
+                    None => "Not saved",
+                };
                 cx.emit(SmsConversationEvent::Notice(notice));
                 cx.notify();
             }
@@ -862,6 +870,81 @@ impl SmsConversation {
         self.selected = None;
         self.rows_dirty = true;
         cx.open_url(url);
+        cx.notify();
+    }
+
+    /// The loaded messages as the text of an export or a share.
+    fn chat_text(&self, cx: &gpui::App) -> String {
+        let title = self.title();
+        let lines: Vec<ExportLine<'_>> = self
+            .timeline
+            .items()
+            .iter()
+            .map(|item| ExportLine {
+                at_ms: item.at_ms,
+                author: if item.outgoing { "You" } else { &title },
+                text: &item.body,
+            })
+            .collect();
+        let offset = self.backend.read(cx).locale().tz_offset_s;
+        chat_export::export_text(&title, &lines, offset)
+    }
+
+    /// "Share as text" of the page menu: the loaded messages go to the share sheet.
+    pub fn share_chat(&mut self, cx: &mut Context<Self>) {
+        let text = self.chat_text(cx);
+        cx.emit(SmsConversationEvent::Share(text));
+    }
+
+    /// "Export chat" of the page menu: writes the loaded messages to a .txt in the cache and
+    /// hands it to "Save as".
+    pub fn export_chat(&mut self, cx: &mut Context<Self>) {
+        if self.saving {
+            cx.emit(SmsConversationEvent::Notice("Already saving a file"));
+            return;
+        }
+        let Some(dir) = self
+            .backend
+            .read(cx)
+            .data_dir()
+            .map(|d| d.join("cache").join("export"))
+        else {
+            cx.emit(SmsConversationEvent::Notice(
+                "The app's storage is not ready yet.",
+            ));
+            return;
+        };
+        let offset = self.backend.read(cx).locale().tz_offset_s;
+        let name =
+            chat_export::export_file_name(&self.title(), crate::conversation::now_ms(), offset);
+        let text = self.chat_text(cx);
+        let path = dir.join(&name);
+        self.saving = true;
+        self.exporting = Some(self.timeline.has_older());
+        let task = cx.background_executor().spawn(async move {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(&path, text).map_err(|e| e.to_string())?;
+            Ok::<_, String>(
+                documents::export_file(&name, "text/plain", &path.to_string_lossy())
+                    .map_err(|e| matches!(e, AndroidError::Unsupported)),
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let (notice, started) = crate::conversation::save_outcome(result);
+                if !started {
+                    this.saving = false;
+                    this.exporting = None;
+                }
+                if let Some(notice) = notice {
+                    cx.emit(SmsConversationEvent::Notice(notice));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
     }
 

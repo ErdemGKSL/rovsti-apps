@@ -18,6 +18,7 @@ use gpui::{
 use rovsti_android::{Error as AndroidError, documents};
 use rovsti_core::{
     ThreadId,
+    chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
     recents::LocaleTime,
     wire::DocumentOp,
@@ -238,6 +239,8 @@ pub struct Conversation {
     media_failed: HashSet<String>,
     /// The cached file handed to "Save as" while its answer is pending.
     saving: Option<std::path::PathBuf>,
+    /// An exported chat is at the "Save as" sheet; true when only part of the chat was loaded.
+    exporting: Option<bool>,
     /// The message whose quick-reaction strip is open.
     strip: Option<String>,
     throttle: TypingThrottle,
@@ -376,6 +379,7 @@ impl Conversation {
             media_loading: HashSet::new(),
             media_failed: HashSet::new(),
             saving: None,
+            exporting: None,
             strip: None,
             throttle: TypingThrottle::new(),
             last_text: String::new(),
@@ -1213,6 +1217,7 @@ impl Conversation {
 
     /// Forgets the pending save and deletes its cached copy.
     fn finish_saving(&mut self) {
+        self.exporting = None;
         if let Some(path) = self.saving.take() {
             std::fs::remove_file(path).ok();
         }
@@ -1223,9 +1228,104 @@ impl Conversation {
         if self.saving.is_none() {
             return;
         }
+        let exported = self.exporting;
         self.finish_saving();
-        let notice = if ok { "Saved" } else { "Not saved" };
+        let notice = match exported {
+            Some(partial) => chat_export::export_notice(ok, partial),
+            None if ok => "Saved",
+            None => "Not saved",
+        };
         cx.emit(ConversationEvent::Notice(notice.to_owned()));
+        cx.notify();
+    }
+
+    /// The loaded messages as the text of an export or a share.
+    fn chat_text(&self, cx: &gpui::App) -> String {
+        let items = self.timeline.items();
+        let authors: Vec<String> = items
+            .iter()
+            .map(|item| {
+                let message = &item.message;
+                let meta = self.timeline.meta(&message.id);
+                self.author(message.from_me, message.sender.as_deref(), meta, cx)
+            })
+            .collect();
+        let texts: Vec<String> = items
+            .iter()
+            .map(|item| {
+                let message = &item.message;
+                if self.hidden.contains(&message.id) {
+                    return String::new();
+                }
+                copy_text_of(&message.body, self.timeline.meta(&message.id)).unwrap_or_default()
+            })
+            .collect();
+        let lines: Vec<ExportLine<'_>> = items
+            .iter()
+            .zip(authors.iter().zip(&texts))
+            .map(|(item, (author, text))| ExportLine {
+                at_ms: item.message.timestamp_ms,
+                author,
+                text,
+            })
+            .collect();
+        chat_export::export_text(&self.title, &lines, self.locale.tz_offset_s)
+    }
+
+    /// "Share as text" of the page menu: the loaded messages go to the share sheet.
+    pub fn share_chat(&mut self, cx: &mut Context<Self>) {
+        let text = self.chat_text(cx);
+        cx.emit(ConversationEvent::Share(text));
+    }
+
+    /// "Export chat" of the page menu: writes the loaded messages to a .txt in the cache and
+    /// hands it to "Save as".
+    pub fn export_chat(&mut self, cx: &mut Context<Self>) {
+        if self.saving.is_some() {
+            cx.emit(ConversationEvent::Notice(
+                "Already saving a file".to_owned(),
+            ));
+            return;
+        }
+        let Some(dir) = self
+            .backend
+            .read(cx)
+            .data_dir()
+            .map(|d| d.join("cache").join("export"))
+        else {
+            cx.emit(ConversationEvent::Notice(
+                "The app's storage is not ready yet.".to_owned(),
+            ));
+            return;
+        };
+        let name = chat_export::export_file_name(&self.title, now_ms(), self.locale.tz_offset_s);
+        let text = self.chat_text(cx);
+        let path = dir.join(&name);
+        self.saving = Some(path.clone());
+        self.exporting = Some(self.timeline.has_older());
+        let task = cx.background_executor().spawn(async move {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(&path, text).map_err(|e| e.to_string())?;
+            Ok::<_, String>(
+                documents::export_file(&name, "text/plain", &path.to_string_lossy())
+                    .map_err(|e| matches!(e, AndroidError::Unsupported)),
+            )
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let (notice, started) = save_outcome(result);
+                if !started {
+                    this.finish_saving();
+                }
+                if let Some(notice) = notice {
+                    cx.emit(ConversationEvent::Notice(notice.to_owned()));
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
     }
 

@@ -126,15 +126,34 @@ pub struct MarkAllTargets {
 
 impl MarkAllTargets {
     /// How many chats are touched.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn count(&self) -> usize {
         self.sms_threads.len() + self.wa_chats.len()
+    }
+
+    /// Nothing is unread.
+    pub fn is_empty(&self) -> bool {
+        self.count() == 0
+    }
+
+    /// Whether the set can be undone: SMS cannot be marked unread again.
+    pub fn undoable(&self) -> bool {
+        self.sms_threads.is_empty() && !self.wa_chats.is_empty()
+    }
+}
+
+/// The confirmation before "mark all as read".
+pub fn mark_all_prompt(targets: &MarkAllTargets) -> String {
+    let n = targets.count();
+    let noun = if n == 1 { "chat" } else { "chats" };
+    if targets.undoable() {
+        format!("Mark {n} {noun} as read?")
+    } else {
+        format!("Mark {n} {noun} as read? Texts can't be marked unread again.")
     }
 }
 
 /// The unread chats of `rows` (the normal rows: pass neither the Spam
 /// filter's nor the archived rows).
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn mark_all_targets(rows: &[RowView]) -> MarkAllTargets {
     let mut out = MarkAllTargets::default();
     for row in rows.iter().filter(|r| r.unread > 0 || r.marked_unread) {
@@ -149,7 +168,6 @@ pub fn mark_all_targets(rows: &[RowView]) -> MarkAllTargets {
 }
 
 /// "Marked 3 chats as read", "Marked 1 chat as read".
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn mark_all_text(n: usize) -> String {
     let noun = if n == 1 { "chat" } else { "chats" };
     format!("Marked {n} {noun} as read")
@@ -1500,6 +1518,27 @@ mod tests {
         assert_eq!(t.sms_threads, [7]);
         assert_eq!(t.wa_chats, ["1@s.whatsapp.net"]);
         assert_eq!(t.count(), 2);
+    }
+
+    #[test]
+    fn mark_all_prompt_warns_about_sms() {
+        let wa = MarkAllTargets {
+            sms_threads: vec![],
+            wa_chats: vec!["a@s.whatsapp.net".into()],
+        };
+        assert!(wa.undoable());
+        assert_eq!(mark_all_prompt(&wa), "Mark 1 chat as read?");
+        let mixed = MarkAllTargets {
+            sms_threads: vec![1],
+            wa_chats: vec!["a@s.whatsapp.net".into()],
+        };
+        assert!(!mixed.undoable());
+        assert_eq!(
+            mark_all_prompt(&mixed),
+            "Mark 2 chats as read? Texts can't be marked unread again."
+        );
+        assert!(MarkAllTargets::default().is_empty());
+        assert!(!MarkAllTargets::default().undoable());
     }
 
     #[test]

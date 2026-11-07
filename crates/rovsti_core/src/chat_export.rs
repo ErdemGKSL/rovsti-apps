@@ -64,6 +64,16 @@ pub fn export_file_name(title: &str, now_ms: i64, tz_offset_s: i32) -> String {
     }
 }
 
+/// The pill after the "Save as" sheet answered for an exported chat. `partial` is true
+/// when older messages were not loaded, so the file holds only part of the chat.
+pub fn export_notice(ok: bool, partial: bool) -> &'static str {
+    match (ok, partial) {
+        (false, _) => "Couldn't export",
+        (true, true) => "Exported the loaded messages",
+        (true, false) => "Chat exported",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +130,12 @@ mod tests {
     #[test]
     fn file_name_without_title() {
         assert_eq!(export_file_name(" ?? ", T, 0), "chat-2026-11-12.txt");
+    }
+
+    #[test]
+    fn export_notice_tells_partial_and_failed() {
+        assert_eq!(export_notice(true, false), "Chat exported");
+        assert_eq!(export_notice(true, true), "Exported the loaded messages");
+        assert_eq!(export_notice(false, true), "Couldn't export");
     }
 }

@@ -13,7 +13,8 @@ use gpui::{
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
 use rovsti_geo::{
-    ActiveTrip, Coord, Diameter, FixOut, NoticeState, Side, TripState, tiles::tiles_for_circle,
+    ActiveTrip, Coord, Diameter, FixOut, NoticeState, Side, TripState, saved_stops::NEAREST_CHIP_M,
+    tiles::tiles_for_circle,
 };
 use rovsti_ui::{
     components::{backdrop, flat_glass, glass_pill, list_row, section},
@@ -32,6 +33,12 @@ use crate::{
 };
 
 // ---- pure ------------------------------------------------------------------------
+
+/// The idle Trip tab offers its nearest-saved-stop row only with a known
+/// position, nothing picked yet and no trip running.
+pub fn nearest_row_visible(has_here: bool, ends_empty: bool, trip: bool) -> bool {
+    has_here && ends_empty && !trip
+}
 
 /// "450 m", "1.2 km": metres to the nearest 10 below a kilometre.
 pub fn distance_text(metres: f64) -> String {
@@ -306,6 +313,9 @@ impl StopsApp {
                 page = page.child(map);
             }
             page = page.child(self.setup_cards(theme, cx));
+            if let Some(row) = self.nearest_saved_row(theme, cx) {
+                page = page.child(row);
+            }
             if let Some(card) = self.last_trip_card(theme, cx) {
                 page = page.child(card);
             }
@@ -348,6 +358,38 @@ impl StopsApp {
             page = page.child(section(theme, None, [row.into_any_element()]));
         }
         page.into_any_element()
+    }
+
+    /// One-tap start for the saved stop closest to the current position.
+    fn nearest_saved_row(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let here = self.map.position.map(|(c, _)| c);
+        if !nearest_row_visible(
+            here.is_some(),
+            self.pick.ends.is_empty(),
+            self.trip.is_some(),
+        ) {
+            return None;
+        }
+        let (stop, d) = self.saved.nearest(here?, NEAREST_CHIP_M)?;
+        let (a, b) = (
+            pick::dest_from_endpoint(&stop.a),
+            pick::dest_from_endpoint(&stop.b),
+        );
+        let row = list_row(
+            theme,
+            None,
+            format!("Nearest: {}", stop.name),
+            Some(format!("{} away", distance_text(d)).into()),
+            Some("Start".into()),
+        )
+        .id("nearest-saved-row")
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if this.busy {
+                return;
+            }
+            this.request_start(a.clone(), b.clone(), cx);
+        }));
+        Some(section(theme, None, [row.into_any_element()]).into_any_element())
     }
 
     /// After a trip ends: what happened, with Start again / Save as stop /
@@ -1266,6 +1308,20 @@ impl StopsApp {
 mod tests {
     use super::*;
     use rovsti_geo::Coord;
+
+    #[test]
+    fn nearest_row_truth_table() {
+        for here in [false, true] {
+            for empty in [false, true] {
+                for trip in [false, true] {
+                    assert_eq!(
+                        nearest_row_visible(here, empty, trip),
+                        here && empty && !trip
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn last_trip_title_by_outcome() {

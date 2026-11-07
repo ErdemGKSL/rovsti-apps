@@ -71,6 +71,13 @@ pub(crate) enum Confirm {
     },
     /// "Show recent calls": explains why the call log is read, then asks Android.
     CallLogAccess,
+    /// The card menu's "Remove my card".
+    RemoveMyCard,
+    /// This contact would leave the emergency list.
+    RemoveEmergency {
+        key: String,
+        name: SharedString,
+    },
 }
 
 /// Title and body of the Trash cards, `None` for the other cards.
@@ -196,6 +203,8 @@ impl ContactsApp {
             Confirm::DeleteWithoutCopy { ids } => self.run_delete(ids, false, cx),
             Confirm::CallLogAccess => self.request_call_log(cx),
             Confirm::Voicemail { id, .. } => self.apply_voicemail(id, true, cx),
+            Confirm::RemoveMyCard => self.clear_my_card(cx),
+            Confirm::RemoveEmergency { key, .. } => self.remove_emergency(&key, cx),
         }
     }
 
@@ -448,6 +457,18 @@ impl ContactsApp {
                 let (title, body) = Self::voicemail_card_text(name);
                 confirm_card(theme, title, body, vec![cancel, yes("Send", false, cx)])
             }
+            Confirm::RemoveMyCard => confirm_card(
+                theme,
+                "Remove my card?",
+                "No contact is marked as you. The contact itself stays in your address book.",
+                vec![cancel, yes("Remove", true, cx)],
+            ),
+            Confirm::RemoveEmergency { name, .. } => confirm_card(
+                theme,
+                format!("Remove {name}?"),
+                "They leave the emergency list. The contact stays in your address book.",
+                vec![cancel, yes("Remove", true, cx)],
+            ),
             Confirm::CallLogAccess => {
                 let (title, body) = Self::call_log_card_text();
                 confirm_card(theme, title, body, vec![cancel, yes("Allow", false, cx)])

@@ -9,7 +9,7 @@ use gpui::{
     AnyElement, AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement, Styled, Window, div, px, svg,
 };
-use rovsti_core::{contact_edit, contacts_view};
+use rovsti_core::{contact_edit, contacts_view, wire::WireContact};
 use rovsti_ui::{
     Icon,
     components::{empty_state, large_title},
@@ -24,6 +24,10 @@ use crate::{ContactsApp, Row, backend, field::TextField, photos::photo_avatar, r
 pub(crate) enum PickFor {
     Group(i64),
     Favorites,
+    /// Single choice: the contact that is me.
+    MyCard,
+    /// Add-only: contacts with a number, not yet on the emergency list.
+    Emergency,
 }
 
 /// The open picker.
@@ -122,12 +126,17 @@ impl ContactsApp {
         let query = picker.field.read(cx).text().to_owned();
         let focus = picker.field.read(cx).focus_handle();
         let new_query = query != picker.built_query;
+        let for_ = picker.for_;
         self.picker_rows = match self.index() {
             Some(index) => {
-                let shown = if query.trim().is_empty() {
+                let shown: Vec<&WireContact> = if query.trim().is_empty() {
                     contacts_view::ordered(index.all(), self.style)
                 } else {
                     index.search_loose(&query)
+                };
+                let shown = match for_ {
+                    PickFor::Emergency => crate::me::addable(shown, &self.emergency),
+                    _ => shown,
                 };
                 contacts_view::build_rows_styled(shown, &query, self.style)
                     .into_iter()
@@ -151,9 +160,16 @@ impl ContactsApp {
     fn toggle_picked(&mut self, id: i64, cx: &mut Context<Self>) {
         if let Some(picker) = self.picker.as_mut()
             && !picker.saving
-            && !picker.chosen.remove(&id)
         {
-            picker.chosen.insert(id);
+            let single = picker.for_ == PickFor::MyCard;
+            if picker.chosen.remove(&id) {
+                // Unticked.
+            } else {
+                if single {
+                    picker.chosen.clear();
+                }
+                picker.chosen.insert(id);
+            }
         }
         cx.notify();
     }
@@ -175,6 +191,14 @@ impl ContactsApp {
             PickFor::Group(id) => id,
             PickFor::Favorites => {
                 self.finish_favorites(change, cx);
+                return;
+            }
+            PickFor::MyCard => {
+                self.finish_my_card(change.add.first().copied(), cx);
+                return;
+            }
+            PickFor::Emergency => {
+                self.finish_emergency(change.add, cx);
                 return;
             }
         };
@@ -254,6 +278,8 @@ impl ContactsApp {
                 format!("Add to {name}").into()
             }
             PickFor::Favorites => "Favorites".into(),
+            PickFor::MyCard => "This is me".into(),
+            PickFor::Emergency => "Add emergency contact".into(),
         }
     }
 

@@ -20,6 +20,7 @@ mod finds;
 mod groups;
 mod history;
 mod intake;
+mod me;
 mod photo_crop;
 mod photo_viewer;
 mod photos;
@@ -412,6 +413,13 @@ struct ContactsApp {
     upcoming_open: bool,
     recent: Vec<recent::RecentRow>,
     recent_open: bool,
+    /// Lookup key of my card, and the emergency keys, as saved in the prefs.
+    my_card: Option<String>,
+    emergency: Vec<String>,
+    emergency_rows: Vec<me::EmergencyRow>,
+    emergency_open: bool,
+    /// The owner changed them before the prefs file was read.
+    me_touched: bool,
     /// The open card's ringtone and voicemail options, the contact the ringtone
     /// picker was opened for, and whether the launcher can pin shortcuts.
     card_options: call_options::CardOptions,
@@ -602,6 +610,11 @@ impl ContactsApp {
                     this.favorites_order = saved.order();
                     this.rebuild(cx);
                 }
+                if !this.me_touched {
+                    this.my_card.clone_from(&saved.my_card);
+                    this.emergency = saved.emergency_keys();
+                    this.rebuild_emergency();
+                }
                 this.prefs_ready = true;
                 this.rearm_and_sync_birthdays(cx);
                 if this.style_touched || this.birthday_touched {
@@ -686,6 +699,11 @@ impl ContactsApp {
             upcoming_open: false,
             recent: Vec::new(),
             recent_open: false,
+            my_card: None,
+            emergency: Vec::new(),
+            emergency_rows: Vec::new(),
+            emergency_open: false,
+            me_touched: false,
             card_options: call_options::CardOptions::default(),
             ringtone_for: None,
             can_pin: false,
@@ -865,6 +883,7 @@ impl ContactsApp {
         }
         self.group_items = self.build_group_items();
         self.recent = recent::build(index.all(), crate::whatsapp::now_ms(), self.wa.offset_s);
+        self.rebuild_emergency();
         self.apply_marks();
         self.rebuild_frequent();
         self.refill_others(cx);
@@ -1062,6 +1081,7 @@ impl ContactsApp {
             || self.dupes.sheet.is_open()
             || self.upcoming_open
             || self.recent_open
+            || self.emergency_open
             || self.summary_open
             || self.trash_ui.open
             || self.trash_ui.sheet.is_open()
@@ -1110,6 +1130,8 @@ impl ContactsApp {
             self.set_upcoming_open(false, cx);
         } else if self.recent_open {
             self.set_recent_open(false, cx);
+        } else if self.emergency_open {
+            self.set_emergency_open(false, cx);
         } else if self.summary_open {
             self.set_summary_open(false, cx);
         } else if self.cleanup_ui.select.is_some() {
@@ -1293,6 +1315,8 @@ impl ContactsApp {
             birthday_reminders: self.birthday_reminders,
             reminder_hour: self.reminder_hour,
             favorites_order: self.favorites_order.clone(),
+            my_card: self.my_card.clone(),
+            emergency: self.emergency.clone(),
             ..ContactsPrefs::from_style(self.style)
         }
     }
@@ -1777,11 +1801,14 @@ impl ContactsApp {
         let recent_row = (matches!(self.book, Book::Ready(_))
             && contacts_view::show_recent(&query, self.recent.len()))
         .then(|| self.recent_entry(theme, cx));
+        let my_card_row = (matches!(self.book, Book::Ready(_)) && query.trim().is_empty())
+            .then(|| self.my_card_entry(theme, cx));
         div()
             .flex()
             .flex_col()
             .child(large_title(theme, TABS[CONTACTS_TAB], trailing))
             .child(self.search_field(theme, window, cx))
+            .children(my_card_row)
             .children(recent_row)
             .children(body)
             .into_any_element()
@@ -1983,6 +2010,7 @@ impl ContactsApp {
                 )
             }))
             .child(self.birthdays_section(theme, cx))
+            .child(self.emergency_entry(theme, cx))
             .child(section(
                 theme,
                 Some("Contacts file".into()),
@@ -2339,6 +2367,8 @@ impl Render for ContactsApp {
             (self.upcoming_page(theme, cx), false)
         } else if self.recent_open && tab == CONTACTS_TAB {
             (self.recent_page(theme, cx), false)
+        } else if self.emergency_open && tab == SETTINGS_TAB {
+            (self.emergency_page(theme, cx), false)
         } else if self.summary_open && tab == SETTINGS_TAB {
             (self.summary_page(theme, cx), false)
         } else if self.cleanup_ui.open && tab == SETTINGS_TAB {
@@ -2461,6 +2491,7 @@ impl Render for ContactsApp {
                                     || this.dupes.open
                                     || this.upcoming_open
                                     || this.recent_open
+                                    || this.emergency_open
                                     || this.summary_open
                                     || this.trash_ui.open
                                     || this.cleanup_ui.open
@@ -2472,6 +2503,7 @@ impl Render for ContactsApp {
                                     this.trash_ui.sheet.close();
                                     this.upcoming_open = false;
                                     this.recent_open = false;
+                                    this.emergency_open = false;
                                     this.summary_open = false;
                                     this.whatsapp_open = false;
                                     this.dupes.open = false;

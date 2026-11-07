@@ -1272,6 +1272,15 @@ impl ContactsApp {
                     .text_color(colors.label)
                     .child(SharedString::from(card.name.clone())),
             )
+            .children(self.is_my_card(id).then(|| {
+                div()
+                    .px(px(10.0))
+                    .py(px(2.0))
+                    .rounded_full()
+                    .text_size(typography::FOOTNOTE.size)
+                    .text_color(colors.accent)
+                    .child("My card")
+            }))
             .children(nickname.map(|nick| {
                 div()
                     .px(px(24.0))
@@ -1359,7 +1368,8 @@ impl ContactsApp {
                 let main = Self::field_main(
                     theme,
                     ("number", i),
-                    number.label.clone().into(),
+                    crate::me::number_subtitle(&number.label, &number.raw, self.home_cc.as_deref())
+                        .into(),
                     number.display.clone().into(),
                     colors.accent,
                 )
@@ -1628,6 +1638,7 @@ impl ContactsApp {
         let call_options =
             self.call_options_section(id, &card.name, !card.numbers.is_empty(), theme, cx);
 
+        let (is_me, on_emergency) = (self.is_my_card(id), self.is_emergency(id));
         let actions_list = section(
             theme,
             None,
@@ -1640,6 +1651,24 @@ impl ContactsApp {
                     Tone::Accent,
                 )
                 .on_click(cx.listener(move |this, _, _, cx| this.open_editor_for(id, cx)))
+                .into_any_element(),
+                tap_row(
+                    theme,
+                    "my-card-menu",
+                    Some(Icon::LucideUser),
+                    crate::me::my_card_menu_entry(is_me),
+                    Tone::Accent,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.my_card_menu_action(id, cx)))
+                .into_any_element(),
+                tap_row(
+                    theme,
+                    "emergency-menu",
+                    Some(Icon::LucideShieldAlert),
+                    crate::me::emergency_menu_entry(on_emergency),
+                    Tone::Accent,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.emergency_menu_action(id, cx)))
                 .into_any_element(),
                 tap_row(
                     theme,

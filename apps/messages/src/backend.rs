@@ -36,6 +36,7 @@ use rovsti_core::{
         DeliveryState, MmsRow, SmsMessagesPayload, SmsRow, SmsSend, SmsSimsPayload, SmsStatus,
         SmsThreadRow, SmsThreadsPayload,
     },
+    sms_timeline::SmsKey,
     spam::SpamRules,
     wire::{
         BlockedNumber, BlocklistPayload, ContactsPayload, DocumentOp, DocumentResult, Envelope,
@@ -91,6 +92,13 @@ pub enum BackendEvent {
     Notice(String),
     /// A conversation was deleted (the thread id): pages and notifications of it go.
     ThreadDeleted(i64),
+    /// The delete of one SMS/MMS ended: `ok` when the message is gone from
+    /// the provider (the page drops it), otherwise it comes back.
+    SmsMessageDeleted {
+        thread_id: i64,
+        key: SmsKey,
+        ok: bool,
+    },
     /// Scheduled sends that fired while no UI looked and failed.
     ScheduledFailed(Vec<ScheduledSms>),
 }
@@ -884,6 +892,57 @@ impl Backend {
                         "Couldn't delete that conversation".into(),
                     ));
                 }
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Deletes one SMS/MMS. Refuses without the SMS role. A `Local` key has no
+    /// provider row and is gone at once. The delete runs in the background;
+    /// on success the thread list is pulled again, otherwise a `Notice` says
+    /// why. `SmsMessageDeleted` tells the page either way.
+    pub fn delete_sms_message(&mut self, thread_id: i64, key: SmsKey, cx: &mut Context<Self>) {
+        let done = move |ok: bool| BackendEvent::SmsMessageDeleted { thread_id, key, ok };
+        let Some(provider_id) = key.provider_id() else {
+            cx.emit(done(true));
+            return;
+        };
+        if let Some(preview) = &mut self.preview {
+            let gone = match key {
+                SmsKey::Sms(id) => preview.delete_message(id),
+                _ => false,
+            };
+            if gone {
+                self.threads = preview.threads().threads;
+                cx.emit(BackendEvent::SmsChanged);
+            }
+            cx.emit(done(gone));
+            cx.notify();
+            return;
+        }
+        if !self.sms_role_held() {
+            cx.emit(BackendEvent::Notice(crate::sms_actions::NEEDS_ROLE.into()));
+            cx.emit(done(false));
+            return;
+        }
+        let task = cx
+            .background_executor()
+            .spawn(async move { sms::delete_message(&provider_id) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let ok = matches!(result, Ok(true));
+                if ok {
+                    this.pull_threads(cx);
+                } else {
+                    if let Err(error) = &result {
+                        log::warn!("deleting message {key:?} failed: {error}");
+                    }
+                    cx.emit(BackendEvent::Notice("Couldn't delete that message".into()));
+                }
+                cx.emit(done(ok));
+                cx.notify();
             })
             .ok();
         })

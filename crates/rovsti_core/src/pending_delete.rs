@@ -4,9 +4,15 @@
 pub const UNDO_MS: i64 = 5_000;
 
 /// Keys scheduled for deletion, each with the time it was queued.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct PendingDeletes<K> {
     items: Vec<(K, i64)>,
+}
+
+impl<K> Default for PendingDeletes<K> {
+    fn default() -> Self {
+        Self { items: Vec::new() }
+    }
 }
 
 impl<K: PartialEq + Clone> PendingDeletes<K> {
@@ -21,6 +27,11 @@ impl<K: PartialEq + Clone> PendingDeletes<K> {
         let before = self.items.len();
         self.items.retain(|(k, _)| k != key);
         self.items.len() != before
+    }
+
+    /// Whether any delete is waiting.
+    pub fn has_pending(&self) -> bool {
+        !self.items.is_empty()
     }
 
     pub fn contains(&self, key: &K) -> bool {
@@ -68,6 +79,16 @@ mod tests {
         assert!(p.contains(&1));
         assert_eq!(p.due(1_000 + UNDO_MS), vec![1]);
         assert!(!p.contains(&1));
+    }
+
+    #[test]
+    fn has_pending_follows_the_queue() {
+        let mut p = PendingDeletes::default();
+        assert!(!p.has_pending());
+        p.add(1_u32, 0);
+        assert!(p.has_pending());
+        p.undo(&1);
+        assert!(!p.has_pending());
     }
 
     #[test]

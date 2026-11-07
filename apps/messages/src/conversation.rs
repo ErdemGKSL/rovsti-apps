@@ -148,9 +148,23 @@ pub enum ConversationEvent {
     OpenAvatar(ViewerItem),
     /// The Forward pill of a message or picture: the page opens the chooser.
     Forward(crate::forward_ui::ForwardItem),
+    /// The "Message {name}" pill of a group message: open the 1:1 chat.
+    OpenChat { jid: String, title: String },
 }
 
 impl EventEmitter<ConversationEvent> for Conversation {}
+
+/// The 1:1 chat JID of a group message's author. `None` for a LID or any
+/// other sender that carries no phone number.
+pub(crate) fn private_chat_jid(sender: &str) -> Option<String> {
+    is_pn_jid(sender).then(|| format!("{}@s.whatsapp.net", jid_user(sender)))
+}
+
+/// The first word of a display name ("Ayşe Demir" -> "Ayşe"); the whole
+/// name when it has no space.
+pub(crate) fn first_name(name: &str) -> &str {
+    name.split_whitespace().next().unwrap_or(name)
+}
 
 /// Who the chat is with, for the header avatar.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -3225,6 +3239,26 @@ impl Conversation {
                 )),
             );
         }
+        if self.is_group
+            && !message.from_me
+            && let Some(jid) = message.sender.as_deref().and_then(private_chat_jid)
+        {
+            let name = self.author(false, message.sender.as_deref(), meta, cx);
+            let label = format!("Message {}", first_name(&name));
+            row = row.child(
+                pill("private", Icon::LucideMessageCircle, &label, false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::OpenChat {
+                            jid: jid.clone(),
+                            title: name.clone(),
+                        });
+                        cx.notify();
+                    },
+                )),
+            );
+        }
         if let Some(text) = copy_text_of(&message.body, meta) {
             let shared = text.clone();
             row = row.child(
@@ -4649,6 +4683,23 @@ fn body_text(body: &MessageBody) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn private_chat_needs_a_phone_jid() {
+        assert_eq!(
+            super::private_chat_jid("905321234567:12@s.whatsapp.net").as_deref(),
+            Some("905321234567@s.whatsapp.net")
+        );
+        assert_eq!(super::private_chat_jid("1234567890@lid"), None);
+        assert_eq!(super::private_chat_jid(""), None);
+    }
+
+    #[test]
+    fn first_name_is_the_first_word() {
+        assert_eq!(super::first_name("Ayşe Demir"), "Ayşe");
+        assert_eq!(super::first_name("Ayşe"), "Ayşe");
+        assert_eq!(super::first_name(""), "");
+    }
+
     #[test]
     fn failed_edit_restores_only_into_an_idle_composer() {
         assert!(super::can_restore_edit(true, false, false));

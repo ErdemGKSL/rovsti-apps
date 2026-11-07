@@ -16,6 +16,18 @@ pub enum SmsKey {
     Local(u64),
 }
 
+impl SmsKey {
+    /// The key the Android bridge deletes by (`"sms:12"`, `"mms:7"`). `None`
+    /// for a `Local` send, which has no provider row of its own.
+    pub fn provider_id(self) -> Option<String> {
+        match self {
+            SmsKey::Sms(id) => Some(format!("sms:{id}")),
+            SmsKey::Mms(id) => Some(format!("mms:{id}")),
+            SmsKey::Local(_) => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SmsItem {
     pub key: SmsKey,
@@ -229,6 +241,27 @@ impl SmsTimeline {
         Some(self.items.remove(pos).body)
     }
 
+    /// The provider key behind `key`: itself, or the row a `Local` send was
+    /// linked to. `None` for a `Local` send that has no provider row (yet).
+    pub fn provider_key(&self, key: SmsKey) -> Option<SmsKey> {
+        match key {
+            SmsKey::Local(id) => self.linked.iter().find(|(l, _)| *l == id).map(|(_, k)| *k),
+            other => Some(other),
+        }
+    }
+
+    /// Removes an item (and the link of a `Local` one). False when unknown.
+    pub fn remove(&mut self, key: SmsKey) -> bool {
+        let Some(pos) = self.position(key) else {
+            return false;
+        };
+        self.items.remove(pos);
+        if let SmsKey::Local(id) = key {
+            self.linked.retain(|(l, _)| *l != id);
+        }
+        true
+    }
+
     fn position(&self, key: SmsKey) -> Option<usize> {
         self.items.iter().position(|i| i.key == key)
     }
@@ -405,6 +438,28 @@ mod tests {
         assert_eq!(t.items()[1].state, DeliveryState::Pending);
         assert!(t.retry(2).is_none());
         assert!(t.retry(99).is_none());
+    }
+
+    #[test]
+    fn provider_ids_and_removal() {
+        assert_eq!(SmsKey::Sms(12).provider_id().as_deref(), Some("sms:12"));
+        assert_eq!(SmsKey::Mms(7).provider_id().as_deref(), Some("mms:7"));
+        assert_eq!(SmsKey::Local(1).provider_id(), None);
+        let mut t = SmsTimeline::new(1);
+        t.push_pending(1, "hi".into(), None, 100);
+        assert_eq!(t.provider_key(SmsKey::Local(1)), None);
+        t.apply_status(&SmsStatus {
+            local_id: 1,
+            uri: Some("content://sms/42".into()),
+            state: DeliveryState::Sent,
+            error_code: None,
+        });
+        assert_eq!(t.provider_key(SmsKey::Local(1)), Some(SmsKey::Sms(42)));
+        assert_eq!(t.provider_key(SmsKey::Mms(3)), Some(SmsKey::Mms(3)));
+        assert!(t.remove(SmsKey::Local(1)));
+        assert!(!t.remove(SmsKey::Local(1)));
+        assert!(t.items().is_empty());
+        assert_eq!(t.provider_key(SmsKey::Local(1)), None);
     }
 
     #[test]

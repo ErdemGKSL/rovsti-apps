@@ -220,6 +220,8 @@ enum PillAction {
     OpenChat { jid: String, title: String },
     /// Opens the chat a message was just forwarded to.
     OpenThread { thread: ThreadId, title: String },
+    /// Brings back an SMS/MMS deleted a moment ago.
+    UndoSmsDelete(rovsti_core::sms_timeline::SmsKey),
 }
 
 /// The page pushed over the tabs.
@@ -468,7 +470,10 @@ impl MessagesApp {
                     }
                     cx.notify();
                 }
-                BackendEvent::SmsChanged | BackendEvent::Status(_) | BackendEvent::Document(_) => {}
+                BackendEvent::SmsChanged
+                | BackendEvent::Status(_)
+                | BackendEvent::Document(_)
+                | BackendEvent::SmsMessageDeleted { .. } => {}
             }),
             cx.subscribe(&settings, |this, _, event, cx| match event {
                 SettingsEvent::OpenWhatsApp => {
@@ -1155,6 +1160,9 @@ impl MessagesApp {
                 this.open_media_viewer(vec![item.clone()], 0, cx);
             }
             ConversationEvent::Forward(item) => this.open_forward(item.clone(), cx),
+            ConversationEvent::OpenChat { jid, title } => {
+                this.open_chat(jid.clone(), title.clone(), cx);
+            }
         })
         .detach();
         // Opening reads the chat.
@@ -1244,6 +1252,18 @@ impl MessagesApp {
                 this.open_media_viewer(vec![item.clone()], 0, cx);
             }
             SmsConversationEvent::Forward(item) => this.open_forward(item.clone(), cx),
+            SmsConversationEvent::NeedsRole => this.show_pill_action(
+                sms_actions::NEEDS_ROLE,
+                sms_actions::MAKE_DEFAULT,
+                PillAction::RequestSmsRole,
+                cx,
+            ),
+            SmsConversationEvent::Deleted(key) => this.show_pill_action(
+                rovsti_core::pending_delete::notice(1),
+                "Undo",
+                PillAction::UndoSmsDelete(*key),
+                cx,
+            ),
             SmsConversationEvent::Notice(text) => {
                 this.show_pill(*text);
                 cx.notify();
@@ -1373,7 +1393,10 @@ impl MessagesApp {
 
     /// A page is about to replace the open one (a notification, the channel
     /// switch): layers that belonged to the old page go with it.
-    fn leave_page(&mut self, cx: &App) {
+    fn leave_page(&mut self, cx: &mut App) {
+        if let Open::Sms(conversation) = &self.open {
+            conversation.update(cx, |page, cx| page.commit_all_deletes(cx));
+        }
         if let Some(thread) = self.open_thread_id(cx) {
             let text = match &self.open {
                 Open::WhatsApp(_, conversation) => conversation.read(cx).draft(cx),
@@ -2052,6 +2075,13 @@ impl MessagesApp {
                 }
             }
             PillAction::Reblock(raw) => self.reblock(raw, cx),
+            PillAction::UndoSmsDelete(key) => {
+                if let Open::Sms(conversation) = &self.open {
+                    conversation.update(cx, |page, cx| {
+                        page.undo_delete(key, cx);
+                    });
+                }
+            }
             PillAction::RequestSmsRole => self
                 .backend
                 .update(cx, |backend, cx| backend.request_sms_role(cx)),
@@ -2936,6 +2966,9 @@ impl MessagesApp {
     fn sms_window_active(&mut self, active: bool, cx: &mut Context<Self>) {
         self.backend
             .update(cx, |backend, cx| backend.set_ui_active(active, cx));
+        if !active && let Open::Sms(conversation) = &self.open {
+            conversation.update(cx, |page, cx| page.commit_all_deletes(cx));
+        }
         if let (true, Some(ThreadId::Sms(id))) = (active, self.open_thread_id(cx)) {
             self.dismiss_notification(&ThreadId::Sms(id), cx);
             self.backend

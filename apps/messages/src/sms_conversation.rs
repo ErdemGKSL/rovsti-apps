@@ -4,7 +4,7 @@
 //! this module is the GPUI shell around it plus a few pure text helpers.
 
 use rovsti_core::text_detect::{self, DetectAction};
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, InteractiveElement, IntoElement, ListAlignment,
@@ -16,6 +16,7 @@ use rovsti_core::{
     ThreadId,
     chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
+    pending_delete::PendingDeletes,
     sms::{DeliveryState, SmsSend, SmsSimsPayload, SmsStatus, segments},
     sms_timeline::{SmsItem, SmsKey, SmsTimeline},
     unread_jump::{self, JumpState},
@@ -104,6 +105,10 @@ pub enum SmsConversationEvent {
     Forward(crate::forward_ui::ForwardItem),
     /// The Copy link pill: the page copies the URL and says "Link copied".
     CopyLink(String),
+    /// Delete on a message without the SMS role: the page offers the role.
+    NeedsRole,
+    /// A message was hidden for deletion: the page's pill offers Undo.
+    Deleted(SmsKey),
 }
 
 impl EventEmitter<SmsConversationEvent> for SmsConversation {}
@@ -193,6 +198,14 @@ pub struct SmsConversation {
     opening_unread: Option<u32>,
     /// The divider: the first unread message and how many follow it.
     divider: Option<(SmsKey, u32)>,
+    /// The message waiting at the "Delete this message?" sheet.
+    delete_confirm: Option<SmsKey>,
+    /// Confirmed deletes in their Undo window (hidden from the rows).
+    pending: PendingDeletes<SmsKey>,
+    /// Deletes handed to the backend, still hidden until it answers.
+    deleting: Vec<SmsKey>,
+    /// The 1 s timer that commits due deletes is running.
+    ticking: bool,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -266,6 +279,10 @@ impl SmsConversation {
             jump: JumpState::default(),
             opening_unread: (unread > 0).then_some(unread),
             divider: None,
+            delete_confirm: None,
+            pending: PendingDeletes::default(),
+            deleting: Vec::new(),
+            ticking: false,
             _subscriptions: subscriptions,
         };
         this.fill_from_thread(cx);
@@ -390,6 +407,10 @@ impl SmsConversation {
     /// System Back inside the page: clears the selected bubble; `false` when
     /// nothing was selected.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.delete_confirm.take().is_some() {
+            cx.notify();
+            return true;
+        }
         if self.gallery.take().is_some() || self.info_sheet.take().is_some() {
             cx.notify();
             return true;
@@ -585,6 +606,16 @@ impl SmsConversation {
                 self.adopt_thread(cx);
                 self.fill_from_thread(cx);
                 self.load(None, cx);
+            }
+            BackendEvent::SmsMessageDeleted { thread_id, key, ok }
+                if *thread_id == self.thread_id =>
+            {
+                self.deleting.retain(|k| k != key);
+                if *ok {
+                    self.timeline.remove(*key);
+                }
+                self.rows_dirty = true;
+                cx.notify();
             }
             BackendEvent::Document(result) if result.op == DocumentOp::Attachment => {
                 self.on_attachment(result, cx);
@@ -935,6 +966,104 @@ impl SmsConversation {
             cx.emit(SmsConversationEvent::Notice("Message deleted"));
         }
         cx.notify();
+    }
+
+    /// Whether `key` is hidden: waiting out its Undo window or being deleted.
+    fn is_hidden(&self, key: SmsKey) -> bool {
+        self.pending.contains(&key) || self.deleting.contains(&key)
+    }
+
+    /// The Delete pill: without the SMS role the page offers it; otherwise
+    /// the confirm sheet opens.
+    fn ask_delete(&mut self, key: SmsKey, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.rows_dirty = true;
+        let backend = self.backend.read(cx);
+        if !backend.sms_role_held() && !backend.is_preview() {
+            cx.emit(SmsConversationEvent::NeedsRole);
+        } else {
+            self.delete_confirm = Some(key);
+        }
+        cx.notify();
+    }
+
+    /// "Delete" on the sheet: the message is hidden and waits out the Undo window.
+    fn confirm_delete(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = self.delete_confirm.take() else {
+            return;
+        };
+        self.pending.add(key, now_ms());
+        self.rows_dirty = true;
+        cx.emit(SmsConversationEvent::Deleted(key));
+        self.start_ticking(cx);
+        cx.notify();
+    }
+
+    /// The pill's Undo: the message comes back. False when it was already committed.
+    pub fn undo_delete(&mut self, key: SmsKey, cx: &mut Context<Self>) -> bool {
+        let undone = self.pending.undo(&key);
+        if undone {
+            self.rows_dirty = true;
+            cx.notify();
+        }
+        undone
+    }
+
+    /// Hands deletes to the backend; they stay hidden until it answers.
+    fn commit_deletes(&mut self, keys: Vec<SmsKey>, cx: &mut Context<Self>) {
+        let thread_id = self.thread_id;
+        for key in keys {
+            // A send of ours linked to a provider row deletes that row.
+            match self.timeline.provider_key(key) {
+                Some(provider) => {
+                    self.deleting.push(key);
+                    self.backend.update(cx, |backend, cx| {
+                        backend.delete_sms_message(thread_id, provider, cx);
+                    });
+                }
+                None => {
+                    self.timeline.remove(key);
+                }
+            }
+        }
+        self.rows_dirty = true;
+        cx.notify();
+    }
+
+    /// Commits everything still waiting (leaving the page, the app pausing).
+    pub fn commit_all_deletes(&mut self, cx: &mut Context<Self>) {
+        let keys = self.pending.drain();
+        if !keys.is_empty() {
+            self.commit_deletes(keys, cx);
+        }
+    }
+
+    /// Runs a 1 s timer that commits due deletes while any are pending.
+    fn start_ticking(&mut self, cx: &mut Context<Self>) {
+        if self.ticking {
+            return;
+        }
+        self.ticking = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let go_on = this
+                    .update(cx, |this, cx| {
+                        let due = this.pending.due(now_ms());
+                        if !due.is_empty() {
+                            this.commit_deletes(due, cx);
+                        }
+                        let more = this.pending.has_pending();
+                        this.ticking = more;
+                        more
+                    })
+                    .unwrap_or(false);
+                if !go_on {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     /// A copy pill was tapped: the page copies it and the selection closes.
@@ -1294,10 +1423,13 @@ impl SmsConversation {
         self.rows_dirty = false;
         self.rows_offset = offset;
         let items = self.timeline.items();
-        let starts = day_starts(items, offset);
+        let starts = day_starts(items, offset, |item| self.is_hidden(item.key));
         let mut entries = Vec::with_capacity(items.len() + starts.len());
         let mut next_start = starts.iter().peekable();
         for (index, item) in items.iter().enumerate() {
+            if self.is_hidden(item.key) {
+                continue;
+            }
             if next_start.next_if(|&&at| at == index).is_some() {
                 entries.push(Entry::Day(index));
             }
@@ -1482,6 +1614,43 @@ impl SmsConversation {
             ..InfoInput::default()
         };
         rows(&input, backend.locale())
+    }
+
+    /// "Delete this message?" over the conversation.
+    fn delete_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.delete_confirm?;
+        let colors = theme::colors(theme);
+        let cancel = |this: &mut Self, cx: &mut Context<Self>| {
+            this.delete_confirm = None;
+            cx.notify();
+        };
+        let items = vec![
+            crate::menu_item(
+                theme,
+                "sms-del-yes",
+                Icon::LucideTrash2,
+                "Delete".into(),
+                colors.red,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.confirm_delete(cx)))
+            .into_any_element(),
+            crate::menu_item(
+                theme,
+                "sms-del-no",
+                Icon::LucideX,
+                "Cancel".into(),
+                colors.label,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| cancel(this, cx)))
+            .into_any_element(),
+        ];
+        Some(crate::menu_card(
+            theme,
+            "sms-delete-menu",
+            "Delete this message? It is removed from this phone.".into(),
+            items,
+            cx.listener(move |this, _, _, cx| cancel(this, cx)),
+        ))
     }
 
     /// The Info or Select text sheet over the conversation.
@@ -1749,6 +1918,13 @@ impl SmsConversation {
                         })),
                 );
             }
+            let key = item.key;
+            pills = pills.child(
+                glass_pill(theme, "Delete")
+                    .id(("sms-del-one", index))
+                    .text_color(colors.red)
+                    .on_click(cx.listener(move |this, _, _, cx| this.ask_delete(key, cx))),
+            );
             let sheet_rows = self.info_rows(item, cx);
             pills = pills.child(glass_pill(theme, "Info").id(("sms-info", index)).on_click(
                 cx.listener(move |this, _, _, cx| {
@@ -2087,6 +2263,7 @@ impl Render for SmsConversation {
 
         let info_sheet = self.info_overlay(theme, cx);
         let gallery_sheet = self.gallery_overlay(theme, cx);
+        let delete_sheet = self.delete_overlay(theme, cx);
         div()
             .size_full()
             .relative()
@@ -2100,6 +2277,7 @@ impl Render for SmsConversation {
             .child(bottom)
             .children(info_sheet)
             .children(gallery_sheet)
+            .children(delete_sheet)
     }
 }
 
@@ -2214,15 +2392,22 @@ pub fn header_subtitle(title: &str, recipients: &[String]) -> Option<String> {
     }
 }
 
-/// Indexes of the items that start a new local day.
-pub fn day_starts(items: &[SmsItem], offset_s: i32) -> Vec<usize> {
+/// Indexes of the shown items (not `hidden`) that start a new local day.
+pub fn day_starts(
+    items: &[SmsItem],
+    offset_s: i32,
+    hidden: impl Fn(&SmsItem) -> bool,
+) -> Vec<usize> {
     let day = |ms: i64| (ms.div_euclid(1000) + i64::from(offset_s)).div_euclid(86_400);
-    items
-        .iter()
-        .enumerate()
-        .filter(|(i, item)| *i == 0 || day(items[i - 1].at_ms) != day(item.at_ms))
-        .map(|(i, _)| i)
-        .collect()
+    let mut last = None;
+    let mut out = Vec::new();
+    for (i, item) in items.iter().enumerate().filter(|(_, it)| !hidden(it)) {
+        if last != Some(day(item.at_ms)) {
+            last = Some(day(item.at_ms));
+            out.push(i);
+        }
+    }
+    out
 }
 
 pub fn is_image(content_type: &str) -> bool {
@@ -2709,10 +2894,17 @@ mod tests {
             item(false, DeliveryState::None, T - day + 60_000),
             item(false, DeliveryState::None, T),
         ];
-        assert_eq!(day_starts(&items, 0), vec![0, 2]);
-        assert_eq!(day_starts(&[], 0), Vec::<usize>::new());
+        let none = |_: &SmsItem| false;
+        assert_eq!(day_starts(&items, 0, none), vec![0, 2]);
+        assert_eq!(day_starts(&[], 0, none), Vec::<usize>::new());
         // A +10h offset moves the cut to local midnight but keeps two days.
-        assert_eq!(day_starts(&items, 10 * 3600), vec![0, 2]);
+        assert_eq!(day_starts(&items, 10 * 3600, none), vec![0, 2]);
+        // Hiding the only item of a day drops its break; hiding the first
+        // item of a day moves the break to the next shown one.
+        let hide2 = |i: &SmsItem| i.at_ms == T;
+        assert_eq!(day_starts(&items, 0, hide2), vec![0]);
+        let hide0 = |i: &SmsItem| i.at_ms == T - day;
+        assert_eq!(day_starts(&items, 0, hide0), vec![1, 2]);
     }
 
     #[test]

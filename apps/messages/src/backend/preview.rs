@@ -263,6 +263,13 @@ impl Preview {
         self.addresses.retain(|(id, _)| *id != thread_id);
     }
 
+    /// Removes one message. False when it is not there.
+    pub fn delete_message(&mut self, id: i64) -> bool {
+        let before = self.rows.len();
+        self.rows.retain(|r| r.id != id);
+        self.rows.len() != before
+    }
+
     pub fn mark_read(&mut self, thread_id: i64) {
         for row in self.rows.iter_mut().filter(|r| r.thread_id == thread_id) {
             row.read = true;

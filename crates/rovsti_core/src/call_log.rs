@@ -274,7 +274,7 @@ pub struct TimeFormat {
 /// "3:14 pm", "Yesterday", "Monday" or "12/10/26" (fits in 16 bytes).
 pub type RelativeTime = SmallText<16>;
 
-const WEEKDAYS: [&str; 7] = [
+pub(crate) const WEEKDAYS: [&str; 7] = [
     "Sunday",
     "Monday",
     "Tuesday",
@@ -347,7 +347,7 @@ pub fn day_section(now_ms: i64, at_ms: i64, tz_offset_s: i32) -> String {
 }
 
 /// 1970-01-01 was a Thursday; index 0 is Sunday.
-fn weekday_index(days_since_epoch: i64) -> usize {
+pub(crate) fn weekday_index(days_since_epoch: i64) -> usize {
     (days_since_epoch + 4).rem_euclid(7) as usize
 }
 
@@ -552,7 +552,6 @@ pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// Inverse of [`civil_from_days`]: (year, month, day) to days since 1970-01-01.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = y.div_euclid(400);

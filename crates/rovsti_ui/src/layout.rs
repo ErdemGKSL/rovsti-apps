@@ -100,6 +100,22 @@ pub mod geom {
         (size, step)
     }
 
+    /// Font size of the monogram in an avatar of `avatar` dp: 36 %, rounded
+    /// (17 dp at 48, 14 dp at 40), so two letters keep clear of the rim.
+    pub fn initials_size(avatar: f32) -> f32 {
+        (avatar * 0.36).round()
+    }
+
+    /// Top-left `(left, top)` of a source badge box of `badge` dp (disc plus
+    /// ring), relative to the avatar's top-left, so that the box centre sits
+    /// on the avatar rim at 45 degrees towards the bottom-right. The badge
+    /// then overlaps the rim, not the letters inside the disc.
+    pub fn source_badge_offset(avatar: f32, badge: f32) -> (f32, f32) {
+        let r = avatar / 2.0;
+        let c = r + r * std::f32::consts::FRAC_1_SQRT_2;
+        (c - badge / 2.0, c - badge / 2.0)
+    }
+
     /// Left edge of the text column of a standard row (separators start here).
     pub fn row_text_inset(margin: f32, avatar: f32, gap: f32) -> f32 {
         margin + avatar + gap
@@ -394,6 +410,28 @@ fn merge_safe_area(real: SafeArea, simulated: Option<SafeArea>) -> SafeArea {
 mod tests {
     use super::geom::*;
     use super::*;
+
+    #[test]
+    fn initials_size_is_36_percent() {
+        assert_eq!(initials_size(48.0), 17.0);
+        assert_eq!(initials_size(40.0), 14.0);
+        assert_eq!(initials_size(28.0), 10.0);
+    }
+
+    #[test]
+    fn source_badge_centre_is_on_the_rim() {
+        for (avatar, badge) in [(48.0_f32, 20.0_f32), (40.0, 20.0), (56.0, 16.0)] {
+            let (l, t) = source_badge_offset(avatar, badge);
+            let (cx, cy) = (
+                l + badge / 2.0 - avatar / 2.0,
+                t + badge / 2.0 - avatar / 2.0,
+            );
+            let dist = (cx * cx + cy * cy).sqrt();
+            assert!(dist >= avatar / 2.0 * 0.95, "{dist}");
+            assert!((dist - avatar / 2.0).abs() < 0.01);
+            assert!(cx > 0.0 && cy > 0.0);
+        }
+    }
 
     #[test]
     fn stack_of_three_fits_its_width() {

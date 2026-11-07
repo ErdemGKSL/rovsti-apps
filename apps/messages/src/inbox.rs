@@ -1010,12 +1010,7 @@ fn contact_photo(row: &InboxRow, sms: &SmsIndex<'_>, contacts: &ContactIndex) ->
 
 /// Up to two initials; `#` for a number or an empty name.
 pub fn initials(title: &str) -> String {
-    let letters: String = title
-        .split_whitespace()
-        .filter_map(|word| word.chars().find(|c| c.is_alphabetic()))
-        .take(2)
-        .flat_map(char::to_uppercase)
-        .collect();
+    let letters = rovsti_core::avatar::initials(title);
     if letters.is_empty() {
         "#".to_owned()
     } else {

@@ -193,17 +193,19 @@ pub fn source_badge(theme: Theme, kind: SourceKind) -> Div {
         )
 }
 
-/// Pins source badges to the bottom-right corner of `avatar` (a merged
+/// Centres source badges on the rim of `avatar` at 45 degrees (bottom-right; a merged
 /// contact passes both kinds; they overlap by [`layout::SOURCE_OVERLAP`]).
 /// The result is exactly the avatar's size, so the layout does not change.
 pub fn with_source_badges(theme: Theme, avatar: Div, kinds: &[SourceKind]) -> Div {
     let box_w = layout::SOURCE_BADGE + layout::SOURCE_RING * 2.0;
     let width = geom::avatar_stack_width(kinds.len(), box_w, layout::SOURCE_OVERLAP);
     let step = box_w - layout::SOURCE_OVERLAP;
+    // The last badge sits on the rim at 45 degrees; earlier ones extend left.
+    let (left, top) = geom::source_badge_offset(layout::AVATAR, box_w);
     let mut row = div()
         .absolute()
-        .bottom(px(-layout::SOURCE_RING))
-        .right(px(-layout::SOURCE_RING * 2.0))
+        .left(px(left + box_w - width))
+        .top(px(top))
         .w(px(width))
         .h(px(box_w));
     for (i, kind) in kinds.iter().enumerate() {

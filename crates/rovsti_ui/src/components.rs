@@ -57,8 +57,8 @@ pub fn avatar(theme: Theme, initials: impl Into<SharedString>, size: f32, tint: 
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(size * 0.4))
-        .font_weight(typography::HEADLINE.weight)
+        .text_size(px(crate::layout::geom::initials_size(size)))
+        .font_weight(gpui::FontWeight(600.0))
         .text_color(colors.background)
         .child(initials.into())
 }

@@ -52,9 +52,37 @@ pub fn monogram(name: &str) -> Option<char> {
         .map(|c| c.to_uppercase().next().unwrap_or(c))
 }
 
+/// The monogram of a name: the first letter of each of its first two words,
+/// upper-cased, at most two graphemes (empty for a number or an empty name).
+/// A grapheme is kept whole, so a dotted capital (`İ`) or a letter with a
+/// combining mark never loses its mark.
+pub fn initials(name: &str) -> String {
+    use unicode_segmentation::UnicodeSegmentation;
+    name.split_whitespace()
+        .filter_map(|word| {
+            word.graphemes(true)
+                .find(|g| g.chars().next().is_some_and(char::is_alphabetic))
+        })
+        .take(2)
+        .map(str::to_uppercase)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initials_take_two_words_and_keep_dotted_capitals() {
+        assert_eq!(initials("mert demir yilmaz"), "MD");
+        assert_eq!(initials("İpek Güneş"), "İG");
+        assert_eq!(initials("Şeyma İnce"), "Şİ");
+        assert_eq!(initials("çağlar"), "Ç");
+        assert_eq!(initials("e\u{301}mile zola"), "E\u{301}Z");
+        assert_eq!(initials("(Ali) 'Veli'"), "AV");
+        assert_eq!(initials("+90 532 123"), "");
+        assert_eq!(initials("   "), "");
+    }
 
     #[test]
     fn monogram_picks_the_first_letter() {

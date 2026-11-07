@@ -17,7 +17,7 @@ use liquid_glass_kit::tokens::{Theme, typography};
 use crate::layout::{self, space};
 
 /// Side padding of the whole row.
-pub const ROW_PAD: f32 = space::M;
+pub const ROW_PAD: f32 = layout::MARGIN;
 /// Gap between two chips' hit boxes.
 pub const CHIP_GAP: f32 = space::S;
 

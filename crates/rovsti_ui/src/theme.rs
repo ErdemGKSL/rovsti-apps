@@ -53,6 +53,11 @@ pub fn colors(theme: Theme) -> Colors {
     if let Some(pair) = ACCENT.get() {
         colors.accent = pair.accent(theme);
     }
+    if theme == Theme::Light {
+        // The iOS secondary label (60 % of #3C3C43) is about 3.4:1 on white;
+        // 74 % reaches the 4.5:1 the layout spec asks for body-size text.
+        colors.secondary_label.a = 0.74;
+    }
     colors
 }
 
@@ -141,5 +146,15 @@ mod tests {
         // A second call is ignored.
         set_accent(AccentPair::from_hex(0, 0, 0));
         assert_eq!(colors(Theme::Light).accent, pair.light);
+    }
+
+    #[test]
+    fn secondary_text_reaches_4_5_on_white() {
+        use gpui::Rgba;
+        let c = colors(Theme::Light).secondary_label;
+        let (f, w): (Rgba, Rgba) = (c.into(), gpui::white().into());
+        let blend = |a: f32, b: f32| a * f.a + b * (1.0 - f.a);
+        let ink = [blend(f.r, w.r), blend(f.g, w.g), blend(f.b, w.b)];
+        assert!(crate::layout::geom::contrast_ratio(ink, [1.0; 3]) >= 4.5);
     }
 }

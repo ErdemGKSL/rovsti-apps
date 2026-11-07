@@ -249,7 +249,7 @@ fn ring_avatar(
     div()
         .flex_none()
         .rounded_full()
-        .border(px(if unseen { 2.5 } else { 1.5 }))
+        .border(px(2.5))
         .border_color(ring)
         .p(px(2.5))
         .child(photo_avatar(

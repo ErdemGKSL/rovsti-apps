@@ -2177,7 +2177,7 @@ fn field_box_with(
         Some(
             div()
                 .truncate()
-                .text_color(colors.tertiary_label)
+                .text_color(colors.secondary_label)
                 .child(placeholder),
         )
     } else {

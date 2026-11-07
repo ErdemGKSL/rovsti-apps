@@ -23,7 +23,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::future::BoxFuture;
 use rovsti_wa_proto::api::routes as r;
-use rovsti_wa_proto::audio::{decode_frame, encode_frame};
+use rovsti_wa_proto::audio::{Rechunker, decode_frame, encode_frame};
 use rovsti_wa_proto::{
     CallDirection, CallInput, CallMachine, CallPhase, CallStarted, CallSummary, CallUpdate,
     ErrorCode, GatewayEvent, PlaceCall, SetMuted,
@@ -768,17 +768,24 @@ impl CallTable {
 
 /// Shuttles audio between the socket and the call until either side ends.
 async fn audio_socket(mut socket: WebSocket, ports: AudioPorts) {
-    loop {
+    // The decoder hands over frames of any length (20 ms ones are common);
+    // the apps take whole 60 ms frames.
+    let mut speaker = Rechunker::new();
+    'shuttle: loop {
         tokio::select! {
             frame = ports.spk_rx.recv() => match frame {
-                Ok(samples) => match encode_frame(&samples) {
-                    Ok(bytes) => {
-                        if socket.send(Message::Binary(bytes.into())).await.is_err() {
-                            break;
+                Ok(samples) => {
+                    for whole in speaker.push(&samples) {
+                        match encode_frame(&whole) {
+                            Ok(bytes) => {
+                                if socket.send(Message::Binary(bytes.into())).await.is_err() {
+                                    break 'shuttle;
+                                }
+                            }
+                            Err(e) => log::warn!("call audio: dropping speaker frame: {e}"),
                         }
                     }
-                    Err(e) => log::warn!("call audio: dropping speaker frame: {e}"),
-                },
+                }
                 // The call ended and closed the channel.
                 Err(_) => break,
             },

@@ -132,4 +132,15 @@ mod tests {
         assert_eq!(r.push(&ramp(FRAME_SAMPLES * 2 + 5, 0)).len(), 2);
         assert_eq!(r.pending(), 5);
     }
+
+    #[test]
+    fn rechunker_joins_20_ms_decoder_frames() {
+        // The WhatsApp decoder emits 320-sample (20 ms) frames; three make one.
+        let mut r = Rechunker::new();
+        assert!(r.push(&ramp(320, 0)).is_empty());
+        assert!(r.push(&ramp(320, 320)).is_empty());
+        let frames = r.push(&ramp(320, 640));
+        assert_eq!(frames, vec![ramp(FRAME_SAMPLES, 0)]);
+        assert_eq!(r.pending(), 0);
+    }
 }

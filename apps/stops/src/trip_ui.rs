@@ -277,6 +277,19 @@ pub struct AlarmView {
     pub side: Option<Side>,
 }
 
+/// Title of the last-trip card.
+pub fn last_trip_title(record: &rovsti_geo::TripRecord) -> String {
+    match record.outcome {
+        rovsti_geo::Outcome::Arrived => format!("Arrived at {}", record.title()),
+        rovsti_geo::Outcome::Cancelled => format!("Trip stopped: {}", record.title()),
+    }
+}
+
+/// The card shows unless Close hid this very record.
+pub fn show_last_trip(id: u64, hidden: Option<u64>) -> bool {
+    hidden != Some(id)
+}
+
 // ---- views -----------------------------------------------------------------------
 
 impl StopsApp {
@@ -293,6 +306,9 @@ impl StopsApp {
                 page = page.child(map);
             }
             page = page.child(self.setup_cards(theme, cx));
+            if let Some(card) = self.last_trip_card(theme, cx) {
+                page = page.child(card);
+            }
         }
         if let Some(hint) = backend::full_screen_notice(&self.preflight) {
             let row = list_row(
@@ -332,6 +348,68 @@ impl StopsApp {
             page = page.child(section(theme, None, [row.into_any_element()]));
         }
         page.into_any_element()
+    }
+
+    /// After a trip ends: what happened, with Start again / Save as stop /
+    /// Share / Close.
+    fn last_trip_card(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let record = self.history.last_finished(now_ms())?;
+        if !show_last_trip(record.id, self.last_trip_hidden) {
+            return None;
+        }
+        let (id, title, summary) = (record.id, last_trip_title(record), record.summary_line());
+        let pair = record.pair();
+        let share = rovsti_geo::history_io::share_text(record, self.tz_offset_s);
+        let colors = theme::colors(theme);
+        let row = list_row(theme, None, title, Some(summary.into()), None).into_any_element();
+        let mut pills = div()
+            .px(px(16.0))
+            .pb(px(12.0))
+            .flex()
+            .flex_wrap()
+            .gap(px(12.0));
+        if let Some((a, b)) = pair {
+            pills = pills
+                .child(
+                    glass_pill(theme, "Start again")
+                        .id("last-trip-again")
+                        .text_color(colors.accent)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.start_again(&a, &b, cx);
+                        })),
+                )
+                .child(
+                    glass_pill(theme, "Save as stop")
+                        .id("last-trip-save")
+                        .text_color(colors.accent)
+                        .on_click(cx.listener(|this, _, _, cx| this.save_record_as_stop(0, cx))),
+                );
+        }
+        pills = pills
+            .child(
+                glass_pill(theme, "Share")
+                    .id("last-trip-share")
+                    .text_color(colors.accent)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.share_out("Trip".into(), share.clone(), cx);
+                    })),
+            )
+            .child(
+                glass_pill(theme, "Close")
+                    .id("last-trip-close")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.last_trip_hidden = Some(id);
+                        cx.notify();
+                    })),
+            );
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .child(section(theme, None, [row]))
+                .child(pills)
+                .into_any_element(),
+        )
     }
 
     /// Under the map while no trip runs: the pick bar, the other ways to pick,
@@ -1188,6 +1266,24 @@ impl StopsApp {
 mod tests {
     use super::*;
     use rovsti_geo::Coord;
+
+    #[test]
+    fn last_trip_title_by_outcome() {
+        let mut r = rovsti_geo::TripRecord {
+            label: "Home".into(),
+            ..Default::default()
+        };
+        assert_eq!(last_trip_title(&r), format!("Arrived at {}", r.title()));
+        r.outcome = rovsti_geo::Outcome::Cancelled;
+        assert_eq!(last_trip_title(&r), format!("Trip stopped: {}", r.title()));
+    }
+
+    #[test]
+    fn close_hides_only_that_record() {
+        assert!(show_last_trip(3, None));
+        assert!(!show_last_trip(3, Some(3)));
+        assert!(show_last_trip(4, Some(3)));
+    }
 
     fn live(side: Option<Side>, inside: bool, circle_m: Option<f64>) -> Live {
         Live {

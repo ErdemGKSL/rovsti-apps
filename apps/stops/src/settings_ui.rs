@@ -1051,6 +1051,28 @@ impl StopsApp {
                             })),
                     );
                 }
+                let share = rovsti_geo::history_io::share_text(r, self.tz_offset_s);
+                let copy = share.clone();
+                pills = pills
+                    .child(
+                        glass_pill(theme, "Share")
+                            .id(("history-share", i))
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.share_out("Trip".into(), share.clone(), cx);
+                            })),
+                    )
+                    .child(
+                        glass_pill(theme, "Copy")
+                            .id(("history-copy", i))
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                    copy.clone(),
+                                ));
+                                this.show_pill("Trip copied", None, cx);
+                            })),
+                    );
                 pills = pills.child(
                     glass_pill(theme, "Delete")
                         .id(("history-delete", i))
@@ -1180,7 +1202,7 @@ impl StopsApp {
     }
 
     /// "Start again": the same rule as starting a saved stop.
-    fn start_again(
+    pub(crate) fn start_again(
         &mut self,
         a: &rovsti_geo::Endpoint,
         b: &rovsti_geo::Endpoint,
@@ -1197,7 +1219,7 @@ impl StopsApp {
     }
 
     /// "Save as stop": keeps the trip's A and B in Saved; the pill offers Undo.
-    fn save_record_as_stop(&mut self, i: usize, cx: &mut Context<Self>) {
+    pub(crate) fn save_record_as_stop(&mut self, i: usize, cx: &mut Context<Self>) {
         let Some(r) = self.history.records.get(i) else {
             return;
         };

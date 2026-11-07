@@ -195,6 +195,8 @@ pub(crate) struct StopsApp {
     pub(crate) confirm_clear: bool,
     /// The History row whose actions (Use, Delete) are showing.
     pub(crate) history_open: Option<usize>,
+    /// The record id whose "last trip" card was closed; in memory only.
+    pub(crate) last_trip_hidden: Option<u64>,
     /// What the History search field holds; not persisted.
     pub(crate) history_query: String,
     pub(crate) history_field: Entity<TextField>,
@@ -406,6 +408,7 @@ impl StopsApp {
             chat_view: Vec::new(),
             confirm_clear: false,
             history_open: None,
+            last_trip_hidden: None,
             history_query: String::new(),
             history_field,
             history_filter: rovsti_geo::OutcomeFilter::All,

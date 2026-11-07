@@ -687,7 +687,7 @@ impl StopsApp {
     }
 
     /// Hands `text` to the share sheet; without one it goes to the clipboard.
-    fn share_out(&mut self, name: String, text: String, cx: &mut Context<Self>) {
+    pub(crate) fn share_out(&mut self, name: String, text: String, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let sent = text.clone();
             let result = cx

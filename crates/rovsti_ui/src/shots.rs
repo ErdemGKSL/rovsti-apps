@@ -201,7 +201,13 @@ pub struct Rig<V: 'static> {
     pub window: WindowHandle<V>,
     pub cx: HeadlessAppContext,
     spec: ShotSpec,
+    /// The theme override, blink flag and frame clock are process globals, so
+    /// only one rig may exist at a time (cargo runs tests on parallel threads).
+    /// Declared last: released after the window is gone.
+    _exclusive: std::sync::MutexGuard<'static, ()>,
 }
+
+static RIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 impl<V: Render + 'static> Rig<V> {
     /// Opens the window described by `spec`; `build` creates the root view.
@@ -209,6 +215,7 @@ impl<V: Render + 'static> Rig<V> {
         spec: ShotSpec,
         build: impl FnOnce(&mut Window, &mut App) -> Entity<V> + 'static,
     ) -> Self {
+        let exclusive = RIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         force_backdrop_support(true);
         crate::field::set_blink(false);
         FrameClock::set_fixed_step(Some(FRAME));
@@ -245,6 +252,7 @@ impl<V: Render + 'static> Rig<V> {
             window,
             root: root.expect("build ran"),
             spec,
+            _exclusive: exclusive,
         }
     }
 

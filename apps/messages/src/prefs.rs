@@ -57,6 +57,9 @@ pub struct MessagesPrefs {
     /// Notification tags (`sms:<id>`, `wa:<jid>`) the user silenced.
     #[serde(default)]
     pub muted: BTreeSet<String>,
+    /// The reply chips above the composers.
+    #[serde(default = "rovsti_core::quick_replies::defaults")]
+    pub quick_replies: Vec<String>,
 }
 
 impl Default for MessagesPrefs {
@@ -67,6 +70,7 @@ impl Default for MessagesPrefs {
             notifications: true,
             otp_copy: true,
             muted: BTreeSet::new(),
+            quick_replies: rovsti_core::quick_replies::defaults(),
         }
     }
 }
@@ -77,6 +81,7 @@ impl MessagesPrefs {
     pub fn reset(&self) -> MessagesPrefs {
         MessagesPrefs {
             sim_choices: self.sim_choices.clone(),
+            quick_replies: self.quick_replies.clone(),
             ..MessagesPrefs::default()
         }
     }
@@ -256,6 +261,24 @@ mod tests {
         assert_eq!(reset.sim_choices.get(&4), Some(&2));
         assert!(reset.notifications && reset.otp_copy && reset.muted.is_empty());
         assert_eq!(reset.spam, MessagesPrefs::default().spam);
+    }
+
+    #[test]
+    fn old_prefs_file_gets_default_replies() {
+        let prefs: MessagesPrefs = serde_json::from_str("{}").expect("parsed");
+        assert_eq!(prefs.quick_replies, rovsti_core::quick_replies::defaults());
+    }
+
+    #[test]
+    fn reset_keeps_quick_replies() {
+        let mut prefs = MessagesPrefs {
+            quick_replies: vec!["Mine".into()],
+            ..MessagesPrefs::default()
+        };
+        assert!(prefs.is_reset());
+        prefs.notifications = false;
+        assert!(!prefs.is_reset());
+        assert_eq!(prefs.reset().quick_replies, vec!["Mine".to_string()]);
     }
 
     #[test]

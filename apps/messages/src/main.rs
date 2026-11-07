@@ -86,6 +86,7 @@ use status_ui::{StatusFeed, StatusPage, StatusPageEvent};
 const TABS: [&str; 3] = ["Chats", "WhatsApp", "Settings"];
 const CHATS_TAB: usize = 0;
 const WHATSAPP_TAB: usize = 1;
+const SETTINGS_TAB: usize = 2;
 const TAB_ICONS: [Icon; 3] = [
     Icon::LucideMessageSquare,
     Icon::LucideMessageCircle,
@@ -476,6 +477,10 @@ impl MessagesApp {
                 }
                 SettingsEvent::UnmuteWhatsApp(jid) => {
                     this.chat_action(jid, ChatActionKind::Unmute, false, cx);
+                }
+                SettingsEvent::Notice(text) => {
+                    this.show_pill(text.clone());
+                    cx.notify();
                 }
                 SettingsEvent::Undoable { text, undo } => {
                     this.show_pill_action(
@@ -1118,6 +1123,7 @@ impl MessagesApp {
             ConversationEvent::CancelScheduled(key) => this.cancel_scheduled(key.clone(), cx),
             ConversationEvent::ToggleMute => this.toggle_open_mute(cx),
             ConversationEvent::Menu => this.open_wa_page_menu(cx),
+            ConversationEvent::OpenSettings => this.open_settings_tab(cx),
             ConversationEvent::Copy(text) => this.copy_text(text.clone().into(), false, cx),
             ConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             ConversationEvent::Call(n) => {
@@ -1221,6 +1227,7 @@ impl MessagesApp {
             ),
             SmsConversationEvent::Email(a) => this.email_to(a.clone(), cx),
             SmsConversationEvent::Menu => this.open_page_menu(cx),
+            SmsConversationEvent::OpenSettings => this.open_settings_tab(cx),
             SmsConversationEvent::NotSpam => this.open_page_not_spam(cx),
             SmsConversationEvent::OpenMedia { items, index } => {
                 this.open_media_viewer(items.clone(), *index, cx);
@@ -1369,6 +1376,15 @@ impl MessagesApp {
         }
         self.schedule.close();
         self.row_menu = None;
+    }
+
+    /// The "Add quick replies in Settings" chip: leave the page for Settings.
+    fn open_settings_tab(&mut self, cx: &mut Context<Self>) {
+        self.close_page(cx);
+        if self.tabs.select(SETTINGS_TAB) {
+            self.page.restart();
+        }
+        cx.notify();
     }
 
     fn close_page(&mut self, cx: &mut Context<Self>) {
@@ -2125,6 +2141,14 @@ impl MessagesApp {
                 self.backend
                     .update(cx, |backend, cx| backend.update_prefs(cx, |p| *p = *old));
                 self.show_pill("Settings restored");
+            }
+            SettingsUndo::QuickReply(index, text) => {
+                self.backend.update(cx, |backend, cx| {
+                    backend.update_prefs(cx, |p| {
+                        rovsti_core::quick_replies::restore(&mut p.quick_replies, index, text);
+                    });
+                });
+                self.show_pill("Reply restored");
             }
             SettingsUndo::Block(raw) => self.reblock(raw, cx),
         }

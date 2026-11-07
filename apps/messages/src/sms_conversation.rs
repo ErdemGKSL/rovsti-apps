@@ -35,7 +35,7 @@ use crate::{
     backend::{Backend, BackendEvent, now_ms, sim_for},
     conversation::{
         HIGHLIGHT_FOR, clock, composer_bar, day_label, header_bar_with, jump_button,
-        unread_divider_row,
+        quick_reply_row, replies_at, unread_divider_row,
     },
     find_ui::{FindActions, FindState, find_bar},
     inbox::Badge,
@@ -72,6 +72,8 @@ pub enum SmsConversationEvent {
     CancelScheduled(StripKey),
     /// The header's bell: mute or unmute this thread's notifications.
     ToggleMute,
+    /// The "Add quick replies in Settings" chip: go to the Settings tab.
+    OpenSettings,
     /// A copy pill under a selected bubble. `sensitive` hides it from the paste preview.
     Copy {
         text: String,
@@ -164,6 +166,8 @@ pub struct SmsConversation {
     /// Waiting scheduled sends of this thread, set by the page.
     scheduled: Vec<StripItem>,
     strip_expanded: bool,
+    /// The quick reply chip row above the composer is open.
+    quick_open: bool,
     muted: bool,
     /// The bubble (by `message_key`) whose copy pills are showing.
     selected: Option<u64>,
@@ -242,6 +246,7 @@ impl SmsConversation {
             switch: None,
             scheduled: Vec::new(),
             strip_expanded: false,
+            quick_open: false,
             muted: false,
             in_spam: false,
             selected: None,
@@ -779,6 +784,17 @@ impl SmsConversation {
                 .update(cx, |backend, cx| backend.remember_sim(thread, next, cx));
             cx.notify();
         }
+    }
+
+    /// A reply chip was tapped: it goes into the composer, the row closes and
+    /// the keyboard stays up.
+    fn insert_quick_reply(&mut self, reply: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let text = rovsti_core::quick_replies::insert_into(self.composer.read(cx).text(), reply);
+        self.composer.update(cx, |field, cx| field.set(&text, cx));
+        self.quick_open = false;
+        let focus = self.composer.read(cx).focus_handle();
+        window.focus(&focus, cx);
+        cx.notify();
     }
 
     fn send(&mut self, cx: &mut Context<Self>) {
@@ -1678,7 +1694,43 @@ impl Render for SmsConversation {
                     cx.listener(|this, _, _, cx| this.long_press_schedule(cx)),
                 )
                 .into_any_element();
-            composer_bar(keyboard, Some(attach), field, send).into_any_element()
+            let zap = glass_icon_button(theme, Icon::LucideZap, 0.0, self.quick_open)
+                .id("sms-quick")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.quick_open = !this.quick_open;
+                    cx.notify();
+                }))
+                .into_any_element();
+            let leading = div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(attach)
+                .child(zap)
+                .into_any_element();
+            let bar = composer_bar(keyboard, Some(leading), field, send);
+            let quick = self.quick_open.then(|| {
+                let replies = self.backend.read(cx).prefs().quick_replies.clone();
+                quick_reply_row(theme, "sms-quick-row", &replies, |pick: Option<usize>| {
+                    Box::new(cx.listener(move |this, _, window, cx| {
+                        let Some(index) = pick else {
+                            cx.emit(SmsConversationEvent::OpenSettings);
+                            return;
+                        };
+                        let Some(reply) = replies_at(&this.backend, index, cx) else {
+                            return;
+                        };
+                        this.insert_quick_reply(&reply, window, cx);
+                    }))
+                })
+            });
+            div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .children(quick)
+                .child(bar)
+                .into_any_element()
         } else {
             div()
                 .flex_none()

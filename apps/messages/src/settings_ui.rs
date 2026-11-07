@@ -23,12 +23,14 @@ use rovsti_android::{Error, documents, sms};
 use rovsti_core::{
     ThreadId, blocklist,
     msg_backup::{self, BackupBody, BackupError, RestorePlan},
+    quick_replies::{self, ReplyError},
     sms::SmsThreadRow,
     spam::SpamRule,
     wire::{DocumentOp, DocumentResult, EmergencyList},
 };
 use rovsti_ui::{
-    components::{glass_pill, list_row, section},
+    Icon,
+    components::{glass_icon_button, glass_pill, list_row, section},
     current_theme,
     field::{TextField, field_box, secret_field_box},
     theme,
@@ -44,7 +46,7 @@ use crate::{
 };
 
 /// Said before "Reset settings" does anything.
-pub const RESET_CONFIRM: &str = "Spam rules, notification switches and mutes go back to the defaults. Blocked numbers and the WhatsApp link stay.";
+pub const RESET_CONFIRM: &str = "Spam rules, notification switches and mutes go back to the defaults. Blocked numbers, quick replies and the WhatsApp link stay.";
 
 /// The largest archive the picker may hand over.
 const IMPORT_MAX_BYTES: u64 = 64 * 1024 * 1024;
@@ -64,6 +66,8 @@ pub enum SettingsEvent {
         text: SharedString,
         undo: SettingsUndo,
     },
+    /// A short message for the page's pill ("Reply added").
+    Notice(SharedString),
 }
 
 /// What "Undo" restores after a Settings delete.
@@ -73,6 +77,8 @@ pub enum SettingsUndo {
     Allow(String),
     Block(String),
     Mute(String),
+    /// A quick reply removed from this place in the list.
+    QuickReply(usize, String),
     /// The settings as they were before "Reset settings".
     Prefs(Box<MessagesPrefs>),
 }
@@ -178,6 +184,7 @@ pub struct SettingsView {
     backend: Entity<Backend>,
     rule_field: Entity<TextField>,
     allow_field: Entity<TextField>,
+    reply_field: Entity<TextField>,
     block_field: Entity<TextField>,
     pass: Entity<TextField>,
     confirm: Entity<TextField>,
@@ -223,6 +230,7 @@ impl SettingsView {
         };
         let rule_field = field(TextInputPurpose::Text, TextInputAction::Done, cx);
         let allow_field = field(TextInputPurpose::Text, TextInputAction::Done, cx);
+        let reply_field = field(TextInputPurpose::Text, TextInputAction::Done, cx);
         let block_field = field(TextInputPurpose::Phone, TextInputAction::Done, cx);
         let pass = field(TextInputPurpose::Text, TextInputAction::Next, cx);
         let confirm = field(TextInputPurpose::Text, TextInputAction::Done, cx);
@@ -235,7 +243,13 @@ impl SettingsView {
                 }
             }),
         ];
-        for field in [&rule_field, &allow_field, &block_field, &open_pass] {
+        for field in [
+            &rule_field,
+            &allow_field,
+            &reply_field,
+            &block_field,
+            &open_pass,
+        ] {
             subscriptions.push(cx.observe(field, |_, _, cx| cx.notify()));
         }
         for field in [&pass, &confirm] {
@@ -248,6 +262,7 @@ impl SettingsView {
             backend,
             rule_field,
             allow_field,
+            reply_field,
             block_field,
             pass,
             confirm,
@@ -283,6 +298,116 @@ impl SettingsView {
             self.rule_field.update(cx, |field, cx| field.clear(cx));
         }
         cx.notify();
+    }
+
+    // ---- quick replies --------------------------------------------------------
+
+    fn add_reply(&mut self, cx: &mut Context<Self>) {
+        let text = self.reply_field.read(cx).text().to_owned();
+        let mut result: Result<usize, ReplyError> = Err(ReplyError::Empty);
+        self.backend.update(cx, |backend, cx| {
+            let mut list = backend.prefs().quick_replies.clone();
+            result = quick_replies::add(&mut list, &text);
+            if result.is_ok() {
+                backend.update_prefs(cx, |p| p.quick_replies = list);
+            }
+        });
+        match result {
+            Ok(_) => {
+                self.reply_field.update(cx, |field, cx| field.clear(cx));
+                cx.emit(SettingsEvent::Notice("Reply added".into()));
+            }
+            Err(e) => cx.emit(SettingsEvent::Notice(e.to_string().into())),
+        }
+        cx.notify();
+    }
+
+    fn move_reply_up(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| {
+                quick_replies::move_up(&mut p.quick_replies, index);
+            });
+        });
+    }
+
+    fn delete_reply(&mut self, index: usize, cx: &mut Context<Self>) {
+        let mut removed = None;
+        self.backend.update(cx, |backend, cx| {
+            backend.update_prefs(cx, |p| {
+                removed = quick_replies::remove(&mut p.quick_replies, index)
+            });
+        });
+        if let Some(text) = removed {
+            cx.emit(SettingsEvent::Undoable {
+                text: "Reply removed".into(),
+                undo: SettingsUndo::QuickReply(index, text),
+            });
+        }
+    }
+
+    fn quick_replies_section(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let replies = self.backend.read(cx).prefs().quick_replies.clone();
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for (index, reply) in replies.iter().enumerate() {
+            let up = (index > 0).then(|| {
+                glass_icon_button(theme, Icon::LucideChevronUp, 0.0, false)
+                    .id(("set-reply-up", index))
+                    .on_click(cx.listener(move |this, _, _, cx| this.move_reply_up(index, cx)))
+            });
+            let delete = glass_icon_button(theme, Icon::LucideTrash2, 0.0, false)
+                .id(("set-reply-del", index))
+                .on_click(cx.listener(move |this, _, _, cx| this.delete_reply(index, cx)));
+            rows.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(div().flex_1().min_w_0().child(list_row(
+                        theme,
+                        None,
+                        quick_replies::chip_label(reply),
+                        None,
+                        None,
+                    )))
+                    .children(up)
+                    .child(delete)
+                    .pr(px(12.0))
+                    .into_any_element(),
+            );
+        }
+        if replies.is_empty() {
+            rows.push(Self::text_line(
+                theme,
+                "No quick replies yet. Add one below.",
+                false,
+            ));
+        }
+        rows.push(Self::form_row(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .w_full()
+                .child(div().flex_1().min_w_0().child(field_box(
+                    theme,
+                    "set-reply-field",
+                    &self.reply_field,
+                    "A new quick reply",
+                    window,
+                    cx,
+                )))
+                .child(
+                    glass_pill(theme, "Add")
+                        .id("set-reply-add")
+                        .on_click(cx.listener(|this, _, _, cx| this.add_reply(cx))),
+                ),
+        ));
+        section(theme, Some("Quick replies".into()), rows).into_any_element()
     }
 
     fn allow_sender(&mut self, cx: &mut Context<Self>) {
@@ -1239,6 +1364,7 @@ impl Render for SettingsView {
             .child(self.default_app(theme, cx))
             .child(self.notifications(theme, cx))
             .child(self.spam(theme, window, cx))
+            .child(self.quick_replies_section(theme, window, cx))
             .child(self.backup_section(theme, window, cx))
             .child(whatsapp)
             .child(self.reset_section(theme, cx))

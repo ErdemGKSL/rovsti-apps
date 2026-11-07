@@ -21,6 +21,7 @@ use rovsti_core::{
     ThreadId,
     chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
+    quick_replies,
     recents::LocaleTime,
     starred::{self, StarCandidate, StarredRow},
     unread_jump::{self, JumpState},
@@ -117,6 +118,8 @@ pub enum ConversationEvent {
     CancelScheduled(StripKey),
     /// The header's bell: mute or unmute this chat's notifications.
     ToggleMute,
+    /// The "Add quick replies in Settings" chip: go to the Settings tab.
+    OpenSettings,
     /// The header's more button: the chat's menu.
     Menu,
     /// The Copy pill of a message: the page puts the text on the clipboard.
@@ -282,6 +285,8 @@ pub struct Conversation {
     /// Waiting scheduled sends of this chat, set by the page.
     scheduled: Vec<StripItem>,
     strip_expanded: bool,
+    /// The quick reply chip row above the composer is open.
+    quick_open: bool,
     muted: bool,
     backend: Entity<Backend>,
     /// The file picker is open and its answer is ours.
@@ -420,6 +425,7 @@ impl Conversation {
             switch: None,
             scheduled: Vec::new(),
             strip_expanded: false,
+            quick_open: false,
             muted: false,
             backend,
             awaiting_attachment: false,
@@ -740,6 +746,17 @@ impl Conversation {
             let focus = find.field.read(cx).focus_handle();
             window.focus(&focus, cx);
         }
+        cx.notify();
+    }
+
+    /// A reply chip was tapped: it goes into the composer, the row closes and
+    /// the keyboard stays up.
+    fn insert_quick_reply(&mut self, reply: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let text = quick_replies::insert_into(self.composer.read(cx).text(), reply);
+        self.composer.update(cx, |field, cx| field.set(&text, cx));
+        self.quick_open = false;
+        let focus = self.composer.read(cx).focus_handle();
+        window.focus(&focus, cx);
         cx.notify();
     }
 
@@ -3455,7 +3472,36 @@ impl Render for Conversation {
             .id("conv-attach")
             .on_click(cx.listener(|this, _, _, cx| this.pick_attachment(cx)))
             .into_any_element();
-        let composer = composer_bar(keyboard, Some(attach), field, send);
+        let zap = glass_icon_button(theme, Icon::LucideZap, 0.0, self.quick_open)
+            .id("conv-quick")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.quick_open = !this.quick_open;
+                cx.notify();
+            }))
+            .into_any_element();
+        let leading = div()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .child(attach)
+            .child(zap)
+            .into_any_element();
+        let composer = composer_bar(keyboard, Some(leading), field, send);
+        let quick = self.quick_open.then(|| {
+            let replies = self.backend.read(cx).prefs().quick_replies.clone();
+            quick_reply_row(theme, "conv-quick-row", &replies, |pick: Option<usize>| {
+                Box::new(cx.listener(move |this, _, window, cx| {
+                    let Some(index) = pick else {
+                        cx.emit(ConversationEvent::OpenSettings);
+                        return;
+                    };
+                    let Some(reply) = replies_at(&this.backend, index, cx) else {
+                        return;
+                    };
+                    this.insert_quick_reply(&reply, window, cx);
+                }))
+            })
+        });
         let colors = theme::colors(theme);
         let info = (self.attachment.is_some() || self.notice.is_some()).then(|| {
             let chip = self.attachment.as_ref().map(|attached| {
@@ -3503,6 +3549,7 @@ impl Render for Conversation {
             .children(strip)
             .children(info)
             .children(context)
+            .children(quick)
             .child(composer)
             .children(overlay)
             .children(starred_sheet)
@@ -3628,6 +3675,57 @@ pub(crate) fn header_bar_with(
                 })),
         )
         .children(trailing)
+}
+
+/// The prefs' quick reply at `index`.
+pub(crate) fn replies_at(
+    backend: &Entity<Backend>,
+    index: usize,
+    cx: &gpui::App,
+) -> Option<String> {
+    backend.read(cx).prefs().quick_replies.get(index).cloned()
+}
+
+type ClickFn = Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static>;
+
+/// The horizontally scrollable chip row above a composer. `handler(Some(i))`
+/// is the tap on reply `i`; `handler(None)` the "Add quick replies in
+/// Settings" chip shown while the list is empty.
+pub(crate) fn quick_reply_row(
+    theme: Theme,
+    id: &'static str,
+    replies: &[String],
+    handler: impl Fn(Option<usize>) -> ClickFn,
+) -> AnyElement {
+    let chip = |index: Option<usize>, label: String| {
+        glass_pill(theme, label)
+            .id(("quick-chip", index.unwrap_or(usize::MAX)))
+            .flex_none()
+            .h(px(34.0))
+            .px(px(14.0))
+            .text_size(typography::FOOTNOTE.size)
+            .on_click(handler(index))
+    };
+    let chips: Vec<_> = if replies.is_empty() {
+        vec![chip(None, "Add quick replies in Settings".to_owned())]
+    } else {
+        replies
+            .iter()
+            .enumerate()
+            .map(|(i, r)| chip(Some(i), quick_replies::chip_label(r)))
+            .collect()
+    };
+    div()
+        .id(id)
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .px(px(12.0))
+        .pt(px(8.0))
+        .overflow_x_scroll()
+        .children(chips)
+        .into_any_element()
 }
 
 /// The strip under a conversation: an optional leading button (attach), the

@@ -111,8 +111,10 @@ object TripAlarm {
     /** A test ring does not tell Rust about its dismissal. */
     @Volatile private var testRing = false
 
-    /** Rings now. Idempotent: a second call while ringing does nothing. */
-    fun ring(context: Context, test: Boolean = false) {
+    /**
+     * Rings now. A test ring with [planOverride] (the plan JSON plus `sound` / `vibrate`) uses it for the
+     * plan and the channels instead of the last trip's saved settings. Idempotent: a second call while ringing does nothing. */
+    fun ring(context: Context, test: Boolean = false, planOverride: String? = null) {
         val app = context.applicationContext
         var fullScreenOk = true
         synchronized(lock) {
@@ -122,12 +124,13 @@ object TripAlarm {
             epoch++
             cancelSnooze(app)
             val now = System.currentTimeMillis()
-            val ringPlan = AlarmPlan.parse(TripPrefs.alarmPlan(app))
+            val override = if (test) planOverride else null
+            val ringPlan = AlarmPlan.parse(override ?: TripPrefs.alarmPlan(app))
             plan = ringPlan
             // Guard: if this process dies mid-ring, this re-rings (same PendingIntent as the snooze).
             if (!test) armSnooze(app, guardRingAt(now, ringPlan.ringTimeoutMs))
             fullScreenOk = postNotification(app)
-            val (wantSound, vibrate) = alarmChannels(readPrefs(app))
+            val (wantSound, vibrate) = alarmChannels(override ?: readPrefs(app))
             val out = AlarmSound(app, ringPlan)
             this.sound = out
             try {

@@ -33,6 +33,7 @@ object Documents {
     const val REQUEST_CAMERA_PHOTO = 0x4350 + 1 // "CQ"
     const val REQUEST_SCAN_IMAGE = 0x4353 // "CS"
     const val REQUEST_RINGTONE = 0x5254 // "RT": answered by [ContactOptions.handle]
+    const val REQUEST_ALARM_SOUND = 0x4153 // "AS": answered by [AlarmOptions.handle]
 
     /** A picked contact photo larger than this (20 MiB) is refused. */
     const val MAX_PHOTO_BYTES = 20 * 1024 * 1024

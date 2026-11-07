@@ -778,11 +778,12 @@ impl StopsApp {
             }
         };
         let session = trip.clone();
+        let plan = self.prefs.alarm_plan();
         let line = b.pattern.or(a.pattern);
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
-                .spawn(async move { backend::start_trip(&dir, &trip) })
+                .spawn(async move { backend::start_trip(&dir, &trip, &plan) })
                 .await;
             this.update(cx, |this, cx| {
                 this.busy = false;
@@ -916,10 +917,11 @@ impl StopsApp {
         let (Some(dir), Some(_)) = (self.dir.clone(), &self.trip) else {
             return;
         };
+        let plan = self.prefs.alarm_plan();
         cx.spawn(async move |this, cx| {
             let running = cx
                 .background_executor()
-                .spawn(async move { backend::resume_trip(&dir) })
+                .spawn(async move { backend::resume_trip(&dir, &plan) })
                 .await;
             if !running {
                 this.update(cx, |this, cx| {

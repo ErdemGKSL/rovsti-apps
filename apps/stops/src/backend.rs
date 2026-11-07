@@ -311,14 +311,14 @@ pub fn build_trip(
 
 /// What the foreground service is told at start: the data directory, the
 /// first notification, and a short first interval so the card fills quickly.
-pub fn start_spec(dir: &Path, label: &str) -> String {
+pub fn start_spec(dir: &Path, label: &str, plan: &AlarmPlan) -> String {
     json!({
         "dir": dir.to_string_lossy(),
         "title": label,
         "text": "Waiting for a location fix",
         "next_fix_ms": 5_000,
         "high_accuracy": true,
-        "alarm": AlarmPlan::default(),
+        "alarm": plan,
     })
     .to_string()
 }
@@ -326,7 +326,7 @@ pub fn start_spec(dir: &Path, label: &str) -> String {
 /// Writes `trip.json` and starts the service. A trip already running is
 /// ended first (recorded as cancelled). On failure the new trip file is
 /// removed again, so a refused start leaves nothing behind.
-pub fn start_trip(dir: &Path, trip: &ActiveTrip) -> Result<(), String> {
+pub fn start_trip(dir: &Path, trip: &ActiveTrip, plan: &AlarmPlan) -> Result<(), String> {
     {
         let _guard = store::lock();
         // The pill gets a sentence; the detail goes to the log.
@@ -340,7 +340,7 @@ pub fn start_trip(dir: &Path, trip: &ActiveTrip) -> Result<(), String> {
         }
         store::save_trip(dir, trip).map_err(storage_failed)?;
     }
-    let started = match trip::start(&start_spec(dir, &trip.label())) {
+    let started = match trip::start(&start_spec(dir, &trip.label(), plan)) {
         Ok(true) | Err(AndroidError::Unsupported) => Ok(()),
         Ok(false) => Err("Android did not start the tracking service.".to_owned()),
         Err(error) => {
@@ -357,7 +357,7 @@ pub fn start_trip(dir: &Path, trip: &ActiveTrip) -> Result<(), String> {
 
 /// Starts the service again for a trip left in `trip.json` (the app was
 /// killed and the service with it). `true` when tracking runs afterwards.
-pub fn resume_trip(dir: &Path) -> bool {
+pub fn resume_trip(dir: &Path, plan: &AlarmPlan) -> bool {
     match trip::is_running() {
         Ok(true) | Err(AndroidError::Unsupported) => return true,
         Ok(false) => {}
@@ -370,7 +370,7 @@ pub fn resume_trip(dir: &Path) -> bool {
     let Some(trip) = store::load_trip(dir) else {
         return false;
     };
-    matches!(trip::start(&start_spec(dir, &trip.label())), Ok(true))
+    matches!(trip::start(&start_spec(dir, &trip.label(), plan)), Ok(true))
 }
 
 /// Stops the service and records the trip as cancelled.
@@ -757,13 +757,27 @@ mod tests {
 
     #[test]
     fn the_start_spec_names_the_directory_and_label() {
-        let spec: serde_json::Value =
-            serde_json::from_str(&start_spec(Path::new("/data/x"), "Kadikoy")).unwrap();
+        let spec: serde_json::Value = serde_json::from_str(&start_spec(
+            Path::new("/data/x"),
+            "Kadikoy",
+            &AlarmPlan::default(),
+        ))
+        .unwrap();
         assert_eq!(spec["dir"], "/data/x");
         assert_eq!(spec["title"], "Kadikoy");
         assert_eq!(spec["high_accuracy"], true);
         assert!(spec["next_fix_ms"].as_u64().unwrap() > 0);
         assert!(spec["alarm"]["volume_pct"].as_u64().unwrap() >= 80);
+        assert!(spec["alarm"].get("user_sound_uri").is_none());
+        let custom = AlarmPlan {
+            volume_pct: 100,
+            user_sound_uri: Some("content://media/x/1".to_owned()),
+            ..AlarmPlan::default()
+        };
+        let spec: serde_json::Value =
+            serde_json::from_str(&start_spec(Path::new("/d"), "K", &custom)).unwrap();
+        assert_eq!(spec["alarm"]["volume_pct"], 100);
+        assert_eq!(spec["alarm"]["user_sound_uri"], "content://media/x/1");
     }
 
     #[test]
@@ -808,9 +822,9 @@ mod tests {
     #[test]
     fn a_started_trip_is_on_disk_and_a_second_start_replaces_it() {
         let dir = tmp("backend-start");
-        start_trip(&dir, &trip_of(1, 10, None)).unwrap();
+        start_trip(&dir, &trip_of(1, 10, None), &AlarmPlan::default()).unwrap();
         assert_eq!(store::load_trip(&dir).unwrap().id, 1);
-        start_trip(&dir, &trip_of(2, 20, None)).unwrap();
+        start_trip(&dir, &trip_of(2, 20, None), &AlarmPlan::default()).unwrap();
         assert_eq!(store::load_trip(&dir).unwrap().id, 2);
         let history = load(&dir).history;
         assert_eq!(history.records.len(), 1);
@@ -820,7 +834,7 @@ mod tests {
     #[test]
     fn stopping_records_a_cancelled_trip() {
         let dir = tmp("backend-stop");
-        start_trip(&dir, &trip_of(5, 10, None)).unwrap();
+        start_trip(&dir, &trip_of(5, 10, None), &AlarmPlan::default()).unwrap();
         stop_trip(&dir);
         let data = load(&dir);
         assert!(data.trip.is_none());
@@ -836,7 +850,7 @@ mod tests {
         assert!(simulate_tick(&dir).is_none());
         // 60 s at 50 m/s: already parked 200 m past the line.
         let started = now_ms() - 60_000;
-        start_trip(&dir, &trip_of(9, started, None)).unwrap();
+        start_trip(&dir, &trip_of(9, started, None), &AlarmPlan::default()).unwrap();
         // The first fix of a real service is on the left; seed it.
         let seed = sim_fix(&store::load_trip(&dir).unwrap().trip.diameter, 0.0, 0);
         let mut request = serde_json::to_value(seed).unwrap();

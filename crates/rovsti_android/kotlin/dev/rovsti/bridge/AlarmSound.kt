@@ -28,6 +28,8 @@ internal data class AlarmPlan(
     val ringTimeoutMs: Long = 600_000L,
     val soundOrder: List<String> = listOf("user_alarm", "default_alarm", "default_ringtone", "default_notification", "tone"),
     val vibratePatternMs: LongArray = longArrayOf(0, 700, 500, 700, 1500),
+    /** The sound the user chose in Stops settings; null uses the system alarm. */
+    val userSoundUri: String? = null,
 ) {
     companion object {
         /** Missing or broken JSON, and missing fields, keep the defaults. */
@@ -44,6 +46,7 @@ internal data class AlarmPlan(
                     ringTimeoutMs = o.optLong("ring_timeout_ms", d.ringTimeoutMs).coerceAtLeast(10_000L),
                     soundOrder = order?.takeIf { it.isNotEmpty() } ?: d.soundOrder,
                     vibratePatternMs = pattern?.takeIf { it.size >= 2 } ?: d.vibratePatternMs,
+                    userSoundUri = o.optString("user_sound_uri", "").takeIf { it.isNotBlank() },
                 )
             } catch (_: JSONException) {
                 d
@@ -101,6 +104,15 @@ internal class AlarmSound(context: Context, private val plan: AlarmPlan) {
         requestFocus()
         raiseVolume()
         playFrom(0)
+    }
+
+    /**
+     * Plays the sound for [ms] milliseconds (volume as the plan says), then stops and restores the
+     * user's volume. Not for use while the alarm rings; [TripAlarm] refuses a preview then.
+     */
+    fun preview(ms: Long) {
+        start()
+        main.postDelayed({ stop() }, ms.coerceIn(500L, 10_000L))
     }
 
     /** Idempotent; releases player, tone, focus and restores the user's volume. */
@@ -190,7 +202,8 @@ internal class AlarmSound(context: Context, private val plan: AlarmPlan) {
 
     private fun uriFor(key: String): Uri? = try {
         when (key) {
-            "user_alarm" -> RingtoneManager.getActualDefaultRingtoneUri(app, RingtoneManager.TYPE_ALARM)
+            "user_alarm" -> plan.userSoundUri?.let(Uri::parse)
+                ?: RingtoneManager.getActualDefaultRingtoneUri(app, RingtoneManager.TYPE_ALARM)
             "default_alarm" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
             "default_ringtone" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
             "default_notification" -> RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)

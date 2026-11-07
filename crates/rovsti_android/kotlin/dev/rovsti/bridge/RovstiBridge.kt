@@ -160,6 +160,7 @@ object RovstiBridge {
     /** `MainActivity.onActivityResult`: true when the request was a document picker's. */
     fun handleActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean =
         ContactOptions.handle(requestCode, resultCode, data) { json -> postOneShot("ringtone_picked", json) } ||
+        AlarmOptions.handle(app, requestCode, resultCode, data) { json -> postOneShot("alarm_sound_picked", json) } ||
         Documents.handle(app, requestCode, resultCode, data, documentExecutor) { json -> postOneShot("document_result", json) }
 
     private val documentExecutor: java.util.concurrent.ExecutorService by lazy {
@@ -689,6 +690,34 @@ object RovstiBridge {
         "snooze" -> { TripAlarm.snooze(app); true }
         "test" -> { TripAlarm.ring(app, test = true); true }
         else -> false
+    }
+
+    /** A test ring with the app's current settings: [json] is the alarm plan plus `sound` / `vibrate`. */
+    @JvmStatic
+    fun tripTestAlarm(json: String): Boolean { TripAlarm.ring(app, test = true, planOverride = json); return true }
+
+    /** The system alarm-sound picker; the answer is the one-shot event `alarm_sound_picked {uri, title, cancelled}`. */
+    @JvmStatic
+    fun pickAlarmSound(current: String, hasCurrent: Boolean): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { AlarmOptions.pickAlarmSound(activity, if (hasCurrent) current else null) }
+        return true
+    }
+
+    /** One vibration cycle; [csv] is the comma-separated pattern in milliseconds. */
+    @JvmStatic
+    fun previewVibration(csv: String): Boolean {
+        val pattern = csv.split(',').mapNotNull { it.trim().toLongOrNull()?.takeIf { v -> v in 0..10_000L } }
+        return pattern.size >= 2 && AlarmOptions.previewVibration(app, pattern.toLongArray())
+    }
+
+    /** Plays the alarm sound of [planJson] for [ms] milliseconds (a string: the seam has no 64-bit argument). */
+    @JvmStatic
+    fun previewAlarmSound(planJson: String, ms: String): Boolean {
+        if (TripAlarm.ringing) return false
+        val length = ms.toLongOrNull() ?: return false
+        android.os.Handler(android.os.Looper.getMainLooper()).post { AlarmSound(app, AlarmPlan.parse(planJson)).preview(length) }
+        return true
     }
 
     /** Arms the snooze re-ring at [atMs], epoch milliseconds as a string (the seam has no 64-bit argument). */

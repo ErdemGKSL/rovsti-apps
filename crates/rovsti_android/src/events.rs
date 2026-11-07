@@ -28,6 +28,8 @@ pub mod kind {
     pub const RINGTONE_RESULT: &str = "ringtone_result";
     /// Rovsti Contacts: the system ringtone picker answered (`{uri, cancelled}`).
     pub const RINGTONE_PICKED: &str = "ringtone_picked";
+    /// Rovsti Stops: the system alarm-sound picker answered (`{uri, title, cancelled}`).
+    pub const ALARM_SOUND_PICKED: &str = "alarm_sound_picked";
     pub const UI_REQUEST: &str = "ui_request";
     /// An FCM data message for WhatsApp (`{"kind":"call"|"message",..}`, AD-WA6). The
     /// event only wakes the process; the apps' gateway stream delivers the content.

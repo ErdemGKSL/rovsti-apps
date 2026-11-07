@@ -11,6 +11,8 @@ const TRIP_ALARM: &str =
     include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/TripAlarm.kt");
 const BRIDGE: &str =
     include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/RovstiBridge.kt");
+const ALARM_OPTIONS: &str =
+    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/AlarmOptions.kt");
 const STOPS_LOCATION: &str =
     include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/StopsLocation.kt");
 const TRIP_SERVICE_RECOVER: &str = "TripAlarm.recover(this)";
@@ -228,4 +230,37 @@ fn share_provider_is_declared_like_the_phone_app() {
     let share =
         include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/MediaShare.kt");
     assert!(share.contains("\"${context.packageName}.rovstishare\""));
+}
+
+#[test]
+fn the_alarm_sound_reads_the_users_choice() {
+    assert!(ALARM_SOUND.contains("\"user_sound_uri\""));
+    assert!(ALARM_SOUND.contains("plan.userSoundUri"));
+    assert!(ALARM_SOUND.contains("fun preview(ms: Long)"));
+    assert!(TRIP_ALARM.contains("planOverride: String? = null"));
+}
+
+#[test]
+fn the_bridge_has_the_alarm_option_functions() {
+    for name in [
+        "fun tripTestAlarm(",
+        "fun pickAlarmSound(",
+        "fun previewVibration(",
+        "fun previewAlarmSound(",
+    ] {
+        assert!(BRIDGE.contains(name), "RovstiBridge.kt lacks {name}");
+    }
+}
+
+#[test]
+fn the_alarm_picker_is_an_alarm_picker_and_answers_once() {
+    assert!(ALARM_OPTIONS.contains("RingtoneManager.TYPE_ALARM"));
+    assert!(ALARM_OPTIONS.contains("EXTRA_RINGTONE_SHOW_SILENT, false"));
+    assert!(ALARM_OPTIONS.contains("Documents.REQUEST_ALARM_SOUND"));
+    assert!(ALARM_OPTIONS.contains("\"title\""));
+    assert!(BRIDGE.contains("AlarmOptions.handle("));
+    assert!(BRIDGE.contains(&format!(
+        "postOneShot(\"{}\"",
+        rovsti_android::events::kind::ALARM_SOUND_PICKED
+    )));
 }

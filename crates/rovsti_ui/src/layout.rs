@@ -35,9 +35,8 @@ pub const SOURCE_BADGE: f32 = 16.0;
 pub const SOURCE_RING: f32 = 2.0;
 /// Overlap of neighbouring source badges on a merged contact.
 pub const SOURCE_OVERLAP: f32 = 6.0;
-/// Avatar diameter inside a stack, and how much neighbours overlap.
-pub const STACK_AVATAR: f32 = 28.0;
-pub const STACK_OVERLAP: f32 = 10.0;
+/// Smallest disc of an avatar stack.
+pub const STACK_MIN_DISC: f32 = 24.0;
 /// Most discs drawn in a stack; past it the last one is the "+n" disc.
 pub const STACK_MAX: usize = 3;
 /// Icon beside a row title (muted, pinned) and in front of a subtitle (tick).
@@ -79,6 +78,26 @@ pub mod geom {
         }
         let step = (diameter - overlap).max(0.0);
         diameter + (count - 1) as f32 * step
+    }
+
+    /// Disc size and step (distance between disc left edges) so that `n`
+    /// discs fill `slot` exactly: `size + (n - 1) * step == slot`. The disc
+    /// is `2 * slot / (n + 1)` (a lone disc fills the slot, three in 48 are
+    /// 24 + 12 + 12) but never below [`STACK_MIN_DISC`], and never above the
+    /// slot. `n == 0` gives `(0, 0)`.
+    pub fn stack_fit(n: usize, slot: f32) -> (f32, f32) {
+        if n == 0 {
+            return (0.0, 0.0);
+        }
+        let size = (2.0 * slot / (n as f32 + 1.0))
+            .max(STACK_MIN_DISC)
+            .min(slot);
+        let step = if n == 1 {
+            0.0
+        } else {
+            (slot - size) / (n - 1) as f32
+        };
+        (size, step)
     }
 
     /// Left edge of the text column of a standard row (separators start here).
@@ -390,6 +409,22 @@ mod tests {
     }
 
     #[test]
+    fn stack_fit_fills_the_slot() {
+        assert_eq!(stack_fit(0, 48.0), (0.0, 0.0));
+        assert_eq!(stack_fit(1, 48.0), (48.0, 0.0));
+        assert_eq!(stack_fit(2, 48.0), (32.0, 16.0));
+        assert_eq!(stack_fit(3, 48.0), (24.0, 12.0));
+        // Four discs hit the 24 dp minimum and tighten the step instead.
+        assert_eq!(stack_fit(4, 48.0), (24.0, 8.0));
+        for n in 1..=4 {
+            let (size, step) = stack_fit(n, 48.0);
+            let width = avatar_stack_width(n, size, size - step);
+            assert!(width <= 48.0 + 1e-3, "n={n} width={width}");
+            assert!(size >= STACK_MIN_DISC);
+        }
+    }
+
+    #[test]
     fn stack_folds_past_the_limit() {
         assert_eq!(stack_split(0, 3), (0, 0));
         assert_eq!(stack_split(3, 3), (3, 0));
@@ -397,7 +432,7 @@ mod tests {
         assert_eq!(stack_split(9, 3), (2, 7));
         assert_eq!(stack_discs(3, 3), 3);
         assert_eq!(stack_discs(9, 3), 3);
-        assert_eq!(avatar_stack_width(stack_discs(9, 3), 28.0, 10.0), 64.0);
+        assert_eq!(stack_discs(9, 3), 3);
     }
 
     #[test]

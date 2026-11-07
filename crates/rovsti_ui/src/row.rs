@@ -23,6 +23,12 @@ use liquid_glass_kit::tokens::{Theme, mix, typography};
 
 use crate::layout::{self, geom, space};
 
+/// Left edge of the text column (and separator) of a row with a leading
+/// slot: `MARGIN + AVATAR + space::M` = 76 dp, whatever the leading is.
+pub fn text_inset() -> f32 {
+    geom::separator_left(true, layout::AVATAR, space::M)
+}
+
 /// Where a row's separator starts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Inset {
@@ -83,8 +89,8 @@ fn icon(path: GpuiIcons, size: f32, color: Hsla) -> impl IntoElement {
         .text_color(color)
 }
 
-/// The first character: an overlapped disc shows only about 18 of its 28 dp,
-/// so two letters would be cut by the next disc.
+/// The first character: an overlapped disc is half covered, so two letters
+/// would not fit.
 fn first_letter(initials: &str) -> SharedString {
     initials
         .chars()
@@ -108,30 +114,37 @@ fn stack_disc(theme: Theme, label: SharedString, tint: Hsla, size: f32) -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .text_size(px(10.0))
-        .font_weight(gpui::FontWeight(700.0))
+        .text_size(typography::CAPTION2.size)
+        .line_height(typography::CAPTION2.line)
+        .font_weight(typography::CAPTION2.weight)
         .text_color(readable_on(tint))
         .child(label)
 }
 
-/// Overlapping avatars, 28 dp with 10 dp overlap by default
-/// ([`layout::STACK_AVATAR`], [`layout::STACK_OVERLAP`]). Past
-/// [`layout::STACK_MAX`] the last disc is "+n". The element is exactly
-/// `geom::avatar_stack_width` wide, so it can never reach neighbouring text.
-pub fn avatar_stack(theme: Theme, items: &[StackItem], size: f32, overlap: f32) -> Div {
+/// Overlapping avatars that fill a `slot` dp square exactly
+/// ([`geom::stack_fit`]; three discs in the 48 dp [`layout::AVATAR`] slot are
+/// 24 + 12 + 12). Past [`layout::STACK_MAX`] the last disc is "+n" (Caption2,
+/// 11 dp w600). The element is `slot` wide, so it can never reach the text
+/// column.
+pub fn avatar_stack(theme: Theme, items: &[StackItem], slot: f32) -> Div {
     let colors = crate::theme::colors(theme);
     let (shown, hidden) = geom::stack_split(items.len(), layout::STACK_MAX);
     let discs = shown + usize::from(hidden > 0);
-    let step = (size - overlap).max(0.0);
-    let mut stack = div()
-        .relative()
-        .flex_none()
-        .w(px(geom::avatar_stack_width(discs, size, overlap)))
-        .h(px(size));
+    let (size, step) = geom::stack_fit(discs, slot);
+    let top = (slot - size) / 2.0;
+    let mut stack = div().relative().flex_none().w(px(slot)).h(px(slot));
     for (i, item) in items.iter().take(shown).enumerate() {
+        // A disc is half covered by the next one, so only the top-most disc
+        // carries its letter.
+        let label = if i + 1 == discs {
+            first_letter(&item.initials)
+        } else {
+            SharedString::default()
+        };
         stack = stack.child(
-            stack_disc(theme, first_letter(&item.initials), item.tint, size)
-                .left(px(step * i as f32)),
+            stack_disc(theme, label, item.tint, size)
+                .left(px(step * i as f32))
+                .top(px(top)),
         );
     }
     if hidden > 0 {
@@ -143,6 +156,7 @@ pub fn avatar_stack(theme: Theme, items: &[StackItem], size: f32, overlap: f32) 
                 size,
             )
             .left(px(step * shown as f32))
+            .top(px(top))
             .text_color(colors.label),
         );
     }
@@ -206,7 +220,6 @@ pub fn with_source_badges(theme: Theme, avatar: Div, kinds: &[SourceKind]) -> Di
 /// `.id(..).on_click(..)` as needed.
 pub struct ListRow {
     leading: Option<AnyElement>,
-    leading_w: f32,
     title: SharedString,
     accessories: Vec<GpuiIcons>,
     meta: Option<SharedString>,
@@ -222,7 +235,6 @@ impl ListRow {
     pub fn new(title: impl Into<SharedString>) -> Self {
         Self {
             leading: None,
-            leading_w: layout::AVATAR,
             title: title.into(),
             accessories: Vec::new(),
             meta: None,
@@ -235,17 +247,11 @@ impl ListRow {
         }
     }
 
-    /// The leading element (avatar). It is placed in a slot
-    /// [`layout::AVATAR`] wide; use [`Self::leading_width`] for others.
+    /// The leading element (avatar, stack, icon tile). It is placed in a
+    /// fixed [`layout::AVATAR`] wide slot, so every row's text column starts
+    /// at [`text_inset`].
     pub fn leading(mut self, el: impl IntoElement) -> Self {
         self.leading = Some(el.into_any_element());
-        self
-    }
-
-    /// Width of the leading slot when it is not a 48 dp avatar (a stack).
-    /// The text column and the separator follow.
-    pub fn leading_width(mut self, w: f32) -> Self {
-        self.leading_w = w;
         self
     }
 
@@ -300,7 +306,7 @@ impl ListRow {
     pub fn render(self, theme: Theme) -> Div {
         let colors = crate::theme::colors(theme);
         let has_leading = self.leading.is_some();
-        let leading_w = if has_leading { self.leading_w } else { 0.0 };
+        let leading_w = if has_leading { layout::AVATAR } else { 0.0 };
 
         // The title takes all the free width (and truncates), so the icons
         // and the time sit together at the right edge.
@@ -433,6 +439,19 @@ impl ListRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_inset_is_76_for_every_leading_kind() {
+        let want = layout::MARGIN + layout::AVATAR + space::M;
+        assert_eq!(want, 76.0);
+        assert_eq!(text_inset(), want);
+        // Avatar and icon tile are 48 dp; a stack is fitted to the same slot.
+        for discs in 1..=layout::STACK_MAX {
+            let (size, step) = geom::stack_fit(discs, layout::AVATAR);
+            let w = geom::avatar_stack_width(discs, size, size - step);
+            assert!(w <= layout::AVATAR + 1e-3);
+        }
+    }
 
     #[test]
     fn first_letter_handles_unicode_and_empty() {

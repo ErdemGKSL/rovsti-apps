@@ -5532,22 +5532,14 @@ impl MessagesApp {
                 .into_any_element()
             }
             ChatItem::Status => {
-                let (leading, width, subtitle, unseen) = {
+                let (leading, subtitle, unseen) = {
                     let feed = self.statuses.read(cx);
                     let list = feed.list().clone();
-                    let (leading, width) =
+                    let leading =
                         status_ui::entry_avatars(theme, &list, &self.backend, &self.avatars, cx);
-                    (
-                        leading,
-                        width,
-                        status_ui::entry_subtitle(&list),
-                        list.unviewed(),
-                    )
+                    (leading, status_ui::entry_subtitle(&list), list.unviewed())
                 };
-                let row = ListRow::new("Status")
-                    .leading(leading)
-                    .leading_width(width)
-                    .subtitle(subtitle);
+                let row = ListRow::new("Status").leading(leading).subtitle(subtitle);
                 let row = if unseen > 0 {
                     row.trailing_badge(unseen.to_string(), BadgeTone::Accent)
                 } else {

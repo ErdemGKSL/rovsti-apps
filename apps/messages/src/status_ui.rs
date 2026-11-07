@@ -21,8 +21,7 @@ use rovsti_core::{call_log::relative_time, recents::LocaleTime};
 use rovsti_ui::{
     Icon,
     components::{empty_state, glass_icon_button, glass_pill},
-    current_theme,
-    layout::{self, geom},
+    current_theme, layout,
     row::{StackItem, avatar_stack},
     theme,
     tokens::{Theme, metrics, mix, typography},
@@ -261,28 +260,17 @@ fn ring_avatar(
         ))
 }
 
-/// Width of the Status row's avatar stack for `people` authors: the discs it
-/// draws (at most [`layout::STACK_MAX`], the last one "+n") side by side with
-/// their overlap, or the 48 dp slot of the empty circle glyph.
-pub(crate) fn stack_slot_width(people: usize) -> f32 {
-    if people == 0 {
-        return layout::AVATAR;
-    }
-    let discs = geom::stack_discs(people, layout::STACK_MAX);
-    geom::avatar_stack_width(discs, layout::STACK_AVATAR, layout::STACK_OVERLAP)
-}
-
-/// The leading element of the Chats tab's Status row and its width: a
+/// The leading element of the Chats tab's Status row: a
 /// [`rovsti_ui::row::avatar_stack`] of discs (green for unseen updates, grey
-/// for seen ones). The stack is exactly as wide as its discs, so the row's
-/// text column starts after it and nothing can overlap the title.
+/// for seen ones). The stack fills the fixed 48 dp leading slot, so the
+/// row's text column starts at 76 dp like every other row.
 pub(crate) fn entry_avatars(
     theme: Theme,
     list: &StatusList,
     backend: &Entity<Backend>,
     avatars: &Entity<WaAvatars>,
     cx: &mut App,
-) -> (AnyElement, f32) {
+) -> AnyElement {
     let colors = theme::colors(theme);
     let items: Vec<StackItem> = list
         .authors
@@ -298,17 +286,20 @@ pub(crate) fn entry_avatars(
             StackItem::new(inbox::initials(&title), tint)
         })
         .collect();
-    let width = stack_slot_width(items.len());
-    let slot = div().h(px(layout::AVATAR)).flex().items_center();
+    let slot = div()
+        .w(px(layout::AVATAR))
+        .h(px(layout::AVATAR))
+        .flex()
+        .items_center();
     if items.is_empty() {
         let icon = gpui::svg()
             .path(Icon::LucideCircle.path())
             .size(px(28.0))
             .text_color(colors.green);
-        return (slot.w(px(width)).child(icon).into_any_element(), width);
+        return slot.child(icon).into_any_element();
     }
-    let stack = avatar_stack(theme, &items, layout::STACK_AVATAR, layout::STACK_OVERLAP);
-    (slot.child(stack).into_any_element(), width)
+    slot.child(avatar_stack(theme, &items, layout::AVATAR))
+        .into_any_element()
 }
 
 // ---- the page ---------------------------------------------------------------
@@ -1175,17 +1166,6 @@ impl Render for StatusPage {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn stack_slot_width_matches_the_discs_drawn() {
-        use rovsti_ui::layout::{STACK_AVATAR, STACK_OVERLAP};
-        let step = STACK_AVATAR - STACK_OVERLAP;
-        assert_eq!(stack_slot_width(0), layout::AVATAR);
-        assert_eq!(stack_slot_width(1), STACK_AVATAR);
-        assert_eq!(stack_slot_width(3), STACK_AVATAR + 2.0 * step);
-        // More than three fold into "+n": still three discs wide.
-        assert_eq!(stack_slot_width(9), stack_slot_width(3));
-    }
-
     use super::*;
 
     #[test]

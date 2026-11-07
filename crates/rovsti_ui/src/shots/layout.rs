@@ -17,7 +17,7 @@ use crate::{
     Icon,
     chips::{ChipSpec, filter_chip_row},
     components,
-    layout::{self, MARGIN, geom, space},
+    layout::{self, MARGIN, space},
     page::{HeaderAction, PageHeader, empty_state, section_header},
     row::{BadgeTone, Inset, ListRow, SourceKind, StackItem, avatar_stack, with_source_badges},
     theme,
@@ -133,13 +133,7 @@ impl Render for Gallery {
                             StackItem::new("SD", colors.red),
                             StackItem::new("OK", colors.accent),
                         ],
-                        layout::STACK_AVATAR,
-                        layout::STACK_OVERLAP,
-                    ))
-                    .leading_width(geom::avatar_stack_width(
-                        geom::stack_discs(5, layout::STACK_MAX),
-                        layout::STACK_AVATAR,
-                        layout::STACK_OVERLAP,
+                        layout::AVATAR,
                     ))
                     .subtitle("3 new updates")
                     .trailing_badge("3", BadgeTone::Accent)

@@ -349,16 +349,26 @@ pub fn maps_url(coord: Coord, label: &str) -> String {
     rovsti_geo::dest::point_qr_payload(coord, (!label.is_empty()).then_some(label))
 }
 
-/// Number of rows of the pin menu: Share, Copy, QR code, Open in maps, Move,
-/// Remove and, for a transit stop, Lines.
-#[cfg(test)]
+/// Number of rows of the pin menu: Share, Copy, QR code, Open in maps, Measure
+/// from here, Move, Remove and, for a transit stop, Lines.
 const fn pin_menu_rows(is_stop: bool) -> usize {
-    if is_stop { 7 } else { 6 }
+    if is_stop { 8 } else { 7 }
 }
 
 /// Width and height of the small menu over a tapped pin.
 pub const PIN_MENU_W: f32 = 180.0;
-pub const PIN_MENU_H: f32 = 248.0;
+/// Height of the details line under the rows.
+const PIN_MENU_DETAILS_H: f32 = 24.0;
+/// Height of the extra "from you" caption under the details line.
+const PIN_MENU_CAPTION_H: f32 = 16.0;
+
+/// Height of the pin menu: every row, the details line and, with a known
+/// position, the distance caption.
+pub fn pin_menu_height(is_stop: bool, has_here: bool) -> f32 {
+    pin_menu_rows(is_stop) as f32 * PIN_MENU_ROW_H
+        + PIN_MENU_DETAILS_H
+        + if has_here { PIN_MENU_CAPTION_H } else { 0.0 }
+}
 /// Height of one row of the pin menu.
 const PIN_MENU_ROW_H: f32 = 32.0;
 const PIN_MENU_MARGIN: f32 = 8.0;
@@ -369,7 +379,7 @@ const PIN_MENU_GAP: f32 = 14.0;
 /// `pin`, below it where there is no room, kept inside `size` with a margin.
 #[cfg(test)]
 pub fn pin_menu_rect(pin: (f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) {
-    pin_menu_rect_h(pin, size, PIN_MENU_H)
+    pin_menu_rect_h(pin, size, pin_menu_height(true, false))
 }
 
 /// [`pin_menu_rect`] for a menu `h` high (a pin that is no transit stop has one row less).
@@ -1674,6 +1684,14 @@ impl MapState {
         self.measure_armed = false;
     }
 
+    /// Starts measuring with `c` as the first point (from a tapped pin).
+    pub fn measure_from(&mut self, c: Coord) {
+        self.start_measure();
+        if let Some(m) = self.measure.as_mut() {
+            m.push(c);
+        }
+    }
+
     /// Turns the tool off and forgets its points; true when it was on.
     pub fn end_measure(&mut self) -> bool {
         self.measure_armed = false;
@@ -2226,14 +2244,14 @@ impl StopsApp {
             .gtfs_stop
             .as_deref()
             .and_then(|id| stop_index(self.gtfs.as_deref(), id));
+        let here = self.map.position.map(|(c, _)| c);
+        let from_you = here.map(|h| rovsti_geo::coord_format::from_you_text(h, dest.coord));
+        let no_trip = self.trip.is_none();
+        let measure_coord = dest.coord;
         let rect = pin_menu_rect_h(
             (size.0 / 2.0 + pin.at.0, size.1 / 2.0 + pin.at.1),
             size,
-            if stop.is_some() {
-                PIN_MENU_H
-            } else {
-                PIN_MENU_H - PIN_MENU_ROW_H
-            },
+            pin_menu_height(stop.is_some(), here.is_some()),
         );
         let details = pick::details_text(dest);
         let share_dest = dest.clone();
@@ -2294,6 +2312,16 @@ impl StopsApp {
                     },
                 )),
             )
+            .children(no_trip.then(|| {
+                row("pin-measure", "Measure from here", colors.label).on_click(cx.listener(
+                    move |this, _, window, cx| {
+                        this.pick.close_menu();
+                        this.map.measure_from(measure_coord);
+                        haptics::perform(window, HapticFeedback::Selection);
+                        this.show_pill("Tap the map to measure from here", None, cx);
+                    },
+                ))
+            }))
             .child(row("pin-move", "Move", colors.label).on_click(cx.listener(
                 move |this, _, _, cx| {
                     this.pick.begin_move(slot);
@@ -2336,6 +2364,16 @@ impl StopsApp {
                     .text_color(colors.secondary_label)
                     .child(details),
             )
+            .children(from_you.map(|t| {
+                div()
+                    .px(px(14.0))
+                    .pb(px(6.0))
+                    .h(px(PIN_MENU_CAPTION_H))
+                    .truncate()
+                    .text_size(typography::CAPTION.size)
+                    .text_color(colors.secondary_label)
+                    .child(t)
+            }))
             .into_any_element();
         Some((rect, card))
     }
@@ -4019,7 +4057,7 @@ mod tests {
         ] {
             let r = pin_menu_rect(pin, size);
             assert!(inside(r), "{pin:?} -> {r:?}");
-            assert_eq!((r.2, r.3), (PIN_MENU_W, PIN_MENU_H));
+            assert_eq!((r.2, r.3), (PIN_MENU_W, pin_menu_height(true, false)));
         }
     }
 
@@ -4039,8 +4077,22 @@ mod tests {
     #[test]
     fn the_menu_rows_fit_the_menu_box() {
         // Every row of a transit stop's menu and the details line.
-        const { assert!(pin_menu_rows(true) as f32 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
         const { assert!(pin_menu_rows(false) < pin_menu_rows(true)) };
+        assert_eq!(pin_menu_height(false, false), 7.0 * 32.0 + 24.0);
+        assert_eq!(pin_menu_height(false, true), 7.0 * 32.0 + 24.0 + 16.0);
+        assert_eq!(pin_menu_height(true, false), 8.0 * 32.0 + 24.0);
+        assert_eq!(pin_menu_height(true, true), 8.0 * 32.0 + 24.0 + 16.0);
+    }
+
+    #[test]
+    fn measure_from_leaves_one_point_and_nothing_armed() {
+        let mut m = MapState {
+            measure_armed: true,
+            ..Default::default()
+        };
+        m.measure_from(Coord::new(41.0, 29.0));
+        assert_eq!(m.measure_points(), vec![Coord::new(41.0, 29.0)]);
+        assert!(!m.measure_armed);
     }
 
     #[test]
@@ -4053,7 +4105,7 @@ mod tests {
 
     #[test]
     fn the_pin_menu_opens_above_and_flips_below_near_the_top() {
-        // Tall enough for the menu to fit above the pin (it is PIN_MENU_H high).
+        // Tall enough for the menu to fit above the pin (it is pin_menu_height high).
         let size = (370.0, 640.0);
         let pin = (185.0, 500.0);
         let above = pin_menu_rect(pin, size);

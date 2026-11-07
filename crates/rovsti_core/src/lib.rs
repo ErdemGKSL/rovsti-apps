@@ -115,6 +115,8 @@ pub mod text_detect;
 pub mod text_edit;
 /// Chat text size setting.
 pub mod text_scale;
+/// Touch rules of the text field: tap outcome, edit-menu items and placement, handles, drag.
+pub mod text_touch;
 /// Scroll, caret blink and password-mask index maths for the text field view.
 pub mod text_view;
 pub mod thread;

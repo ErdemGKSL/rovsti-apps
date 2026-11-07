@@ -331,6 +331,8 @@ impl<V: Render + 'static> Rig<V> {
 }
 
 #[cfg(test)]
+mod field_touch;
+#[cfg(test)]
 mod fields;
 
 #[cfg(test)]

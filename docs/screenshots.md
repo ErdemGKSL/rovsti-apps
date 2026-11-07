@@ -24,6 +24,7 @@ The shared rig has a smoke test and the text-field state gallery:
 ```
 cargo test -p rovsti_ui --features shots shots -- --ignored --nocapture   # smoke + fields
 cargo test -p rovsti_ui --features shots fields -- --ignored --nocapture  # fields only
+cargo test -p rovsti_ui --features shots field_touch -- --ignored --nocapture  # handles + edit menu
 ```
 
 Each app test takes under a minute once built (about 0.5 to 2.5 s per shot). The first

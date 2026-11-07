@@ -15,13 +15,23 @@ use std::{
 };
 
 use gpui::{
-    App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle, Focusable, Font,
-    Hsla, IntoElement, KeyDownEvent, Pixels, Point, PreeditSelection, ShapedLine, Styled,
-    SurroundingText, TextAlign, TextInputAction, TextInputMode, TextInputPurpose, TextRun,
-    UTF16Selection, UnderlineStyle, Window, canvas, div, fill, point, px, size,
+    AnyElement, App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle,
+    Focusable, Font, Hsla, InteractiveElement as _, IntoElement, KeyDownEvent, LongPressEvent,
+    MouseButton, ParentElement as _, PathBuilder, Pixels, Point, PreeditSelection, ShapedLine,
+    Styled, SurroundingText, TextAlign, TextInputAction, TextInputMode, TextInputPurpose, TextRun,
+    TouchEvent, TouchPhase, UTF16Selection, UnderlineStyle, Window, canvas, deferred, div, fill,
+    point, px, size,
 };
-use liquid_glass_kit::tokens::{Theme, typography};
+use liquid_glass_kit::{
+    glass::{GlassSpec, glass},
+    tokens::{Theme, shadow, typography},
+};
 use rovsti_core::text_edit::EditBuffer;
+use rovsti_core::text_touch::{
+    ECHO_MS, EDGE_MAX, EDGE_ZONE, HANDLE_HIT, HANDLE_SIZE, INSERTION_MS, MENU_H, MENU_ITEM_PAD,
+    MenuItem, MenuState, TapAction, drag_selection, edge_scroll, handle_visible, hits_caret,
+    in_selection, menu_items, menu_width, place_menu, resolve_tap, tap_byte, teardrop,
+};
 use rovsti_core::text_view::{
     CARET_MARGIN, caret_visible, clamp_scroll, masked_index, next_toggle_ms, scroll_for_caret,
     unmasked_index,
@@ -41,6 +51,23 @@ const CARET_W: f32 = 2.0;
 const SELECTION_RADIUS: f32 = 3.0;
 /// Composing-text underline thickness, dp.
 const MARKED_UNDERLINE: f32 = 1.5;
+
+/// The field's side padding inside its glass box, dp.
+const BOX_PAD: f32 = 16.0;
+/// The menu keeps this far below the window's top (the status bar), dp.
+const SAFE_TOP: f32 = 48.0;
+/// Auto-scroll tick while a finger drags near an edge.
+const DRAG_TICK: Duration = Duration::from_millis(16);
+
+/// A finger drag that edits the selection.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Drag {
+    /// After a long-press: extends from the pressed word (`start..end`).
+    Select(usize, usize),
+    /// A handle: `Some(fixed)` keeps the other end of the selection, `None`
+    /// is the insertion handle and moves the caret.
+    Handle(Option<usize>),
+}
 
 /// The text as last shaped and painted: what hit-testing and the keyboard's
 /// geometry queries read.
@@ -79,6 +106,21 @@ pub struct TextField {
     /// The field was focused when it last painted (the blink timer's cue).
     painted_focused: Cell<bool>,
     blinking: Cell<bool>,
+    /// The content box as last laid out, focused or not (window coordinates).
+    content: Cell<Option<Bounds<Pixels>>>,
+    /// The edit menu is open: `edits` and selection when it opened. Any edit
+    /// or selection change since closes it.
+    menu: Cell<Option<(u64, usize, usize)>>,
+    /// When the insertion handle was shown, and `edits` then.
+    insertion: Cell<Option<(Instant, u64)>>,
+    drag: Cell<Option<Drag>>,
+    /// The dragging finger's window x.
+    pointer_x: Cell<f32>,
+    drag_loop: Cell<bool>,
+    /// Taps before this are the echo of a lift that ended a drag.
+    ignore_until: Cell<Instant>,
+    /// Handle touch targets as last painted, with the drag each starts.
+    handles: RefCell<Vec<(Drag, Bounds<Pixels>)>>,
 }
 
 impl TextField {
@@ -110,6 +152,14 @@ impl TextField {
             last_activity: Cell::new(Instant::now()),
             painted_focused: Cell::new(false),
             blinking: Cell::new(false),
+            content: Cell::new(None),
+            menu: Cell::new(None),
+            insertion: Cell::new(None),
+            drag: Cell::new(None),
+            pointer_x: Cell::new(0.0),
+            drag_loop: Cell::new(false),
+            ignore_until: Cell::new(Instant::now()),
+            handles: RefCell::new(Vec::new()),
         }
     }
 
@@ -231,6 +281,16 @@ impl TextField {
         self.focus.clone()
     }
 
+    /// Opens the edit menu as a long-press would (previews and screenshots).
+    pub fn open_edit_menu(&self) {
+        self.open_menu();
+    }
+
+    /// Shows the insertion handle as a tap would (previews and screenshots).
+    pub fn show_insertion_handle(&self, cx: &mut Context<Self>) {
+        self.show_insertion(cx);
+    }
+
     /// Empties the field and keeps focus (the clear button).
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         if !self.buf.is_empty() || self.buf.marked().is_some() {
@@ -320,6 +380,338 @@ impl TextField {
             _ => return false,
         }
         true
+    }
+}
+
+/// Touch: tap, double-tap, long-press, drag, handles and the edit menu.
+impl TextField {
+    /// The displayed line (masked for a passphrase), shaped for hit-testing.
+    fn shape_display(&self, window: &Window) -> ShapedLine {
+        let shown: gpui::SharedString = if self.secret.get() {
+            masked(self.buf.text()).into()
+        } else {
+            self.buf.text().to_owned().into()
+        };
+        let font = window.text_style().font();
+        window.text_system().shape_line(
+            shown.clone(),
+            typography::BODY.size,
+            &runs(&font, Hsla::default(), shown.len(), None),
+            None,
+        )
+    }
+
+    /// Scroll offset of the text as shown: unfocused fields show the start.
+    fn shown_scroll(&self, window: &Window) -> f32 {
+        if self.focus.is_focused(window) {
+            self.scroll.get()
+        } else {
+            0.0
+        }
+    }
+
+    /// The text byte under window x `x`.
+    fn byte_at(&self, x: Pixels, window: &Window) -> usize {
+        let Some(content) = self.content.get() else {
+            return self.buf.head();
+        };
+        let line = self.shape_display(window);
+        let byte = tap_byte(
+            self.buf.text(),
+            self.secret.get(),
+            f32::from(x),
+            f32::from(content.left()),
+            self.shown_scroll(window),
+            |lx| line.closest_index_for_x(px(lx)),
+        );
+        self.buf.snap(byte)
+    }
+
+    /// [`Self::byte_at`] from the painted line (no window needed).
+    fn byte_at_laid(&self, x: f32) -> Option<usize> {
+        let laid = self.laid.borrow();
+        let laid = laid.as_ref()?;
+        let byte = tap_byte(
+            self.buf.text(),
+            laid.masked,
+            x,
+            f32::from(laid.bounds.left()),
+            self.scroll.get(),
+            |lx| laid.line.closest_index_for_x(px(lx)),
+        );
+        Some(self.buf.snap(byte))
+    }
+
+    fn open_menu(&self) {
+        let sel = self.buf.selection();
+        self.menu.set(Some((self.edits, sel.start, sel.end)));
+    }
+
+    /// Whether the edit menu is showing now.
+    fn menu_visible(&self, window: &Window) -> bool {
+        let sel = self.buf.selection();
+        self.drag.get().is_none()
+            && self.focus.is_focused(window)
+            && self.menu.get() == Some((self.edits, sel.start, sel.end))
+    }
+
+    /// Whether the insertion handle is showing now.
+    fn insertion_visible(&self) -> bool {
+        matches!(self.insertion.get(), Some((at, edits))
+            if edits == self.edits
+                && !self.buf.has_selection()
+                && at.elapsed() < Duration::from_millis(INSERTION_MS))
+    }
+
+    /// Shows the insertion handle for [`INSERTION_MS`] and repaints when it goes.
+    fn show_insertion(&self, cx: &mut Context<Self>) {
+        self.insertion.set(Some((Instant::now(), self.edits)));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(INSERTION_MS + 50))
+                .await;
+            this.update(cx, |_, cx| cx.notify()).ok();
+        })
+        .detach();
+    }
+
+    fn ignore_echo(&self) {
+        self.ignore_until
+            .set(Instant::now() + Duration::from_millis(ECHO_MS));
+    }
+
+    /// A tap at window `position` (`click_count` 2 is a double-tap): focuses
+    /// the field and raises the keyboard, then places the caret, toggles the
+    /// edit menu (a tap on the caret or the selection) or selects the word.
+    pub fn tap(
+        &mut self,
+        position: Point<Pixels>,
+        click_count: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.drag.get().is_some() || Instant::now() < self.ignore_until.get() {
+            return;
+        }
+        let focused = self.focus.is_focused(window);
+        let byte = self.byte_at(position.x, window);
+        let sel = self.buf.selection();
+        let on_target = focused
+            && if sel.is_empty() {
+                self.content.get().is_some_and(|content| {
+                    let line = self.shape_display(window);
+                    let caret_x = f32::from(content.left()) - self.scroll.get()
+                        + f32::from(line.x_for_index(self.display_index(self.buf.head())));
+                    hits_caret(f32::from(position.x), caret_x)
+                })
+            } else {
+                in_selection(byte, &sel)
+            };
+        if !focused {
+            self.scroll.set(0.0);
+        }
+        let handle = self.focus.clone();
+        window.focus(&handle, cx);
+        window.show_soft_keyboard();
+        match resolve_tap(click_count, focused, on_target) {
+            TapAction::PlaceCaret => {
+                self.buf.unmark();
+                self.buf.set_caret(byte);
+                self.menu.set(None);
+                self.show_insertion(cx);
+            }
+            TapAction::ToggleMenu => {
+                if self.menu.get().is_some() {
+                    self.menu.set(None);
+                } else {
+                    self.open_menu();
+                }
+            }
+            TapAction::SelectWord => {
+                self.buf.unmark();
+                let word = self.buf.word_at(byte);
+                self.buf.set_selection(word.start, word.end);
+                self.menu.set(None);
+                self.insertion.set(None);
+            }
+        }
+        self.touch();
+        cx.notify();
+    }
+
+    /// A long-press at window `position`: focuses, selects the word under it
+    /// and arms the menu (Paste only in an empty field). The finger may keep
+    /// going: its drag extends the selection until it lifts.
+    pub fn long_press(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let byte = self.byte_at(position.x, window);
+        if !self.focus.is_focused(window) {
+            self.scroll.set(0.0);
+        }
+        let handle = self.focus.clone();
+        window.focus(&handle, cx);
+        window.show_soft_keyboard();
+        let word = if self.buf.is_empty() {
+            0..0
+        } else {
+            self.buf.word_at(byte)
+        };
+        self.buf.unmark();
+        self.buf.set_selection(word.start, word.end);
+        self.insertion.set(None);
+        self.drag.set(Some(Drag::Select(word.start, word.end)));
+        self.pointer_x.set(f32::from(position.x));
+        self.open_menu();
+        crate::haptics::perform(window, gpui::HapticFeedback::LongPress);
+        self.ensure_drag_loop(cx);
+        self.touch();
+        cx.notify();
+    }
+
+    /// Raw touch: a finger landing on a handle starts dragging it; a drag in
+    /// progress follows the finger and ends when it lifts. Returns whether
+    /// the event was used.
+    pub fn touch_event(&mut self, event: &TouchEvent, cx: &mut Context<Self>) -> bool {
+        match event.phase {
+            TouchPhase::Started => {
+                let hit = self
+                    .handles
+                    .borrow()
+                    .iter()
+                    .find(|(_, rect)| rect.contains(&event.position))
+                    .map(|(drag, _)| *drag);
+                let Some(drag) = hit else { return false };
+                self.drag.set(Some(drag));
+                self.pointer_x.set(f32::from(event.position.x));
+                self.ensure_drag_loop(cx);
+                cx.notify();
+                true
+            }
+            TouchPhase::Moved => {
+                let Some(drag) = self.drag.get() else {
+                    return false;
+                };
+                self.pointer_x.set(f32::from(event.position.x));
+                self.apply_drag(drag, cx);
+                true
+            }
+            _ => {
+                if self.drag.take().is_none() {
+                    return false;
+                }
+                self.ignore_echo();
+                if self.menu.get().is_some() || self.buf.has_selection() {
+                    self.open_menu();
+                }
+                cx.notify();
+                true
+            }
+        }
+    }
+
+    /// Moves the selection to the finger.
+    fn apply_drag(&mut self, drag: Drag, cx: &mut Context<Self>) {
+        let Some(idx) = self.byte_at_laid(self.pointer_x.get()) else {
+            return;
+        };
+        match drag {
+            Drag::Select(start, end) => {
+                let (anchor, head) = drag_selection(&(start..end), idx);
+                self.buf.set_selection(anchor, head);
+            }
+            Drag::Handle(Some(fixed)) => self.buf.set_selection(fixed, idx),
+            Drag::Handle(None) => self.buf.set_caret(idx),
+        }
+        cx.notify();
+    }
+
+    /// Scrolls the text while a finger holds near an edge.
+    fn ensure_drag_loop(&self, cx: &mut Context<Self>) {
+        if self.drag_loop.replace(true) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(DRAG_TICK).await;
+                let again = this.update(cx, |f, cx| f.drag_tick(cx));
+                if !matches!(again, Ok(true)) {
+                    return;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn drag_tick(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(drag) = self.drag.get() else {
+            self.drag_loop.set(false);
+            return false;
+        };
+        let scrolled = {
+            let laid = self.laid.borrow();
+            laid.as_ref().is_some_and(|laid| {
+                let (left, right) = (
+                    f32::from(laid.bounds.left()),
+                    f32::from(laid.bounds.right()),
+                );
+                let delta = edge_scroll(self.pointer_x.get(), left, right, EDGE_ZONE, EDGE_MAX);
+                let old = self.scroll.get();
+                let new = clamp_scroll(
+                    old + delta,
+                    f32::from(laid.line.width),
+                    right - left,
+                    CARET_MARGIN,
+                );
+                self.scroll.set(new);
+                (new - old).abs() > 0.01
+            })
+        };
+        if scrolled {
+            // The drag owns the scroll: no scroll-to-caret for this move.
+            self.seen_activity.set(self.activity.get());
+            self.apply_drag(drag, cx);
+        }
+        true
+    }
+
+    /// Runs a tapped edit-menu item.
+    fn menu_action(&mut self, item: MenuItem, cx: &mut Context<Self>) {
+        match item {
+            MenuItem::Cut => {
+                if !self.secret.get() {
+                    self.copy(cx);
+                    self.backspace(cx);
+                }
+                self.menu.set(None);
+            }
+            MenuItem::Copy => {
+                self.copy(cx);
+                self.menu.set(None);
+            }
+            MenuItem::Paste => {
+                self.paste(cx);
+                self.menu.set(None);
+            }
+            MenuItem::SelectAll => {
+                self.select_all(cx);
+                self.open_menu();
+            }
+        }
+        self.insertion.set(None);
+        cx.notify();
+    }
+
+    /// Window x the menu centres on: the caret or the middle of the selection.
+    fn menu_anchor_x(&self) -> Option<f32> {
+        let laid = self.laid.borrow();
+        let laid = laid.as_ref()?;
+        let sel = self.buf.selection();
+        let x = |b: usize| f32::from(laid.line.x_for_index(self.display_index(b)));
+        Some(f32::from(laid.bounds.left()) - self.scroll.get() + (x(sel.start) + x(sel.end)) / 2.0)
     }
 }
 
@@ -619,6 +1011,7 @@ fn text_layer(
     canvas(
         |_, _, _| (),
         move |bounds, (), window, cx| {
+            field.read(cx).content.set(Some(bounds));
             window.handle_input(
                 &focus,
                 gpui::ElementInputHandler::new(bounds, field.clone()),
@@ -765,6 +1158,234 @@ fn runs(font: &Font, color: Hsla, len: usize, marked: Option<Range<usize>>) -> V
     }
 }
 
+/// The touch layer over a whole field box (not clipped to the text): the
+/// gestures, and the selection handles hanging below the text.
+fn touch_layer(field: Entity<TextField>, accent: Hsla) -> impl IntoElement {
+    canvas(
+        |_, _, _| (),
+        move |bounds, (), window, cx| {
+            let f = field.clone();
+            window.on_mouse_event(move |event: &TouchEvent, phase, window, cx| {
+                if !phase.bubble() {
+                    return;
+                }
+                if f.update(cx, |f, cx| f.touch_event(event, cx)) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            });
+            let f = field.clone();
+            window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
+                if !phase.bubble()
+                    || window.default_prevented()
+                    || !bounds.contains(&event.position)
+                {
+                    return;
+                }
+                f.update(cx, |f, cx| f.long_press(event.position, window, cx));
+                window.prevent_default();
+                cx.stop_propagation();
+            });
+            paint_handles(&field, accent, window, cx);
+        },
+    )
+    .absolute()
+    .size_full()
+}
+
+/// Paints the selection handles (or the insertion handle) and records their
+/// touch targets.
+fn paint_handles(field: &Entity<TextField>, accent: Hsla, window: &mut Window, cx: &mut App) {
+    let f = field.read(cx);
+    f.handles.borrow_mut().clear();
+    if !f.focus.is_focused(window) {
+        return;
+    }
+    let laid = f.laid.borrow();
+    let Some(laid) = laid.as_ref() else { return };
+    let sel = f.buf.selection();
+    let r = HANDLE_SIZE / 2.0;
+    let lh = typography::BODY.line;
+    let tip_y = f32::from(laid.bounds.top() + (laid.bounds.size.height + lh) / 2.0);
+    let (left, right) = (
+        f32::from(laid.bounds.left()),
+        f32::from(laid.bounds.right()),
+    );
+    let x_of = |byte: usize| {
+        left - f.scroll.get() + f32::from(laid.line.x_for_index(f.display_index(byte)))
+    };
+    // (tip x, direction tip -> centre, the drag it starts)
+    let wanted: Vec<(f32, (f32, f32), Drag)> = if !sel.is_empty() {
+        vec![
+            (x_of(sel.start), (-1.0, 1.0), Drag::Handle(Some(sel.end))),
+            (x_of(sel.end), (1.0, 1.0), Drag::Handle(Some(sel.start))),
+        ]
+    } else if f.insertion_visible() || matches!(f.drag.get(), Some(Drag::Handle(None))) {
+        vec![(x_of(f.buf.head()), (0.0, 1.0), Drag::Handle(None))]
+    } else {
+        Vec::new()
+    };
+    let mut hits = Vec::new();
+    for (tip_x, dir, drag) in wanted {
+        if !handle_visible(tip_x, left, right) {
+            continue;
+        }
+        let pts: Vec<Point<Pixels>> = teardrop((tip_x, tip_y), dir, r, 28)
+            .into_iter()
+            .map(|(x, y)| point(px(x), px(y)))
+            .collect();
+        let mut path = PathBuilder::fill();
+        path.add_polygon(&pts, true);
+        match path.build() {
+            Ok(path) => window.paint_path(path, accent),
+            Err(err) => log::warn!("text field: handle path failed: {err}"),
+        }
+        let len = dir.0.hypot(dir.1);
+        let reach = r * std::f32::consts::SQRT_2 / len;
+        let (cx0, cy0) = (tip_x + dir.0 * reach, tip_y + dir.1 * reach);
+        hits.push((
+            drag,
+            Bounds::new(
+                point(px(cx0 - HANDLE_HIT / 2.0), px(cy0 - HANDLE_HIT / 2.0)),
+                size(px(HANDLE_HIT), px(HANDLE_HIT)),
+            ),
+        ));
+    }
+    *f.handles.borrow_mut() = hits;
+}
+
+/// The edit menu as a glass capsule above the field (below it when there is
+/// no room), kept on screen. `None` while closed or with nothing to offer.
+fn edit_menu(
+    theme: Theme,
+    field: &Entity<TextField>,
+    window: &Window,
+    cx: &App,
+) -> Option<AnyElement> {
+    let f = field.read(cx);
+    if !f.menu_visible(window) {
+        return None;
+    }
+    let content = f.content.get()?;
+    let sel = f.buf.selection();
+    let clipboard_empty = cx
+        .read_from_clipboard()
+        .and_then(|c| c.text())
+        .is_none_or(|t| t.is_empty());
+    let items = menu_items(MenuState {
+        has_selection: !sel.is_empty(),
+        secret: f.secret.get(),
+        clipboard_empty,
+        text_empty: f.buf.is_empty(),
+        all_selected: !f.buf.is_empty() && sel == (0..f.buf.text().len()),
+    });
+    if items.is_empty() {
+        return None;
+    }
+    let colors = crate::theme::colors(theme);
+    let font = window.text_style().font();
+    let widths: Vec<f32> = items
+        .iter()
+        .map(|item| {
+            let label: gpui::SharedString = item.label().into();
+            let line = window.text_system().shape_line(
+                label.clone(),
+                typography::SUBHEADLINE.size,
+                &runs(&font, Hsla::default(), label.len(), None),
+                None,
+            );
+            f32::from(line.width)
+        })
+        .collect();
+    let width = menu_width(&widths);
+    let anchor = f
+        .menu_anchor_x()
+        .unwrap_or_else(|| f32::from(content.center().x));
+    let (left, top) = place_menu(
+        anchor,
+        f32::from(content.top()),
+        f32::from(content.bottom()),
+        width,
+        f32::from(window.viewport_size().width),
+        SAFE_TOP,
+    );
+    // The box's own origin: the content box sits `BOX_PAD` in from the left.
+    let rel_left = left - (f32::from(content.left()) - BOX_PAD);
+    let rel_top = top - f32::from(content.top());
+    let buttons = items.into_iter().enumerate().map(|(i, item)| {
+        let field = field.clone();
+        div()
+            .id(("edit-menu-item", i))
+            .h_full()
+            .px(px(MENU_ITEM_PAD))
+            .flex()
+            .items_center()
+            .text_size(typography::SUBHEADLINE.size)
+            .text_color(colors.label)
+            .child(item.label())
+            .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                field.update(cx, |f, cx| f.menu_action(item, cx));
+                cx.stop_propagation();
+            })
+    });
+    Some(
+        deferred(
+            div()
+                .absolute()
+                .left(px(rel_left))
+                .top(px(rel_top))
+                .w(px(width))
+                .h(px(MENU_H))
+                .occlude()
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(
+                    glass(GlassSpec::control(theme))
+                        .size_full()
+                        .rounded_full()
+                        .shadow(shadow::glass(theme.is_dark()))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .children(buttons),
+                ),
+        )
+        .with_priority(10)
+        .into_any_element(),
+    )
+}
+
+/// Invisible touch targets over the handles, so a press on one never reaches
+/// what lies under it.
+fn handle_shields(field: &Entity<TextField>, window: &Window, cx: &App) -> Vec<AnyElement> {
+    let f = field.read(cx);
+    let Some(content) = f.content.get() else {
+        return Vec::new();
+    };
+    if !f.focus.is_focused(window) {
+        return Vec::new();
+    }
+    let origin = point(content.left() - px(BOX_PAD), content.top());
+    f.handles
+        .borrow()
+        .iter()
+        .enumerate()
+        .map(|(i, (_, rect))| {
+            deferred(
+                div()
+                    .id(("handle-shield", i))
+                    .absolute()
+                    .left(rect.left() - origin.x)
+                    .top(rect.top() - origin.y)
+                    .size(px(HANDLE_HIT))
+                    .occlude()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
+            )
+            .with_priority(9)
+            .into_any_element()
+        })
+        .collect()
+}
+
 /// The glass box around `field`: `placeholder` while it is empty and
 /// unfocused, the text and a caret while typing, and a tap that focuses it
 /// and raises the soft keyboard.
@@ -805,12 +1426,6 @@ fn field_box_with(
     window: &Window,
     cx: &App,
 ) -> impl IntoElement {
-    use gpui::{InteractiveElement, MouseButton, ParentElement};
-    use liquid_glass_kit::{
-        glass::{GlassSpec, glass},
-        tokens::{shadow, typography},
-    };
-
     let colors = crate::theme::colors(theme);
     field.read(cx).set_secret(secret);
     let focus = field.read(cx).focus_handle();
@@ -841,9 +1456,14 @@ fn field_box_with(
         .on_key_down(on_backspace(field.clone()))
         .flex_none()
         .h(px(44.0))
-        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            window.focus(&focus, cx);
-            window.show_soft_keyboard();
+        .on_mouse_down(MouseButton::Left, {
+            let field = field.clone();
+            move |event, window, cx| {
+                field.update(cx, |f, cx| {
+                    f.tap(event.position, event.click_count, window, cx);
+                });
+                cx.stop_propagation();
+            }
         })
         .child(
             glass(GlassSpec::control(theme))
@@ -852,7 +1472,7 @@ fn field_box_with(
                 .shadow(shadow::glass(theme.is_dark()))
                 .flex()
                 .items_center()
-                .px(px(16.0))
+                .px(px(BOX_PAD))
                 .child(
                     div()
                         .relative()
@@ -873,6 +1493,9 @@ fn field_box_with(
                         .children(shown),
                 ),
         )
+        .child(touch_layer(field.clone(), colors.accent))
+        .children(handle_shields(field, window, cx))
+        .children(edit_menu(theme, field, window, cx))
 }
 
 #[cfg(test)]
@@ -1077,6 +1700,168 @@ mod tests {
             assert!(f.handle_key(&ctrl("c"), cx));
             assert!(f.handle_key(&ctrl("x"), cx));
             assert_eq!(f.text(), " worldhello");
+        });
+    }
+
+    /// A host that draws a real field box so layout and hit-testing work.
+    struct BoxHost(Entity<TextField>);
+
+    impl gpui::Render for BoxHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().p(px(16.0)).child(field_box(
+                Theme::Dark,
+                "f",
+                &self.0,
+                "Ara",
+                window,
+                cx,
+            ))
+        }
+    }
+
+    fn box_cx<'a>(
+        cx: &'a mut TestAppContext,
+        text: &str,
+    ) -> (Entity<TextField>, &'a mut gpui::VisualTestContext) {
+        let (host, cx) = cx.add_window_view(|_, cx| BoxHost(cx.new(TextField::new)));
+        let field = host.read_with(cx, |h, _| h.0.clone());
+        field.update(cx, |f, cx| f.set(text, cx));
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        (field, cx)
+    }
+
+    /// Window x of byte `b` in the unfocused, unscrolled line.
+    fn x_of(field: &Entity<TextField>, b: usize, cx: &mut gpui::VisualTestContext) -> f32 {
+        field.update_in(cx, |f, w, _| {
+            let line = f.shape_display(w);
+            f32::from(f.content.get().unwrap().left() + line.x_for_index(b))
+        })
+    }
+
+    #[gpui::test]
+    fn tap_on_an_unfocused_field_focuses_and_places_the_caret(cx: &mut TestAppContext) {
+        let (field, cx) = box_cx(cx, "merhaba dünya");
+        let x = x_of(&field, 3, cx);
+        field.update_in(cx, |f, w, cx| {
+            assert!(!f.focus.is_focused(w));
+            f.tap(point(px(x + 1.0), px(40.0)), 1, w, cx);
+            assert!(f.focus.is_focused(w));
+            assert_eq!(f.selection(), 3..3);
+            assert!(f.insertion.get().is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn tap_in_a_focused_field_moves_the_caret_and_the_caret_toggles_the_menu(
+        cx: &mut TestAppContext,
+    ) {
+        let (field, cx) = box_cx(cx, "merhaba dünya");
+        let (x2, x9) = (x_of(&field, 2, cx), x_of(&field, 9, cx));
+        field.update_in(cx, |f, w, cx| {
+            f.tap(point(px(x2), px(40.0)), 1, w, cx);
+            f.tap(point(px(x9), px(40.0)), 1, w, cx);
+            assert_eq!(f.selection(), 9..9);
+            assert!(f.menu.get().is_none());
+        });
+        cx.run_until_parked();
+        field.update_in(cx, |f, w, cx| {
+            // The painted caret is now at 9: tapping it opens the menu.
+            f.tap(point(px(x9), px(40.0)), 1, w, cx);
+            assert!(f.menu.get().is_some());
+            f.tap(point(px(x9), px(40.0)), 1, w, cx);
+            assert!(f.menu.get().is_none());
+            assert_eq!(f.selection(), 9..9);
+        });
+    }
+
+    #[gpui::test]
+    fn double_tap_selects_the_word(cx: &mut TestAppContext) {
+        let (field, cx) = box_cx(cx, "merhaba dünya");
+        let x = x_of(&field, 10, cx);
+        field.update_in(cx, |f, w, cx| {
+            f.tap(point(px(x), px(40.0)), 2, w, cx);
+            assert!(f.focus.is_focused(w));
+            assert_eq!(&f.text()[f.selection()], "dünya");
+        });
+    }
+
+    #[gpui::test]
+    fn long_press_selects_the_word_and_arms_the_menu(cx: &mut TestAppContext) {
+        let (field, cx) = box_cx(cx, "merhaba dünya");
+        let x = x_of(&field, 2, cx);
+        field.update_in(cx, |f, w, cx| {
+            f.long_press(point(px(x), px(40.0)), w, cx);
+            assert_eq!(&f.text()[f.selection()], "merhaba");
+            assert!(f.menu.get().is_some());
+            assert!(f.drag.get().is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn long_press_on_an_empty_field_arms_a_menu(cx: &mut TestAppContext) {
+        let (field, cx) = box_cx(cx, "");
+        field.update_in(cx, |f, w, cx| {
+            f.long_press(point(px(30.0), px(40.0)), w, cx);
+            assert_eq!(f.selection(), 0..0);
+            assert!(f.menu.get().is_some());
+        });
+    }
+
+    #[gpui::test]
+    fn menu_actions_use_the_clipboard(cx: &mut TestAppContext) {
+        let (field, cx) = window_cx(cx);
+        field.update(cx, |f, cx| {
+            f.set("hello world", cx);
+            f.set_selection(0, 5, cx);
+            f.menu_action(MenuItem::Copy, cx);
+            assert_eq!(f.text(), "hello world");
+            f.menu_action(MenuItem::Cut, cx);
+            assert_eq!(f.text(), " world");
+            f.set_selection(6, 6, cx);
+            f.menu_action(MenuItem::Paste, cx);
+            assert_eq!(f.text(), " worldhello");
+            f.menu_action(MenuItem::SelectAll, cx);
+            assert_eq!(f.selection(), 0..11);
+            assert!(f.menu.get().is_some());
+            // A secret field neither copies nor cuts.
+            f.set_secret(true);
+            f.menu_action(MenuItem::Cut, cx);
+            assert_eq!(f.text(), " worldhello");
+        });
+    }
+
+    #[gpui::test]
+    fn dragging_a_handle_moves_one_end(cx: &mut TestAppContext) {
+        let (field, cx) = box_cx(cx, "bir iki üç dört");
+        let (x1, x12) = (x_of(&field, 1, cx), x_of(&field, 12, cx));
+        field.update_in(cx, |f, w, cx| {
+            f.tap(point(px(x1), px(40.0)), 2, w, cx);
+            assert_eq!(&f.text()[f.selection()], "bir");
+        });
+        cx.run_until_parked();
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        field.update(cx, |f, cx| {
+            // Grab the end handle, drag it to byte 12.
+            let rect = f.handles.borrow().last().map(|(_, r)| *r).unwrap();
+            let start = TouchEvent {
+                phase: TouchPhase::Started,
+                position: rect.center(),
+                ..Default::default()
+            };
+            assert!(f.touch_event(&start, cx));
+            f.pointer_x.set(x12);
+            f.apply_drag(f.drag.get().unwrap(), cx);
+            assert_eq!(f.selection(), 0..12);
+            let end = TouchEvent {
+                phase: TouchPhase::Ended,
+                position: rect.center(),
+                ..Default::default()
+            };
+            assert!(f.touch_event(&end, cx));
+            assert!(f.drag.get().is_none());
         });
     }
 

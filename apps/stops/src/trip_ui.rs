@@ -125,7 +125,12 @@ fn trip_ends(trip: Option<&ActiveTrip>) -> Option<(Destination, Destination)> {
 }
 
 /// The pill text for the live card's status, from the pure helper.
-fn status_text(trip: &ActiveTrip, live: Option<&Live>, here: Option<Coord>) -> String {
+fn status_text(
+    trip: &ActiveTrip,
+    live: Option<&Live>,
+    here: Option<Coord>,
+    arrive: Option<String>,
+) -> String {
     let crossed = live.is_some_and(|l| l.state != TripState::Tracking);
     rovsti_geo::status_share_text(
         &trip.label(),
@@ -134,7 +139,7 @@ fn status_text(trip: &ActiveTrip, live: Option<&Live>, here: Option<Coord>) -> S
         here,
         trip.trip.diameter.center(),
         crossed,
-        None,
+        arrive.as_deref(),
     )
 }
 
@@ -209,9 +214,13 @@ pub fn circle_text(live: &Live) -> Option<String> {
         .map(|m| format!("{} to the circle", distance_text(m)))
 }
 
-/// "About 4 min to the line", when there is an estimate.
-pub fn eta_text(eta_min: Option<u32>) -> Option<String> {
-    eta_min.map(|m| format!("About {m} min to the line"))
+/// "About 4 min to the line, around 18:42", when there is an estimate.
+/// Without a clock time it is just "About 4 min to the line".
+pub fn eta_text(eta_min: Option<u32>, clock: Option<&str>) -> Option<String> {
+    eta_min.map(|m| match clock {
+        Some(c) => format!("About {m} min to the line, around {c}"),
+        None => format!("About {m} min to the line"),
+    })
 }
 
 /// What the alarm screen says under the title: the half you ended up on.
@@ -629,7 +638,10 @@ impl StopsApp {
         let mut details = Vec::new();
         if let Some(l) = tracking {
             details.extend(circle_text(l));
-            details.extend(eta_text(l.eta_min));
+            let clock = l
+                .eta_min
+                .map(|m| rovsti_geo::arrival_clock(now_ms(), m, self.tz_offset_s));
+            details.extend(eta_text(l.eta_min, clock.as_deref()));
         }
         if let Some((here, _)) = self.map.position {
             let target = trip.trip.diameter.center();
@@ -737,7 +749,12 @@ impl StopsApp {
     fn status_now(&self) -> Option<String> {
         let trip = self.trip.as_ref()?;
         let here = self.map.position.map(|(c, _)| c);
-        Some(status_text(trip, self.live.as_ref(), here))
+        let arrive = self
+            .live
+            .as_ref()
+            .and_then(|l| l.eta_min)
+            .map(|m| rovsti_geo::arrival_clock(now_ms(), m, self.tz_offset_s));
+        Some(status_text(trip, self.live.as_ref(), here, arrive))
     }
 
     /// Copy status: the trip's status text to the clipboard.
@@ -1412,10 +1429,14 @@ mod tests {
     fn the_distance_texts_read_for_the_card() {
         assert_eq!(distance_text(120.0), "120 m");
         assert_eq!(
-            eta_text(Some(3)).as_deref(),
+            eta_text(Some(3), None).as_deref(),
             Some("About 3 min to the line")
         );
-        assert_eq!(eta_text(None), None);
+        assert_eq!(
+            eta_text(Some(4), Some("18:42")).as_deref(),
+            Some("About 4 min to the line, around 18:42")
+        );
+        assert_eq!(eta_text(None, Some("18:42")), None);
     }
 
     #[test]

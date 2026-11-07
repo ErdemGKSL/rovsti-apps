@@ -777,6 +777,117 @@ pub fn saved_notice(summary: Option<String>) -> String {
     }
 }
 
+/// Numbers and emails to add to a contact that already exists.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Addition {
+    pub numbers: Vec<String>,
+    pub emails: Vec<String>,
+}
+
+impl Addition {
+    /// The numbers and emails of a search query; a plain name gives `None`.
+    pub fn from_query(query: &str) -> Option<Self> {
+        Self::from_draft(&draft_from_query(query)?)
+    }
+
+    /// The numbers and emails of a scanned or pasted card; `None` without any.
+    pub fn from_draft(d: &ContactDraft) -> Option<Self> {
+        let pick = |fields: &[DraftField]| -> Vec<String> {
+            fields
+                .iter()
+                .map(|f| f.value.trim().to_owned())
+                .filter(|v| !v.is_empty())
+                .collect()
+        };
+        let add = Self {
+            numbers: pick(&d.numbers),
+            emails: pick(&d.emails),
+        };
+        (!add.is_empty()).then_some(add)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.numbers.is_empty() && self.emails.is_empty()
+    }
+}
+
+/// Why nothing was added to a contact.
+#[derive(Debug, PartialEq, Eq, Error)]
+pub enum AddError {
+    /// The named contact already has every detail.
+    #[error("{0} already has this")]
+    AlreadyThere(String),
+    #[error("Nothing to add")]
+    Empty,
+}
+
+fn number_identity(raw: &str) -> String {
+    crate::import_plan::number_key(raw).unwrap_or_else(|| raw.trim().to_lowercase())
+}
+
+/// Appends the details `target` lacks (numbers by digits, emails ignoring
+/// case) and returns the new draft with how many were added.
+pub fn add_to_existing(
+    target: &ContactDraft,
+    add: &Addition,
+) -> Result<(ContactDraft, usize), AddError> {
+    if add.is_empty() {
+        return Err(AddError::Empty);
+    }
+    let mut out = target.clone();
+    let mut seen: BTreeSet<String> = out
+        .numbers
+        .iter()
+        .map(|f| number_identity(&f.value))
+        .collect();
+    let mut added = 0;
+    for n in add
+        .numbers
+        .iter()
+        .map(|n| n.trim())
+        .filter(|n| !n.is_empty())
+    {
+        if seen.insert(number_identity(n)) {
+            out.numbers.push(DraftField::new(n, FieldKind::Mobile));
+            added += 1;
+        }
+    }
+    let mut seen: BTreeSet<String> = out
+        .emails
+        .iter()
+        .map(|f| f.value.trim().to_lowercase())
+        .collect();
+    for e in add
+        .emails
+        .iter()
+        .map(|e| e.trim())
+        .filter(|e| !e.is_empty())
+    {
+        if seen.insert(e.to_lowercase()) {
+            out.emails.push(DraftField::new(e, FieldKind::Home));
+            added += 1;
+        }
+    }
+    if added == 0 {
+        return Err(AddError::AlreadyThere(target.display_name()));
+    }
+    Ok((out, added))
+}
+
+/// "Number added to Ayşe Yılmaz" / "2 details added to Ayşe Yılmaz".
+pub fn added_notice(name: &str, add: &Addition, n: usize) -> String {
+    if n == 1 {
+        let what = match (add.numbers.is_empty(), add.emails.is_empty()) {
+            (false, true) => "Number",
+            (true, false) => "Email",
+            _ => "Detail",
+        };
+        format!("{what} added to {name}")
+    } else {
+        format!("{n} details added to {name}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1429,5 +1540,117 @@ mod tests {
             saved_notice(Some("Number added".into())),
             "Saved · Number added"
         );
+    }
+
+    #[test]
+    fn addition_from_query_number_email_name() {
+        let a = Addition::from_query("0532 111 22 33").expect("number");
+        assert_eq!(a.numbers.len(), 1);
+        assert!(a.emails.is_empty());
+        let a = Addition::from_query("a@b.com").expect("email");
+        assert_eq!(a.emails, vec!["a@b.com".to_owned()]);
+        assert!(a.numbers.is_empty());
+        assert_eq!(Addition::from_query("Ayşe Yılmaz"), None);
+        assert_eq!(Addition::from_query("  "), None);
+    }
+
+    #[test]
+    fn addition_from_draft_takes_numbers_and_emails() {
+        let d = ContactDraft {
+            given: "X".into(),
+            numbers: vec![DraftField::new(" 111 ", FieldKind::Work)],
+            emails: vec![DraftField::new("", FieldKind::Home)],
+            ..ContactDraft::default()
+        };
+        let a = Addition::from_draft(&d).expect("some");
+        assert_eq!(a.numbers, vec!["111".to_owned()]);
+        assert!(a.emails.is_empty());
+        assert_eq!(Addition::from_draft(&ContactDraft::default()), None);
+    }
+
+    fn ayse() -> ContactDraft {
+        ContactDraft {
+            id: Some(1),
+            given: "Ayşe".into(),
+            family: "Yılmaz".into(),
+            numbers: vec![DraftField::new("0532 111 22 33", FieldKind::Home)],
+            emails: vec![DraftField::new("Ayse@Mail.com", FieldKind::Work)],
+            ..ContactDraft::default()
+        }
+    }
+
+    #[test]
+    fn add_new_number_and_email() {
+        let add = Addition {
+            numbers: vec!["0555 000 00 00".into()],
+            emails: vec!["new@mail.com".into()],
+        };
+        let (d, n) = add_to_existing(&ayse(), &add).expect("added");
+        assert_eq!(n, 2);
+        assert_eq!(d.numbers.len(), 2);
+        assert_eq!(d.numbers[1].kind, FieldKind::Mobile);
+        assert!(!d.numbers[1].primary);
+        assert_eq!(d.emails[1].kind, FieldKind::Home);
+        assert_eq!(d.numbers[0], ayse().numbers[0]);
+    }
+
+    #[test]
+    fn same_number_in_another_format_is_already_there() {
+        let add = Addition {
+            numbers: vec!["+90 532 111 22 33".into()],
+            emails: vec![],
+        };
+        assert_eq!(
+            add_to_existing(&ayse(), &add),
+            Err(AddError::AlreadyThere("Ayşe Yılmaz".into()))
+        );
+    }
+
+    #[test]
+    fn email_match_ignores_case_and_mixed_counts_only_new() {
+        let add = Addition {
+            numbers: vec!["0555 000 00 00".into(), "0555-000-00-00".into()],
+            emails: vec!["ayse@mail.COM".into()],
+        };
+        let (d, n) = add_to_existing(&ayse(), &add).expect("added");
+        assert_eq!(n, 1);
+        assert_eq!(d.emails.len(), 1);
+        assert_eq!(d.numbers.len(), 2);
+    }
+
+    #[test]
+    fn empty_addition_is_rejected() {
+        assert_eq!(
+            add_to_existing(&ayse(), &Addition::default()),
+            Err(AddError::Empty)
+        );
+        assert_eq!(AddError::Empty.to_string(), "Nothing to add");
+        assert_eq!(
+            AddError::AlreadyThere("Ali".into()).to_string(),
+            "Ali already has this"
+        );
+    }
+
+    #[test]
+    fn added_notices() {
+        let num = Addition {
+            numbers: vec!["1".into()],
+            emails: vec![],
+        };
+        let mail = Addition {
+            numbers: vec![],
+            emails: vec!["a@b.c".into()],
+        };
+        let both = Addition {
+            numbers: vec!["1".into()],
+            emails: vec!["a@b.c".into()],
+        };
+        assert_eq!(
+            added_notice("Ayşe Yılmaz", &num, 1),
+            "Number added to Ayşe Yılmaz"
+        );
+        assert_eq!(added_notice("Ömer", &mail, 1), "Email added to Ömer");
+        assert_eq!(added_notice("Ömer", &both, 1), "Detail added to Ömer");
+        assert_eq!(added_notice("Şule", &both, 2), "2 details added to Şule");
     }
 }

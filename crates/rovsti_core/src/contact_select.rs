@@ -267,6 +267,46 @@ pub fn full_text(d: &ContactDraft) -> String {
     lines.join("\n")
 }
 
+/// How a selection is shared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShareFormat {
+    Vcf,
+    Text,
+}
+
+impl ShareFormat {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Vcf => ".vcf file",
+            Self::Text => "Text",
+        }
+    }
+}
+
+pub const SHARE_FORMATS: [ShareFormat; 2] = [ShareFormat::Vcf, ShareFormat::Text];
+
+/// Most contacts written into one shared text.
+pub const MAX_TEXT_CONTACTS: usize = 100;
+
+/// The contacts as text, blank-line separated, ending in "… and N more" when
+/// there are more than [`MAX_TEXT_CONTACTS`].
+pub fn share_text(drafts: &[ContactDraft]) -> String {
+    let mut parts: Vec<String> = drafts
+        .iter()
+        .take(MAX_TEXT_CONTACTS)
+        .map(full_text)
+        .collect();
+    if drafts.len() > MAX_TEXT_CONTACTS {
+        parts.push(format!("… and {} more", drafts.len() - MAX_TEXT_CONTACTS));
+    }
+    parts.join("\n\n")
+}
+
+/// The pill after sharing text.
+pub fn shared_text_notice(n: usize) -> String {
+    format!("Shared {} as text", contacts(n))
+}
+
 pub fn copied_contact_notice() -> &'static str {
     "Contact copied"
 }
@@ -441,5 +481,41 @@ mod tests {
             "Added 2 contacts to Family. 1 skipped: other account"
         );
         assert_eq!(added_with_skipped(1, "Work", 0), "Added 1 contact to Work");
+    }
+
+    #[test]
+    fn share_formats_and_labels() {
+        assert_eq!(SHARE_FORMATS[0].label(), ".vcf file");
+        assert_eq!(SHARE_FORMATS[1].label(), "Text");
+    }
+
+    #[test]
+    fn share_text_joins_with_blank_lines_in_order() {
+        let text = share_text(&[d(1, "Ayşe"), d(2, "Ömer")]);
+        assert_eq!(
+            text,
+            format!(
+                "{}\n\n{}",
+                full_text(&d(1, "Ayşe")),
+                full_text(&d(2, "Ömer"))
+            )
+        );
+        assert_eq!(share_text(&[]), "");
+    }
+
+    #[test]
+    fn share_text_caps_with_a_more_line() {
+        let all: Vec<ContactDraft> = (0..112).map(|i| d(i, &format!("C{i}"))).collect();
+        let text = share_text(&all);
+        assert!(text.ends_with("\n\n… and 12 more"));
+        assert!(text.contains("C99"));
+        assert!(!text.contains("C100"));
+        assert!(!share_text(&all[..100]).contains("more"));
+    }
+
+    #[test]
+    fn shared_text_notice_plural() {
+        assert_eq!(shared_text_notice(1), "Shared 1 contact as text");
+        assert_eq!(shared_text_notice(3), "Shared 3 contacts as text");
     }
 }

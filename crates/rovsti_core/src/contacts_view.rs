@@ -226,12 +226,20 @@ pub fn favorite_columns(width_dp: f32) -> usize {
 /// `order` come first, by index there; the rest follow by name, then id. Keys
 /// of vanished contacts are skipped.
 pub fn order_favorites<'a>(favorites: &'a [WireContact], order: &[String]) -> Vec<&'a WireContact> {
+    order_favorite_refs(favorites.iter().collect(), order)
+}
+
+/// `order_favorites` for a list of references (for example a filtered one).
+pub fn order_favorite_refs<'a>(
+    favorites: Vec<&'a WireContact>,
+    order: &[String],
+) -> Vec<&'a WireContact> {
     let rank = |c: &WireContact| {
         c.lookup_key
             .as_deref()
             .and_then(|key| order.iter().position(|k| k == key))
     };
-    let mut shown: Vec<&WireContact> = favorites.iter().collect();
+    let mut shown = favorites;
     shown.sort_by_cached_key(|c| (rank(c).unwrap_or(usize::MAX), fold(&c.display_name), c.id));
     shown
 }
@@ -244,6 +252,21 @@ pub fn reordered_keys(shown: &[&WireContact], from: usize, to: usize) -> Vec<Str
         crate::settings::move_reply(&mut keys, from, to);
     }
     keys
+}
+
+/// The saved order after moving the favorite at `index` one place up or down
+/// in `shown`. `None` at the edges, out of range, or when either contact has no
+/// lookup key (it could not be remembered).
+pub fn move_favorite(shown: &[&WireContact], index: usize, up: bool) -> Option<Vec<String>> {
+    let to = if up {
+        index.checked_sub(1)?
+    } else {
+        index.checked_add(1).filter(|t| *t < shown.len())?
+    };
+    if index >= shown.len() || shown[index].lookup_key.is_none() || shown[to].lookup_key.is_none() {
+        return None;
+    }
+    Some(reordered_keys(shown, index, to))
 }
 
 /// The contacts whose id is not in `hidden`, in the order given.
@@ -545,6 +568,37 @@ mod tests {
         assert_eq!(reordered_keys(&shown, 0, 0), keys(&["a", "c", "d"]));
         assert_eq!(reordered_keys(&shown, 0, 9), keys(&["a", "c", "d"]));
         assert_eq!(reordered_keys(&shown, 9, 0), keys(&["a", "c", "d"]));
+    }
+
+    #[test]
+    fn move_favorite_up_down_and_edges() {
+        let all = [
+            fav(1, "A", Some("a")),
+            fav(2, "B", Some("b")),
+            fav(3, "C", Some("c")),
+            fav(4, "D", None),
+        ];
+        let shown: Vec<&WireContact> = all.iter().collect();
+        assert_eq!(move_favorite(&shown, 1, true), Some(keys(&["b", "a", "c"])));
+        assert_eq!(
+            move_favorite(&shown, 0, false),
+            Some(keys(&["b", "a", "c"]))
+        );
+        assert_eq!(move_favorite(&shown, 0, true), None);
+        assert_eq!(move_favorite(&shown, 3, false), None);
+        assert_eq!(move_favorite(&shown, 2, false), None);
+        assert_eq!(move_favorite(&shown, 3, true), None);
+        assert_eq!(move_favorite(&shown, 9, true), None);
+    }
+
+    #[test]
+    fn favorite_refs_match_order_favorites() {
+        let all = [fav(1, "Z", Some("z")), fav(2, "A", Some("a"))];
+        let order = keys(&["z"]);
+        assert_eq!(
+            ids(&order_favorite_refs(all.iter().collect(), &order)),
+            ids(&order_favorites(&all, &order))
+        );
     }
 
     #[test]

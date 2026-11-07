@@ -31,6 +31,8 @@ pub mod contact_edit;
 pub mod contact_history;
 /// Contacts shared to the app: .vcf files and text.
 pub mod contact_intake;
+/// Per-contact ringtone and voicemail options, and the Home screen shortcut spec.
+pub mod contact_options;
 pub mod contact_photo;
 /// Select mode in the Contacts list: export ids, group changes, notices, contact text.
 /// Quick actions on a contact row.

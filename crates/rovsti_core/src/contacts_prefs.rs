@@ -11,7 +11,10 @@ use crate::{contacts_view::NameStyle, settings::SortBy, wire::NameFormat};
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// A file larger than this is not ours; it is ignored.
-pub const MAX_FILE_BYTES: usize = 4 * 1024;
+pub const MAX_FILE_BYTES: usize = 64 * 1024;
+
+/// Most favorites keys kept in the saved order.
+pub const MAX_ORDER: usize = 300;
 
 fn schema() -> u32 {
     SCHEMA_VERSION
@@ -35,6 +38,9 @@ pub struct ContactsPrefs {
     /// Local hour of those notifications, 0..=23.
     #[serde(default = "default_hour")]
     pub reminder_hour: u8,
+    /// Lookup keys of the favorites in the user's order.
+    #[serde(default)]
+    pub favorites_order: Vec<String>,
 }
 
 fn default_hour() -> u8 {
@@ -45,6 +51,17 @@ impl ContactsPrefs {
     /// The reminder hour, clamped to 0..=23 (a damaged file may hold more).
     pub fn hour(&self) -> u8 {
         self.reminder_hour.min(23)
+    }
+
+    /// The saved favorites order: no empty or repeated keys, at most `MAX_ORDER`.
+    pub fn order(&self) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        self.favorites_order
+            .iter()
+            .filter(|k| !k.is_empty() && seen.insert(k.as_str()))
+            .take(MAX_ORDER)
+            .cloned()
+            .collect()
     }
 }
 
@@ -57,6 +74,7 @@ impl Default for ContactsPrefs {
             save_to: String::new(),
             birthday_reminders: false,
             reminder_hour: default_hour(),
+            favorites_order: Vec::new(),
         }
     }
 }
@@ -79,6 +97,7 @@ impl ContactsPrefs {
             save_to: String::new(),
             birthday_reminders: false,
             reminder_hour: default_hour(),
+            favorites_order: Vec::new(),
         }
     }
 }
@@ -139,6 +158,31 @@ mod tests {
             serde_json::from_str(r#"{"birthday_reminders":true,"reminder_hour":200}"#).expect("ok");
         assert!(p.birthday_reminders);
         assert_eq!(p.hour(), 23);
+    }
+
+    #[test]
+    fn favorites_order_defaults_empty_and_old_json_loads() {
+        assert!(ContactsPrefs::default().favorites_order.is_empty());
+        let p: ContactsPrefs = serde_json::from_str(r#"{"save_to":"x"}"#).expect("ok");
+        assert!(p.order().is_empty());
+        let p: ContactsPrefs =
+            serde_json::from_str(r#"{"favorites_order":["a","b"]}"#).expect("ok");
+        assert_eq!(p.order(), ["a", "b"]);
+    }
+
+    #[test]
+    fn order_drops_empty_and_repeated_keys_and_caps() {
+        let p = ContactsPrefs {
+            favorites_order: ["a", "", "b", "a", "c"].map(String::from).to_vec(),
+            ..ContactsPrefs::default()
+        };
+        assert_eq!(p.order(), ["a", "b", "c"]);
+        let many = ContactsPrefs {
+            favorites_order: (0..400).map(|i| format!("k{i}")).collect(),
+            ..ContactsPrefs::default()
+        };
+        assert_eq!(many.order().len(), MAX_ORDER);
+        assert_eq!(many.order()[299], "k299");
     }
 
     #[test]

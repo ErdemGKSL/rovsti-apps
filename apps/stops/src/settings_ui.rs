@@ -15,7 +15,7 @@ use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, list, px,
 };
-use rovsti_android::{Error as AndroidError, trip, xiaomi};
+use rovsti_android::{Error as AndroidError, trip, trip::AlarmPick, xiaomi};
 use rovsti_geo::{
     NoticePrefs, NoticeWhen, Outcome, Stats, StopsPrefs, TripRecord,
     alarm::MIN_ALARM_VOLUME_PCT,
@@ -1829,25 +1829,27 @@ impl StopsApp {
         cx.notify();
     }
 
-    /// Undo of "turn off": brings the message setup back.
     /// A picked alarm sound (`None` = the default alarm) with an Undo.
     pub(crate) fn on_alarm_sound_picked(&mut self, json: &str, cx: &mut Context<Self>) {
         let Some(picked) = trip::parse_alarm_sound_picked(json) else {
             log::warn!("unreadable alarm_sound_picked event");
             return;
         };
-        // A cancelled picker leaves everything as it was.
-        let Some((uri, title)) = picked else {
-            return;
+        let (new, text) = match picked {
+            // A cancelled picker leaves everything as it was.
+            AlarmPick::Cancelled => return,
+            AlarmPick::Default => (None, "Alarm sound: Default alarm".to_owned()),
+            AlarmPick::Chosen(uri, title) => {
+                let title = if title.is_empty() {
+                    "Alarm".to_owned()
+                } else {
+                    title
+                };
+                let text = format!("Alarm sound: {title}");
+                (Some(rovsti_geo::prefs::AlarmSound { uri, title }), text)
+            }
         };
-        let old = self.prefs.alarm_sound.take();
-        let title = if title.is_empty() {
-            "Alarm".to_owned()
-        } else {
-            title
-        };
-        let text = format!("Alarm sound: {title}");
-        self.prefs.alarm_sound = Some(rovsti_geo::prefs::AlarmSound { uri, title });
+        let old = std::mem::replace(&mut self.prefs.alarm_sound, new);
         self.save_prefs(cx);
         self.show_pill(text, Some(crate::PillAction::RestoreAlarmSound(old)), cx);
         cx.notify();
@@ -1863,6 +1865,7 @@ impl StopsApp {
         cx.notify();
     }
 
+    /// Undo of "turn off": brings the message setup back.
     pub(crate) fn restore_notice(&mut self, old: rovsti_geo::NoticePrefs, cx: &mut Context<Self>) {
         self.prefs.notice = Some(old);
         self.save_prefs(cx);

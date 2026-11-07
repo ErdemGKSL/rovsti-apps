@@ -110,23 +110,33 @@ pub fn preview_alarm_sound(plan_json: &str, ms: u32) -> Result<bool> {
     )
 }
 
+/// What the alarm-sound picker answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AlarmPick {
+    /// The picker was dismissed: change nothing.
+    Cancelled,
+    /// "Default": go back to the system alarm sound.
+    Default,
+    /// A chosen sound: uri and title (the title may be empty).
+    Chosen(String, String),
+}
+
 /// Decodes an `alarm_sound_picked` payload `{uri, title, cancelled}`.
-/// `None` is malformed JSON; `Some(None)` is cancelled or the default alarm
-/// (null uri); `Some(Some((uri, title)))` is a chosen sound.
-pub fn parse_alarm_sound_picked(json: &str) -> Option<Option<(String, String)>> {
+/// `None` is malformed JSON.
+pub fn parse_alarm_sound_picked(json: &str) -> Option<AlarmPick> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let object = value.as_object()?;
     if object.get("cancelled").and_then(|v| v.as_bool())? {
-        return Some(None);
+        return Some(AlarmPick::Cancelled);
     }
     match object.get("uri")? {
-        serde_json::Value::Null => Some(None),
+        serde_json::Value::Null => Some(AlarmPick::Default),
         serde_json::Value::String(uri) if !uri.is_empty() => {
             let title = object
                 .get("title")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            Some(Some((uri.clone(), title.to_owned())))
+            Some(AlarmPick::Chosen(uri.clone(), title.to_owned()))
         }
         _ => None,
     }
@@ -214,22 +224,22 @@ mod tests {
             r#"{"uri":"content://media/internal/audio/media/9","title":"Argon","cancelled":false}"#;
         assert_eq!(
             parse_alarm_sound_picked(chosen),
-            Some(Some((
+            Some(AlarmPick::Chosen(
                 "content://media/internal/audio/media/9".to_owned(),
                 "Argon".to_owned()
-            )))
+            ))
         );
         assert_eq!(
             parse_alarm_sound_picked(r#"{"uri":null,"title":null,"cancelled":false}"#),
-            Some(None)
+            Some(AlarmPick::Default)
         );
         assert_eq!(
             parse_alarm_sound_picked(r#"{"uri":null,"cancelled":true}"#),
-            Some(None)
+            Some(AlarmPick::Cancelled)
         );
         assert_eq!(
             parse_alarm_sound_picked(r#"{"uri":"content://x","title":"","cancelled":false}"#),
-            Some(Some(("content://x".to_owned(), String::new())))
+            Some(AlarmPick::Chosen("content://x".to_owned(), String::new()))
         );
         for bad in [
             "",

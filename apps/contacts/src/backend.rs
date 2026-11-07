@@ -229,7 +229,6 @@ pub(crate) fn export_selection(ids: &[i64], hidden: &[i64]) -> Result<(String, u
 }
 
 /// The editable drafts of the contacts with these ids, in address-book order.
-#[allow(dead_code, reason = "wired to Trash in a later step")]
 pub(crate) fn drafts_of(ids: &[i64]) -> Result<Vec<ContactDraft>, String> {
     Ok(contact_select::pick_drafts(&pull_full()?, ids))
 }
@@ -263,7 +262,6 @@ pub(crate) fn set_default(
 }
 
 /// What a scanned picture holds, or why it could not be read.
-#[allow(dead_code, reason = "wired to Scan to add in a later step")]
 pub(crate) fn scan_image(path: &str) -> Result<Scanned, String> {
     let bytes = std::fs::read(path).map_err(|_| Failed::Unreadable.words())?;
     let decoded = image::load_from_memory(&bytes).map_err(|_| Failed::Unreadable.words())?;
@@ -355,6 +353,12 @@ pub(crate) fn add_contacts(cards: Vec<ContactDraft>) -> Result<u32, String> {
 /// Opens the photo picker. The answer is a `document_result` (`contact_photo`).
 pub(crate) fn start_pick_photo() -> Result<(), String> {
     done(documents::pick_contact_photo())
+}
+
+/// Opens the photo picker for a picture to scan. The answer is a
+/// `document_result` (`scan_image`).
+pub(crate) fn start_pick_scan() -> Result<(), String> {
+    done(documents::pick_scan_image())
 }
 
 /// Opens the camera for one photo. The answer is a `document_result`

@@ -7,12 +7,18 @@
 use gpui::Context;
 use rovsti_android::events::{RawEvent, kind};
 use rovsti_core::{
+    contact_edit::ContactDraft,
     contact_photo::{self, CropView},
+    contact_scan::{self, Scanned},
     import_plan, vcard,
     wire::{DocumentOp, DocumentResult, WireContact},
 };
 
-use crate::{ContactsApp, backend, confirm::Confirm};
+use crate::{
+    ContactsApp, backend,
+    confirm::Confirm,
+    trash::{self, ScanRoute},
+};
 
 /// What the export notice says for `count` contacts written.
 pub(crate) fn export_words(count: usize) -> String {
@@ -94,6 +100,77 @@ impl ContactsApp {
         .detach();
     }
 
+    /// Settings, "Scan QR code": opens the picture picker; the answer is a
+    /// `document_result` (`scan_image`).
+    pub(crate) fn scan_qr(&mut self, cx: &mut Context<Self>) {
+        if self.transfer_busy {
+            self.say_busy(cx);
+            return;
+        }
+        self.transfer_busy = true;
+        self.clear_notice();
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { backend::start_pick_scan() })
+                .await;
+            this.update(cx, |this, cx| {
+                if let Err(words) = result {
+                    this.transfer_busy = false;
+                    this.notice = Some(format!("Can't scan: {words}.").into());
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Reads the QR code in the picked picture off the UI thread, then routes it.
+    fn scan_picked(&mut self, path: String, cx: &mut Context<Self>) {
+        self.notice = Some("Reading the picture…".into());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { backend::scan_image(&path) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.transfer_busy = false;
+                match result {
+                    Ok(scanned) => this.route_scan(scanned, cx),
+                    Err(words) => {
+                        this.notice = Some(format!("Can't read that picture: {words}.").into());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn route_scan(&mut self, scanned: Scanned, cx: &mut Context<Self>) {
+        match trash::scanned_route(&scanned) {
+            ScanRoute::Editor => match trash::scanned_draft(&scanned) {
+                Some(draft) => {
+                    self.open_new_editor_with(draft, cx);
+                    self.notice = Some(contact_scan::scan_notice(&scanned).into());
+                }
+                None => self.notice = Some(contact_scan::scan_notice(&Scanned::Nothing).into()),
+            },
+            ScanRoute::Import => {
+                if let Scanned::Cards(cards) = scanned {
+                    self.plan_cards(cards, cx);
+                }
+            }
+            ScanRoute::Notice => {
+                self.notice = Some(contact_scan::scan_notice(&scanned).into());
+            }
+        }
+    }
+
     /// A file button was tapped while another file job runs (the rows are dimmed).
     fn say_busy(&mut self, cx: &mut Context<Self>) {
         if self.notice.is_none() {
@@ -166,6 +243,21 @@ impl ContactsApp {
                 }
                 self.photo_picked(path, cx);
             }
+            DocumentOp::ScanImage => {
+                // Still busy while the picture is read; the answer ends it.
+                let path = result.ok.then_some(result.path).flatten();
+                match path {
+                    Some(path) => self.scan_picked(path, cx),
+                    None => {
+                        self.transfer_busy = false;
+                        // A cancelled picker answers `ok: false` with no error.
+                        if result.error.is_some() || result.ok {
+                            self.notice = Some("Can't read that picture.".into());
+                        }
+                        cx.notify();
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -236,6 +328,31 @@ impl ContactsApp {
             }
         }
         cx.notify();
+    }
+
+    /// Asks before adding the new ones among `cards` (a scanned code).
+    fn plan_cards(&mut self, cards: Vec<ContactDraft>, cx: &mut Context<Self>) {
+        let existing: Vec<WireContact> = self
+            .index()
+            .map(|index| index.all().cloned().collect())
+            .unwrap_or_default();
+        cx.spawn(async move |this, cx| {
+            let plan = cx
+                .background_executor()
+                .spawn(async move { import_plan::plan(&existing, cards) })
+                .await;
+            this.update(cx, |this, cx| {
+                this.clear_notice();
+                this.confirm = Some(Confirm::Import {
+                    cards: plan.add,
+                    duplicates: plan.duplicates,
+                    unreadable: 0,
+                });
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Reads the cards of `text` and asks before adding the new ones.

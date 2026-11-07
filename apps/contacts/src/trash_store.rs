@@ -20,7 +20,6 @@ fn path(dir: &Path) -> PathBuf {
 }
 
 /// The saved Trash, or an empty one when there is none.
-#[allow(dead_code, reason = "wired to the Trash page in a later step")]
 pub(crate) fn trash_load(dir: &Path) -> Trash {
     let Ok(bytes) = fs::read(path(dir)) else {
         return Trash::default();
@@ -35,9 +34,20 @@ pub(crate) fn trash_load(dir: &Path) -> Trash {
     })
 }
 
+/// The saved Trash with the entries older than the retention period dropped
+/// (and the file rewritten when any were).
+pub(crate) fn trash_load_purged(dir: &Path, now_ms: i64) -> Trash {
+    let mut trash = trash_load(dir);
+    if trash.purge_expired(now_ms) > 0
+        && let Err(error) = trash_save(dir, &trash)
+    {
+        log::warn!("could not save the purged Trash: {error}");
+    }
+    trash
+}
+
 /// Writes `trash`; the old file stays whole if this fails. A file that would
 /// be too big to read back again is refused.
-#[allow(dead_code, reason = "wired to the Trash page in a later step")]
 pub(crate) fn trash_save(dir: &Path, trash: &Trash) -> io::Result<()> {
     let mut copy = trash.clone();
     copy.schema_version = SCHEMA_VERSION;
@@ -105,6 +115,21 @@ mod tests {
         trash.clear();
         trash_save(&dir, &trash).expect("second");
         assert!(trash_load(&dir).entries.is_empty());
+        fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn loading_drops_what_is_older_than_thirty_days() {
+        let dir = scratch("purge");
+        let day = 86_400_000;
+        let mut trash = Trash::default();
+        trash.push(vec![draft("Old")], 0);
+        trash.push(vec![draft("New")], 40 * day);
+        trash_save(&dir, &trash).expect("writes");
+        let back = trash_load_purged(&dir, 40 * day + 1);
+        assert_eq!(back.entries.len(), 1);
+        assert_eq!(back.entries[0].draft.given, "New");
+        assert_eq!(trash_load(&dir).entries.len(), 1);
         fs::remove_dir_all(dir).ok();
     }
 

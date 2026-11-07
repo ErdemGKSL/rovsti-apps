@@ -24,6 +24,7 @@ mod recent;
 mod sample;
 mod select;
 mod transfer;
+mod trash;
 mod trash_store;
 mod ui;
 mod upcoming;
@@ -45,6 +46,7 @@ use rovsti_android::{
 use rovsti_core::{
     contact_card::{self, ContactCard},
     contact_edit::{Account, ContactDraft, Group, account_label},
+    contact_trash::Trash,
     contacts_prefs::ContactsPrefs,
     contacts_view::{self, ContactVm, NameStyle},
     settings::SortBy,
@@ -315,6 +317,9 @@ struct ContactsApp {
     upcoming_open: bool,
     recent: Vec<recent::RecentRow>,
     recent_open: bool,
+    /// Deleted contacts kept for 30 days, and the Trash page.
+    trash: Trash,
+    trash_ui: trash::TrashUi,
     /// The alphabet scrubber: the section letter of each Contacts row, the
     /// letters shown, and the drag.
     row_letters: Vec<char>,
@@ -427,10 +432,23 @@ impl ContactsApp {
             let read_from = dir.clone();
             let saved = cx
                 .background_executor()
-                .spawn(async move { prefs::load(&read_from) })
+                .spawn(async move {
+                    (
+                        prefs::load(&read_from),
+                        trash_store::trash_load_purged(&read_from, whatsapp::now_ms()),
+                    )
+                })
                 .await;
+            let (saved, kept) = saved;
             this.update(cx, |this, cx| {
                 this.prefs_dir = Some(dir);
+                // Entries added before the file was read stay on top of it.
+                let fresh = std::mem::replace(&mut this.trash, kept);
+                if !fresh.entries.is_empty() {
+                    let now = whatsapp::now_ms();
+                    this.trash
+                        .push(fresh.entries.into_iter().map(|e| e.draft).collect(), now);
+                }
                 this.save_to.clone_from(&saved.save_to);
                 if this.style_touched {
                     // The owner chose before the file was read: theirs wins.
@@ -503,6 +521,8 @@ impl ContactsApp {
             upcoming_open: false,
             recent: Vec::new(),
             recent_open: false,
+            trash: Trash::default(),
+            trash_ui: trash::TrashUi::default(),
             row_letters: Vec::new(),
             scrub_letters: Vec::new(),
             scrub: upcoming::Scrub::default(),
@@ -787,6 +807,8 @@ impl ContactsApp {
             || self.dupes.sheet.is_open()
             || self.upcoming_open
             || self.recent_open
+            || self.trash_ui.open
+            || self.trash_ui.sheet.is_open()
             || self.select_ui.sheet.is_open()
             || self.select.is_some()
             || self.tabs.selected() != CONTACTS_TAB
@@ -797,6 +819,8 @@ impl ContactsApp {
     fn go_back(&mut self, cx: &mut Context<Self>) {
         if self.confirm.is_some() {
             self.answer(false, cx);
+        } else if self.trash_ui.sheet.is_open() {
+            self.close_trash_sheet(cx);
         } else if self.select_ui.sheet.is_open() {
             self.select_ui.sheet.close();
             cx.notify();
@@ -826,6 +850,10 @@ impl ContactsApp {
             self.set_upcoming_open(false, cx);
         } else if self.recent_open {
             self.set_recent_open(false, cx);
+        } else if self.trash_ui.select.is_some() {
+            self.leave_trash_select(cx);
+        } else if self.trash_ui.open {
+            self.set_trash_open(false, cx);
         } else if self.dupes.sheet.is_open() {
             self.close_dupes_sheet(cx);
         } else if self.dupes.open {
@@ -1616,6 +1644,17 @@ impl ContactsApp {
                     )
                     .on_click(cx.listener(|this, _, _, cx| this.set_dupes_open(true, cx)))
                     .into_any_element(),
+                    tap_row(
+                        theme,
+                        "scan-qr",
+                        Some(Icon::LucideQrCode),
+                        "Scan QR code",
+                        Tone::Accent,
+                    )
+                    .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
+                    .on_click(cx.listener(|this, _, _, cx| this.scan_qr(cx)))
+                    .into_any_element(),
+                    self.trash_entry(theme, cx),
                 ],
             ))
             .child(section(
@@ -1703,7 +1742,7 @@ impl ContactsApp {
         let owns_button = match self.notice_action {
             Some(NoticeAction::UndoDelete) => self.pending_delete.as_ref().is_some_and(|p| {
                 self.notice.as_deref()
-                    == Some(rovsti_core::contact_select::deleted_notice(p.ids.len()).as_str())
+                    == Some(rovsti_core::contact_trash::moved_notice(p.ids.len()).as_str())
             }),
             Some(NoticeAction::UndoMerge) => self
                 .merge_undo
@@ -1776,7 +1815,11 @@ impl ContactsApp {
                             0.0
                         })
                         // Above the select bar.
-                        + px(if self.select.is_some() { 76.0 } else { 0.0 }),
+                        + px(if self.select.is_some() || self.trash_selecting() {
+                            76.0
+                        } else {
+                            0.0
+                        }),
                 )
                 .flex()
                 .justify_center()
@@ -1832,6 +1875,8 @@ impl Render for ContactsApp {
                 | self.select_ui.sheet.tick_real(real)
                 | self.dupes.sheet.tick(dt)
                 | self.dupes.sheet.tick_real(real)
+                | self.trash_ui.sheet.tick(dt)
+                | self.trash_ui.sheet.tick_real(real)
         });
         self.motion = motion;
         self.drop_finished_viewer();
@@ -1872,6 +1917,8 @@ impl Render for ContactsApp {
             (self.upcoming_page(theme, cx), false)
         } else if self.recent_open && tab == CONTACTS_TAB {
             (self.recent_page(theme, cx), false)
+        } else if self.trash_ui.open && tab == SETTINGS_TAB {
+            (self.trash_page(theme, cx), false)
         } else if self.dupes.open && tab == SETTINGS_TAB {
             (self.dupes_page(theme, cx), false)
         } else if self.whatsapp_open && tab == SETTINGS_TAB {
@@ -1942,6 +1989,7 @@ impl Render for ContactsApp {
                 None
             })
             .children(self.select_bar_view(theme, cx))
+            .children(self.trash_bar_view(theme, cx))
             .children(self.select.is_some().then(|| {
                 let entity = cx.entity();
                 canvas(
@@ -1959,48 +2007,56 @@ impl Render for ContactsApp {
                 .size_full()
             }))
             // No tab bar while a form is open or ticking: no stray tap loses the edits.
-            .children((!editing && !picking && self.select.is_none()).then(|| {
-                self.tabs.render(
-                    theme,
-                    move |index, _, cx| {
-                        entity.update(cx, |this, cx| {
-                            this.tabs.press();
-                            let changed = this.tabs.select(index);
-                            if changed {
-                                this.select = None;
-                            }
-                            if changed
-                                || this.open.is_some()
-                                || this.group_page.is_some()
-                                || this.group_edit.is_some()
-                                || this.whatsapp_open
-                                || this.dupes.open
-                                || this.upcoming_open
-                                || this.recent_open
-                            {
-                                this.upcoming_open = false;
-                                this.recent_open = false;
-                                this.whatsapp_open = false;
-                                this.dupes.open = false;
-                                this.dupes.sheet.close();
-                                this.open = None;
-                                this.open_draft = None;
-                                this.group_page = None;
-                                this.group_edit = None;
-                                this.clear_notice();
-                                this.page.restart();
-                            }
-                            cx.notify();
-                        });
+            .children(
+                (!editing && !picking && self.select.is_none() && !self.trash_selecting()).then(
+                    || {
+                        self.tabs.render(
+                            theme,
+                            move |index, _, cx| {
+                                entity.update(cx, |this, cx| {
+                                    this.tabs.press();
+                                    let changed = this.tabs.select(index);
+                                    if changed {
+                                        this.select = None;
+                                    }
+                                    if changed
+                                        || this.open.is_some()
+                                        || this.group_page.is_some()
+                                        || this.group_edit.is_some()
+                                        || this.whatsapp_open
+                                        || this.dupes.open
+                                        || this.upcoming_open
+                                        || this.recent_open
+                                        || this.trash_ui.open
+                                    {
+                                        this.trash_ui.open = false;
+                                        this.trash_ui.select = None;
+                                        this.trash_ui.sheet.close();
+                                        this.upcoming_open = false;
+                                        this.recent_open = false;
+                                        this.whatsapp_open = false;
+                                        this.dupes.open = false;
+                                        this.dupes.sheet.close();
+                                        this.open = None;
+                                        this.open_draft = None;
+                                        this.group_page = None;
+                                        this.group_edit = None;
+                                        this.clear_notice();
+                                        this.page.restart();
+                                    }
+                                    cx.notify();
+                                });
+                            },
+                            move |phase, _, cx| {
+                                touch_entity.update(cx, |this, cx| {
+                                    this.tabs.touch(phase);
+                                    cx.notify();
+                                });
+                            },
+                        )
                     },
-                    move |phase, _, cx| {
-                        touch_entity.update(cx, |this, cx| {
-                            this.tabs.touch(phase);
-                            cx.notify();
-                        });
-                    },
-                )
-            }))
+                ),
+            )
             .children(
                 scrubber
                     .then(|| {
@@ -2029,6 +2085,7 @@ impl Render for ContactsApp {
             .children(self.qr_sheet_view(theme, window, cx))
             .children(self.dupes_sheet_view(theme, window, cx))
             .children(self.select_sheet_view(theme, window, cx))
+            .children(self.trash_sheet_view(theme, window, cx))
     }
 }
 

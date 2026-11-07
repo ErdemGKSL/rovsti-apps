@@ -5,13 +5,11 @@
 use std::sync::Arc;
 
 use gpui::{AnyElement, Context, IntoElement, SharedString, StatefulInteractiveElement};
-use rovsti_core::{
-    contact_edit::ContactDraft, contact_select, contacts_view, search::ContactIndex,
-};
+use rovsti_core::{contact_edit::ContactDraft, contact_trash, contacts_view, search::ContactIndex};
 use rovsti_ui::tokens::Theme;
 
 use crate::{
-    Book, ContactsApp, NoticeAction, PendingDelete, UNDO_LIFE, backend,
+    Book, ContactsApp, NoticeAction, PendingDelete, UNDO_LIFE, backend, trash_store,
     ui::{confirm_card, pill},
 };
 
@@ -54,6 +52,28 @@ pub(crate) enum Confirm {
         duplicates: usize,
         unreadable: usize,
     },
+    /// Settings, Trash: everything in the Trash would be deleted for good.
+    EmptyTrash {
+        count: usize,
+    },
+    /// These Trash entries would be deleted for good.
+    DeleteForever {
+        keys: Vec<u64>,
+    },
+    /// No copy could be kept in the Trash: delete these anyway?
+    DeleteWithoutCopy {
+        ids: Vec<i64>,
+    },
+}
+
+/// Title and body of the Trash cards, `None` for the other cards.
+fn trash_confirm_text(confirm: &Confirm) -> Option<(String, String)> {
+    match confirm {
+        Confirm::EmptyTrash { count } => Some(contact_trash::empty_confirm(*count)),
+        Confirm::DeleteForever { keys } => Some(contact_trash::forever_confirm(keys.len())),
+        Confirm::DeleteWithoutCopy { ids } => Some(crate::trash::no_copy_text(ids.len())),
+        _ => None,
+    }
 }
 
 /// "1 contact", "3 contacts".
@@ -142,6 +162,10 @@ impl ContactsApp {
         };
         cx.notify();
         if !yes {
+            // The contacts were hidden for the delete: they come back.
+            if matches!(confirm, Confirm::DeleteWithoutCopy { .. }) {
+                self.reload(cx);
+            }
             return;
         }
         match confirm {
@@ -159,6 +183,9 @@ impl ContactsApp {
             Confirm::DiscardEdits => self.close_editor(cx),
             Confirm::MergeContacts { keeper, others, .. } => self.run_merge(keeper, others, cx),
             Confirm::Import { cards, .. } => self.add_imported(cards, cx),
+            Confirm::EmptyTrash { .. } => self.empty_trash(cx),
+            Confirm::DeleteForever { keys } => self.delete_forever(keys, cx),
+            Confirm::DeleteWithoutCopy { ids } => self.run_delete(ids, false, cx),
         }
     }
 
@@ -178,7 +205,7 @@ impl ContactsApp {
         self.open_draft = None;
         self.page.restart();
         self.rebuild(cx);
-        self.notice = Some(contact_select::deleted_notice(ids.len()).into());
+        self.notice = Some(contact_trash::moved_notice(ids.len()).into());
         self.notice_action = Some(NoticeAction::UndoDelete);
         // A second delete within the window must restart the timer.
         self.notice_timer = None;
@@ -200,29 +227,87 @@ impl ContactsApp {
         // The button is gone with the delete; the text expires on its timer.
         self.notice_action = None;
         cx.notify();
+        self.run_delete(ids, true, cx);
+    }
+
+    /// Deletes the contacts for real. With `keep_copy` their cards go to the
+    /// Trash first; when that fails the owner is asked before they are lost.
+    pub(crate) fn run_delete(&mut self, ids: Vec<i64>, keep_copy: bool, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let total = ids.len();
-            let failure = cx
+            let mut kept: Vec<(i64, u64)> = Vec::new();
+            if keep_copy {
+                let wanted = ids.clone();
+                let fetched = cx
+                    .background_executor()
+                    .spawn(async move { backend::drafts_of(&wanted) })
+                    .await;
+                let prepared = this
+                    .update(cx, |this, _| {
+                        fetched.ok().and_then(|drafts| this.keep_copies(drafts))
+                    })
+                    .ok()
+                    .flatten();
+                let saved = match prepared {
+                    Some(copies) if copies.entries.is_empty() => Some(copies.entries),
+                    Some(copies) => {
+                        let (dir, snapshot) = (copies.dir.clone(), copies.snapshot.clone());
+                        let written = cx
+                            .background_executor()
+                            .spawn(async move { trash_store::trash_save(&dir, &snapshot) })
+                            .await;
+                        if let Err(error) = &written {
+                            log::warn!("could not save the Trash: {error}");
+                            let keys: Vec<u64> = copies.entries.iter().map(|(_, k)| *k).collect();
+                            this.update(cx, |this, _| this.trash.remove(&keys)).ok();
+                        }
+                        written.ok().map(|()| copies.entries)
+                    }
+                    None => None,
+                };
+                match saved {
+                    Some(entries) => kept = entries,
+                    None => {
+                        this.update(cx, |this, cx| {
+                            this.confirm = Some(Confirm::DeleteWithoutCopy { ids });
+                            cx.notify();
+                        })
+                        .ok();
+                        return;
+                    }
+                }
+            }
+            let (failed, words) = cx
                 .background_executor()
                 .spawn(async move {
-                    let mut failed = 0usize;
+                    let mut failed = Vec::new();
                     let mut words = String::new();
                     for id in ids {
                         if let Err(error) = backend::delete(id) {
-                            failed += 1;
+                            failed.push(id);
                             words = error;
                         }
                     }
-                    (failed > 0).then_some((failed, words))
+                    (failed, words)
                 })
                 .await;
             this.update(cx, |this, cx| {
-                if let Some((failed, words)) = failure {
+                if !failed.is_empty() {
+                    // What was not deleted must not also sit in the Trash.
+                    let keys: Vec<u64> = kept
+                        .iter()
+                        .filter(|(id, _)| failed.contains(id))
+                        .map(|(_, key)| *key)
+                        .collect();
+                    if !keys.is_empty() {
+                        this.trash.remove(&keys);
+                        this.save_trash_quietly(cx);
+                    }
                     this.notice = Some(
                         if total == 1 {
                             format!("Can't delete the contact: {words}.")
                         } else {
-                            format!("Can't delete {}: {words}.", contacts_words(failed))
+                            format!("Can't delete {}: {words}.", contacts_words(failed.len()))
                         }
                         .into(),
                     );
@@ -290,6 +375,19 @@ impl ContactsApp {
                 .on_click(cx.listener(|this, _, _, cx| this.answer(true, cx)))
                 .into_any_element()
         };
+        if let Some((title, body)) = trash_confirm_text(confirm) {
+            let label = match confirm {
+                Confirm::EmptyTrash { .. } => "Empty Trash",
+                Confirm::DeleteForever { .. } => "Delete forever",
+                _ => "Delete",
+            };
+            return Some(confirm_card(
+                theme,
+                title,
+                body,
+                vec![cancel, yes(label, true, cx)],
+            ));
+        }
         Some(match confirm {
             Confirm::DeleteContact { name, .. } => confirm_card(
                 theme,
@@ -336,6 +434,9 @@ impl ContactsApp {
                 crate::dupes::confirm_body(others.len()),
                 vec![cancel, yes("Merge", false, cx)],
             ),
+            Confirm::EmptyTrash { .. }
+            | Confirm::DeleteForever { .. }
+            | Confirm::DeleteWithoutCopy { .. } => return None,
             Confirm::Import {
                 cards,
                 duplicates,
@@ -379,6 +480,26 @@ mod tests {
         assert_eq!(title, "Delete 3 contacts?");
         assert!(body.contains("removed from the phone"));
         assert_eq!(delete_many_text(1).0, "Delete this contact?");
+    }
+
+    #[test]
+    fn the_trash_cards_say_what_is_lost() {
+        let (title, body) =
+            trash_confirm_text(&Confirm::EmptyTrash { count: 3 }).expect("empty text");
+        assert_eq!(title, "Empty Trash?");
+        assert_eq!(
+            body,
+            "3 contacts will be deleted for good. This can't be undone."
+        );
+        let (title, body) =
+            trash_confirm_text(&Confirm::DeleteForever { keys: vec![4] }).expect("forever text");
+        assert_eq!(title, "Delete forever?");
+        assert!(body.starts_with("1 contact will"));
+        let (title, body) = trash_confirm_text(&Confirm::DeleteWithoutCopy { ids: vec![1, 2] })
+            .expect("no copy text");
+        assert_eq!(title, "Delete anyway?");
+        assert!(body.contains("Can't keep a copy in Trash"));
+        assert!(trash_confirm_text(&Confirm::DiscardEdits).is_none());
     }
 
     #[test]

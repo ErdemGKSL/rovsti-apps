@@ -956,6 +956,9 @@ pub enum DocumentOp {
     ImportMessages,
     /// Rovsti Contacts: a contact photo was picked and copied to `path`.
     ContactPhoto,
+    /// Rovsti Contacts: a picture to scan for a QR code was picked and copied
+    /// to `path`.
+    ScanImage,
     /// Rovsti Messages: a file to attach was picked and copied to `path`
     /// (its type is in `mime`).
     Attachment,
@@ -1314,6 +1317,19 @@ mod tests {
         assert_eq!(r.op, DocumentOp::Attachment);
         assert_eq!(r.mime.as_deref(), Some("image/jpeg"));
         assert_eq!(r.path.as_deref(), Some("/c/x.bin"));
+    }
+
+    #[test]
+    fn scan_image_op_round_trips() {
+        let r: DocumentResult = serde_json::from_str(
+            r#"{"op":"scan_image","ok":true,"path":"/c/s.bin","mime":"image/png"}"#,
+        )
+        .expect("parse");
+        assert_eq!(r.op, DocumentOp::ScanImage);
+        assert_eq!(
+            serde_json::to_string(&DocumentOp::ScanImage).expect("serialize"),
+            r#""scan_image""#
+        );
     }
 
     #[test]

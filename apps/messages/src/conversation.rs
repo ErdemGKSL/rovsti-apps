@@ -2,6 +2,7 @@
 //! text composer. The merge logic lives in `rovsti_wa_proto::timeline`; this
 //! module is the thin GPUI shell around it plus a few pure text helpers.
 
+use rovsti_core::text_detect::{self, DetectAction};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -56,6 +57,16 @@ use rovsti_wa_proto::{
 
 /// The text "Copy" puts on the clipboard: the text or a media caption. Nothing
 /// for a deleted message, media without a caption, or a location/contact card.
+/// The icon of a detected-number or address pill.
+fn detect_icon(action: &DetectAction) -> Icon {
+    match action {
+        DetectAction::Call(_) => Icon::LucidePhone,
+        DetectAction::Message(_) => Icon::LucideMessageCircle,
+        DetectAction::CopyNumber(_) | DetectAction::CopyEmail(_) => Icon::LucideCopy,
+        DetectAction::Email(_) => Icon::LucideExternalLink,
+    }
+}
+
 fn copy_text_of(body: &MessageBody, meta: Option<&MessageMeta>) -> Option<String> {
     if let Some(meta) = meta
         && (meta.revoked || meta.location.is_some() || meta.contact.is_some())
@@ -114,6 +125,8 @@ pub enum ConversationEvent {
     Message { name: String, number: String },
     /// The Add to contacts pill of a contact card.
     AddContact(String),
+    /// The Email pill of an address found in a message.
+    Email(String),
     /// The Share pill of a message: the page opens the system share sheet.
     Share(String),
     /// A short message for the page's pill (save results).
@@ -2722,6 +2735,37 @@ impl Conversation {
                         cx.open_url(&link.url);
                         cx.notify();
                     })),
+                );
+            }
+        }
+        if !revoked && let Some(text) = copy_text_of(&message.body, meta) {
+            let own = (!self.is_group).then(|| jid_user(&self.chat).to_owned());
+            let own: Vec<&str> = own.as_deref().into_iter().collect();
+            for (n, action) in text_detect::actions(&text, 2, &own).into_iter().enumerate() {
+                let label = action.label();
+                row = row.child(
+                    pill(&format!("detect{n}"), detect_icon(&action), &label, false).on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            this.strip = None;
+                            this.rows_dirty = true;
+                            match action.clone() {
+                                DetectAction::Call(n) => {
+                                    cx.emit(ConversationEvent::Call(text_detect::dial(&n)));
+                                }
+                                DetectAction::Message(number) => {
+                                    cx.emit(ConversationEvent::Message {
+                                        name: number.clone(),
+                                        number,
+                                    });
+                                }
+                                DetectAction::CopyNumber(t) | DetectAction::CopyEmail(t) => {
+                                    cx.emit(ConversationEvent::Copy(t));
+                                }
+                                DetectAction::Email(a) => cx.emit(ConversationEvent::Email(a)),
+                            }
+                            cx.notify();
+                        }),
+                    ),
                 );
             }
         }

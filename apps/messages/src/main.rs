@@ -1111,6 +1111,7 @@ impl MessagesApp {
                 this.telecom_action(sms_actions::SmsAction::Call, n.clone(), cx);
             }
             ConversationEvent::AddContact(n) => this.add_or_open_contact(n.clone(), cx),
+            ConversationEvent::Email(a) => this.email_to(a.clone(), cx),
             ConversationEvent::Message { name, number } => this.open_recipient(
                 &Recipient {
                     title: name.clone(),
@@ -1186,6 +1187,18 @@ impl MessagesApp {
                 this.copy_text(text.clone().into(), *sensitive, cx);
             }
             SmsConversationEvent::Share(text) => this.share_text(text.clone(), cx),
+            SmsConversationEvent::Call(n) => {
+                this.telecom_action(sms_actions::SmsAction::Call, n.clone(), cx);
+            }
+            SmsConversationEvent::Message(number) => this.open_recipient(
+                &Recipient {
+                    title: number.clone(),
+                    number: number.clone(),
+                    detail: None,
+                },
+                cx,
+            ),
+            SmsConversationEvent::Email(a) => this.email_to(a.clone(), cx),
             SmsConversationEvent::Menu => this.open_page_menu(cx),
             SmsConversationEvent::NotSpam => this.open_page_not_spam(cx),
             SmsConversationEvent::OpenMedia { items, index } => {
@@ -1750,6 +1763,28 @@ impl MessagesApp {
                         this.show_pill("Contacts need an Android phone.");
                     }
                     Ok(false) | Err(_) => this.show_pill("Couldn't open that contact."),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Opens the mail composer for an address found in a message.
+    fn email_to(&mut self, address: String, cx: &mut Context<Self>) {
+        let task = cx
+            .background_executor()
+            .spawn(async move { rovsti_android::telecom::send_email_to(&address) });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(true) => {}
+                    Err(rovsti_android::Error::Unsupported) => {
+                        this.show_pill("That needs an Android phone.");
+                    }
+                    Ok(false) | Err(_) => this.show_pill("No mail app answered"),
                 }
                 cx.notify();
             })

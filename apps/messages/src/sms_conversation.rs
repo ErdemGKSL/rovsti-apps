@@ -3,6 +3,7 @@
 //! pages and `sms_status` events is `rovsti_core::sms_timeline::SmsTimeline`;
 //! this module is the GPUI shell around it plus a few pure text helpers.
 
+use rovsti_core::text_detect::{self, DetectAction};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use gpui::{
@@ -74,6 +75,12 @@ pub enum SmsConversationEvent {
     },
     /// A share pill under a selected bubble: the page opens the share sheet.
     Share(String),
+    /// A Call pill of a number found in a bubble.
+    Call(String),
+    /// A Message pill of a number found in a bubble: start a chat with it.
+    Message(String),
+    /// An Email pill of an address found in a bubble.
+    Email(String),
     /// The header's more button: the conversation menu.
     Menu,
     /// The Spam banner's "Not spam": allow this sender.
@@ -865,6 +872,31 @@ impl SmsConversation {
         cx.notify();
     }
 
+    /// A pill for a number or address found in a bubble was tapped.
+    fn detect_action(&mut self, action: DetectAction, cx: &mut Context<Self>) {
+        match action {
+            DetectAction::Call(n) => {
+                self.selected = None;
+                self.rows_dirty = true;
+                cx.emit(SmsConversationEvent::Call(text_detect::dial(&n)));
+                cx.notify();
+            }
+            DetectAction::Message(number) => {
+                self.selected = None;
+                self.rows_dirty = true;
+                cx.emit(SmsConversationEvent::Message(number));
+                cx.notify();
+            }
+            DetectAction::CopyNumber(t) | DetectAction::CopyEmail(t) => self.copy(t, false, cx),
+            DetectAction::Email(a) => {
+                self.selected = None;
+                self.rows_dirty = true;
+                cx.emit(SmsConversationEvent::Email(a));
+                cx.notify();
+            }
+        }
+    }
+
     /// An open-link pill was tapped: the browser gets the URL and the selection closes.
     fn open_link(&mut self, url: &str, cx: &mut Context<Self>) {
         self.selected = None;
@@ -1344,6 +1376,19 @@ impl SmsConversation {
                         .id(("sms-link", index * 10 + n))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.open_link(&link.url, cx);
+                        })),
+                );
+            }
+            let own: Vec<&str> = self.recipients.iter().map(String::as_str).collect();
+            for (n, action) in text_detect::actions(&item.body, 2, &own)
+                .into_iter()
+                .enumerate()
+            {
+                pills = pills.child(
+                    glass_pill(theme, action.label())
+                        .id(("sms-detect", index * 10 + n))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.detect_action(action.clone(), cx);
                         })),
                 );
             }

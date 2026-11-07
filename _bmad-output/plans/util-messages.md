@@ -44,14 +44,14 @@ Gateway seams that exist (`rovsti_wa_client::Gateway`): `media(id)`, `thumbnail(
 
 | # | Utility | Status |
 |---|---------|--------|
-| M1 | Full-screen image viewer for WhatsApp images: pinch / double-tap zoom, pan, swipe down to close, tap hides chrome | R1 step 3 |
-| M2 | Save image to gallery and Share image from the viewer (WA and MMS) | R1 step 3 |
-| M3 | Swipe left/right between the chat's images in the viewer, "3 of 7"; MMS pictures open it too | R1 step 4 |
-| M4 | Tap the conversation header avatar: full-screen profile photo (WA full picture, contact photo), Save/Share | R1 step 5 |
-| M5 | Search in conversation (WA + SMS): find bar, "2 of 5", up/down, jump with glow | R1 step 6 |
-| M6 | Export chat as text (Save as .txt) and Share as text, from the page menu | R1 step 7 |
-| M7 | Mark all read (Chats title button, confirm, pill with count) | R1 step 7 |
-| M8 | Phone number and email detection in messages: Call / Message / Email / Copy pills | R1 step 8 |
+| M1 | Full-screen image viewer for WhatsApp images: pinch / double-tap zoom, pan, swipe down to close, tap hides chrome | done R1 |
+| M2 | Save image to gallery and Share image from the viewer (WA and MMS) | done R1 |
+| M3 | Swipe left/right between the chat's images in the viewer, "3 of 7"; MMS pictures open it too | done R1 |
+| M4 | Tap the conversation header avatar: full-screen profile photo (WA full picture, contact photo), Save/Share | done R1 |
+| M5 | Search in conversation (WA + SMS): find bar, "2 of 5", up/down, jump with glow | done R1 |
+| M6 | Export chat as text (Save as .txt) and Share as text, from the page menu | done R1 |
+| M7 | Mark all read (Chats title button, confirm, pill with count) | done R1 |
+| M8 | Phone number and email detection in messages: Call / Message / Email / Copy pills | done R1 |
 | M9 | Forward a message (text, caption, image) to another chat via a chat chooser | open |
 | M10 | Starred messages list per WhatsApp chat (page menu), tap jumps to the message | open |
 | M11 | Quick reply templates (local list in Settings, chip row in composer, insert) | open |
@@ -228,3 +228,8 @@ already uses).
   (`Unsupported` -> "That needs an Android phone."). Do not offer Call for a number equal to the
   thread's own sender (the page menu already has Call).
 - Update this file: statuses of M1-M8 to "done R1", note anything deferred.
+
+Step 8 result: done. `text_detect::actions/dial/same_number` (pure, tested) drive the pills in both
+the WA strip and the SMS selection pills. Message goes through `open_recipient` (channel chooser /
+existing thread). Deferred: Call is skipped only for the 1:1 counterpart (groups keep it); no "Add to
+contacts" pill for detected numbers (M19+ territory). Backlog M9-M21 stays open for round 2.

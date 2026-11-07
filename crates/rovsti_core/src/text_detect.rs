@@ -128,6 +128,78 @@ fn phone_runs(body: &str, masked: &[bool]) -> Vec<(usize, usize)> {
     out
 }
 
+/// One tap action offered under a message for something [`detect`] found.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DetectAction {
+    /// Place a call to the dialled number.
+    Call(String),
+    /// Start a conversation with the dialled number.
+    Message(String),
+    /// Copy the number as written.
+    CopyNumber(String),
+    /// Compose a mail to the address.
+    Email(String),
+    /// Copy the address.
+    CopyEmail(String),
+}
+
+impl DetectAction {
+    /// The pill text.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Call(n) => format!("Call {n}"),
+            Self::Message(_) => "Message".to_owned(),
+            Self::CopyNumber(_) => "Copy number".to_owned(),
+            Self::Email(_) => "Email".to_owned(),
+            Self::CopyEmail(_) => "Copy".to_owned(),
+        }
+    }
+}
+
+/// `number` reduced to what is dialled: digits and one leading `+`.
+pub fn dial(number: &str) -> String {
+    let mut out = String::new();
+    for c in number.trim().chars() {
+        if c.is_ascii_digit() || (c == '+' && out.is_empty()) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Whether two numbers are the same line, ignoring formatting and country
+/// prefix (the last nine digits agree; at least seven digits each).
+pub fn same_number(a: &str, b: &str) -> bool {
+    let digits = |s: &str| -> Vec<char> { s.chars().filter(char::is_ascii_digit).collect() };
+    let (a, b) = (digits(a), digits(b));
+    let n = a.len().min(b.len()).min(9);
+    n >= 7 && a[a.len() - n..] == b[b.len() - n..]
+}
+
+/// The pills for the phone numbers and addresses in `body` (at most `max`
+/// found). Call is left out for a number equal to one of `own` (the thread's
+/// own counterpart, whose page menu already calls).
+pub fn actions(body: &str, max: usize, own: &[&str]) -> Vec<DetectAction> {
+    let mut out = Vec::new();
+    for found in detect(body, max) {
+        match found {
+            Detected::Phone(raw) => {
+                let dialled = dial(&raw);
+                if !own.iter().any(|o| same_number(o, &dialled)) {
+                    out.push(DetectAction::Call(raw.clone()));
+                }
+                out.push(DetectAction::Message(dialled));
+                out.push(DetectAction::CopyNumber(raw));
+            }
+            Detected::Email(address) => {
+                out.push(DetectAction::Email(address.clone()));
+                out.push(DetectAction::CopyEmail(address));
+            }
+        }
+    }
+    out
+}
+
 /// Up to `max` phone numbers and e-mail addresses of `body`, in order of
 /// appearance and without duplicates. Phones have 7-15 digits with spaces,
 /// `-`, `.`, parentheses and one leading `+`. Links, the one-time code,
@@ -224,5 +296,38 @@ mod tests {
         assert_eq!(detect(body, 10).len(), 3);
         assert_eq!(detect(body, 2).len(), 2);
         assert!(detect(body, 0).is_empty());
+    }
+
+    #[test]
+    fn dial_keeps_digits_and_leading_plus() {
+        assert_eq!(dial("+90 (532) 123-45-67"), "+905321234567");
+        assert_eq!(dial("0532 123 45 67"), "05321234567");
+    }
+
+    #[test]
+    fn same_number_ignores_format_and_prefix() {
+        assert!(same_number("+90 532 123 45 67", "0532 123 45 67"));
+        assert!(!same_number("0532 123 45 67", "0532 123 45 68"));
+        assert!(!same_number("123", "123"));
+    }
+
+    #[test]
+    fn actions_skip_call_for_own_number_only() {
+        let body = "Ara 0532 123 45 67 veya ada@example.com";
+        let all = actions(body, 2, &[]);
+        assert_eq!(
+            all,
+            [
+                DetectAction::Call("0532 123 45 67".into()),
+                DetectAction::Message("05321234567".into()),
+                DetectAction::CopyNumber("0532 123 45 67".into()),
+                DetectAction::Email("ada@example.com".into()),
+                DetectAction::CopyEmail("ada@example.com".into()),
+            ]
+        );
+        let own = actions(body, 2, &["+905321234567"]);
+        assert!(!own.iter().any(|a| matches!(a, DetectAction::Call(_))));
+        assert_eq!(own.len(), 4);
+        assert_eq!(all[0].label(), "Call 0532 123 45 67");
     }
 }

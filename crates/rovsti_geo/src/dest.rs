@@ -59,6 +59,42 @@ pub fn share_text(label: &str, coord: Coord) -> String {
     }
 }
 
+/// Text to share a stop's two ends: the name on its own line, then an
+/// `A:` and a `B:` OpenStreetMap link. `parse_stop_share` reads it back.
+pub fn stop_share_text(name: &str, a: Coord, b: Coord) -> String {
+    let link = |c: Coord| share_text("", c);
+    let body = format!("A: {}\nB: {}", link(a), link(b));
+    match name.trim() {
+        "" => body,
+        name => format!("{name}\n{body}"),
+    }
+}
+
+/// Reads text from `stop_share_text`: the first location link is A, the
+/// second B, and the name is the first line without a link (empty if none).
+/// Fewer than two links gives `None`.
+pub fn parse_stop_share(text: &str) -> Option<(String, SharedPlace, SharedPlace)> {
+    let mut places = uri_tokens(text)
+        .into_iter()
+        .filter_map(|uri| parse_uri(uri).ok());
+    let a = places.next()?;
+    let b = places.next()?;
+    let name = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && uri_tokens(l).is_empty())
+        .unwrap_or("")
+        .chars()
+        .take(MAX_LABEL_CHARS)
+        .collect();
+    Some((name, a, b))
+}
+
+/// Payload for a QR code that opens a point in any maps app.
+pub fn point_qr_payload(c: Coord, label: Option<&str>) -> String {
+    rovsti_core::location_link::geo_url(c.lat, c.lon, label)
+}
+
 /// Finds a destination in free text. The first location link wins; a plain
 /// `lat, lon` line is the fallback.
 pub fn parse_location(text: &str) -> Result<SharedPlace, DestError> {
@@ -483,6 +519,43 @@ mod tests {
         assert!((a.0 - lat).abs() < 1e-6, "lat {a:?}");
         assert!((a.1 - lon).abs() < 1e-6, "lon {a:?}");
         assert_eq!(a.2.as_deref(), label, "label {a:?}");
+    }
+
+    #[test]
+    fn stop_share_round_trips() {
+        let a = Coord::new(41.02567, 28.97413);
+        let b = Coord::new(-33.86882, 151.20929);
+        let text = stop_share_text("  Home stop ", a, b);
+        let (name, pa, pb) = parse_stop_share(&text).unwrap();
+        assert_eq!(name, "Home stop");
+        assert!((pa.coord.lat - a.lat).abs() < 1e-5 && (pa.coord.lon - a.lon).abs() < 1e-5);
+        assert!((pb.coord.lat - b.lat).abs() < 1e-5 && (pb.coord.lon - b.lon).abs() < 1e-5);
+    }
+
+    #[test]
+    fn stop_share_blank_name() {
+        let a = Coord::new(1.0, 2.0);
+        let text = stop_share_text("  ", a, Coord::new(3.0, 4.0));
+        assert!(text.starts_with("A: "));
+        let (name, _, pb) = parse_stop_share(&text).unwrap();
+        assert_eq!(name, "");
+        assert!((pb.coord.lat - 3.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn single_link_is_not_a_stop_share() {
+        let text = share_text("Cafe", Coord::new(41.0, 29.0));
+        assert!(parse_stop_share(&text).is_none());
+        assert!(parse_location(&text).is_ok());
+        assert!(parse_stop_share("no links here").is_none());
+    }
+
+    #[test]
+    fn qr_payload_is_geo_url() {
+        let c = Coord::new(41.0, 29.0);
+        let p = point_qr_payload(c, None);
+        assert!(p.starts_with("geo:"));
+        assert_eq!(parse_location(&p).unwrap().coord, c);
     }
 
     #[test]

@@ -218,6 +218,8 @@ pub enum SheetMode {
     MyLocation(Coord, f64),
     /// The measure tool's Copy / Share / Save actions.
     MeasureActions,
+    /// A saved stop's ring was tapped on the map.
+    SavedStop(u64),
     /// Confirming the replacement of all data by a backup file.
     RestoreBackup(Box<rovsti_geo::backup::Backup>),
 }
@@ -490,6 +492,96 @@ impl StopsApp {
             .into_any_element()
     }
 
+    /// Opens the sheet on a saved stop whose ring was tapped on the map.
+    pub(crate) fn open_saved_sheet(&mut self, id: u64, cx: &mut Context<Self>) {
+        if self.saved.get(id).is_none() {
+            self.show_pill("That stop was deleted", None, cx);
+            return;
+        }
+        self.sheet_mode = SheetMode::SavedStop(id);
+        self.sheet.open();
+        cx.notify();
+    }
+
+    fn saved_stop_body(&mut self, theme: Theme, id: u64, cx: &mut Context<Self>) -> AnyElement {
+        let Some(stop) = self.saved.get(id) else {
+            // Deleted while the sheet was open: close it once this frame is done.
+            cx.spawn(async move |this, cx| {
+                this.update(cx, |this, cx| {
+                    this.sheet.close();
+                    this.show_pill("That stop was deleted", None, cx);
+                })
+                .ok();
+            })
+            .detach();
+            return div().into_any_element();
+        };
+        let usage = self
+            .history
+            .usage_of(stop.a.coord, stop.b.coord)
+            .map(|u| rovsti_geo::usage_text(u, crate::store::now_ms(), self.tz_offset_s));
+        let detail =
+            crate::saved_ui::stop_detail(stop, self.map.position.map(|(c, _)| c), usage.as_deref());
+        let title = crate::saved_ui::row_title(stop);
+        let center = stop.center();
+        let row = |label: &'static str, key: &'static str| {
+            list_row(theme, None, label, None, None).id(key)
+        };
+        let rows = vec![
+            row("Start", "saved-sheet-start")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.sheet.close();
+                    this.start_saved_stop(id, cx);
+                    cx.notify();
+                }))
+                .into_any_element(),
+            row("Share", "saved-sheet-share")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.sheet.close();
+                    this.share_stop(id, cx);
+                    cx.notify();
+                }))
+                .into_any_element(),
+            row("Copy as", "saved-sheet-copy")
+                .on_click(cx.listener(move |this, _, _, cx| this.copy_stop_as(id, cx)))
+                .into_any_element(),
+            row("Open in maps", "saved-sheet-maps")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.sheet.close();
+                    this.open_stop_in_maps(id, cx);
+                    cx.notify();
+                }))
+                .into_any_element(),
+            row("Open in Saved", "saved-sheet-saved")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.sheet.close();
+                    this.confirm_delete = None;
+                    this.tabs.jump_to(1);
+                    this.expanded = Some(id);
+                    cx.notify();
+                }))
+                .into_any_element(),
+            row("Place a pin here", "saved-sheet-pin")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.sheet.close();
+                    if this.pick.tap(Destination::dropped(center)) == crate::pick::TapOutcome::Full
+                    {
+                        this.show_pill("Drag a pin to adjust it, or tap Clear.", None, cx);
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+        ];
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(Self::sheet_title(theme, title))
+            .child(Self::footnote(theme, detail))
+            .child(section(theme, None, rows))
+            .into_any_element()
+    }
+
     pub(crate) fn close_sheet(&mut self, cx: &mut Context<Self>) {
         self.area_armed = false;
         if matches!(self.sheet_mode, SheetMode::Stop(_)) {
@@ -611,6 +703,7 @@ impl StopsApp {
                 self.my_location_body(theme, at, accuracy, cx),
             ),
             SheetMode::MeasureActions => ("Measurement", self.measure_actions_body(theme, cx)),
+            SheetMode::SavedStop(id) => ("Saved stop", self.saved_stop_body(theme, id, cx)),
             SheetMode::RestoreBackup(file) => {
                 ("Restore backup", self.restore_body(theme, &file, cx))
             }

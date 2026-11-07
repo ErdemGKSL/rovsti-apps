@@ -621,7 +621,7 @@ impl StopsApp {
         self.show_pill(favourite_pill(state), None, cx);
     }
 
-    fn open_stop_in_maps(&mut self, id: u64, cx: &mut Context<Self>) {
+    pub(crate) fn open_stop_in_maps(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(stop) = self.saved.get(id) else {
             return;
         };
@@ -667,7 +667,7 @@ impl StopsApp {
     }
 
     /// Shares a saved stop (name and both points) as text.
-    fn share_stop(&mut self, id: u64, cx: &mut Context<Self>) {
+    pub(crate) fn share_stop(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(stop) = self.saved.get(id) else {
             return;
         };
@@ -694,7 +694,7 @@ impl StopsApp {
     }
 
     /// Opens Copy as for the middle of the gate.
-    fn copy_stop_as(&mut self, id: u64, cx: &mut Context<Self>) {
+    pub(crate) fn copy_stop_as(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(stop) = self.saved.get(id) else {
             return;
         };
@@ -754,7 +754,7 @@ impl StopsApp {
     }
 
     /// Runs a trip for the stop straight away, unless one is running.
-    fn start_saved_stop(&mut self, id: u64, cx: &mut Context<Self>) {
+    pub(crate) fn start_saved_stop(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.trip.is_some() {
             self.show_pill("Not while a trip is running", None, cx);
             return;

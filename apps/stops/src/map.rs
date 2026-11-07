@@ -186,6 +186,21 @@ pub fn pick_stop(
     )
 }
 
+/// How close to a saved stop's ring centre a tap counts as on it.
+pub const SAVED_TAP_RADIUS_PX: f32 = 18.0;
+
+/// The saved stop whose centre is nearest to a tap at `at`, within `max_px`.
+pub fn pick_saved(
+    saved: &SavedStops,
+    viewport: &Viewport,
+    at: (f32, f32),
+    max_px: f32,
+) -> Option<u64> {
+    let centres: Vec<Coord> = saved.stops.iter().map(SavedStop::center).collect();
+    let k = viewport.nearest_on_screen(&centres, at, max_px)?;
+    saved.stops.get(k).map(|s| s.id)
+}
+
 /// A fingerprint of the saved stops (id and both ends), to tell when the
 /// drawn rings need rebuilding.
 pub fn saved_key(saved: &SavedStops) -> u64 {
@@ -2639,6 +2654,12 @@ impl StopsApp {
                 return;
             }
         }
+        if self.prefs.show_saved_on_map
+            && let Some(id) = pick_saved(&self.saved, &self.map.viewport, at, SAVED_TAP_RADIUS_PX)
+        {
+            self.open_saved_sheet(id, cx);
+            return;
+        }
         // Keep the view where the user tapped: the idle fit would otherwise
         // recentre on the new pin and move it from under the finger.
         self.map.take_over();
@@ -3071,6 +3092,31 @@ mod tests {
             coord,
         };
         saved.add(name, end(a), end(b), 0).unwrap()
+    }
+
+    #[test]
+    fn pick_saved_hits_misses_and_takes_the_nearest() {
+        let vp = Viewport::new(Coord::new(41.0, 29.0), 2.0);
+        let mut saved = SavedStops::default();
+        assert_eq!(pick_saved(&saved, &vp, (0.0, 0.0), 18.0), None);
+        let near = add_gate(
+            &mut saved,
+            "near",
+            Coord::new(41.0, 29.0),
+            Coord::new(41.0, 29.002),
+        );
+        let (x, y) = vp.project(saved.get(near).unwrap().center());
+        assert_eq!(pick_saved(&saved, &vp, (x + 3.0, y), 18.0), Some(near));
+        assert_eq!(pick_saved(&saved, &vp, (x + 100.0, y), 18.0), None);
+        let other = add_gate(
+            &mut saved,
+            "other",
+            Coord::new(41.0, 29.0022),
+            Coord::new(41.0, 29.004),
+        );
+        let (ox, oy) = vp.project(saved.get(other).unwrap().center());
+        assert_eq!(pick_saved(&saved, &vp, (ox - 1.0, oy), 400.0), Some(other));
+        assert_eq!(pick_saved(&saved, &vp, (x + 1.0, y), 400.0), Some(near));
     }
 
     #[test]

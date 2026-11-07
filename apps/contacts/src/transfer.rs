@@ -209,6 +209,8 @@ impl ContactsApp {
         self.wa_photo_busy = false;
         match result {
             Ok(done) => {
+                // The viewer shows the old picture.
+                self.viewer = None;
                 self.photos.forget(id);
                 self.notice = Some(done.into());
                 self.reload(cx);

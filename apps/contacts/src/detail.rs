@@ -4,7 +4,7 @@ use std::{iter, sync::Arc};
 
 use gpui::{
     AnyElement, ClipboardItem, Context, InteractiveElement, IntoElement, ParentElement,
-    RenderImage, SharedString, StatefulInteractiveElement, Styled, div, px, svg,
+    RenderImage, Role, SharedString, StatefulInteractiveElement, Styled, div, px, svg,
 };
 use rovsti_core::{contact_card::ContactCard, contact_edit::ContactDraft};
 use rovsti_ui::{
@@ -547,6 +547,14 @@ impl ContactsApp {
         let picture =
             self.avatar_picture(id, self.photo_uri_of(id).is_some(), wa_jid.as_deref(), cx);
         let photo = picture.as_ref().map(|(image, opacity)| (image, *opacity));
+        // The viewer opens on what the avatar shows: the full photo is read
+        // only for the contact's own photo, not a WhatsApp stand-in.
+        let own_uri = self
+            .photo_uri_of(id)
+            .filter(|_| self.photos.get(id).is_some())
+            .map(str::to_owned);
+        let viewable = picture.as_ref().map(|(image, _)| Arc::clone(image));
+        let view_name: SharedString = card.name.clone().into();
         // The card's extra facts, once the full contact has been read.
         let full = self.open_draft.as_ref().filter(|d| d.id == Some(id));
 
@@ -579,7 +587,22 @@ impl ContactsApp {
             .gap(px(12.0))
             .pt(px(8.0))
             .pb(px(20.0))
-            .child(photo_avatar(theme, monogram, 96.0, tint, photo))
+            .child(
+                div()
+                    .id("card-avatar")
+                    .role(Role::Button)
+                    .aria_label("View photo")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.open_photo_viewer(
+                            id,
+                            view_name.clone(),
+                            viewable.clone(),
+                            own_uri.clone(),
+                            cx,
+                        );
+                    }))
+                    .child(photo_avatar(theme, monogram, 96.0, tint, photo)),
+            )
             .child(
                 div()
                     .px(px(24.0))

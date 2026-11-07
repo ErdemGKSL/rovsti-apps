@@ -13,6 +13,7 @@ mod detail;
 mod editor;
 mod field;
 mod groups;
+mod photo_viewer;
 mod photos;
 mod picker;
 mod prefs;
@@ -275,6 +276,8 @@ struct ContactsApp {
     photos: Photos,
     /// The "Contact photo" sheet over the editor.
     photo_sheet: Sheet,
+    /// The full-screen photo viewer, drawn above the card and under the sheets.
+    viewer: Option<photo_viewer::PhotoViewer>,
     /// The per-field actions sheet over the contact card, and what it acts on.
     field_sheet: Sheet,
     field_target: Option<detail::FieldTarget>,
@@ -435,6 +438,7 @@ impl ContactsApp {
             reveal_pending: false,
             photos: Photos::new(),
             photo_sheet: Sheet::new(),
+            viewer: None,
             field_sheet: Sheet::new(),
             field_target: None,
             back_enabled: false,
@@ -659,6 +663,7 @@ impl ContactsApp {
 
     fn close_contact(&mut self, cx: &mut Context<Self>) {
         self.close_field_sheet_now();
+        self.viewer = None;
         self.open = None;
         self.open_draft = None;
         self.page.restart();
@@ -673,6 +678,7 @@ impl ContactsApp {
         self.confirm.is_some()
             || self.photo_sheet.is_open()
             || self.field_sheet.is_open()
+            || self.viewer.as_ref().is_some_and(|v| !v.is_closing())
             || self.picker.is_some()
             || self.editor.is_some()
             || self.group_edit.is_some()
@@ -691,6 +697,8 @@ impl ContactsApp {
             self.close_photo_sheet(cx);
         } else if self.field_sheet.is_open() {
             self.close_field_sheet(cx);
+        } else if self.viewer.as_ref().is_some_and(|v| !v.is_closing()) {
+            self.request_close_viewer(cx);
         } else if self.picker.is_some() {
             self.close_picker(cx);
         } else if self.editor.is_some() {
@@ -1559,7 +1567,12 @@ impl ContactsApp {
                 .absolute()
                 .left_0()
                 .right_0()
-                .bottom(content_bottom_inset() + px(8.0))
+                .bottom(
+                    content_bottom_inset()
+                        + px(8.0)
+                        // Above the viewer's bottom bar.
+                        + px(if self.viewer.is_some() { 88.0 } else { 0.0 }),
+                )
                 .flex()
                 .justify_center()
                 .px(px(24.0))
@@ -1595,9 +1608,11 @@ impl Render for ContactsApp {
         self.request_photos(cx);
         self.request_wa_card(cx);
         let fading = self.photos.fading() || self.avatars.read(cx).fading();
+        self.start_viewer_close(window);
         let mut motion = std::mem::take(&mut self.motion);
         motion.frame_timed(window, |dt, real| {
-            self.tabs.tick(dt)
+            self.viewer.as_mut().is_some_and(|v| v.tick(dt))
+                | self.tabs.tick(dt)
                 | self.page.tick(dt)
                 | fading
                 | self.photo_sheet.tick(dt)
@@ -1606,6 +1621,7 @@ impl Render for ContactsApp {
                 | self.field_sheet.tick_real(real)
         });
         self.motion = motion;
+        self.drop_finished_viewer();
         let entity = cx.entity();
         let touch_entity = entity.clone();
         let editing = self.editor.is_some();
@@ -1694,7 +1710,11 @@ impl Render for ContactsApp {
                 theme::colors(theme).green,
             ))
             .child(scroller)
-            .children(self.notice(theme, cx))
+            .children(if self.viewer.is_none() {
+                self.notice(theme, cx)
+            } else {
+                None
+            })
             // No tab bar while a form is open: no stray tap loses the edits.
             .children((!editing && !picking).then(|| {
                 self.tabs.render(
@@ -1728,6 +1748,13 @@ impl Render for ContactsApp {
                     },
                 )
             }))
+            .children(self.photo_viewer_overlay(theme, window, cx))
+            // The pill sits above the viewer, which hides the one under the page.
+            .children(if self.viewer.is_some() {
+                self.notice(theme, cx)
+            } else {
+                None
+            })
             .children(self.confirm_view(theme, cx))
             .children(self.photo_sheet_view(theme, window, cx))
             .children(self.field_sheet_view(theme, window, cx))

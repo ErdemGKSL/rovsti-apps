@@ -29,6 +29,11 @@ pub(crate) enum Confirm {
         jid: String,
         name: SharedString,
     },
+    /// The viewer's "Remove photo": the contact's own photo would be deleted.
+    RemovePhoto {
+        id: i64,
+        name: SharedString,
+    },
     /// Cancel or Back on an edit form with unsaved changes.
     DiscardEdits,
     /// A vCard file was read: these cards would be added.
@@ -69,6 +74,16 @@ fn import_summary(add: usize, duplicates: usize, unreadable: usize) -> String {
         (_, true) => "They are saved on this phone.".to_owned(),
         (_, false) => format!("Left out: {}.", parts.join(", ")),
     }
+}
+
+/// The title of the remove-photo card.
+fn remove_photo_title() -> &'static str {
+    "Remove photo?"
+}
+
+/// The sentence under it.
+fn remove_photo_body(name: &str) -> String {
+    format!("{name}'s photo is removed from this phone and from any account it syncs with.")
 }
 
 impl ContactsApp {
@@ -116,6 +131,10 @@ impl ContactsApp {
             Confirm::DeleteContact { id, .. } => self.delete_contact(id, cx),
             Confirm::DeleteGroup { id, .. } => self.delete_group(id, cx),
             Confirm::UseWaPhoto { id, jid, .. } => self.use_wa_photo(id, jid, cx),
+            Confirm::RemovePhoto { id, .. } => {
+                self.viewer = None;
+                self.clear_photo(id, cx);
+            }
             Confirm::DiscardEdits => self.close_editor(cx),
             Confirm::Import { cards, .. } => self.add_imported(cards, cx),
         }
@@ -244,6 +263,12 @@ impl ContactsApp {
                 format!("{name}'s photo is replaced with their WhatsApp photo."),
                 vec![cancel, yes("Replace", false, cx)],
             ),
+            Confirm::RemovePhoto { name, .. } => confirm_card(
+                theme,
+                remove_photo_title(),
+                remove_photo_body(name),
+                vec![cancel, yes("Remove", true, cx)],
+            ),
             Confirm::DiscardEdits => {
                 let keep = pill(theme, "confirm-no", "Keep Editing", false)
                     .on_click(cx.listener(|this, _, _, cx| this.answer(false, cx)))
@@ -282,6 +307,15 @@ impl ContactsApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_remove_photo_card_names_the_contact() {
+        assert_eq!(remove_photo_title(), "Remove photo?");
+        assert_eq!(
+            remove_photo_body("Ada"),
+            "Ada's photo is removed from this phone and from any account it syncs with."
+        );
+    }
 
     #[test]
     fn counts_read_naturally() {

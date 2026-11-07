@@ -476,6 +476,14 @@ impl ContactsApp {
     fn remove_photo(&mut self, cx: &mut Context<Self>) {
         self.photo_sheet.close();
         let Some(editor) = self.editor.as_mut() else {
+            // From the viewer: ask first, the card closes it on Remove.
+            if let Some(viewer) = self.viewer.as_ref().filter(|v| v.can_edit()) {
+                self.confirm = Some(crate::confirm::Confirm::RemovePhoto {
+                    id: viewer.contact_id,
+                    name: viewer.title.clone(),
+                });
+            }
+            cx.notify();
             return;
         };
         match editor.id {
@@ -489,6 +497,11 @@ impl ContactsApp {
     /// a new one holds it until the first save returns the id.
     pub(crate) fn photo_picked(&mut self, path: String, cx: &mut Context<Self>) {
         let Some(editor) = self.editor.as_mut() else {
+            // Chosen from the viewer (or the card): the open contact gets it now.
+            let id = self.viewer.as_ref().map(|v| v.contact_id);
+            if let Some(id) = id.or_else(|| self.open.as_ref().map(|c| c.id)) {
+                self.apply_photo(id, path, cx);
+            }
             return;
         };
         match editor.id {
@@ -512,6 +525,7 @@ impl ContactsApp {
             .set_reduced(window.prefers_reduced_motion());
         self.photo_sheet.set_viewport(window.viewport_size());
         let colors = theme::colors(theme);
+        let from_viewer = self.editor.is_none() && self.viewer.is_some();
         let mut body = div().flex().flex_col().pb(px(12.0)).child(
             div()
                 .px(px(20.0))
@@ -526,12 +540,16 @@ impl ContactsApp {
                 theme,
                 "photo-choose",
                 Some(Icon::LucideImagePlus),
-                "Choose photo",
+                if from_viewer {
+                    "Choose new photo"
+                } else {
+                    "Choose photo"
+                },
                 Tone::Plain,
             )
             .on_click(cx.listener(|this, _, _, cx| this.choose_photo(cx))),
         );
-        if self.editor_has_photo() {
+        if self.editor_has_photo() || from_viewer {
             body = body.child(
                 tap_row(
                     theme,

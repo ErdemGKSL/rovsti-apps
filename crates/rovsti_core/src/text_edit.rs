@@ -464,6 +464,183 @@ impl EditBuffer {
     pub fn surrounding(&self) -> (&str, Range<usize>) {
         (&self.text, self.selection())
     }
+
+    /// The state an undo step restores.
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            text: self.text.clone(),
+            anchor: self.anchor,
+            head: self.head,
+            marked: self.marked.is_some(),
+        }
+    }
+
+    /// Put a snapshot back: its text and selection, no marked range.
+    pub fn restore(&mut self, s: &Snapshot) {
+        self.text = s.text.clone();
+        self.anchor = s.anchor.min(self.text.len());
+        self.head = s.head.min(self.text.len());
+        self.marked = None;
+    }
+}
+
+/// Text and selection at one point in time, one undo step.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snapshot {
+    pub text: String,
+    pub anchor: usize,
+    pub head: usize,
+    /// Whether text was composing when the snapshot was taken (not restored).
+    marked: bool,
+}
+
+/// How an edit groups with the one before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    /// One non-whitespace grapheme typed at a caret.
+    Insert,
+    /// One grapheme removed by backspace or delete.
+    Delete,
+    /// Anything else (paste, cut, newline, space, selection replace): always its own step.
+    Other,
+}
+
+/// Most undo steps kept.
+pub const HISTORY_CAP: usize = 100;
+
+/// Undo and redo stacks over [`Snapshot`]s. Typing a word and deleting a run of
+/// characters are one step each; IME composition is one step, recorded on commit.
+#[derive(Debug, Clone, Default)]
+pub struct History {
+    undo: Vec<Snapshot>,
+    redo: Vec<Snapshot>,
+    /// The open group: its kind and where its caret ended.
+    open: Option<(Kind, usize)>,
+    /// The snapshot from before the current composition began.
+    composing: Option<Snapshot>,
+}
+
+impl History {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.composing.is_some() || !self.undo.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Forget everything (the app set or cleared the text).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn push(&mut self, s: Snapshot) {
+        self.redo.clear();
+        self.undo.push(s);
+        if self.undo.len() > HISTORY_CAP {
+            self.undo.remove(0);
+        }
+    }
+
+    /// Record an edit that turned `before` (taken with [`EditBuffer::snapshot`] ahead
+    /// of it) into `after`. `hint` forces the kind; `None` infers it from the change.
+    pub fn record(&mut self, hint: Option<Kind>, before: &Snapshot, after: &EditBuffer) {
+        let changed = before.text != after.text();
+        if !changed && self.composing.is_none() {
+            if before.anchor != after.anchor() || before.head != after.head() {
+                self.open = None;
+            }
+            return;
+        }
+        if before.marked || after.marked().is_some() || self.composing.is_some() {
+            if changed && self.composing.is_none() {
+                self.composing = Some(before.clone());
+            }
+            self.open = None;
+            self.finish_composition(after);
+            return;
+        }
+        let kind = hint.unwrap_or_else(|| infer(before, after));
+        let continues = matches!(self.open, Some((k, caret))
+            if k == kind && caret == before.head && before.anchor == before.head);
+        if !continues {
+            self.push(before.clone());
+        }
+        self.open = (kind != Kind::Other).then_some((kind, after.head()));
+    }
+
+    /// The composition ended without an edit (the keyboard committed it as is).
+    pub fn commit(&mut self, after: &EditBuffer) {
+        self.finish_composition(after);
+        self.open = None;
+    }
+
+    /// Once nothing is marked any more, the composition becomes one step.
+    fn finish_composition(&mut self, after: &EditBuffer) {
+        if after.marked().is_some() {
+            return;
+        }
+        if let Some(s) = self.composing.take().filter(|s| s.text != after.text()) {
+            self.push(s);
+        }
+    }
+
+    /// Step back. Returns whether anything changed.
+    pub fn undo(&mut self, buf: &mut EditBuffer) -> bool {
+        self.open = None;
+        let Some(s) = self.composing.take().or_else(|| self.undo.pop()) else {
+            return false;
+        };
+        self.redo.push(buf.snapshot());
+        buf.restore(&s);
+        true
+    }
+
+    /// Step forward again. Returns whether anything changed.
+    pub fn redo(&mut self, buf: &mut EditBuffer) -> bool {
+        self.open = None;
+        let Some(s) = self.redo.pop() else {
+            return false;
+        };
+        self.undo.push(buf.snapshot());
+        if self.undo.len() > HISTORY_CAP {
+            self.undo.remove(0);
+        }
+        buf.restore(&s);
+        true
+    }
+}
+
+fn is_single_grapheme(s: &str) -> bool {
+    s.graphemes(true).count() == 1
+}
+
+/// Classify a plain edit from what changed.
+fn infer(before: &Snapshot, after: &EditBuffer) -> Kind {
+    if before.anchor != before.head {
+        return Kind::Other;
+    }
+    let (old, new) = (before.text.len(), after.text().len());
+    if new > old {
+        let ins = after.text().get(before.head..before.head + (new - old));
+        match ins {
+            Some(i) if is_single_grapheme(i) && !i.chars().any(char::is_whitespace) => Kind::Insert,
+            _ => Kind::Other,
+        }
+    } else if new < old {
+        let n = old - new;
+        let removed = before.text.get(after.head()..after.head() + n);
+        match removed {
+            Some(r) if is_single_grapheme(r) => Kind::Delete,
+            _ => Kind::Other,
+        }
+    } else {
+        Kind::Other
+    }
 }
 
 #[cfg(test)]
@@ -734,5 +911,154 @@ mod tests {
         assert_eq!(b.text(), "x\ny");
         assert_eq!(b.marked(), None);
         assert_eq!(b.selection(), 3..3);
+    }
+
+    // ---- history ---------------------------------------------------------
+
+    fn typed(h: &mut History, b: &mut EditBuffer, s: &str) {
+        for c in s.chars() {
+            let before = b.snapshot();
+            b.replace_selection(&c.to_string());
+            h.record(None, &before, b);
+        }
+    }
+
+    fn backspaces(h: &mut History, b: &mut EditBuffer, n: usize) {
+        for _ in 0..n {
+            let before = b.snapshot();
+            b.delete_backward();
+            h.record(None, &before, b);
+        }
+    }
+
+    #[test]
+    fn turkish_words_coalesce_per_word() {
+        let (mut h, mut b) = (History::new(), EditBuffer::new(false));
+        typed(&mut h, &mut b, "günaydın şehir");
+        assert!(h.undo(&mut b));
+        assert_eq!(b.text(), "günaydın ");
+        assert!(h.undo(&mut b));
+        assert_eq!(b.text(), "günaydın");
+        assert!(h.undo(&mut b));
+        assert_eq!(b.text(), "");
+        assert!(!h.undo(&mut b));
+        assert!(h.redo(&mut b));
+        assert_eq!(b.text(), "günaydın");
+        assert_eq!(b.head(), "günaydın".len());
+    }
+
+    #[test]
+    fn consecutive_deletes_coalesce() {
+        let (mut h, mut b) = (History::new(), EditBuffer::with_text("İstanbul", false));
+        backspaces(&mut h, &mut b, 3);
+        assert_eq!(b.text(), "İstan");
+        assert!(h.undo(&mut b));
+        assert_eq!(b.text(), "İstanbul");
+        assert!(!h.undo(&mut b));
+    }
+
+    #[test]
+    fn caret_jump_closes_the_group() {
+        let (mut h, mut b) = (History::new(), EditBuffer::new(false));
+        typed(&mut h, &mut b, "ab");
+        let before = b.snapshot();
+        b.move_left(false);
+        h.record(None, &before, &b);
+        typed(&mut h, &mut b, "x");
+        assert_eq!(b.text(), "axb");
+        h.undo(&mut b);
+        assert_eq!(b.text(), "ab");
+        h.undo(&mut b);
+        assert_eq!(b.text(), "");
+    }
+
+    #[test]
+    fn paste_and_newline_are_single_steps() {
+        let (mut h, mut b) = (History::new(), EditBuffer::new(true));
+        typed(&mut h, &mut b, "ab");
+        let before = b.snapshot();
+        b.replace_selection("çay içelim");
+        h.record(Some(Kind::Other), &before, &b);
+        typed(&mut h, &mut b, "x\ny");
+        assert_eq!(b.text(), "abçay içelimx\ny");
+        h.undo(&mut b);
+        assert_eq!(b.text(), "abçay içelimx\n");
+        h.undo(&mut b);
+        assert_eq!(b.text(), "abçay içelimx");
+        h.undo(&mut b);
+        assert_eq!(b.text(), "abçay içelim");
+        h.undo(&mut b);
+        assert_eq!(b.text(), "ab");
+    }
+
+    #[test]
+    fn selection_replace_is_its_own_step() {
+        let (mut h, mut b) = (History::new(), EditBuffer::new(false));
+        typed(&mut h, &mut b, "abc");
+        b.select_all();
+        typed(&mut h, &mut b, "x");
+        typed(&mut h, &mut b, "y");
+        assert_eq!(b.text(), "xy");
+        h.undo(&mut b);
+        assert_eq!(b.text(), "x");
+        h.undo(&mut b);
+        assert_eq!(b.text(), "abc");
+        assert_eq!(b.selection(), 0..3);
+    }
+
+    #[test]
+    fn one_composition_is_one_step() {
+        let (mut h, mut b) = (History::new(), EditBuffer::with_text("a ", false));
+        for s in ["ş", "şe", "şeh", "şehi", "şehir"] {
+            let before = b.snapshot();
+            let at = b.text().len() - b.marked().map_or(0, |m| m.len());
+            b.replace_and_mark(at..b.text().len(), s, None);
+            h.record(None, &before, &b);
+        }
+        assert!(h.can_undo());
+        let before = b.snapshot();
+        let m = b.marked().expect("composing");
+        b.replace(m, "şehir");
+        h.record(None, &before, &b);
+        assert_eq!(b.text(), "a şehir");
+        h.undo(&mut b);
+        assert_eq!(b.text(), "a ");
+        assert!(!h.can_undo());
+        h.redo(&mut b);
+        assert_eq!(b.text(), "a şehir");
+    }
+
+    #[test]
+    fn a_new_edit_clears_redo() {
+        let (mut h, mut b) = (History::new(), EditBuffer::new(false));
+        typed(&mut h, &mut b, "ab");
+        h.undo(&mut b);
+        assert!(h.can_redo());
+        typed(&mut h, &mut b, "c");
+        assert!(!h.can_redo());
+        assert!(!h.redo(&mut b));
+        assert_eq!(b.text(), "c");
+    }
+
+    #[test]
+    fn history_is_capped() {
+        let (mut h, mut b) = (History::new(), EditBuffer::new(false));
+        for _ in 0..150 {
+            typed(&mut h, &mut b, " ");
+        }
+        let mut steps = 0;
+        while h.undo(&mut b) {
+            steps += 1;
+        }
+        assert_eq!(steps, HISTORY_CAP);
+        assert_eq!(b.text().len(), 50);
+    }
+
+    #[test]
+    fn reset_forgets_everything() {
+        let (mut h, mut b) = (History::new(), EditBuffer::new(false));
+        typed(&mut h, &mut b, "ab");
+        h.reset();
+        assert!(!h.can_undo() && !h.can_redo());
     }
 }

@@ -26,7 +26,7 @@ use liquid_glass_kit::{
     glass::{GlassSpec, glass},
     tokens::{Theme, shadow, typography},
 };
-use rovsti_core::text_edit::EditBuffer;
+use rovsti_core::text_edit::{EditBuffer, History, Kind};
 use rovsti_core::text_touch::{
     ECHO_MS, EDGE_MAX, EDGE_ZONE, HANDLE_HIT, HANDLE_SIZE, INSERTION_MS, MENU_H, MENU_ITEM_PAD,
     MenuItem, MenuState, TapAction, drag_selection, edge_scroll, handle_visible, hits_caret,
@@ -235,6 +235,8 @@ pub struct TextField {
     purpose: TextInputPurpose,
     action: TextInputAction,
     buf: EditBuffer,
+    /// Undo and redo for the user's edits.
+    history: History,
     /// A passphrase: the keyboard gets `TextInputMode::Password`.
     secret: Cell<bool>,
     /// Bumped on every edit; the page compares it instead of the text.
@@ -301,6 +303,7 @@ impl TextField {
             purpose,
             action,
             buf: EditBuffer::new(false),
+            history: History::new(),
             lines: None,
             scroll_y: Cell::new(0.0),
             multi: RefCell::new(None),
@@ -432,6 +435,7 @@ impl TextField {
     /// goes to the end.
     pub fn set(&mut self, text: &str, cx: &mut Context<Self>) {
         self.buf.set_text(text);
+        self.history.reset();
         self.edits += 1;
         self.touch();
         cx.notify();
@@ -482,6 +486,7 @@ impl TextField {
     pub fn clear(&mut self, cx: &mut Context<Self>) {
         if !self.buf.is_empty() || self.buf.marked().is_some() {
             self.buf.set_text("");
+            self.history.reset();
             self.edits += 1;
             self.touch();
             cx.notify();
@@ -492,32 +497,52 @@ impl TextField {
     /// caret. Keyboards send it as a `backspace` key event, rather than an
     /// input-method edit, when they hold no text.
     pub fn backspace(&mut self, cx: &mut Context<Self>) {
-        if self.buf.delete_backward() {
-            self.edits += 1;
-        }
-        self.touch();
-        cx.notify();
+        self.mutate(cx, |b| {
+            b.delete_backward();
+        });
     }
 
     /// The forward delete key.
     pub fn delete_forward(&mut self, cx: &mut Context<Self>) {
-        if self.buf.delete_forward() {
+        self.mutate(cx, |b| {
+            b.delete_forward();
+        });
+    }
+
+    /// Runs `edit` on the buffer; bumps `edits` when the text changed.
+    fn mutate(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut EditBuffer)) {
+        self.mutate_as(None, cx, edit);
+    }
+
+    /// [`Self::mutate`] with the undo grouping forced (a paste is never merged).
+    fn mutate_as(
+        &mut self,
+        kind: Option<Kind>,
+        cx: &mut Context<Self>,
+        edit: impl FnOnce(&mut EditBuffer),
+    ) {
+        let before = self.buf.snapshot();
+        edit(&mut self.buf);
+        self.history.record(kind, &before, &self.buf);
+        if before.text != self.buf.text() {
             self.edits += 1;
         }
         self.touch();
         cx.notify();
     }
 
-    /// Runs `edit` on the buffer; bumps `edits` when the text changed.
-    fn mutate(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut EditBuffer)) {
-        let before = self.buf.text().len();
-        let before_text = (before <= 4096).then(|| self.buf.text().to_owned());
-        edit(&mut self.buf);
-        let changed = match before_text {
-            Some(old) => old != self.buf.text(),
-            None => true,
-        };
-        if changed {
+    /// Steps the text back one undo group.
+    pub fn undo(&mut self, cx: &mut Context<Self>) {
+        if self.history.undo(&mut self.buf) {
+            self.edits += 1;
+        }
+        self.touch();
+        cx.notify();
+    }
+
+    /// Steps the text forward again after an undo.
+    pub fn redo(&mut self, cx: &mut Context<Self>) {
+        if self.history.redo(&mut self.buf) {
             self.edits += 1;
         }
         self.touch();
@@ -536,7 +561,7 @@ impl TextField {
         let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else {
             return;
         };
-        self.mutate(cx, |b| b.replace_selection(&text));
+        self.mutate_as(Some(Kind::Other), cx, |b| b.replace_selection(&text));
     }
 
     /// Handles a key event (arrows, Home/End, Backspace, Delete, clipboard
@@ -564,9 +589,14 @@ impl TextField {
             "x" if command => {
                 self.copy(cx);
                 if !self.secret.get() {
-                    self.backspace(cx);
+                    self.mutate_as(Some(Kind::Other), cx, |b| {
+                        b.delete_backward();
+                    });
                 }
             }
+            "z" if command && shift => self.redo(cx),
+            "z" if command => self.undo(cx),
+            "y" if k.modifiers.control => self.redo(cx),
             "v" if command => self.paste(cx),
             _ => return false,
         }
@@ -771,6 +801,7 @@ impl TextField {
         match action {
             TapAction::PlaceCaret => {
                 self.buf.unmark();
+                self.history.commit(&self.buf);
                 self.buf.set_caret(byte);
                 self.menu.set(None);
                 if !native {
@@ -1154,6 +1185,7 @@ impl EntityInputHandler for TextField {
 
     fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
         self.buf.unmark();
+        self.history.commit(&self.buf);
         self.touch();
     }
 
@@ -2392,6 +2424,38 @@ mod tests {
             f.replace_and_mark_text_with_selection(None, "abcd", PreeditSelection::Hidden, w, cx);
             assert_eq!(f.text(), "abcd");
             assert_eq!(f.selection(), 4..4);
+        });
+    }
+
+    #[gpui::test]
+    fn undo_and_redo_keys(cx: &mut TestAppContext) {
+        use gpui::Keystroke;
+        let (field, cx) = window_cx(cx);
+        let key = |s: &str| KeyDownEvent {
+            keystroke: Keystroke::parse(s).unwrap(),
+            is_held: false,
+            prefer_character_input: false,
+        };
+        field.update_in(cx, |f, w, cx| {
+            f.replace_text_in_range(None, "g", w, cx);
+            f.replace_text_in_range(None, "ü", w, cx);
+            f.replace_text_in_range(None, " ", w, cx);
+            f.replace_text_in_range(None, "n", w, cx);
+            assert_eq!(f.text(), "gü n");
+            assert!(f.handle_key(&key("ctrl-z"), cx));
+            assert_eq!(f.text(), "gü ");
+            assert!(f.handle_key(&key("ctrl-z"), cx));
+            assert!(f.handle_key(&key("cmd-z"), cx));
+            assert_eq!(f.text(), "");
+            assert!(f.handle_key(&key("ctrl-shift-z"), cx));
+            assert_eq!(f.text(), "gü");
+            assert!(f.handle_key(&key("ctrl-y"), cx));
+            assert_eq!(f.text(), "gü ");
+            assert!(f.handle_key(&key("cmd-shift-z"), cx));
+            assert_eq!(f.text(), "gü n");
+            f.set("app", cx);
+            assert!(f.handle_key(&key("ctrl-z"), cx));
+            assert_eq!(f.text(), "app", "set resets the history");
         });
     }
 

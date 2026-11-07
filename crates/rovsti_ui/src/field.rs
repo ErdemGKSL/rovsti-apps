@@ -1,32 +1,37 @@
-//! A single-line text field for forms: the text, the focus handle and the
-//! platform input-method plumbing (`EntityInputHandler`).
+//! A text field for forms: the text, the focus handle and the platform
+//! input-method plumbing (`EntityInputHandler`).
 //!
-//! Generalised from the apps' search fields: the keyboard layout
-//! ([`TextInputPurpose`]) and the action key ([`TextInputAction`]) are set per
-//! field. [`field_box`] draws the glass box around it.
+//! The text, selection and composing range live in
+//! [`rovsti_core::text_edit::EditBuffer`]; this file only maps the keyboard's
+//! calls (UTF-16, as `gpui_android` sends them) and key events onto it. The
+//! keyboard layout ([`TextInputPurpose`]) and the action key
+//! ([`TextInputAction`]) are set per field. [`field_box`] draws the glass box.
 
-use std::ops::Range;
+use std::{cell::Cell, ops::Range};
 
 use gpui::{
-    App, Bounds, Context, Entity, EntityInputHandler, FocusHandle, Focusable, IntoElement,
-    KeyDownEvent, Pixels, Point, Styled, SurroundingText, TextInputAction, TextInputMode,
-    TextInputPurpose, UTF16Selection, Window, canvas, div, px,
+    App, Bounds, ClipboardItem, Context, Entity, EntityInputHandler, FocusHandle, Focusable,
+    IntoElement, KeyDownEvent, Pixels, Point, PreeditSelection, Styled, SurroundingText,
+    TextInputAction, TextInputMode, TextInputPurpose, UTF16Selection, Window, canvas, div, px,
 };
 use liquid_glass_kit::tokens::Theme;
+use rovsti_core::text_edit::EditBuffer;
 
 pub struct TextField {
     focus: FocusHandle,
     purpose: TextInputPurpose,
     action: TextInputAction,
-    content: String,
-    /// The input method's composing text (bytes into `content`).
-    marked: Option<Range<usize>>,
+    buf: EditBuffer,
+    /// A passphrase: the keyboard gets `TextInputMode::Password`.
+    secret: Cell<bool>,
     /// Bumped on every edit; the page compares it instead of the text.
     pub edits: u64,
     /// Bumped each time the keyboard's action key (Send, Go, ...) is pressed.
     actions: u64,
     /// The action key keeps the keyboard up (a composer that sends on it).
     keep_focus_on_action: bool,
+    /// Where the field was last laid out (window coordinates).
+    viewport: Cell<Option<Bounds<Pixels>>>,
 }
 
 impl TextField {
@@ -45,11 +50,12 @@ impl TextField {
             focus: cx.focus_handle(),
             purpose,
             action,
-            content: String::new(),
-            marked: None,
+            buf: EditBuffer::new(false),
+            secret: Cell::new(false),
             edits: 0,
             actions: 0,
             keep_focus_on_action: false,
+            viewport: Cell::new(None),
         }
     }
 
@@ -65,16 +71,47 @@ impl TextField {
         self.keep_focus_on_action = keep;
     }
 
-    /// Sets the text (a pasted value, or a preview typing a query).
+    /// Marks the field as a passphrase (keyboard `Password` mode). Set by
+    /// [`secret_field_box`]; call it directly when drawing the box yourself.
+    pub fn set_secret(&self, secret: bool) {
+        self.secret.set(secret);
+    }
+
+    pub fn is_secret(&self) -> bool {
+        self.secret.get()
+    }
+
+    /// Sets the text (a pasted value, or a preview typing a query). The caret
+    /// goes to the end.
     pub fn set(&mut self, text: &str, cx: &mut Context<Self>) {
-        self.content = text.replace(['\n', '\r'], " ");
-        self.marked = None;
+        self.buf.set_text(text);
         self.edits += 1;
         cx.notify();
     }
 
     pub fn text(&self) -> &str {
-        &self.content
+        self.buf.text()
+    }
+
+    /// The selection in UTF-8 bytes (a caret when empty).
+    pub fn selection(&self) -> Range<usize> {
+        self.buf.selection()
+    }
+
+    /// The composing range in UTF-8 bytes.
+    pub fn marked(&self) -> Option<Range<usize>> {
+        self.buf.marked()
+    }
+
+    pub fn select_all(&mut self, cx: &mut Context<Self>) {
+        self.buf.select_all();
+        cx.notify();
+    }
+
+    /// Selects `anchor..head` (UTF-8 bytes, clamped to grapheme boundaries).
+    pub fn set_selection(&mut self, anchor: usize, head: usize, cx: &mut Context<Self>) {
+        self.buf.set_selection(anchor, head);
+        cx.notify();
     }
 
     pub fn focus_handle(&self) -> FocusHandle {
@@ -83,61 +120,89 @@ impl TextField {
 
     /// Empties the field and keeps focus (the clear button).
     pub fn clear(&mut self, cx: &mut Context<Self>) {
-        if !self.content.is_empty() || self.marked.is_some() {
-            self.content.clear();
-            self.marked = None;
+        if !self.buf.is_empty() || self.buf.marked().is_some() {
+            self.buf.set_text("");
             self.edits += 1;
             cx.notify();
         }
     }
 
-    /// The delete key: removes the last character (shrinking the composing
-    /// text if the caret is in it). Keyboards send it as a `backspace` key
-    /// event, rather than an input-method edit, when they hold no text.
+    /// The delete key: removes the selection, else the character before the
+    /// caret. Keyboards send it as a `backspace` key event, rather than an
+    /// input-method edit, when they hold no text.
     pub fn backspace(&mut self, cx: &mut Context<Self>) {
-        let Some((start, _)) = self.content.char_indices().next_back() else {
-            return;
-        };
-        let end = self.content.len();
-        self.splice(start..end, "");
-        self.marked = self
-            .marked
-            .take()
-            .map(|m| m.start..start)
-            .filter(|m| !m.is_empty());
+        if self.buf.delete_backward() {
+            self.edits += 1;
+        }
         cx.notify();
     }
 
-    fn utf16_to_utf8(&self, offset: usize) -> usize {
-        let mut utf16 = 0;
-        for (utf8, c) in self.content.char_indices() {
-            if utf16 >= offset {
-                return utf8;
-            }
-            utf16 += c.len_utf16();
+    /// The forward delete key.
+    pub fn delete_forward(&mut self, cx: &mut Context<Self>) {
+        if self.buf.delete_forward() {
+            self.edits += 1;
         }
-        self.content.len()
+        cx.notify();
     }
 
-    fn utf8_to_utf16(&self, offset: usize) -> usize {
-        self.content[..offset.min(self.content.len())]
-            .chars()
-            .map(char::len_utf16)
-            .sum()
+    /// Runs `edit` on the buffer; bumps `edits` when the text changed.
+    fn mutate(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut EditBuffer)) {
+        let before = self.buf.text().len();
+        let before_text = (before <= 4096).then(|| self.buf.text().to_owned());
+        edit(&mut self.buf);
+        let changed = match before_text {
+            Some(old) => old != self.buf.text(),
+            None => true,
+        };
+        if changed {
+            self.edits += 1;
+        }
+        cx.notify();
     }
 
-    fn range_from_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.utf16_to_utf8(range.start)..self.utf16_to_utf8(range.end)
+    fn copy(&self, cx: &mut Context<Self>) {
+        if !self.secret.get() && self.buf.has_selection() {
+            cx.write_to_clipboard(ClipboardItem::new_string(
+                self.buf.selected_text().to_owned(),
+            ));
+        }
     }
 
-    fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.utf8_to_utf16(range.start)..self.utf8_to_utf16(range.end)
+    fn paste(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else {
+            return;
+        };
+        self.mutate(cx, |b| b.replace_selection(&text));
     }
 
-    fn splice(&mut self, range: Range<usize>, text: &str) {
-        let range = range.start.min(self.content.len())..range.end.min(self.content.len());
-        self.content.replace_range(range, text);
-        self.edits += 1;
+    /// Handles a key event (arrows, Home/End, Backspace, Delete, clipboard
+    /// shortcuts). Returns whether the key was used.
+    pub fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        let k = &event.keystroke;
+        let shift = k.modifiers.shift;
+        let word = k.modifiers.control || k.modifiers.alt;
+        let command = k.modifiers.control || k.modifiers.platform;
+        match k.key.as_str() {
+            "left" if word => self.mutate(cx, |b| b.word_left(shift)),
+            "right" if word => self.mutate(cx, |b| b.word_right(shift)),
+            "left" => self.mutate(cx, |b| b.move_left(shift)),
+            "right" => self.mutate(cx, |b| b.move_right(shift)),
+            "home" => self.mutate(cx, |b| b.home(shift)),
+            "end" => self.mutate(cx, |b| b.end(shift)),
+            "backspace" => self.backspace(cx),
+            "delete" => self.delete_forward(cx),
+            "a" if command => self.select_all(cx),
+            "c" if command => self.copy(cx),
+            "x" if command => {
+                self.copy(cx);
+                if !self.secret.get() {
+                    self.backspace(cx);
+                }
+            }
+            "v" if command => self.paste(cx),
+            _ => return false,
+        }
+        true
     }
 }
 
@@ -149,7 +214,11 @@ impl Focusable for TextField {
 
 impl EntityInputHandler for TextField {
     fn text_input_mode(&self, _: &mut Window, _: &mut Context<Self>) -> TextInputMode {
-        TextInputMode::SingleLine
+        if self.secret.get() {
+            TextInputMode::Password
+        } else {
+            TextInputMode::SingleLine
+        }
     }
 
     fn text_input_purpose(&self, _: &mut Window, _: &mut Context<Self>) -> TextInputPurpose {
@@ -183,9 +252,9 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<String> {
-        let range = self.range_from_utf16(&range);
-        actual.replace(self.range_to_utf16(&range));
-        Some(self.content[range].to_owned())
+        let bytes = self.buf.bytes_of(range);
+        actual.replace(self.buf.utf16_of(bytes.clone()));
+        Some(self.buf.text()[bytes].to_owned())
     }
 
     fn selected_text_range(
@@ -194,19 +263,28 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        let end = self.utf8_to_utf16(self.content.len());
-        Some(UTF16Selection {
-            range: end..end,
-            reversed: false,
-        })
+        let (range, reversed) = self.buf.selection_utf16();
+        Some(UTF16Selection { range, reversed })
+    }
+
+    fn set_selected_text_range(
+        &mut self,
+        range_utf16: Range<usize>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // The platform's `setSelection` / the cursor after a commit. The
+        // composing range stays as it is.
+        self.buf.set_selection_utf16(range_utf16, false);
+        cx.notify();
     }
 
     fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<Range<usize>> {
-        self.marked.as_ref().map(|r| self.range_to_utf16(r))
+        self.buf.marked().map(|r| self.buf.utf16_of(r))
     }
 
     fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
-        self.marked = None;
+        self.buf.unmark();
     }
 
     fn replace_text_in_range(
@@ -216,36 +294,54 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range
-            .as_ref()
-            .map(|r| self.range_from_utf16(r))
-            .or_else(|| self.marked.clone())
-            .unwrap_or(self.content.len()..self.content.len());
-        // A single line: line breaks never enter the text.
-        let text = text.replace(['\n', '\r'], " ");
-        self.splice(range, &text);
-        self.marked = None;
-        cx.notify();
+        self.mutate(cx, |b| {
+            let range = target_range(b, range);
+            b.replace(range, text);
+        });
     }
 
     fn replace_and_mark_text_in_range(
         &mut self,
         range: Option<Range<usize>>,
         text: &str,
-        _: Option<Range<usize>>,
+        new_selected_range: Option<Range<usize>>,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range
-            .as_ref()
-            .map(|r| self.range_from_utf16(r))
-            .or_else(|| self.marked.clone())
-            .unwrap_or(self.content.len()..self.content.len());
-        let text = text.replace(['\n', '\r'], " ");
-        let start = range.start.min(self.content.len());
-        self.splice(range, &text);
-        self.marked = (!text.is_empty()).then_some(start..start + text.len());
-        cx.notify();
+        self.mutate(cx, |b| {
+            let range = target_range(b, range);
+            b.replace_and_mark(range, text, new_selected_range);
+        });
+    }
+
+    fn replace_and_mark_text_with_selection(
+        &mut self,
+        range: Option<Range<usize>>,
+        text: &str,
+        selection: PreeditSelection,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.mutate(cx, |b| {
+            let range = target_range(b, range);
+            match selection {
+                PreeditSelection::Range { anchor, head } => {
+                    b.replace_and_mark(
+                        range.clone(),
+                        text,
+                        Some(anchor.min(head)..anchor.max(head)),
+                    );
+                    if anchor > head {
+                        // The caret sits at the start: a reversed selection.
+                        let sel = b.selection();
+                        b.set_selection(sel.end, sel.start);
+                    }
+                }
+                PreeditSelection::Hidden => {
+                    b.replace_and_mark(range, text, None);
+                }
+            }
+        });
     }
 
     fn surrounding_text(
@@ -256,8 +352,13 @@ impl EntityInputHandler for TextField {
     ) -> Option<SurroundingText> {
         // Without this snapshot the keyboard believes the field is empty, so
         // it sends a bare delete key instead of deleting text.
-        let end = self.content.len();
-        SurroundingText::from_utf8(&self.content, end, end, self.marked.clone(), max_bytes)
+        SurroundingText::from_utf8(
+            self.buf.text(),
+            self.buf.head(),
+            self.buf.anchor(),
+            self.buf.marked(),
+            max_bytes,
+        )
     }
 
     fn delete_surrounding_text(
@@ -267,20 +368,11 @@ impl EntityInputHandler for TextField {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        // The caret is always at the end: nothing follows it.
-        if self.marked.is_some() || after_utf16 > 0 {
-            return false;
-        }
-        let end = self.content.len();
-        let Some(start) = self.utf8_to_utf16(end).checked_sub(before_utf16) else {
-            return false;
-        };
-        let start = self.utf16_to_utf8(start);
-        if start < end {
-            self.splice(start..end, "");
-            cx.notify();
-        }
-        true
+        let mut done = false;
+        self.mutate(cx, |b| {
+            done = b.delete_surrounding(before_utf16, after_utf16)
+        });
+        done || (before_utf16 == 0 && after_utf16 == 0)
     }
 
     fn bounds_for_range(
@@ -293,24 +385,44 @@ impl EntityInputHandler for TextField {
         Some(element_bounds)
     }
 
+    fn element_bounds(
+        &mut self,
+        element_bounds: Bounds<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        // The visible text area as last laid out; the keyboard scrolls to it.
+        self.viewport.set(Some(element_bounds));
+        Some(element_bounds)
+    }
+
     fn character_index_for_point(
         &mut self,
         _: Point<Pixels>,
         _: &mut Window,
         _: &mut Context<Self>,
     ) -> Option<usize> {
-        Some(self.utf8_to_utf16(self.content.len()))
+        // Until the field shapes its text, a tap answers the caret.
+        Some(self.buf.utf16_of(self.buf.head()..self.buf.head()).start)
+    }
+}
+
+/// The range a replace targets: the one the keyboard names, else the composing
+/// text, else the selection.
+fn target_range(b: &EditBuffer, range: Option<Range<usize>>) -> Range<usize> {
+    match range {
+        Some(r) => b.bytes_of(r),
+        None => b.marked().unwrap_or_else(|| b.selection()),
     }
 }
 
 /// A key-down listener for the element that tracks the field's focus:
-/// handles the keyboard's delete key when it arrives as a key event.
+/// the delete key, arrows, Home/End and the clipboard shortcuts.
 pub fn on_backspace(
     field: Entity<TextField>,
 ) -> impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static {
     move |event, _, cx| {
-        if event.keystroke.key == "backspace" {
-            field.update(cx, |field, cx| field.backspace(cx));
+        if field.update(cx, |field, cx| field.handle_key(event, cx)) {
             cx.stop_propagation();
         }
     }
@@ -381,6 +493,7 @@ fn field_box_with(
     };
 
     let colors = crate::theme::colors(theme);
+    field.read(cx).set_secret(secret);
     let focus = field.read(cx).focus_handle();
     let raw = field.read(cx).text();
     let text: gpui::SharedString = if secret {
@@ -451,20 +564,208 @@ fn field_box_with(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use gpui::{AppContext as _, TestAppContext};
 
     use super::*;
 
+    struct Host(Entity<TextField>);
+
+    impl gpui::Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    fn field(cx: &mut TestAppContext) -> Entity<TextField> {
+        cx.new(TextField::new)
+    }
+
+    fn window_cx(cx: &mut TestAppContext) -> (Entity<TextField>, &mut gpui::VisualTestContext) {
+        let (host, cx) = cx.add_window_view(|_, cx| Host(cx.new(TextField::new)));
+        let field = host.read_with(cx, |h, _| h.0.clone());
+        (field, cx)
+    }
+
     #[gpui::test]
     fn set_text_and_backspace(cx: &mut TestAppContext) {
-        let field = cx.new(TextField::new);
+        let field = field(cx);
         field.update(cx, |f, cx| f.set("https://a\nb", cx));
         field.read_with(cx, |f, _| assert_eq!(f.text(), "https://a b"));
         field.update(cx, |f, cx| f.backspace(cx));
         field.read_with(cx, |f, _| assert_eq!(f.text(), "https://a "));
         field.update(cx, |f, cx| f.clear(cx));
         field.read_with(cx, |f, _| assert_eq!(f.text(), ""));
+    }
+
+    #[gpui::test]
+    fn android_commit_then_cursor_then_insert_mid_text(cx: &mut TestAppContext) {
+        let (field, cx) = window_cx(cx);
+        field.update_in(cx, |f, w, cx| {
+            // commitText("kar", 1) then setSelection(2, 2).
+            f.replace_text_in_range(None, "kar", w, cx);
+            assert_eq!(f.selected_text_range(false, w, cx).unwrap().range, 3..3);
+            f.set_selected_text_range(2..2, w, cx);
+            let sel = f.selected_text_range(false, w, cx).unwrap();
+            assert_eq!((sel.range, sel.reversed), (2..2, false));
+            // commitText("ş", 1) lands between "ka" and "r".
+            f.replace_text_in_range(None, "ş", w, cx);
+            assert_eq!(f.text(), "kaşr");
+            assert_eq!(f.selected_text_range(false, w, cx).unwrap().range, 3..3);
+        });
+        field.read_with(cx, |f, _| assert!(f.edits >= 2));
+    }
+
+    #[gpui::test]
+    fn android_composing_region_over_a_word(cx: &mut TestAppContext) {
+        let (field, cx) = window_cx(cx);
+        field.update_in(cx, |f, w, cx| {
+            f.replace_text_in_range(None, "merhaba dünya", w, cx);
+            // setComposingRegion(8, 13) marks "dünya" and keeps the cursor.
+            f.set_selected_text_range(13..13, w, cx);
+            f.buf.mark_utf16(8..13);
+            assert_eq!(f.marked_text_range(w, cx), Some(8..13));
+            // setComposingText("dünyalı") replaces the marked word.
+            f.replace_and_mark_text_in_range(None, "dünyalı", Some(7..7), w, cx);
+            assert_eq!(f.text(), "merhaba dünyalı");
+            assert_eq!(f.marked_text_range(w, cx), Some(8..15));
+            f.set_selected_text_range(15..15, w, cx);
+            // finishComposingText.
+            f.unmark_text(w, cx);
+            assert_eq!(f.marked_text_range(w, cx), None);
+            // The suggestion bar replaces an explicit range.
+            f.replace_text_in_range(Some(0..7), "selam", w, cx);
+            assert_eq!(f.text(), "selam dünyalı");
+        });
+    }
+
+    #[gpui::test]
+    fn android_delete_surrounding_both_sides(cx: &mut TestAppContext) {
+        let (field, cx) = window_cx(cx);
+        field.update_in(cx, |f, w, cx| {
+            f.replace_text_in_range(None, "abcde", w, cx);
+            f.set_selected_text_range(2..3, w, cx);
+            // deleteSurroundingText(1, 1) around the selected "c".
+            assert!(f.delete_surrounding_text(1, 1, w, cx));
+            assert_eq!(f.text(), "ace");
+            let s = f.surrounding_text(100, w, cx).unwrap();
+            assert_eq!((s.text.as_str(), s.cursor, s.anchor), ("ace", 2, 1));
+            // Nothing before the start: clamps instead of failing.
+            f.set_selected_text_range(0..0, w, cx);
+            assert!(f.delete_surrounding_text(3, 1, w, cx));
+            assert_eq!(f.text(), "ce");
+        });
+    }
+
+    #[gpui::test]
+    fn surrounding_text_reports_a_reversed_selection(cx: &mut TestAppContext) {
+        let (field, cx) = window_cx(cx);
+        field.update_in(cx, |f, w, cx| {
+            f.set("abcdef", cx);
+            f.set_selection(4, 1, cx);
+            let sel = f.selected_text_range(false, w, cx).unwrap();
+            assert_eq!((sel.range, sel.reversed), (1..4, true));
+            let s = f.surrounding_text(100, w, cx).unwrap();
+            assert_eq!((s.cursor, s.anchor), (1, 4));
+            // Typing replaces the selection.
+            f.replace_text_in_range(None, "X", w, cx);
+            assert_eq!(f.text(), "aXef");
+        });
+    }
+
+    #[gpui::test]
+    fn marked_text_with_selection_and_hidden_caret(cx: &mut TestAppContext) {
+        let (field, cx) = window_cx(cx);
+        field.update_in(cx, |f, w, cx| {
+            f.replace_and_mark_text_with_selection(
+                None,
+                "abc",
+                PreeditSelection::Range { anchor: 1, head: 1 },
+                w,
+                cx,
+            );
+            assert_eq!(f.selection(), 1..1);
+            assert_eq!(f.marked(), Some(0..3));
+            f.replace_and_mark_text_with_selection(None, "abcd", PreeditSelection::Hidden, w, cx);
+            assert_eq!(f.text(), "abcd");
+            assert_eq!(f.selection(), 4..4);
+        });
+    }
+
+    #[gpui::test]
+    fn secret_fields_ask_for_password_mode(cx: &mut TestAppContext) {
+        let (field, cx) = window_cx(cx);
+        field.update_in(cx, |f, w, cx| {
+            assert_eq!(f.text_input_mode(w, cx), TextInputMode::SingleLine);
+            f.set_secret(true);
+            assert_eq!(f.text_input_mode(w, cx), TextInputMode::Password);
+        });
+    }
+
+    #[gpui::test]
+    fn keys_move_select_and_delete(cx: &mut TestAppContext) {
+        use gpui::{Keystroke, Modifiers};
+        let (field, cx) = window_cx(cx);
+        let key = |s: &str, shift: bool| {
+            let mut k = Keystroke::parse(s).unwrap();
+            k.modifiers.shift |= shift;
+            KeyDownEvent {
+                keystroke: k,
+                is_held: false,
+                prefer_character_input: false,
+            }
+        };
+        field.update(cx, |f, cx| {
+            f.set("sağlık", cx);
+            assert!(f.handle_key(&key("left", false), cx));
+            assert!(f.handle_key(&key("left", true), cx));
+            assert_eq!(f.selection(), 5..7);
+            assert!(f.handle_key(&key("delete", false), cx));
+            assert_eq!(f.text(), "sağlk");
+            assert!(f.handle_key(&key("home", false), cx));
+            assert!(f.handle_key(&key("delete", false), cx));
+            assert_eq!(f.text(), "ağlk");
+            assert!(f.handle_key(&key("end", true), cx));
+            assert!(f.handle_key(&key("backspace", false), cx));
+            assert_eq!(f.text(), "");
+            assert!(!f.handle_key(&key("q", false), cx));
+            f.set("abc", cx);
+            let mut all = key("a", false);
+            all.keystroke.modifiers = Modifiers::control();
+            assert!(f.handle_key(&all, cx));
+            assert_eq!(f.selection(), 0..3);
+        });
+    }
+
+    #[gpui::test]
+    fn clipboard_shortcuts(cx: &mut TestAppContext) {
+        use gpui::{Keystroke, Modifiers};
+        let (field, cx) = window_cx(cx);
+        let ctrl = |c: &str| {
+            let mut k = Keystroke::parse(c).unwrap();
+            k.modifiers = Modifiers::control();
+            KeyDownEvent {
+                keystroke: k,
+                is_held: false,
+                prefer_character_input: false,
+            }
+        };
+        field.update(cx, |f, cx| {
+            f.set("hello world", cx);
+            f.set_selection(0, 5, cx);
+            assert!(f.handle_key(&ctrl("x"), cx));
+            assert_eq!(f.text(), " world");
+            f.set_selection(6, 6, cx);
+            assert!(f.handle_key(&ctrl("v"), cx));
+            assert_eq!(f.text(), " worldhello");
+            // A secret field never copies.
+            f.set_secret(true);
+            f.select_all(cx);
+            assert!(f.handle_key(&ctrl("c"), cx));
+            assert!(f.handle_key(&ctrl("x"), cx));
+            assert_eq!(f.text(), " worldhello");
+        });
     }
 
     #[test]

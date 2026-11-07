@@ -21,6 +21,42 @@ pub enum Outcome {
     Cancelled,
 }
 
+/// Which finished trips the history list shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OutcomeFilter {
+    #[default]
+    All,
+    Arrived,
+    Cancelled,
+}
+
+impl OutcomeFilter {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Arrived => "Arrived",
+            Self::Cancelled => "Cancelled",
+        }
+    }
+
+    /// The next filter in the chip cycle.
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Arrived,
+            Self::Arrived => Self::Cancelled,
+            Self::Cancelled => Self::All,
+        }
+    }
+
+    fn admits(self, outcome: Outcome) -> bool {
+        match self {
+            Self::All => true,
+            Self::Arrived => outcome == Outcome::Arrived,
+            Self::Cancelled => outcome == Outcome::Cancelled,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TripRecord {
@@ -75,6 +111,11 @@ impl TripRecord {
             snoozes: trip.snoozes,
             notice_sent: trip.notice.as_ref().is_some_and(|n| n.sent),
         }
+    }
+
+    /// Both ends, when the record has them (not for legacy records).
+    pub fn pair(&self) -> Option<(Endpoint, Endpoint)> {
+        Some((self.a.clone()?, self.b.clone()?))
     }
 
     /// Trip length in milliseconds (never negative).
@@ -136,6 +177,30 @@ impl History {
         }
         self.records.insert(index.min(self.records.len()), record);
         self.records.truncate(MAX_RECORDS);
+    }
+
+    /// Indices of the records that pass `filter` and whose label or A/B
+    /// labels contain the accent- and case-folded `query`; newest first
+    /// (the storage order). A blank query matches every record.
+    pub fn matching(&self, query: &str, filter: OutcomeFilter) -> Vec<usize> {
+        let q = fold(query.trim());
+        self.records
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| filter.admits(r.outcome))
+            .filter(|(_, r)| {
+                q.is_empty()
+                    || [
+                        Some(&r.label),
+                        r.a.as_ref().map(|e| &e.label),
+                        r.b.as_ref().map(|e| &e.label),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .any(|l| fold(l).contains(&q))
+            })
+            .map(|(i, _)| i)
+            .collect()
     }
 
     /// Distinct recent (A, B) pairs, newest first. Legacy single-destination
@@ -438,6 +503,53 @@ mod tests {
                 ("Home".to_owned(), 1)
             ]
         );
+    }
+
+    #[test]
+    fn matching_filters_and_folds() {
+        let mut h = History::default();
+        h.push(rec(1, "Kadıköy", B, 1, Outcome::Arrived));
+        h.push(pair_rec(2, ep("Home", A), ep("İş Yeri", B), 2));
+        let mut c = rec(3, "Taksim", A, 3, Outcome::Cancelled);
+        c.a = Some(ep("Pier", A));
+        c.b = Some(ep("Cafe Éclair", B));
+        h.push(c);
+        // Newest first: ids 3, 2, 1 at indices 0, 1, 2.
+        assert_eq!(h.matching("", OutcomeFilter::All), [0, 1, 2]);
+        assert_eq!(h.matching("  ", OutcomeFilter::All), [0, 1, 2]);
+        assert_eq!(h.matching("", OutcomeFilter::Arrived), [1, 2]);
+        assert_eq!(h.matching("", OutcomeFilter::Cancelled), [0]);
+        assert_eq!(h.matching("kadikoy", OutcomeFilter::All), [2]);
+        assert_eq!(h.matching("ECLAIR", OutcomeFilter::All), [0]);
+        assert_eq!(h.matching("home", OutcomeFilter::All), [1]);
+        assert_eq!(
+            h.matching("home", OutcomeFilter::Cancelled),
+            Vec::<usize>::new()
+        );
+        assert!(h.matching("zzz", OutcomeFilter::All).is_empty());
+    }
+
+    #[test]
+    fn filter_cycles() {
+        let mut f = OutcomeFilter::All;
+        let mut seen = vec![f.label()];
+        for _ in 0..3 {
+            f = f.next();
+            seen.push(f.label());
+        }
+        assert_eq!(seen, ["All", "Arrived", "Cancelled", "All"]);
+    }
+
+    #[test]
+    fn pair_needs_both_ends() {
+        let r = pair_rec(1, ep("A", A), ep("B", B), 1);
+        assert_eq!(r.pair().unwrap().1.label, "B");
+        assert!(rec(2, "x", A, 1, Outcome::Arrived).pair().is_none());
+        let half = TripRecord {
+            a: Some(ep("A", A)),
+            ..TripRecord::default()
+        };
+        assert!(half.pair().is_none());
     }
 
     #[test]

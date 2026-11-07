@@ -13,6 +13,7 @@ pub mod csv;
 pub mod dest;
 pub mod gtfs;
 pub mod history;
+pub mod history_io;
 pub mod measure;
 pub mod notice;
 pub mod places_io;
@@ -35,7 +36,7 @@ pub use dest::{
     stop_share_text,
 };
 pub use gtfs::{Feed, FeedBuilder, FeedReport, GtfsError, Pattern, Route, Stop, read_zip};
-pub use history::{History, Outcome, Stats, TripRecord};
+pub use history::{History, Outcome, OutcomeFilter, Stats, TripRecord};
 pub use measure::Measure;
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};
 pub use prefs::{

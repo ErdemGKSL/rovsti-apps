@@ -51,7 +51,7 @@ pub fn to_json(stops: &SavedStops) -> String {
     serde_json::to_string_pretty(stops).unwrap_or_default()
 }
 
-fn escape(s: &str) -> String {
+pub(crate) fn escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {

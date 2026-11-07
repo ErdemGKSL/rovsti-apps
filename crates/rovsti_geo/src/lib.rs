@@ -24,7 +24,7 @@ pub mod tiles;
 mod trip;
 pub mod view;
 
-pub use alarm::{AlarmPlan, SoundSource};
+pub use alarm::{AlarmPlan, SoundSource, VOLUME_CHOICES, VibrationPattern, next_volume};
 pub use coord::{Coord, EARTH_RADIUS_M};
 pub use crossing::{
     Crossing, CrossingTrip, CrossingUpdate, CrossingWatch, DEAD_BAND_M, Diameter, DiameterError,
@@ -38,7 +38,9 @@ pub use gtfs::{Feed, FeedBuilder, FeedReport, GtfsError, Pattern, Route, Stop, r
 pub use history::{History, Outcome, Stats, TripRecord};
 pub use measure::Measure;
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};
-pub use prefs::{NOTICE_MINUTES, NoticePrefs, NoticeWhen, SNOOZE_CHOICES, StopsPrefs};
+pub use prefs::{
+    AlarmSound, Appearance, NOTICE_MINUTES, NoticePrefs, NoticeWhen, SNOOZE_CHOICES, StopsPrefs,
+};
 pub use saved_stops::{LoadedStops, SavedStop, SavedStopError, SavedStops};
 pub use session::{
     ActiveTrip, FixIn, FixOut, FixOutcome, FixPos, NoticeDelivery, NoticeState, Track,

@@ -18,6 +18,69 @@ pub const MAX_TIMEOUT_RERINGS: u8 = 6;
 /// Vibration pattern (off, on, off, on, pause), repeated from index 0.
 pub const VIBRATION_MS: [u64; 5] = [0, 700, 500, 700, 1500];
 
+/// Volumes (percent of the alarm stream) the Settings row cycles through.
+pub const VOLUME_CHOICES: [u8; 3] = [80, 90, 100];
+
+/// The next volume in [`VOLUME_CHOICES`] (wrapping); values below 80 snap to 80.
+pub fn next_volume(pct: u8) -> u8 {
+    VOLUME_CHOICES
+        .into_iter()
+        .find(|v| *v > pct)
+        .unwrap_or(VOLUME_CHOICES[0])
+}
+
+/// Vibration rhythm the user can pick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VibrationPattern {
+    #[default]
+    Standard,
+    Pulse,
+    Long,
+    Heartbeat,
+}
+
+impl VibrationPattern {
+    pub const ALL: [Self; 4] = [Self::Standard, Self::Pulse, Self::Long, Self::Heartbeat];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Standard => "Standard",
+            Self::Pulse => "Pulse",
+            Self::Long => "Long",
+            Self::Heartbeat => "Heartbeat",
+        }
+    }
+
+    /// The next pattern (wrapping).
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|p| *p == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+
+    /// Android pattern (off, on, off, on, ...), repeated from index 0.
+    pub fn pattern_ms(self) -> &'static [u64] {
+        match self {
+            Self::Standard => &VIBRATION_MS,
+            Self::Pulse => &[0, 250, 250, 250, 250, 250, 1000],
+            Self::Long => &[0, 1500, 700],
+            Self::Heartbeat => &[0, 120, 120, 300, 900],
+        }
+    }
+
+    /// One cycle without the trailing pause, for a short preview buzz.
+    pub fn preview_ms(self) -> Vec<u64> {
+        let p = self.pattern_ms();
+        // Even indexes are "off": an odd length ends on a trailing pause.
+        let end = if p.len() % 2 == 1 {
+            p.len() - 1
+        } else {
+            p.len()
+        };
+        p[..end].to_vec()
+    }
+}
+
 /// Where the alarm sound comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -88,6 +151,9 @@ pub struct AlarmPlan {
     pub ring_timeout_ms: u64,
     pub sound_order: Vec<SoundSource>,
     pub vibrate_pattern_ms: Vec<u64>,
+    /// Sound the user picked (content URI); tried first when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_sound_uri: Option<String>,
 }
 
 impl Default for AlarmPlan {
@@ -98,6 +164,7 @@ impl Default for AlarmPlan {
             ring_timeout_ms: RING_TIMEOUT.as_millis() as u64,
             sound_order: SOUND_ORDER.to_vec(),
             vibrate_pattern_ms: VIBRATION_MS.to_vec(),
+            user_sound_uri: None,
         }
     }
 }
@@ -106,6 +173,52 @@ impl Default for AlarmPlan {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn patterns_are_well_formed() {
+        assert_eq!(VibrationPattern::Standard.pattern_ms(), &VIBRATION_MS);
+        for p in VibrationPattern::ALL {
+            let m = p.pattern_ms();
+            assert!(m.len() >= 2 && m[0] == 0, "{p:?}");
+            assert!(m.iter().skip(1).step_by(2).any(|v| *v > 0), "{p:?}");
+            assert!(m.iter().sum::<u64>() >= 1000, "{p:?}");
+            let pre = p.preview_ms();
+            assert!(!pre.is_empty() && pre.len() % 2 == 0, "{p:?}");
+            assert!(pre.iter().sum::<u64>() < 3000, "{p:?}");
+            assert!(!p.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn pattern_next_cycles_all() {
+        let mut p = VibrationPattern::default();
+        let mut seen = vec![p];
+        for _ in 0..VibrationPattern::ALL.len() - 1 {
+            p = p.next();
+            assert!(!seen.contains(&p));
+            seen.push(p);
+        }
+        assert_eq!(p.next(), VibrationPattern::Standard);
+        assert_eq!(seen, VibrationPattern::ALL);
+    }
+
+    #[test]
+    fn next_volume_cycles_and_snaps() {
+        assert_eq!(next_volume(0), 80);
+        assert_eq!(next_volume(79), 80);
+        assert_eq!(next_volume(80), 90);
+        assert_eq!(next_volume(90), 100);
+        assert_eq!(next_volume(100), 80);
+        assert_eq!(next_volume(255), 80);
+    }
+
+    #[test]
+    fn default_plan_json_has_no_user_sound() {
+        let json = serde_json::to_string(&AlarmPlan::default()).unwrap();
+        assert!(!json.contains("user_sound_uri"));
+        let back: AlarmPlan = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, AlarmPlan::default());
+    }
 
     #[test]
     fn volume_never_lowers_and_reaches_80_percent() {

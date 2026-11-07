@@ -6,6 +6,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::NoticeRule;
+use crate::alarm::{AlarmPlan, MIN_ALARM_VOLUME_PCT, VibrationPattern};
 use crate::notice::{DEFAULT_TEMPLATE, TemplateError, validate};
 use crate::session::NoticeState;
 use crate::tiles::TileSource;
@@ -92,6 +93,43 @@ impl NoticePrefs {
     }
 }
 
+/// Map and app appearance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Appearance {
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
+
+impl Appearance {
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Light, Self::Dark];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Auto => "Auto",
+            Self::Light => "Light",
+            Self::Dark => "Dark",
+        }
+    }
+
+    /// The next choice (wrapping).
+    pub fn next(self) -> Self {
+        let i = Self::ALL.iter().position(|a| *a == self).unwrap_or(0);
+        Self::ALL[(i + 1) % Self::ALL.len()]
+    }
+}
+
+/// A sound the user picked for the alarm.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlarmSound {
+    /// Content URI of the sound.
+    pub uri: String,
+    /// Name to show.
+    pub title: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StopsPrefs {
@@ -102,6 +140,12 @@ pub struct StopsPrefs {
     pub notice: Option<NoticePrefs>,
     /// Map tile URL template; `None` is the default public server.
     pub tile_url: Option<String>,
+    pub appearance: Appearance,
+    pub vibration: VibrationPattern,
+    /// Alarm volume, percent of the alarm stream (80..=100).
+    pub volume_pct: u8,
+    /// `None`: the system default alarm sound.
+    pub alarm_sound: Option<AlarmSound>,
 }
 
 impl Default for StopsPrefs {
@@ -112,6 +156,10 @@ impl Default for StopsPrefs {
             snooze_min: 5,
             notice: None,
             tile_url: None,
+            appearance: Appearance::default(),
+            vibration: VibrationPattern::default(),
+            volume_pct: MIN_ALARM_VOLUME_PCT,
+            alarm_sound: None,
         }
     }
 }
@@ -150,6 +198,33 @@ impl StopsPrefs {
         true
     }
 
+    /// What Kotlin rings with for a new trip.
+    pub fn alarm_plan(&self) -> AlarmPlan {
+        AlarmPlan {
+            volume_pct: self.volume_pct.clamp(MIN_ALARM_VOLUME_PCT, 100),
+            vibrate_pattern_ms: self.vibration.pattern_ms().to_vec(),
+            user_sound_uri: self.alarm_sound.as_ref().map(|s| s.uri.clone()),
+            ..AlarmPlan::default()
+        }
+    }
+
+    /// JSON for a test ring: the plan plus the sound and vibration switches.
+    pub fn test_ring_json(&self) -> String {
+        let mut v = serde_json::to_value(self.alarm_plan()).unwrap_or_default();
+        if let Some(o) = v.as_object_mut() {
+            o.insert("sound".to_owned(), self.sound.into());
+            o.insert("vibrate".to_owned(), self.vibrate.into());
+        }
+        v.to_string()
+    }
+
+    /// Name of the alarm sound for the Settings row.
+    pub fn alarm_sound_label(&self) -> String {
+        self.alarm_sound
+            .as_ref()
+            .map_or_else(|| "Default alarm".to_owned(), |s| s.title.clone())
+    }
+
     /// The next snooze length in [`SNOOZE_CHOICES`] (wrapping); a stored
     /// value outside the list moves to the first choice that is longer.
     pub fn next_snooze(&self) -> u8 {
@@ -175,6 +250,65 @@ mod tests {
         assert!(p.toggle_sound());
         assert!(p.toggle_vibrate());
         assert!(p.sound && !p.vibrate);
+    }
+
+    #[test]
+    fn default_prefs_give_default_plan() {
+        let p = StopsPrefs::default();
+        assert_eq!(p.alarm_plan(), AlarmPlan::default());
+        assert_eq!(p.alarm_sound_label(), "Default alarm");
+        assert_eq!(p.appearance, Appearance::Auto);
+    }
+
+    #[test]
+    fn old_prefs_json_loads() {
+        let p: StopsPrefs = serde_json::from_str(r#"{"sound":true,"snooze_min":3}"#).unwrap();
+        assert_eq!(p.snooze_min, 3);
+        assert_eq!(p.volume_pct, 80);
+        assert_eq!(p.vibration, VibrationPattern::Standard);
+        assert!(p.alarm_sound.is_none());
+    }
+
+    #[test]
+    fn volume_is_clamped_in_plan() {
+        let mut p = StopsPrefs::default();
+        for (given, want) in [(0, 80), (79, 80), (90, 90), (255, 100)] {
+            p.volume_pct = given;
+            assert_eq!(p.alarm_plan().volume_pct, want);
+        }
+    }
+
+    #[test]
+    fn appearance_cycles() {
+        let mut a = Appearance::Auto;
+        for want in [Appearance::Light, Appearance::Dark, Appearance::Auto] {
+            a = a.next();
+            assert_eq!(a, want);
+            assert!(!a.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_ring_json_keys() {
+        let mut p = StopsPrefs {
+            vibrate: false,
+            ..StopsPrefs::default()
+        };
+        let v: serde_json::Value = serde_json::from_str(&p.test_ring_json()).unwrap();
+        assert_eq!(v["sound"], true);
+        assert_eq!(v["vibrate"], false);
+        assert_eq!(v["volume_pct"], 80);
+        assert!(v.get("vibrate_pattern_ms").is_some());
+        assert!(v.get("user_sound_uri").is_none());
+        p.vibration = VibrationPattern::Long;
+        p.alarm_sound = Some(AlarmSound {
+            uri: "content://x/1".into(),
+            title: "Chime".into(),
+        });
+        let v: serde_json::Value = serde_json::from_str(&p.test_ring_json()).unwrap();
+        assert_eq!(v["user_sound_uri"], "content://x/1");
+        assert_eq!(v["vibrate_pattern_ms"], serde_json::json!([0, 1500, 700]));
+        assert_eq!(p.alarm_sound_label(), "Chime");
     }
 
     #[test]

@@ -53,6 +53,8 @@ use crate::{
     store::now_ms,
 };
 
+/// A tap this close (pixels) to the blue dot opens My location.
+pub const MY_LOCATION_RADIUS_PX: f32 = 24.0;
 /// Fixes kept for the breadcrumb.
 pub const BREADCRUMB_CAP: usize = 500;
 /// Stops drawn per frame.
@@ -1640,6 +1642,12 @@ pub fn measure_summary(m: &Measure) -> String {
     }
 }
 
+/// A tap within `radius` pixels of the blue dot (both in pixels from the view
+/// centre) is a tap on the dot.
+pub fn hits_position(tap: (f32, f32), dot: (f32, f32), radius: f32) -> bool {
+    dist(tap, dot) <= radius
+}
+
 /// Whether the pins can be grabbed: only while the pair can be edited and the
 /// measure tool is not taking the taps.
 pub fn pins_grabbable(trip: bool, alarm: bool, measuring: bool) -> bool {
@@ -2337,6 +2345,7 @@ impl StopsApp {
         let m = self.map.measure.as_ref()?;
         let summary = measure_summary(m);
         let armed = self.map.measure_armed;
+        let count = m.points().len();
         let colors = theme::colors(theme);
         let clear_label = if armed { "Tap to clear" } else { "Clear" };
         let action = |label: &'static str| {
@@ -2397,6 +2406,11 @@ impl StopsApp {
                                     }
                                 })),
                         )
+                        .when(count >= 2, |row| {
+                            row.child(action("More").id("measure-more").on_click(
+                                cx.listener(|this, _, _, cx| this.open_measure_actions(cx)),
+                            ))
+                        })
                         .child(action("Done").id("measure-done").on_click(
                             cx.listener(|this, _, window, cx| this.toggle_measure(window, cx)),
                         )),
@@ -2545,6 +2559,13 @@ impl StopsApp {
             }
             return;
         }
+        if let Some((at_coord, accuracy)) = self.map.position {
+            let dot = self.map.viewport.project(at_coord);
+            if hits_position(at, dot, MY_LOCATION_RADIUS_PX) {
+                self.open_my_location(at_coord, accuracy, cx);
+                return;
+            }
+        }
         // Keep the view where the user tapped: the idle fit would otherwise
         // recentre on the new pin and move it from under the finger.
         self.map.take_over();
@@ -2663,6 +2684,14 @@ mod tests {
     use super::*;
 
     const IST: Coord = Coord::new(41.0, 29.0);
+
+    #[test]
+    fn hits_position_is_inclusive_at_the_radius() {
+        assert!(hits_position((10.0, 10.0), (10.0, 10.0), 24.0));
+        assert!(hits_position((24.0, 0.0), (0.0, 0.0), 24.0));
+        assert!(!hits_position((17.0, 17.0), (0.0, 0.0), 24.0));
+        assert!(!hits_position((25.0, 0.0), (0.0, 0.0), 24.0));
+    }
 
     #[test]
     fn a_startup_fix_does_not_move_a_view_the_user_took_over() {

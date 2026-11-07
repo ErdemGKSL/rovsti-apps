@@ -46,6 +46,7 @@ mod headless;
 mod kotlin_contract;
 mod lists;
 mod map;
+mod map_actions;
 mod map_options;
 mod pick;
 mod picker;

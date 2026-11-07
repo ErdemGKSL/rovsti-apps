@@ -77,9 +77,59 @@ pub fn divider_label(unread: u32) -> String {
     }
 }
 
+/// Index of the next chat with unread messages after `current`, wrapping
+/// around the end of `order` (each entry is a key and whether it is unread).
+/// Never returns `current`; without a (found) `current` the first unread
+/// entry is returned. `None` when no other chat is unread.
+pub fn next_unread<K: PartialEq>(order: &[(K, bool)], current: Option<&K>) -> Option<usize> {
+    let start = current
+        .and_then(|c| order.iter().position(|(k, _)| k == c))
+        .map_or(0, |i| i + 1);
+    (0..order.len())
+        .map(|step| (start + step) % order.len())
+        .find(|&i| order[i].1 && current != Some(&order[i].0))
+}
+
+/// Label of the "next unread" button given how many other chats are unread:
+/// `None`, "Next unread" (one) or "Next unread · 3".
+pub fn next_unread_label(others: usize) -> Option<String> {
+    match others {
+        0 => None,
+        1 => Some("Next unread".to_string()),
+        n => Some(format!("Next unread · {n}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn next_unread_wraps_and_skips_current() {
+        let order = [("a", false), ("b", true), ("c", false), ("d", true)];
+        assert_eq!(next_unread(&order, Some(&"a")), Some(1));
+        assert_eq!(next_unread(&order, Some(&"b")), Some(3));
+        assert_eq!(next_unread(&order, Some(&"d")), Some(1));
+        assert_eq!(next_unread(&order, Some(&"c")), Some(3));
+        assert_eq!(next_unread(&order, None), Some(1));
+        assert_eq!(next_unread(&order, Some(&"zzz")), Some(1));
+    }
+
+    #[test]
+    fn next_unread_none_when_only_current_or_nothing() {
+        assert_eq!(next_unread(&[("a", true)], Some(&"a")), None);
+        assert_eq!(next_unread(&[("a", true), ("b", false)], Some(&"a")), None);
+        assert_eq!(next_unread(&[("a", false), ("b", false)], Some(&"a")), None);
+        assert_eq!(next_unread::<&str>(&[], None), None);
+        assert_eq!(next_unread(&[("a", true)], None), Some(0));
+    }
+
+    #[test]
+    fn next_unread_label_counts() {
+        assert_eq!(next_unread_label(0), None);
+        assert_eq!(next_unread_label(1).as_deref(), Some("Next unread"));
+        assert_eq!(next_unread_label(3).as_deref(), Some("Next unread · 3"));
+    }
 
     #[test]
     fn badge_counts_only_while_away() {

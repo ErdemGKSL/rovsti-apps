@@ -23,6 +23,8 @@ pub mod contact_edit;
 pub mod contact_photo;
 pub mod contacts_prefs;
 pub mod contacts_view;
+/// Header copy choices: name, number or WhatsApp ID.
+pub mod copy_choices;
 pub mod date_detect;
 pub mod date_jump;
 pub mod dial;

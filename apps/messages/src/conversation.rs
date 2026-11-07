@@ -3449,7 +3449,10 @@ impl Conversation {
         } else if confirmed {
             let id = message.id.clone();
             let map_url = (!revoked)
-                .then(|| meta.and_then(|m| m.location.as_ref()).map(geo_url))
+                .then(|| {
+                    meta.and_then(|m| m.location.as_ref())
+                        .map(|l| location_link::geo_url(l.latitude, l.longitude, l.name.as_deref()))
+                })
                 .flatten();
             let (from_me, sender) = (message.from_me, message.sender.clone());
             let double_tap = (!revoked).then(|| id.clone());
@@ -5460,33 +5463,6 @@ pub enum CardAction {
     CopyLink(String),
 }
 
-/// Percent-encodes everything but ASCII alphanumerics and `-._~`.
-fn encode_query(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
-        }
-    }
-    out
-}
-
-/// `geo:41.008200,28.978400?q=41.008200,28.978400(Name)` for a maps app.
-pub fn geo_url(location: &Location) -> String {
-    let point = format!("{:.6},{:.6}", location.latitude, location.longitude);
-    let mut url = format!("geo:{point}?q={point}");
-    if let Some(name) = location.name.as_deref().map(str::trim)
-        && !name.is_empty()
-    {
-        url.push('(');
-        url.push_str(&encode_query(name));
-        url.push(')');
-    }
-    url
-}
-
 /// The actions under a location or contact card; none for deleted messages.
 pub fn card_actions(meta: Option<&MessageMeta>) -> Vec<CardAction> {
     let Some(meta) = meta.filter(|m| !m.revoked) else {
@@ -5508,7 +5484,7 @@ pub fn card_actions(meta: Option<&MessageMeta>) -> Vec<CardAction> {
         }
         return vec![
             CardAction::OpenMap {
-                url: geo_url(location),
+                url: location_link::geo_url(lat, lon, location.name.as_deref()),
             },
             CardAction::ShareLocation(location_link::share_text(
                 location.name.as_deref(),
@@ -5854,27 +5830,6 @@ mod tests {
             },
             state,
         }
-    }
-
-    #[test]
-    fn geo_urls_encode_the_name() {
-        let mut loc = Location {
-            latitude: 41.0082,
-            longitude: 28.9784,
-            name: Some("Ayasofya Müzesi".into()),
-            ..Location::default()
-        };
-        assert_eq!(
-            geo_url(&loc),
-            "geo:41.008200,28.978400?q=41.008200,28.978400(Ayasofya%20M%C3%BCzesi)"
-        );
-        loc.name = Some("  ".into());
-        assert_eq!(
-            geo_url(&loc),
-            "geo:41.008200,28.978400?q=41.008200,28.978400"
-        );
-        loc.name = None;
-        assert!(!geo_url(&loc).contains('('));
     }
 
     #[test]

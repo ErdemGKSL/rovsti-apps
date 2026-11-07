@@ -164,6 +164,16 @@ list in `docs/phone-acceptance.md`.
         delete through the Trash
       - C25 Group utilities on a group's page: Message group (one SMS to all), Email group, Share as
         `.vcf`, Save to file
+- [x] Utilities, round 4 (C26-C32, C34, C36, done without a device):
+      - C26 Favorites custom order: Edit, then Move up / Move down, saved locally
+      - C27 Smarter search: initials ("ay" finds Ayse Yilmaz) and words in any order, tiered results
+      - C28 Paste to add: a clipboard vCard, MECARD or "Name +90 ..." text opens the editor or import preview
+      - C29 Contacts summary in Settings: total, per account, with number / email / birthday, favorites
+      - C30 Quick actions on long press in Favorites, Group and Recent rows
+      - C31 Open a `.vcf` shared to or opened with Contacts: import preview
+      - C32 Copy number as international, national, display or `tel:` link
+      - C34 Per-contact ringtone and "Send calls to voicemail" (with confirm)
+      - C36 Add a contact to the Home screen (pinned shortcut opens the card)
 - [ ] Check the photo viewer gestures, the QR sheet, the calendar-event and address writes, and
       the scrubber drag on a phone: written without a device
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device

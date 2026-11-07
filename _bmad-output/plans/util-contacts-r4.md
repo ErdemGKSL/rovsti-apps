@@ -50,15 +50,15 @@ Facts the R4 steps build on (checked at baseSha, do not re-create):
 | C1-C10 | Photo viewer, save/share photo, change/remove, share as text/vcf/QR, dates, addresses, vCard fields, duplicates+merge, upcoming birthdays, scrubber | done R1 |
 | C11-C18 | Select mode, export one, crop/rotate, camera, recently added, copy contact / vCard, WhatsApp per number, websites/nickname/title | done R2 |
 | C19-C25 | Scan to add, Trash, card call history, birthday reminders, default number/email, Clean up, group utilities | done R3 |
-| C27 | Smarter search: initials ("ay" -> Ayse Yilmaz), words in any order ("yil ay"), tiered results | R4 S1+S5 |
-| C30 | Quick actions on long press in Favorites / Group / Recent (Call, Message, WhatsApp, Copy number, Share, Star, Add to Home screen) | R4 S1+S5 |
-| C26 | Favorites custom order (Edit -> Move up / Move down, saved locally) | R4 S3+S5 |
-| C28 | Paste to add: clipboard vCard / MECARD / "Name +90 ..." text -> editor or import preview | R4 S2+S6 |
-| C31 | Open a .vcf shared to or opened with Contacts (SEND / VIEW text/x-vcard) -> import preview | R4 S2+S4+S6 |
-| C32 | Copy number as: international (E.164), national, display, tel: link (field sheet "Copy as...") | R4 S2+S6 |
-| C34 | Per-contact ringtone (system picker) and "Send calls to voicemail" (confirm) | R4 S3+S4+S7 |
-| C36 | Add contact to Home screen (pinned shortcut opens the card) | R4 S3+S4+S7 |
-| C29 | Contacts summary in Settings: total, per account, with number / email / birthday / photo | R4 S1+S7 |
+| C27 | Smarter search: initials ("ay" -> Ayse Yilmaz), words in any order ("yil ay"), tiered results | done R4 |
+| C30 | Quick actions on long press in Favorites / Group / Recent (Call, Message, WhatsApp, Copy number, Share, Star, Add to Home screen) | done R4 |
+| C26 | Favorites custom order (Edit -> Move up / Move down, saved locally) | done R4 |
+| C28 | Paste to add: clipboard vCard / MECARD / "Name +90 ..." text -> editor or import preview | done R4 |
+| C31 | Open a .vcf shared to or opened with Contacts (SEND / VIEW text/x-vcard) -> import preview | done R4 |
+| C32 | Copy number as: international (E.164), national, display, tel: link (field sheet "Copy as...") | done R4 |
+| C34 | Per-contact ringtone (system picker) and "Send calls to voicemail" (confirm) | done R4 |
+| C36 | Add contact to Home screen (pinned shortcut opens the card) | done R4 |
+| C29 | Contacts summary in Settings: total, per account, with number / email / birthday / photo | done R4 |
 | C33 | vCard PHOTO import/export (base64 JPEG, size-capped) for single-card share / save and single-card import | backlog R5 |
 | C38 | My card: the phone owner's profile card (ContactsContract.Profile) with Share / QR | backlog R5 |
 | C39 | Export as CSV (Google / Outlook column set) next to "Export to a .vcf file" | backlog R5 |

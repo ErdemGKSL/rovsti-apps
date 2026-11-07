@@ -223,6 +223,8 @@ impl ContactsApp {
     /// Asks the launcher to pin a shortcut that opens the contact's card.
     pub(crate) fn pin_home(&mut self, id: i64, cx: &mut Context<Self>) {
         let Some(contact) = self.index().and_then(|i| i.all().find(|c| c.id == id)) else {
+            self.notice = Some("Can't find this contact.".into());
+            cx.notify();
             return;
         };
         let spec = contact_options::shortcut(

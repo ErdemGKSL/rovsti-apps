@@ -261,6 +261,14 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
 - **AD-CT9 Group tools.** Message group and Email group build one `smsto:` / `mailto:` intent
   (`telecom::compose_group_sms`, `email_group`) from `rovsti_core::group_tools` (at most 30
   numbers / 50 addresses, one per distinct number). The cards are read off the UI thread.
+- **AD-CT10 Round 4 intake and writes.** Contacts receives shared and opened vCards through
+  `on_receive_share` (SEND) and `on_open_urls` (VIEW, `content://`, copied to `cacheDir/shared/`
+  by `readSharedUri` and read off the UI thread); the manifest filters (`text/x-vcard`,
+  `text/vcard`, `text/directory`) are mirrored in `gpuiforge.json`. `rovsti_core::contact_intake`
+  decides what a file is. Per-contact `CUSTOM_RINGTONE` and `SEND_TO_VOICEMAIL` are written
+  through `ContactOptions.kt` (voicemail on asks first). Pinned Home screen shortcuts launch the
+  app with `EXTRA_CONTACT_ID` and reuse `open_contact` (AD-CT8). The Favorites order is a list
+  of lookup keys in `contacts-prefs.json` (`favorites_order`, up to 300, file cap 64 KiB).
 
 ### Messages: decisions (AD-MSG1 to AD-MSG9)
 

@@ -11,7 +11,9 @@
 use std::collections::BTreeMap;
 
 use crate::contact_dates;
-use crate::contact_edit::{ContactDraft, DraftEvent, DraftField, EventKind, FieldKind};
+use crate::contact_edit::{
+    ContactDraft, DraftEvent, DraftField, DraftRelation, EventKind, FieldKind, RelationKind,
+};
 use crate::vcard::Parsed;
 
 /// Most numbered columns of one kind (phones, emails, addresses, websites).
@@ -65,11 +67,14 @@ pub fn write(drafts: &[ContactDraft]) -> String {
     let emails = used(|d| d.emails.len());
     let addresses = used(|d| d.addresses.len());
     let sites = used(|d| d.websites.len());
+    let relations = used(|d| d.relations.len());
 
     let mut header: Vec<String> = [
         "First Name",
         "Middle Name",
         "Last Name",
+        "Phonetic First Name",
+        "Phonetic Last Name",
         "Nickname",
         "Organization Name",
         "Organization Title",
@@ -93,6 +98,10 @@ pub fn write(drafts: &[ContactDraft]) -> String {
     for n in 1..=sites {
         header.push(format!("Website {n} - Value"));
     }
+    for n in 1..=relations {
+        header.push(format!("Relation {n} - Label"));
+        header.push(format!("Relation {n} - Value"));
+    }
 
     let mut out = String::from(BOM);
     push_row(&mut out, &header);
@@ -108,6 +117,8 @@ pub fn write(drafts: &[ContactDraft]) -> String {
             d.given.clone(),
             String::new(),
             d.family.clone(),
+            d.phonetic_given.clone(),
+            d.phonetic_family.clone(),
             d.nickname.clone(),
             d.org.clone(),
             d.title.clone(),
@@ -120,6 +131,15 @@ pub fn write(drafts: &[ContactDraft]) -> String {
         push_fields(&mut row, &d.addresses, addresses);
         for i in 0..sites {
             row.push(d.websites.get(i).cloned().unwrap_or_default());
+        }
+        for i in 0..relations {
+            match d.relations.get(i) {
+                Some(r) => {
+                    row.push(r.title());
+                    row.push(r.name.clone());
+                }
+                None => row.extend([String::new(), String::new()]),
+            }
         }
         push_row(&mut out, &row);
     }
@@ -229,6 +249,9 @@ enum Col {
     Family,
     FullName,
     Nickname,
+    PhoneticGiven,
+    PhoneticFamily,
+    Relation(usize, Part),
     Org,
     Title,
     Birthday,
@@ -251,6 +274,8 @@ fn classify(header: &str) -> Col {
         "last name" | "family name" => return Col::Family,
         "name" | "display name" | "full name" => return Col::FullName,
         "nickname" | "nick name" => return Col::Nickname,
+        "phonetic first name" | "phonetic given name" => return Col::PhoneticGiven,
+        "phonetic last name" | "phonetic family name" => return Col::PhoneticFamily,
         "organization name" | "organization 1 - name" | "company" | "organization" => {
             return Col::Org;
         }
@@ -276,6 +301,9 @@ fn classify(header: &str) -> Col {
     }
     if h.starts_with("e-mail") && h.ends_with(" address") {
         return Col::EmailPlain;
+    }
+    if let Some((n, part)) = numbered(&h, "relation") {
+        return part.map_or(Col::Ignore, |p| Col::Relation(n, p));
     }
     if let Some((n, part)) = numbered(&h, "address") {
         return part.map_or(Col::Ignore, |p| Col::Address(n, p));
@@ -359,6 +387,7 @@ fn read_row(cols: &[Col], row: &[String]) -> ContactDraft {
     let mut phones: BTreeMap<usize, (String, String)> = BTreeMap::new();
     let mut emails: BTreeMap<usize, (String, String)> = BTreeMap::new();
     let mut addresses: BTreeMap<usize, (String, String)> = BTreeMap::new();
+    let mut relations: BTreeMap<usize, (String, String)> = BTreeMap::new();
     let mut plain_phones: Vec<DraftField> = Vec::new();
     let mut plain_emails: Vec<DraftField> = Vec::new();
 
@@ -374,6 +403,9 @@ fn read_row(cols: &[Col], row: &[String]) -> ContactDraft {
             Col::Family => d.family = cell.to_owned(),
             Col::FullName => full = cell.to_owned(),
             Col::Nickname => d.nickname = cell.to_owned(),
+            Col::PhoneticGiven => d.phonetic_given = cell.to_owned(),
+            Col::PhoneticFamily => d.phonetic_family = cell.to_owned(),
+            Col::Relation(n, part) => put(&mut relations, n, part, cell),
             Col::Org => d.org = cell.to_owned(),
             Col::Title => d.title = cell.to_owned(),
             Col::Birthday => {
@@ -428,6 +460,23 @@ fn read_row(cols: &[Col], row: &[String]) -> ContactDraft {
     for (labels, values) in phones.into_values() {
         expand(&mut d.numbers, &labels, &values, kinds);
     }
+    for (label, name) in relations.into_values() {
+        if name.trim().is_empty() {
+            continue;
+        }
+        let (kind, label) = match crate::vcard::relation_kind_of(&label) {
+            Some(kind) => (kind, String::new()),
+            None if label.trim().eq_ignore_ascii_case("other") => {
+                (RelationKind::Custom, String::new())
+            }
+            None => (RelationKind::Custom, label.trim().to_owned()),
+        };
+        d.relations.push(DraftRelation {
+            name: name.trim().to_owned(),
+            kind,
+            label,
+        });
+    }
     d.numbers.extend(plain_phones);
     for (labels, values) in emails.into_values() {
         expand(&mut d.emails, &labels, &values, &[]);
@@ -474,6 +523,16 @@ mod tests {
             family: "Yılmaz".into(),
             org: "Çiğdem & Oğul, Ltd.".into(),
             nickname: "Şişko".into(),
+            phonetic_given: "Ay-she".into(),
+            phonetic_family: "Yil-maz".into(),
+            relations: vec![
+                DraftRelation::new("Mehmet Yılmaz", RelationKind::Spouse),
+                DraftRelation {
+                    name: "Zeynep".into(),
+                    kind: RelationKind::Custom,
+                    label: "Godmother".into(),
+                },
+            ],
             title: "Müdür".into(),
             note: "Dedi ki: \"merhaba\"\nİkinci satır, virgüllü".into(),
             numbers: vec![DraftField::new("0555 111 22 33", FieldKind::Mobile), work],
@@ -500,15 +559,28 @@ mod tests {
     }
 
     #[test]
+    fn reads_relation_columns() {
+        let text = "First Name,Relation 1 - Label,Relation 1 - Value,Relation 2 - Label,\
+Relation 2 - Value\nAli,Spouse,Ayşe,Neighbour,Kemal\n";
+        let d = &parse(text).contacts[0];
+        assert_eq!(
+            d.relations[0],
+            DraftRelation::new("Ayşe", RelationKind::Spouse)
+        );
+        assert_eq!(d.relations[1].label, "Neighbour");
+        assert_eq!(d.relations[1].kind, RelationKind::Custom);
+    }
+
+    #[test]
     fn exports_the_google_columns() {
         let text = write(&[full()]);
         let header = text.trim_start_matches(BOM).lines().next().expect("header");
         assert_eq!(
             header,
-            "First Name,Middle Name,Last Name,Nickname,Organization Name,Organization Title,\
+            "First Name,Middle Name,Last Name,Phonetic First Name,Phonetic Last Name,Nickname,Organization Name,Organization Title,\
 Birthday,Notes,Phone 1 - Label,Phone 1 - Value,Phone 2 - Label,Phone 2 - Value,\
 E-mail 1 - Label,E-mail 1 - Value,Address 1 - Label,Address 1 - Formatted,Website 1 - Value,\
-Website 2 - Value"
+Website 2 - Value,Relation 1 - Label,Relation 1 - Value,Relation 2 - Label,Relation 2 - Value"
         );
         assert!(text.contains("\"Dedi ki: \"\"merhaba\"\"\nİkinci satır, virgüllü\""));
         assert!(text.contains("1990-03-07"));
@@ -526,7 +598,7 @@ Website 2 - Value"
         assert!(!text.contains("Website 11"));
         let empty = write(&[]);
         assert!(empty.starts_with(BOM));
-        assert!(!empty.contains("Phone"));
+        assert!(!empty.contains("Phone 1"));
     }
 
     #[test]

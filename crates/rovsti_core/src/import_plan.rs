@@ -11,10 +11,12 @@
 
 use std::collections::HashSet;
 
-use crate::{contact_edit::ContactDraft, search::fold, wire::WireContact};
+use crate::{contact_edit::ContactDraft, search::fold, vcard::CardPhoto, wire::WireContact};
 
 /// How many trailing digits identify a number.
 const KEY_DIGITS: usize = 10;
+/// Most photos one import writes; later cards are added without one.
+pub const MAX_IMPORT_PHOTOS: usize = 200;
 
 /// The outcome of [`plan`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -68,6 +70,18 @@ pub fn plan<'a>(
     existing: impl IntoIterator<Item = &'a WireContact>,
     incoming: Vec<ContactDraft>,
 ) -> Plan {
+    plan_with_photos(existing, incoming, Vec::new()).0
+}
+
+/// Like [`plan`], and the photos of the kept cards in the same order (a
+/// shorter `photos` list is padded with `None`).
+pub fn plan_with_photos<'a>(
+    existing: impl IntoIterator<Item = &'a WireContact>,
+    cards: Vec<ContactDraft>,
+    photos: Vec<Option<CardPhoto>>,
+) -> (Plan, Vec<Option<CardPhoto>>) {
+    let mut photos = photos.into_iter();
+    let mut kept = Vec::new();
     let mut seen: HashSet<(String, String)> = existing
         .into_iter()
         .flat_map(|c| {
@@ -80,7 +94,8 @@ pub fn plan<'a>(
         })
         .collect();
     let mut plan = Plan::default();
-    for card in incoming {
+    for card in cards {
+        let photo = photos.next().flatten();
         let name = card.display_name();
         let mut card_keys = keys(&name, card.numbers.iter().map(|n| n.value.as_str()));
         if card_keys.is_empty() {
@@ -91,9 +106,25 @@ pub fn plan<'a>(
         } else {
             seen.extend(card_keys);
             plan.add.push(card);
+            kept.push(photo);
         }
     }
-    plan
+    (plan, kept)
+}
+
+/// `(contact id, photo)` pairs to write after an import: ids and photos are
+/// aligned with the added cards; id 0 (a failed card) and cards without a
+/// photo are skipped, and at most [`MAX_IMPORT_PHOTOS`] are returned.
+pub fn photo_targets<'a>(
+    ids: &[i64],
+    photos: &'a [Option<CardPhoto>],
+) -> Vec<(i64, &'a CardPhoto)> {
+    ids.iter()
+        .zip(photos)
+        .filter(|(id, _)| **id > 0)
+        .filter_map(|(id, photo)| photo.as_ref().map(|p| (*id, p)))
+        .take(MAX_IMPORT_PHOTOS)
+        .collect()
 }
 
 #[cfg(test)]
@@ -188,6 +219,41 @@ mod tests {
             email: email.map(str::to_owned),
             ..WireContact::default()
         }
+    }
+
+    fn photo(n: u8) -> Option<CardPhoto> {
+        Some(CardPhoto {
+            format: crate::vcard::PhotoFormat::Jpeg,
+            bytes: vec![n],
+        })
+    }
+
+    #[test]
+    fn photos_follow_the_kept_cards() {
+        let cards = vec![
+            card("Ali", "Veli", "0555 111 22 33"),
+            card("Ali", "Veli", "0555 111 22 33"),
+            card("Can", "Er", "0555 222 33 44"),
+            card("Zed", "Yo", "0555 333 44 55"),
+        ];
+        let (plan, kept) = plan_with_photos(&[], cards, vec![photo(1), photo(2), None]);
+        assert_eq!(plan.add.len(), 3);
+        assert_eq!(plan.duplicates, 1);
+        // The duplicate's photo is dropped; Zed's photo was padded with None.
+        assert_eq!(kept, vec![photo(1), None, None]);
+    }
+
+    #[test]
+    fn photo_targets_skip_failures_and_cap() {
+        let photos = vec![photo(1), None, photo(3), photo(4)];
+        let targets = photo_targets(&[10, 11, 0, 13], &photos);
+        assert_eq!(
+            targets.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            vec![10, 13]
+        );
+        let many: Vec<Option<CardPhoto>> = (0..300).map(|_| photo(1)).collect();
+        let ids: Vec<i64> = (1..=300).collect();
+        assert_eq!(photo_targets(&ids, &many).len(), MAX_IMPORT_PHOTOS);
     }
 
     fn email_card(given: &str, email: &str) -> ContactDraft {

@@ -35,6 +35,8 @@ pub mod contact_find;
 pub mod contact_frequent;
 /// Calls with one contact on the card: limits, header, permission text.
 pub mod contact_history;
+/// Birthdays and anniversaries as an iCalendar (.ics) file.
+pub mod contact_ics;
 /// Contacts shared to the app: .vcf files and text.
 pub mod contact_intake;
 /// My card and emergency contacts: lookup, row texts, toggle, share text.

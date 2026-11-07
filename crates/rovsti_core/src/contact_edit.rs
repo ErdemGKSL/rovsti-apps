@@ -12,6 +12,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::wire::WireContact;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -158,6 +159,90 @@ impl DraftEvent {
     }
 }
 
+/// How a related person is connected to the contact.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationKind {
+    Spouse,
+    Partner,
+    Child,
+    Mother,
+    Father,
+    Parent,
+    Brother,
+    Sister,
+    Relative,
+    Friend,
+    Manager,
+    Assistant,
+    #[default]
+    Custom,
+}
+
+impl RelationKind {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Spouse => "Spouse",
+            Self::Partner => "Partner",
+            Self::Child => "Child",
+            Self::Mother => "Mother",
+            Self::Father => "Father",
+            Self::Parent => "Parent",
+            Self::Brother => "Brother",
+            Self::Sister => "Sister",
+            Self::Relative => "Relative",
+            Self::Friend => "Friend",
+            Self::Manager => "Manager",
+            Self::Assistant => "Assistant",
+            Self::Custom => "Other",
+        }
+    }
+}
+
+/// A related person (spouse, parent, manager...) of a contact.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DraftRelation {
+    pub name: String,
+    pub kind: RelationKind,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub label: String,
+}
+
+impl DraftRelation {
+    pub fn new(name: impl Into<String>, kind: RelationKind) -> Self {
+        Self {
+            name: name.into(),
+            kind,
+            label: String::new(),
+        }
+    }
+
+    /// The label shown next to the name: the custom label, else the kind.
+    pub fn title(&self) -> String {
+        let label = self.label.trim();
+        if self.kind == RelationKind::Custom && !label.is_empty() {
+            label.to_owned()
+        } else {
+            self.kind.title().to_owned()
+        }
+    }
+}
+
+/// The one contact whose display name equals `name` (case, accents and
+/// spacing folded), or `None` when there is no such contact or several.
+pub fn relation_match<'a>(name: &str, all: &'a [WireContact]) -> Option<&'a WireContact> {
+    let key = crate::search::fold(name.trim());
+    if key.is_empty() {
+        return None;
+    }
+    let mut hits = all
+        .iter()
+        .filter(|c| crate::search::fold(c.display_name.trim()) == key);
+    let first = hits.next()?;
+    hits.next().is_none().then_some(first)
+}
+
 /// A contact being created, edited, imported or exported.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -174,6 +259,11 @@ pub struct ContactDraft {
     /// Job title.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub title: String,
+    /// Phonetic spelling of the given name (for sorting and pronunciation).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub phonetic_given: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub phonetic_family: String,
     pub note: String,
     pub numbers: Vec<DraftField>,
     pub emails: Vec<DraftField>,
@@ -186,6 +276,9 @@ pub struct ContactDraft {
     /// Birthdays, anniversaries and other dated events.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<DraftEvent>,
+    /// Related people (spouse, manager...).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub relations: Vec<DraftRelation>,
     /// Ids of the groups the contact belongs to.
     pub groups: Vec<i64>,
     pub starred: bool,
@@ -259,6 +352,8 @@ impl ContactDraft {
             &mut self.org,
             &mut self.nickname,
             &mut self.title,
+            &mut self.phonetic_given,
+            &mut self.phonetic_family,
         ] {
             *text = clip(text.trim(), MAX_TEXT_CHARS).to_owned();
         }
@@ -268,6 +363,11 @@ impl ContactDraft {
         clean_fields(&mut self.addresses, |value| value.to_lowercase());
         clean_events(&mut self.events);
         clean_websites(&mut self.websites);
+        for r in &mut self.relations {
+            r.name = clip(r.name.trim(), MAX_TEXT_CHARS).to_owned();
+            r.label = clip(r.label.trim(), MAX_TEXT_CHARS).to_owned();
+        }
+        self.relations.retain(|r| !r.name.is_empty());
         self.groups.sort_unstable();
         self.groups.dedup();
     }
@@ -352,10 +452,14 @@ pub struct SavedPayload {
 }
 
 /// What Kotlin returns after an import.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ImportPayload {
     pub added: u32,
+    /// Ids of the created contacts, aligned with the drafts sent (0 for one
+    /// that failed).
+    #[serde(default)]
+    pub ids: Vec<i64>,
 }
 
 /// One account contacts can be stored in, as Kotlin lists it.
@@ -890,6 +994,84 @@ pub fn added_notice(name: &str, add: &Addition, n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn new_fields_round_trip_and_old_json_parses() {
+        let old: ContactDraft =
+            serde_json::from_str(r#"{"given":"Ali","numbers":[]}"#).expect("json");
+        assert!(old.relations.is_empty() && old.phonetic_given.is_empty());
+        let json = serde_json::to_string(&old).expect("json");
+        assert!(!json.contains("phonetic") && !json.contains("relations"));
+
+        let d = ContactDraft {
+            given: "Ali".into(),
+            phonetic_given: "Aa-li".into(),
+            phonetic_family: "Ve-li".into(),
+            relations: vec![DraftRelation {
+                name: "Ayşe".into(),
+                kind: RelationKind::Spouse,
+                label: String::new(),
+            }],
+            ..ContactDraft::default()
+        };
+        let json = serde_json::to_string(&d).expect("json");
+        assert!(json.contains(r#""kind":"spouse""#));
+        assert_eq!(
+            serde_json::from_str::<ContactDraft>(&json).expect("json"),
+            d
+        );
+    }
+
+    #[test]
+    fn clean_trims_and_drops_empty_relations() {
+        let mut d = ContactDraft {
+            given: "Ali".into(),
+            phonetic_given: "  Aa-li ".into(),
+            relations: vec![
+                DraftRelation::new("  Ayşe ", RelationKind::Spouse),
+                DraftRelation::new("   ", RelationKind::Friend),
+            ],
+            ..ContactDraft::default()
+        };
+        d.clean();
+        assert_eq!(d.phonetic_given, "Aa-li");
+        assert_eq!(
+            d.relations,
+            vec![DraftRelation::new("Ayşe", RelationKind::Spouse)]
+        );
+        assert_eq!(d.relations[0].title(), "Spouse");
+        let custom = DraftRelation {
+            name: "X".into(),
+            kind: RelationKind::Custom,
+            label: "Godmother".into(),
+        };
+        assert_eq!(custom.title(), "Godmother");
+    }
+
+    #[test]
+    fn relation_match_needs_a_unique_name() {
+        let c = |id: i64, name: &str| WireContact {
+            id,
+            display_name: name.into(),
+            ..WireContact::default()
+        };
+        let all = [c(1, "Ayşe Yılmaz"), c(2, "Can Er"), c(3, "can er")];
+        assert_eq!(
+            relation_match("  AYŞE yılmaz ", &all).map(|c| c.id),
+            Some(1)
+        );
+        assert!(relation_match("Can Er", &all).is_none());
+        assert!(relation_match("Nobody", &all).is_none());
+        assert!(relation_match("  ", &all).is_none());
+    }
+
+    #[test]
+    fn import_payload_parses_old_json() {
+        let old: ImportPayload = serde_json::from_str(r#"{"added":3}"#).expect("json");
+        assert_eq!((old.added, old.ids.len()), (3, 0));
+        let new: ImportPayload = serde_json::from_str(r#"{"added":2,"ids":[5,0]}"#).expect("json");
+        assert_eq!(new.ids, vec![5, 0]);
+    }
+
     #[test]
     fn clean_keeps_one_primary_per_list() {
         let mut d = ContactDraft {

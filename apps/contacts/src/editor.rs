@@ -112,6 +112,11 @@ pub(crate) struct Editor {
     /// `None` while creating.
     pub(crate) id: Option<i64>,
     account: String,
+    /// Kept from the loaded contact until the form edits them, so saving
+    /// does not drop them.
+    phonetic_given: String,
+    phonetic_family: String,
+    relations: Vec<rovsti_core::contact_edit::DraftRelation>,
     starred: bool,
     given: Entity<TextField>,
     family: Entity<TextField>,
@@ -186,6 +191,9 @@ impl Editor {
         let mut editor = Self {
             id: draft.id,
             account: draft.account.clone(),
+            phonetic_given: draft.phonetic_given.clone(),
+            phonetic_family: draft.phonetic_family.clone(),
+            relations: draft.relations.clone(),
             starred: draft.starred,
             given: make_field(Config::TEXT, &draft.given, cx),
             family: make_field(Config::TEXT, &draft.family, cx),
@@ -264,6 +272,9 @@ impl Editor {
             groups: self.groups.iter().copied().collect(),
             starred: self.starred,
             account: self.account.clone(),
+            phonetic_given: self.phonetic_given.clone(),
+            phonetic_family: self.phonetic_family.clone(),
+            relations: self.relations.clone(),
             nickname: self.nickname.read(cx).text().to_owned(),
             title: self.title.read(cx).text().to_owned(),
             websites: self

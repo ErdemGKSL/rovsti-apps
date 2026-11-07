@@ -16,6 +16,8 @@ pub enum DeepField {
     Company,
     JobTitle,
     Nickname,
+    PhoneticName,
+    Relation,
     Note,
     Address,
     Email,
@@ -28,6 +30,8 @@ impl DeepField {
             Self::Company => "Company",
             Self::JobTitle => "Job title",
             Self::Nickname => "Nickname",
+            Self::PhoneticName => "Phonetic name",
+            Self::Relation => "Relative",
             Self::Note => "Note",
             Self::Address => "Address",
             Self::Email => "Email",
@@ -87,6 +91,13 @@ impl DeepIndex {
                 add(DeepField::Company, &d.org);
                 add(DeepField::JobTitle, &d.title);
                 add(DeepField::Nickname, &d.nickname);
+                add(
+                    DeepField::PhoneticName,
+                    &format!("{} {}", d.phonetic_given.trim(), d.phonetic_family.trim()),
+                );
+                for r in &d.relations {
+                    add(DeepField::Relation, &r.name);
+                }
                 add(DeepField::Note, &d.note);
                 for a in &d.addresses {
                     add(DeepField::Address, &a.value);
@@ -219,6 +230,20 @@ mod tests {
         let mut d = draft(1);
         d.nickname = "Chief".into();
         assert_eq!(one(d, "chie").map(|h| h.field), Some(DeepField::Nickname));
+        let mut d = draft(1);
+        d.phonetic_family = "Yilmaz".into();
+        assert_eq!(
+            one(d, "yilm").map(|h| h.field),
+            Some(DeepField::PhoneticName)
+        );
+        let mut d = draft(1);
+        d.relations = vec![crate::contact_edit::DraftRelation::new(
+            "Mehmet Şen",
+            crate::contact_edit::RelationKind::Spouse,
+        )];
+        let hit = one(d, "mehmet sen").expect("hit");
+        assert_eq!(hit.field, DeepField::Relation);
+        assert_eq!(hit.snippet, "Mehmet Şen");
         let mut d = draft(1);
         d.note = "met at the fair".into();
         assert_eq!(one(d, "fair").map(|h| h.field), Some(DeepField::Note));

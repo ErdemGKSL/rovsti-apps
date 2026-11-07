@@ -22,7 +22,9 @@ use base64::Engine as _;
 use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 
 use crate::contact_dates;
-use crate::contact_edit::{ContactDraft, DraftEvent, DraftField, EventKind, FieldKind};
+use crate::contact_edit::{
+    ContactDraft, DraftEvent, DraftField, DraftRelation, EventKind, FieldKind, RelationKind,
+};
 
 /// Longest content line before folding, in bytes (RFC 6350 says 75 octets).
 const FOLD_AT: usize = 75;
@@ -140,6 +142,10 @@ struct Builder {
     photo: Option<CardPhoto>,
     /// An embedded photo was met; later ones are ignored.
     photo_seen: bool,
+    /// Apple `itemN.X-ABRELATEDNAMES` values with their group.
+    apple_names: Vec<(String, String)>,
+    /// Apple `itemN.X-ABLabel` values with their group.
+    apple_labels: Vec<(String, String)>,
 }
 
 impl Builder {
@@ -180,6 +186,21 @@ impl Builder {
                     .unwrap_or_default();
             }
             "TITLE" => card.title = unescape(&prop.value),
+            "X-PHONETIC-FIRST-NAME" => card.phonetic_given = unescape(&prop.value),
+            "X-PHONETIC-LAST-NAME" => card.phonetic_family = unescape(&prop.value),
+            "RELATED" => {
+                if let Some(relation) = related_of(prop) {
+                    card.relations.push(relation);
+                }
+            }
+            "X-ABRELATEDNAMES" if !prop.group.is_empty() => {
+                self.apple_names
+                    .push((prop.group.clone(), unescape(&prop.value)));
+            }
+            "X-ABLABEL" if !prop.group.is_empty() => {
+                self.apple_labels
+                    .push((prop.group.clone(), unescape(&prop.value)));
+            }
             "URL" => {
                 let url = unescape(&prop.value);
                 if !url.trim().is_empty() {
@@ -215,6 +236,26 @@ impl Builder {
     }
 
     fn finish(mut self) -> Result<ContactDraft, crate::contact_edit::DraftError> {
+        for (group, name) in &self.apple_names {
+            let label = self
+                .apple_labels
+                .iter()
+                .find(|(g, _)| g == group)
+                .map(|(_, l)| apple_label(l))
+                .unwrap_or_default();
+            let (kind, label) = match relation_kind_of(&label) {
+                Some(kind) => (kind, String::new()),
+                None if label.eq_ignore_ascii_case("other") => {
+                    (RelationKind::Custom, String::new())
+                }
+                None => (RelationKind::Custom, label),
+            };
+            self.draft.relations.push(DraftRelation {
+                name: name.clone(),
+                kind,
+                label,
+            });
+        }
         let card = &mut self.draft;
         if card.given.trim().is_empty()
             && card.family.trim().is_empty()
@@ -234,6 +275,8 @@ impl Builder {
 
 /// One content line: `[group.]NAME[;PARAM[=VALUE]]*:value`.
 struct Property {
+    /// The `item1.` group prefix, upper case; empty when there is none.
+    group: String,
     name: String,
     params: Vec<(String, String)>,
     value: String,
@@ -262,7 +305,12 @@ impl Property {
                 None => ("TYPE".to_owned(), p.trim().to_owned()),
             })
             .collect();
+        let group = full_name
+            .rsplit_once('.')
+            .map(|(g, _)| g.trim().to_ascii_uppercase())
+            .unwrap_or_default();
         let mut prop = Self {
+            group,
             name,
             params,
             value: value.to_owned(),
@@ -299,6 +347,71 @@ impl Property {
             .filter(|t| !t.is_empty())
             .collect()
     }
+}
+
+/// `_$!<Spouse>!$_` gives `Spouse`; any other label is returned as is.
+fn apple_label(label: &str) -> String {
+    let label = label.trim();
+    label
+        .strip_prefix("_$!<")
+        .and_then(|l| l.strip_suffix(">!$_"))
+        .unwrap_or(label)
+        .trim()
+        .to_owned()
+}
+
+/// The relation kind a vCard / Apple type word names.
+pub(crate) fn relation_kind_of(word: &str) -> Option<RelationKind> {
+    Some(match word.trim().to_ascii_lowercase().as_str() {
+        "spouse" | "wife" | "husband" => RelationKind::Spouse,
+        "partner" | "domestic-partner" | "domestic partner" => RelationKind::Partner,
+        "child" | "son" | "daughter" => RelationKind::Child,
+        "mother" => RelationKind::Mother,
+        "father" => RelationKind::Father,
+        "parent" => RelationKind::Parent,
+        "brother" => RelationKind::Brother,
+        "sister" => RelationKind::Sister,
+        "relative" | "kin" => RelationKind::Relative,
+        "friend" => RelationKind::Friend,
+        "manager" => RelationKind::Manager,
+        "assistant" => RelationKind::Assistant,
+        _ => return None,
+    })
+}
+
+/// A `RELATED` property as a relation; uri values are skipped.
+fn related_of(prop: &Property) -> Option<DraftRelation> {
+    let is_uri = prop
+        .params
+        .iter()
+        .any(|(k, v)| k == "VALUE" && v.eq_ignore_ascii_case("uri"));
+    let name = unescape(&prop.value).trim().to_owned();
+    let lower = name.to_ascii_lowercase();
+    let looks_uri = ["urn:", "http:", "https:", "mailto:", "tel:"]
+        .iter()
+        .any(|scheme| lower.starts_with(scheme));
+    if is_uri || looks_uri || name.is_empty() {
+        return None;
+    }
+    let raw: Vec<&str> = prop
+        .params
+        .iter()
+        .filter(|(k, _)| k == "TYPE")
+        .map(|(_, v)| v.trim())
+        .filter(|v| !v.is_empty())
+        .collect();
+    let kind = raw
+        .iter()
+        .flat_map(|v| v.split(','))
+        .find_map(relation_kind_of);
+    let (kind, label) = match kind {
+        Some(kind) => (kind, String::new()),
+        None => (
+            RelationKind::Custom,
+            raw.first().copied().unwrap_or("").to_owned(),
+        ),
+    };
+    Some(DraftRelation { name, kind, label })
 }
 
 /// The photo of a `PHOTO` property: `None` when it is not embedded (a `uri`
@@ -590,6 +703,35 @@ fn write_card(contact: &ContactDraft, photo: Option<&CardPhoto>, out: &mut Strin
     }
     if !contact.title.is_empty() {
         push_line(out, &format!("TITLE:{}", escape(&contact.title)));
+    }
+    if !contact.phonetic_given.is_empty() {
+        push_line(
+            out,
+            &format!("X-PHONETIC-FIRST-NAME:{}", escape(&contact.phonetic_given)),
+        );
+    }
+    if !contact.phonetic_family.is_empty() {
+        push_line(
+            out,
+            &format!("X-PHONETIC-LAST-NAME:{}", escape(&contact.phonetic_family)),
+        );
+    }
+    for relation in &contact.relations {
+        let kind = match relation.kind {
+            RelationKind::Custom => {
+                let label = relation.label.replace('"', "");
+                if label.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!(";TYPE=\"{}\"", label.trim())
+                }
+            }
+            kind => format!(";TYPE={}", kind.title().to_ascii_lowercase()),
+        };
+        push_line(
+            out,
+            &format!("RELATED{kind};VALUE=text:{}", escape(&relation.name)),
+        );
     }
     for site in &contact.websites {
         push_line(out, &format!("URL:{}", escape(site)));
@@ -927,6 +1069,60 @@ BEGIN:VCARD\nFN:C D\nTEL:222\nEND:VCARD\n";
         assert_eq!(
             crate::contact_edit::primary_of(&v4.contacts[0].emails),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn phonetic_names_and_relations_round_trip() {
+        let mut card = named();
+        card.phonetic_given = "Ay-she".into();
+        card.phonetic_family = "Yil-maz".into();
+        card.relations = vec![
+            DraftRelation::new("Mehmet Yılmaz", RelationKind::Spouse),
+            DraftRelation {
+                name: "Zeynep".into(),
+                kind: RelationKind::Custom,
+                label: "Godmother, dear".into(),
+            },
+            DraftRelation::new("Can", RelationKind::Custom),
+        ];
+        let text = write(std::slice::from_ref(&card));
+        assert!(text.contains("X-PHONETIC-FIRST-NAME:Ay-she\r\n"));
+        assert!(text.contains("RELATED;TYPE=spouse;VALUE=text:Mehmet Yılmaz\r\n"));
+        assert!(text.contains("RELATED;TYPE=\"Godmother, dear\";VALUE=text:Zeynep\r\n"));
+        round_trip(card);
+    }
+
+    #[test]
+    fn reads_related_in_version_four_and_skips_uris() {
+        let text = "BEGIN:VCARD\nVERSION:4.0\nFN:Ali Veli\n\
+X-PHONETIC-LAST-NAME:Vely\nRELATED;TYPE=friend,colleague:Can\n\
+RELATED;TYPE=spouse;VALUE=uri:urn:uuid:1234\nRELATED;TYPE=kin:https://x.org/a\nEND:VCARD";
+        let card = &parse(text).contacts[0];
+        assert_eq!(card.phonetic_family, "Vely");
+        assert_eq!(
+            card.relations,
+            vec![DraftRelation::new("Can", RelationKind::Friend)]
+        );
+    }
+
+    #[test]
+    fn reads_apple_related_names_with_labels() {
+        let text = "BEGIN:VCARD\nVERSION:3.0\nFN:Ali Veli\n\
+item1.X-ABRELATEDNAMES:Ayşe\nitem1.X-ABLabel:_$!<Spouse>!$_\n\
+item2.X-ABRELATEDNAMES:Kemal\nitem2.X-ABLabel:Neighbour\n\
+item3.X-ABRELATEDNAMES:Orphan\nEND:VCARD";
+        let card = &parse(text).contacts[0];
+        assert_eq!(card.relations.len(), 3);
+        assert_eq!(
+            card.relations[0],
+            DraftRelation::new("Ayşe", RelationKind::Spouse)
+        );
+        assert_eq!(card.relations[1].kind, RelationKind::Custom);
+        assert_eq!(card.relations[1].label, "Neighbour");
+        assert_eq!(
+            card.relations[2],
+            DraftRelation::new("Orphan", RelationKind::Custom)
         );
     }
 

@@ -50,7 +50,8 @@ at a time if your cargo version rejects the combined form:
 (no ellipsis), 8 unfocused long text (end ellipsis), 9 composing text (underlined),
 10 multiline 3 lines, 11 secret (Password mode, masked), 12 phone purpose, 13 empty
 with the Paste-only menu, 14 long URL panned to the start while focused (set by
-the same scroll call a finger drag makes). `02-field-touch-*` covers the touch states.
+the same scroll call a finger drag makes), 15 at max length (20 of 20 characters) with the
+caret mid-text and the full text shown. `02-field-touch-*` covers the touch states.
 
 The shots always draw the field's own handles and menu. On Android the field uses the
 host's native chrome instead, which cannot be rendered headless. The rig can force either

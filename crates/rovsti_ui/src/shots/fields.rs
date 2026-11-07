@@ -65,6 +65,8 @@ struct State {
     multiline: bool,
     purpose: TextInputPurpose,
     extra: Extra,
+    /// `TextField::set_max_chars`.
+    max_chars: Option<usize>,
 }
 
 const fn state(caption: &'static str, fill: Fill, focused: bool) -> State {
@@ -76,12 +78,16 @@ const fn state(caption: &'static str, fill: Fill, focused: bool) -> State {
         multiline: false,
         purpose: TextInputPurpose::Text,
         extra: Extra::None,
+        max_chars: None,
     }
 }
 
 const THREE_LINES: &str = "Selam!\nYarın Kadıköy'de buluşalım mı?\nSaat 19.30 olur.";
 
-const STATES: [State; 14] = [
+/// Exactly 20 characters (not bytes).
+const FULL_TEXT: &str = "İpek'le Şişli'de ara";
+
+const STATES: [State; 15] = [
     state("Placeholder (unfocused, empty)", Fill::Empty, false),
     state("Focused, empty", Fill::Empty, true),
     state("Focused, short text", Fill::Text("Merhaba"), true),
@@ -133,6 +139,15 @@ const STATES: [State; 14] = [
         ..state(
             "Long URL panned to the start while focused",
             Fill::Text(TURKISH_URL),
+            true,
+        )
+    },
+    State {
+        extra: Extra::CaretAfter("İpek'le "),
+        max_chars: Some(20),
+        ..state(
+            "At max length (20), caret mid-text (20/20)",
+            Fill::Text(FULL_TEXT),
             true,
         )
     },
@@ -359,6 +374,9 @@ fn open(theme: Theme) -> Rig<Gallery> {
                     if let Some((anchor, head)) = selection_of(s) {
                         f.set_selection(anchor, head, cx);
                     }
+                    if s.max_chars.is_some() {
+                        f.set_max_chars(s.max_chars);
+                    }
                     if matches!(s.extra, Extra::Menu(_) | Extra::PasteMenu) {
                         f.open_edit_menu();
                     }
@@ -460,10 +478,20 @@ mod tests {
     }
 
     #[test]
+    fn full_row_is_exactly_at_the_limit_with_caret_mid_text() {
+        let s = &STATES[14];
+        let text = text_of(s.fill);
+        assert_eq!(Some(text.chars().count()), s.max_chars);
+        let (a, b) = selection_of(s).expect("caret row");
+        assert_eq!(a, b);
+        assert_eq!(text[..a].chars().count(), 8);
+    }
+
+    #[test]
     fn which_rows_need_focus() {
         assert_eq!(
             focused_rows(&STATES),
-            vec![1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13]
+            vec![1, 2, 3, 4, 5, 6, 8, 9, 10, 12, 13, 14]
         );
         assert!(!STATES[0].focused);
     }

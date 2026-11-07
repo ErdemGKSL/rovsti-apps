@@ -291,6 +291,7 @@ a device proves this. Check each on Phone, Messages, Contacts and Stops:
 - [ ] Stops search: with a long URL pasted, a finger drag pans the text sideways; at the
       end the page scrolls on.
 - [ ] Messages composer grows to 6 lines, then scrolls inside itself.
+- [ ] Typing in the middle of a full quick reply inserts nothing and the caret stays put.
 - [ ] Secret field (WhatsApp connect key): the toolbar has no Copy or Cut.
 
 ## Contact photos (Phone, story 10.5)

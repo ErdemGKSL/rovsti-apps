@@ -21,6 +21,14 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (y, m, d)
 }
 
+/// Short English month name for 1..=12 (clamped).
+pub(crate) fn month_name(m: u8) -> &'static str {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    MONTHS[usize::from(m.clamp(1, 12) - 1)]
+}
+
 /// `YYYY-MM-DD` of an instant shifted by `tz_offset_s`.
 fn date(ms: i64, tz_offset_s: i32) -> String {
     let local = ms.div_euclid(1000) + i64::from(tz_offset_s);
@@ -122,14 +130,11 @@ pub fn to_gpx(records: &[TripRecord]) -> String {
 /// Shareable summary of a finished trip; a second line with a geo link to B
 /// follows when B is known. Times are local (`tz_offset_s` east of UTC).
 pub fn share_text(record: &TripRecord, tz_offset_s: i32) -> String {
-    const MONTHS: [&str; 12] = [
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-    ];
     let (y, m, d) = rovsti_core::contact_dates::local_ymd(record.ended_ms, tz_offset_s);
     let secs = (record.ended_ms.div_euclid(1000) + i64::from(tz_offset_s)).rem_euclid(DAY_S);
     let when = format!(
         "{d} {} {y}, {:02}:{:02}",
-        MONTHS[usize::from(m.clamp(1, 12) - 1)],
+        month_name(m),
         secs / 3600,
         secs % 3600 / 60
     );

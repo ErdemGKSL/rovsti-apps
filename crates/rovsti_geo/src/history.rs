@@ -13,7 +13,10 @@ pub const MAX_RECORDS: usize = 500;
 pub const RECENT_DEDUPE_M: f64 = 100.0;
 /// A finished trip is offered as the "last trip" card for this long.
 pub const LAST_TRIP_CARD_MS: i64 = 12 * 3_600_000;
-const DAY_MS: i64 = 86_400_000;
+/// One day in milliseconds.
+pub const DAY_MS: i64 = 86_400_000;
+/// Ages offered by "delete trips older than".
+pub const PRUNE_CHOICES_DAYS: [u32; 2] = [30, 90];
 const TOP_LEN: usize = 3;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,7 +218,85 @@ impl Stats {
     }
 }
 
+/// How often a route was driven and when it last ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Usage {
+    pub count: u32,
+    pub last_ms: i64,
+}
+
+/// "Used once, today", "Used 4 times, last 5 Nov" (year added when it is not
+/// the current one). Local time is `tz_offset_s` east of UTC.
+pub fn usage_text(u: Usage, now_ms: i64, tz_offset_s: i32) -> String {
+    use rovsti_core::contact_dates::{local_day, local_ymd};
+    let times = if u.count == 1 {
+        "once".to_owned()
+    } else {
+        format!("{} times", u.count)
+    };
+    let age = local_day(now_ms, tz_offset_s) - local_day(u.last_ms, tz_offset_s);
+    let last = match age {
+        0 => "today".to_owned(),
+        1 => "yesterday".to_owned(),
+        _ => {
+            let (y, m, d) = local_ymd(u.last_ms, tz_offset_s);
+            let month = crate::history_io::month_name(m);
+            if y == local_ymd(now_ms, tz_offset_s).0 {
+                format!("{d} {month}")
+            } else {
+                format!("{d} {month} {y}")
+            }
+        }
+    };
+    if u.count == 1 {
+        format!("Used {times}, {last}")
+    } else {
+        format!("Used {times}, last {last}")
+    }
+}
+
+/// "Delete 12 trips older than 30 days", "Delete 1 trip older than 90 days".
+pub fn prune_label(n: usize, days: u32) -> String {
+    let noun = if n == 1 { "trip" } else { "trips" };
+    format!("Delete {n} {noun} older than {days} days")
+}
+
 impl History {
+    fn cutoff_ms(now_ms: i64, days: u32) -> i64 {
+        now_ms.saturating_sub(i64::from(days).saturating_mul(DAY_MS))
+    }
+
+    /// Records that ended strictly before `days` days ago.
+    pub fn older_than(&self, now_ms: i64, days: u32) -> usize {
+        let cutoff = Self::cutoff_ms(now_ms, days);
+        self.records.iter().filter(|r| r.ended_ms < cutoff).count()
+    }
+
+    /// Drops those records, keeping the order of the rest; returns how many.
+    pub fn remove_older_than(&mut self, now_ms: i64, days: u32) -> usize {
+        let cutoff = Self::cutoff_ms(now_ms, days);
+        let before = self.records.len();
+        self.records.retain(|r| r.ended_ms >= cutoff);
+        before - self.records.len()
+    }
+
+    /// How often the pair a -> b (either direction, each end within
+    /// [`RECENT_DEDUPE_M`]) was driven. Legacy records never match.
+    pub fn usage_of(&self, a: Coord, b: Coord) -> Option<Usage> {
+        let near = |x: Coord, y: Coord| x.distance_m(y) <= RECENT_DEDUPE_M;
+        let mut count = 0u32;
+        let mut last_ms = i64::MIN;
+        for r in &self.records {
+            let Some((ra, rb)) = r.pair() else { continue };
+            let (ra, rb) = (ra.coord, rb.coord);
+            if (near(ra, a) && near(rb, b)) || (near(ra, b) && near(rb, a)) {
+                count += 1;
+                last_ms = last_ms.max(r.ended_ms);
+            }
+        }
+        (count > 0).then_some(Usage { count, last_ms })
+    }
+
     /// The newest record when it ended at most [`LAST_TRIP_CARD_MS`] before
     /// `now_ms` (a future end time does not count).
     pub fn last_finished(&self, now_ms: i64) -> Option<&TripRecord> {
@@ -750,5 +831,74 @@ mod tests {
         assert!(h.records.is_empty());
         let h: History = serde_json::from_str(r#"{"records":[{"label":"x"}]}"#).unwrap();
         assert_eq!(h.records[0].label, "x");
+    }
+
+    #[test]
+    fn older_than_and_remove() {
+        let now = 100 * DAY_MS;
+        let mut h = History::default();
+        assert_eq!(h.older_than(now, 30), 0);
+        assert_eq!(h.remove_older_than(now, 30), 0);
+        let cutoff = now - 30 * DAY_MS;
+        for (id, ended) in [(1, now + DAY_MS), (2, cutoff), (3, cutoff - 1), (4, 0)] {
+            h.records.push(rec(id, "x", A, ended, Outcome::Arrived));
+        }
+        assert_eq!(h.older_than(now, 30), 2);
+        assert_eq!(h.older_than(now, 90), 1);
+        assert_eq!(h.remove_older_than(now, 30), 2);
+        let ids: Vec<u64> = h.records.iter().map(|r| r.id).collect();
+        assert_eq!(ids, [1, 2]);
+        assert_eq!(h.older_than(i64::MIN, 90), 0);
+    }
+
+    #[test]
+    fn usage_of_both_directions() {
+        let far = Coord::new(41.0370 + 0.0018, 28.9850); // ~200 m off
+        let mut h = History::default();
+        h.push(pair_rec(1, ep("a", A), ep("b", B), 10));
+        h.push(pair_rec(2, ep("b", B), ep("a", A), 50));
+        h.push(pair_rec(3, ep("a", A), ep("b", B), 30));
+        h.push(rec(4, "legacy", B, 99, Outcome::Arrived));
+        assert_eq!(
+            h.usage_of(A, B),
+            Some(Usage {
+                count: 3,
+                last_ms: 50
+            })
+        );
+        assert_eq!(h.usage_of(B, A), h.usage_of(A, B));
+        assert_eq!(h.usage_of(far, B), None);
+        assert_eq!(History::default().usage_of(A, B), None);
+    }
+
+    #[test]
+    fn usage_text_variants() {
+        let tz = 3 * 3600;
+        let now = 1_762_500_000_000; // 2025-11-07 07:20 UTC
+        let at = |days_ago: i64| now - days_ago * DAY_MS;
+        let u = |count, last_ms| Usage { count, last_ms };
+        assert_eq!(usage_text(u(1, now), now, tz), "Used once, today");
+        assert_eq!(
+            usage_text(u(4, at(1)), now, tz),
+            "Used 4 times, last yesterday"
+        );
+        assert_eq!(usage_text(u(4, at(2)), now, tz), "Used 4 times, last 5 Nov");
+        assert_eq!(
+            usage_text(u(2, at(200)), now, tz),
+            "Used 2 times, last 21 Apr"
+        );
+        assert_eq!(
+            usage_text(u(2, at(400)), now, tz),
+            "Used 2 times, last 3 Oct 2024"
+        );
+        // Local midnight: 23:30 UTC the day before is already today at +03:00.
+        let late = now - 8 * 3_600_000 + 30 * 60_000; // 2025-11-06 23:50 UTC
+        assert_eq!(usage_text(u(1, late), now, tz), "Used once, today");
+    }
+
+    #[test]
+    fn prune_label_plurals() {
+        assert_eq!(prune_label(12, 30), "Delete 12 trips older than 30 days");
+        assert_eq!(prune_label(1, 90), "Delete 1 trip older than 90 days");
     }
 }

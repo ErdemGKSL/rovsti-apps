@@ -37,7 +37,10 @@ pub use dest::{
     stop_share_text,
 };
 pub use gtfs::{Feed, FeedBuilder, FeedReport, GtfsError, Pattern, Route, Stop, read_zip};
-pub use history::{History, Outcome, OutcomeFilter, Stats, TripRecord};
+pub use history::{
+    DAY_MS, History, Outcome, OutcomeFilter, PRUNE_CHOICES_DAYS, Stats, TripRecord, Usage,
+    prune_label, usage_text,
+};
 pub use measure::Measure;
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};
 pub use prefs::{

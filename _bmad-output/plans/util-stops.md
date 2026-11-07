@@ -47,15 +47,15 @@ Reusable pieces (do not re-create):
 
 | # | Utility | Status |
 |---|---------|--------|
-| S1 | Copy coordinates as: decimal, DMS, degrees + decimal minutes, Plus Code, geo: URI, OSM link (pin menu, saved stop, transit stop) | R1 |
-| S2 | Share a saved stop (both gate points) as text; pasting that text in the picker fills A and B together | R1 |
-| S3 | QR code of a point / saved stop (geo: URI or stop share text) with Save to gallery and Share image | R1 |
-| S4 | Open a point in another maps app (`geo:` via `cx.open_url`) | R1 |
-| S5 | Export saved stops as GPX and JSON; import GPX / JSON with a merge summary, duplicates skipped, Undo | R1 |
-| S6 | Search field and sort (saved order / name / nearest) on the Saved tab | R1 |
-| S7 | Transit stop sheet: Copy name, Copy stop code, Share stop, distance from here | R1 |
-| S8 | Measure distance on the map: tap points, total + per-leg distance, Undo last, Clear | R1 |
-| S9 | Bearing to the gate on the live card ("NE, 1.2 km") with an arrow | R1 |
+| S1 | Copy coordinates as: decimal, DMS, degrees + decimal minutes, Plus Code, geo: URI, OSM link (pin menu, saved stop, transit stop) | done R1 |
+| S2 | Share a saved stop (both gate points) as text; pasting that text in the picker fills A and B together | done R1 |
+| S3 | QR code of a point / saved stop (geo: URI or stop share text) with Save to gallery and Share image | done R1 |
+| S4 | Open a point in another maps app (`geo:` via `cx.open_url`) | done R1 |
+| S5 | Export saved stops as GPX and JSON; import GPX / JSON with a merge summary, duplicates skipped, Undo | done R1 |
+| S6 | Search field and sort (saved order / name / nearest) on the Saved tab | done R1 |
+| S7 | Transit stop sheet: Copy name, Copy stop code, Share stop, distance from here | done R1 |
+| S8 | Measure distance on the map: tap points, total + per-leg distance, Undo last, Clear | done R1 |
+| S9 | Bearing to the gate on the live card ("NE, 1.2 km") with an arrow | done R1 |
 | S10 | Download this area for offline use: tile count estimate, progress, cancel, zoom range cap | backlog R2 |
 | S11 | Appearance quick toggle Auto / Light / Dark (map style follows), persisted in `StopsPrefs` | backlog R2 |
 | S12 | Vibration pattern choice (Standard / Pulse / Long / Heartbeat) feeding `AlarmPlan.vibrate_pattern_ms`, with a preview buzz | backlog R2 |

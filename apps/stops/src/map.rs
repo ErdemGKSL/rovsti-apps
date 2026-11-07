@@ -19,6 +19,7 @@ use std::{
     time::Duration,
 };
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, BorderStyle, Bounds, Context, Corners, Edges, HapticFeedback, HitboxBehavior,
     Hsla, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
@@ -27,7 +28,7 @@ use gpui::{
 };
 use rovsti_android::location;
 use rovsti_geo::{
-    Coord, Diameter, EARTH_RADIUS_M, Feed, History, SavedStop, SavedStops, Side, Stop,
+    Coord, Diameter, EARTH_RADIUS_M, Feed, History, Measure, SavedStop, SavedStops, Side, Stop,
     tiles::{
         ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileCover, TileGeometry,
         TileLayer, build_layer, line_width, tiles_for_view,
@@ -35,7 +36,7 @@ use rovsti_geo::{
     view::Viewport,
 };
 use rovsti_ui::{
-    components::flat_glass,
+    components::{flat_glass, glass_pill},
     haptics, motion_tokens,
     spring::Spring,
     theme,
@@ -89,7 +90,7 @@ const DEFAULT_SIZE: (f32, f32) = (370.0, MAP_HEIGHT);
 const CONTROL_SIZE: f32 = 40.0;
 const CONTROL_GAP: f32 = 8.0;
 const CONTROL_MARGIN: f32 = 10.0;
-const CONTROL_COUNT: f32 = 3.0;
+const CONTROL_COUNT: f32 = 4.0;
 
 // ---- pure: what is in view ----------------------------------------------------------
 
@@ -759,6 +760,8 @@ pub struct Scene {
     /// The middles of the saved stops in view (plus a margin), drawn as rings.
     pub saved: Vec<(f32, f32)>,
     pub line: Vec<(f32, f32)>,
+    /// The measure tool's points, in tap order.
+    pub measure: Vec<(f32, f32)>,
     /// Map tiles under everything else; empty where none are loaded.
     pub tiles: TileLayer,
 }
@@ -832,6 +835,8 @@ pub struct SceneInput<'a> {
     pub pattern: Option<u32>,
     /// The middles of the saved stops.
     pub saved: &'a [Coord],
+    /// The measure tool's points.
+    pub measure: &'a [Coord],
     /// Loaded map tiles under the scene.
     pub tiles: &'a [&'a TileGeometry],
 }
@@ -915,6 +920,7 @@ impl Scene {
             stops,
             saved,
             line: thin_polyline(&line, LINE_MIN_PX),
+            measure: input.measure.iter().map(|&c| vp.project(c)).collect(),
             tiles: build_layer(input.tiles, vp, input.size, TILE_MAX_VERTICES),
         }
     }
@@ -939,6 +945,7 @@ pub struct Palette {
     right_wash: Hsla,
     halo: Hsla,
     saved: Hsla,
+    measure: Hsla,
     /// The map tile colours: light is "colorful", dark is "eclipse".
     style: MapStyle,
 }
@@ -976,6 +983,7 @@ impl Palette {
             right_wash: with_alpha(c.green, 0.18),
             halo: gpui::white(),
             saved: c.orange,
+            measure: c.label,
             style: match theme {
                 Theme::Light => MapStyle::Colorful,
                 Theme::Dark => MapStyle::Eclipse,
@@ -1328,6 +1336,14 @@ fn scene_paths(scene: &Scene, dragging: Option<Slot>, pal: &Palette) -> Paths {
 
     stroke_line(out, &scene.trail, 3.0, pal.trail);
 
+    // The measure tool: a polyline with a dot on every tapped point.
+    stroke_line(out, &scene.measure, 6.0, pal.halo);
+    stroke_line(out, &scene.measure, 3.0, pal.measure);
+    for &p in &scene.measure {
+        fill_circle(out, to_window(p), 6.5, pal.halo);
+        fill_circle(out, to_window(p), 4.5, pal.measure);
+    }
+
     if let Some((at, accuracy)) = scene.position {
         let at = to_window(at);
         fill_circle(out, at, accuracy, pal.accuracy);
@@ -1459,6 +1475,10 @@ pub struct MapState {
     paint: Rc<RefCell<PaintCache>>,
     /// A pin easing into the stop it snapped to.
     pub settle: Option<PinSettle>,
+    /// The measure tool: `Some` while it is on, and the points tapped so far.
+    pub measure: Option<Measure>,
+    /// The first tap on "Clear" has armed the second.
+    pub measure_armed: bool,
 }
 
 /// What a scene is built from: equal inputs give an equal scene.
@@ -1470,6 +1490,7 @@ struct SceneKey {
     diameter: Option<Diameter>,
     pins: [Option<(Coord, bool)>; 2],
     trail: u64,
+    measure: Vec<Coord>,
     /// [`saved_key`] of the saved stops.
     saved: u64,
     /// The feed's address; a new feed also forgets the scene.
@@ -1515,6 +1536,8 @@ impl Default for MapState {
             scene_serial: 0,
             paint: Rc::default(),
             settle: None,
+            measure: None,
+            measure_armed: false,
         }
     }
 }
@@ -1567,7 +1590,90 @@ pub fn settle_for_drop(
         .then(|| PinSettle::new(slot, released))
 }
 
+/// What a tap on the measure tool did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MeasureTap {
+    /// The tool is off: the tap is an ordinary map tap.
+    Off,
+    Added,
+    /// The point cap was reached; nothing was added.
+    Full,
+}
+
+/// What a tap on "Clear" does: a longer measurement asks for a second tap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClearStep {
+    Arm,
+    Clear,
+}
+
+/// More points than this ask before "Clear" wipes them.
+pub const CLEAR_CONFIRM_ABOVE: usize = 2;
+
+pub fn clear_step(points: usize, armed: bool) -> ClearStep {
+    if points > CLEAR_CONFIRM_ABOVE && !armed {
+        ClearStep::Arm
+    } else {
+        ClearStep::Clear
+    }
+}
+
+/// The measure card's headline: "Total 1.4 km, 3 legs".
+pub fn measure_summary(m: &Measure) -> String {
+    match m.points().len() {
+        0 => "Tap the map to add points".to_string(),
+        1 => "Tap a second point".to_string(),
+        n => {
+            let legs = n - 1;
+            format!(
+                "Total {}, {legs} {}",
+                crate::settings_ui::distance_text(m.total_m()),
+                if legs == 1 { "leg" } else { "legs" }
+            )
+        }
+    }
+}
+
+/// Whether the pins can be grabbed: only while the pair can be edited and the
+/// measure tool is not taking the taps.
+pub fn pins_grabbable(trip: bool, alarm: bool, measuring: bool) -> bool {
+    !trip && !alarm && !measuring
+}
+
 impl MapState {
+    /// The measure tool's points (empty while it is off).
+    pub fn measure_points(&self) -> Vec<Coord> {
+        self.measure
+            .as_ref()
+            .map(|m| m.points().to_vec())
+            .unwrap_or_default()
+    }
+
+    pub fn start_measure(&mut self) {
+        self.measure = Some(Measure::new());
+        self.measure_armed = false;
+    }
+
+    /// Turns the tool off and forgets its points; true when it was on.
+    pub fn end_measure(&mut self) -> bool {
+        self.measure_armed = false;
+        self.measure.take().is_some()
+    }
+
+    /// A tap at `at` (pixels from the view centre) while measuring adds a point.
+    pub fn measure_tap(&mut self, at: (f32, f32)) -> MeasureTap {
+        let coord = self.viewport.unproject(at);
+        let Some(m) = self.measure.as_mut() else {
+            return MeasureTap::Off;
+        };
+        self.measure_armed = false;
+        if m.push(coord) {
+            MeasureTap::Added
+        } else {
+            MeasureTap::Full
+        }
+    }
+
     /// Advances the settle; returns whether it is still moving.
     pub fn tick_settle(&mut self, dt: Duration) -> bool {
         let Some(settle) = &mut self.settle else {
@@ -1827,6 +1933,10 @@ impl StopsApp {
 
     /// The map card for the Trip tab, or `None` while there is nothing to show.
     pub(crate) fn map_card(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        // A running trip ends the ruler.
+        if self.trip.is_some() {
+            self.map.end_measure();
+        }
         let size = self.map.size();
         let diameter = self.map_diameter();
         let position = self.map.position;
@@ -1845,7 +1955,11 @@ impl StopsApp {
         let viewport = self.map.viewport;
         let centre = self.map.bounds.get().center();
         // Pins are only grabbable while the pair can be edited.
-        let editable = self.trip.is_none() && self.alarm.is_none();
+        let editable = pins_grabbable(
+            self.trip.is_some(),
+            self.alarm.is_some(),
+            self.map.measure.is_some(),
+        );
         let handles: Vec<(Slot, (f32, f32))> = [Slot::A, Slot::B]
             .into_iter()
             .filter(|_| editable)
@@ -1880,6 +1994,7 @@ impl StopsApp {
             diameter,
             pins,
             trail: self.map.trail.revision(),
+            measure: self.map.measure_points(),
             saved: saved_key(&self.saved),
             feed: self.gtfs.as_ref().map_or(0, |f| Arc::as_ptr(f) as usize),
             pattern: self.map.pattern,
@@ -1903,6 +2018,7 @@ impl StopsApp {
                     feed: self.gtfs.as_deref(),
                     pattern: self.map.pattern,
                     saved: &saved_coords,
+                    measure: &key.measure,
                     tiles: &loaded,
                 });
                 self.map.store_scene(key, scene)
@@ -1957,6 +2073,12 @@ impl StopsApp {
                     cx.notify();
                 }))
         };
+        let ruler_on = self.map.measure.is_some();
+        let ruler = control_button(theme, "Ruler")
+            .id("map-ruler")
+            .text_size(typography::CAPTION.size)
+            .when(ruler_on, |b| b.bg(colors.accent.opacity(0.25)))
+            .on_click(cx.listener(|this, _, window, cx| this.toggle_measure(window, cx)));
         let controls = div()
             .absolute()
             .top(px(CONTROL_MARGIN))
@@ -1974,7 +2096,9 @@ impl StopsApp {
                     .id("map-zoom-out")
                     .on_click(cx.listener(|this, _, _, cx| this.map_zoom(0.5, cx))),
             )
+            .child(ruler)
             .child(last_control);
+        let measure_card = self.measure_card(theme, cx);
         let scale = div()
             .absolute()
             .left(px(14.0))
@@ -2038,6 +2162,7 @@ impl StopsApp {
                         .children(pin_labels)
                         .child(surface)
                         .children(menu.map(|(_, card)| card))
+                        .children(measure_card)
                         .child(scale)
                         .child(attribution)
                         .child(controls),
@@ -2169,6 +2294,95 @@ impl StopsApp {
         Some((rect, card))
     }
 
+    /// The Ruler button: turn the tool on, or off (with its points).
+    fn toggle_measure(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.trip.is_some() || self.alarm.is_some() {
+            return;
+        }
+        if self.map.end_measure() {
+            self.show_pill("Measuring done", None, cx);
+            return;
+        }
+        self.pick.close_menu();
+        self.map.start_measure();
+        haptics::perform(window, HapticFeedback::Selection);
+        cx.notify();
+    }
+
+    /// The glass card at the bottom of the map while measuring: the total and
+    /// leg count, Undo, Clear (twice for a long measurement) and Done.
+    fn measure_card(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let m = self.map.measure.as_ref()?;
+        let summary = measure_summary(m);
+        let armed = self.map.measure_armed;
+        let colors = theme::colors(theme);
+        let clear_label = if armed { "Tap to clear" } else { "Clear" };
+        let action = |label: &'static str| {
+            glass_pill(theme, label)
+                .px(px(12.0))
+                .text_size(typography::FOOTNOTE.size)
+        };
+        Some(
+            flat_glass(theme, None)
+                .absolute()
+                .left(px(10.0))
+                .right(px(CONTROL_MARGIN + CONTROL_SIZE + CONTROL_GAP + 2.0))
+                .bottom(px(30.0))
+                .rounded(radius::CARD)
+                .p(px(10.0))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(typography::BODY.size)
+                        .text_color(colors.label)
+                        .child(summary),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(px(8.0))
+                        .child(action("Undo").id("measure-undo").on_click(cx.listener(
+                            |this, _, _, cx| {
+                                if let Some(m) = this.map.measure.as_mut() {
+                                    m.undo();
+                                }
+                                this.map.measure_armed = false;
+                                cx.notify();
+                            },
+                        )))
+                        .child(
+                            action(clear_label)
+                                .id("measure-clear")
+                                .when(armed, |b| b.text_color(colors.red))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    let count =
+                                        this.map.measure.as_ref().map_or(0, |m| m.points().len());
+                                    if clear_step(count, this.map.measure_armed) == ClearStep::Arm {
+                                        this.map.measure_armed = true;
+                                        cx.notify();
+                                        return;
+                                    }
+                                    this.map.measure_armed = false;
+                                    if let Some(m) = this.map.measure.as_mut() {
+                                        m.clear();
+                                    }
+                                    if count > 0 {
+                                        this.show_pill("Measurement cleared", None, cx);
+                                    } else {
+                                        cx.notify();
+                                    }
+                                })),
+                        )
+                        .child(action("Done").id("measure-done").on_click(
+                            cx.listener(|this, _, window, cx| this.toggle_measure(window, cx)),
+                        )),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn map_zoom(&mut self, factor: f64, cx: &mut Context<Self>) {
         if !factor.is_finite() || factor <= 0.0 {
             return;
@@ -2293,6 +2507,20 @@ impl StopsApp {
             || self.alarm.is_some()
             || self.tabs.selected() != 0
         {
+            return;
+        }
+        // While measuring, a tap is a point on the ruler and never a pin.
+        if self.map.measure.is_some() {
+            self.map.take_over();
+            if self.map.measure_tap(at) == MeasureTap::Full {
+                self.show_pill(
+                    format!("Up to {} points", rovsti_geo::measure::MAX_POINTS),
+                    None,
+                    cx,
+                );
+            } else {
+                cx.notify();
+            }
             return;
         }
         // Keep the view where the user tapped: the idle fit would otherwise
@@ -2637,6 +2865,7 @@ mod tests {
             diameter: None,
             pins: [None, None],
             trail: 0,
+            measure: Vec::new(),
             saved: 0,
             feed: 0,
             pattern: None,
@@ -3213,8 +3442,80 @@ mod tests {
         let size = (370.0, 340.0);
         assert!(over_controls(size, (350.0, 20.0)));
         assert!(over_controls(size, (330.0, 150.0)));
-        assert!(!over_controls(size, (350.0, 200.0)));
+        assert!(!over_controls(size, (350.0, 240.0)));
         assert!(!over_controls(size, (100.0, 20.0)));
+    }
+
+    // -- the measure tool --
+
+    #[test]
+    fn a_tap_while_measuring_adds_a_point_and_is_no_pin() {
+        let mut map = MapState::default();
+        assert_eq!(map.measure_tap((10.0, 10.0)), MeasureTap::Off);
+        map.start_measure();
+        assert_eq!(map.measure_tap((10.0, 10.0)), MeasureTap::Added);
+        assert_eq!(map.measure_tap((80.0, -20.0)), MeasureTap::Added);
+        let points = map.measure_points();
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0], map.viewport.unproject((10.0, 10.0)));
+        // Pins cannot be grabbed (so a touch on one pans or taps the ruler).
+        assert!(!pins_grabbable(false, false, true));
+        assert!(pins_grabbable(false, false, false));
+        assert!(!pins_grabbable(true, false, false));
+    }
+
+    #[test]
+    fn the_point_cap_stops_taps_and_ending_forgets_the_points() {
+        let mut map = MapState::default();
+        map.start_measure();
+        for _ in 0..rovsti_geo::measure::MAX_POINTS {
+            assert_eq!(map.measure_tap((0.0, 0.0)), MeasureTap::Added);
+        }
+        assert_eq!(map.measure_tap((0.0, 0.0)), MeasureTap::Full);
+        assert!(map.end_measure());
+        assert!(!map.end_measure());
+        assert!(map.measure_points().is_empty());
+    }
+
+    #[test]
+    fn clear_asks_twice_only_for_longer_measurements() {
+        assert_eq!(clear_step(0, false), ClearStep::Clear);
+        assert_eq!(clear_step(2, false), ClearStep::Clear);
+        assert_eq!(clear_step(3, false), ClearStep::Arm);
+        assert_eq!(clear_step(3, true), ClearStep::Clear);
+    }
+
+    #[test]
+    fn the_summary_names_total_and_legs() {
+        let mut m = Measure::new();
+        assert_eq!(measure_summary(&m), "Tap the map to add points");
+        m.push(IST);
+        assert_eq!(measure_summary(&m), "Tap a second point");
+        m.push(near(1_000.0, 0.0).coord);
+        assert!(measure_summary(&m).ends_with(", 1 leg"));
+        m.push(near(1_000.0, 1_000.0).coord);
+        let text = measure_summary(&m);
+        assert!(
+            text.starts_with("Total 2.0 km") && text.ends_with(", 2 legs"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_scene_projects_the_measure_points_and_the_ruler_is_a_control() {
+        let trail = Breadcrumb::default();
+        let pts = [near(100.0, 0.0).coord, near(0.0, 100.0).coord];
+        let mut input = scene_input(&trail, None);
+        input.measure = &pts;
+        let scene = Scene::build(&input);
+        assert_eq!(
+            scene.measure,
+            pts.iter()
+                .map(|&c| input.viewport.project(c))
+                .collect::<Vec<_>>()
+        );
+        // The fourth control (the ruler) is still over the control column.
+        assert!(over_controls((370.0, 460.0), (350.0, 175.0)));
     }
 
     // -- the scene --
@@ -3230,6 +3531,7 @@ mod tests {
             feed,
             pattern: None,
             saved: &[],
+            measure: &[],
             tiles: &[],
         }
     }

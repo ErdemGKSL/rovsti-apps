@@ -515,6 +515,7 @@ impl StopsApp {
     /// has not, Back leaves the app.
     pub(crate) fn can_go_back(&self) -> bool {
         self.pick.menu().is_some()
+            || self.map.measure.is_some()
             || self.pick.moving().is_some()
             || self.alarm.is_some()
             || self.sheet.is_open()
@@ -527,6 +528,8 @@ impl StopsApp {
     fn on_back(&mut self, cx: &mut Context<Self>) {
         if self.pick.menu().is_some() {
             self.pick.close_menu();
+            cx.notify();
+        } else if self.map.end_measure() {
             cx.notify();
         } else if self.alarm.is_some() {
             // With no snoozes left Back does nothing; the alarm stays.
@@ -559,6 +562,7 @@ impl StopsApp {
             cx.notify();
         } else if self.tabs.select(0) {
             self.confirm_clear = false;
+            self.map.end_measure();
             self.confirm_remove_feed = false;
             self.page.restart();
             cx.notify();
@@ -781,6 +785,7 @@ impl Render for StopsApp {
                             this.confirm_clear = false;
                             this.confirm_remove_feed = false;
                             this.pick.close_menu();
+                            this.map.end_measure();
                             this.page.restart();
                             this.saved_list.scroll_to_top();
                             if index == 2 {

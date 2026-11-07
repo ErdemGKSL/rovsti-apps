@@ -181,9 +181,7 @@ impl PhoneApp {
         };
         let extras = self.wa_call.read(cx).recents_extras();
         let notes = self.notes.snapshot();
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as i64);
+        let now_ms = rovsti_core::clock::now_ms();
         cx.spawn(async move |this, cx| {
             let made = cx
                 .background_executor()

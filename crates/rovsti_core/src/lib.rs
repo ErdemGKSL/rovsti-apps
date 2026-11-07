@@ -18,6 +18,8 @@ pub mod calling_code;
 pub mod chat_export;
 pub mod chat_find;
 pub mod chat_gallery;
+/// Wall clock for rendered times, with a fixed-instant override for tests.
+pub mod clock;
 pub mod contact;
 pub mod contact_card;
 /// Clean up filters: contacts without a number, name, photo or group.

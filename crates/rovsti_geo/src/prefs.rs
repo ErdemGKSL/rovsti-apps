@@ -294,6 +294,20 @@ impl StopsPrefs {
 mod tests {
     use super::*;
 
+    /// The screenshot rig seeds `stops-prefs.json` with exactly this shape:
+    /// an unreachable tile server and a fixed appearance.
+    #[test]
+    fn rig_seed_prefs_parse() {
+        let json = r#"{"tile_url":"http://127.0.0.1:9/{z}/{x}/{y}.pbf","appearance":"dark"}"#;
+        let p: StopsPrefs = serde_json::from_str(json).expect("seed prefs parse");
+        assert_eq!(p.appearance, Appearance::Dark);
+        assert_eq!(
+            p.tile_url.as_deref(),
+            Some("http://127.0.0.1:9/{z}/{x}/{y}.pbf")
+        );
+        assert_eq!(p.snooze_min, StopsPrefs::default().snooze_min);
+    }
+
     #[test]
     fn sound_and_vibration_are_never_both_off() {
         let mut p = StopsPrefs::default();

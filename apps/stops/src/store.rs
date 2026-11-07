@@ -11,7 +11,6 @@ use std::{
     io,
     path::Path,
     sync::{Mutex, MutexGuard},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use rovsti_geo::{ActiveTrip, History, Outcome, TripRecord};
@@ -43,11 +42,7 @@ pub fn lock() -> MutexGuard<'static, ()> {
 
 /// Milliseconds since the Unix epoch.
 pub fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()
-        .and_then(|d| i64::try_from(d.as_millis()).ok())
-        .unwrap_or(0)
+    rovsti_core::clock::now_ms()
 }
 
 /// A `trip.json` from before the crossing trigger (or otherwise unreadable),

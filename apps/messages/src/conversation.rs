@@ -6,7 +6,7 @@ use rovsti_core::text_detect::{self, DetectAction};
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use gpui::MouseButton;
@@ -5415,9 +5415,7 @@ pub(crate) fn composer_bar(
 }
 
 pub(crate) fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+    rovsti_core::clock::now_ms()
 }
 
 /// The read receipts the open chat owes: none while the window is not in

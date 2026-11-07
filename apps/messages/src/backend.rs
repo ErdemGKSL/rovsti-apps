@@ -11,12 +11,7 @@
 
 pub mod preview;
 
-use std::{
-    collections::HashSet,
-    path::PathBuf,
-    sync::Arc,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 
 use futures::StreamExt as _;
 use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Task};
@@ -156,9 +151,7 @@ pub fn sim_for(sims: &SmsSimsPayload, remembered: Option<i32>) -> Option<i32> {
 }
 
 pub fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+    rovsti_core::clock::now_ms()
 }
 
 /// Pull generations: only the newest pull of each kind lands.

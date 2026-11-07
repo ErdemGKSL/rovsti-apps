@@ -18,7 +18,7 @@
 
 use std::{
     sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use futures::StreamExt;
@@ -357,9 +357,7 @@ pub struct Backend {
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub(crate) fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+    rovsti_core::clock::now_ms()
 }
 
 impl Backend {

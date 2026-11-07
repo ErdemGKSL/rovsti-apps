@@ -17,7 +17,7 @@ use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant},
 };
 
 use gpui::{
@@ -51,9 +51,7 @@ const PRUNE_EVERY: u32 = 32;
 const PROFILE_BATCH: Duration = Duration::from_millis(40);
 
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+    rovsti_core::clock::now_ms()
 }
 
 /// Decodes a JPEG, PNG or WebP into the BGRA image gpui draws, scaled down to

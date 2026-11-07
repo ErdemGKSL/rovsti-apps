@@ -50,6 +50,8 @@ mod route;
 mod sample;
 mod settings_ui;
 mod setup_ui;
+#[cfg(all(test, feature = "shots"))]
+mod shots;
 mod signature;
 mod sim_ui;
 mod speed_dial_ui;
@@ -154,6 +156,10 @@ enum Status {
 }
 
 struct PhoneApp {
+    /// Desktop design aids (devtools chips, "Preview data" caption). The
+    /// screenshot rig turns them off; Android never has them.
+    #[cfg(not(target_os = "android"))]
+    devtools_visible: bool,
     tabs: TabBar,
     /// The Tab Bar's own cached view (it re-renders only when the bar changes).
     tab_view: Entity<TabBarView>,
@@ -558,6 +564,8 @@ impl PhoneApp {
             })
         };
         let mut app = Self {
+            #[cfg(not(target_os = "android"))]
+            devtools_visible: true,
             tabs,
             tab_view,
             dialed: String::new(),
@@ -1419,7 +1427,9 @@ impl PhoneApp {
                 .text_color(colors.label)
                 .child(TABS[tab]);
             #[cfg(not(target_os = "android"))]
-            let caption = Some(self.preview_caption(theme, 1.0 - collapse));
+            let caption = self
+                .devtools_visible
+                .then(|| self.preview_caption(theme, 1.0 - collapse));
             #[cfg(target_os = "android")]
             let caption: Option<AnyElement> = None;
             // Virtualised lists scroll themselves: the page only stacks the
@@ -1661,7 +1671,7 @@ impl Render for PhoneApp {
                 .children(self.row_menu_overlay(theme, window, cx));
         }
         #[cfg(not(target_os = "android"))]
-        let root = root.child(self.dev_switcher(theme, cx));
+        let root = root.children(self.devtools_visible.then(|| self.dev_switcher(theme, cx)));
         let pill = self.render_pill(theme, cx);
         let route = self.render_route(theme, window, cx);
         root.children(incall)

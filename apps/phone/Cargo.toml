@@ -24,6 +24,8 @@ image.workspace = true
 [features]
 # Frame recorder and scripted scenarios (stories 12.1, 12.2). Never in release.
 perf = ["rovsti_ui/perf"]
+# Headless screenshot tests (`docs/screenshots.md`). Never in release.
+shots = ["rovsti_ui/shots"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true

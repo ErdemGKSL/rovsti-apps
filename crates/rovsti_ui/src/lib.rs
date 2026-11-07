@@ -4,6 +4,7 @@
 //! here as constants so every app makes the same choice and it is easy to
 //! flip later.
 
+pub mod button;
 pub mod chips;
 pub mod components;
 pub mod field;

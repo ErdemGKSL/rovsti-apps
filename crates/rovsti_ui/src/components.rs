@@ -142,6 +142,8 @@ pub fn section(
 }
 
 /// A floating glass pill button with a centred label.
+///
+/// Prefer [`crate::button::Button`]; kept for migration.
 pub fn glass_pill(theme: Theme, label: impl Into<SharedString>) -> Div {
     let colors = crate::theme::colors(theme);
     glass(GlassSpec::control(theme))

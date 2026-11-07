@@ -50,7 +50,7 @@ pub fn chip_colors(theme: Theme, selected: bool) -> (Hsla, Hsla) {
 
 /// `fill`, darkened in steps until white text on it reaches 4.5:1 (the light
 /// theme's accent is only about 4.0:1). Colours that already pass are kept.
-fn solid_under_white(fill: Hsla) -> Hsla {
+pub(crate) fn solid_under_white(fill: Hsla) -> Hsla {
     let mut out = fill;
     for _ in 0..20 {
         let c: Rgba = out.into();

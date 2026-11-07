@@ -128,6 +128,67 @@ pub mod geom {
         (label_w + badge + pad * 2.0).max(CHIP_H)
     }
 
+    /// Size class of a [`crate::button::Button`].
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ButtonSize {
+        /// 50 dp, radius 14, Headline.
+        Large,
+        /// 44 dp, radius 12, Body w600.
+        Regular,
+        /// 32 dp, full radius, Subheadline w600, 44 dp hit area.
+        Small,
+    }
+
+    impl ButtonSize {
+        /// Visual height.
+        pub fn height(self) -> f32 {
+            match self {
+                Self::Large => 50.0,
+                Self::Regular => 44.0,
+                Self::Small => 32.0,
+            }
+        }
+
+        /// Height of the touch target: never under [`HIT`].
+        pub fn hit_height(self) -> f32 {
+            self.height().max(HIT)
+        }
+
+        /// Side padding of the visual button.
+        pub fn pad(self) -> f32 {
+            match self {
+                Self::Large => space::XXL,
+                Self::Regular => space::XL,
+                Self::Small => space::M + 2.0,
+            }
+        }
+    }
+
+    /// Icon side inside a button.
+    pub const BUTTON_ICON: f32 = 18.0;
+    /// Gap between a button's icon and its label.
+    pub const BUTTON_ICON_GAP: f32 = space::S;
+
+    /// Natural width of a button: label, optional icon and gap, side padding.
+    /// Never narrower than its height (a circle).
+    pub fn button_width(label_dp: f32, icon: bool, size: ButtonSize) -> f32 {
+        let icon_w = if icon {
+            BUTTON_ICON + BUTTON_ICON_GAP
+        } else {
+            0.0
+        };
+        (label_dp + icon_w + size.pad() * 2.0).max(size.height())
+    }
+
+    /// Width of each of `n` equal buttons in `avail` dp with `gap` between
+    /// them (use 8). Zero for no buttons; never negative.
+    pub fn buttons_row_widths(n: usize, avail: f32, gap: f32) -> f32 {
+        if n == 0 {
+            return 0.0;
+        }
+        ((avail - gap * (n - 1) as f32) / n as f32).max(0.0)
+    }
+
     /// Press growth and squash/stretch factors of the puck (1.0 = rest).
     #[derive(Clone, Copy, Debug)]
     pub struct PuckScale {
@@ -527,6 +588,41 @@ fn merge_safe_area(real: SafeArea, simulated: Option<SafeArea>) -> SafeArea {
 mod tests {
     use super::geom::*;
     use super::*;
+
+    #[test]
+    fn button_sizes_and_hit_areas() {
+        assert_eq!(ButtonSize::Large.height(), 50.0);
+        assert_eq!(ButtonSize::Regular.height(), 44.0);
+        assert_eq!(ButtonSize::Small.height(), 32.0);
+        for size in [ButtonSize::Large, ButtonSize::Regular, ButtonSize::Small] {
+            assert!(size.hit_height() >= HIT);
+        }
+        assert_eq!(ButtonSize::Small.hit_height(), 44.0);
+    }
+
+    #[test]
+    fn button_width_adds_icon_and_padding() {
+        assert_eq!(button_width(60.0, false, ButtonSize::Regular), 100.0);
+        assert_eq!(button_width(60.0, true, ButtonSize::Regular), 126.0);
+        assert_eq!(button_width(60.0, false, ButtonSize::Large), 108.0);
+        assert_eq!(button_width(40.0, false, ButtonSize::Small), 68.0);
+    }
+
+    #[test]
+    fn button_width_is_at_least_a_circle() {
+        assert_eq!(button_width(0.0, false, ButtonSize::Small), 32.0);
+        assert_eq!(button_width(0.0, false, ButtonSize::Large), 50.0);
+    }
+
+    #[test]
+    fn buttons_row_splits_evenly_with_gaps() {
+        assert_eq!(buttons_row_widths(0, 300.0, 8.0), 0.0);
+        assert_eq!(buttons_row_widths(1, 300.0, 8.0), 300.0);
+        assert_eq!(buttons_row_widths(2, 300.0, 8.0), 146.0);
+        let w = buttons_row_widths(3, 343.0, 8.0);
+        assert!((w * 3.0 + 16.0 - 343.0).abs() < 1e-4);
+        assert_eq!(buttons_row_widths(4, 10.0, 8.0), 0.0);
+    }
 
     #[test]
     fn initials_size_is_36_percent() {

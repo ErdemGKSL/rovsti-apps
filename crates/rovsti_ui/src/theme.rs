@@ -272,6 +272,19 @@ mod tests {
                     ));
                 }
             }
+            for destructive in [false, true] {
+                for style in [
+                    crate::button::ButtonStyle::Filled,
+                    crate::button::ButtonStyle::Tinted,
+                ] {
+                    let (ink, fill) = crate::button::button_colors(theme, style, destructive);
+                    cases.push((
+                        format!("button {style:?} destructive={destructive} ink on fill"),
+                        ink,
+                        flatten(fill, c.background),
+                    ));
+                }
+            }
             for (name, fg, bg) in cases {
                 let bg = flatten(bg, c.background);
                 let r = contrast_ratio(rgb3(flatten(fg, bg)), rgb3(bg));

@@ -62,6 +62,25 @@ impl FindCursor {
         self.hits.is_empty()
     }
 
+    /// The current hit is the oldest one (older pages may hold more).
+    pub fn is_oldest(&self) -> bool {
+        self.at == Some(0)
+    }
+
+    /// A cursor over fresh `hits` after pages loaded: stays on item `keep` when it is a
+    /// hit, moving one hit older when `step_older`; else on the newest.
+    pub fn resume(hits: Vec<usize>, keep: Option<usize>, step_older: bool) -> Self {
+        let mut cursor = Self::new(hits);
+        if let Some(pos) = keep.and_then(|k| cursor.hits.iter().position(|&h| h == k)) {
+            cursor.at = Some(if step_older {
+                pos.saturating_sub(1)
+            } else {
+                pos
+            });
+        }
+        cursor
+    }
+
     /// Replace the hits (indices may have shifted), keeping the current item when it is
     /// still a hit, else moving to the newest.
     pub fn retarget(&mut self, hits: Vec<usize>) {
@@ -130,5 +149,19 @@ mod tests {
         assert_eq!(c.label(), "3 of 4");
         c.retarget(vec![]);
         assert_eq!(c.label(), "No matches");
+    }
+
+    #[test]
+    fn resume_steps_to_the_next_older_hit() {
+        let c = FindCursor::resume(vec![1, 4, 9], Some(4), true);
+        assert_eq!(c.current(), Some(1));
+        let c = FindCursor::resume(vec![1, 4, 9], Some(4), false);
+        assert_eq!(c.current(), Some(4));
+        let c = FindCursor::resume(vec![1, 4], Some(1), true);
+        assert_eq!(c.current(), Some(1));
+        assert!(c.is_oldest());
+        let c = FindCursor::resume(vec![1, 4], Some(7), true);
+        assert_eq!(c.current(), Some(4));
+        assert!(!c.is_oldest());
     }
 }

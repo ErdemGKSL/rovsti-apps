@@ -11,6 +11,7 @@ mod backup_ui;
 mod conversation;
 mod drafts;
 mod files;
+mod find_ui;
 // Only the Android JNI entry calls `handle`; desktop builds exercise it from the tests.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod headless;
@@ -1558,6 +1559,21 @@ impl MessagesApp {
         cx.notify();
     }
 
+    /// "Search in chat" of a page menu: closes the menu and opens the find bar of the open page.
+    fn menu_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.row_menu = None;
+        match &self.open {
+            Open::WhatsApp(_, conversation) => {
+                conversation.update(cx, |c, cx| c.begin_find(window, cx));
+            }
+            Open::Sms(conversation) => {
+                conversation.update(cx, |c, cx| c.begin_find(window, cx));
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
     /// "Send later" of a page menu: closes the menu and asks the open page to schedule its
     /// composer text; a blank composer gets the "type first" pill.
     fn menu_send_later(&mut self, cx: &mut Context<Self>) {
@@ -2208,6 +2224,17 @@ impl MessagesApp {
             );
         } else {
             if menu.send_later {
+                items.push(
+                    menu_item(
+                        theme,
+                        "menu-find",
+                        Icon::LucideSearch,
+                        "Search in chat".into(),
+                        colors.label,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| this.menu_find(window, cx)))
+                    .into_any_element(),
+                );
                 items.push(
                     menu_item(
                         theme,

@@ -13,6 +13,7 @@ use gpui::{
 use rovsti_android::{Error as AndroidError, documents};
 use rovsti_core::{
     ThreadId,
+    chat_find::{self, FindCursor},
     sms::{DeliveryState, SmsSend, SmsSimsPayload, SmsStatus, segments},
     sms_timeline::{SmsItem, SmsKey, SmsTimeline},
     wire::{DocumentOp, DocumentResult},
@@ -29,7 +30,8 @@ use rovsti_wa_ui::photo_avatar;
 
 use crate::{
     backend::{Backend, BackendEvent, now_ms, sim_for},
-    conversation::{clock, composer_bar, day_label, header_bar_with},
+    conversation::{HIGHLIGHT_FOR, clock, composer_bar, day_label, header_bar_with},
+    find_ui::{FindActions, FindState, find_bar},
     inbox::Badge,
     keyed_list::{KeyedList, key_of},
     media_viewer::{ViewerItem, ViewerSource},
@@ -153,6 +155,10 @@ pub struct SmsConversation {
     saving: bool,
     /// The address-book photo of the person, for the header avatar.
     peer_photo: Option<PeerPhoto>,
+    /// The "Search in chat" bar.
+    find: Option<FindState<SmsKey>>,
+    /// The hit that glows for a moment.
+    highlight: Option<SmsKey>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -216,6 +222,8 @@ impl SmsConversation {
             selected: None,
             saving: false,
             peer_photo: None,
+            find: None,
+            highlight: None,
             _subscriptions: subscriptions,
         };
         this.fill_from_thread(cx);
@@ -340,12 +348,145 @@ impl SmsConversation {
     /// System Back inside the page: clears the selected bubble; `false` when
     /// nothing was selected.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.find.take().is_some() {
+            cx.notify();
+            return true;
+        }
         if self.selected.take().is_none() {
             return false;
         }
         self.rows_dirty = true;
         cx.notify();
         true
+    }
+
+    /// "Search in chat" on the page menu: opens the bar and focuses its field.
+    pub fn begin_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.find.is_none() {
+            self.find = Some(FindState::new(Self::find_edited, cx));
+        }
+        if let Some(find) = &self.find {
+            let focus = find.field.read(cx).focus_handle();
+            window.focus(&focus, cx);
+        }
+        cx.notify();
+    }
+
+    /// The find field changed: search again from the newest hit.
+    fn find_edited(&mut self, cx: &mut Context<Self>) {
+        let Some(find) = &mut self.find else {
+            return;
+        };
+        let text = find.field.read(cx).text().to_owned();
+        if text == find.query {
+            return;
+        }
+        find.query = text;
+        find.anchor = None;
+        self.refind(false, true, cx);
+    }
+
+    /// Recomputes the hits. With an anchor (a page just arrived) the cursor stays on
+    /// that message, `step_older` moving to the next older hit; `reveal` shows it.
+    fn refind(&mut self, step_older: bool, reveal: bool, cx: &mut Context<Self>) {
+        let Some(find) = &self.find else {
+            return;
+        };
+        let items = self.timeline.items();
+        let texts: Vec<String> = items
+            .iter()
+            .map(|item| copy_text(item).unwrap_or_default())
+            .collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let hits = chat_find::find(&refs, &find.query);
+        let keep = find
+            .anchor
+            .and_then(|key| items.iter().position(|i| i.key == key));
+        let cursor = FindCursor::resume(hits, keep, step_older);
+        let target = cursor.current().and_then(|at| items.get(at)).map(|i| i.key);
+        if let Some(find) = &mut self.find {
+            find.cursor = cursor;
+            find.anchor = None;
+        }
+        match target {
+            Some(key) if reveal => self.glow(key, cx),
+            _ => cx.notify(),
+        }
+    }
+
+    /// Makes the shown hit the anchor of the next [`Self::refind`].
+    fn keep_current_hit(&mut self) {
+        let key = self
+            .find
+            .as_ref()
+            .and_then(|f| f.cursor.current())
+            .and_then(|at| self.timeline.items().get(at))
+            .map(|i| i.key);
+        if let Some(find) = &mut self.find {
+            find.anchor = key;
+        }
+    }
+
+    /// Up (older) or down (newer) on the find bar.
+    fn find_step(&mut self, older: bool, cx: &mut Context<Self>) {
+        let Some(find) = &mut self.find else {
+            return;
+        };
+        let at = if older {
+            find.cursor.older()
+        } else {
+            find.cursor.newer()
+        };
+        let key = at
+            .and_then(|at| self.timeline.items().get(at))
+            .map(|i| i.key);
+        match key {
+            Some(key) => self.glow(key, cx),
+            None => cx.notify(),
+        }
+    }
+
+    /// "Load earlier" on the find bar: one more page, then the next older hit.
+    fn find_load_earlier(&mut self, cx: &mut Context<Self>) {
+        let Some(oldest) = self.timeline.oldest_ms() else {
+            return;
+        };
+        if self.loading {
+            return;
+        }
+        self.keep_current_hit();
+        if let Some(find) = &mut self.find {
+            find.asked = true;
+        }
+        self.load(Some(oldest.saturating_add(1)), cx);
+    }
+
+    /// Shows the message and lets it glow for a moment.
+    fn glow(&mut self, key: SmsKey, cx: &mut Context<Self>) {
+        if self.rows_dirty {
+            self.sync_rows();
+        }
+        let items = self.timeline.items();
+        let found = self.entries.iter().position(|entry| {
+            matches!(entry, Entry::Message(at) if items.get(*at).is_some_and(|i| i.key == key))
+        });
+        if let Some(position) = found {
+            // Item 0 of the list is the "Load earlier" slot.
+            self.list.reveal(position + 1);
+        }
+        self.highlight = Some(key);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(HIGHLIGHT_FOR).await;
+            this.update(cx, |this, cx| {
+                if this.highlight == Some(key) {
+                    this.highlight = None;
+                    cx.notify();
+                }
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
     }
 
     /// Unsent composer text worth keeping.
@@ -537,6 +678,18 @@ impl SmsConversation {
                         let first = this.timeline.items().is_empty();
                         this.timeline.apply_page(page);
                         this.sync_rows();
+                        if this.find.is_some() && before_ms.is_some() {
+                            // Asked on the find bar: move on to the next older hit.
+                            // Any other page keeps the hit and the scroll position.
+                            let asked = this
+                                .find
+                                .as_mut()
+                                .is_some_and(|f| std::mem::take(&mut f.asked));
+                            if !asked {
+                                this.keep_current_hit();
+                            }
+                            this.refind(asked, asked, cx);
+                        }
                         if before_ms.is_none() {
                             this.list.scroll_to_end();
                         }
@@ -551,6 +704,9 @@ impl SmsConversation {
                         log::warn!("loading SMS messages failed: {error}");
                         // The detail is for the log; the screen says it plainly.
                         this.error = Some(load_error_text(&error).into());
+                        if let Some(find) = &mut this.find {
+                            find.asked = false;
+                        }
                     }
                 }
                 if std::mem::take(&mut this.reload_due) {
@@ -920,6 +1076,11 @@ impl SmsConversation {
                 colors.tertiary_label,
             )
         };
+        let fill = if self.highlight == Some(item.key) {
+            colors.orange.opacity(if own { 0.9 } else { 0.35 })
+        } else {
+            fill
+        };
         let meta_color = if failed {
             if own { gpui::white() } else { colors.red }
         } else {
@@ -1188,6 +1349,25 @@ impl Render for SmsConversation {
             header_subtitle(&self.title, &self.recipients),
             Some(trailing),
         );
+        let find_row = self.find.as_ref().map(|find| {
+            find_bar(
+                theme,
+                find,
+                self.timeline.has_older(),
+                self.loading,
+                &FindActions {
+                    older: |this: &mut Self, cx| this.find_step(true, cx),
+                    newer: |this: &mut Self, cx| this.find_step(false, cx),
+                    close: |this: &mut Self, cx| {
+                        this.find = None;
+                        cx.notify();
+                    },
+                    load_earlier: Self::find_load_earlier,
+                },
+                window,
+                cx,
+            )
+        });
         let strip = schedule_ui::strip(
             theme,
             &self.scheduled,
@@ -1305,6 +1485,7 @@ impl Render for SmsConversation {
             .flex()
             .flex_col()
             .child(header)
+            .children(find_row)
             .child(timeline)
             .children(strip)
             .children(has_info.then_some(info))

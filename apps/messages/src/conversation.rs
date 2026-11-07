@@ -16,7 +16,12 @@ use gpui::{
     Styled, StyledImage, Window, div, img, list, prelude::*, px,
 };
 use rovsti_android::{Error as AndroidError, documents};
-use rovsti_core::{ThreadId, recents::LocaleTime, wire::DocumentOp};
+use rovsti_core::{
+    ThreadId,
+    chat_find::{self, FindCursor},
+    recents::LocaleTime,
+    wire::DocumentOp,
+};
 use rovsti_ui::{
     Icon,
     components::{glass_icon_button, glass_pill},
@@ -32,6 +37,7 @@ use rovsti_wa_ui::{WaAvatars, display_name, photo_avatar};
 
 use crate::{
     backend::{Backend, BackendEvent},
+    find_ui::{FindActions, FindState, find_bar},
     inbox::duration_label,
     keyed_list::{KeyedList, key_of},
     media_viewer::{ViewerItem, ViewerSource},
@@ -79,7 +85,7 @@ const THUMB_PARALLEL: usize = 3;
 /// WhatsApp lets a text or caption be edited this long after sending.
 const EDIT_WINDOW_MS: i64 = 15 * 60_000;
 /// A message jumped to from a quote glows this long.
-const HIGHLIGHT_FOR: Duration = Duration::from_millis(1_600);
+pub(crate) const HIGHLIGHT_FOR: Duration = Duration::from_millis(1_600);
 
 /// How long a "typing" event keeps the header line alive.
 const TYPING_SHOW_MS: i64 = 6_000;
@@ -286,6 +292,8 @@ pub struct Conversation {
     delete_confirm: Option<DeleteTarget>,
     /// The message a quote tap jumped to (it glows for a moment).
     highlight: Option<String>,
+    /// The "Search in chat" bar.
+    find: Option<FindState<String>>,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -398,6 +406,7 @@ impl Conversation {
             hidden: HashSet::new(),
             delete_confirm: None,
             highlight: None,
+            find: None,
             _subscriptions: subscriptions,
         };
         this.load(None, cx);
@@ -468,7 +477,9 @@ impl Conversation {
     /// System Back inside the page: closes the Delete menu, a message's menu,
     /// or the edit or reply bar; `false` when there is none of them.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.delete_confirm.is_some() {
+        if self.find.is_some() {
+            self.find = None;
+        } else if self.delete_confirm.is_some() {
             self.delete_confirm = None;
         } else if self.strip.is_some() {
             self.strip = None;
@@ -678,6 +689,128 @@ impl Conversation {
         if self.strip.as_deref() == Some(id) {
             self.strip = None;
         }
+    }
+
+    /// "Search in chat" on the page menu: opens the bar and focuses its field.
+    pub fn begin_find(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.find.is_none() {
+            self.find = Some(FindState::new(Self::find_edited, cx));
+        }
+        if let Some(find) = &self.find {
+            let focus = find.field.read(cx).focus_handle();
+            window.focus(&focus, cx);
+        }
+        cx.notify();
+    }
+
+    /// The find field changed: search again from the newest hit.
+    fn find_edited(&mut self, cx: &mut Context<Self>) {
+        let Some(find) = &mut self.find else {
+            return;
+        };
+        let text = find.field.read(cx).text().to_owned();
+        if text == find.query {
+            return;
+        }
+        find.query = text;
+        find.anchor = None;
+        self.refind(false, true, cx);
+    }
+
+    /// Item indices of the loaded messages that match the query.
+    fn find_hits(&self, query: &str) -> Vec<usize> {
+        let texts: Vec<String> = self
+            .timeline
+            .items()
+            .iter()
+            .map(|item| {
+                let message = &item.message;
+                if self.hidden.contains(&message.id) {
+                    return String::new();
+                }
+                copy_text_of(&message.body, self.timeline.meta(&message.id)).unwrap_or_default()
+            })
+            .collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        chat_find::find(&refs, query)
+    }
+
+    /// Recomputes the hits. With an anchor (a page just arrived) the cursor stays on
+    /// that message, `step_older` moving to the next older hit; then the hit glows.
+    fn refind(&mut self, step_older: bool, reveal: bool, cx: &mut Context<Self>) {
+        let Some(find) = &self.find else {
+            return;
+        };
+        let hits = self.find_hits(&find.query);
+        let items = self.timeline.items();
+        let keep = find
+            .anchor
+            .as_ref()
+            .and_then(|id| items.iter().position(|i| i.message.id == *id));
+        let cursor = FindCursor::resume(hits, keep, step_older);
+        let target = cursor
+            .current()
+            .and_then(|at| items.get(at))
+            .map(|i| i.message.id.clone());
+        if let Some(find) = &mut self.find {
+            find.cursor = cursor;
+            find.anchor = None;
+        }
+        match target {
+            Some(id) if reveal => self.jump_to(&id, cx),
+            _ => cx.notify(),
+        }
+    }
+
+    /// Makes the shown hit the anchor of the next [`Self::refind`].
+    fn keep_current_hit(&mut self) {
+        let id = self
+            .find
+            .as_ref()
+            .and_then(|f| f.cursor.current())
+            .and_then(|at| self.timeline.items().get(at))
+            .map(|i| i.message.id.clone());
+        if let Some(find) = &mut self.find {
+            find.anchor = id;
+        }
+    }
+
+    /// Up (older) or down (newer) on the find bar.
+    fn find_step(&mut self, older: bool, cx: &mut Context<Self>) {
+        let Some(find) = &mut self.find else {
+            return;
+        };
+        let at = if older {
+            find.cursor.older()
+        } else {
+            find.cursor.newer()
+        };
+        let id = at
+            .and_then(|at| self.timeline.items().get(at))
+            .map(|i| i.message.id.clone());
+        match id {
+            Some(id) => self.jump_to(&id, cx),
+            None => cx.notify(),
+        }
+    }
+
+    /// "Load earlier" on the find bar: one more page, then the next older hit.
+    fn find_load_earlier(&mut self, cx: &mut Context<Self>) {
+        let Some(oldest) = self.timeline.oldest_ms() else {
+            return;
+        };
+        if self.loading {
+            return;
+        }
+        let current = self.find.as_ref().and_then(|f| f.cursor.current());
+        let anchor = current
+            .and_then(|at| self.timeline.items().get(at))
+            .map(|i| i.message.id.clone());
+        if let Some(find) = &mut self.find {
+            find.anchor = anchor;
+            find.asked = true;
+        }
+        self.load(Some(oldest.saturating_add(1)), cx);
     }
 
     /// A tap on a quote: shows the quoted message and lets it glow.
@@ -1117,6 +1250,18 @@ impl Conversation {
                         this.load_error = None;
                         this.timeline.apply_rich_page(page, PAGE);
                         this.sync_rows();
+                        if this.find.is_some() && before_ms.is_some() {
+                            // Asked on the find bar: move on to the next older hit.
+                            // Any other page keeps the hit and the scroll position.
+                            let asked = this
+                                .find
+                                .as_mut()
+                                .is_some_and(|f| std::mem::take(&mut f.asked));
+                            if !asked {
+                                this.keep_current_hit();
+                            }
+                            this.refind(asked, asked, cx);
+                        }
                         if before_ms.is_none() {
                             this.list.scroll_to_end();
                         }
@@ -1125,6 +1270,10 @@ impl Conversation {
                     Err(error) => {
                         log::warn!("loading WhatsApp messages failed: {error}");
                         this.load_error = Some(LOAD_ERROR.into());
+                        if let Some(find) = &mut this.find {
+                            find.asked = false;
+                            find.anchor = None;
+                        }
                     }
                 }
                 cx.notify();
@@ -2762,6 +2911,25 @@ impl Render for Conversation {
             self.subtitle(now),
             Some(trailing),
         );
+        let find_row = self.find.as_ref().map(|find| {
+            find_bar(
+                theme,
+                find,
+                self.timeline.has_older(),
+                self.loading,
+                &FindActions {
+                    older: |this: &mut Self, cx| this.find_step(true, cx),
+                    newer: |this: &mut Self, cx| this.find_step(false, cx),
+                    close: |this: &mut Self, cx| {
+                        this.find = None;
+                        cx.notify();
+                    },
+                    load_earlier: Self::find_load_earlier,
+                },
+                window,
+                cx,
+            )
+        });
         let strip = schedule_ui::strip(
             theme,
             &self.scheduled,
@@ -2844,6 +3012,7 @@ impl Render for Conversation {
             .flex()
             .flex_col()
             .child(header)
+            .children(find_row)
             .child(timeline)
             .children(strip)
             .children(info)

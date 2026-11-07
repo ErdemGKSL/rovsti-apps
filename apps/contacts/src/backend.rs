@@ -636,7 +636,8 @@ pub(crate) fn can_pin() -> bool {
 pub(crate) fn shared_file(uri: &str) -> Result<Intake, String> {
     let max = contact_intake::MAX_SHARED_BYTES;
     let (path, cached) = match documents::copy_shared(uri, max) {
-        Ok(path) if path.is_empty() => return Ok(Intake::TooBig),
+        Ok(path) if path == "too-big" => return Ok(Intake::TooBig),
+        Ok(path) if path.is_empty() => return Ok(Intake::Unreadable),
         Ok(path) => (PathBuf::from(path), true),
         Err(Error::Unsupported) => (
             PathBuf::from(uri.strip_prefix("file://").unwrap_or(uri)),

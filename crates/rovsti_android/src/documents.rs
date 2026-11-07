@@ -97,8 +97,8 @@ pub fn capture_photo() -> Result<bool> {
 }
 
 /// Copies the shared `content://` file at `uri` into the app cache and returns
-/// the path of the copy. Empty when it could not be read or is longer than
-/// `max_bytes`.
+/// the path of the copy. `"too-big"` when it is longer than `max_bytes`, empty
+/// when it could not be read.
 pub fn copy_shared(uri: &str, max_bytes: usize) -> Result<String> {
     let max = i32::try_from(max_bytes).unwrap_or(i32::MAX);
     bridge::call_string("readSharedUri", &[Arg::Str(uri), Arg::Int(max)])

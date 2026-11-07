@@ -338,7 +338,7 @@ object RovstiBridge {
 
     @JvmStatic fun pinContactShortcut(specJson: String): Boolean = Shortcuts.pinContact(app, specJson)
 
-    /** Copies the content [uri] (at most [maxBytes]) to `cacheDir/shared/`; its path, or "" on failure or when too big. */
+    /** Copies the content [uri] (at most [maxBytes]) to `cacheDir/shared/`; its path, "too-big" when over the limit, or "" on failure. */
     @JvmStatic
     fun readSharedUri(uri: String, maxBytes: Int): String {
         var target: java.io.File? = null
@@ -349,7 +349,7 @@ object RovstiBridge {
             val fits = app.contentResolver.openInputStream(Uri.parse(uri))?.use { input ->
                 file.outputStream().use { Documents.copyLimited(input, it, maxBytes.coerceAtLeast(0)) }
             }
-            if (fits == true) file.absolutePath else { file.delete(); "" }
+            if (fits == true) file.absolutePath else { file.delete(); if (fits == false) "too-big" else "" }
         } catch (_: Exception) {
             target?.delete()
             ""

@@ -184,7 +184,11 @@ impl ContactsApp {
 
     /// The switch: turning it on asks first, turning it off is direct.
     fn toggle_voicemail(&mut self, id: i64, name: &str, cx: &mut Context<Self>) {
-        let current = self.card_options.ready(id).is_some_and(|o| o.to_voicemail);
+        let Some(current) = self.card_options.ready(id).map(|o| o.to_voicemail) else {
+            self.notice = Some("Can't read this contact's call options.".into());
+            cx.notify();
+            return;
+        };
         self.clear_notice();
         match voicemail_toggle(current, !current, id, name) {
             Some(confirm) => self.confirm = Some(confirm),

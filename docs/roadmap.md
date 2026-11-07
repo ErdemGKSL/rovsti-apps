@@ -174,11 +174,21 @@ list in `docs/phone-acceptance.md`.
       - C32 Copy number as international, national, display or `tel:` link
       - C34 Per-contact ringtone and "Send calls to voicemail" (with confirm)
       - C36 Add a contact to the Home screen (pinned shortcut opens the card)
+- [x] Utilities, round 5 (C33, C38-C44, done without a device):
+      - C33 vCard PHOTO: sharing, saving or copying a single card carries its photo (JPEG, size-capped); a single-card import with a photo prefills the editor photo
+      - C38 My card: mark a contact "This is me"; pinned "My card" row on Contacts with Share / QR; removing asks first
+      - C39 CSV export (Google column set) and CSV import (Google / Outlook headers) next to the .vcf rows
+      - C40 Undo last edit: "Saved · Number added" pill with Undo restores the previous version
+      - C41 Search in details: company, job title, nickname, note, address, email, website, with the matched snippet
+      - C42 Frequently contacted on Favorites (local call log, last 30 days, not starred, read-only)
+      - C43 Emergency contacts (up to 5): list in Settings, one-tap call, "Share emergency info" text; removing asks first
+      - C44 Country of a foreign number shown on the card
 - [ ] Check the photo viewer gestures, the QR sheet, the calendar-event and address writes, and
       the scrubber drag on a phone: written without a device
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
 - [ ] Check Scan to add, Trash restore, birthday notifications, the call-log permission, Clean up and the group SMS / email composers on a phone: written without a device
 - [ ] Check the group member write and the mailto handoff on a phone; a delete commits after 5 s or when leaving the app
+- [ ] Check vCard photos (share, save, import), CSV in Google Contacts, Frequently contacted, My card and Emergency contacts on a phone: written without a device
 
 ## Rovsti Stops
 

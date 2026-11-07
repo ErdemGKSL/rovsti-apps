@@ -47,14 +47,14 @@ Facts the R5 steps build on (checked at baseSha, do not re-create):
 | C11-C18 | Select mode, export one, crop/rotate, camera, recently added, copy contact / vCard, WhatsApp per number, websites/nickname/title | done R2 |
 | C19-C25 | Scan to add, Trash, card call history, birthday reminders, default number/email, Clean up, group utilities | done R3 |
 | C26-C32, C34, C36 | Favorites order, smarter search, paste to add, summary, quick actions, open shared .vcf, copy number as, ringtone/voicemail, Home screen shortcut | done R4 |
-| C40 | Undo last edit: after Save, "Saved · Number added" pill with Undo restores the previous version | planned R5 (S2, S6) |
-| C33 | vCard PHOTO: single-card share / save / copy carries the photo (JPEG, size-capped); a single-card import with a photo prefills the editor photo | planned R5 (S1, S4, S5) |
-| C41 | Search in details: company, job title, nickname, note, address, email, website ("In details" section with the matched snippet) | planned R5 (S2, S4, S6) |
-| C39 | CSV export (Google CSV column set) and CSV import (Google / Outlook headers) next to the .vcf rows | planned R5 (S1, S4, S5) |
-| C42 | Frequently contacted on Favorites (local call log, last 30 days, not starred) | planned R5 (S2, S4, S6) |
-| C38 | My card: mark a contact "This is me"; pinned "My card" row at the top of Contacts with Share / QR | planned R5 (S3, S7) |
-| C43 | Emergency contacts (up to 5): list in Settings, one-tap call, "Share emergency info" text | planned R5 (S3, S7) |
-| C44 | Country of a foreign number on the card ("Germany") from `calling_code::country_line` | planned R5 (S7) |
+| C40 | Undo last edit: after Save, "Saved · Number added" pill with Undo restores the previous version | done R5 |
+| C33 | vCard PHOTO: single-card share / save / copy carries the photo (JPEG, size-capped); a single-card import with a photo prefills the editor photo | done R5 |
+| C41 | Search in details: company, job title, nickname, note, address, email, website ("In details" section with the matched snippet) | done R5 |
+| C39 | CSV export (Google CSV column set) and CSV import (Google / Outlook headers) next to the .vcf rows | done R5 |
+| C42 | Frequently contacted on Favorites (local call log, last 30 days, not starred) | done R5 |
+| C38 | My card: mark a contact "This is me"; pinned "My card" row at the top of Contacts with Share / QR | done R5 |
+| C43 | Emergency contacts (up to 5): list in Settings, one-tap call, "Share emergency info" text | done R5 |
+| C44 | Country of a foreign number on the card ("Germany") from `calling_code::country_line` | done R5 |
 | C45 | Recently edited (`CONTACT_LAST_UPDATED_TIMESTAMP`) next to Recently added | backlog R6 |
 | C46 | Phonetic name and Relationship fields (card, editor, vCard `X-PHONETIC-*`, `RELATED`) | backlog R6 |
 | C47 | Share several selected contacts as plain text (select mode) | backlog R6 |

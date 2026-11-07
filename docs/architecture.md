@@ -269,6 +269,12 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
   through `ContactOptions.kt` (voicemail on asks first). Pinned Home screen shortcuts launch the
   app with `EXTRA_CONTACT_ID` and reuse `open_contact` (AD-CT8). The Favorites order is a list
   of lookup keys in `contacts-prefs.json` (`favorites_order`, up to 300, file cap 64 KiB).
+- **AD-CT11 Round 5 data.** vCard `PHOTO` is written only for single cards (share, save, copy;
+  bulk exports and the QR payload stay photo-free), built off the UI thread. CSV export goes
+  through the `text/csv` save picker and import reads Google / Outlook headers
+  (`rovsti_core::contact_csv`). "My card" and the emergency contacts (up to 5) are lookup keys in
+  `contacts-prefs.json` (`my_card`, `emergency`). Frequently contacted is computed from the call
+  log, read-only, and never written back to the provider.
 
 ### Messages: decisions (AD-MSG1 to AD-MSG9)
 

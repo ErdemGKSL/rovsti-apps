@@ -29,6 +29,10 @@ pub mod contact_dates;
 /// Duplicate detection and merging of contacts.
 pub mod contact_dupes;
 pub mod contact_edit;
+/// Search in contact details: company, title, nickname, note, address, email, website.
+pub mod contact_find;
+/// Frequently contacted people from the local call log.
+pub mod contact_frequent;
 /// Calls with one contact on the card: limits, header, permission text.
 pub mod contact_history;
 /// Contacts shared to the app: .vcf files and text.

@@ -678,6 +678,105 @@ pub fn members_summary(title: &str, done: &MembersPayload) -> String {
     text
 }
 
+/// The draft to restore when the owner taps Undo after saving `after` over
+/// `before`. `None` for a new contact (nothing to go back to) and when the
+/// save changed nothing. The result is the cleaned `before` carrying the id of
+/// the saved contact.
+pub fn undo_target(before: &ContactDraft, after: &ContactDraft) -> Option<ContactDraft> {
+    before.id?;
+    let mut old = before.clone();
+    let mut new = after.clone();
+    old.clean();
+    new.clean();
+    if old == new {
+        return None;
+    }
+    old.id = after.id;
+    Some(old)
+}
+
+/// What a save changed, in a few words: "Number added" for one change,
+/// "3 changes" for several, `None` when nothing differs.
+pub fn change_summary(before: &ContactDraft, after: &ContactDraft) -> Option<String> {
+    let mut old = before.clone();
+    let mut new = after.clone();
+    old.clean();
+    new.clean();
+    let mut changes: Vec<String> = Vec::new();
+    if (&old.given, &old.family) != (&new.given, &new.family) {
+        changes.push("Name changed".into());
+    }
+    for (a, b, what) in [
+        (&old.org, &new.org, "Company"),
+        (&old.nickname, &new.nickname, "Nickname"),
+        (&old.title, &new.title, "Job title"),
+        (&old.note, &new.note, "Note"),
+    ] {
+        if a != b {
+            changes.push(format!("{what} changed"));
+        }
+    }
+    list_change(&mut changes, &old.numbers, &new.numbers, "Number");
+    list_change(&mut changes, &old.emails, &new.emails, "Email");
+    list_change(&mut changes, &old.addresses, &new.addresses, "Address");
+    list_change(&mut changes, &old.websites, &new.websites, "Website");
+    event_change(&mut changes, &old.events, &new.events);
+    if old.groups != new.groups {
+        changes.push("Groups changed".into());
+    }
+    if old.starred != new.starred {
+        changes.push(
+            if new.starred {
+                "Added to favorites"
+            } else {
+                "Removed from favorites"
+            }
+            .into(),
+        );
+    }
+    match changes.len() {
+        0 => None,
+        1 => changes.pop(),
+        n => Some(format!("{n} changes")),
+    }
+}
+
+fn list_change<T: PartialEq>(changes: &mut Vec<String>, old: &[T], new: &[T], what: &str) {
+    if old == new {
+        return;
+    }
+    changes.push(match new.len().cmp(&old.len()) {
+        std::cmp::Ordering::Greater => format!("{what} added"),
+        std::cmp::Ordering::Less => format!("{what} removed"),
+        std::cmp::Ordering::Equal => format!("{what} changed"),
+    });
+}
+
+fn event_change(changes: &mut Vec<String>, old: &[DraftEvent], new: &[DraftEvent]) {
+    if old == new {
+        return;
+    }
+    changes.push(match new.len().cmp(&old.len()) {
+        std::cmp::Ordering::Greater => {
+            let title = new.iter().find(|e| !old.contains(e)).map(DraftEvent::title);
+            format!("{} added", title.unwrap_or_else(|| "Date".into()))
+        }
+        std::cmp::Ordering::Less => {
+            let title = old.iter().find(|e| !new.contains(e)).map(DraftEvent::title);
+            format!("{} removed", title.unwrap_or_else(|| "Date".into()))
+        }
+        std::cmp::Ordering::Equal => "Date changed".into(),
+    });
+}
+
+/// The pill after a save: "Saved · Number added", or "Saved." without a summary.
+pub fn saved_notice(summary: Option<String>) -> String {
+    match summary {
+        Some(text) => format!("Saved · {text}"),
+        None => "Saved.".into(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -1197,6 +1296,138 @@ mod tests {
                 .expect("draft")
                 .finish()
                 .is_ok()
+        );
+    }
+
+    fn base() -> ContactDraft {
+        ContactDraft {
+            id: Some(7),
+            given: "Ayşe".into(),
+            family: "Yılmaz".into(),
+            numbers: vec![DraftField::new("0532 111 22 33", FieldKind::Mobile)],
+            ..ContactDraft::default()
+        }
+    }
+
+    #[test]
+    fn undo_none_for_new_contact() {
+        let mut before = base();
+        before.id = None;
+        let mut after = base();
+        after.given = "Zeynep".into();
+        assert_eq!(undo_target(&before, &after), None);
+    }
+
+    #[test]
+    fn undo_none_when_unchanged_after_clean() {
+        let before = base();
+        let mut after = base();
+        after.given = "  Ayşe ".into();
+        after.numbers.push(DraftField::new("  ", FieldKind::Home));
+        assert_eq!(undo_target(&before, &after), None);
+        assert_eq!(change_summary(&before, &after), None);
+    }
+
+    #[test]
+    fn undo_restores_cleaned_before_with_after_id() {
+        let mut before = base();
+        before.family = " Yılmaz ".into();
+        let mut after = base();
+        after.id = Some(9);
+        after.given = "Zeynep".into();
+        let undo = undo_target(&before, &after).expect("undo");
+        assert_eq!(undo.id, Some(9));
+        assert_eq!(undo.given, "Ayşe");
+        assert_eq!(undo.family, "Yılmaz");
+    }
+
+    fn summary(edit: impl FnOnce(&mut ContactDraft)) -> Option<String> {
+        let before = base();
+        let mut after = base();
+        edit(&mut after);
+        change_summary(&before, &after)
+    }
+
+    #[test]
+    fn summary_single_changes() {
+        let s = |edit: fn(&mut ContactDraft)| summary(edit).expect("summary");
+        assert_eq!(s(|d| d.given = "Zeynep".into()), "Name changed");
+        assert_eq!(s(|d| d.org = "Acme".into()), "Company changed");
+        assert_eq!(s(|d| d.nickname = "Ayo".into()), "Nickname changed");
+        assert_eq!(s(|d| d.title = "CTO".into()), "Job title changed");
+        assert_eq!(s(|d| d.note = "hi".into()), "Note changed");
+        assert_eq!(
+            s(|d| d.numbers.push(DraftField::new("555 1", FieldKind::Home))),
+            "Number added"
+        );
+        assert_eq!(s(|d| d.numbers.clear()), "Number removed");
+        assert_eq!(
+            s(|d| d.numbers[0].value = "0532 999 88 77".into()),
+            "Number changed"
+        );
+        assert_eq!(
+            s(|d| d.emails.push(DraftField::new("a@b.com", FieldKind::Home))),
+            "Email added"
+        );
+        assert_eq!(
+            s(|d| d
+                .addresses
+                .push(DraftField::new("Main St", FieldKind::Home))),
+            "Address added"
+        );
+        assert_eq!(s(|d| d.websites.push("a.com".into())), "Website added");
+        assert_eq!(
+            s(|d| d
+                .events
+                .push(DraftEvent::new("1990-05-01", EventKind::Birthday))),
+            "Birthday added"
+        );
+        assert_eq!(s(|d| d.groups.push(3)), "Groups changed");
+        assert_eq!(s(|d| d.starred = true), "Added to favorites");
+    }
+
+    #[test]
+    fn summary_removed_event_and_unstarred() {
+        let mut before = base();
+        before.starred = true;
+        before
+            .events
+            .push(DraftEvent::new("2010-01-02", EventKind::Anniversary));
+        let after = base();
+        let mut only_event = before.clone();
+        only_event.starred = false;
+        assert_eq!(
+            change_summary(&before, &only_event).as_deref(),
+            Some("Removed from favorites")
+        );
+        let mut only_star = before.clone();
+        only_star.events.clear();
+        assert_eq!(
+            change_summary(&before, &only_star).as_deref(),
+            Some("Anniversary removed")
+        );
+        assert_eq!(
+            change_summary(&before, &after).as_deref(),
+            Some("2 changes")
+        );
+    }
+
+    #[test]
+    fn summary_several_changes_counts_them() {
+        let text = summary(|d| {
+            d.given = "Zeynep".into();
+            d.note = "x".into();
+            d.emails.push(DraftField::new("a@b.com", FieldKind::Home));
+        });
+        assert_eq!(text.as_deref(), Some("3 changes"));
+    }
+
+    #[test]
+    fn saved_notice_texts() {
+        assert_eq!(saved_notice(None), "Saved.");
+        assert_eq!(
+            saved_notice(Some("Number added".into())),
+            "Saved · Number added"
         );
     }
 }

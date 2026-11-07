@@ -162,6 +162,8 @@ pub enum ConversationEvent {
     Schedule(String),
     /// Cancel on a Scheduled strip row.
     CancelScheduled(StripKey),
+    /// The header's "Next unread" chip: open the next chat with unread messages.
+    NextUnread,
     /// The header's bell: mute or unmute this chat's notifications.
     ToggleMute,
     /// The "Add quick replies in Settings" chip: go to the Settings tab.
@@ -384,6 +386,8 @@ pub struct Conversation {
     /// The quick reply chip row above the composer is open.
     quick_open: bool,
     muted: bool,
+    /// The header's "Next unread" chip label; `None` hides the chip.
+    next_unread: Option<SharedString>,
     backend: Entity<Backend>,
     /// The file picker is open and its answer is ours.
     awaiting_attachment: bool,
@@ -567,6 +571,7 @@ impl Conversation {
             strip_expanded: false,
             quick_open: false,
             muted: false,
+            next_unread: None,
             backend,
             awaiting_attachment: false,
             attachment: None,
@@ -654,6 +659,14 @@ impl Conversation {
     pub fn set_muted_until(&mut self, until: Option<i64>, cx: &mut Context<Self>) {
         if self.muted_until != until {
             self.muted_until = until;
+            cx.notify();
+        }
+    }
+
+    /// The label of the header's "Next unread" chip (`None` hides it).
+    pub fn set_next_unread(&mut self, label: Option<SharedString>, cx: &mut Context<Self>) {
+        if self.next_unread != label {
+            self.next_unread = label;
             cx.notify();
         }
     }
@@ -4974,10 +4987,21 @@ impl Render for Conversation {
             .id("conv-mute")
             .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::ToggleMute)))
             .into_any_element();
+        let next = self
+            .next_unread
+            .clone()
+            .filter(|_| self.find.is_none())
+            .map(|label| {
+                next_unread_chip(theme, &label)
+                    .id("conv-next-unread")
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::NextUnread)))
+                    .into_any_element()
+            });
         let trailing = div()
             .flex()
             .items_center()
             .gap(px(8.0))
+            .children(next)
             .children(switch)
             .child(more)
             .child(mute)
@@ -5240,6 +5264,25 @@ pub(crate) fn header_bar(
     trailing: Option<gpui::AnyElement>,
 ) -> gpui::Div {
     header_bar_with(theme, back, None, title, subtitle, trailing, None)
+}
+
+/// The small glass chip of the header that opens the next unread chat: the
+/// double chevron and, when `label` ("Next unread · 3") has one, the count.
+pub(crate) fn next_unread_chip(theme: Theme, label: &str) -> gpui::Div {
+    let colors = theme::colors(theme);
+    let count = label.rsplit_once("· ").map(|(_, n)| n.to_owned());
+    glass_pill(theme, "")
+        .gap(px(4.0))
+        .px(px(12.0))
+        .flex_none()
+        .text_size(typography::FOOTNOTE.size)
+        .child(
+            gpui::svg()
+                .path(Icon::LucideChevronsRight.path())
+                .size(px(18.0))
+                .text_color(colors.label),
+        )
+        .children(count)
 }
 
 /// What holding the header's title does.

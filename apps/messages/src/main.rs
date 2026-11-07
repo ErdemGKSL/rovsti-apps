@@ -1196,6 +1196,7 @@ impl MessagesApp {
         });
         cx.subscribe(&conversation, |this, _, event, cx| match event {
             ConversationEvent::Back => this.close_page(cx),
+            ConversationEvent::NextUnread => this.open_next_unread(cx),
             ConversationEvent::Switch(thread) => this.switch_to(thread.clone(), cx),
             ConversationEvent::Schedule(text) => this.ask_schedule_whatsapp(text.clone(), cx),
             ConversationEvent::CancelScheduled(key) => this.cancel_scheduled(key.clone(), cx),
@@ -1309,6 +1310,7 @@ impl MessagesApp {
         }
         cx.subscribe(&conversation, |this, _, event, cx| match event {
             SmsConversationEvent::Back => this.close_page(cx),
+            SmsConversationEvent::NextUnread => this.open_next_unread(cx),
             SmsConversationEvent::Switch(thread) => this.switch_to(thread.clone(), cx),
             SmsConversationEvent::Schedule { to, body, sub_id } => {
                 this.ask_schedule_sms(to.clone(), body.clone(), *sub_id, cx);
@@ -3392,6 +3394,35 @@ impl MessagesApp {
         }
     }
 
+    /// The next chat with unread messages after the open one, in the order
+    /// of the normal inbox (see [`inbox::next_unread_target`]), and how many
+    /// other chats are unread.
+    fn next_unread_pick(&self, cx: &App) -> (Option<(ThreadId, String)>, usize) {
+        let current = self.open_thread_id(cx);
+        inbox::next_unread_target(&self.view.rows, self.inbox_filter, current.as_ref())
+    }
+
+    fn next_unread_target(&self, cx: &App) -> Option<(ThreadId, String)> {
+        self.next_unread_pick(cx).0
+    }
+
+    /// Label of the open page's "Next unread" chip.
+    fn next_unread_label(&self, cx: &App) -> Option<String> {
+        rovsti_core::unread_jump::next_unread_label(self.next_unread_pick(cx).1)
+    }
+
+    /// The chip was tapped: close the page like Back (drafts kept) and open
+    /// the next unread chat.
+    fn open_next_unread(&mut self, cx: &mut Context<Self>) {
+        let Some((thread, title)) = self.next_unread_target(cx) else {
+            self.show_pill("No other unread chats");
+            cx.notify();
+            return;
+        };
+        self.close_page(cx);
+        self.open_thread(thread, title, cx);
+    }
+
     /// The conversation someone is looking at: the open one while the window
     /// is in front. In the background nothing is being read, so it notifies.
     fn viewed_thread_id(&self, cx: &App) -> Option<ThreadId> {
@@ -3748,6 +3779,7 @@ impl MessagesApp {
             (muted, in_spam, backend.queue().items().to_vec(), until)
         };
         let badges = self.reminder_badges(cx);
+        let next_unread = self.next_unread_label(cx).map(gpui::SharedString::from);
         match &self.open {
             Open::WhatsApp(jid, conversation) => {
                 let items = schedule_ui::strip_items(
@@ -3757,6 +3789,7 @@ impl MessagesApp {
                 );
                 conversation.update(cx, |c, cx| {
                     c.set_muted(muted, cx);
+                    c.set_next_unread(next_unread, cx);
                     c.set_muted_until(until, cx);
                     c.set_scheduled(items, cx);
                     c.set_reminders(badges, cx);
@@ -3771,6 +3804,7 @@ impl MessagesApp {
                 );
                 conversation.update(cx, |c, cx| {
                     c.set_muted(muted, cx);
+                    c.set_next_unread(next_unread, cx);
                     c.set_muted_until(until, cx);
                     c.set_in_spam(in_spam, cx);
                     c.set_scheduled(items, cx);

@@ -71,6 +71,8 @@ fn spam_banner_visible(in_spam: bool, recipients: &[String]) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SmsConversationEvent {
     Back,
+    /// The header's "Next unread" chip: open the next chat with unread messages.
+    NextUnread,
     /// The header's channel switch: open the person's other thread.
     Switch(ThreadId),
     /// Long-press on Send: the text wants a time (the "Send later" sheet).
@@ -218,6 +220,8 @@ pub struct SmsConversation {
     /// The quick reply chip row above the composer is open.
     quick_open: bool,
     muted: bool,
+    /// The header's "Next unread" chip label; `None` hides the chip.
+    next_unread: Option<SharedString>,
     /// The bubble (by `message_key`) whose copy pills are showing.
     selected: Option<u64>,
     /// Select mode: the ticked messages.
@@ -346,6 +350,7 @@ impl SmsConversation {
             strip_expanded: false,
             quick_open: false,
             muted: false,
+            next_unread: None,
             in_spam: false,
             selected: None,
             select: None,
@@ -510,6 +515,14 @@ impl SmsConversation {
     pub fn set_muted_until(&mut self, until: Option<i64>, cx: &mut Context<Self>) {
         if self.muted_until != until {
             self.muted_until = until;
+            cx.notify();
+        }
+    }
+
+    /// The label of the header's "Next unread" chip (`None` hides it).
+    pub fn set_next_unread(&mut self, label: Option<SharedString>, cx: &mut Context<Self>) {
+        if self.next_unread != label {
+            self.next_unread = label;
             cx.notify();
         }
     }
@@ -3326,10 +3339,21 @@ impl Render for SmsConversation {
             .id("sms-mute")
             .on_click(cx.listener(|_, _, _, cx| cx.emit(SmsConversationEvent::ToggleMute)))
             .into_any_element();
+        let next = self
+            .next_unread
+            .clone()
+            .filter(|_| self.find.is_none())
+            .map(|label| {
+                crate::conversation::next_unread_chip(theme, &label)
+                    .id("sms-next-unread")
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(SmsConversationEvent::NextUnread)))
+                    .into_any_element()
+            });
         let trailing = div()
             .flex()
             .items_center()
             .gap(px(8.0))
+            .children(next)
             .children(switch)
             .child(mute)
             .child(more)

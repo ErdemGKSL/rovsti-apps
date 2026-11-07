@@ -18,13 +18,14 @@ use rovsti_core::{
     Channel, PhoneNumber, ThreadId,
     blocklist::BlockSet,
     inbox::{InboxRow, InboxThread, PersonKey, merge},
-    inbox_filter::RowFacts,
+    inbox_filter::{self, InboxFilter, RowFacts},
     otp,
     recents::LocaleTime,
     search::{self, ContactIndex},
     sms::SmsThreadRow,
     spam::{self, SpamRules},
     thread_marks::SmsMarks,
+    unread_jump,
 };
 use rovsti_ui::{
     Icon, theme,
@@ -887,6 +888,34 @@ pub fn row_facts(row: &RowView) -> RowFacts {
     }
 }
 
+/// The chat the header's "Next unread" chip opens, and how many other chats
+/// are unread: over `rows` (the normal inbox) as `filter` shows them, muted
+/// rows skipped. `current` is the open thread; any thread of its row counts
+/// as the current chat. The target is the row's newest thread and title.
+pub fn next_unread_target(
+    rows: &[RowView],
+    filter: InboxFilter,
+    current: Option<&ThreadId>,
+) -> (Option<(ThreadId, String)>, usize) {
+    let order: Vec<(usize, bool)> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, row)| !row.muted && inbox_filter::matches(filter, row_facts(row)))
+        .map(|(i, row)| (i, row.unread > 0 || row.marked_unread))
+        .collect();
+    let current = current
+        .and_then(|t| rows.iter().position(|row| row.threads.contains(t)))
+        .filter(|i| order.iter().any(|(k, _)| k == i));
+    let others = order
+        .iter()
+        .filter(|(k, unread)| *unread && current != Some(*k))
+        .count();
+    let target = unread_jump::next_unread(&order, current.as_ref())
+        .map(|at| &rows[order[at].0])
+        .and_then(|row| Some((row.newest()?.clone(), row.title.to_string())));
+    (target, others)
+}
+
 /// Shows the unsent draft of each row's first thread that has one in place
 /// of its snippet.
 pub fn apply_drafts<'a>(view: &mut InboxView, draft_of: impl Fn(&ThreadId) -> Option<&'a str>) {
@@ -1601,6 +1630,42 @@ mod tests {
         row.title = title.to_owned().into();
         row.sms_sender = sender.map(|s| SharedString::from(s.to_owned()));
         row
+    }
+
+    #[test]
+    fn next_unread_target_filters_and_skips() {
+        let mk = |title: &str, n: i64, unread: u32| {
+            let mut r = row_for(title, "x", None);
+            r.unread = unread;
+            r.threads = vec![ThreadId::Sms(n)];
+            r
+        };
+        let mut muted = mk("M", 3, 1);
+        muted.muted = true;
+        let mut marked = mk("D", 4, 0);
+        marked.marked_unread = true;
+        let rows = vec![mk("A", 1, 0), mk("B", 2, 2), muted, marked];
+        let all = InboxFilter::All;
+        let (t, n) = next_unread_target(&rows, all, Some(&ThreadId::Sms(1)));
+        assert_eq!(t, Some((ThreadId::Sms(2), "B".to_owned())));
+        assert_eq!(n, 2);
+        let (t, n) = next_unread_target(&rows, all, Some(&ThreadId::Sms(2)));
+        assert_eq!(t, Some((ThreadId::Sms(4), "D".to_owned())));
+        assert_eq!(n, 1);
+        // Wraps around, and the muted row is never offered.
+        let (t, _) = next_unread_target(&rows, all, Some(&ThreadId::Sms(4)));
+        assert_eq!(t.map(|t| t.0), Some(ThreadId::Sms(2)));
+        // No open chat: the first unread.
+        assert_eq!(next_unread_target(&rows, all, None).1, 2);
+        // Only the open chat is unread: nothing else.
+        let only = vec![mk("B", 2, 1)];
+        assert_eq!(
+            next_unread_target(&only, all, Some(&ThreadId::Sms(2))),
+            (None, 0)
+        );
+        // A filter hides rows from the order.
+        let (t, n) = next_unread_target(&rows, InboxFilter::WhatsApp, None);
+        assert_eq!((t, n), (None, 0));
     }
 
     #[test]

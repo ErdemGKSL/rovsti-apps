@@ -72,7 +72,7 @@ fn detect_icon(action: &DetectAction) -> Icon {
     }
 }
 
-fn copy_text_of(body: &MessageBody, meta: Option<&MessageMeta>) -> Option<String> {
+pub(crate) fn copy_text_of(body: &MessageBody, meta: Option<&MessageMeta>) -> Option<String> {
     if let Some(meta) = meta
         && (meta.revoked || meta.location.is_some() || meta.contact.is_some())
     {
@@ -194,6 +194,8 @@ pub struct Setup {
     pub active: bool,
     /// Unread incoming messages when the chat was opened (the divider's count).
     pub unread: u32,
+    /// A message to show once it is loaded (a global search hit).
+    pub jump: Option<rovsti_core::global_search::JumpTarget>,
 }
 
 /// The message the composer answers.
@@ -351,6 +353,10 @@ pub struct Conversation {
     starred_open: bool,
     /// The "Media, links and docs" sheet.
     gallery: Option<crate::gallery_ui::GallerySheet>,
+    /// The message a search hit opened the chat for, until it is shown.
+    goto: Option<rovsti_core::global_search::JumpTarget>,
+    /// Older pages loaded while working towards `goto`.
+    goto_pages: usize,
     /// The scroll-to-bottom button and its count of new messages.
     jump: JumpState,
     /// Unread count the chat opened with, until the first page decides the divider.
@@ -378,6 +384,7 @@ impl Conversation {
             peer,
             active,
             unread,
+            jump,
         } = setup;
         let composer = cx.new(|cx| {
             let mut field =
@@ -487,6 +494,8 @@ impl Conversation {
             info_sheet: None,
             starred_open: false,
             gallery: None,
+            goto: jump,
+            goto_pages: 0,
             jump: JumpState::default(),
             opening_unread: (unread > 0).then_some(unread),
             divider: None,
@@ -1290,6 +1299,40 @@ impl Conversation {
         ))
     }
 
+    /// Works towards the message a search hit asked for: shows it, loads one
+    /// more older page, or says why it stopped.
+    fn continue_goto(&mut self, cx: &mut Context<Self>) {
+        use rovsti_core::global_search::{JumpStep, jump_notice, jump_step};
+        let Some(target) = self.goto.clone() else {
+            return;
+        };
+        let loaded = self
+            .timeline
+            .items()
+            .iter()
+            .any(|i| i.message.id == target.id);
+        let oldest = self.timeline.oldest_ms();
+        let step = jump_step(
+            loaded,
+            self.timeline.has_older(),
+            self.goto_pages,
+            oldest,
+            target.at_ms,
+        );
+        match (step, oldest) {
+            (JumpStep::Reveal, _) => {
+                self.goto = None;
+                self.jump_to(&target.id, cx);
+            }
+            (JumpStep::LoadOlder, Some(oldest)) => self.load(Some(oldest.saturating_add(1)), cx),
+            (step, _) => {
+                self.goto = None;
+                self.notice = jump_notice(step).map(Into::into);
+                cx.notify();
+            }
+        }
+    }
+
     /// A tap on a quote: shows the quoted message and lets it glow.
     fn jump_to(&mut self, id: &str, cx: &mut Context<Self>) {
         if self.rows_dirty {
@@ -1878,9 +1921,14 @@ impl Conversation {
                             this.list.scroll_to_end();
                         }
                         this.mark_unread(cx);
+                        if before_ms.is_some() {
+                            this.goto_pages += 1;
+                        }
+                        this.continue_goto(cx);
                     }
                     Err(error) => {
                         log::warn!("loading WhatsApp messages failed: {error}");
+                        this.goto = None;
                         this.load_error = Some(LOAD_ERROR.into());
                         if let Some(find) = &mut this.find {
                             find.asked = false;

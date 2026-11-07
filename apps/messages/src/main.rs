@@ -15,6 +15,7 @@ mod find_ui;
 // Only the Android JNI entry calls `handle`; desktop builds exercise it from the tests.
 mod forward_ui;
 mod gallery_ui;
+mod global_search_ui;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod headless;
 mod inbox;
@@ -314,6 +315,10 @@ struct MessagesApp {
     /// The Chats search row is showing.
     search_open: bool,
     search_field: Entity<TextField>,
+    /// The Messages section of the search.
+    global: global_search_ui::GlobalSearch,
+    /// The message the next opened thread jumps to.
+    pending_jump: Option<rovsti_core::global_search::JumpTarget>,
     /// The OTP code that was just copied.
     copied: Option<SharedString>,
     open: Open,
@@ -353,6 +358,8 @@ struct ChatLayout {
     /// Whether a non-blank query filters the list, and its field's edit count.
     searching: bool,
     search_edits: u64,
+    /// The Messages section: shown, and the epoch of its hits.
+    messages: (bool, u64),
     role_held: bool,
     /// The WhatsApp banner's text, `None` while there is nothing to say.
     wa_banner: Option<&'static str>,
@@ -369,6 +376,12 @@ enum ChatItem {
     Title,
     /// An archived chat that matches the search query.
     ArchivedMatch(usize),
+    /// The "Messages" header of the search.
+    MessagesHeader,
+    /// A message that matches the search (index into the hits).
+    Hit(usize),
+    /// The result count line of the message search.
+    MessagesFooter,
     /// The search field and its Cancel pill.
     Search,
     /// Nothing matches the query.
@@ -424,7 +437,7 @@ impl MessagesApp {
         // The backend owns the one event sink: it hands WhatsApp pushes over
         // here, and SMS, contact and role changes rebuild the inbox.
         let subscriptions = vec![
-            cx.observe(&search_field, |_, _, cx| cx.notify()),
+            cx.observe(&search_field, |this, _, cx| this.on_search_edit(cx)),
             cx.observe(&whatsapp, |this, whatsapp, cx| {
                 let events = whatsapp.update(cx, |settings, _| settings.take_events());
                 let connected = whatsapp.read(cx).is_connected();
@@ -556,6 +569,8 @@ impl MessagesApp {
             show_spam: false,
             search_open: false,
             search_field,
+            global: global_search_ui::GlobalSearch::default(),
+            pending_jump: None,
             copied: None,
             open: Open::None,
             chats: ChatsState::Needed,
@@ -1116,6 +1131,7 @@ impl MessagesApp {
             .iter()
             .find(|t| t.id == ThreadId::WhatsApp(jid.clone()))
             .map_or(0, |t| t.unread);
+        let jump = self.pending_jump.take();
         let backend = self.backend.clone();
         let avatars = self.avatars.clone();
         let photos = self.photos.clone();
@@ -1134,6 +1150,7 @@ impl MessagesApp {
                     peer,
                     active: self.window_active,
                     unread,
+                    jump,
                 },
                 cx,
             )
@@ -1217,9 +1234,11 @@ impl MessagesApp {
             .find(|t| t.thread_id == thread_id)
             .map_or(0, |t| t.unread);
         let voice = self.voice.clone();
+        let jump = self.pending_jump.take();
         let conversation = cx.new(|cx| {
             SmsConversation::new(backend, voice, thread_id, title, recipients, unread, cx)
         });
+        conversation.update(cx, |page, _| page.set_goto(jump));
         let row = self
             .view
             .all_rows()
@@ -3839,6 +3858,7 @@ impl MessagesApp {
 
     fn close_search(&mut self, cx: &mut Context<Self>) {
         self.search_open = false;
+        self.global.reset();
         self.search_field.update(cx, |field, cx| field.clear(cx));
         self.chat_list.scroll_to_top();
         cx.notify();
@@ -3892,6 +3912,10 @@ impl MessagesApp {
             access::notify_banner(backend.prefs().notifications, backend.notify_access())
         }
         .filter(|_| query.is_empty());
+        let messages_shown = global_search_ui::GlobalSearch::shows(&query)
+            && !self.show_spam
+            && !self.show_archived
+            && !self.show_scheduled;
         let layout = ChatLayout {
             view_gen: self.view_gen,
             show_spam: self.show_spam,
@@ -3904,6 +3928,7 @@ impl MessagesApp {
             } else {
                 0
             },
+            messages: (messages_shown, self.global.epoch),
             role_held,
             wa_banner,
             access_banner,
@@ -3965,6 +3990,13 @@ impl MessagesApp {
         }
         no_match_empty = no_match_empty && archived_matches.is_empty();
         items.extend(archived_matches.into_iter().map(ChatItem::ArchivedMatch));
+        if messages_shown {
+            // Messages can answer a query no chat title does.
+            no_match_empty = no_match_empty && self.global.hits.is_empty() && !self.global.running;
+            items.push(ChatItem::MessagesHeader);
+            items.extend((0..self.global.hits.len()).map(ChatItem::Hit));
+            items.push(ChatItem::MessagesFooter);
+        }
         if no_match_empty {
             items.push(ChatItem::NoResults);
         }
@@ -3985,6 +4017,12 @@ impl MessagesApp {
                     key_of((1u8, self.show_spam, self.show_archived, &rows[index]))
                 }
                 ChatItem::ArchivedMatch(index) => key_of((17u8, &self.view.archived[index])),
+                ChatItem::MessagesHeader => key_of(18u8),
+                ChatItem::Hit(index) => {
+                    let hit = &self.global.hits[index].hit;
+                    key_of((19u8, &hit.chat_key, &hit.message_id, &hit.snippet))
+                }
+                ChatItem::MessagesFooter => key_of((20u8, self.global.epoch)),
                 ChatItem::SpamFilter => {
                     key_of((2u8, self.view.spam.len(), self.view.spam_unread()))
                 }
@@ -4377,6 +4415,9 @@ impl MessagesApp {
                 };
                 self.inbox_row(theme, id, view, cx)
             }
+            ChatItem::MessagesHeader => self.messages_header(theme),
+            ChatItem::Hit(index) => self.hit_row(theme, index, cx),
+            ChatItem::MessagesFooter => self.messages_footer(theme),
             ChatItem::ArchivedMatch(row) => {
                 let Some(view) = self.view.archived.get(row) else {
                     return div().into_any_element();

@@ -150,6 +150,107 @@ pub fn summary(hits: usize, partial: bool) -> String {
     }
 }
 
+/// Recent WhatsApp chats whose history the global search reads.
+pub const WA_CHATS: usize = 15;
+/// Older pages a jump loads before it gives up.
+pub const MAX_JUMP_PAGES: usize = 10;
+
+/// Whether one source took part in a search.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    Searched,
+    /// The SMS permission is missing.
+    NoAccess,
+    /// WhatsApp is not linked.
+    NotLinked,
+    /// The source answered with an error.
+    Failed,
+}
+
+/// The footer under the hits: the count, then why a source is missing.
+pub fn footer(hits: usize, partial: bool, sms: Source, wa: Source) -> String {
+    let mut out = summary(hits, partial);
+    let notes = [
+        match sms {
+            Source::Searched => None,
+            Source::NoAccess => Some("SMS access is off, so texts were skipped"),
+            Source::NotLinked => Some("SMS is not available here"),
+            Source::Failed => Some("SMS search failed"),
+        },
+        match wa {
+            Source::Searched => None,
+            Source::NoAccess | Source::NotLinked => {
+                Some("WhatsApp is not linked, so its chats were skipped")
+            }
+            Source::Failed => Some("WhatsApp search failed"),
+        },
+    ];
+    for note in notes.into_iter().flatten() {
+        out.push_str(". ");
+        out.push_str(note);
+    }
+    out
+}
+
+/// The `limit` newest of `(key, last_ms)` chats, newest first (stable on ties).
+pub fn most_recent<T: Clone>(chats: &[(T, i64)], limit: usize) -> Vec<T> {
+    let mut order: Vec<&(T, i64)> = chats.iter().collect();
+    order.sort_by_key(|c| std::cmp::Reverse(c.1));
+    order.into_iter().take(limit).map(|c| c.0.clone()).collect()
+}
+
+/// A message a search hit opens a chat at.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JumpTarget {
+    /// WhatsApp message id, or the provider id of an SMS (`sms:12`, `mms:7`).
+    pub id: String,
+    pub at_ms: i64,
+}
+
+/// What a page does next while it works towards a [`JumpTarget`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JumpStep {
+    /// The message is loaded: show it and let it glow.
+    Reveal,
+    /// Load one more older page.
+    LoadOlder,
+    /// Ten pages were not enough: tell the user to scroll up.
+    FurtherBack,
+    /// History reaches past the message and it is not there.
+    Gone,
+}
+
+/// Decides the next step. `oldest_ms` is the oldest loaded message.
+pub fn jump_step(
+    loaded: bool,
+    has_older: bool,
+    pages_loaded: usize,
+    oldest_ms: Option<i64>,
+    target_ms: i64,
+) -> JumpStep {
+    if loaded {
+        return JumpStep::Reveal;
+    }
+    let passed = oldest_ms.is_some_and(|oldest| oldest < target_ms);
+    if !has_older || passed {
+        return JumpStep::Gone;
+    }
+    if pages_loaded >= MAX_JUMP_PAGES {
+        JumpStep::FurtherBack
+    } else {
+        JumpStep::LoadOlder
+    }
+}
+
+/// The pill for a jump that stopped short.
+pub fn jump_notice(step: JumpStep) -> Option<&'static str> {
+    match step {
+        JumpStep::FurtherBack => Some("That message is further back. Scroll up to load it."),
+        JumpStep::Gone => Some("That message isn't here any more"),
+        JumpStep::Reveal | JumpStep::LoadOlder => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,5 +327,45 @@ mod tests {
         assert_eq!(summary(1, false), "1 result");
         assert_eq!(summary(3, true), "3 results in recent chats");
         assert_eq!(summary(MAX_HITS, false), "200+ results");
+    }
+
+    #[test]
+    fn footer_names_missing_sources() {
+        assert_eq!(
+            footer(2, false, Source::Searched, Source::Searched),
+            "2 results"
+        );
+        assert_eq!(
+            footer(0, false, Source::NoAccess, Source::NotLinked),
+            "No results. SMS access is off, so texts were skipped. WhatsApp is not linked, so its chats were skipped"
+        );
+        assert_eq!(
+            footer(1, true, Source::Searched, Source::Failed),
+            "1 result in recent chats. WhatsApp search failed"
+        );
+    }
+
+    #[test]
+    fn most_recent_takes_newest() {
+        let chats = [("a", 1), ("b", 9), ("c", 5), ("d", 9)];
+        assert_eq!(most_recent(&chats, 3), ["b", "d", "c"]);
+        assert_eq!(most_recent(&chats, 10).len(), 4);
+        assert!(most_recent::<&str>(&[], 3).is_empty());
+    }
+
+    #[test]
+    fn jump_steps() {
+        use JumpStep::*;
+        assert_eq!(jump_step(true, true, 0, Some(5), 9), Reveal);
+        assert_eq!(jump_step(false, true, 1, Some(50), 9), LoadOlder);
+        assert_eq!(
+            jump_step(false, true, MAX_JUMP_PAGES, Some(50), 9),
+            FurtherBack
+        );
+        assert_eq!(jump_step(false, false, 1, Some(50), 9), Gone);
+        assert_eq!(jump_step(false, true, 1, Some(5), 9), Gone);
+        assert_eq!(jump_step(false, true, 0, None, 9), LoadOlder);
+        assert!(jump_notice(FurtherBack).is_some_and(|t| t.contains("Scroll up")));
+        assert!(jump_notice(Reveal).is_none());
     }
 }

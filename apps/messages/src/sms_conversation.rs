@@ -193,6 +193,10 @@ pub struct SmsConversation {
     find: Option<FindState<SmsKey>>,
     /// The hit that glows for a moment.
     highlight: Option<SmsKey>,
+    /// The message a search hit opened the thread for, until it is shown.
+    goto: Option<rovsti_core::global_search::JumpTarget>,
+    /// Older pages loaded while working towards `goto`.
+    goto_pages: usize,
     /// The scroll-to-bottom button and its count of new messages.
     jump: JumpState,
     /// Unread count the thread opened with, until the first page decides the divider.
@@ -284,6 +288,8 @@ impl SmsConversation {
             peer_photo: None,
             find: None,
             highlight: None,
+            goto: None,
+            goto_pages: 0,
             jump: JumpState::default(),
             opening_unread: (unread > 0).then_some(unread),
             divider: None,
@@ -296,6 +302,12 @@ impl SmsConversation {
         this.fill_from_thread(cx);
         this.load(None, cx);
         this
+    }
+
+    /// Opens the thread at a search hit: it is shown once loaded (the first
+    /// page is still on its way when this runs).
+    pub fn set_goto(&mut self, target: Option<rovsti_core::global_search::JumpTarget>) {
+        self.goto = target;
     }
 
     /// Gives the header an avatar: the contact's photo at `uri`, with
@@ -534,6 +546,47 @@ impl SmsConversation {
             find.asked = true;
         }
         self.load(Some(oldest.saturating_add(1)), cx);
+    }
+
+    /// Works towards the message a search hit asked for: shows it, loads one
+    /// more older page, or says why it stopped.
+    fn continue_goto(&mut self, cx: &mut Context<Self>) {
+        use rovsti_core::global_search::{JumpStep, jump_notice, jump_step};
+        let Some(target) = self.goto.clone() else {
+            return;
+        };
+        let Some(wanted) = SmsKey::from_provider_id(&target.id) else {
+            self.goto = None;
+            return;
+        };
+        let found = self
+            .timeline
+            .items()
+            .iter()
+            .find(|i| i.key == wanted || self.timeline.provider_key(i.key) == Some(wanted))
+            .map(|i| i.key);
+        let oldest = self.timeline.oldest_ms();
+        let step = jump_step(
+            found.is_some(),
+            self.timeline.has_older(),
+            self.goto_pages,
+            oldest,
+            target.at_ms,
+        );
+        match (step, found, oldest) {
+            (JumpStep::Reveal, Some(key), _) => {
+                self.goto = None;
+                self.glow(key, cx);
+            }
+            (JumpStep::LoadOlder, _, Some(oldest)) => {
+                self.load(Some(oldest.saturating_add(1)), cx);
+            }
+            (step, _, _) => {
+                self.goto = None;
+                self.notice = jump_notice(step).map(Into::into);
+                cx.notify();
+            }
+        }
     }
 
     /// Shows the message and lets it glow for a moment.
@@ -788,6 +841,10 @@ impl SmsConversation {
                         if before_ms.is_none() && !this.reveal_unread() {
                             this.list.scroll_to_end();
                         }
+                        if before_ms.is_some() {
+                            this.goto_pages += 1;
+                        }
+                        this.continue_goto(cx);
                         // Read only while someone looks: the app in the
                         // background leaves new messages unread.
                         if (first || before_ms.is_none()) && this.backend.read(cx).ui_active() {
@@ -799,6 +856,7 @@ impl SmsConversation {
                         log::warn!("loading SMS messages failed: {error}");
                         // The detail is for the log; the screen says it plainly.
                         this.error = Some(load_error_text(&error).into());
+                        this.goto = None;
                         if let Some(find) = &mut this.find {
                             find.asked = false;
                         }

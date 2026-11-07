@@ -26,6 +26,17 @@ impl SmsKey {
             SmsKey::Local(_) => None,
         }
     }
+
+    /// The inverse of [`Self::provider_id`].
+    pub fn from_provider_id(id: &str) -> Option<SmsKey> {
+        let (kind, n) = id.split_once(':')?;
+        let n = n.parse().ok()?;
+        match kind {
+            "sms" => Some(SmsKey::Sms(n)),
+            "mms" => Some(SmsKey::Mms(n)),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -444,6 +455,9 @@ mod tests {
     fn provider_ids_and_removal() {
         assert_eq!(SmsKey::Sms(12).provider_id().as_deref(), Some("sms:12"));
         assert_eq!(SmsKey::Mms(7).provider_id().as_deref(), Some("mms:7"));
+        assert_eq!(SmsKey::from_provider_id("mms:7"), Some(SmsKey::Mms(7)));
+        assert_eq!(SmsKey::from_provider_id("sms:x"), None);
+        assert_eq!(SmsKey::from_provider_id("wa:1"), None);
         assert_eq!(SmsKey::Local(1).provider_id(), None);
         let mut t = SmsTimeline::new(1);
         t.push_pending(1, "hi".into(), None, 100);

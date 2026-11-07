@@ -6,6 +6,8 @@
 pub mod audio;
 pub mod avatar;
 pub mod blocklist;
+/// Swipe-to-reply and double-tap gesture math for chat bubbles.
+pub mod bubble_gesture;
 pub mod call;
 pub mod call_log;
 pub mod call_log_query;
@@ -32,8 +34,12 @@ pub mod inbox;
 /// Inbox filter chips: matching, counts, visibility and labels.
 pub mod inbox_filter;
 pub mod keypad_layout;
+/// OpenStreetMap links and share text for locations.
+pub mod location_link;
 pub mod lru;
 pub mod message_info;
+/// Reminders attached to a single message.
+pub mod message_reminder;
 pub mod mms_pdu;
 pub mod msg_backup;
 pub mod multi_select;
@@ -63,6 +69,8 @@ pub mod speed_dial;
 pub mod starred;
 pub mod t9;
 pub mod text_detect;
+/// Chat text size setting.
+pub mod text_scale;
 pub mod thread;
 /// Local pinned, archived and unread marks for SMS threads.
 pub mod thread_marks;

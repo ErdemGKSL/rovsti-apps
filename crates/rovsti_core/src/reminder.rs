@@ -46,7 +46,7 @@ fn local_s(ms: i64, tz_offset_s: i32) -> i64 {
     ms.div_euclid(1000) + i64::from(tz_offset_s)
 }
 
-fn local_day(ms: i64, tz_offset_s: i32) -> i64 {
+pub(crate) fn local_day(ms: i64, tz_offset_s: i32) -> i64 {
     local_s(ms, tz_offset_s).div_euclid(DAY_S)
 }
 

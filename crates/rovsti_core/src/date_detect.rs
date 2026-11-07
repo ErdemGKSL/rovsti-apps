@@ -23,6 +23,26 @@ pub fn calendar_end_ms(found: &FoundDate) -> i64 {
     found.start_ms + if found.all_day { DAY_MS } else { 3_600_000 }
 }
 
+/// Calendar event title: `{chat}: {first 40 chars of the message}`, one line.
+pub fn event_title(chat: &str, text: &str) -> String {
+    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut head: String = flat.chars().take(40).collect();
+    if flat.chars().count() > 40 {
+        head.push('…');
+    }
+    let chat = chat.trim();
+    match (chat.is_empty(), head.is_empty()) {
+        (true, _) => head,
+        (false, true) => chat.to_owned(),
+        (false, false) => format!("{chat}: {head}"),
+    }
+}
+
+/// The matched date text of `found` in `body` (what "Copy date" copies).
+pub fn matched_text<'a>(body: &'a str, found: &FoundDate) -> &'a str {
+    body.get(found.span.clone()).unwrap_or_default()
+}
+
 /// Up to `max` dates in `body`, in order.
 pub fn detect(body: &str, now_ms: i64, tz_offset_s: i32, max: usize) -> Vec<FoundDate> {
     let today = (now_ms.div_euclid(1000) + i64::from(tz_offset_s)).div_euclid(86_400);
@@ -309,5 +329,33 @@ mod tests {
         let body = "12.11.2026 13.11.2026 14.11.2026";
         assert_eq!(detect(body, NOW, 0, 2).len(), 2);
         assert!(detect(body, NOW, 0, 0).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn title_joins_chat_and_head() {
+        assert_eq!(
+            event_title("Anna", "Dinner\n tomorrow"),
+            "Anna: Dinner tomorrow"
+        );
+        assert_eq!(event_title("", "Hi"), "Hi");
+        assert_eq!(event_title("Anna", "  "), "Anna");
+    }
+
+    #[test]
+    fn title_truncates_at_40_chars() {
+        let t = event_title("A", &"x".repeat(60));
+        assert_eq!(t, format!("A: {}…", "x".repeat(40)));
+    }
+
+    #[test]
+    fn matched_text_is_the_span() {
+        let body = "see you 12.11.2099 ok";
+        let d = detect(body, 0, 0, 1);
+        assert_eq!(matched_text(body, &d[0]), "12.11.2099");
     }
 }

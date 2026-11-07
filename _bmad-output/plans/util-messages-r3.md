@@ -48,20 +48,20 @@ M14, M16, M21. `git stash list` is empty. Re-checked by grep for the open rows:
 | M14 | Message info sheet | done R2 |
 | M16 | Select text sheet | done R2 |
 | M21 | Inbox avatar tap opens the profile photo viewer | done R2 |
-| M13 | Per-chat media / links / docs gallery (tabs, month headers, tap opens viewer / link / jump) | R3 step 4 |
-| M25 | Copy link pill next to each detected URL; long links shortened in the gallery | R3 step 4 |
-| M15 | Delete a single SMS/MMS (confirm, 5 s Undo window, then provider delete) | R3 step 5 |
-| M22 | "Message privately" from a group message strip (opens the 1:1 WA chat) | R3 step 5 |
-| M17 | Voice note / audio playback: play/pause, scrub bar, 1x/1.5x/2x speed, remembered speed | R3 step 6 |
-| M18 | Global message search (SMS provider + recent WA chats) with jump-to-message | R3 step 7 |
-| M19 | Date/time detection ("tomorrow 15:00", "12.11.2026") -> Add to calendar / Copy | R3 step 8 |
-| M20 | Select mode: copy/forward several messages as one block with names and times | open (R4) |
-| M23 | Local star for SMS/MMS (starred.json), SMS starred list | open (R4) |
-| M24 | Jump to date in a conversation (date chooser, loads older pages) | open (R4) |
-| M26 | Save a shared contact card as .vcf / Add to contacts with all fields | open (R4) |
-| M27 | Clear chat (SMS: delete thread messages with confirm; WA: delete for me loaded) | open (R4) |
-| M28 | Copy / Share a single MMS attachment that is not an image (audio, vCard, file) | open (R4) |
-| M29 | Per-chat notification override shortcut in the header (mute 8 h / 1 week / always) | open (R4) |
+| M13 | Per-chat media / links / docs gallery (tabs, month headers, tap opens viewer / link / jump) | done R3 |
+| M25 | Copy link pill next to each detected URL; long links shortened in the gallery | done R3 |
+| M15 | Delete a single SMS/MMS (confirm, 5 s Undo window, then provider delete) | done R3 |
+| M22 | "Message privately" from a group message strip (opens the 1:1 WA chat) | done R3 |
+| M17 | Voice note / audio playback: play/pause, scrub bar, 1x/1.5x/2x speed, remembered speed | done R3 |
+| M18 | Global message search (SMS provider + recent WA chats) with jump-to-message | done R3 |
+| M19 | Date/time detection ("tomorrow 15:00", "12.11.2026") -> Add to calendar / Copy | done R3 |
+| M20 | Select mode: copy/forward several messages as one block with names and times | open (R4, round-4 leftover) |
+| M23 | Local star for SMS/MMS (starred.json), SMS starred list | open (R4, round-4 leftover) |
+| M24 | Jump to date in a conversation (date chooser, loads older pages) | open (R4, round-4 leftover) |
+| M26 | Save a shared contact card as .vcf / Add to contacts with all fields | open (R4, round-4 leftover) |
+| M27 | Clear chat (SMS: delete thread messages with confirm; WA: delete for me loaded) | open (R4, round-4 leftover) |
+| M28 | Copy / Share a single MMS attachment that is not an image (audio, vCard, file) | open (R4, round-4 leftover) |
+| M29 | Per-chat notification override shortcut in the header (mute 8 h / 1 week / always) | open (R4, round-4 leftover) |
 | -- | Reply, Star, Copy, Share, Edit, Delete for me/everyone, reactions | done (pre-existing) |
 | -- | Pin / mute / archive / mark read per chat; spam, block | done (pre-existing) |
 | -- | Draft persistence, scheduled send (SMS local, WA gateway) | done (pre-existing) |
@@ -284,3 +284,8 @@ Gateway changes (`services/wa_gateway`) are out of scope.
 - This file: mark shipped rows "done R3"; note deferred items; remaining backlog (M20, M23, M24,
   M26-M29) is round 4.
 - Commit: `Rovsti messages: UI: date pills (M19), docs, backlog`.
+
+## Round 4 backlog (leftovers)
+M20 select mode (copy/forward several), M23 local star for SMS/MMS, M24 jump to date,
+M26 save contact card as .vcf, M27 clear chat, M28 copy/share non-image MMS attachment,
+M29 mute duration shortcut in the header.

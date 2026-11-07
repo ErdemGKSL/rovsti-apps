@@ -1167,6 +1167,15 @@ impl MessagesApp {
             ConversationEvent::CopyLink(url) => {
                 this.copy_text_with(url.clone().into(), false, "Link copied", cx);
             }
+            ConversationEvent::CopyDate(text) => {
+                this.copy_text_with(text.clone().into(), false, "Date copied", cx);
+            }
+            ConversationEvent::AddToCalendar {
+                title,
+                start_ms,
+                end_ms,
+                all_day,
+            } => this.add_to_calendar(title.clone(), *start_ms, *end_ms, *all_day, cx),
             ConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             ConversationEvent::Call(n) => {
                 this.telecom_action(sms_actions::SmsAction::Call, n.clone(), cx);
@@ -1265,6 +1274,15 @@ impl MessagesApp {
             SmsConversationEvent::CopyLink(url) => {
                 this.copy_text_with(url.clone().into(), false, "Link copied", cx);
             }
+            SmsConversationEvent::CopyDate(text) => {
+                this.copy_text_with(text.clone().into(), false, "Date copied", cx);
+            }
+            SmsConversationEvent::AddToCalendar {
+                title,
+                start_ms,
+                end_ms,
+                all_day,
+            } => this.add_to_calendar(title.clone(), *start_ms, *end_ms, *all_day, cx),
             SmsConversationEvent::Share(text) => this.share_text(text.clone(), cx),
             SmsConversationEvent::Call(n) => {
                 this.telecom_action(sms_actions::SmsAction::Call, n.clone(), cx);
@@ -1898,6 +1916,35 @@ impl MessagesApp {
     }
 
     /// Opens the mail composer for an address found in a message.
+    fn add_to_calendar(
+        &mut self,
+        title: String,
+        start_ms: i64,
+        end_ms: i64,
+        all_day: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let task = cx.background_executor().spawn(async move {
+            rovsti_android::calendar::insert_event(&title, start_ms, end_ms, all_day)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(true) => {}
+                    Err(rovsti_android::Error::Unsupported) => {
+                        this.show_pill("That needs an Android phone.");
+                    }
+                    Ok(false) => this.show_pill("No calendar app found"),
+                    Err(_) => this.show_pill("Couldn't open the calendar"),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     fn email_to(&mut self, address: String, cx: &mut Context<Self>) {
         let task = cx
             .background_executor()

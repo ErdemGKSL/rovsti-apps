@@ -105,6 +105,15 @@ pub enum SmsConversationEvent {
     Forward(crate::forward_ui::ForwardItem),
     /// The Copy link pill: the page copies the URL and says "Link copied".
     CopyLink(String),
+    /// The Copy date pill: the page copies the text and says "Date copied".
+    CopyDate(String),
+    /// The Add to calendar pill: the page opens the calendar editor.
+    AddToCalendar {
+        title: String,
+        start_ms: i64,
+        end_ms: i64,
+        all_day: bool,
+    },
     /// Delete on a message without the SMS role: the page offers the role.
     NeedsRole,
     /// A message was hidden for deletion: the page's pill offers Undo.
@@ -2057,6 +2066,44 @@ impl SmsConversation {
                             this.selected = None;
                             this.rows_dirty = true;
                             cx.emit(SmsConversationEvent::CopyLink(link.url.clone()));
+                            cx.notify();
+                        })),
+                );
+            }
+            if let Some(found) = rovsti_core::date_detect::detect(
+                &item.body,
+                now_ms(),
+                self.backend.read(cx).locale().tz_offset_s,
+                1,
+            )
+            .into_iter()
+            .next()
+            {
+                let title = rovsti_core::date_detect::event_title(&self.title, &item.body);
+                let matched = rovsti_core::date_detect::matched_text(&item.body, &found).to_owned();
+                let end_ms = rovsti_core::date_detect::calendar_end_ms(&found);
+                pills = pills.child(
+                    glass_pill(theme, format!("Add to calendar · {}", found.label))
+                        .id(("sms-add-calendar", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            cx.emit(SmsConversationEvent::AddToCalendar {
+                                title: title.clone(),
+                                start_ms: found.start_ms,
+                                end_ms,
+                                all_day: found.all_day,
+                            });
+                            cx.notify();
+                        })),
+                );
+                pills = pills.child(
+                    glass_pill(theme, "Copy date")
+                        .id(("sms-copy-date", index))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.selected = None;
+                            this.rows_dirty = true;
+                            cx.emit(SmsConversationEvent::CopyDate(matched.clone()));
                             cx.notify();
                         })),
                 );

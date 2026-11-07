@@ -136,6 +136,15 @@ pub enum ConversationEvent {
     Email(String),
     /// The Copy link pill: the page copies the URL and says "Link copied".
     CopyLink(String),
+    /// The Copy date pill: the page copies the text and says "Date copied".
+    CopyDate(String),
+    /// The Add to calendar pill: the page opens the calendar editor.
+    AddToCalendar {
+        title: String,
+        start_ms: i64,
+        end_ms: i64,
+        all_day: bool,
+    },
     /// The Share pill of a message: the page opens the system share sheet.
     Share(String),
     /// A short message for the page's pill (save results).
@@ -3439,6 +3448,43 @@ impl Conversation {
                         this.strip = None;
                         this.rows_dirty = true;
                         cx.emit(ConversationEvent::CopyLink(link.url.clone()));
+                        cx.notify();
+                    },
+                )),
+            );
+        }
+        if !revoked
+            && let Some(text) = copy_text_of(&message.body, meta)
+            && let Some(found) =
+                rovsti_core::date_detect::detect(&text, now_ms(), self.locale.tz_offset_s, 1)
+                    .into_iter()
+                    .next()
+        {
+            let title = rovsti_core::date_detect::event_title(&self.title, &text);
+            let matched = rovsti_core::date_detect::matched_text(&text, &found).to_owned();
+            let label = format!("Add to calendar · {}", found.label);
+            let end_ms = rovsti_core::date_detect::calendar_end_ms(&found);
+            row = row.child(
+                pill("add-calendar", Icon::LucideCalendarClock, &label, false).on_click(
+                    cx.listener(move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::AddToCalendar {
+                            title: title.clone(),
+                            start_ms: found.start_ms,
+                            end_ms,
+                            all_day: found.all_day,
+                        });
+                        cx.notify();
+                    }),
+                ),
+            );
+            row = row.child(
+                pill("copy-date", Icon::LucideCopy, "Copy date", false).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.strip = None;
+                        this.rows_dirty = true;
+                        cx.emit(ConversationEvent::CopyDate(matched.clone()));
                         cx.notify();
                     },
                 )),

@@ -1,8 +1,8 @@
-# Rovsti Stops: everyday utilities (rounds 1-5)
+# Rovsti Stops: everyday utilities (rounds 1-6)
 
 Everything here is local. Pure logic lives in `crates/rovsti_geo` (unit-tested); the GPUI code in
 `apps/stops/src` is thin glue, and Android calls go through `rovsti_android` (desktop returns
-`Error::Unsupported`). Backlog and status: `_bmad-output/plans/util-stops.md` (R1) and `_bmad-output/plans/util-stops-r2.md` (R2), `_bmad-output/plans/util-stops-r3.md` (R3), `_bmad-output/plans/util-stops-r4.md` (R4), `_bmad-output/plans/util-stops-r5.md` (R5 and later backlog).
+`Error::Unsupported`). Backlog and status: `_bmad-output/plans/util-stops.md` (R1) and `_bmad-output/plans/util-stops-r2.md` (R2), `_bmad-output/plans/util-stops-r3.md` (R3), `_bmad-output/plans/util-stops-r4.md` (R4), `_bmad-output/plans/util-stops-r5.md` (R5), `_bmad-output/plans/util-stops-r6.md` (R6 and later backlog).
 
 | # | Utility | What it does | Where |
 |---|---------|--------------|-------|
@@ -44,7 +44,10 @@ Everything here is local. Pure logic lives in `crates/rovsti_geo` (unit-tested);
 | S37 | Nearest saved stop | The idle Trip tab shows "Nearest: Home gate", "350 m away", with Start, when a fix exists, no ends are picked and a saved stop lies within 2 km. Start uses the normal path (pill "Starting <name>" or the usual error). | `rovsti_geo::saved_stops::{SavedStops::nearest, NEAREST_CHIP_M}`; `trip_ui.rs` (`nearest_row_visible`); reach: Trip tab, idle |
 | S38 | Usage on saved stops | The Saved row subtitle adds "Used 4 times, last 5 Nov" (or "Used once, today") from the trip history; matches the gate in either direction. Read-only. | `rovsti_geo::history::{History::usage_of, usage_text, Usage}`; `saved_ui.rs::stop_detail`; reach: Saved tab |
 | S39 | Reset alarm settings | Last row of Settings > Alarm, shown only when something differs from the defaults. First tap arms ("Tap again to reset"), second resets sound, vibration, pattern, volume, snooze and alarm sound (appearance and tile settings untouched). Pill "Alarm settings reset" with Undo. | `rovsti_geo::prefs::StopsPrefs::{alarm_is_default, with_alarm_defaults}`; `settings_ui.rs` (`reset_alarm_label`), `PillAction::RestorePrefs`; reach: Settings > Alarm |
-
+| S35 | Colour tag on saved stops | Opened row has a "Colour: Orange" pill; each tap cycles Orange, Red, Green, Blue. A dot in the tag colour shows on the row (not for Orange) and the map ring uses it. Pill "Colour: Red" with Undo (restores the previous colour). Kept in JSON export/import and backup; old files load as Orange. Not destructive, no confirm. | `rovsti_geo::saved_stops::{StopColour, SavedStops::{cycle_colour, set_colour}}`, `places_io`; `saved_ui.rs` (`stop-colour`, `restore_colour`), `PillAction::RestoreColour`, `map.rs::stop_colour_hsla`; reach: Saved tab > open a stop > "Colour" |
+| S40 | Saved stops on the map | The saved-stop rings can be hidden with "Saved stops on map" in Map options (pill "Saved stops shown" / "Saved stops hidden"; row hidden without saved stops). Tapping a ring (within 18 px) opens a "Saved stop" sheet: Start, Share, Copy as, Open in maps, Open in Saved, Place a pin here. Rows reuse their usual pills (Start during a trip: "Not while a trip is running"); a deleted stop closes the sheet with "That stop was deleted". No confirm needed. | `rovsti_geo::prefs::StopsPrefs::show_saved_on_map`; `map.rs` (`pick_saved`, `SAVED_TAP_RADIUS_PX`), `picker.rs` (`SheetMode::SavedStop`), `map_options.rs` (`saved_toggle_pill`); reach: Map button > Saved stops on map, or tap a ring |
+| S41 | Arrival clock | The live card reads "About 4 min to the line, around 18:42", and Copy / Share status add "(around 18:42)" to the ETA. Local time from the device offset. No new pill (existing "Status copied" / share sheet). | `rovsti_geo::session::{arrival_clock, status_share_text}`; `trip_ui.rs` (`eta_text`, `status_text`); reach: Trip tab live card |
+| S42 | Map view link, share and centre | Map options > "This view": Copy map link (OpenStreetMap link of the centre and zoom, pill "Map link copied"), Share this view (system share sheet with the OSM and geo links) and Copy centre as (the Copy as sheet). | `rovsti_geo::coord_format::{osm_view_url, geo_view_url, map_view_share_text}`; `map_options.rs` (`map-copy-link`, `map-share-view`, `map-copy-centre`); reach: Map button > This view |
 
 ## Backup (S32)
 

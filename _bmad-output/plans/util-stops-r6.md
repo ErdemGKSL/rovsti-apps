@@ -35,10 +35,10 @@ baseSha: fda322eff78818bd3794e2ae2730da3285fe3a87
 | S17, S18, S20-S23, S25, S26 | Follow-me, home screen shortcut, live status share, re-arm, tile cache size, paste DMS/Plus Code, share my location, measure actions | done R3 |
 | S24, S27-S33 | Favourites, last trip card, scale bar, open saved stop in maps, copy list, mojibake fix, backup/restore, share/copy trip | done R4 |
 | S34, S36-S39 | Pin distance + Measure from here, delete old trips, nearest saved stop, usage on saved rows, reset alarm settings | done R5 |
-| S41 | Arrival clock: "About 4 min to the line, around 18:42" on the live card and in the status share | R6 |
-| S40 | Saved stops on the map: tap a ring opens a saved-stop sheet (Start, Share, Copy as, Open in maps, Open in Saved, Place a pin here); "Saved stops on map" toggle in Map options | R6 |
-| S42 | Map options: Copy map link, Share this view, Copy centre as | R6 |
-| S35 | Saved stops: colour tag (Orange / Red / Green / Blue), shown on the row and on the map ring | R6 |
+| S41 | Arrival clock: "About 4 min to the line, around 18:42" on the live card and in the status share | done R6 |
+| S40 | Saved stops on the map: tap a ring opens a saved-stop sheet (Start, Share, Copy as, Open in maps, Open in Saved, Place a pin here); "Saved stops on map" toggle in Map options | done R6 |
+| S42 | Map options: Copy map link, Share this view, Copy centre as | done R6 |
+| S35 | Saved stops: colour tag (Orange / Red / Green / Blue), shown on the row and on the map ring | done R6 |
 | S43 | Distance units (metric / imperial) | backlog R7 (touches every distance string; needs its own pass) |
 | S44 | Saved stop note (free text shown in the row and share text) | backlog R7 |
 | S19 | Reverse / Duplicate a saved stop | dropped (gate is direction-agnostic) |

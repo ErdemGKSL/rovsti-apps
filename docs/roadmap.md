@@ -152,9 +152,22 @@ list in `docs/phone-acceptance.md`.
       camera; "Recently added" (last 30 days) on the Contacts tab; copy a whole contact as text or
       vCard; a WhatsApp chip per number; websites, nickname and job title (card, editor, vCard
       `URL`, `NICKNAME`, `TITLE`)
+- [x] Utilities, round 3 (C19-C25, done without a device):
+      - C19 Scan to add: pick a picture of a contact QR code (vCard, MECARD, `tel:`, `mailto:`) and
+        the editor opens prefilled (several cards go to the import preview)
+      - C20 Trash: deleted contacts are kept on the phone for 30 days; Restore, Delete forever and
+        Empty Trash (with confirm), select mode on the Trash page
+      - C21 Recent calls on the card (local call log, read-only, asks first)
+      - C22 Birthday reminders: opt-in morning notification, a tap opens the card
+      - C23 Default number / email: Set or Clear default from the field sheet, kept on save and in vCard
+      - C24 Clean up (Settings): No number, No name, No photo, Not in a group, with counts; select and
+        delete through the Trash
+      - C25 Group utilities on a group's page: Message group (one SMS to all), Email group, Share as
+        `.vcf`, Save to file
 - [ ] Check the photo viewer gestures, the QR sheet, the calendar-event and address writes, and
       the scrubber drag on a phone: written without a device
 - [ ] Check the editor, groups and vCard flows on a phone: written without a device
+- [ ] Check Scan to add, Trash restore, birthday notifications, the call-log permission, Clean up and the group SMS / email composers on a phone: written without a device
 - [ ] Check the group member write and the mailto handoff on a phone; a delete commits after 5 s or when leaving the app
 
 ## Rovsti Stops

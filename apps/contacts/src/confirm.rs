@@ -174,6 +174,7 @@ impl ContactsApp {
             Confirm::DeleteContact { id, .. } => self.delete_contacts(vec![id], cx),
             Confirm::DeleteMany { ids } => {
                 self.select = None;
+                self.cleanup_forget(&ids);
                 self.delete_contacts(ids, cx);
             }
             Confirm::DeleteGroup { id, .. } => self.delete_group(id, cx),

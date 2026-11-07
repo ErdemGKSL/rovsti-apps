@@ -41,13 +41,13 @@ history; birthday notifications; default number/email; cleanup filters; group-wi
 |---|---------|--------|
 | C1-C10 | Photo viewer, save/share photo, change/remove, share as text/vcf/QR, dates, addresses, vCard fields, duplicates+merge, upcoming birthdays, scrubber | done R1 |
 | C11-C18 | Select mode, export one, crop/rotate, camera, recently added, copy contact / vCard, WhatsApp per number, websites/nickname/title | done R2 |
-| C19 | Scan to add: decode a contact QR from a picked image (rqrr, pure Rust) -> editor prefilled / import | R3 (S2, S6) |
-| C20 | Trash: deleted contacts kept locally as drafts for 30 days, Restore, Delete forever, Empty Trash (confirm) | R3 (S1, S5, S6) |
-| C21 | Contact history: last calls with this contact on the card (local call log, READ_CALL_LOG, read-only) | R3 (S3, S5, S7) |
-| C22 | Birthday reminders: opt-in morning notification, tap opens the card | R3 (S4, S5, S7) |
-| C23 | Default number / email: Set / Clear default from the field sheet, kept on save, vCard `PREF` | R3 (S4, S5, S7) |
-| C24 | Clean up page: chips No number, No name, No photo, Not in a group; select + delete (to Trash) | R3 (S3, S8) |
-| C25 | Group utilities: Message group (one SMS to all), Email group, Share / save group as .vcf | R3 (S3, S5, S8) |
+| C19 | Scan to add: decode a contact QR from a picked image (rqrr, pure Rust) -> editor prefilled / import | done R3 |
+| C20 | Trash: deleted contacts kept locally as drafts for 30 days, Restore, Delete forever, Empty Trash (confirm) | done R3 |
+| C21 | Contact history: last calls with this contact on the card (local call log, READ_CALL_LOG, read-only) | done R3 |
+| C22 | Birthday reminders: opt-in morning notification, tap opens the card | done R3 |
+| C23 | Default number / email: Set / Clear default from the field sheet, kept on save, vCard `PREF` | done R3 |
+| C24 | Clean up page: chips No number, No name, No photo, Not in a group; select + delete (to Trash) | done R3 |
+| C25 | Group utilities: Message group (one SMS to all), Email group, Share / save group as .vcf | done R3 |
 | C26 | Favorites custom order (drag) using `contacts_view::reordered_keys` | backlog R4 |
 | C27 | Fuzzy search: initials ("ay" -> "Ayse Yilmaz") and number fragments in any format | backlog R4 |
 | C28 | Import from clipboard: paste a vCard or "Name +90..." text to create a contact (reuses C19 `parse_payload`) | backlog R4 |

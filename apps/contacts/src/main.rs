@@ -9,6 +9,7 @@
 
 mod backend;
 mod birthdays;
+mod cleanup;
 mod confirm;
 mod detail;
 mod dupes;
@@ -338,6 +339,8 @@ struct ContactsApp {
     /// Deleted contacts kept for 30 days, and the Trash page.
     trash: Trash,
     trash_ui: trash::TrashUi,
+    /// The Clean up page.
+    cleanup_ui: cleanup::CleanupUi,
     /// The alphabet scrubber: the section letter of each Contacts row, the
     /// letters shown, and the drag.
     row_letters: Vec<char>,
@@ -555,6 +558,7 @@ impl ContactsApp {
             recent_open: false,
             trash: Trash::default(),
             trash_ui: trash::TrashUi::default(),
+            cleanup_ui: cleanup::CleanupUi::default(),
             row_letters: Vec::new(),
             scrub_letters: Vec::new(),
             scrub: upcoming::Scrub::default(),
@@ -630,6 +634,7 @@ impl ContactsApp {
                     this.refresh_marks();
                     this.rebuild(cx);
                     this.load_upcoming(cx);
+                    this.load_cleanup(cx);
                     if let Some(id) = this.pending_open.take() {
                         this.open_contact(id, cx);
                     }
@@ -843,6 +848,7 @@ impl ContactsApp {
             || self.recent_open
             || self.trash_ui.open
             || self.trash_ui.sheet.is_open()
+            || self.cleanup_ui.open
             || self.select_ui.sheet.is_open()
             || self.select.is_some()
             || self.tabs.selected() != CONTACTS_TAB
@@ -884,6 +890,10 @@ impl ContactsApp {
             self.set_upcoming_open(false, cx);
         } else if self.recent_open {
             self.set_recent_open(false, cx);
+        } else if self.cleanup_ui.select.is_some() {
+            self.leave_cleanup_select(cx);
+        } else if self.cleanup_ui.open {
+            self.set_cleanup_open(false, cx);
         } else if self.trash_ui.select.is_some() {
             self.leave_trash_select(cx);
         } else if self.trash_ui.open {
@@ -1698,6 +1708,15 @@ impl ContactsApp {
                     .into_any_element(),
                     tap_row(
                         theme,
+                        "clean-up",
+                        Some(Icon::LucideBrush),
+                        "Clean up",
+                        Tone::Accent,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.set_cleanup_open(true, cx)))
+                    .into_any_element(),
+                    tap_row(
+                        theme,
                         "scan-qr",
                         Some(Icon::LucideQrCode),
                         "Scan QR code",
@@ -1880,7 +1899,10 @@ impl ContactsApp {
                             0.0
                         })
                         // Above the select bar.
-                        + px(if self.select.is_some() || self.trash_selecting() {
+                        + px(if self.select.is_some()
+                            || self.trash_selecting()
+                            || self.cleanup_selecting()
+                        {
                             76.0
                         } else {
                             0.0
@@ -1982,6 +2004,8 @@ impl Render for ContactsApp {
             (self.upcoming_page(theme, cx), false)
         } else if self.recent_open && tab == CONTACTS_TAB {
             (self.recent_page(theme, cx), false)
+        } else if self.cleanup_ui.open && tab == SETTINGS_TAB {
+            (self.cleanup_page(theme, cx), false)
         } else if self.trash_ui.open && tab == SETTINGS_TAB {
             (self.trash_page(theme, cx), false)
         } else if self.dupes.open && tab == SETTINGS_TAB {
@@ -2055,6 +2079,7 @@ impl Render for ContactsApp {
             })
             .children(self.select_bar_view(theme, cx))
             .children(self.trash_bar_view(theme, cx))
+            .children(self.cleanup_bar_view(theme, cx))
             .children(self.select.is_some().then(|| {
                 let entity = cx.entity();
                 canvas(
@@ -2073,54 +2098,60 @@ impl Render for ContactsApp {
             }))
             // No tab bar while a form is open or ticking: no stray tap loses the edits.
             .children(
-                (!editing && !picking && self.select.is_none() && !self.trash_selecting()).then(
-                    || {
-                        self.tabs.render(
-                            theme,
-                            move |index, _, cx| {
-                                entity.update(cx, |this, cx| {
-                                    this.tabs.press();
-                                    let changed = this.tabs.select(index);
-                                    if changed {
-                                        this.select = None;
-                                    }
-                                    if changed
-                                        || this.open.is_some()
-                                        || this.group_page.is_some()
-                                        || this.group_edit.is_some()
-                                        || this.whatsapp_open
-                                        || this.dupes.open
-                                        || this.upcoming_open
-                                        || this.recent_open
-                                        || this.trash_ui.open
-                                    {
-                                        this.trash_ui.open = false;
-                                        this.trash_ui.select = None;
-                                        this.trash_ui.sheet.close();
-                                        this.upcoming_open = false;
-                                        this.recent_open = false;
-                                        this.whatsapp_open = false;
-                                        this.dupes.open = false;
-                                        this.dupes.sheet.close();
-                                        this.open = None;
-                                        this.open_draft = None;
-                                        this.group_page = None;
-                                        this.group_edit = None;
-                                        this.clear_notice();
-                                        this.page.restart();
-                                    }
-                                    cx.notify();
-                                });
-                            },
-                            move |phase, _, cx| {
-                                touch_entity.update(cx, |this, cx| {
-                                    this.tabs.touch(phase);
-                                    cx.notify();
-                                });
-                            },
-                        )
-                    },
-                ),
+                (!editing
+                    && !picking
+                    && self.select.is_none()
+                    && !self.trash_selecting()
+                    && !self.cleanup_selecting())
+                .then(|| {
+                    self.tabs.render(
+                        theme,
+                        move |index, _, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.tabs.press();
+                                let changed = this.tabs.select(index);
+                                if changed {
+                                    this.select = None;
+                                }
+                                if changed
+                                    || this.open.is_some()
+                                    || this.group_page.is_some()
+                                    || this.group_edit.is_some()
+                                    || this.whatsapp_open
+                                    || this.dupes.open
+                                    || this.upcoming_open
+                                    || this.recent_open
+                                    || this.trash_ui.open
+                                    || this.cleanup_ui.open
+                                {
+                                    this.cleanup_ui.open = false;
+                                    this.cleanup_ui.select = None;
+                                    this.trash_ui.open = false;
+                                    this.trash_ui.select = None;
+                                    this.trash_ui.sheet.close();
+                                    this.upcoming_open = false;
+                                    this.recent_open = false;
+                                    this.whatsapp_open = false;
+                                    this.dupes.open = false;
+                                    this.dupes.sheet.close();
+                                    this.open = None;
+                                    this.open_draft = None;
+                                    this.group_page = None;
+                                    this.group_edit = None;
+                                    this.clear_notice();
+                                    this.page.restart();
+                                }
+                                cx.notify();
+                            });
+                        },
+                        move |phase, _, cx| {
+                            touch_entity.update(cx, |this, cx| {
+                                this.tabs.touch(phase);
+                                cx.notify();
+                            });
+                        },
+                    )
+                }),
             )
             .children(
                 scrubber

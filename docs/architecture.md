@@ -70,6 +70,11 @@ crates/rovsti_core, rovsti_geo     pure Rust, no I/O, unit-tested
   native code; licence `(MIT OR Apache-2.0) AND ISC`) in `rovsti_core::contact_scan`.
   The payload parser reads vCard, MECARD, `tel:` and `mailto:`.
 
+- **Contacts trash file.** Deleted contacts are kept as drafts in `contacts-trash.json` in the
+  app's data directory (`apps/contacts/src/trash_store.rs`, atomic temp file + rename, size
+  guarded, a damaged file reads as an empty Trash). The model is `rovsti_core::contact_trash`:
+  30 days, at most 500 entries. Merge deletes are not trashed; select-mode and Clean up deletes are.
+
 ## What each app needs from Android
 
 | App | Role / service | Kotlin components (in the ejected host) |
@@ -244,6 +249,18 @@ The trigger is a diameter crossing (`rovsti_geo::crossing`); the earlier radius,
   to `POST /v1/contacts/lookup` and subscribes presence once per JID per run. The gateway
   caches (24 h, 4096) and rate-limits lookups. A local number without a country code only
   matches an existing chat, otherwise the card asks for the country code. No push in Contacts.
+- **AD-CT7 Contacts permissions.** Besides READ/WRITE_CONTACTS, INTERNET and HANDOFF, Contacts
+  declares `READ_CALL_LOG` (recent calls on the card, read-only, requested only after the owner
+  taps "Show recent calls") and `POST_NOTIFICATIONS` (birthday reminders, requested when the
+  owner turns them on). Neither is requested at launch.
+- **AD-CT8 `open_contact` one-shot.** A birthday notification starts Contacts with
+  `EXTRA_CONTACT_ID`; Kotlin posts one `open_contact {id}` event through the mailbox
+  (`deliverOpenContact`, called from `onCreate` and `onNewIntent`, like Messages' open thread).
+  `rovsti_android::events::parse_open_contact` reads it; the app opens the card, or keeps the id
+  as `pending_open` until the book has loaded.
+- **AD-CT9 Group tools.** Message group and Email group build one `smsto:` / `mailto:` intent
+  (`telecom::compose_group_sms`, `email_group`) from `rovsti_core::group_tools` (at most 30
+  numbers / 50 addresses, one per distinct number). The cards are read off the UI thread.
 
 ### Messages: decisions (AD-MSG1 to AD-MSG9)
 

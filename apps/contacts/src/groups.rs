@@ -12,8 +12,13 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder, px, svg,
 };
 use rovsti_core::{
-    contact_edit::{Group, account_label, group_join_hint, group_subtitle, group_title},
-    contacts_view,
+    contact_dates,
+    contact_edit::{
+        ContactDraft, Group, account_label, group_join_hint, group_subtitle, group_title,
+    },
+    contacts_view, group_tools,
+    group_tools::Kind,
+    vcard,
 };
 use rovsti_ui::{
     Icon,
@@ -28,6 +33,69 @@ use crate::{
     refill,
     ui::{Tone, field_box, form_row, pill, tap_row},
 };
+
+/// An action of the group page's menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GroupAction {
+    Message,
+    Email,
+    Share,
+    SaveToFile,
+}
+
+/// The menu rows for a group with `n_members` people in the address book.
+/// Message needs a member with a number. `has_emails` is `true` when it is
+/// not known (e-mails are read only when the action runs, and the pill then
+/// says if nobody has one). An empty group has no menu.
+pub(crate) fn group_menu(
+    n_members: usize,
+    has_numbers: bool,
+    has_emails: bool,
+) -> Vec<GroupAction> {
+    if n_members == 0 {
+        return Vec::new();
+    }
+    let mut actions = Vec::new();
+    if has_numbers {
+        actions.push(GroupAction::Message);
+    }
+    if has_emails {
+        actions.push(GroupAction::Email);
+    }
+    actions.push(GroupAction::Share);
+    actions.push(GroupAction::SaveToFile);
+    actions
+}
+
+fn action_row(action: GroupAction) -> (&'static str, Icon, &'static str) {
+    match action {
+        GroupAction::Message => ("group-message", Icon::LucideMessageSquare, "Message group"),
+        GroupAction::Email => ("group-email", Icon::LucideMail, "Email group"),
+        GroupAction::Share => ("group-share", Icon::LucideShare, "Share as .vcf"),
+        GroupAction::SaveToFile => ("group-save-file", Icon::LucideDownload, "Save to file"),
+    }
+}
+
+/// Whether more people had an address than the cap let through.
+fn was_capped(members: usize, missing: usize, used: usize, cap: usize) -> bool {
+    used >= cap && members.saturating_sub(missing) > used
+}
+
+/// The pill after an action ran: what was left out, or why nothing opened.
+fn recipients_pill(kind: Kind, members: usize, used: usize, missing: usize) -> Option<String> {
+    let cap = match kind {
+        Kind::Sms => group_tools::MAX_SMS,
+        Kind::Email => group_tools::MAX_EMAIL,
+    };
+    group_tools::recipients_notice(kind, used, missing, was_capped(members, missing, used, cap))
+}
+
+fn nobody_text(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Sms => "No one in this group has a number.",
+        Kind::Email => "No one in this group has an email.",
+    }
+}
 
 /// One row of the Groups tab, with its texts built once per change.
 pub(crate) struct GroupItem {
@@ -69,6 +137,122 @@ impl ContactsApp {
                 row
             })
             .collect()
+    }
+
+    /// The cards of the people in group `id`, read off the UI thread.
+    fn group_member_ids(&self) -> Vec<i64> {
+        self.group_rows.iter().map(|r| r.vm.id).collect()
+    }
+
+    /// Message group / Email group: one composer for every member with a
+    /// number or address.
+    fn group_compose(&mut self, kind: Kind, cx: &mut Context<Self>) {
+        let ids = self.group_member_ids();
+        self.notice = Some("Opening\u{2026}".into());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let members: Vec<ContactDraft> = backend::drafts_of(&ids)?;
+                    let (list, missing) = match kind {
+                        Kind::Sms => group_tools::sms_recipients(&members),
+                        Kind::Email => group_tools::email_recipients(&members),
+                    };
+                    if list.is_empty() {
+                        return Ok::<_, String>(Err(nobody_text(kind).to_owned()));
+                    }
+                    match kind {
+                        Kind::Sms => backend::group_sms(&list, ""),
+                        Kind::Email => backend::group_email(&list),
+                    }?;
+                    Ok(Ok(recipients_pill(
+                        kind,
+                        members.len(),
+                        list.len(),
+                        missing,
+                    )))
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                this.notice = match result {
+                    Ok(Ok(note)) => note.map(Into::into),
+                    Ok(Err(words)) => Some(words.into()),
+                    Err(words) => Some(format!("Can't open the composer: {words}.").into()),
+                };
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Share as .vcf (the share sheet) or Save to file (the picker).
+    fn group_file(&mut self, id: i64, save: bool, cx: &mut Context<Self>) {
+        if save && self.transfer_busy {
+            self.notice = Some("Wait for the file being saved or read to finish.".into());
+            cx.notify();
+            return;
+        }
+        let Some(title) = self.group(id).map(|g| g.title.clone()) else {
+            return;
+        };
+        let ids = self.group_member_ids();
+        let today = contact_dates::local_ymd(crate::whatsapp::now_ms(), self.wa.offset_s);
+        if save {
+            self.transfer_busy = true;
+        }
+        self.notice = Some("Preparing the file\u{2026}".into());
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let members = backend::drafts_of(&ids)?;
+                    if members.is_empty() {
+                        return Ok(0);
+                    }
+                    let name = group_tools::group_file_name(&title, today);
+                    let text = vcard::write(&members);
+                    if save {
+                        backend::start_export_named(&name, &text)?;
+                    } else {
+                        backend::share_vcf(&name, &text)?;
+                    }
+                    Ok::<_, String>(members.len())
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(0) => {
+                        this.transfer_busy = false;
+                        this.notice = Some("Nothing to share.".into());
+                    }
+                    // The picker answers with a document_result.
+                    Ok(count) if save => {
+                        this.exported = Some(count);
+                        this.notice = None;
+                    }
+                    Ok(_) => this.notice = None,
+                    Err(words) => {
+                        this.transfer_busy = false;
+                        this.notice = Some(format!("Can't share the group: {words}.").into());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn run_group_action(&mut self, id: i64, action: GroupAction, cx: &mut Context<Self>) {
+        match action {
+            GroupAction::Message => self.group_compose(Kind::Sms, cx),
+            GroupAction::Email => self.group_compose(Kind::Email, cx),
+            GroupAction::Share => self.group_file(id, false, cx),
+            GroupAction::SaveToFile => self.group_file(id, true, cx),
+        }
     }
 
     /// The Groups tab's rows: each group's title and how many of its members
@@ -476,6 +660,28 @@ impl ContactsApp {
                             })),
                     ),
             );
+        let has_numbers = self.group_rows.iter().any(|r| {
+            self.index()
+                .and_then(|index| index.all().find(|c| c.id == r.vm.id))
+                .is_some_and(|c| !c.numbers.is_empty())
+        });
+        let menu = group_menu(self.group_rows.len(), has_numbers, true);
+        let menu_section = (!menu.is_empty()).then(|| {
+            section(
+                theme,
+                None,
+                menu.into_iter()
+                    .map(|action| {
+                        let (key, icon, label) = action_row(action);
+                        tap_row(theme, key, Some(icon), label, Tone::Accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.run_group_action(id, action, cx);
+                            }))
+                            .into_any_element()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        });
         let empty = self.group_rows.is_empty().then(|| {
             empty_state(
                 theme,
@@ -504,6 +710,7 @@ impl ContactsApp {
                 .on_click(cx.listener(move |this, _, _, cx| this.open_group_picker(id, cx)))
                 .into_any_element()],
             ))
+            .children(menu_section)
             .children(join_hint.map(|hint| {
                 div()
                     .px(px(32.0))
@@ -514,5 +721,57 @@ impl ContactsApp {
             .children(self.group_edit_section(theme, window, cx))
             .children(empty)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_group_has_no_menu() {
+        assert!(group_menu(0, true, true).is_empty());
+    }
+
+    #[test]
+    fn menu_follows_what_members_have() {
+        assert_eq!(
+            group_menu(3, true, true),
+            [
+                GroupAction::Message,
+                GroupAction::Email,
+                GroupAction::Share,
+                GroupAction::SaveToFile
+            ]
+        );
+        assert_eq!(
+            group_menu(2, false, true),
+            [
+                GroupAction::Email,
+                GroupAction::Share,
+                GroupAction::SaveToFile
+            ]
+        );
+        assert_eq!(
+            group_menu(2, false, false),
+            [GroupAction::Share, GroupAction::SaveToFile]
+        );
+    }
+
+    #[test]
+    fn cap_is_reported_only_when_people_were_left_out() {
+        assert!(!was_capped(30, 0, 30, 30));
+        assert!(was_capped(40, 5, 30, 30));
+        assert!(!was_capped(35, 5, 30, 30));
+        assert!(!was_capped(10, 0, 10, 30));
+    }
+
+    #[test]
+    fn pill_names_the_people_left_out() {
+        assert_eq!(recipients_pill(Kind::Sms, 3, 3, 0), None);
+        assert_eq!(
+            recipients_pill(Kind::Sms, 4, 2, 2).as_deref(),
+            Some("2 people have no number")
+        );
     }
 }

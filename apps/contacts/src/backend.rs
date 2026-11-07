@@ -280,13 +280,11 @@ pub(crate) fn scan_image(path: &str) -> Result<Scanned, String> {
 }
 
 /// Opens one SMS composer for all `numbers`.
-#[allow(dead_code, reason = "wired to groups in a later step")]
 pub(crate) fn group_sms(numbers: &[String], body: &str) -> Result<(), String> {
     done(telecom::compose_group_sms(numbers, body))
 }
 
 /// Opens the e-mail composer for all `addresses`.
-#[allow(dead_code, reason = "wired to groups in a later step")]
 pub(crate) fn group_email(addresses: &[String]) -> Result<(), String> {
     done(telecom::email_group(addresses))
 }

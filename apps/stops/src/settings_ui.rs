@@ -862,6 +862,23 @@ impl StopsApp {
             .into_any_element(),
         ];
 
+        let backup_rows = vec![
+            list_row(
+                theme,
+                None,
+                "Export backup",
+                Some("Saved stops, trip history and settings".into()),
+                None,
+            )
+            .id("set-backup-export")
+            .on_click(cx.listener(|this, _, _, cx| this.export_backup(cx)))
+            .into_any_element(),
+            list_row(theme, None, "Restore backup", None, None)
+                .id("set-backup-restore")
+                .on_click(cx.listener(|this, _, _, cx| this.restore_backup(cx)))
+                .into_any_element(),
+        ];
+
         div()
             .flex()
             .flex_col()
@@ -869,6 +886,7 @@ impl StopsApp {
             .child(section(theme, Some("Alarm".into()), alarm))
             .child(section(theme, Some("Battery".into()), reliability))
             .child(self.transit_section(theme, cx))
+            .child(section(theme, Some("Backup".into()), backup_rows))
             .child(section(theme, None, more))
             .into_any_element()
     }
@@ -1307,7 +1325,7 @@ impl StopsApp {
         cx.notify();
     }
 
-    fn save_history_in_background(&self, cx: &mut Context<Self>) {
+    pub(crate) fn save_history_in_background(&self, cx: &mut Context<Self>) {
         if let Some(dir) = self.dir.clone() {
             let history = self.history.clone();
             cx.background_executor()
@@ -1882,7 +1900,7 @@ impl StopsApp {
     }
 
     /// Saves `source` as the setting and switches the map to it.
-    fn use_tile_source(&mut self, source: TileSource, cx: &mut Context<Self>) {
+    pub(crate) fn use_tile_source(&mut self, source: TileSource, cx: &mut Context<Self>) {
         self.prefs.set_tile_url(&source);
         self.save_prefs(cx);
         self.map_tiles.set_source(source, cx);

@@ -13,6 +13,7 @@ use rovsti_android::Error as AndroidError;
 use rovsti_core::wire::DocumentResult;
 use rovsti_geo::{
     Coord, SavedStop, SavedStops,
+    backup::{self, Backup},
     places_io::{self, MergePlan},
     saved_stops::{self, SavedSort},
 };
@@ -37,6 +38,28 @@ pub enum ExportKind {
     #[default]
     SavedStops,
     History,
+    Backup,
+}
+
+/// Which import the file picker is for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImportKind {
+    #[default]
+    Places,
+    Backup,
+}
+
+/// The pill when Restore is tapped during a trip, else `None`.
+pub fn restore_blocked(trip_running: bool) -> Option<&'static str> {
+    trip_running.then_some("Not while a trip is running")
+}
+
+/// The restore sheet's text: what the file holds and what restoring does.
+pub fn restore_sheet_body(backup: &Backup, tz_offset_s: i32) -> String {
+    format!(
+        "{}.\n\nThis replaces your saved stops, trip history and settings.",
+        backup::summary(backup, tz_offset_s)
+    )
 }
 
 /// The pill for the answer of a save dialog: `None` when it was cancelled.
@@ -46,6 +69,7 @@ pub fn export_pill(kind: ExportKind, ok: bool, error: bool) -> Option<String> {
             match kind {
                 ExportKind::SavedStops => "Saved stops exported",
                 ExportKind::History => "History exported",
+                ExportKind::Backup => "Backup saved",
             }
             .to_owned(),
         )
@@ -772,6 +796,7 @@ impl StopsApp {
 
     /// Opens the file picker; the answer arrives in `on_places_picked`.
     fn import_places(&mut self, cx: &mut Context<Self>) {
+        self.pending_import = Some(ImportKind::Places);
         if let Err(words) = backend::pick_import() {
             self.show_pill(format!("Can't import: {words}"), None, cx);
         }
@@ -805,6 +830,161 @@ impl StopsApp {
                 }
             }
         }
+    }
+
+    /// Settings > Backup > Export: one JSON file with stops, trips and settings.
+    pub(crate) fn export_backup(&mut self, cx: &mut Context<Self>) {
+        let now = crate::store::now_ms();
+        let file = Backup::new(
+            self.saved.clone(),
+            self.history.clone(),
+            self.prefs.clone(),
+            now,
+        );
+        let name = backup::export_file_name(&export_stamp(now, self.tz_offset_s));
+        self.pending_export = Some(ExportKind::Backup);
+        if let Err(words) = backend::export_text(&name, "application/json", &backup::to_json(&file))
+        {
+            self.pending_export = None;
+            self.show_pill(format!("Can't export: {words}"), None, cx);
+        }
+    }
+
+    /// Settings > Backup > Restore: opens the file picker unless a trip runs.
+    pub(crate) fn restore_backup(&mut self, cx: &mut Context<Self>) {
+        if let Some(text) = restore_blocked(self.trip.is_some()) {
+            self.show_pill(text, None, cx);
+            return;
+        }
+        self.pending_import = Some(ImportKind::Backup);
+        if let Err(words) = backend::pick_import() {
+            self.pending_import = None;
+            self.show_pill(format!("Can't import: {words}"), None, cx);
+        }
+    }
+
+    /// The picked backup file: parse it and ask before replacing anything.
+    pub(crate) fn on_backup_picked(&mut self, result: &DocumentResult, cx: &mut Context<Self>) {
+        let Some(path) = result.path.as_deref().filter(|_| result.ok) else {
+            if result.error.is_some() {
+                self.show_pill("Can't restore: that file can't be read", None, cx);
+            }
+            return;
+        };
+        let text = match backend::read_import(path) {
+            Ok(text) => text,
+            Err(words) => {
+                self.show_pill(format!("Can't restore: {words}"), None, cx);
+                return;
+            }
+        };
+        match backup::parse(&text) {
+            Err(error) => self.show_pill(error.message(), None, cx),
+            Ok(file) => {
+                // A trip may have started while the picker was open.
+                if let Some(text) = restore_blocked(self.trip.is_some()) {
+                    self.show_pill(text, None, cx);
+                    return;
+                }
+                self.sheet_mode = SheetMode::RestoreBackup(Box::new(file));
+                self.sheet.open();
+                cx.notify();
+            }
+        }
+    }
+
+    /// The restore sheet: what the file holds, then Cancel / Replace everything.
+    pub(crate) fn restore_body(
+        &mut self,
+        theme: Theme,
+        file: &Backup,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        let confirm = file.clone();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(Self::sheet_title(theme, "Restore backup"))
+            .child(Self::footnote(
+                theme,
+                restore_sheet_body(file, self.tz_offset_s),
+            ))
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap(px(10.0))
+                    .px(px(16.0))
+                    .pt(px(8.0))
+                    .child(
+                        glass_pill(theme, "Cancel")
+                            .id("restore-cancel")
+                            .on_click(cx.listener(|this, _, _, cx| this.close_sheet(cx))),
+                    )
+                    .child(
+                        glass_pill(theme, "Replace everything")
+                            .id("restore-confirm")
+                            .text_color(colors.red)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.confirm_restore(confirm.clone(), cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// Replaces stops, trips and settings by the backup, with Undo on the pill.
+    fn confirm_restore(&mut self, file: Backup, cx: &mut Context<Self>) {
+        self.sheet.close();
+        if let Some(text) = restore_blocked(self.trip.is_some()) {
+            self.show_pill(text, None, cx);
+            return;
+        }
+        let before = Box::new((
+            std::mem::take(&mut self.saved),
+            std::mem::take(&mut self.history),
+            self.prefs.clone(),
+        ));
+        self.apply_snapshot(file.saved, file.history, file.prefs, cx);
+        self.show_pill(
+            "Backup restored",
+            Some(crate::PillAction::UndoRestore(before)),
+            cx,
+        );
+    }
+
+    /// Makes `saved`, `history` and `prefs` the app's data: saves them and
+    /// applies what the settings drive. Restore and its Undo share this.
+    pub(crate) fn apply_snapshot(
+        &mut self,
+        saved: SavedStops,
+        history: rovsti_geo::History,
+        prefs: rovsti_geo::StopsPrefs,
+        cx: &mut Context<Self>,
+    ) {
+        self.saved = saved;
+        self.history = history;
+        self.prefs = prefs;
+        self.save_stops(cx);
+        self.save_history_in_background(cx);
+        self.save_prefs(cx);
+        self.apply_appearance(cx);
+        self.use_tile_source(self.prefs.tile_source(), cx);
+        let cap = self.prefs.tile_cache_bytes();
+        self.map_tiles.set_cap(cap, cx);
+        self.saved_visible = visible_stops(
+            &self.saved,
+            &self.saved_query,
+            self.saved_sort,
+            self.map.position.map(|(c, _)| c),
+        );
+        self.expanded = None;
+        self.confirm_delete = None;
+        self.last_trip_hidden = None;
+        self.history_open = None;
+        cx.notify();
     }
 
     /// The import sheet: what would be added, then Cancel / Add.
@@ -1116,6 +1296,26 @@ mod tests {
         );
         assert!(export_pill(ExportKind::History, false, true).is_some());
         assert_eq!(export_pill(ExportKind::History, false, false), None);
+    }
+
+    #[test]
+    fn backup_texts() {
+        assert_eq!(
+            export_pill(ExportKind::Backup, true, false).as_deref(),
+            Some("Backup saved")
+        );
+        assert_eq!(restore_blocked(true), Some("Not while a trip is running"));
+        assert_eq!(restore_blocked(false), None);
+        assert_eq!(ImportKind::default(), ImportKind::Places);
+        let file = Backup::new(
+            SavedStops::default(),
+            rovsti_geo::History::default(),
+            rovsti_geo::StopsPrefs::default(),
+            1_793_000_000_000,
+        );
+        let body = restore_sheet_body(&file, 0);
+        assert!(body.starts_with("0 stops, 0 trips and settings from "));
+        assert!(body.ends_with("This replaces your saved stops, trip history and settings."));
     }
 
     #[test]

@@ -82,6 +82,8 @@ pub(crate) enum Page {
 /// What the Undo button on the notice pill does.
 pub(crate) enum PillAction {
     UndoDelete(SavedStop, usize),
+    /// The stops, trips and settings from before a backup restore.
+    UndoRestore(Box<(SavedStops, History, StopsPrefs)>),
     RestoreHistory(History),
     RestoreRecord(rovsti_geo::TripRecord, usize),
     RestoreEnds(picker::Ends),
@@ -206,6 +208,8 @@ pub(crate) struct StopsApp {
     pub(crate) history_view: Vec<usize>,
     /// The export whose save dialog is open, so its answer is worded right.
     pub(crate) pending_export: Option<saved_ui::ExportKind>,
+    /// The import whose file picker is open.
+    pub(crate) pending_import: Option<saved_ui::ImportKind>,
     /// The first tap on "Remove transit data" has armed the second.
     pub(crate) confirm_remove_feed: bool,
     /// The phone's time zone, seconds east of UTC, for the dates in History.
@@ -414,6 +418,7 @@ impl StopsApp {
             history_filter: rovsti_geo::OutcomeFilter::All,
             history_view: Vec::new(),
             pending_export: None,
+            pending_import: None,
             confirm_remove_feed: false,
             tz_offset_s: 0,
             tile_usage: None,
@@ -594,7 +599,10 @@ impl StopsApp {
                     }
                 }
                 Ok(result) if result.op == DocumentOp::ImportMessages => {
-                    self.on_places_picked(&result, cx);
+                    match self.pending_import.take().unwrap_or_default() {
+                        saved_ui::ImportKind::Places => self.on_places_picked(&result, cx),
+                        saved_ui::ImportKind::Backup => self.on_backup_picked(&result, cx),
+                    }
                 }
                 Ok(_) => {}
                 Err(error) => log::warn!("bad document_result: {error}"),
@@ -737,6 +745,10 @@ impl StopsApp {
         }
         match action {
             PillAction::UndoDelete(stop, index) => self.undo_delete(stop, index, cx),
+            PillAction::UndoRestore(before) => {
+                let (saved, history, prefs) = *before;
+                self.apply_snapshot(saved, history, prefs, cx);
+            }
             PillAction::RestoreHistory(history) => self.restore_history(history, cx),
             PillAction::RestoreRecord(record, index) => self.restore_record(record, index, cx),
             PillAction::RestartTrip(a, b) | PillAction::Rearm(a, b) => {

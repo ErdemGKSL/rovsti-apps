@@ -218,6 +218,8 @@ pub enum SheetMode {
     MyLocation(Coord, f64),
     /// The measure tool's Copy / Share / Save actions.
     MeasureActions,
+    /// Confirming the replacement of all data by a backup file.
+    RestoreBackup(Box<rovsti_geo::backup::Backup>),
 }
 
 /// The stop search for one query, and the lines of the stop the sheet shows,
@@ -609,6 +611,9 @@ impl StopsApp {
                 self.my_location_body(theme, at, accuracy, cx),
             ),
             SheetMode::MeasureActions => ("Measurement", self.measure_actions_body(theme, cx)),
+            SheetMode::RestoreBackup(file) => {
+                ("Restore backup", self.restore_body(theme, &file, cx))
+            }
         };
         let body = div()
             .flex()

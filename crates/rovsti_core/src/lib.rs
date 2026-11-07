@@ -25,6 +25,7 @@ pub mod date_detect;
 pub mod dial;
 pub mod forward;
 pub mod gesture;
+pub mod global_search;
 pub mod import_plan;
 pub mod inbox;
 pub mod keypad_layout;
@@ -59,6 +60,7 @@ pub mod text_detect;
 pub mod thread;
 pub mod unread_jump;
 pub mod vcard;
+pub mod voice_player;
 pub mod wire;
 pub mod zoom;
 

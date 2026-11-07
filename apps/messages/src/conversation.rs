@@ -420,6 +420,9 @@ pub struct Conversation {
     hidden: HashSet<String>,
     /// The Delete menu.
     delete_confirm: Option<DeleteTarget>,
+    /// Where the header's bell and more buttons were painted, for their popovers.
+    mute_anchor: rovsti_ui::menu::AnchorSlot,
+    more_anchor: rovsti_ui::menu::AnchorSlot,
     /// Select mode: the ticked message ids.
     select: Option<Selection<String>>,
     /// Select mode's "Delete {n} messages for you?" card is open.
@@ -585,6 +588,8 @@ impl Conversation {
             reminders: HashMap::new(),
             hidden: HashSet::new(),
             delete_confirm: None,
+            mute_anchor: rovsti_ui::menu::AnchorSlot::new(),
+            more_anchor: rovsti_ui::menu::AnchorSlot::new(),
             select: None,
             select_delete: false,
             info_sheet: None,
@@ -672,6 +677,16 @@ impl Conversation {
     }
 
     /// The chat title shown in the header.
+    /// Where the header's bell button was painted.
+    pub fn mute_anchor(&self) -> rovsti_ui::menu::AnchorSlot {
+        self.mute_anchor.clone()
+    }
+
+    /// Where the header's more button was painted.
+    pub fn more_anchor(&self) -> rovsti_ui::menu::AnchorSlot {
+        self.more_anchor.clone()
+    }
+
     pub fn title(&self) -> SharedString {
         self.title.clone()
     }
@@ -4973,10 +4988,12 @@ impl Render for Conversation {
                 .into_any_element()
         });
         let more = glass_icon_button(theme, Icon::LucideEllipsis, 0.0, false)
+            .child(self.more_anchor.track())
             .id("conv-more")
             .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::Menu)))
             .into_any_element();
         let mute = glass_icon_button(theme, Icon::LucideBellOff, 0.0, self.muted)
+            .child(self.mute_anchor.track())
             .id("conv-mute")
             .on_click(cx.listener(|_, _, _, cx| cx.emit(ConversationEvent::ToggleMute)))
             .into_any_element();

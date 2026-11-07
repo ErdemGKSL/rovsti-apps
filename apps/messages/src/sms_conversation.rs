@@ -274,6 +274,9 @@ pub struct SmsConversation {
     divider: Option<(SmsKey, u32)>,
     /// The message waiting at the "Delete this message?" sheet.
     delete_confirm: Option<SmsKey>,
+    /// Where the header's bell and more buttons were painted, for their popovers.
+    mute_anchor: rovsti_ui::menu::AnchorSlot,
+    more_anchor: rovsti_ui::menu::AnchorSlot,
     /// Confirmed deletes in their Undo window (hidden from the rows).
     pending: PendingDeletes<SmsKey>,
     /// Deletes handed to the backend, still hidden until it answers.
@@ -373,6 +376,8 @@ impl SmsConversation {
             opening_unread: (unread > 0).then_some(unread),
             divider: None,
             delete_confirm: None,
+            mute_anchor: rovsti_ui::menu::AnchorSlot::new(),
+            more_anchor: rovsti_ui::menu::AnchorSlot::new(),
             pending: PendingDeletes::default(),
             deleting: Vec::new(),
             ticking: false,
@@ -452,6 +457,16 @@ impl SmsConversation {
             self.switch = switch;
             cx.notify();
         }
+    }
+
+    /// Where the header's bell button was painted.
+    pub fn mute_anchor(&self) -> rovsti_ui::menu::AnchorSlot {
+        self.mute_anchor.clone()
+    }
+
+    /// Where the header's more button was painted.
+    pub fn more_anchor(&self) -> rovsti_ui::menu::AnchorSlot {
+        self.more_anchor.clone()
     }
 
     pub fn title(&self) -> SharedString {
@@ -3333,10 +3348,12 @@ impl Render for SmsConversation {
                 .into_any_element()
         });
         let more = glass_icon_button(theme, Icon::LucideEllipsis, 0.0, false)
+            .child(self.more_anchor.track())
             .id("sms-more")
             .on_click(cx.listener(|_, _, _, cx| cx.emit(SmsConversationEvent::Menu)))
             .into_any_element();
         let mute = glass_icon_button(theme, Icon::LucideBellOff, 0.0, self.muted)
+            .child(self.mute_anchor.track())
             .id("sms-mute")
             .on_click(cx.listener(|_, _, _, cx| cx.emit(SmsConversationEvent::ToggleMute)))
             .into_any_element();

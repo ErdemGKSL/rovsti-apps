@@ -29,6 +29,7 @@ mod notifications;
 mod photos;
 mod prefs;
 mod remind_ui;
+mod row_menu;
 mod schedule_ui;
 mod select_ui;
 mod settings_ui;
@@ -75,6 +76,7 @@ use rovsti_ui::{
     field::{TextField, field_box},
     glass::{GlassSpec, glass},
     layout::{self, content_bottom_inset, space},
+    menu::{AnchorSlot, Menu, MenuState},
     notice_pill::{NoticePill, PillEvent},
     page::{HeaderAction, PageHeader},
     row::{BadgeTone, ListRow},
@@ -125,12 +127,8 @@ struct RowMenu {
     /// The chat carries the local mute tag (`wa:<jid>`).
     local_muted: bool,
     unread: u32,
-    /// The mute lengths show instead of the main actions.
-    mute_choices: bool,
     /// The row's SMS thread, when it has one.
     sms: Option<SmsRowMenu>,
-    /// "Delete conversation" asked: the confirmation shows instead.
-    delete_confirm: bool,
     /// The phone number of a 1:1 WhatsApp chat page's menu (Call, Add to contacts).
     page_number: Option<String>,
     /// Android contact id of `page_number`, when it is in the address book.
@@ -184,28 +182,34 @@ fn is_number_sender(sender: Option<&str>) -> bool {
     })
 }
 
-/// The SMS actions a row menu lists.
-fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
-    let mut actions = sms_actions::actions(&sms_actions::SmsActionContext {
-        unread: sms.unread,
-        muted: sms.muted,
-        in_spam: sms.in_spam,
-        single_sender: sms.sender.is_some(),
-        known_contact: sms.contact_id.is_some(),
-        sender_is_number: sms.sender_is_number,
-        can_be_spam: sms.can_be_spam,
-        blocked: sms.blocked,
-        on_page: sms.on_page,
-        pinned: sms.pinned,
-        archived: sms.archived,
-        marked_unread: sms.marked_unread,
-    });
-    // A new conversation has no provider thread to delete or mark yet.
-    if sms.thread_id < 0 {
-        use sms_actions::SmsAction as A;
-        actions.retain(|a| !matches!(a, A::Delete | A::Archive | A::MarkUnread | A::Pin));
+impl SmsRowMenu {
+    /// What the pure menu model needs to know about the thread.
+    fn flags(&self) -> row_menu::SmsFlags {
+        row_menu::SmsFlags {
+            ctx: sms_actions::SmsActionContext {
+                unread: self.unread,
+                muted: self.muted,
+                in_spam: self.in_spam,
+                single_sender: self.sender.is_some(),
+                known_contact: self.contact_id.is_some(),
+                sender_is_number: self.sender_is_number,
+                can_be_spam: self.can_be_spam,
+                blocked: self.blocked,
+                on_page: self.on_page,
+                pinned: self.pinned,
+                archived: self.archived,
+                marked_unread: self.marked_unread,
+            },
+            // A new conversation has no provider thread to delete or mark yet.
+            new_thread: self.thread_id < 0,
+        }
     }
-    actions
+}
+
+/// The SMS actions a row menu lists.
+#[cfg(test)]
+fn row_sms_actions(sms: &SmsRowMenu) -> Vec<sms_actions::SmsAction> {
+    row_menu::sms_actions_of(Some(sms.flags()))
 }
 
 /// What the pill's trailing "Undo" does.
@@ -348,6 +352,10 @@ struct MessagesApp {
     scheduled_entries: Vec<schedule_ui::ScheduledEntry>,
     /// The long-press menu of a WhatsApp row.
     row_menu: Option<RowMenu>,
+    /// Open state of the row menu popover.
+    row_menu_ui: MenuState,
+    /// Where each inbox row was last painted (by select key), for its menu.
+    row_anchors: std::cell::RefCell<HashMap<String, AnchorSlot>>,
     /// Inbox select mode: the ticked rows, keyed by their newest thread's tag.
     inbox_select: Option<Selection<String>>,
     /// The mute lengths or the delete confirmation of the bulk bar.
@@ -358,6 +366,8 @@ struct MessagesApp {
     channel_pick: Option<Recipient>,
     /// The header bell's "Mute for" menu of the open chat.
     mute_menu: Option<ThreadId>,
+    /// Open state of the bell's popover.
+    mute_ui: MenuState,
     /// The "Remind me" sheet over the open chat.
     remind: Option<remind_ui::RemindSheet>,
     /// The "Forward to" chooser.
@@ -644,11 +654,14 @@ impl MessagesApp {
             show_scheduled: false,
             scheduled_entries: Vec::new(),
             row_menu: None,
+            row_menu_ui: MenuState::new(),
+            row_anchors: std::cell::RefCell::new(HashMap::new()),
             inbox_select: None,
             bulk_sheet: None,
             bulk_delete: None,
             channel_pick: None,
             mute_menu: None,
+            mute_ui: MenuState::new(),
             remind: None,
             forward: None,
             wa_rev: 0,
@@ -1608,6 +1621,7 @@ impl MessagesApp {
         jid: Option<String>,
         sms: Option<(i64, Option<String>)>,
         title: SharedString,
+        anchor: &AnchorSlot,
         cx: &mut Context<Self>,
     ) {
         let local_muted = jid.as_ref().is_some_and(|jid| {
@@ -1671,15 +1685,37 @@ impl MessagesApp {
             meta,
             local_muted,
             unread,
-            mute_choices: false,
             sms,
-            delete_confirm: false,
             page_number: None,
             contact_id: None,
             send_later: false,
             select_key: None,
         });
+        self.show_row_menu(anchor);
         cx.notify();
+    }
+
+    /// Opens the row menu popover hanging off `anchor`. Without a painted
+    /// anchor it hangs from the top right corner.
+    fn show_row_menu(&mut self, anchor: &AnchorSlot) {
+        let bounds = anchor.get().unwrap_or_else(|| {
+            Bounds::new(
+                gpui::point(px(10_000.0), px(96.0)),
+                gpui::size(px(0.0), px(0.0)),
+            )
+        });
+        self.row_menu_ui.open_at(bounds);
+    }
+
+    /// The painted bounds of the inbox row of WhatsApp chat `jid`, for a menu.
+    #[cfg(all(test, feature = "shots"))]
+    pub(crate) fn row_anchor_of_chat(&self, jid: &str) -> AnchorSlot {
+        self.view
+            .all_rows()
+            .find(|row| row.wa_chat.as_deref() == Some(jid))
+            .and_then(inbox::select_key)
+            .and_then(|key| self.row_anchors.borrow().get(&key).cloned())
+            .unwrap_or_default()
     }
 
     /// Mutes an SMS thread for `choice` (it ends by itself) and offers Undo.
@@ -1713,52 +1749,51 @@ impl MessagesApp {
         cx.notify();
     }
 
-    /// The header bell's "Mute for" menu over the open chat.
-    fn mute_menu_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// The header bell's "Mute for" popover over the open chat.
+    fn mute_menu_overlay(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let thread = self.mute_menu.clone()?;
-        let colors = theme::colors(theme);
-        let mut items: Vec<AnyElement> = MuteFor::ALL
-            .into_iter()
-            .enumerate()
-            .map(|(index, choice)| {
-                let thread = thread.clone();
-                menu_item(
-                    theme,
-                    ("mute-for", index),
-                    Icon::LucideBellOff,
-                    choice.label().into(),
-                    colors.label,
-                )
-                .on_click(
-                    cx.listener(move |this, _, _, cx| this.mute_for(thread.clone(), choice, cx)),
-                )
-                .into_any_element()
-            })
-            .collect();
-        items.push(
-            menu_item(
-                theme,
-                "mute-for-cancel",
-                Icon::LucideX,
-                "Cancel".into(),
-                colors.label,
-            )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.mute_menu = None;
-                cx.notify();
-            }))
-            .into_any_element(),
-        );
-        Some(menu_card(
+        let entity = cx.entity();
+        let nav = cx.entity();
+        Menu::new("Mute for", row_menu::mute_menu_items()).render(
+            &self.mute_ui,
             theme,
-            "mute-menu",
-            "Mute for".into(),
-            items,
-            cx.listener(|this, _, _, cx| {
-                this.mute_menu = None;
-                cx.notify();
-            }),
-        ))
+            window,
+            move |key, _, cx| {
+                if let Some(choice) = row_menu::mute_for_key(key) {
+                    let thread = thread.clone();
+                    entity.update(cx, |this, cx| this.mute_for(thread, choice, cx));
+                }
+            },
+            move |request, _, cx| {
+                nav.update(cx, |this, cx| {
+                    this.mute_ui.apply(request);
+                    cx.notify();
+                });
+            },
+        )
+    }
+
+    /// Opens the bell popover of the open chat's `thread`.
+    fn open_mute_menu(&mut self, thread: ThreadId, cx: &mut Context<Self>) {
+        let anchor = match &self.open {
+            Open::WhatsApp(_, c) => c.read(cx).mute_anchor(),
+            Open::Sms(c) => c.read(cx).mute_anchor(),
+            _ => AnchorSlot::new(),
+        };
+        self.mute_menu = Some(thread);
+        let bounds = anchor.get().unwrap_or_else(|| {
+            Bounds::new(
+                gpui::point(px(10_000.0), px(96.0)),
+                gpui::size(px(0.0), px(0.0)),
+            )
+        });
+        self.mute_ui.open_at(bounds);
+        cx.notify();
     }
 
     /// Mutes or unmutes an SMS thread and offers Undo.
@@ -1844,8 +1879,9 @@ impl MessagesApp {
                         PillAction::RequestSmsRole,
                         cx,
                     );
-                } else if let Some(menu) = &mut self.row_menu {
-                    menu.delete_confirm = true;
+                } else {
+                    // The popover's Confirm page already asked.
+                    self.confirm_delete_thread(cx);
                 }
             }
             SmsAction::MarkRead => {
@@ -1895,12 +1931,8 @@ impl MessagesApp {
                 }
                 self.show_pill(rovsti_core::thread_marks::unread_notice());
             }
-            SmsAction::Mute => {
-                // The lengths show in the same menu.
-                if let Some(menu) = &mut self.row_menu {
-                    menu.mute_choices = true;
-                }
-            }
+            // The lengths are the popover's "Mute for" page; `mute_for_key` acts.
+            SmsAction::Mute => {}
             SmsAction::Unmute => {
                 self.row_menu = None;
                 self.set_sms_mute(id, false, cx);
@@ -1968,8 +2000,11 @@ impl MessagesApp {
             return;
         };
         let jid = jid.clone();
-        let title = conversation.read(cx).title();
-        self.open_row_menu(Some(jid.clone()), None, title, cx);
+        let (title, anchor) = {
+            let c = conversation.read(cx);
+            (c.title(), c.more_anchor())
+        };
+        self.open_row_menu(Some(jid.clone()), None, title, &anchor, cx);
         let number = wa_page_number(&jid);
         let contact_id = number.as_deref().and_then(|n| {
             self.backend
@@ -2130,12 +2165,12 @@ impl MessagesApp {
         let Open::Sms(conversation) = &self.open else {
             return;
         };
-        let (thread_id, title, recipients) = {
+        let (thread_id, title, recipients, anchor) = {
             let c = conversation.read(cx);
             let ThreadId::Sms(id) = c.thread() else {
                 return;
             };
-            (id, c.title(), c.recipients().to_vec())
+            (id, c.title(), c.recipients().to_vec(), c.more_anchor())
         };
         let sender = sms_actions::sender_of(&recipients).map(str::to_owned);
         let in_spam = self.view.in_spam(&ThreadId::Sms(thread_id));
@@ -2163,7 +2198,6 @@ impl MessagesApp {
             meta: ChatMeta::default(),
             local_muted: false,
             unread: 0,
-            mute_choices: false,
             sms: Some(SmsRowMenu {
                 thread_id,
                 sender,
@@ -2179,12 +2213,12 @@ impl MessagesApp {
                 archived,
                 marked_unread,
             }),
-            delete_confirm: false,
             page_number: None,
             contact_id: None,
             send_later: true,
             select_key: None,
         });
+        self.show_row_menu(&anchor);
         cx.notify();
     }
 
@@ -3537,363 +3571,201 @@ impl MessagesApp {
         ))
     }
 
-    /// The row menu over the inbox: a dimmed screen and a glass card of actions.
-    fn row_menu_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let menu = self.row_menu.as_ref()?;
-        let colors = theme::colors(theme);
-        let mut items: Vec<AnyElement> = Vec::new();
-        if menu.delete_confirm {
-            let prompt = sms_actions::delete_prompt(&menu.title);
-            items.push(
-                div()
-                    .px(px(16.0))
-                    .py(px(8.0))
-                    .text_size(typography::BODY.size)
-                    .text_color(colors.label)
-                    .child(prompt)
-                    .into_any_element(),
-            );
-            items.push(
-                menu_item(
-                    theme,
-                    "menu-delete-confirm",
-                    Icon::LucideTrash2,
-                    "Delete".into(),
-                    colors.red,
-                )
-                .on_click(cx.listener(|this, _, _, cx| this.confirm_delete_thread(cx)))
-                .into_any_element(),
-            );
-            items.push(
-                menu_item(
-                    theme,
-                    "menu-delete-cancel",
-                    Icon::LucideX,
-                    "Cancel".into(),
-                    colors.label,
-                )
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if let Some(menu) = &mut this.row_menu {
-                        menu.delete_confirm = false;
-                    }
-                    cx.notify();
-                }))
-                .into_any_element(),
-            );
-        } else if menu.mute_choices {
-            for (index, choice) in MuteFor::ALL.into_iter().enumerate() {
-                let jid = menu.jid.clone();
-                let sms_id = menu.sms.as_ref().map(|sms| sms.thread_id);
-                items.push(
-                    menu_item(
-                        theme,
-                        ("menu-mute-for", index),
-                        Icon::LucideBellOff,
-                        choice.label().into(),
-                        colors.label,
-                    )
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if let Some(jid) = &jid {
-                            let kind = ChatActionKind::Mute {
-                                until_ms: choice.until_ms(now_ms()),
-                            };
-                            this.chat_action(jid, kind, false, cx);
-                        } else if let Some(id) = sms_id {
-                            this.row_menu = None;
-                            this.mute_sms_for(id, choice, cx);
-                        }
-                    }))
-                    .into_any_element(),
-                );
-            }
-        } else {
-            if let Some(key) = menu.select_key.clone() {
-                items.push(
-                    menu_item(
-                        theme,
-                        "menu-select",
-                        Icon::LucideCircleCheck,
-                        "Select".into(),
-                        colors.label,
-                    )
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.begin_inbox_select(key.clone(), cx)),
-                    )
-                    .into_any_element(),
-                );
-            }
-            if menu.send_later {
-                items.push(
-                    menu_item(
-                        theme,
-                        "menu-find",
-                        Icon::LucideSearch,
-                        "Search in chat".into(),
-                        colors.label,
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| this.menu_find(window, cx)))
-                    .into_any_element(),
-                );
-                items.push(
-                    menu_item(
-                        theme,
-                        "menu-date",
-                        Icon::LucideCalendarSearch,
-                        "Jump to date".into(),
-                        colors.label,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.menu_date(cx)))
-                    .into_any_element(),
-                );
-                items.push(
-                    menu_item(
-                        theme,
-                        "menu-gallery",
-                        Icon::LucideImage,
-                        "Media, links and docs".into(),
-                        colors.label,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.menu_gallery(cx)))
-                    .into_any_element(),
-                );
-                if menu.jid.is_some() {
-                    items.push(
-                        menu_item(
-                            theme,
-                            "menu-starred",
-                            Icon::LucideStar,
-                            "Starred messages".into(),
-                            colors.label,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| this.menu_starred(cx)))
-                        .into_any_element(),
-                    );
-                } else if let Some(sms) = &menu.sms {
+    /// What the row menu model is built from: the WhatsApp and SMS flags of the
+    /// menu's threads, and the extras of an inbox row or an open page.
+    fn row_menu_inputs(
+        &self,
+        menu: &RowMenu,
+        cx: &App,
+    ) -> (
+        Option<row_menu::WaFlags>,
+        Option<row_menu::SmsFlags>,
+        row_menu::Extras,
+    ) {
+        let wa = menu.jid.as_ref().map(|_| row_menu::WaFlags {
+            pinned: menu.meta.pinned,
+            archived: menu.meta.archived,
+            muted: inbox::wa_muted(Some(&menu.meta), menu.local_muted, now_ms()),
+            unread: menu.unread > 0 || menu.meta.marked_unread,
+        });
+        let sms = menu.sms.as_ref().map(SmsRowMenu::flags);
+        let page = menu.send_later.then(|| {
+            let starred = match (&menu.jid, &menu.sms) {
+                (None, Some(sms)) => {
                     let count = self
                         .backend
                         .read(cx)
                         .prefs()
                         .sms_stars
                         .count_for(&sms.thread_id.to_string());
-                    let label = if count > 0 {
+                    if count > 0 {
                         format!("Starred messages ({count})")
                     } else {
                         "Starred messages".to_owned()
-                    };
-                    items.push(
-                        menu_item(
-                            theme,
-                            "menu-starred",
-                            Icon::LucideStar,
-                            label.into(),
-                            colors.label,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| this.menu_starred(cx)))
-                        .into_any_element(),
-                    );
+                    }
                 }
-                items.push(
-                    menu_item(
-                        theme,
-                        "menu-send-later",
-                        Icon::LucideAlarmClock,
-                        "Send later".into(),
-                        colors.label,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.menu_send_later(cx)))
-                    .into_any_element(),
-                );
-                items.push(
-                    menu_item(
-                        theme,
-                        "menu-export",
-                        Icon::LucideDownload,
-                        "Export chat".into(),
-                        colors.label,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.menu_export(false, cx)))
-                    .into_any_element(),
-                );
-                items.push(
-                    menu_item(
-                        theme,
-                        "menu-share-text",
-                        Icon::LucideShare,
-                        "Share as text".into(),
-                        colors.label,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.menu_export(true, cx)))
-                    .into_any_element(),
-                );
+                _ => "Starred messages".to_owned(),
+            };
+            row_menu::PageExtras {
+                starred,
+                wa_number: menu.page_number.is_some(),
+                known_contact: menu.contact_id.is_some(),
             }
-            if menu.jid.is_some() {
-                self.wa_menu_items(menu, theme, &mut items, cx);
-            }
-            if let Some(sms) = &menu.sms {
-                for sms_action in row_sms_actions(sms) {
-                    let danger = sms_actions::is_danger(sms_action);
-                    let icon = match sms_action {
-                        sms_actions::SmsAction::MarkRead => Icon::LucideMailOpen,
-                        sms_actions::SmsAction::Mute => Icon::LucideBellOff,
-                        sms_actions::SmsAction::Unmute => Icon::LucideBell,
-                        sms_actions::SmsAction::Call => Icon::LucidePhone,
-                        sms_actions::SmsAction::AddContact => Icon::LucideUserPlus,
-                        sms_actions::SmsAction::Block => Icon::LucideBan,
-                        sms_actions::SmsAction::Unblock => Icon::LucideCircleCheck,
-                        sms_actions::SmsAction::OpenContact => Icon::LucideUser,
-                        sms_actions::SmsAction::MoveToSpam => Icon::LucideShieldAlert,
-                        sms_actions::SmsAction::Pin => Icon::LucidePin,
-                        sms_actions::SmsAction::Unpin => Icon::LucidePinOff,
-                        sms_actions::SmsAction::Archive => Icon::LucideArchive,
-                        sms_actions::SmsAction::Unarchive => Icon::LucideArchiveRestore,
-                        sms_actions::SmsAction::MarkUnread => Icon::LucideMail,
-                        _ => Icon::LucideTrash2,
-                    };
-                    items.push(
-                        menu_item(
-                            theme,
-                            format!("menu-sms-{sms_action:?}"),
-                            icon,
-                            sms_actions::label(sms_action).into(),
-                            if danger { colors.red } else { colors.label },
-                        )
-                        .on_click(
-                            cx.listener(move |this, _, _, cx| this.sms_row_action(sms_action, cx)),
-                        )
-                        .into_any_element(),
-                    );
-                }
-            }
-        }
-        Some(menu_card(
-            theme,
-            "row-menu",
-            menu.title.clone(),
-            items,
-            cx.listener(|this, _, _, cx| {
-                this.row_menu = None;
-                cx.notify();
-            }),
-        ))
+        });
+        let extras = row_menu::Extras {
+            select: menu.select_key.is_some(),
+            page,
+        };
+        (wa, sms, extras)
     }
 
-    /// The WhatsApp items of the row menu (pin, archive, mute, read).
-    fn wa_menu_items(
+    /// The row menu: an anchored popover with the row's actions, a "Mute for"
+    /// page and a Delete confirmation.
+    fn row_menu_overlay(
         &self,
-        menu: &RowMenu,
         theme: Theme,
-        items: &mut Vec<AnyElement>,
+        window: &Window,
         cx: &mut Context<Self>,
-    ) {
-        let colors = theme::colors(theme);
-        let now = now_ms();
-        let jid = menu.jid.clone().unwrap_or_default();
-        let action = |id: &'static str, icon: Icon, label: String, kind: ChatActionKind| {
-            let jid = jid.clone();
-            menu_item(theme, id, icon, label.into(), colors.label).on_click(
-                cx.listener(move |this, _, _, cx| this.chat_action(&jid, kind.clone(), false, cx)),
-            )
-        };
-        {
-            let meta = &menu.meta;
-            items.push(
-                action(
-                    "menu-pin",
-                    Icon::LucidePin,
-                    if meta.pinned { "Unpin" } else { "Pin" }.into(),
-                    ChatActionKind::Pin {
-                        pinned: !meta.pinned,
-                    },
-                )
-                .into_any_element(),
-            );
-            items.push(
-                action(
-                    "menu-archive",
-                    Icon::LucideArchive,
-                    if meta.archived {
-                        "Unarchive"
-                    } else {
-                        "Archive"
-                    }
-                    .into(),
-                    ChatActionKind::Archive {
-                        archived: !meta.archived,
-                    },
-                )
-                .into_any_element(),
-            );
-            if inbox::wa_muted(Some(meta), menu.local_muted, now) {
-                items.push(
-                    action(
-                        "menu-unmute",
-                        Icon::LucideBell,
-                        "Unmute".into(),
-                        ChatActionKind::Unmute,
-                    )
-                    .into_any_element(),
-                );
-            } else {
-                items.push(
-                    menu_item(
-                        theme,
-                        "menu-mute",
-                        Icon::LucideBellOff,
-                        "Mute…".into(),
-                        colors.label,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(menu) = &mut this.row_menu {
-                            menu.mute_choices = true;
-                        }
-                        cx.notify();
-                    }))
-                    .into_any_element(),
-                );
-            }
-            let unread = menu.unread > 0 || meta.marked_unread;
-            items.push(
-                action(
-                    "menu-unread",
-                    Icon::LucideMailOpen,
-                    if unread {
-                        "Mark as read"
-                    } else {
-                        "Mark as unread"
-                    }
-                    .into(),
-                    ChatActionKind::MarkRead { read: unread },
-                )
-                .into_any_element(),
-            );
-            if menu.page_number.is_some() {
-                items.push(
-                    menu_item(
-                        theme,
-                        "menu-wa-call",
-                        Icon::LucidePhone,
-                        "Call".into(),
-                        colors.label,
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.wa_page_contact_action(sms_actions::SmsAction::Call, cx);
-                    }))
-                    .into_any_element(),
-                );
-                let (icon, label) = if menu.contact_id.is_some() {
-                    (Icon::LucideUser, "Open contact")
-                } else {
-                    (Icon::LucideUserPlus, "Add to contacts")
-                };
-                items.push(
-                    menu_item(theme, "menu-wa-contact", icon, label.into(), colors.label)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.wa_page_contact_action(sms_actions::SmsAction::AddContact, cx);
-                        }))
-                        .into_any_element(),
-                );
-            }
+    ) -> Option<AnyElement> {
+        let menu = self.row_menu.as_ref()?;
+        let (wa, sms, extras) = self.row_menu_inputs(menu, cx);
+        let model = row_menu::row_menu_items(wa, sms, &extras);
+        let mut popover =
+            Menu::new("Conversation menu", model).submenu("mute", row_menu::mute_menu_items());
+        if sms.is_some() {
+            popover = popover.confirm("delete", row_menu::delete_prompt(&menu.title), "Delete");
         }
+        let select = cx.entity();
+        let nav = cx.entity();
+        popover.render(
+            &self.row_menu_ui,
+            theme,
+            window,
+            move |key, window, cx| {
+                select.update(cx, |this, cx| this.row_menu_select(key, window, cx));
+            },
+            move |request, _, cx| {
+                nav.update(cx, |this, cx| {
+                    this.row_menu_ui.apply(request);
+                    cx.notify();
+                });
+            },
+        )
+    }
+
+    /// An item of the row menu was tapped (or a Delete confirmed). Each action
+    /// applies to every thread the row holds.
+    fn row_menu_select(&mut self, key: &'static str, window: &mut Window, cx: &mut Context<Self>) {
+        use sms_actions::SmsAction;
+        let Some(menu) = self.row_menu.clone() else {
+            return;
+        };
+        let (wa, sms, _) = self.row_menu_inputs(&menu, cx);
+        self.row_menu_ui.close();
+        let jid = menu.jid.clone();
+        let has_sms = |actions: &[SmsAction]| row_menu::sms_offers(sms, actions);
+        if let Some(choice) = row_menu::mute_for_key(key) {
+            if has_sms(&[SmsAction::Mute, SmsAction::Unmute])
+                && let Some(sms) = &menu.sms
+            {
+                self.mute_sms_for(sms.thread_id, choice, cx);
+            }
+            if let Some(jid) = &jid {
+                let kind = ChatActionKind::Mute {
+                    until_ms: choice.until_ms(now_ms()),
+                };
+                self.chat_action(jid, kind, false, cx);
+            }
+            cx.notify();
+            return;
+        }
+        match key {
+            "select" => {
+                if let Some(select) = menu.select_key.clone() {
+                    self.begin_inbox_select(select, cx);
+                }
+            }
+            "find" => self.menu_find(window, cx),
+            "date" => self.menu_date(cx),
+            "gallery" => self.menu_gallery(cx),
+            "starred" => self.menu_starred(cx),
+            "send_later" => self.menu_send_later(cx),
+            "export" => self.menu_export(false, cx),
+            "share" => self.menu_export(true, cx),
+            "pin" => {
+                let pin = !row_menu::pinned_all(wa, sms);
+                if has_sms(&[SmsAction::Pin, SmsAction::Unpin]) {
+                    let action = if pin {
+                        SmsAction::Pin
+                    } else {
+                        SmsAction::Unpin
+                    };
+                    self.sms_row_action(action, cx);
+                }
+                if let Some(jid) = &jid {
+                    self.chat_action(jid, ChatActionKind::Pin { pinned: pin }, false, cx);
+                }
+            }
+            "archive" => {
+                let archive = !row_menu::archived_all(wa, sms);
+                if has_sms(&[SmsAction::Archive, SmsAction::Unarchive]) {
+                    let action = if archive {
+                        SmsAction::Archive
+                    } else {
+                        SmsAction::Unarchive
+                    };
+                    self.sms_row_action(action, cx);
+                }
+                if let Some(jid) = &jid {
+                    let kind = ChatActionKind::Archive { archived: archive };
+                    self.chat_action(jid, kind, false, cx);
+                }
+            }
+            "read" => {
+                let unread = row_menu::unread_any(wa, sms);
+                if has_sms(&[SmsAction::MarkRead, SmsAction::MarkUnread]) {
+                    let action = if unread {
+                        SmsAction::MarkRead
+                    } else {
+                        SmsAction::MarkUnread
+                    };
+                    self.sms_row_action(action, cx);
+                }
+                if let Some(jid) = &jid {
+                    self.chat_action(jid, ChatActionKind::MarkRead { read: unread }, false, cx);
+                }
+            }
+            "unmute" => {
+                if has_sms(&[SmsAction::Unmute]) {
+                    self.sms_row_action(SmsAction::Unmute, cx);
+                }
+                if let Some(jid) = &jid {
+                    self.chat_action(jid, ChatActionKind::Unmute, false, cx);
+                }
+            }
+            "not_spam" => self.sms_row_action(SmsAction::NotSpam, cx),
+            "spam" => self.sms_row_action(SmsAction::MoveToSpam, cx),
+            "block" => self.sms_row_action(SmsAction::Block, cx),
+            "unblock" => self.sms_row_action(SmsAction::Unblock, cx),
+            "call" if menu.page_number.is_some() => {
+                self.wa_page_contact_action(SmsAction::Call, cx);
+            }
+            "call" => self.sms_row_action(SmsAction::Call, cx),
+            "contact" if menu.page_number.is_some() => {
+                self.wa_page_contact_action(SmsAction::AddContact, cx);
+            }
+            "contact" => {
+                let action = if menu.sms.as_ref().is_some_and(|s| s.contact_id.is_some()) {
+                    SmsAction::OpenContact
+                } else {
+                    SmsAction::AddContact
+                };
+                self.sms_row_action(action, cx);
+            }
+            "delete" => self.sms_row_action(SmsAction::Delete, cx),
+            _ => {}
+        }
+        cx.notify();
     }
 
     /// Whether System Back has a layer to close: the "Send later" sheet, an open chat or the new
@@ -3930,7 +3802,7 @@ impl MessagesApp {
         } else if self.back_remind(cx) {
             // The Remind me sheet stepped back or closed.
         } else if self.mute_menu.is_some() {
-            self.mute_menu = None;
+            self.mute_ui.back_or_close();
             cx.notify();
         } else if self.bulk_sheet.is_some() {
             self.bulk_sheet = None;
@@ -3938,15 +3810,9 @@ impl MessagesApp {
         } else if self.channel_pick.is_some() {
             self.channel_pick = None;
             cx.notify();
-        } else if let Some(menu) = &mut self.row_menu {
-            // The mute lengths step back to the menu, the menu closes.
-            if menu.delete_confirm {
-                menu.delete_confirm = false;
-            } else if menu.mute_choices {
-                menu.mute_choices = false;
-            } else {
-                self.row_menu = None;
-            }
+        } else if self.row_menu.is_some() {
+            // A page of the popover steps back, then the popover closes.
+            self.row_menu_ui.back_or_close();
             cx.notify();
         } else if self.inbox_select.is_some() {
             // Select mode ends before anything else steps back.
@@ -4327,7 +4193,7 @@ impl MessagesApp {
             let meta = self.wa_info.get(jid).map(|info| info.meta.clone());
             match inbox::wa_bell(meta.as_ref(), local, now_ms()) {
                 inbox::BellToggle::Mute => {
-                    self.mute_menu = Some(thread.clone());
+                    self.open_mute_menu(thread.clone(), cx);
                 }
                 inbox::BellToggle::Unmute { gateway, local } => {
                     if gateway {
@@ -4352,8 +4218,7 @@ impl MessagesApp {
         if self.backend.read(cx).prefs().is_muted(&tag) {
             self.set_sms_mute(id, false, cx);
         } else {
-            self.mute_menu = Some(ThreadId::Sms(id));
-            cx.notify();
+            self.open_mute_menu(ThreadId::Sms(id), cx);
         }
     }
 
@@ -4693,6 +4558,15 @@ impl MessagesApp {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let reduced = window.prefers_reduced_motion();
+        self.row_menu_ui.set_reduced(reduced);
+        self.mute_ui.set_reduced(reduced);
+        // A menu that finished closing leaves its data behind.
+        if self.row_menu.is_some() && !self.row_menu_ui.is_visible() {
+            self.row_menu = None;
+        }
+        if self.mute_menu.is_some() && !self.mute_ui.is_visible() {
+            self.mute_menu = None;
+        }
         self.schedule.sheet.set_reduced(reduced);
         self.schedule.sheet.set_viewport(window.viewport_size());
         self.pill.set_reduced(reduced);
@@ -4724,10 +4598,10 @@ impl MessagesApp {
         ));
         out.extend(self.schedule.render(theme, window, now_ms(), offset, cx));
         if matches!(self.open, Open::None | Open::Sms(_)) {
-            out.extend(self.row_menu_overlay(theme, cx));
+            out.extend(self.row_menu_overlay(theme, window, cx));
         }
         out.extend(self.channel_pick_overlay(theme, cx));
-        out.extend(self.mute_menu_overlay(theme, cx));
+        out.extend(self.mute_menu_overlay(theme, window, cx));
         out.extend(self.bulk_sheet_overlay(theme, cx));
         out.extend(self.remind_overlay(theme, cx));
         out
@@ -4883,6 +4757,15 @@ impl MessagesApp {
             })) as Box<dyn Fn(&gpui::ClickEvent, &mut Window, &mut App)>
         });
         let photo = found.map(|(photo, _)| photo);
+        let anchor = match &select_key {
+            Some(key) => self
+                .row_anchors
+                .borrow_mut()
+                .entry(key.clone())
+                .or_default()
+                .clone(),
+            None => AnchorSlot::new(),
+        };
         let has_menu = row.wa_chat.is_some() || row.sms_thread.is_some();
         let menu = has_menu.then(|| {
             let title = row.title.clone();
@@ -4891,23 +4774,33 @@ impl MessagesApp {
                 .sms_thread
                 .map(|id| (id, row.sms_sender.as_ref().map(|s| s.to_string())));
             let key = select_key.clone();
-            Box::new(cx.listener(move |this, _, _, cx| {
-                if this.inbox_select.is_some() {
-                    if let Some(key) = key.clone() {
-                        this.toggle_inbox_row(key, cx);
+            let slot = anchor.clone();
+            Box::new(
+                cx.listener(move |this, event: &gpui::LongPressEvent, _, cx| {
+                    if this.inbox_select.is_some() {
+                        if let Some(key) = key.clone() {
+                            this.toggle_inbox_row(key, cx);
+                        }
+                        return;
                     }
-                    return;
-                }
-                this.open_row_menu(
-                    jid.as_ref().map(|j| j.to_string()),
-                    sms.clone(),
-                    title.clone(),
-                    cx,
-                );
-                if let Some(menu) = &mut this.row_menu {
-                    menu.select_key = key.clone();
-                }
-            })) as Box<dyn Fn(&gpui::LongPressEvent, &mut Window, &mut App)>
+                    // The row's bounds; the press point when it was never painted.
+                    let anchor = if slot.get().is_some() {
+                        slot.clone()
+                    } else {
+                        AnchorSlot::point(event.position)
+                    };
+                    this.open_row_menu(
+                        jid.as_ref().map(|j| j.to_string()),
+                        sms.clone(),
+                        title.clone(),
+                        &anchor,
+                        cx,
+                    );
+                    if let Some(menu) = &mut this.row_menu {
+                        menu.select_key = key.clone();
+                    }
+                }),
+            ) as Box<dyn Fn(&gpui::LongPressEvent, &mut Window, &mut App)>
         });
         let open_title = title.clone();
         inbox::row_element(
@@ -4934,6 +4827,7 @@ impl MessagesApp {
                 open_avatar,
                 menu,
                 select,
+                anchor: Some(anchor),
             },
         )
     }
@@ -5729,6 +5623,10 @@ impl Render for MessagesApp {
                 | self.schedule.sheet.tick(dt)
                 | self.schedule.sheet.tick_real(real)
                 | self.pill.tick(dt)
+                | self.row_menu_ui.tick(dt)
+                | self.row_menu_ui.tick_real(real)
+                | self.mute_ui.tick(dt)
+                | self.mute_ui.tick_real(real)
                 | self.media_viewer.as_mut().is_some_and(|v| v.tick(dt))
                 | fading
         });
@@ -5945,7 +5843,7 @@ pub(crate) fn menu_card(
         .occlude()
         .on_click(dismiss)
         .child(
-            glass(GlassSpec::control(theme))
+            glass(GlassSpec::thick(theme))
                 .occlude()
                 .w_full()
                 .rounded(px(26.0))

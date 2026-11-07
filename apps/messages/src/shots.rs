@@ -48,9 +48,30 @@ fn search(app: &mut MessagesApp, text: &str, window: &mut Window, cx: &mut Conte
     cx.notify();
 }
 
+/// Opens the long-press menu of Ayşe's merged WhatsApp + SMS row, hanging off
+/// the row as it was painted.
+fn ayse_menu(app: &mut MessagesApp, cx: &mut Context<MessagesApp>) {
+    let anchor = app.row_anchor_of_chat(WHATSAPP_AYSE);
+    app.open_row_menu(
+        Some(WHATSAPP_AYSE.to_owned()),
+        Some((1, Some(AYSE.to_owned()))),
+        "Ayşe Yılmaz".into(),
+        &anchor,
+        cx,
+    );
+    let key = app
+        .view
+        .all_rows()
+        .find(|row| row.wa_chat.as_deref() == Some(WHATSAPP_AYSE))
+        .and_then(crate::inbox::select_key);
+    if let Some(menu) = &mut app.row_menu {
+        menu.select_key = key;
+    }
+}
+
 /// Every main screen and important sheet, in shot order.
 /// `(number, name, needs a linked gateway, what it does)`.
-const SCENES: [(u32, &str, bool, Scene); 14] = [
+const SCENES: [(u32, &str, bool, Scene); 16] = [
     (1, "inbox", false, |_, _, _| {}),
     (2, "unread-filter", false, |app, _, cx| {
         app.inbox_filter = InboxFilter::Unread;
@@ -97,13 +118,16 @@ const SCENES: [(u32, &str, bool, Scene); 14] = [
         app.chat_list.scroll_to_end();
         cx.notify();
     }),
-    (11, "row-menu", false, |app, _, cx| {
-        app.open_row_menu(
-            Some(WHATSAPP_AYSE.to_owned()),
-            Some((1, Some(AYSE.to_owned()))),
-            "Ayşe Yılmaz".into(),
-            cx,
-        );
+    (11, "row-menu", false, |app, _, cx| ayse_menu(app, cx)),
+    (11, "row-menu-mute", false, |app, _, cx| {
+        ayse_menu(app, cx);
+        app.row_menu_ui.push_submenu("mute");
+        cx.notify();
+    }),
+    (11, "row-menu-delete", false, |app, _, cx| {
+        ayse_menu(app, cx);
+        app.row_menu_ui.confirm("delete");
+        cx.notify();
     }),
     (12, "settings", false, |app, _, cx| {
         app.tabs.select(SETTINGS_TAB);

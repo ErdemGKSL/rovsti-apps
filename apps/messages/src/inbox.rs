@@ -29,6 +29,7 @@ use rovsti_core::{
 };
 use rovsti_ui::{
     Icon, layout,
+    menu::AnchorSlot,
     row::{BadgeTone, ListRow, SourceKind, with_source_badges},
     theme,
     tokens::{Theme, typography},
@@ -1103,6 +1104,8 @@ pub struct RowExtras {
     pub menu: Option<PressHandler>,
     /// Select mode: `Some(ticked)` shows a check circle instead of the avatar.
     pub select: Option<bool>,
+    /// Records where the row was painted, so its menu can hang off it.
+    pub anchor: Option<AnchorSlot>,
 }
 
 /// The source kinds drawn as corner badges on the avatar, one per channel of the
@@ -1142,6 +1145,7 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
         open_avatar,
         menu,
         select,
+        anchor,
     } = extras;
     let colors = theme::colors(theme);
     let tint = match view.channel {
@@ -1229,6 +1233,9 @@ pub fn row_element(theme: Theme, index: usize, view: &RowView, extras: RowExtras
     let mut main = row.render(theme).id(("inbox-row", index)).on_click(open);
     if let Some(menu) = menu {
         main = main.on_long_press(menu);
+    }
+    if let Some(anchor) = anchor {
+        main = main.relative().child(anchor.track());
     }
     main.into_any_element()
 }

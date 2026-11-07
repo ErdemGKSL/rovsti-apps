@@ -119,6 +119,7 @@ pub fn actions(ctx: &SmsActionContext) -> Vec<SmsAction> {
     out
 }
 
+#[cfg(test)]
 pub fn label(action: SmsAction) -> &'static str {
     match action {
         SmsAction::MarkRead => "Mark as read",
@@ -141,6 +142,7 @@ pub fn label(action: SmsAction) -> &'static str {
 }
 
 /// Shown in red.
+#[cfg(test)]
 pub fn is_danger(action: SmsAction) -> bool {
     matches!(action, SmsAction::Block | SmsAction::Delete)
 }

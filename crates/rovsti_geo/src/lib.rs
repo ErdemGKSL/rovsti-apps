@@ -7,6 +7,7 @@
 
 pub mod alarm;
 mod coord;
+pub mod coord_format;
 mod crossing;
 pub mod csv;
 pub mod dest;

@@ -1915,7 +1915,7 @@ impl MessagesApp {
         .detach();
     }
 
-    /// Opens the mail composer for an address found in a message.
+    /// Hands a date found in a message to the calendar app.
     fn add_to_calendar(
         &mut self,
         title: String,
@@ -1945,6 +1945,7 @@ impl MessagesApp {
         .detach();
     }
 
+    /// Opens the mail composer for an address found in a message.
     fn email_to(&mut self, address: String, cx: &mut Context<Self>) {
         let task = cx
             .background_executor()

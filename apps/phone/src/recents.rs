@@ -34,6 +34,7 @@ use rovsti_core::{
 use rovsti_ui::{
     Icon,
     components::{flat_glass, glass_pill},
+    field::{Bare, TextField, bare_field},
     glass::{GlassSpec, glass},
     moments::Fade,
     motion::{Entrance, press_scale},
@@ -46,7 +47,6 @@ use rovsti_ui::{
 use crate::{
     PhoneApp, RECENTS_TAB,
     backend::{self, Access, CallLog, Group, Load, Placement},
-    field::{SearchField, input_layer, on_backspace},
     flight::{Home, Look},
     notice::Notice,
     wa_peer::CallerPhoto,
@@ -311,7 +311,7 @@ pub(crate) struct RecentsView {
     /// Rows (indices into `rows`) that pass only through their note, with its preview.
     note_hits: std::collections::HashMap<usize, SharedString>,
     /// The search field under the title.
-    pub(crate) field: gpui::Entity<SearchField>,
+    pub(crate) field: gpui::Entity<TextField>,
     seen_edits: u64,
     field_text: SharedString,
     /// The field has focus (caret drawn).
@@ -382,7 +382,13 @@ impl RecentsView {
             notes: Notes::default(),
             notes_rev: 0,
             note_hits: std::collections::HashMap::new(),
-            field: cx.new(SearchField::new),
+            field: cx.new(|cx| {
+                TextField::with_input(
+                    gpui::TextInputPurpose::Text,
+                    gpui::TextInputAction::Search,
+                    cx,
+                )
+            }),
             seen_edits: 0,
             field_text: SharedString::default(),
             typing: false,
@@ -1776,7 +1782,7 @@ impl PhoneApp {
                     .child(if r.select.is_some() {
                         self.recents_select_header(theme, cx).into_any_element()
                     } else {
-                        self.recents_field(theme, cx).into_any_element()
+                        self.recents_field(theme, window, cx).into_any_element()
                     })
                     .child(self.recents_chips(theme, cx))
                     .child(results)
@@ -1926,7 +1932,12 @@ impl PhoneApp {
     }
 
     /// The glass search field under the title (44 px), like the Contacts one.
-    fn recents_field(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    fn recents_field(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let colors = theme::colors(theme);
         let field = self.recents.field.clone();
         let focus = field.read(cx).focus_handle();
@@ -1944,38 +1955,23 @@ impl PhoneApp {
             .h_full()
             .flex()
             .items_center()
-            .overflow_hidden()
             .text_size(typography::BODY.size)
-            .child(input_layer(field.clone(), cx))
-            .child(if text.is_empty() && !typing {
-                div()
-                    .text_color(colors.tertiary_label)
-                    .child("Search names, numbers, notes")
-                    .into_any_element()
-            } else {
-                div()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis_start()
-                    .text_color(colors.label)
-                    .child(text.clone())
-                    .into_any_element()
-            })
-            .children(typing.then(|| {
-                div()
-                    .flex_none()
-                    .ml(px(1.0))
-                    .w(px(2.0))
-                    .h(px(20.0))
-                    .rounded_full()
-                    .bg(colors.accent)
-            }));
+            .child(bare_field(
+                theme,
+                "rc-text",
+                &field,
+                "Search names, numbers, notes",
+                Bare {
+                    height: None,
+                    pad_v: 0.0,
+                },
+                window,
+                cx,
+            ));
         div()
             .id("rc-field")
             .role(Role::TextInput)
             .aria_label("Search calls")
-            .track_focus(&focus)
-            .on_key_down(on_backspace(field))
             .relative()
             .flex_none()
             .h(px(FIELD_H))

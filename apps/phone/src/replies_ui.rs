@@ -24,6 +24,7 @@ use rovsti_core::{
 use rovsti_ui::{
     Icon,
     components::flat_glass,
+    field::{Bare, TextField, bare_field},
     motion::press_scale,
     motion_tokens::{self, scale},
     spring::Spring,
@@ -32,11 +33,7 @@ use rovsti_ui::{
     touch::{drag_surface, touch_surface},
 };
 
-use crate::{
-    PhoneApp, SheetKind,
-    backend::ReplyOutcome,
-    field::{SearchField, input_layer, on_backspace},
-};
+use crate::{PhoneApp, SheetKind, backend::ReplyOutcome};
 
 const ROW_H: f32 = 56.0;
 const ROW_IDS: [&str; 7] = ["rp-0", "rp-1", "rp-2", "rp-3", "rp-4", "rp-5", "rp-own"];
@@ -561,7 +558,7 @@ struct RowDrag {
 }
 
 pub(crate) struct ReplyEditor {
-    pub fields: Vec<Entity<SearchField>>,
+    pub fields: Vec<Entity<TextField>>,
     /// Field index shown in each slot, top to bottom.
     order: Vec<usize>,
     seen: [u64; MAX_REPLIES],
@@ -577,7 +574,15 @@ impl ReplyEditor {
     pub fn new(cx: &mut Context<PhoneApp>) -> Self {
         Self {
             fields: (0..MAX_REPLIES)
-                .map(|_| cx.new(|cx| SearchField::new(cx).with_action(gpui::TextInputAction::Done)))
+                .map(|_| {
+                    cx.new(|cx| {
+                        TextField::with_input(
+                            gpui::TextInputPurpose::Text,
+                            gpui::TextInputAction::Done,
+                            cx,
+                        )
+                    })
+                })
                 .collect(),
             order: Vec::new(),
             seen: [0; MAX_REPLIES],
@@ -869,6 +874,7 @@ impl PhoneApp {
         theme: Theme,
         slot: usize,
         focused: bool,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = theme::colors(theme);
@@ -885,7 +891,6 @@ impl PhoneApp {
             ),
             _ => ed.shift[slot].value,
         };
-        let focus_handle = field.read(cx).focus_handle();
         let grip_press = self.presses.value(GRIP_IDS[slot]).clamp(0.0, 1.0);
         let button = |id: &'static str, icon: Icon, label: &'static str, cx: &mut Context<Self>| {
             let press = self.presses.value(id).clamp(0.0, 1.0);
@@ -918,47 +923,25 @@ impl PhoneApp {
             .id(FIELD_IDS[slot])
             .role(Role::TextInput)
             .aria_label(FIELD_ARIA[slot])
-            .track_focus(&focus_handle)
-            .on_key_down(on_backspace(field.clone()))
             .relative()
             .flex_1()
             .min_w_0()
             .h_full()
             .flex()
             .items_center()
-            .overflow_hidden()
             .text_size(typography::BODY.size)
-            .child(input_layer(field, cx))
-            .child(if text.is_empty() && !focused {
-                div()
-                    .text_color(colors.tertiary_label)
-                    .child("Write a reply")
-                    .into_any_element()
-            } else if focused {
-                // While typing the ellipsis cuts the start, never the words just typed.
-                div()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis_start()
-                    .text_color(colors.label)
-                    .child(text.clone())
-                    .into_any_element()
-            } else {
-                div()
-                    .truncate()
-                    .text_color(colors.label)
-                    .child(text.clone())
-                    .into_any_element()
-            })
-            .children(focused.then(|| {
-                div()
-                    .flex_none()
-                    .ml(px(1.0))
-                    .w(px(2.0))
-                    .h(px(20.0))
-                    .rounded_full()
-                    .bg(colors.accent)
-            }))
+            .child(bare_field(
+                theme,
+                FIELD_IDS[slot],
+                &field,
+                "Write a reply",
+                Bare {
+                    height: None,
+                    pad_v: 0.0,
+                },
+                window,
+                cx,
+            ))
             .on_mouse_down(MouseButton::Left, {
                 cx.listener(move |this, _, window, cx| {
                     this.presses.down(FIELD_IDS[slot]);
@@ -1100,7 +1083,7 @@ impl PhoneApp {
         self.replies_ed.focused = focused;
         let can_add = settings::can_add_reply(n);
         let rows: Vec<AnyElement> = (0..n)
-            .map(|s| self.edit_row(theme, s, focused == Some(s), cx))
+            .map(|s| self.edit_row(theme, s, focused == Some(s), window, cx))
             .collect();
         let action = |id: &'static str,
                       label: &'static str,

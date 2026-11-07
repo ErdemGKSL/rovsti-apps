@@ -23,6 +23,7 @@ use rovsti_core::{
 use rovsti_ui::{
     Icon,
     components::flat_glass,
+    field::{Bare, TextField, bare_field},
     glass::{GlassSpec, glass},
     motion::press_scale,
     motion_tokens::{self, scale},
@@ -36,7 +37,6 @@ use crate::{
     PhoneApp, SheetKind,
     backend::{self, Access, Group, Load},
     block_ui::PillAction,
-    field::{SearchField, input_layer, on_backspace},
     recents::{ROW_H, state_view},
 };
 
@@ -91,7 +91,7 @@ enum Shown {
 pub(crate) struct BlockedUi {
     pub segment: usize,
     seg: Spring,
-    pub field: Entity<SearchField>,
+    pub field: Entity<TextField>,
     seen_edits: u64,
     seen_submits: u64,
     typing: bool,
@@ -120,7 +120,9 @@ impl BlockedUi {
             segment: 0,
             seg: Spring::new(0.0, motion_tokens::select()).with_epsilon(0.002),
             // The keyboard's action key blocks the typed number, like the Block button.
-            field: cx.new(|cx| SearchField::new(cx).with_action(gpui::TextInputAction::Go)),
+            field: cx.new(|cx| {
+                TextField::with_input(gpui::TextInputPurpose::Text, gpui::TextInputAction::Go, cx)
+            }),
             seen_edits: 0,
             seen_submits: 0,
             typing: false,
@@ -219,7 +221,7 @@ impl PhoneApp {
             let field = self.blocked.field.read(cx);
             (
                 field.edits,
-                field.submits,
+                field.actions(),
                 field.focus_handle().is_focused(window),
             )
         };
@@ -1064,7 +1066,13 @@ impl PhoneApp {
 
     /// The add field in the search-field shape: `LucideBan`, the placeholder and a
     /// trailing accent "Block" button.
-    fn blocked_field(&self, theme: Theme, enabled: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn blocked_field(
+        &self,
+        theme: Theme,
+        enabled: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = theme::colors(theme);
         let field = self.blocked.field.clone();
         let focus = field.read(cx).focus_handle();
@@ -1080,39 +1088,28 @@ impl PhoneApp {
             .h_full()
             .flex()
             .items_center()
-            .overflow_hidden()
             .text_size(typography::BODY.size)
-            .child(input_layer(field.clone(), cx))
-            .child(if text.is_empty() && !(typing && enabled) {
+            .child(if enabled {
+                bare_field(
+                    theme,
+                    "bk-field",
+                    &field,
+                    "Add a number to block",
+                    Bare {
+                        height: None,
+                        pad_v: 0.0,
+                    },
+                    window,
+                    cx,
+                )
+            } else {
+                // Switched off: the same line, not editable.
                 div()
+                    .truncate()
                     .text_color(colors.tertiary_label)
                     .child("Add a number to block")
                     .into_any_element()
-            } else if typing && enabled {
-                // While typing the ellipsis cuts the start, never the digits just typed.
-                div()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis_start()
-                    .text_color(colors.label)
-                    .child(text.clone())
-                    .into_any_element()
-            } else {
-                div()
-                    .truncate()
-                    .text_color(colors.label)
-                    .child(text.clone())
-                    .into_any_element()
-            })
-            .children((typing && enabled).then(|| {
-                div()
-                    .flex_none()
-                    .ml(px(1.0))
-                    .w(px(2.0))
-                    .h(px(20.0))
-                    .rounded_full()
-                    .bg(colors.accent)
-            }));
+            });
         let mut shell = div()
             .id("set-bk-field")
             .role(Role::TextInput)
@@ -1125,8 +1122,6 @@ impl PhoneApp {
             .opacity(if enabled { 1.0 } else { 0.5 });
         if enabled {
             shell = shell
-                .track_focus(&focus)
-                .on_key_down(on_backspace(field))
                 .on_mouse_down(MouseButton::Left, {
                     let focus = focus_for_tap;
                     cx.listener(move |this, _, window, cx| {
@@ -1464,7 +1459,7 @@ impl PhoneApp {
     pub(crate) fn blocked_body(
         &mut self,
         theme: Theme,
-        _window: &Window,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.blocked_sync(cx);
@@ -1583,7 +1578,7 @@ impl PhoneApp {
                     .h(px(FIELD_H + 12.0))
                     .flex_none()
                     .pt(px(12.0))
-                    .child(self.blocked_field(theme, can_block, cx)),
+                    .child(self.blocked_field(theme, can_block, window, cx)),
             )
             .child(
                 div()

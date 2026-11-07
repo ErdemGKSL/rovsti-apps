@@ -1795,7 +1795,7 @@ impl PhoneApp {
             Sub::WhatsApp => self.whatsapp_body(),
             Sub::SpeedDial => self.speed_dial_body(theme, cx),
             Sub::Stats => self.stats_body(theme, cx),
-            Sub::Notes => self.notes_body(theme, cx),
+            Sub::Notes => self.notes_body(theme, window, cx),
         };
         Some(
             div()

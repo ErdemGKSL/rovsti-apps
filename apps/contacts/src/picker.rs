@@ -13,11 +13,18 @@ use rovsti_core::{contact_edit, contacts_view, wire::WireContact};
 use rovsti_ui::{
     Icon,
     components::{empty_state, large_title},
-    current_theme, theme,
+    current_theme,
+    field::TextField,
+    theme,
     tokens::{metrics, typography},
 };
 
-use crate::{ContactsApp, Row, backend, field::TextField, photos::photo_avatar, refill, ui::pill};
+use crate::{
+    ContactsApp, Row, backend,
+    photos::photo_avatar,
+    refill,
+    ui::{Config, pill},
+};
 
 /// What the picker edits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,7 +102,7 @@ pub(crate) fn known_members(members: &[i64], known: &HashSet<i64>) -> Vec<i64> {
 impl ContactsApp {
     /// Opens the picker with `initial` ticked.
     pub(crate) fn open_picker(&mut self, for_: PickFor, initial: Vec<i64>, cx: &mut Context<Self>) {
-        let field = cx.new(TextField::new);
+        let field = cx.new(|cx| Config::SEARCH.build("", cx));
         let watched = field.clone();
         cx.observe(&field, move |this, field, cx| {
             let same = this.picker.as_ref().is_some_and(|p| p.field == watched);

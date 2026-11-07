@@ -1639,6 +1639,7 @@ fn paint_handles(field: &Entity<TextField>, accent: Hsla, window: &mut Window, c
 fn edit_menu(
     theme: Theme,
     field: &Entity<TextField>,
+    pad: f32,
     window: &Window,
     cx: &App,
 ) -> Option<AnyElement> {
@@ -1689,8 +1690,8 @@ fn edit_menu(
         f32::from(window.viewport_size().width),
         SAFE_TOP,
     );
-    // The box's own origin: the content box sits `BOX_PAD` in from the left.
-    let rel_left = left - (f32::from(content.left()) - BOX_PAD);
+    // The box's own origin: the content box sits `pad` in from the left.
+    let rel_left = left - (f32::from(content.left()) - pad);
     let rel_top = top - f32::from(content.top());
     let buttons = items.into_iter().enumerate().map(|(i, item)| {
         let field = field.clone();
@@ -1736,7 +1737,12 @@ fn edit_menu(
 
 /// Invisible touch targets over the handles, so a press on one never reaches
 /// what lies under it.
-fn handle_shields(field: &Entity<TextField>, window: &Window, cx: &App) -> Vec<AnyElement> {
+fn handle_shields(
+    field: &Entity<TextField>,
+    pad: f32,
+    window: &Window,
+    cx: &App,
+) -> Vec<AnyElement> {
     let f = field.read(cx);
     let Some(content) = f.content.get() else {
         return Vec::new();
@@ -1744,7 +1750,7 @@ fn handle_shields(field: &Entity<TextField>, window: &Window, cx: &App) -> Vec<A
     if !f.focus.is_focused(window) {
         return Vec::new();
     }
-    let origin = point(content.left() - px(BOX_PAD), content.top());
+    let origin = point(content.left() - px(pad), content.top());
     f.handles
         .borrow()
         .iter()
@@ -1777,7 +1783,15 @@ pub fn field_box(
     window: &Window,
     cx: &App,
 ) -> impl IntoElement {
-    field_box_with(theme, id, field, placeholder, false, window, cx)
+    field_box_with(
+        theme,
+        id,
+        field,
+        placeholder,
+        Shell::Glass { secret: false },
+        window,
+        cx,
+    )
 }
 
 /// [`field_box`] for a passphrase: every character shows as a dot.
@@ -1789,7 +1803,15 @@ pub fn secret_field_box(
     window: &Window,
     cx: &App,
 ) -> impl IntoElement {
-    field_box_with(theme, id, field, placeholder, true, window, cx)
+    field_box_with(
+        theme,
+        id,
+        field,
+        placeholder,
+        Shell::Glass { secret: true },
+        window,
+        cx,
+    )
 }
 
 /// What a secret field shows for `text`: one dot per character.
@@ -1797,15 +1819,64 @@ pub fn masked(text: &str) -> String {
     "•".repeat(text.chars().count())
 }
 
+/// How [`bare_field`] sizes itself.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bare {
+    /// Height of a single-line field, dp; `None` fills the parent, whose
+    /// height must then be definite.
+    pub height: Option<f32>,
+    /// Space above and below the lines of a multiline field, dp.
+    pub pad_v: f32,
+}
+
+/// What draws around the text of [`field_box_with`].
+#[derive(Clone, Copy)]
+enum Shell {
+    /// A glass capsule; `secret` shows dots.
+    Glass { secret: bool },
+    /// Nothing: the page draws the box.
+    Bare(Bare),
+}
+
+/// A field without a glass box, for pages that draw their own (a form row, a
+/// search capsule). It fills the width of its flex parent. A single-line field
+/// is `style.height` dp tall (`None`: the parent's height, which must be
+/// definite); a multiline one sizes itself to its rows plus `style.pad_v`
+/// above and below. Focus, keys, touch, selection handles and the
+/// edit menu work exactly as in [`field_box`].
+pub fn bare_field(
+    theme: Theme,
+    id: impl Into<gpui::ElementId>,
+    field: &Entity<TextField>,
+    placeholder: &'static str,
+    style: Bare,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
+    field_box_with(
+        theme,
+        id,
+        field,
+        placeholder,
+        Shell::Bare(style),
+        window,
+        cx,
+    )
+}
+
 fn field_box_with(
     theme: Theme,
     id: impl Into<gpui::ElementId>,
     field: &Entity<TextField>,
     placeholder: &'static str,
-    secret: bool,
+    shell: Shell,
     window: &Window,
     cx: &App,
-) -> impl IntoElement {
+) -> AnyElement {
+    let (secret, bare) = match shell {
+        Shell::Glass { secret } => (secret, None),
+        Shell::Bare(style) => (false, Some(style)),
+    };
     let colors = crate::theme::colors(theme);
     field.read(cx).set_secret(secret);
     let focus = field.read(cx).focus_handle();
@@ -1843,6 +1914,59 @@ fn field_box_with(
     } else {
         Some(div().truncate().text_color(colors.label).child(text))
     };
+    let inner = div()
+        .relative()
+        .flex_1()
+        .min_w_0()
+        .h_full()
+        .flex()
+        .items_center()
+        .overflow_hidden()
+        .text_size(typography::BODY.size)
+        .child(text_layer(
+            field.clone(),
+            colors.label,
+            colors.accent,
+            true,
+            cx,
+        ))
+        .children(shown);
+    if let Some(bare) = bare {
+        // No glass: the page draws the box. The field still owns focus, keys,
+        // touch, handles and the edit menu.
+        let height = match (rows_lines, bare.height) {
+            (Some(lines), _) => Some(lines as f32 * ML_LINE + 2.0 * bare.pad_v),
+            (None, height) => height,
+        };
+        let shell = div()
+            .id(id)
+            .track_focus(&focus)
+            .on_key_down(on_backspace(field.clone()))
+            .relative()
+            .flex_1()
+            .min_w_0();
+        let shell = match height {
+            Some(h) => shell.h(px(h)),
+            None => shell.h_full(),
+        };
+        return shell
+            .flex()
+            .items_center()
+            .py(px(if multiline.is_some() { bare.pad_v } else { 0.0 }))
+            .on_mouse_down(MouseButton::Left, {
+                let field = field.clone();
+                move |event, window, cx| {
+                    field.update(cx, |f, cx| {
+                        f.tap(event.position, event.click_count, window, cx);
+                    });
+                }
+            })
+            .child(inner)
+            .child(touch_layer(field.clone(), colors.accent))
+            .children(handle_shields(field, 0.0, window, cx))
+            .children(edit_menu(theme, field, 0.0, window, cx))
+            .into_any_element();
+    }
     div()
         .id(id)
         .track_focus(&focus)
@@ -1867,29 +1991,12 @@ fn field_box_with(
                 .items_center()
                 .px(px(BOX_PAD))
                 .py(px(if multiline.is_some() { ML_PAD_V } else { 0.0 }))
-                .child(
-                    div()
-                        .relative()
-                        .flex_1()
-                        .min_w_0()
-                        .h_full()
-                        .flex()
-                        .items_center()
-                        .overflow_hidden()
-                        .text_size(typography::BODY.size)
-                        .child(text_layer(
-                            field.clone(),
-                            colors.label,
-                            colors.accent,
-                            true,
-                            cx,
-                        ))
-                        .children(shown),
-                ),
+                .child(inner),
         )
         .child(touch_layer(field.clone(), colors.accent))
-        .children(handle_shields(field, window, cx))
-        .children(edit_menu(theme, field, window, cx))
+        .children(handle_shields(field, BOX_PAD, window, cx))
+        .children(edit_menu(theme, field, BOX_PAD, window, cx))
+        .into_any_element()
 }
 
 #[cfg(test)]
@@ -2316,6 +2423,47 @@ mod tests {
             assert!(f.handle_key(&enter, cx));
             assert_eq!(f.text(), "bir\n\niki");
             assert_eq!(f.selection(), 4..4);
+        });
+    }
+
+    struct BareHost(Entity<TextField>);
+
+    impl gpui::Render for BareHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(320.0)).flex().child(bare_field(
+                Theme::Dark,
+                "b",
+                &self.0,
+                "Not",
+                Bare {
+                    height: Some(44.0),
+                    pad_v: 5.0,
+                },
+                window,
+                cx,
+            ))
+        }
+    }
+
+    #[gpui::test]
+    fn a_bare_note_field_wraps_and_sizes_to_its_rows(cx: &mut TestAppContext) {
+        let (host, cx) =
+            cx.add_window_view(|_, cx| BareHost(cx.new(|cx| TextField::multiline(2, 4, cx))));
+        let field = host.read_with(cx, |h, _| h.0.clone());
+        let long = "bu bir not, birkaç satıra sarılacak kadar uzun yazılmış bir metindir";
+        field.update_in(cx, |f, w, cx| {
+            let handle = f.focus_handle();
+            w.focus(&handle, cx);
+            f.set(long, cx);
+        });
+        for _ in 0..4 {
+            cx.run_until_parked();
+            cx.update(|window, _| window.refresh());
+        }
+        field.read_with(cx, |f, _| {
+            assert!(f.shown_lines() >= 3, "{} lines", f.shown_lines());
+            assert!(f.is_multiline());
+            assert_eq!(f.text(), long);
         });
     }
 

@@ -15,7 +15,6 @@ mod confirm;
 mod detail;
 mod dupes;
 mod editor;
-mod field;
 mod finds;
 mod groups;
 mod history;
@@ -66,6 +65,7 @@ use rovsti_ui::{
     Icon, IconAssets,
     components::{empty_state, glass_icon_button, glass_pill, large_title, list_row, section},
     current_theme,
+    field::{Bare, TextField, bare_field},
     glass::{GlassSpec, glass},
     sheet::Sheet,
     tab_bar::{Tab, TabBar, content_bottom_inset},
@@ -79,7 +79,6 @@ use crate::{
     backend::Book,
     confirm::Confirm,
     editor::Editor,
-    field::{TextField, input_layer, on_backspace},
     groups::GroupEdit,
     photos::{Photos, photo_avatar},
     picker::Picker,
@@ -526,7 +525,7 @@ impl ContactsApp {
             }
         })
         .detach();
-        let field = cx.new(TextField::new);
+        let field = cx.new(|cx| ui::Config::SEARCH.build("", cx));
         cx.observe(&field, |this, field, cx| {
             let edits = field.read(cx).edits;
             if edits != this.seen_edits {
@@ -1435,9 +1434,7 @@ impl ContactsApp {
     ) -> AnyElement {
         let colors = theme::colors(theme);
         let field = field.clone();
-        let focus = field.read(cx).focus_handle();
         let text: SharedString = field.read(cx).text().to_owned().into();
-        let typing = focus.is_focused(window);
         let text_box = div()
             .relative()
             .flex_1()
@@ -1445,37 +1442,19 @@ impl ContactsApp {
             .h_full()
             .flex()
             .items_center()
-            .overflow_hidden()
             .text_size(typography::BODY.size)
-            .child(input_layer(field.clone(), cx))
-            // The placeholder goes as soon as the field is touched.
-            .child(if text.is_empty() && !typing {
-                div()
-                    .text_color(colors.tertiary_label)
-                    .child("Search name or number")
-            } else if typing {
-                // While typing the end of the query counts: cut the start, not the end.
-                div()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis_start()
-                    .text_color(colors.label)
-                    .child(text.clone())
-            } else {
-                div()
-                    .truncate()
-                    .text_color(colors.label)
-                    .child(text.clone())
-            })
-            .children(typing.then(|| {
-                div()
-                    .flex_none()
-                    .ml(px(1.0))
-                    .w(px(2.0))
-                    .h(px(20.0))
-                    .rounded_full()
-                    .bg(colors.accent)
-            }));
+            .child(bare_field(
+                theme,
+                ("search-field", field.entity_id().as_u64() as usize),
+                &field,
+                "Search name or number",
+                Bare {
+                    height: None,
+                    pad_v: 0.0,
+                },
+                window,
+                cx,
+            ));
         let clear = (!text.is_empty()).then(|| {
             div()
                 .id("search-clear")
@@ -1497,16 +1476,10 @@ impl ContactsApp {
         });
         div()
             .id("search")
-            .track_focus(&focus)
-            .on_key_down(on_backspace(field.clone()))
             .flex_none()
             .h(px(FIELD_H))
             .mx(metrics::ROW_INSET)
             .mb(px(8.0))
-            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                window.focus(&focus, cx);
-                window.show_soft_keyboard();
-            })
             .child(
                 glass(GlassSpec::control(theme))
                     .size_full()

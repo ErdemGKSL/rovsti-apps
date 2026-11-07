@@ -24,6 +24,7 @@ use rovsti_core::{
 };
 use rovsti_ui::{
     Icon,
+    field::{Bare, TextField, bare_field},
     motion::press_scale,
     motion_tokens::scale,
     theme::{self, call_colors},
@@ -31,12 +32,7 @@ use rovsti_ui::{
     touch::touch_surface,
 };
 
-use crate::{
-    PhoneApp, SheetKind, backend,
-    block_ui::PillAction,
-    field::{SearchField, input_layer, on_backspace},
-    notes::NotesStore,
-};
+use crate::{PhoneApp, SheetKind, backend, block_ui::PillAction, notes::NotesStore};
 
 /// Id prefix of a Number sheet history line (a tap target).
 pub(crate) const NUMBER_LINE: &str = "sheet-nhl-";
@@ -137,7 +133,7 @@ pub(crate) struct DetailsSheet {
     /// Opened from the Call notes page: Back closes the sheet.
     from_notes: bool,
     pub(crate) editing: bool,
-    pub(crate) field: Entity<SearchField>,
+    pub(crate) field: Entity<TextField>,
     /// The call was blocked (it lives in the blocked list).
     blocked: bool,
     /// The call was a missed one (offers Remind me).
@@ -201,7 +197,9 @@ impl PhoneApp {
             _ => Default::default(),
         };
         let details = call_notes::details(&vm.line, &vm.number, None, locale);
-        let field = cx.new(|cx| SearchField::new(cx).with_action(TextInputAction::Done));
+        let field = cx.new(|cx| {
+            TextField::with_input(gpui::TextInputPurpose::Text, TextInputAction::Done, cx)
+        });
         let sub = cx.observe_in(&field, window, |this, _, window, cx| {
             this.details_field_changed(window, cx);
         });
@@ -275,7 +273,7 @@ impl PhoneApp {
         let Some(d) = self.details.as_mut() else {
             return;
         };
-        let submits = d.field.read(cx).submits;
+        let submits = d.field.read(cx).actions();
         if submits != d.seen_submits {
             d.seen_submits = submits;
             self.details_commit(cx);
@@ -295,7 +293,7 @@ impl PhoneApp {
             .map(|n| n.text.clone())
             .unwrap_or_default();
         d.editing = true;
-        d.seen_submits = d.field.read(cx).submits;
+        d.seen_submits = d.field.read(cx).actions();
         d.field.update(cx, |f, cx| f.set(&current, cx));
         let focus = d.field.read(cx).focus_handle();
         window.focus(&focus, cx);
@@ -573,9 +571,6 @@ impl PhoneApp {
 
         let note_card = if d.editing {
             let field = d.field.clone();
-            let focus = field.read(cx).focus_handle();
-            let typed: SharedString = field.read(cx).text().to_owned().into();
-            let focused = focus.is_focused(window);
             let done = {
                 let press = self.presses.value(DONE).clamp(0.0, 1.0);
                 div()
@@ -613,31 +608,25 @@ impl PhoneApp {
                         .id(FIELD)
                         .role(Role::TextInput)
                         .aria_label("Note")
-                        .track_focus(&focus)
-                        .on_key_down(on_backspace(field.clone()))
                         .relative()
                         .flex_1()
                         .min_w_0()
                         .h(px(NOTE_FIELD_H))
                         .flex()
                         .items_center()
-                        .overflow_hidden()
                         .text_size(typography::BODY.size)
-                        .child(input_layer(field, cx))
-                        .child(if typed.is_empty() && !focused {
-                            div()
-                                .text_color(colors.tertiary_label)
-                                .child("Write a note")
-                                .into_any_element()
-                        } else {
-                            div()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis_start()
-                                .text_color(colors.label)
-                                .child(typed)
-                                .into_any_element()
-                        })
+                        .child(bare_field(
+                            theme,
+                            "dt-note-text",
+                            &field,
+                            "Write a note",
+                            Bare {
+                                height: None,
+                                pad_v: 0.0,
+                            },
+                            window,
+                            cx,
+                        ))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(|this, _, window, cx| {

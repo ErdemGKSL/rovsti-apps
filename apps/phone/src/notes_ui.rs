@@ -15,6 +15,7 @@ use gpui::{
 use rovsti_core::{call_notes, recents::LocaleTime};
 use rovsti_ui::{
     Icon,
+    field::{Bare, TextField, bare_field},
     glass::{GlassSpec, glass},
     theme::{self, call_colors},
     tokens::{Theme, metrics, shadow, typography},
@@ -25,7 +26,6 @@ use crate::{
     PhoneApp, SheetKind,
     backend::{self, Load},
     block_ui::PillAction,
-    field::{SearchField, input_layer, on_backspace},
     recents::ROW_H,
 };
 
@@ -54,7 +54,7 @@ pub(crate) struct NoteVm {
 
 /// The state of the page.
 pub(crate) struct NotesUi {
-    pub(crate) field: Entity<SearchField>,
+    pub(crate) field: Entity<TextField>,
     seen_edits: u64,
     typing: bool,
     rows: Arc<[NoteVm]>,
@@ -68,7 +68,13 @@ pub(crate) struct NotesUi {
 impl NotesUi {
     pub(crate) fn new(cx: &mut Context<PhoneApp>) -> Self {
         Self {
-            field: cx.new(SearchField::new),
+            field: cx.new(|cx| {
+                TextField::with_input(
+                    gpui::TextInputPurpose::Text,
+                    gpui::TextInputAction::Search,
+                    cx,
+                )
+            }),
             seen_edits: 0,
             typing: false,
             rows: Arc::from(Vec::new()),
@@ -274,7 +280,12 @@ impl PhoneApp {
 
     // ---- drawing ------------------------------------------------------------
 
-    pub(crate) fn notes_body(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn notes_body(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let colors = theme::colors(theme);
         let count = self.notes_ui.rows.len();
         let list = if count == 0 {
@@ -315,7 +326,7 @@ impl PhoneApp {
                     .h(px(FIELD_H + 12.0))
                     .flex_none()
                     .pt(px(12.0))
-                    .child(self.notes_field(theme, cx)),
+                    .child(self.notes_field(theme, window, cx)),
             )
             .children((self.notes_ui.total > 0).then(|| self.notes_header(theme, cx)))
             .child(div().relative().flex_1().min_h_0().w_full().child(list))
@@ -370,11 +381,10 @@ impl PhoneApp {
     }
 
     /// The search field in the glass field shape.
-    fn notes_field(&self, theme: Theme, cx: &mut Context<Self>) -> AnyElement {
+    fn notes_field(&self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let colors = theme::colors(theme);
         let field = self.notes_ui.field.clone();
         let focus = field.read(cx).focus_handle();
-        let text: SharedString = field.read(cx).text().to_owned().into();
         let typing = self.notes_ui.typing;
         let focus_for_tap = focus.clone();
         let text_box = div()
@@ -384,30 +394,19 @@ impl PhoneApp {
             .h_full()
             .flex()
             .items_center()
-            .overflow_hidden()
             .text_size(typography::BODY.size)
-            .child(input_layer(field.clone(), cx))
-            .child(if text.is_empty() && !typing {
-                div()
-                    .text_color(colors.tertiary_label)
-                    .child(HINT)
-                    .into_any_element()
-            } else {
-                div()
-                    .truncate()
-                    .text_color(colors.label)
-                    .child(text)
-                    .into_any_element()
-            })
-            .children(typing.then(|| {
-                div()
-                    .flex_none()
-                    .ml(px(1.0))
-                    .w(px(2.0))
-                    .h(px(20.0))
-                    .rounded_full()
-                    .bg(colors.accent)
-            }));
+            .child(bare_field(
+                theme,
+                "nt-text",
+                &field,
+                HINT,
+                Bare {
+                    height: None,
+                    pad_v: 0.0,
+                },
+                window,
+                cx,
+            ));
         div()
             .id(FIELD_ID)
             .role(Role::TextInput)
@@ -416,8 +415,6 @@ impl PhoneApp {
             .flex_none()
             .h(px(FIELD_H))
             .mx(px(16.0))
-            .track_focus(&focus)
-            .on_key_down(on_backspace(field))
             .on_mouse_down(MouseButton::Left, {
                 cx.listener(move |this, _, window, cx| {
                     this.presses.down(FIELD_ID);

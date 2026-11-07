@@ -1001,7 +1001,7 @@ impl PhoneApp {
             .flex()
             .flex_col()
             .gap(px(8.0))
-            .child(self.contacts_field(theme, cx))
+            .child(self.contacts_field(theme, window, cx))
             .child(list)
             .into_any_element()
     }

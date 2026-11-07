@@ -23,15 +23,15 @@ use rovsti_core::{
 use rovsti_ui::{
     Icon,
     components::{empty_state, glass_icon_button, large_title, list_row, section},
-    current_theme, theme,
+    current_theme,
+    field::TextField,
+    theme,
     tokens::{Theme, metrics, radius, typography},
 };
 
 use crate::{
-    ContactsApp, GROUPS_TAB, Row, RowSet, TABS, backend, editor,
-    field::{Config, TextField},
-    refill,
-    ui::{Tone, field_box, form_row, pill, tap_row},
+    ContactsApp, GROUPS_TAB, Row, RowSet, TABS, backend, editor, refill,
+    ui::{Config, Tone, field_box, form_row, pill, tap_row},
 };
 
 /// An action of the group page's menu.
@@ -325,7 +325,7 @@ impl ContactsApp {
             .and_then(|id| self.group(id))
             .map(|g| g.title.clone())
             .unwrap_or_default();
-        let field = cx.new(|cx| TextField::configured(Config::TEXT, &title, cx));
+        let field = cx.new(|cx| Config::TEXT.build(&title, cx));
         let account = match id.and_then(|id| self.group(id)) {
             Some(group) => group.account.clone(),
             None => editor::default_account(&self.accounts, &self.save_to),

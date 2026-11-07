@@ -23,6 +23,7 @@ use rovsti_core::{
 use rovsti_ui::{
     Icon,
     components::flat_glass,
+    field::{Bare, TextField, bare_field},
     glass::{GlassSpec, glass},
     moments::Tween,
     motion::press_scale,
@@ -37,7 +38,6 @@ use crate::{
     CONTACTS_TAB, FAVORITES_TAB, PhoneApp, SheetKind,
     actions_ui::StripAction,
     backend::{self, Access, Group, Load},
-    field::{SearchField, input_layer, on_backspace},
     flight::{Home, Look},
     recents::{ROW_H, row_at, state_view},
 };
@@ -210,7 +210,7 @@ pub(crate) struct ContactsView {
     pub(crate) rows: Arc<[ContactRow]>,
     /// The query `rows` was built for.
     query: String,
-    pub(crate) field: Entity<SearchField>,
+    pub(crate) field: Entity<TextField>,
     seen_edits: u64,
     /// The field's text as of the last edit.
     field_text: SharedString,
@@ -249,7 +249,13 @@ impl ContactsView {
             query: String::new(),
             style: NameStyle::default(),
             sort_task: None,
-            field: cx.new(SearchField::new),
+            field: cx.new(|cx| {
+                TextField::with_input(
+                    gpui::TextInputPurpose::Text,
+                    gpui::TextInputAction::Search,
+                    cx,
+                )
+            }),
             seen_edits: 0,
             field_text: SharedString::default(),
             query_number: None,
@@ -1631,7 +1637,7 @@ impl PhoneApp {
             State::Ready => {
                 let column = div().flex_1().min_h_0().w_full().flex().flex_col();
                 column
-                    .child(self.contacts_field(theme, cx))
+                    .child(self.contacts_field(theme, window, cx))
                     .child(self.contacts_results(theme, window, cx))
                     .into_any_element()
             }
@@ -1670,7 +1676,12 @@ impl PhoneApp {
     }
 
     /// The sticky glass search field (44 px).
-    pub(crate) fn contacts_field(&self, theme: Theme, cx: &mut Context<Self>) -> impl IntoElement {
+    pub(crate) fn contacts_field(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let colors = theme::colors(theme);
         let field = self.contacts.field.clone();
         let focus = field.read(cx).focus_handle();
@@ -1688,47 +1699,23 @@ impl PhoneApp {
             .h_full()
             .flex()
             .items_center()
-            .overflow_hidden()
             .text_size(typography::BODY.size)
-            .child(input_layer(field.clone(), cx))
-            // The placeholder goes as soon as the field is touched.
-            .child(if text.is_empty() && !typing {
-                div()
-                    .text_color(colors.tertiary_label)
-                    .child("Search name or number")
-                    .into_any_element()
-            } else if typing {
-                // While typing the end of the query is what matters (the caret
-                // follows it): the ellipsis cuts the start, never the end.
-                div()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis_start()
-                    .text_color(colors.label)
-                    .child(text.clone())
-                    .into_any_element()
-            } else {
-                div()
-                    .truncate()
-                    .text_color(colors.label)
-                    .child(text.clone())
-                    .into_any_element()
-            })
-            .children(typing.then(|| {
-                div()
-                    .flex_none()
-                    .ml(px(1.0))
-                    .w(px(2.0))
-                    .h(px(20.0))
-                    .rounded_full()
-                    .bg(colors.accent)
-            }));
+            .child(bare_field(
+                theme,
+                "cs-text",
+                &field,
+                "Search name or number",
+                Bare {
+                    height: None,
+                    pad_v: 0.0,
+                },
+                window,
+                cx,
+            ));
         div()
             .id("cs-field")
             .role(Role::TextInput)
             .aria_label("Search name or number")
-            .track_focus(&focus)
-            .on_key_down(on_backspace(field))
             .relative()
             .flex_none()
             .h(px(FIELD_H))

@@ -15,6 +15,7 @@ use rovsti_core::call_notes::SetOutcome;
 use rovsti_ui::{
     Icon,
     components::flat_glass,
+    field::{Bare, TextField, bare_field},
     motion::press_scale,
     motion_tokens::scale,
     theme,
@@ -24,7 +25,6 @@ use rovsti_ui::{
 
 use crate::{
     PhoneApp, backend,
-    field::{SearchField, input_layer, on_backspace},
     incall::{CallView, copy_number_text, note_allowed, note_call_ms},
 };
 
@@ -41,7 +41,7 @@ const FIELD_H: f32 = 52.0;
 pub(crate) struct InCallNote {
     number: SharedString,
     at_ms: i64,
-    pub(crate) field: Entity<SearchField>,
+    pub(crate) field: Entity<TextField>,
     seen_submits: u64,
     _field_sub: Subscription,
 }
@@ -66,12 +66,14 @@ impl PhoneApp {
             .get(&view.number, at_ms)
             .map(|n| n.text.clone())
             .unwrap_or_default();
-        let field = cx.new(|cx| SearchField::new(cx).with_action(TextInputAction::Done));
+        let field = cx.new(|cx| {
+            TextField::with_input(gpui::TextInputPurpose::Text, TextInputAction::Done, cx)
+        });
         field.update(cx, |f, cx| f.set(&current, cx));
         let sub = cx.observe_in(&field, window, |this, _, window, cx| {
             this.incall_note_field_changed(window, cx);
         });
-        let seen_submits = field.read(cx).submits;
+        let seen_submits = field.read(cx).actions();
         let focus = field.read(cx).focus_handle();
         window.focus(&focus, cx);
         window.show_soft_keyboard();
@@ -114,7 +116,7 @@ impl PhoneApp {
         let Some(note) = self.incall_note.as_mut() else {
             return;
         };
-        let submits = note.field.read(cx).submits;
+        let submits = note.field.read(cx).actions();
         if submits != note.seen_submits {
             note.seen_submits = submits;
             self.incall_note_commit(cx);
@@ -233,9 +235,6 @@ impl PhoneApp {
         let note = self.incall_note.as_ref()?;
         let colors = theme::colors(theme);
         let field = note.field.clone();
-        let focus = field.read(cx).focus_handle();
-        let typed: SharedString = field.read(cx).text().to_owned().into();
-        let focused = focus.is_focused(window);
         let press = self.presses.value(DONE).clamp(0.0, 1.0);
         let done = div()
             .id(DONE)
@@ -267,31 +266,25 @@ impl PhoneApp {
                     .id(FIELD)
                     .role(Role::TextInput)
                     .aria_label("Note")
-                    .track_focus(&focus)
-                    .on_key_down(on_backspace(field.clone()))
                     .relative()
                     .flex_1()
                     .min_w_0()
                     .h(px(FIELD_H))
                     .flex()
                     .items_center()
-                    .overflow_hidden()
                     .text_size(typography::BODY.size)
-                    .child(input_layer(field, cx))
-                    .child(if typed.is_empty() && !focused {
-                        div()
-                            .text_color(colors.tertiary_label)
-                            .child("Write a note")
-                            .into_any_element()
-                    } else {
-                        div()
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis_start()
-                            .text_color(colors.label)
-                            .child(typed)
-                            .into_any_element()
-                    })
+                    .child(bare_field(
+                        theme,
+                        "ic-note-field",
+                        &field,
+                        "Write a note",
+                        Bare {
+                            height: None,
+                            pad_v: 0.0,
+                        },
+                        window,
+                        cx,
+                    ))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _, window, cx| this.mouse_down(FIELD, window, cx)),

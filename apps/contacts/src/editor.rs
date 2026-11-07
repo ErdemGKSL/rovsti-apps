@@ -21,16 +21,16 @@ use rovsti_core::{
 use rovsti_ui::{
     Icon,
     components::{large_title, section},
+    field::TextField,
     theme,
     tokens::{Theme, metrics, typography},
 };
 
 use crate::{
     ContactsApp, EditUndo, NoticeAction, backend,
-    field::{Config, TextField},
     photo_crop::PhotoSource,
     photos::photo_avatar,
-    ui::{Tone, field_box, form_row, pill, tap_row},
+    ui::{Config, Tone, field_box, form_row, pill, tap_row},
 };
 
 /// One number or email being edited.
@@ -184,7 +184,7 @@ pub(crate) fn next_account(accounts: &[Account], current: &str) -> String {
 }
 
 fn make_field(config: Config, text: &str, cx: &mut Context<ContactsApp>) -> Entity<TextField> {
-    cx.new(|cx| TextField::configured(config, text, cx))
+    cx.new(|cx| config.build(text, cx))
 }
 
 fn make_rows(

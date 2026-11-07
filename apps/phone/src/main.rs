@@ -23,7 +23,6 @@ mod details_ui;
 #[cfg(not(target_os = "android"))]
 mod devtools;
 mod diagnostics;
-mod field;
 mod flight;
 mod fx;
 mod history_ui;

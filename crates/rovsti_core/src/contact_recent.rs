@@ -40,6 +40,17 @@ pub enum RecentTab {
 }
 
 impl RecentTab {
+    /// The tabs in the order the segmented control shows them.
+    pub const ALL: [Self; 2] = [Self::Added, Self::Edited];
+
+    /// The empty state (title, body) of the tab.
+    pub fn empty(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Added => ("Nothing New", "No contacts added in the last 30 days"),
+            Self::Edited => ("Nothing Edited", "No contacts edited in the last 30 days"),
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Added => "Added",

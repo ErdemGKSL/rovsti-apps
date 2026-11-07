@@ -9,7 +9,10 @@ use gpui::{
 use rovsti_core::{
     contact_card::ContactCard,
     contact_dates,
-    contact_edit::{ContactDraft, DraftEvent, DraftField, EventKind, default_action, web_url},
+    contact_edit::{
+        ContactDraft, DraftEvent, DraftField, EventKind, RelationTap, default_action, relation_tap,
+        web_url,
+    },
     contact_select, number_format, vcard,
 };
 use rovsti_ui::{
@@ -296,6 +299,18 @@ pub(crate) fn date_copy_text(event: &DraftEvent) -> Option<String> {
     Some(format!("{} · {}", event.title(), date.text()))
 }
 
+/// The phonetic name as one line ("Aa-li Ve-li"), or `None` when both parts
+/// are empty.
+pub(crate) fn phonetic_text(given: &str, family: &str) -> Option<String> {
+    let line = [given.trim(), family.trim()]
+        .iter()
+        .filter(|p| !p.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!line.is_empty()).then_some(line)
+}
+
 /// The org line under the name: "Engineer · Acme", or whichever part exists.
 pub(crate) fn org_line(title: &str, org: &str) -> Option<String> {
     let parts: Vec<&str> = [title.trim(), org.trim()]
@@ -351,6 +366,22 @@ impl ContactsApp {
     pub(crate) fn close_field_sheet(&mut self, cx: &mut Context<Self>) {
         self.field_sheet.close();
         cx.notify();
+    }
+
+    /// A relation row was tapped: open the matching contact, else search the name.
+    fn open_relation(&mut self, name: &str, cx: &mut Context<Self>) {
+        let all: Vec<_> = self
+            .index()
+            .map(|index| index.all().cloned().collect())
+            .unwrap_or_default();
+        match relation_tap(name, &all) {
+            RelationTap::Open(id) => self.open_contact(id, cx),
+            RelationTap::Search(name) => {
+                self.close_contact(cx);
+                self.tabs.select(crate::CONTACTS_TAB);
+                self.field.update(cx, |field, cx| field.set(&name, cx));
+            }
+        }
     }
 
     fn copy_field(&mut self, text: String, cx: &mut Context<Self>) {
@@ -1581,6 +1612,63 @@ impl ContactsApp {
             })
             .unwrap_or_default();
 
+        let phonetic_rows: Vec<AnyElement> = full
+            .and_then(|d| phonetic_text(&d.phonetic_given, &d.phonetic_family))
+            .map(|text| {
+                let (copy, press) = (text.clone(), text.clone());
+                let main = Self::field_main(
+                    theme,
+                    ("phonetic", 0),
+                    "Phonetic name".into(),
+                    text.into(),
+                    colors.label,
+                )
+                .on_long_press(cx.listener(move |this, _, _, cx| {
+                    this.copy_field(press.clone(), cx);
+                }));
+                let more = Self::field_more(theme, ("phonetic-more", 0), Icon::LucideCopy)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.copy_field(copy.clone(), cx);
+                    }));
+                Self::field_line(theme, main, more)
+            })
+            .into_iter()
+            .collect();
+
+        let relation_rows: Vec<AnyElement> = full
+            .map(|d| {
+                d.relations
+                    .iter()
+                    .filter(|r| !r.name.trim().is_empty())
+                    .enumerate()
+                    .map(|(i, rel)| {
+                        let name = rel.name.trim().to_owned();
+                        let (copy, press) = (rel.row_text(), rel.row_text());
+                        let main = Self::field_main(
+                            theme,
+                            ("relation", i),
+                            rel.title().into(),
+                            rel.name.trim().to_owned().into(),
+                            colors.accent,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.open_relation(&name, cx);
+                        }))
+                        .on_long_press(cx.listener(
+                            move |this, _, _, cx| {
+                                this.copy_field(press.clone(), cx);
+                            },
+                        ));
+                        let more = Self::field_more(theme, ("relation-more", i), Icon::LucideCopy)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.copy_field(copy.clone(), cx);
+                            }));
+                        Self::field_line(theme, main, more)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let group_rows: Vec<AnyElement> = full
             .map(|d| {
                 self.groups
@@ -1727,6 +1815,11 @@ impl ContactsApp {
             .children(
                 (!website_rows.is_empty())
                     .then(|| section(theme, Some("Websites".into()), website_rows)),
+            )
+            .children((!phonetic_rows.is_empty()).then(|| section(theme, None, phonetic_rows)))
+            .children(
+                (!relation_rows.is_empty())
+                    .then(|| section(theme, Some("Related people".into()), relation_rows)),
             )
             .children(
                 (!group_rows.is_empty()).then(|| section(theme, Some("Groups".into()), group_rows)),
@@ -1964,5 +2057,15 @@ mod tests {
             date_copy_text(&DraftEvent::new("junk", EventKind::Birthday)),
             None
         );
+    }
+
+    #[test]
+    fn phonetic_line_joins_the_parts() {
+        assert_eq!(
+            phonetic_text(" Aa-li ", "Ve-li").as_deref(),
+            Some("Aa-li Ve-li")
+        );
+        assert_eq!(phonetic_text("", " Ve-li").as_deref(), Some("Ve-li"));
+        assert_eq!(phonetic_text(" ", ""), None);
     }
 }

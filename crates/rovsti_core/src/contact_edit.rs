@@ -199,6 +199,29 @@ impl RelationKind {
     }
 }
 
+/// The kinds the editor cycles through, in order.
+pub const RELATION_KINDS: [RelationKind; 13] = [
+    RelationKind::Spouse,
+    RelationKind::Partner,
+    RelationKind::Child,
+    RelationKind::Mother,
+    RelationKind::Father,
+    RelationKind::Parent,
+    RelationKind::Brother,
+    RelationKind::Sister,
+    RelationKind::Relative,
+    RelationKind::Friend,
+    RelationKind::Manager,
+    RelationKind::Assistant,
+    RelationKind::Custom,
+];
+
+/// The kind after `kind` in [`RELATION_KINDS`], wrapping round.
+pub fn next_relation_kind(kind: RelationKind) -> RelationKind {
+    let at = RELATION_KINDS.iter().position(|k| *k == kind);
+    RELATION_KINDS[at.map_or(0, |i| (i + 1) % RELATION_KINDS.len())]
+}
+
 /// A related person (spouse, parent, manager...) of a contact.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -241,6 +264,31 @@ pub fn relation_match<'a>(name: &str, all: &'a [WireContact]) -> Option<&'a Wire
         .filter(|c| crate::search::fold(c.display_name.trim()) == key);
     let first = hits.next()?;
     hits.next().is_none().then_some(first)
+}
+
+impl DraftRelation {
+    /// The card row text: "Spouse · Mehmet Yılmaz".
+    pub fn row_text(&self) -> String {
+        format!("{} · {}", self.title(), self.name.trim())
+    }
+}
+
+/// What tapping a relation row on the card does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RelationTap {
+    /// Open the card of this contact.
+    Open(i64),
+    /// No single contact has the name: search for it.
+    Search(String),
+}
+
+/// The tap target of a relation: its contact when exactly one has the name,
+/// else a search for the name.
+pub fn relation_tap(name: &str, all: &[WireContact]) -> RelationTap {
+    match relation_match(name, all) {
+        Some(c) => RelationTap::Open(c.id),
+        None => RelationTap::Search(name.trim().to_owned()),
+    }
 }
 
 /// A contact being created, edited, imported or exported.
@@ -1834,5 +1882,59 @@ mod tests {
         assert_eq!(added_notice("Ömer", &mail, 1), "Email added to Ömer");
         assert_eq!(added_notice("Ömer", &both, 1), "Detail added to Ömer");
         assert_eq!(added_notice("Şule", &both, 2), "2 details added to Şule");
+    }
+
+    #[test]
+    fn relation_kinds_cycle_and_wrap() {
+        assert_eq!(
+            next_relation_kind(RelationKind::Spouse),
+            RelationKind::Partner
+        );
+        assert_eq!(
+            next_relation_kind(RelationKind::Assistant),
+            RelationKind::Custom
+        );
+        assert_eq!(
+            next_relation_kind(RelationKind::Custom),
+            RelationKind::Spouse
+        );
+    }
+
+    #[test]
+    fn relation_row_text_and_tap_target() {
+        let all = [
+            WireContact {
+                id: 7,
+                display_name: "Mehmet Yılmaz".into(),
+                ..WireContact::default()
+            },
+            WireContact {
+                id: 8,
+                display_name: "Can Er".into(),
+                ..WireContact::default()
+            },
+            WireContact {
+                id: 9,
+                display_name: "can er".into(),
+                ..WireContact::default()
+            },
+        ];
+        let spouse = DraftRelation::new(" Mehmet Yılmaz ", RelationKind::Spouse);
+        assert_eq!(spouse.row_text(), "Spouse · Mehmet Yılmaz");
+        assert_eq!(relation_tap(&spouse.name, &all), RelationTap::Open(7));
+        let twin = DraftRelation {
+            name: "Can Er".into(),
+            kind: RelationKind::Custom,
+            label: "Neighbour".into(),
+        };
+        assert_eq!(twin.row_text(), "Neighbour · Can Er");
+        assert_eq!(
+            relation_tap(&twin.name, &all),
+            RelationTap::Search("Can Er".into())
+        );
+        assert_eq!(
+            relation_tap(" Nobody ", &all),
+            RelationTap::Search("Nobody".into())
+        );
     }
 }

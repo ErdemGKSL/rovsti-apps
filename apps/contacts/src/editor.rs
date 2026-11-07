@@ -14,8 +14,8 @@ use gpui::{
 use rovsti_core::{
     contact_dates, contact_edit,
     contact_edit::{
-        Account, ContactDraft, DraftEvent, DraftField, EventKind, FieldKind, MAX_FIELDS,
-        account_label, retain_account_groups,
+        Account, ContactDraft, DraftEvent, DraftField, DraftRelation, EventKind, FieldKind,
+        MAX_FIELDS, RelationKind, account_label, retain_account_groups,
     },
 };
 use rovsti_ui::{
@@ -107,6 +107,25 @@ impl EventRow {
     }
 }
 
+/// One related person being edited: name box, kind, and a label box that
+/// shows for the custom kind.
+pub(crate) struct RelationRow {
+    name: Entity<TextField>,
+    kind: RelationKind,
+    label: Entity<TextField>,
+}
+
+/// Whether the Phonetic name fields show: when either part is set, or after
+/// the owner asked for them.
+pub(crate) fn phonetic_visible(given: &str, family: &str, asked: bool) -> bool {
+    asked || !given.trim().is_empty() || !family.trim().is_empty()
+}
+
+/// Whether a relation row shows its label box: only for the custom kind.
+pub(crate) fn relation_label_visible(kind: RelationKind) -> bool {
+    kind == RelationKind::Custom
+}
+
 /// The form for one contact.
 pub(crate) struct Editor {
     /// `None` while creating.
@@ -114,9 +133,11 @@ pub(crate) struct Editor {
     account: String,
     /// Kept from the loaded contact until the form edits them, so saving
     /// does not drop them.
-    phonetic_given: String,
-    phonetic_family: String,
-    relations: Vec<rovsti_core::contact_edit::DraftRelation>,
+    phonetic_given: Entity<TextField>,
+    phonetic_family: Entity<TextField>,
+    /// The owner asked for the Phonetic name fields with "Add phonetic name".
+    phonetic_asked: bool,
+    relations: Vec<RelationRow>,
     starred: bool,
     given: Entity<TextField>,
     family: Entity<TextField>,
@@ -191,9 +212,18 @@ impl Editor {
         let mut editor = Self {
             id: draft.id,
             account: draft.account.clone(),
-            phonetic_given: draft.phonetic_given.clone(),
-            phonetic_family: draft.phonetic_family.clone(),
-            relations: draft.relations.clone(),
+            phonetic_given: make_field(Config::TEXT, &draft.phonetic_given, cx),
+            phonetic_family: make_field(Config::TEXT, &draft.phonetic_family, cx),
+            phonetic_asked: false,
+            relations: draft
+                .relations
+                .iter()
+                .map(|r| RelationRow {
+                    name: make_field(Config::TEXT, &r.name, cx),
+                    kind: r.kind,
+                    label: make_field(Config::TEXT, &r.label, cx),
+                })
+                .collect(),
             starred: draft.starred,
             given: make_field(Config::TEXT, &draft.given, cx),
             family: make_field(Config::TEXT, &draft.family, cx),
@@ -272,9 +302,17 @@ impl Editor {
             groups: self.groups.iter().copied().collect(),
             starred: self.starred,
             account: self.account.clone(),
-            phonetic_given: self.phonetic_given.clone(),
-            phonetic_family: self.phonetic_family.clone(),
-            relations: self.relations.clone(),
+            phonetic_given: self.phonetic_given.read(cx).text().to_owned(),
+            phonetic_family: self.phonetic_family.read(cx).text().to_owned(),
+            relations: self
+                .relations
+                .iter()
+                .map(|r| DraftRelation {
+                    name: r.name.read(cx).text().to_owned(),
+                    kind: r.kind,
+                    label: r.label.read(cx).text().to_owned(),
+                })
+                .collect(),
             nickname: self.nickname.read(cx).text().to_owned(),
             title: self.title.read(cx).text().to_owned(),
             websites: self
@@ -419,6 +457,50 @@ impl ContactsApp {
             row.label = None;
             cx.notify();
         }
+    }
+
+    fn cycle_relation_kind(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(row) = self
+            .editor
+            .as_mut()
+            .and_then(|e| e.relations.get_mut(index))
+        {
+            row.kind = contact_edit::next_relation_kind(row.kind);
+            cx.notify();
+        }
+    }
+
+    fn add_relation(&mut self, cx: &mut Context<Self>) {
+        let (name, label) = (
+            make_field(Config::TEXT, "", cx),
+            make_field(Config::TEXT, "", cx),
+        );
+        if let Some(editor) = self.editor.as_mut()
+            && editor.relations.len() < MAX_FIELDS
+        {
+            editor.relations.push(RelationRow {
+                name,
+                kind: RelationKind::Spouse,
+                label,
+            });
+        }
+        cx.notify();
+    }
+
+    fn remove_relation(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(editor) = self.editor.as_mut()
+            && index < editor.relations.len()
+        {
+            editor.relations.remove(index);
+        }
+        cx.notify();
+    }
+
+    fn ask_phonetic(&mut self, cx: &mut Context<Self>) {
+        if let Some(editor) = self.editor.as_mut() {
+            editor.phonetic_asked = true;
+        }
+        cx.notify();
     }
 
     fn add_event(&mut self, cx: &mut Context<Self>) {
@@ -829,67 +911,100 @@ impl ContactsApp {
                 .on_click(cx.listener(|this, _, _, cx| this.save_editor(cx))),
             );
 
-        let name = section(
-            theme,
-            Some("Name".into()),
-            [
-                form_row(theme)
-                    .child(field_box(
-                        theme,
-                        "f-given",
-                        &editor.given,
-                        "First name",
-                        false,
-                        window,
-                        cx,
-                    ))
-                    .into_any_element(),
-                form_row(theme)
-                    .child(field_box(
-                        theme,
-                        "f-family",
-                        &editor.family,
-                        "Last name",
-                        false,
-                        window,
-                        cx,
-                    ))
-                    .into_any_element(),
-                form_row(theme)
-                    .child(field_box(
-                        theme,
-                        "f-nickname",
-                        &editor.nickname,
-                        "Nickname",
-                        false,
-                        window,
-                        cx,
-                    ))
-                    .into_any_element(),
-                form_row(theme)
-                    .child(field_box(
-                        theme,
-                        "f-title",
-                        &editor.title,
-                        "Job title",
-                        false,
-                        window,
-                        cx,
-                    ))
-                    .into_any_element(),
-                form_row(theme)
-                    .child(field_box(
-                        theme,
-                        "f-org",
-                        &editor.org,
-                        "Organisation",
-                        false,
-                        window,
-                        cx,
-                    ))
-                    .into_any_element(),
-            ],
-        );
+        let mut name_rows: Vec<AnyElement> = vec![
+            form_row(theme)
+                .child(field_box(
+                    theme,
+                    "f-given",
+                    &editor.given,
+                    "First name",
+                    false,
+                    window,
+                    cx,
+                ))
+                .into_any_element(),
+            form_row(theme)
+                .child(field_box(
+                    theme,
+                    "f-family",
+                    &editor.family,
+                    "Last name",
+                    false,
+                    window,
+                    cx,
+                ))
+                .into_any_element(),
+            form_row(theme)
+                .child(field_box(
+                    theme,
+                    "f-nickname",
+                    &editor.nickname,
+                    "Nickname",
+                    false,
+                    window,
+                    cx,
+                ))
+                .into_any_element(),
+            form_row(theme)
+                .child(field_box(
+                    theme,
+                    "f-title",
+                    &editor.title,
+                    "Job title",
+                    false,
+                    window,
+                    cx,
+                ))
+                .into_any_element(),
+            form_row(theme)
+                .child(field_box(
+                    theme,
+                    "f-org",
+                    &editor.org,
+                    "Organisation",
+                    false,
+                    window,
+                    cx,
+                ))
+                .into_any_element(),
+        ];
+        if phonetic_visible(
+            editor.phonetic_given.read(cx).text(),
+            editor.phonetic_family.read(cx).text(),
+            editor.phonetic_asked,
+        ) {
+            for (key, field, placeholder) in [
+                (
+                    "f-phonetic-given",
+                    &editor.phonetic_given,
+                    "Phonetic first name",
+                ),
+                (
+                    "f-phonetic-family",
+                    &editor.phonetic_family,
+                    "Phonetic last name",
+                ),
+            ] {
+                name_rows.push(
+                    form_row(theme)
+                        .child(field_box(theme, key, field, placeholder, false, window, cx))
+                        .into_any_element(),
+                );
+            }
+        } else {
+            name_rows.push(
+                tap_row(
+                    theme,
+                    "phonetic-add",
+                    Some(Icon::LucidePlus),
+                    "Add phonetic name",
+                    Tone::Accent,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.ask_phonetic(cx)))
+                .into_any_element(),
+            );
+        }
+        let name = section(theme, Some("Name".into()), name_rows);
 
         let save_to = {
             let label = SharedString::from(account_label(&editor.account));
@@ -929,6 +1044,7 @@ impl ContactsApp {
         let numbers = self.field_section(theme, Set::Numbers, window, cx);
         let emails = self.field_section(theme, Set::Emails, window, cx);
         let dates = self.event_section(theme, window, cx);
+        let relations = self.relation_section(theme, window, cx);
         let addresses = self.field_section(theme, Set::Addresses, window, cx);
         let websites = self.field_section(theme, Set::Websites, window, cx);
 
@@ -1014,6 +1130,7 @@ impl ContactsApp {
             .child(numbers)
             .child(emails)
             .child(dates)
+            .child(relations)
             .child(addresses)
             .child(websites)
             .child(section(
@@ -1150,6 +1267,103 @@ impl ContactsApp {
         section(theme, Some(header.into()), children).into_any_element()
     }
 
+    /// The Relationship section: kind button, name box, remove button and,
+    /// for the custom kind, a label box per row.
+    fn relation_section(
+        &self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(editor) = &self.editor else {
+            return div().into_any_element();
+        };
+        let colors = theme::colors(theme);
+        let mut children: Vec<AnyElement> = Vec::new();
+        for (i, row) in editor.relations.iter().enumerate() {
+            let title = if relation_label_visible(row.kind) {
+                "Custom"
+            } else {
+                row.kind.title()
+            };
+            children.push(
+                form_row(theme)
+                    .child(
+                        div()
+                            .id(("rel-kind", i))
+                            .flex_none()
+                            .w(px(88.0))
+                            .h(metrics::MIN_HIT)
+                            .flex()
+                            .items_center()
+                            .text_size(typography::FOOTNOTE.size)
+                            .text_color(colors.accent)
+                            .child(title)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.cycle_relation_kind(i, cx);
+                            })),
+                    )
+                    .child(field_box(
+                        theme,
+                        ("rel-name", i),
+                        &row.name,
+                        "Name",
+                        false,
+                        window,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .id(("rel-remove", i))
+                            .flex_none()
+                            .size(metrics::MIN_HIT)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                svg()
+                                    .path(Icon::LucideX.path())
+                                    .size(px(16.0))
+                                    .text_color(colors.secondary_label),
+                            )
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.remove_relation(i, cx);
+                            })),
+                    )
+                    .into_any_element(),
+            );
+            if relation_label_visible(row.kind) {
+                children.push(
+                    form_row(theme)
+                        .child(field_box(
+                            theme,
+                            ("rel-label", i),
+                            &row.label,
+                            "Label, e.g. Neighbour",
+                            false,
+                            window,
+                            cx,
+                        ))
+                        .into_any_element(),
+                );
+            }
+        }
+        if editor.relations.len() < MAX_FIELDS {
+            children.push(
+                tap_row(
+                    theme,
+                    "rel-add",
+                    Some(Icon::LucidePlus),
+                    "Add relationship",
+                    Tone::Accent,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.add_relation(cx)))
+                .into_any_element(),
+            );
+        }
+        section(theme, Some("Relationship".into()), children).into_any_element()
+    }
+
     /// The Birthday & dates section: kind button, date box and remove button
     /// per row.
     fn event_section(&self, theme: Theme, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -1273,6 +1487,20 @@ mod tests {
         );
         assert_eq!(default_account(&listed(), "com.google|gone@b.com"), "");
         assert_eq!(default_account(&[], "com.google|a@b.com"), "");
+    }
+
+    #[test]
+    fn phonetic_fields_show_when_set_or_asked() {
+        assert!(!phonetic_visible("", "  ", false));
+        assert!(phonetic_visible("Aa-li", "", false));
+        assert!(phonetic_visible("", "Ve-li", false));
+        assert!(phonetic_visible("", "", true));
+    }
+
+    #[test]
+    fn only_the_custom_relation_has_a_label_box() {
+        assert!(relation_label_visible(RelationKind::Custom));
+        assert!(!relation_label_visible(RelationKind::Spouse));
     }
 
     #[test]

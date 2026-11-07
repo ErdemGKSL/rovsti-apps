@@ -87,6 +87,14 @@ impl TextField {
         self.focus.clone()
     }
 
+    /// Replaces the text (a search started from a card).
+    pub(crate) fn set(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.content = text.replace(['\n', '\r'], " ");
+        self.marked = None;
+        self.edits += 1;
+        cx.notify();
+    }
+
     /// Empties the field and keeps focus (the clear button).
     pub(crate) fn clear(&mut self, cx: &mut Context<Self>) {
         if !self.content.is_empty() || self.marked.is_some() {

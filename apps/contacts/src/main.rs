@@ -411,7 +411,9 @@ struct ContactsApp {
     upcoming_numbers: std::collections::HashMap<i64, String>,
     upcoming_loads: u64,
     upcoming_open: bool,
-    recent: Vec<recent::RecentRow>,
+    recent: recent::RecentLists,
+    /// The tab of the Recent page, kept for the session.
+    recent_tab: rovsti_core::contact_recent::RecentTab,
     recent_open: bool,
     /// Lookup key of my card, and the emergency keys, as saved in the prefs.
     my_card: Option<String>,
@@ -709,7 +711,8 @@ impl ContactsApp {
             upcoming_numbers: std::collections::HashMap::new(),
             upcoming_loads: 0,
             upcoming_open: false,
-            recent: Vec::new(),
+            recent: recent::RecentLists::default(),
+            recent_tab: rovsti_core::contact_recent::RecentTab::Added,
             recent_open: false,
             my_card: None,
             emergency: Vec::new(),
@@ -870,7 +873,7 @@ impl ContactsApp {
             self.favorites.clear();
             self.group_rows.clear();
             self.group_items.clear();
-            self.recent.clear();
+            self.recent = recent::RecentLists::default();
             self.frequent_rows.clear();
             self.refill_others(cx);
             cx.notify();
@@ -901,7 +904,12 @@ impl ContactsApp {
             }
         }
         self.group_items = self.build_group_items();
-        self.recent = recent::build(index.all(), crate::whatsapp::now_ms(), self.wa.offset_s);
+        self.recent = recent::build(
+            index.all(),
+            &self.added_marks,
+            crate::whatsapp::now_ms(),
+            self.wa.offset_s,
+        );
         self.rebuild_emergency();
         self.apply_marks();
         self.rebuild_frequent();
@@ -1865,7 +1873,11 @@ impl ContactsApp {
         };
         let query = self.field.read(cx).text().to_owned();
         let recent_row = (matches!(self.book, Book::Ready(_))
-            && contacts_view::show_recent(&query, self.recent.len()))
+            && rovsti_core::contact_recent::show_entry(
+                &query,
+                self.recent.added.len(),
+                self.recent.edited.len(),
+            ))
         .then(|| self.recent_entry(theme, cx));
         let my_card_row = (matches!(self.book, Book::Ready(_)) && query.trim().is_empty())
             .then(|| self.my_card_entry(theme, cx));

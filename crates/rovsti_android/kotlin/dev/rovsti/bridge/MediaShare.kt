@@ -25,6 +25,11 @@ object MediaShare {
     /** Pure: whether [name] may be served by [RovstiShareProvider] (no separators, no traversal). */
     fun isSafeName(name: String): Boolean = SAFE_NAME.matches(name) && !name.contains("..")
 
+    private val CAMERA_NAME = Regex("camera-[0-9]{1,20}\\.jpg")
+
+    /** Pure: whether the camera app may write [name] (only `camera-<digits>.jpg`, created by the app itself). */
+    fun writable(name: String): Boolean = CAMERA_NAME.matches(name)
+
     /** Pure: a served-safe file name made from [display], keeping a short extension. */
     fun safeName(display: String, fallback: String): String {
         val cleaned = display.map { if (it.isLetterOrDigit() || it == '.' || it == '-' || it == '_') it else '_' }
@@ -106,13 +111,20 @@ class RovstiShareProvider : ContentProvider() {
     override fun onCreate(): Boolean = true
 
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
-        if (mode != "r") return null
+        val write = mode == "w" || mode == "wt"
+        if (mode != "r" && !write) return null
         val ctx = context ?: return null
         val name = uri.lastPathSegment ?: return null
         if (!MediaShare.isSafeName(name)) return null
+        if (write && !MediaShare.writable(name)) return null
         val file = File(MediaShare.dir(ctx), name)
         if (!file.isFile) return null
-        return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        val flags = if (write) {
+            ParcelFileDescriptor.MODE_WRITE_ONLY or ParcelFileDescriptor.MODE_TRUNCATE
+        } else {
+            ParcelFileDescriptor.MODE_READ_ONLY
+        }
+        return ParcelFileDescriptor.open(file, flags)
     }
 
     override fun query(uri: Uri, p: Array<out String>?, s: String?, a: Array<out String>?, o: String?): Cursor? = null

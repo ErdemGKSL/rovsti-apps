@@ -29,7 +29,17 @@ fn contact(id: i64, name: &str, numbers: Vec<WireNumber>, starred: bool) -> Wire
         display_name_alt: alt,
         numbers,
         starred,
+        updated_ms: updated_ms(id),
         ..Default::default()
+    }
+}
+
+/// Fixed "last updated" stamps (ms) for two samples, so the recent list has data.
+fn updated_ms(id: i64) -> Option<i64> {
+    match id {
+        3 => Some(1_760_000_000_000),
+        6 => Some(1_762_000_000_000),
+        _ => None,
     }
 }
 
@@ -196,6 +206,21 @@ pub(crate) fn draft(id: i64) -> Option<ContactDraft> {
         id: Some(wire.id),
         events,
         addresses,
+        nickname: if id == 1 {
+            "Ayşecik".to_owned()
+        } else {
+            String::new()
+        },
+        title: if id == 1 {
+            "Engineer".to_owned()
+        } else {
+            String::new()
+        },
+        websites: if id == 1 {
+            vec!["https://example.com/ayse".to_owned()]
+        } else {
+            Vec::new()
+        },
         given: given.to_owned(),
         family: family.to_owned(),
         numbers: wire
@@ -284,6 +309,22 @@ mod tests {
                 .filter_map(|c| draft(c.id))
                 .any(|d| !d.addresses.is_empty())
         );
+    }
+
+    #[test]
+    fn one_sample_has_a_nickname_title_and_website() {
+        let d = draft(1).expect("draft");
+        assert_eq!(d.nickname, "Ayşecik");
+        assert_eq!(d.title, "Engineer");
+        assert_eq!(d.websites.len(), 1);
+        assert!(draft(2).expect("draft").websites.is_empty());
+    }
+
+    #[test]
+    fn two_samples_carry_a_fixed_updated_stamp() {
+        let stamped: Vec<i64> = contacts().iter().filter_map(|c| c.updated_ms).collect();
+        assert_eq!(stamped.len(), 2);
+        assert!(stamped.iter().all(|t| *t > 0));
     }
 
     #[test]

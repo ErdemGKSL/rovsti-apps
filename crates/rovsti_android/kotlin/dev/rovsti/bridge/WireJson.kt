@@ -355,6 +355,8 @@ object ProviderJson {
         val sortKeyAlt: String? = null,
         /** The contact's first email; [numberRaw] is "" for a contact with no number. */
         val email: String? = null,
+        /** `CONTACT_LAST_UPDATED_TIMESTAMP` in ms; 0 when unknown. */
+        val updatedMs: Long = 0,
     )
 
     fun error(code: String): String =
@@ -452,6 +454,7 @@ object ProviderJson {
             first.displayNameAlt?.takeIf { it.isNotEmpty() }?.let { o.put("display_name_alt", it) }
             first.sortKey?.takeIf { it.isNotEmpty() }?.let { o.put("sort_key", it) }
             first.sortKeyAlt?.takeIf { it.isNotEmpty() }?.let { o.put("sort_key_alt", it) }
+            group.maxOf { it.updatedMs }.takeIf { it > 0 }?.let { o.put("updated_ms", it) }
             contacts.put(o)
         }
         return ok(JSONObject().put("contacts", contacts))

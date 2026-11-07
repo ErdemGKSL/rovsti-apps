@@ -30,6 +30,7 @@ object Documents {
     const val REQUEST_IMPORT_GTFS = 0x4947 // "IG"
 
     const val REQUEST_CONTACT_PHOTO = 0x4350 // "CP"
+    const val REQUEST_CAMERA_PHOTO = 0x4350 + 1 // "CQ"
 
     /** A picked contact photo larger than this (20 MiB) is refused. */
     const val MAX_PHOTO_BYTES = 20 * 1024 * 1024
@@ -103,6 +104,51 @@ object Documents {
         true
     } catch (_: android.content.ActivityNotFoundException) {
         false
+    }
+
+    /** Pure: the file name the camera writes, `camera-<ms>.jpg` (the only name the share provider lets it write). */
+    fun cameraName(nowMs: Long): String = "camera-${nowMs.coerceAtLeast(0)}.jpg"
+
+    private var pendingCamera: File? = null
+
+    /**
+     * Opens the camera app to take one photo into `cache/share/camera-<ms>.jpg` through
+     * [RovstiShareProvider]. No `CAMERA` permission is declared (it would make the intent need it).
+     * The answer is `document_result` op `contact_photo` with `path` and `mime` `image/jpeg`.
+     */
+    fun startPhotoCapture(activity: Activity): Boolean {
+        return try {
+            val file = File(MediaShare.dir(activity), cameraName(System.currentTimeMillis()))
+            file.delete()
+            if (!file.createNewFile()) return false
+            val uri = Uri.Builder().scheme("content").authority(MediaShare.authority(activity)).appendPath(file.name).build()
+            val intent = Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
+                .putExtra(android.provider.MediaStore.EXTRA_OUTPUT, uri)
+                .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            intent.clipData = android.content.ClipData.newRawUri("", uri)
+            pendingCamera = file
+            @Suppress("DEPRECATION")
+            activity.startActivityForResult(intent, REQUEST_CAMERA_PHOTO)
+            true
+        } catch (_: android.content.ActivityNotFoundException) {
+            pendingCamera?.delete()
+            pendingCamera = null
+            false
+        } catch (_: java.io.IOException) {
+            false
+        }
+    }
+
+    private fun handleCamera(resultCode: Int, emit: (String) -> Unit) {
+        val op = "contact_photo"
+        val file = pendingCamera
+        pendingCamera = null
+        if (resultCode == Activity.RESULT_OK && file != null && file.length() > 0) {
+            emit(resultJson(op, true, path = file.absolutePath, mime = "image/jpeg"))
+        } else {
+            file?.delete()
+            emit(resultJson(op, false))
+        }
     }
 
     private fun handlePhoto(
@@ -310,6 +356,10 @@ object Documents {
             requestCode == REQUEST_ATTACH_FILE || requestCode == REQUEST_IMPORT_GTFS
         ) {
             handleFile(context, requestCode, resultCode, data, worker, emit)
+            return true
+        }
+        if (requestCode == REQUEST_CAMERA_PHOTO) {
+            handleCamera(resultCode, emit)
             return true
         }
         if (requestCode == REQUEST_CONTACT_PHOTO) {

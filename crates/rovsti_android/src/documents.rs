@@ -82,6 +82,13 @@ pub fn pick_contact_photo() -> Result<bool> {
     bridge::call_bool0("pickContactPhoto")
 }
 
+/// Opens the camera app for one photo (no `CAMERA` permission is used). The
+/// picture is written to the app cache; the `document_result` (op
+/// `contact_photo`) carries its `path` and `mime` `image/jpeg`, like the picker.
+pub fn capture_photo() -> Result<bool> {
+    bridge::call_bool0("capturePhoto")
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -108,5 +115,6 @@ mod tests {
         assert!(matches!(import_gtfs(1024), Err(Error::Unsupported)));
         assert!(matches!(pick_attachment(1024), Err(Error::Unsupported)));
         assert!(matches!(pick_contact_photo(), Err(Error::Unsupported)));
+        assert!(matches!(capture_photo(), Err(Error::Unsupported)));
     }
 }

@@ -125,6 +125,13 @@ object ContactPhotos {
         return Crop(x, y, side, out)
     }
 
+    /** The plan's clockwise quarter turns (`turns`, default 0), reduced to 0..3. */
+    fun quarterTurns(planJson: String): Int = try {
+        org.json.JSONObject(planJson).optInt("turns", 0).mod(4)
+    } catch (_: org.json.JSONException) {
+        0
+    }
+
     /** `{"w":..,"h":..}` of the image at [path] (EXIF rotation applied), or `{"w":0,"h":0}` when unreadable. */
     fun sizeJson(path: String): String {
         var w = 0
@@ -164,8 +171,18 @@ object ContactPhotos {
                     decoder.setTargetSize((headerW * k).toInt().coerceAtLeast(1), (headerH * k).toInt().coerceAtLeast(1))
                 }
             }
-            val crop = cropFor(planJson, headerW, headerH, decoded.width, decoded.height) ?: return false
-            val square = Bitmap.createBitmap(decoded, crop.x, crop.y, crop.side, crop.side)
+            val turns = quarterTurns(planJson)
+            val source = if (turns == 0) {
+                decoded
+            } else {
+                val m = android.graphics.Matrix().apply { postRotate(90f * turns) }
+                Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, m, true)
+            }
+            // PhotoPlan coordinates are in the rotated image, so the header size swaps on an odd turn.
+            val rotatedW = if (turns % 2 == 1) headerH else headerW
+            val rotatedH = if (turns % 2 == 1) headerW else headerH
+            val crop = cropFor(planJson, rotatedW, rotatedH, source.width, source.height) ?: return false
+            val square = Bitmap.createBitmap(source, crop.x, crop.y, crop.side, crop.side)
             val scaled = if (crop.side == crop.out) square else Bitmap.createScaledBitmap(square, crop.out, crop.out, true)
             val bytes = java.io.ByteArrayOutputStream().also { scaled.compress(Bitmap.CompressFormat.JPEG, 90, it) }.toByteArray()
             val uri = android.net.Uri.withAppendedPath(

@@ -296,6 +296,14 @@ object RovstiBridge {
         return true
     }
 
+    /** Camera for a contact photo; the answer is `document_result` op `contact_photo` with `path` and `mime` `image/jpeg`. */
+    @JvmStatic
+    fun capturePhoto(): Boolean {
+        val activity = foreground ?: return false
+        activity.runOnUiThread { Documents.startPhotoCapture(activity) }
+        return true
+    }
+
     /** Asks a signature-matching sibling app to handle [action] (WhatsApp call or chat); false when none does. */
     @JvmStatic fun handoff(action: String, jid: String, name: String): Boolean = Handoff.start(app, action, jid, name)
 

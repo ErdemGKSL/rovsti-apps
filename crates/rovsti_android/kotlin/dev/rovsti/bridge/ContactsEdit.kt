@@ -10,11 +10,13 @@ import android.provider.ContactsContract
 import android.provider.ContactsContract.CommonDataKinds.Email
 import android.provider.ContactsContract.CommonDataKinds.Event
 import android.provider.ContactsContract.CommonDataKinds.GroupMembership
+import android.provider.ContactsContract.CommonDataKinds.Nickname
 import android.provider.ContactsContract.CommonDataKinds.Note
 import android.provider.ContactsContract.CommonDataKinds.Organization
 import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.provider.ContactsContract.CommonDataKinds.StructuredName
 import android.provider.ContactsContract.CommonDataKinds.StructuredPostal
+import android.provider.ContactsContract.CommonDataKinds.Website
 import android.provider.ContactsContract.Contacts
 import android.provider.ContactsContract.Data
 import android.provider.ContactsContract.Groups
@@ -44,6 +46,8 @@ object ContactsEdit {
         Note.CONTENT_ITEM_TYPE,
         Event.CONTENT_ITEM_TYPE,
         StructuredPostal.CONTENT_ITEM_TYPE,
+        Website.CONTENT_ITEM_TYPE,
+        Nickname.CONTENT_ITEM_TYPE,
     )
 
     private inline fun guard(block: () -> String): String = try {
@@ -163,13 +167,16 @@ object ContactsEdit {
 
     /**
      * One draft being filled from `Data` rows. [add] reads a row whose columns are
-     * MIMETYPE, DATA1, DATA2, DATA3, DATA5 starting at index `base`. A name, organisation or
+     * MIMETYPE, DATA1, DATA2, DATA3, DATA5, DATA4 starting at index `base`. A name, organisation or
      * note already set wins, so a contact merged from several raw contacts keeps the first.
      */
     private class DraftBuilder(val contactId: Long, val account: String = "") {
         var given = ""
         var family = ""
         var org = ""
+        var title = ""
+        var nickname = ""
+        val websites = JSONArray()
         var note = ""
         var starred = false
         val numbers = JSONArray()
@@ -202,7 +209,12 @@ object ContactsEdit {
                 StructuredPostal.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) {
                     addresses.put(field(data1, kindOfPostal(c.getInt(base + 2)), c.getString(base + 3)))
                 }
-                Organization.CONTENT_ITEM_TYPE -> if (org.isEmpty()) org = data1.orEmpty()
+                Organization.CONTENT_ITEM_TYPE -> {
+                    if (org.isEmpty()) org = data1.orEmpty()
+                    if (title.isEmpty()) title = c.getString(base + 5).orEmpty()
+                }
+                Website.CONTENT_ITEM_TYPE -> if (!data1.isNullOrBlank()) websites.put(data1.trim())
+                Nickname.CONTENT_ITEM_TYPE -> if (nickname.isEmpty()) nickname = data1.orEmpty()
                 Note.CONTENT_ITEM_TYPE -> if (note.isEmpty()) note = data1.orEmpty()
                 GroupMembership.CONTENT_ITEM_TYPE -> c.getLong(base + 1).takeIf { it > 0 }?.let { groups.put(it) }
             }
@@ -216,12 +228,15 @@ object ContactsEdit {
                 .put("starred", starred)
             if (events.length() > 0) o.put("events", events)
             if (addresses.length() > 0) o.put("addresses", addresses)
+            if (websites.length() > 0) o.put("websites", websites)
+            if (nickname.isNotEmpty()) o.put("nickname", nickname)
+            if (title.isNotEmpty()) o.put("title", title)
             if (account.isNotEmpty()) o.put("account", account)
             return o
         }
     }
 
-    private val DATA_PROJECTION = arrayOf(Data.MIMETYPE, Data.DATA1, Data.DATA2, Data.DATA3, Data.DATA5)
+    private val DATA_PROJECTION = arrayOf(Data.MIMETYPE, Data.DATA1, Data.DATA2, Data.DATA3, Data.DATA5, Data.DATA4)
     private val DATA_MIMES = EDITED_MIMES + GroupMembership.CONTENT_ITEM_TYPE
 
     private fun starred(context: Context, contactId: Long): Boolean =
@@ -279,8 +294,34 @@ object ContactsEdit {
                     .build(),
             )
         }
-        str(draft, "org").takeIf { it.isNotEmpty() }?.let {
-            ops.add(insert(Organization.CONTENT_ITEM_TYPE).withValue(Organization.COMPANY, it).build())
+        val org = str(draft, "org")
+        val title = str(draft, "title")
+        if (org.isNotEmpty() || title.isNotEmpty()) {
+            ops.add(
+                insert(Organization.CONTENT_ITEM_TYPE)
+                    .withValue(Organization.COMPANY, org.ifEmpty { null })
+                    .withValue(Organization.TITLE, title.ifEmpty { null })
+                    .build(),
+            )
+        }
+        str(draft, "nickname").takeIf { it.isNotEmpty() }?.let {
+            ops.add(
+                insert(Nickname.CONTENT_ITEM_TYPE)
+                    .withValue(Nickname.NAME, it)
+                    .withValue(Nickname.TYPE, Nickname.TYPE_DEFAULT)
+                    .build(),
+            )
+        }
+        draft.optJSONArray("websites")?.let { sites ->
+            for (i in 0 until sites.length()) {
+                val url = sites.optString(i, "").trim().takeIf { it.isNotEmpty() } ?: continue
+                ops.add(
+                    insert(Website.CONTENT_ITEM_TYPE)
+                        .withValue(Website.URL, url)
+                        .withValue(Website.TYPE, Website.TYPE_OTHER)
+                        .build(),
+                )
+            }
         }
         str(draft, "note").takeIf { it.isNotEmpty() }?.let {
             ops.add(insert(Note.CONTENT_ITEM_TYPE).withValue(Note.NOTE, it).build())

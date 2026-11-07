@@ -17,7 +17,8 @@ use rovsti_core::{
         Account, AccountsPayload, ContactDraft, DetailPayload, FullPayload, Group, GroupsPayload,
         ImportPayload, MembersPayload, SavedPayload, SelectionChange,
     },
-    contact_photo::{self, PhotoError},
+    contact_photo::{self, CropView, PhotoError},
+    contact_select,
     search::{ContactIndex, fold},
     vcard,
     wire::{ContactsPayload, Envelope, WireError},
@@ -211,9 +212,27 @@ pub(crate) fn pull_full() -> Result<Vec<ContactDraft>, String> {
     Ok(contacts)
 }
 
+/// The chosen contacts as vCard text, and how many that is. `hidden` is a
+/// contact in its Undo window: it is left out even when chosen.
+#[allow(dead_code)] // used by the selection export (plan step S7)
+pub(crate) fn export_selection(
+    ids: &[i64],
+    hidden: Option<i64>,
+) -> Result<(String, usize), String> {
+    let all = pull_full()?;
+    let mut cards = contact_select::pick_drafts(&all, ids);
+    cards.retain(|c| hidden.is_none() || c.id != hidden);
+    Ok((vcard::write(&cards), cards.len()))
+}
+
 /// Opens "save as" for the `.vcf`. The answer is a `document_result`.
 pub(crate) fn start_export(text: &str) -> Result<(), String> {
-    done(documents::export_contacts("contacts.vcf", text))
+    start_export_named("contacts.vcf", text)
+}
+
+/// Opens "save as" for a `.vcf` under the suggested `name`.
+pub(crate) fn start_export_named(name: &str, text: &str) -> Result<(), String> {
+    done(documents::export_contacts(name, text))
 }
 
 /// Opens the file picker for a `.vcf`. The answer is a `document_result`.
@@ -233,6 +252,13 @@ pub(crate) fn add_contacts(cards: Vec<ContactDraft>) -> Result<u32, String> {
 /// Opens the photo picker. The answer is a `document_result` (`contact_photo`).
 pub(crate) fn start_pick_photo() -> Result<(), String> {
     done(documents::pick_contact_photo())
+}
+
+/// Opens the camera for one photo. The answer is a `document_result`
+/// (`contact_photo`), like the picker's.
+#[allow(dead_code)] // used by the photo sheet (plan step S7)
+pub(crate) fn start_capture_photo() -> Result<(), String> {
+    done(documents::capture_photo())
 }
 
 /// Removes the contact's photo.
@@ -280,8 +306,13 @@ fn photo_words(error: PhotoError) -> String {
 /// Sets the picked image at `path` as the photo of `contact_id`: asks for its
 /// size, plans the centred crop and has Android crop, scale and store it.
 pub(crate) fn change_photo(contact_id: i64, path: &str) -> Result<(), String> {
+    change_photo_with(contact_id, path, CropView::default())
+}
+
+/// Like [`change_photo`], with the crop the owner chose (turns, zoom, pan).
+pub(crate) fn change_photo_with(contact_id: i64, path: &str, view: CropView) -> Result<(), String> {
     let (width, height) = decode_size(contacts_edit::photo_size(path)).map_err(|e| e.words())?;
-    let plan = contact_photo::plan(width, height).map_err(photo_words)?;
+    let plan = contact_photo::plan_for(width, height, view).map_err(photo_words)?;
     let plan =
         serde_json::to_string(&plan).map_err(|error| Failed::Other(error.to_string()).words())?;
     done(contacts_edit::set_photo(contact_id, path, &plan))
@@ -546,6 +577,16 @@ mod tests {
     fn desktop_photo_actions_need_a_phone() {
         let words = "this needs an Android phone";
         assert_eq!(start_pick_photo().expect_err("no picker"), words);
+        assert_eq!(start_capture_photo().expect_err("no camera"), words);
+        assert_eq!(
+            change_photo_with(1, "/c/p", CropView::default().rotate_right())
+                .expect_err("no provider"),
+            words
+        );
+        assert_eq!(
+            start_export_named("a.vcf", "BEGIN:VCARD").expect_err("no picker"),
+            words
+        );
         assert_eq!(remove_photo(1).expect_err("no provider"), words);
         assert_eq!(change_photo(1, "/c/p").expect_err("no provider"), words);
         assert_eq!(Failed::Unreadable.words(), "that image can't be read");
@@ -618,5 +659,16 @@ mod tests {
         assert!(all.iter().all(|c| c.validate().is_ok()));
         let (_, count) = export_text(None).expect("export");
         assert_eq!(count, all.len());
+    }
+
+    #[test]
+    fn export_selection_writes_only_the_chosen_cards() {
+        let (text, count) = export_selection(&[1, 3], None).expect("sample");
+        assert_eq!(count, 2);
+        assert_eq!(text.matches("BEGIN:VCARD").count(), 2);
+        let (_, none) = export_selection(&[], None).expect("sample");
+        assert_eq!(none, 0);
+        let (_, left) = export_selection(&[1, 3], Some(1)).expect("sample");
+        assert_eq!(left, 1);
     }
 }

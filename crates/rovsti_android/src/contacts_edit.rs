@@ -78,7 +78,7 @@ pub fn photo_size(path: &str) -> Result<String> {
 }
 
 /// Crops the image at `path` by `plan_json` (`rovsti_core::contact_photo::PhotoPlan`),
-/// scales it, and stores it as the contact's photo; the cached file is deleted
+/// scales it, and stores it as the contact's photo (the plan's `turns` quarter turns are applied before the crop); the cached file is deleted
 /// afterwards. `false` when Android refused or the image cannot be decoded.
 pub fn set_photo(contact_id: i64, path: &str, plan_json: &str) -> Result<bool> {
     bridge::call_bool(

@@ -51,6 +51,7 @@ object ContactsQuery {
         Contacts.DISPLAY_NAME_ALTERNATIVE,
         Contacts.SORT_KEY_PRIMARY,
         Contacts.SORT_KEY_ALTERNATIVE,
+        Contacts.CONTACT_LAST_UPDATED_TIMESTAMP,
     )
 
     private fun allRows(context: Context): List<ProviderJson.PhoneRow> {
@@ -67,7 +68,8 @@ object ContactsQuery {
                 val email = emails[id]
                 val own = phones[id]
                 if (own != null) {
-                    own.mapTo(out) { it.copy(email = email) }
+                    val updated = c.getLong(8)
+                    own.mapTo(out) { it.copy(email = email, updatedMs = updated) }
                 } else {
                     out.add(
                         ProviderJson.PhoneRow(
@@ -81,6 +83,7 @@ object ContactsQuery {
                             sortKey = c.getString(6),
                             sortKeyAlt = c.getString(7),
                             email = email,
+                            updatedMs = c.getLong(8),
                         )
                     )
                 }

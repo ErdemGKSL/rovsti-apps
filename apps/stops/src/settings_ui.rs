@@ -1329,7 +1329,6 @@ impl StopsApp {
     /// Undo on the pill: the stop saved from a trip goes again.
     pub(crate) fn undo_save(&mut self, id: u64, cx: &mut Context<Self>) {
         if self.saved.remove(id) {
-            self.expanded = None;
             self.save_stops(cx);
         }
         cx.notify();

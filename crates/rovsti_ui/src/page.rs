@@ -17,6 +17,7 @@ use liquid_glass_kit::{
 
 use crate::{
     layout::{self, geom, space},
+    menu::AnchorSlot,
     motion::press_scale,
 };
 
@@ -28,6 +29,7 @@ pub struct HeaderAction {
     icon: GpuiIcons,
     label: SharedString,
     badge: bool,
+    anchor: Option<AnchorSlot>,
     on_click: Option<ActionHandler>,
 }
 
@@ -39,8 +41,16 @@ impl HeaderAction {
             icon,
             label: label.into(),
             badge: false,
+            anchor: None,
             on_click: None,
         }
+    }
+
+    /// Records where the button is painted, so a [`crate::menu::Menu`] can
+    /// hang off it.
+    pub fn anchor(mut self, slot: &AnchorSlot) -> Self {
+        self.anchor = Some(slot.clone());
+        self
     }
 
     /// Shows the small accent dot (something new behind this action).
@@ -151,11 +161,15 @@ fn action_button(theme: Theme, action: HeaderAction) -> impl IntoElement {
         icon,
         label,
         badge,
+        anchor,
         on_click,
     } = action;
-    let slot = header_button(theme, icon, 0.0, badge)
+    let mut slot = header_button(theme, icon, 0.0, badge)
         .id(id)
         .aria_label(label);
+    if let Some(anchor) = anchor {
+        slot = slot.child(anchor.track());
+    }
     match on_click {
         Some(f) => slot
             .on_click(move |_, window, cx| f(window, cx))

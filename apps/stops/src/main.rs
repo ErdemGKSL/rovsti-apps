@@ -33,6 +33,7 @@ use rovsti_ui::{
     current_theme,
     field::TextField,
     layout::content_bottom_inset,
+    menu::{AnchorSlot, MenuState},
     motion::{Entrance, Motion},
     notice_pill::{NoticePill, PillEvent},
     sheet::Sheet,
@@ -163,10 +164,16 @@ pub(crate) struct StopsApp {
     pub(crate) sheet_mode: SheetMode,
     pub(crate) field: Entity<TextField>,
     pub(crate) back_enabled: bool,
-    /// The saved stop whose actions are open.
-    pub(crate) expanded: Option<u64>,
-    /// The saved stop whose Delete was tapped once and now asks to be confirmed.
-    pub(crate) confirm_delete: Option<u64>,
+    /// The saved stop whose "..." menu is open, and the menu's state.
+    pub(crate) row_menu: Option<u64>,
+    pub(crate) row_menu_ui: MenuState,
+    /// Where each Saved row's "..." button was painted (by stop id).
+    pub(crate) row_anchors: std::cell::RefCell<std::collections::HashMap<u64, AnchorSlot>>,
+    /// The Saved header's "..." menu and the Sort menu, with their anchors.
+    pub(crate) more_menu_ui: MenuState,
+    pub(crate) more_anchor: AnchorSlot,
+    pub(crate) sort_menu_ui: MenuState,
+    pub(crate) sort_anchor: AnchorSlot,
     /// The Saved tab's search text and order (not persisted).
     pub(crate) saved_query: String,
     pub(crate) saved_sort: rovsti_geo::saved_stops::SavedSort,
@@ -399,12 +406,17 @@ impl StopsApp {
             sheet_mode: SheetMode::Pick,
             field,
             back_enabled: false,
-            expanded: None,
+            row_menu: None,
+            row_menu_ui: MenuState::new(),
+            row_anchors: std::cell::RefCell::new(std::collections::HashMap::new()),
+            more_menu_ui: MenuState::new(),
+            more_anchor: AnchorSlot::new(),
+            sort_menu_ui: MenuState::new(),
+            sort_anchor: AnchorSlot::new(),
             saved_query: String::new(),
             saved_sort: rovsti_geo::saved_stops::SavedSort::default(),
             saved_field,
             saved_visible: Vec::new(),
-            confirm_delete: None,
             saved_list: lists::KeyedList::default(),
             history_list: lists::KeyedList::default(),
             notice_list: lists::KeyedList::default(),
@@ -633,13 +645,22 @@ impl StopsApp {
             || self.alarm.is_some()
             || self.sheet.is_open()
             || (self.tabs.selected() == 2 && self.settings_page != SettingsPage::Main)
-            || self.expanded.is_some()
+            || self.menus_open()
             || self.tabs.selected() != 0
     }
 
     /// System Back: one step out of the top-most layer (an open pin menu first).
     fn on_back(&mut self, cx: &mut Context<Self>) {
-        if self.pick.menu().is_some() {
+        if self.row_menu_ui.is_open() {
+            self.row_menu_ui.back_or_close();
+            cx.notify();
+        } else if self.more_menu_ui.is_open() {
+            self.more_menu_ui.back_or_close();
+            cx.notify();
+        } else if self.sort_menu_ui.is_open() {
+            self.sort_menu_ui.back_or_close();
+            cx.notify();
+        } else if self.pick.menu().is_some() {
             self.pick.close_menu();
             cx.notify();
         } else if self.map.end_measure() {
@@ -669,10 +690,6 @@ impl StopsApp {
             if !stepped {
                 self.open_settings(SettingsPage::Main, cx);
             }
-        } else if self.expanded.is_some() {
-            self.expanded = None;
-            self.confirm_delete = None;
-            cx.notify();
         } else if self.tabs.select(0) {
             self.confirm_clear = false;
             self.confirm_prune = None;
@@ -836,6 +853,12 @@ impl Render for StopsApp {
                 | self.page.tick(dt)
                 | self.sheet.tick(dt)
                 | self.sheet.tick_real(real)
+                | self.row_menu_ui.tick(dt)
+                | self.row_menu_ui.tick_real(real)
+                | self.more_menu_ui.tick(dt)
+                | self.more_menu_ui.tick_real(real)
+                | self.sort_menu_ui.tick(dt)
+                | self.sort_menu_ui.tick_real(real)
                 | self.pill.tick(dt)
                 | self.map.tick_settle(dt)
         });
@@ -904,8 +927,7 @@ impl Render for StopsApp {
                         if this.tabs.select(index) {
                             this.map.follow_mode = this.map.follow_mode.on_pan();
                             this.sync_follow(true, cx);
-                            this.expanded = None;
-                            this.confirm_delete = None;
+                            this.close_saved_menus();
                             // Leaving disarms a half-done destructive tap and
                             // closes the pin menu nobody can see any more.
                             this.confirm_clear = false;
@@ -930,6 +952,7 @@ impl Render for StopsApp {
                 },
             ))
             .children(self.sheet_view(theme, window, cx))
+            .children(self.saved_menu_overlays(theme, window, cx))
             // Over the sheet, so a refused name or a save result is seen.
             .children(self.render_pill(theme, window, cx))
             .children(self.alarm_screen(theme, cx))

@@ -235,7 +235,7 @@ fn run_trip(app: &mut StopsApp, cx: &mut Context<StopsApp>, ago_s: i64, fixes_s:
 }
 
 /// Every main screen and important sheet, in shot order.
-const SCENES: [(u32, &str, Scene); 12] = [
+const SCENES: [(u32, &str, Scene); 14] = [
     (1, "trip-idle", |_, _, _| {}),
     (2, "trip-a-set", |app, _, _| place_ends(app, true, false)),
     (3, "trip-a-b-set", |app, _, _| place_ends(app, true, true)),
@@ -246,6 +246,11 @@ const SCENES: [(u32, &str, Scene); 12] = [
         run_trip(app, cx, 48, &[28, 32, 36, 40, 44, 48]);
     }),
     (6, "saved-list", |app, _, _| app.tabs.jump_to(SAVED_TAB)),
+    // 06b and 06c: the row "..." menu and the header "..." menu.
+    (6, "saved-row-menu", |app, _, _| app.tabs.jump_to(SAVED_TAB)),
+    (6, "saved-more-menu", |app, _, _| {
+        app.tabs.jump_to(SAVED_TAB)
+    }),
     (7, "saved-stop-sheet", |app, _, cx| {
         app.tabs.jump_to(SAVED_TAB);
         let id = app.saved.stops[0].id;
@@ -264,16 +269,34 @@ const SCENES: [(u32, &str, Scene); 12] = [
     }),
 ];
 
+/// What a scene does once its first frames are painted: the anchors of a menu
+/// are only known after the tab rendered.
+fn follow_up(screen: &str) -> Option<Scene> {
+    match screen {
+        "saved-row-menu" => Some(|app, _, cx| {
+            let id = app.saved.stops[1].id;
+            app.open_row_menu_for_shot(id, cx);
+        }),
+        "saved-more-menu" => Some(|app, _, cx| app.open_more_menu_for_shot(cx)),
+        _ => None,
+    }
+}
+
 fn render(spec: ShotSpec, scene: Scene) -> PathBuf {
     // Trips, prefs and drafts persist; every shot starts from a fresh dir.
     let root = isolate_data_dir("stops");
     seed(&root, spec.theme);
+    let screen = spec.screen;
     let mut rig = open(spec);
     // The seeded files arrive first; scenes act on the settled app.
     rig.settle();
     let root = rig.root.clone();
     rig.update(|cx, window| root.update(cx, |app, cx| scene(app, window, cx)));
     rig.settle();
+    if let Some(next) = follow_up(screen) {
+        rig.update(|cx, window| root.update(cx, |app, cx| next(app, window, cx)));
+        rig.settle();
+    }
     rig.save()
 }
 
@@ -316,15 +339,18 @@ mod tests {
 
     #[test]
     fn scenes_are_numbered_in_order_with_unique_names() {
-        for (i, (nn, name, _)) in SCENES.iter().enumerate() {
-            assert_eq!(*nn as usize, i + 1);
+        // The a/b/c variants of a screen share its number.
+        let mut last = 0;
+        for (nn, name, _) in &SCENES {
+            assert!(*nn == last || *nn == last + 1, "{name}");
+            last = *nn;
             assert!(SCENES.iter().filter(|s| s.1 == *name).count() == 1);
         }
     }
 
     #[test]
     fn the_run_writes_two_themes_per_scene_and_one_small_shot() {
-        assert_eq!(SCENES.len() * 2 + 1, 25);
+        assert_eq!(SCENES.len() * 2 + 1, 29);
     }
 
     #[test]

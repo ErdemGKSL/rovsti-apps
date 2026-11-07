@@ -1,13 +1,15 @@
 //! The Saved tab: stops (a gate of two points) kept for one-tap trips. Tapping a
-//! row opens its actions (Rename, Up, Down, Delete); a delete can be undone from
-//! the pill. `share_point` opens the system share sheet (`telecom::share_text`)
+//! row opens the stop's sheet; the row's "..." button (or a long press) opens a
+//! popover menu (Show on map, Open in maps, Move, Delete) and nothing is ever
+//! inserted into the list. The header's "..." menu holds Copy list, the exports
+//! and Import. A delete can be undone from the pill. `share_point` opens the system share sheet (`telecom::share_text`)
 //! and falls back to the clipboard when there is no sheet (desktop, or no app
 //! answered).
 
 use crate::pick::dest_from_endpoint;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement,
-    StatefulInteractiveElement, Styled, Window, div, list, px,
+    StatefulInteractiveElement, Styled, Window, div, list, px, svg,
 };
 use rovsti_android::Error as AndroidError;
 use rovsti_core::wire::DocumentResult;
@@ -18,8 +20,16 @@ use rovsti_geo::{
     saved_stops::{self, SavedSort},
 };
 use rovsti_ui::{
-    components::{empty_state, glass_pill, large_title, list_row, section},
+    Icon,
+    button::{Button, ButtonSize, ButtonStyle},
+    components::{empty_state, glass_pill, list_row, section},
     field::field_box,
+    layout,
+    menu::{
+        AnchorSlot, Menu,
+        model::{MenuGroup, MenuItem, MenuModel},
+    },
+    page::{HeaderAction, PageHeader},
     theme,
     tokens::Theme,
 };
@@ -162,13 +172,72 @@ pub fn reorderable(count: usize, query: &str, sort: SavedSort) -> bool {
     sort == SavedSort::Saved && (!show_search(count) || query.trim().is_empty())
 }
 
-/// The next order when the sort pill is tapped.
-pub fn next_sort(sort: SavedSort) -> SavedSort {
+/// The menu key of a sort order.
+pub fn sort_key(sort: SavedSort) -> &'static str {
     match sort {
-        SavedSort::Saved => SavedSort::Name,
-        SavedSort::Name => SavedSort::Nearest,
-        SavedSort::Nearest => SavedSort::Saved,
+        SavedSort::Saved => "sort-saved",
+        SavedSort::Name => "sort-name",
+        SavedSort::Nearest => "sort-nearest",
     }
+}
+
+/// The sort order a Sort menu key stands for.
+pub fn sort_from_key(key: &str) -> Option<SavedSort> {
+    [SavedSort::Saved, SavedSort::Name, SavedSort::Nearest]
+        .into_iter()
+        .find(|s| sort_key(*s) == key)
+}
+
+/// The Sort menu: one choice per order, the current one checked.
+pub fn sort_menu_model(current: SavedSort) -> MenuModel {
+    MenuModel::new(vec![MenuGroup::new(
+        [SavedSort::Saved, SavedSort::Name, SavedSort::Nearest]
+            .into_iter()
+            .map(|s| MenuItem::new(sort_key(s), sort_label(s)).checked(s == current))
+            .collect(),
+    )])
+}
+
+/// The row "..." menu. Up and Down are disabled (not hidden) at the ends of a
+/// group and whenever the list is not in the order the user arranged.
+pub fn row_menu_model(can_up: bool, can_down: bool) -> MenuModel {
+    let mut up = MenuItem::new("up", "Move up");
+    let mut down = MenuItem::new("down", "Move down");
+    if !can_up {
+        up = up.disabled();
+    }
+    if !can_down {
+        down = down.disabled();
+    }
+    MenuModel::new(vec![
+        MenuGroup::new(vec![
+            MenuItem::new("show", "Show on map"),
+            MenuItem::new("maps", "Open in maps"),
+        ]),
+        MenuGroup::new(vec![up, down]),
+        MenuGroup::new(vec![MenuItem::new("delete", "Delete").destructive()]),
+    ])
+}
+
+/// The confirm prompt of the row menu's Delete.
+pub fn delete_prompt(name: &str) -> String {
+    format!("Delete {name}?")
+}
+
+/// The header "..." menu. Copy list is disabled when nothing is listed.
+pub fn more_menu_model(has_visible: bool) -> MenuModel {
+    let mut copy = MenuItem::new("copy", "Copy list");
+    if !has_visible {
+        copy = copy.disabled();
+    }
+    MenuModel::new(vec![
+        MenuGroup::new(vec![copy]),
+        MenuGroup::new(vec![
+            MenuItem::new("gpx", "Export GPX"),
+            MenuItem::new("json", "Export JSON"),
+        ]),
+        MenuGroup::new(vec![MenuItem::new("import", "Import")]),
+    ])
 }
 
 /// The sort pill's text.
@@ -226,31 +295,6 @@ pub fn stop_detail(stop: &SavedStop, here: Option<Coord>, usage: Option<&str>) -
     match usage {
         Some(u) => format!("{base} · {u}"),
         None => base,
-    }
-}
-
-/// What a tap on Delete does for stop `id` given the stop awaiting confirmation.
-#[derive(Debug, PartialEq, Eq)]
-pub struct DeleteStep {
-    /// The stop awaiting confirmation after this tap.
-    pub confirm: Option<u64>,
-    /// Delete now (this was the second tap on the same stop).
-    pub delete: bool,
-}
-
-/// The first tap arms `id`, the second tap on the same stop deletes it, and a
-/// tap on another stop's Delete arms that one instead.
-pub fn delete_step(armed: Option<u64>, id: u64) -> DeleteStep {
-    if armed == Some(id) {
-        DeleteStep {
-            confirm: None,
-            delete: true,
-        }
-    } else {
-        DeleteStep {
-            confirm: Some(id),
-            delete: false,
-        }
     }
 }
 
@@ -321,12 +365,8 @@ impl StopsApp {
         if self.saved_visible.is_empty() {
             keys.push(lists::key(3, 0));
         }
-        keys.extend(self.saved_visible.iter().map(|id| {
-            // An opened stop is taller, and taller again with the Cancel row.
-            let open = self.expanded == Some(*id);
-            let armed = open && self.confirm_delete == Some(*id);
-            lists::key(1 + u8::from(open) + u8::from(armed), *id)
-        }));
+        // Rows never change height, so the key is the stop alone.
+        keys.extend(self.saved_visible.iter().map(|id| lists::key(1, *id)));
         let state = self.saved_list.sync(keys);
         Page::List(Box::new(list(
             state,
@@ -343,61 +383,39 @@ impl StopsApp {
         )))
     }
 
-    /// The title, the export / import pills, then search and sort.
+    /// The title with one "..." button, then search and sort on one 44 dp line.
     fn saved_header(
         &mut self,
         theme: Theme,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let colors = theme::colors(theme);
         let count = self.saved.stops.len();
-        let tools = div()
-            .flex()
-            .gap(px(10.0))
-            .px(px(16.0))
-            .pb(px(10.0))
-            .child(
-                glass_pill(theme, "Export GPX")
-                    .id("saved-export-gpx")
-                    .flex_1()
-                    .on_click(cx.listener(|this, _, _, cx| this.export_places(true, cx))),
-            )
-            .child(
-                glass_pill(theme, "Export JSON")
-                    .id("saved-export-json")
-                    .flex_1()
-                    .on_click(cx.listener(|this, _, _, cx| this.export_places(false, cx))),
-            )
-            .child(
-                glass_pill(theme, "Import")
-                    .id("saved-import")
-                    .flex_1()
-                    .text_color(colors.accent)
-                    .on_click(cx.listener(|this, _, _, cx| this.import_places(cx))),
-            );
-        let mut header = div()
-            .flex()
-            .flex_col()
-            .child(large_title(window, theme, "Saved", None))
-            .child(tools);
-        if !self.saved_visible.is_empty() {
-            header = header.child(
-                div().flex().px(px(16.0)).pb(px(10.0)).child(
-                    glass_pill(theme, "Copy list")
-                        .id("saved-copy-list")
-                        .flex_1()
-                        .on_click(cx.listener(|this, _, _, cx| this.copy_list(cx))),
-                ),
-            );
-        }
+        let entity = cx.entity();
+        let mut header = div().w_full().flex().flex_col().child(
+            PageHeader::new("Saved")
+                .action(
+                    HeaderAction::new("saved-more", Icon::LucideEllipsis, "More")
+                        .anchor(&self.more_anchor)
+                        .on_click(move |_, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.close_saved_menus();
+                                if this.more_menu_ui.open_from(&this.more_anchor) {
+                                    cx.notify();
+                                }
+                            });
+                        }),
+                )
+                .render(window, theme),
+        );
         if show_search(count) || show_sort(count) {
             let mut row = div()
                 .flex()
                 .items_center()
                 .gap(px(8.0))
-                .px(px(16.0))
-                .pb(px(10.0));
+                .px(px(layout::MARGIN))
+                .min_h(px(layout::HIT))
+                .mb(px(8.0));
             if show_search(count) {
                 row = row.child(div().flex_1().child(field_box(
                     theme,
@@ -412,16 +430,21 @@ impl StopsApp {
             }
             if show_sort(count) {
                 row = row.child(
-                    glass_pill(theme, format!("Sort: {}", sort_label(self.saved_sort)))
-                        .id("saved-sort")
-                        .text_color(colors.accent)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.saved_sort = next_sort(this.saved_sort);
-                            this.expanded = None;
-                            this.confirm_delete = None;
-                            this.saved_list.scroll_to_top();
+                    Button::new(
+                        "saved-sort",
+                        format!("Sort: {}", sort_label(self.saved_sort)),
+                    )
+                    .style(ButtonStyle::Gray)
+                    .size(ButtonSize::Small)
+                    .build(theme)
+                    .relative()
+                    .child(self.sort_anchor.track())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.close_saved_menus();
+                        if this.sort_menu_ui.open_from(&this.sort_anchor) {
                             cx.notify();
-                        })),
+                        }
+                    })),
                 );
             }
             header = header.child(row);
@@ -429,14 +452,13 @@ impl StopsApp {
         header.into_any_element()
     }
 
-    /// Saved stop `i` with its actions when it is open.
+    /// Saved stop `i`: a tap opens its sheet, the "..." button or a long press
+    /// its menu. The row never changes height.
     fn saved_item(&mut self, theme: Theme, i: usize, cx: &mut Context<Self>) -> AnyElement {
         let shown = self.saved_visible.len();
-        let count = self.saved.stops.len();
         let Some(stop) = self.saved_visible.get(i).and_then(|id| self.saved.get(*id)) else {
             return div().into_any_element();
         };
-        let reorder = reorderable(count, &self.saved_query, self.saved_sort);
         let colors = theme::colors(theme);
         let id = stop.id;
         let usage = self
@@ -444,193 +466,218 @@ impl StopsApp {
             .usage_of(stop.a.coord, stop.b.coord)
             .map(|u| rovsti_geo::usage_text(u, crate::store::now_ms(), self.tz_offset_s));
         let detail = stop_detail(stop, self.map.position.map(|(c, _)| c), usage.as_deref());
-        let open = self.expanded == Some(id);
-        let dot: Option<AnyElement> = (stop.colour != StopColour::Orange).then(|| {
+        // Orange is the default and shows no dot, but the slot stays so every
+        // title starts on the same x.
+        let dot_colour = (stop.colour != StopColour::Orange)
+            .then(|| crate::map::stop_colour_hsla(theme, stop.colour));
+        let dot: Option<AnyElement> = Some(
             div()
                 .size(px(10.0))
+                .flex_none()
                 .rounded_full()
-                .bg(crate::map::stop_colour_hsla(theme, stop.colour))
-                .into_any_element()
-        });
-        let row = list_row(
-            theme,
-            dot,
-            row_title(stop),
-            Some(detail.into()),
-            Some(if open { "Close" } else { "" }.into()),
-        )
-        .id(("saved-stop", id as usize))
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.confirm_delete = None;
-            this.expanded = if this.expanded == Some(id) {
-                None
-            } else {
-                Some(id)
-            };
-            cx.notify();
-        }));
-        let mut item = div().flex().flex_col().child(row);
-        if open {
-            let pill_row = || div().flex().gap(px(10.0)).px(px(12.0)).pb(px(10.0));
-            let armed = self.confirm_delete == Some(id);
-            let delete_label = if armed {
-                format!("Delete {}?", stop.name)
-            } else {
-                "Delete".to_string()
-            };
-            let up: AnyElement = if reorder && can_move(&self.saved, id, -1) {
-                glass_pill(theme, "Up")
-                    .id(("stop-up", id as usize))
-                    .flex_1()
-                    .on_click(cx.listener(move |this, _, _, cx| this.move_stop(id, -1, cx)))
-                    .into_any_element()
-            } else {
-                glass_pill(theme, "Up")
-                    .flex_1()
-                    .text_color(colors.tertiary_label)
-                    .into_any_element()
-            };
-            let down: AnyElement = if reorder && can_move(&self.saved, id, 1) {
-                glass_pill(theme, "Down")
-                    .id(("stop-down", id as usize))
-                    .flex_1()
-                    .on_click(cx.listener(move |this, _, _, cx| this.move_stop(id, 1, cx)))
-                    .into_any_element()
-            } else {
-                glass_pill(theme, "Down")
-                    .flex_1()
-                    .text_color(colors.tertiary_label)
-                    .into_any_element()
-            };
-            item = item.child(
-                pill_row()
-                    .child(
-                        glass_pill(theme, "Show on map")
-                            .id(("stop-show", id as usize))
-                            .flex_1()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.show_stop_on_map(id, cx);
-                            })),
-                    )
-                    .child(
-                        glass_pill(theme, "Open in maps")
-                            .id(("stop-maps", id as usize))
-                            .flex_1()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.open_stop_in_maps(id, cx);
-                            })),
-                    )
-                    .child(
-                        glass_pill(
-                            theme,
-                            if stop.favourite {
-                                "Unfavourite"
-                            } else {
-                                "Favourite"
-                            },
-                        )
-                        .id(("stop-fav", id as usize))
-                        .flex_1()
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_stop_favourite(id, cx);
-                        })),
-                    )
-                    .child(
-                        glass_pill(theme, "Start")
-                            .id(("stop-start", id as usize))
-                            .flex_1()
-                            .text_color(colors.accent)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.start_saved_stop(id, cx);
-                            })),
-                    ),
+                .children(dot_colour.map(|c| div().size_full().rounded_full().bg(c)))
+                .into_any_element(),
+        );
+        let anchor = self.row_anchors.borrow_mut().entry(id).or_default().clone();
+        let more = div()
+            .id(("saved-stop-more", id as usize))
+            .aria_label("More")
+            .relative()
+            .flex_none()
+            .size(px(layout::HIT))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                svg()
+                    .path(Icon::LucideEllipsis.path())
+                    .size(px(20.0))
+                    .text_color(colors.secondary_label),
+            )
+            .child(anchor.track())
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.open_row_menu(id, None, cx);
+            }));
+        let row = list_row(theme, dot, row_title(stop), Some(detail.into()), None)
+            .id(("saved-stop", id as usize))
+            .pr(px(4.0))
+            .child(more)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.close_saved_menus();
+                this.open_saved_sheet(id, cx);
+            }))
+            .on_long_press(
+                cx.listener(move |this, event: &gpui::LongPressEvent, _, cx| {
+                    this.open_row_menu(id, Some(event.position), cx);
+                }),
             );
-            item = item.child(
-                pill_row()
-                    .child(
-                        glass_pill(theme, "Share")
-                            .id(("stop-share", id as usize))
-                            .flex_1()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.share_stop(id, cx);
-                            })),
-                    )
-                    .child(
-                        glass_pill(theme, "Copy as")
-                            .id(("stop-copy-as", id as usize))
-                            .flex_1()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.copy_stop_as(id, cx);
-                            })),
-                    )
-                    .child(
-                        glass_pill(theme, "QR")
-                            .id(("stop-qr", id as usize))
-                            .flex_1()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.open_stop_qr(id, cx);
-                            })),
-                    )
-                    .child(
-                        glass_pill(theme, "Home screen")
-                            .id(("stop-pin", id as usize))
-                            .flex_1()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.pin_stop_home(id, cx);
-                            })),
-                    ),
-            );
-            item = item.child(
-                pill_row()
-                    .child(
-                        glass_pill(theme, "Rename")
-                            .id(("stop-rename", id as usize))
-                            .flex_1()
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.open_rename(id, cx);
-                            })),
-                    )
-                    .child(up)
-                    .child(down)
-                    .child(
-                        glass_pill(theme, delete_label)
-                            .id(("stop-delete", id as usize))
-                            .flex_1()
-                            .text_color(colors.red)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.delete_stop(id, cx);
-                            })),
-                    ),
-            );
-            item = item.child(
-                pill_row().child(
-                    glass_pill(theme, colour_label(stop.colour))
-                        .id(("stop-colour", id as usize))
-                        .flex_1()
-                        .text_color(crate::map::stop_colour_hsla(theme, stop.colour))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.cycle_stop_colour(id, cx);
-                        })),
-                ),
-            );
-            if armed {
-                item = item.child(
-                    pill_row().child(
-                        glass_pill(theme, "Cancel")
-                            .id(("stop-delete-cancel", id as usize))
-                            .flex_1()
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.confirm_delete = None;
-                                cx.notify();
-                            })),
-                    ),
-                );
-            }
-        }
-        lists::grouped(theme, lists::Place::of(i, shown), item).into_any_element()
+        lists::grouped(theme, lists::Place::of(i, shown), row).into_any_element()
     }
 
-    fn toggle_stop_favourite(&mut self, id: u64, cx: &mut Context<Self>) {
+    /// Opens the "..." menu of stop `id`, hanging off its button (or off the
+    /// long-press point).
+    fn open_row_menu(
+        &mut self,
+        id: u64,
+        at: Option<gpui::Point<gpui::Pixels>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_saved_menus();
+        let anchor = match at {
+            Some(point) => AnchorSlot::point(point),
+            None => self
+                .row_anchors
+                .borrow()
+                .get(&id)
+                .cloned()
+                .unwrap_or_default(),
+        };
+        if let Some(bounds) = anchor.get() {
+            self.row_menu = Some(id);
+            self.row_menu_ui.open_at(bounds);
+        }
+        cx.notify();
+    }
+
+    /// Shots: opens the menu of stop `id` off its painted button.
+    #[cfg(all(test, feature = "shots"))]
+    pub(crate) fn open_row_menu_for_shot(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.open_row_menu(id, None, cx);
+    }
+
+    /// Shots: opens the header "..." menu off its painted button.
+    #[cfg(all(test, feature = "shots"))]
+    pub(crate) fn open_more_menu_for_shot(&mut self, cx: &mut Context<Self>) {
+        self.more_menu_ui.open_from(&self.more_anchor);
+        cx.notify();
+    }
+
+    /// Closes every popover of the Saved tab.
+    pub(crate) fn close_saved_menus(&mut self) {
+        self.row_menu_ui.close();
+        self.more_menu_ui.close();
+        self.sort_menu_ui.close();
+    }
+
+    /// Whether a Saved popover is open (it takes System Back first).
+    pub(crate) fn menus_open(&self) -> bool {
+        self.row_menu_ui.is_open() || self.more_menu_ui.is_open() || self.sort_menu_ui.is_open()
+    }
+
+    /// The popovers of the Saved tab, drawn over everything else.
+    pub(crate) fn saved_menu_overlays(
+        &mut self,
+        theme: Theme,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let reduced = window.prefers_reduced_motion();
+        self.row_menu_ui.set_reduced(reduced);
+        self.more_menu_ui.set_reduced(reduced);
+        self.sort_menu_ui.set_reduced(reduced);
+        if self.row_menu.is_some() && !self.row_menu_ui.is_visible() {
+            self.row_menu = None;
+        }
+        let mut out = Vec::new();
+        if let Some(id) = self.row_menu
+            && let Some(stop) = self.saved.get(id)
+        {
+            let reorder = reorderable(self.saved.stops.len(), &self.saved_query, self.saved_sort);
+            let model = row_menu_model(
+                reorder && can_move(&self.saved, id, -1),
+                reorder && can_move(&self.saved, id, 1),
+            );
+            let prompt = delete_prompt(&stop.name);
+            let select = cx.entity();
+            let nav = cx.entity();
+            out.extend(
+                Menu::new("Stop menu", model)
+                    .confirm("delete", prompt, "Delete")
+                    .render(
+                        &self.row_menu_ui,
+                        theme,
+                        window,
+                        move |key, _, cx| {
+                            select.update(cx, |this, cx| this.row_menu_select(id, key, cx));
+                        },
+                        move |request, _, cx| {
+                            nav.update(cx, |this, cx| {
+                                this.row_menu_ui.apply(request);
+                                cx.notify();
+                            });
+                        },
+                    ),
+            );
+        }
+        let select = cx.entity();
+        let nav = cx.entity();
+        out.extend(
+            Menu::new("More", more_menu_model(!self.saved_visible.is_empty())).render(
+                &self.more_menu_ui,
+                theme,
+                window,
+                move |key, _, cx| select.update(cx, |this, cx| this.more_menu_select(key, cx)),
+                move |request, _, cx| {
+                    nav.update(cx, |this, cx| {
+                        this.more_menu_ui.apply(request);
+                        cx.notify();
+                    });
+                },
+            ),
+        );
+        let select = cx.entity();
+        let nav = cx.entity();
+        out.extend(Menu::new("Sort", sort_menu_model(self.saved_sort)).render(
+            &self.sort_menu_ui,
+            theme,
+            window,
+            move |key, _, cx| select.update(cx, |this, cx| this.sort_menu_select(key, cx)),
+            move |request, _, cx| {
+                nav.update(cx, |this, cx| {
+                    this.sort_menu_ui.apply(request);
+                    cx.notify();
+                });
+            },
+        ));
+        out
+    }
+
+    fn row_menu_select(&mut self, id: u64, key: &'static str, cx: &mut Context<Self>) {
+        self.row_menu_ui.close();
+        match key {
+            "show" => self.show_stop_on_map(id, cx),
+            "maps" => self.open_stop_in_maps(id, cx),
+            "up" => self.move_stop(id, -1, cx),
+            "down" => self.move_stop(id, 1, cx),
+            "delete" => self.delete_stop(id, cx),
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    fn more_menu_select(&mut self, key: &'static str, cx: &mut Context<Self>) {
+        self.more_menu_ui.close();
+        match key {
+            "copy" => self.copy_list(cx),
+            "gpx" => self.export_places(true, cx),
+            "json" => self.export_places(false, cx),
+            "import" => self.import_places(cx),
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    fn sort_menu_select(&mut self, key: &'static str, cx: &mut Context<Self>) {
+        self.sort_menu_ui.close();
+        if let Some(sort) = sort_from_key(key) {
+            self.saved_sort = sort;
+            self.saved_list.scroll_to_top();
+        }
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_stop_favourite(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(state) = self.saved.toggle_favourite(id) else {
             return;
         };
@@ -645,7 +692,7 @@ impl StopsApp {
     }
 
     /// Moves the stop to its next map colour; Undo on the pill puts the old one back.
-    fn cycle_stop_colour(&mut self, id: u64, cx: &mut Context<Self>) {
+    pub(crate) fn cycle_stop_colour(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(before) = self.saved.get(id).map(|s| s.colour) else {
             return;
         };
@@ -724,7 +771,7 @@ impl StopsApp {
     }
 
     /// Asks the launcher to put a shortcut to the stop on the home screen.
-    fn pin_stop_home(&mut self, id: u64, cx: &mut Context<Self>) {
+    pub(crate) fn pin_stop_home(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(stop) = self.saved.get(id).cloned() else {
             return;
         };
@@ -750,7 +797,7 @@ impl StopsApp {
     }
 
     /// The QR code of the stop's share text, which another Stops can read back.
-    fn open_stop_qr(&mut self, id: u64, cx: &mut Context<Self>) {
+    pub(crate) fn open_stop_qr(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(stop) = self.saved.get(id) else {
             return;
         };
@@ -787,15 +834,13 @@ impl StopsApp {
     }
 
     /// Puts both points of the stop on the map and frames the circle.
-    fn show_stop_on_map(&mut self, id: u64, cx: &mut Context<Self>) {
+    pub(crate) fn show_stop_on_map(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(stop) = self.saved.get(id) else {
             return;
         };
         let (a, b) = (dest_from_endpoint(&stop.a), dest_from_endpoint(&stop.b));
         self.pick.set_pair(a, b);
         self.map.follow = true;
-        self.expanded = None;
-        self.confirm_delete = None;
         self.tabs.jump_to(0);
         cx.notify();
     }
@@ -813,20 +858,13 @@ impl StopsApp {
         self.request_start(a, b, cx);
     }
 
-    /// Two taps: the first asks, the second deletes.
+    /// Deletes the stop (the menu already asked); Undo on the pill brings it back.
     fn delete_stop(&mut self, id: u64, cx: &mut Context<Self>) {
-        let step = delete_step(self.confirm_delete, id);
-        self.confirm_delete = step.confirm;
-        if !step.delete {
-            cx.notify();
-            return;
-        }
         let Some(index) = self.saved.stops.iter().position(|st| st.id == id) else {
             return;
         };
         let stop = self.saved.stops[index].clone();
         self.saved.remove(id);
-        self.expanded = None;
         self.save_stops(cx);
         let text = format!("Deleted {}", stop.name);
         self.show_pill(text, Some(crate::PillAction::UndoDelete(stop, index)), cx);
@@ -1035,8 +1073,7 @@ impl StopsApp {
             self.saved_sort,
             self.map.position.map(|(c, _)| c),
         );
-        self.expanded = None;
-        self.confirm_delete = None;
+        self.close_saved_menus();
         self.last_trip_hidden = None;
         self.history_open = None;
         cx.notify();
@@ -1106,7 +1143,6 @@ impl StopsApp {
             self.show_pill("Nothing new to add", None, cx);
             return;
         }
-        self.expanded = None;
         self.save_stops(cx);
         self.show_pill(
             import_pill(added),
@@ -1118,8 +1154,7 @@ impl StopsApp {
     /// Undo of an import.
     pub(crate) fn restore_saved(&mut self, saved: SavedStops, cx: &mut Context<Self>) {
         self.saved = saved;
-        self.expanded = None;
-        self.confirm_delete = None;
+        self.close_saved_menus();
         self.save_stops(cx);
         cx.notify();
     }
@@ -1186,20 +1221,45 @@ mod tests {
     }
 
     #[test]
-    fn delete_needs_two_taps_on_the_same_stop() {
-        let first = delete_step(None, 3);
-        assert_eq!(
-            first,
-            DeleteStep {
-                confirm: Some(3),
-                delete: false
-            }
-        );
-        assert!(delete_step(first.confirm, 3).delete);
-        assert_eq!(delete_step(first.confirm, 3).confirm, None);
-        // Another stop's Delete re-arms instead of deleting.
-        let other = delete_step(Some(3), 4);
-        assert_eq!((other.confirm, other.delete), (Some(4), false));
+    fn the_row_menu_groups_actions_and_disables_the_ends() {
+        let m = row_menu_model(true, true);
+        assert_eq!(m.group_sizes(), vec![2, 2, 1]);
+        assert!(m.find("up").unwrap().enabled && m.find("down").unwrap().enabled);
+        let m = row_menu_model(false, true);
+        assert!(!m.find("up").unwrap().enabled);
+        assert!(m.find("down").unwrap().enabled);
+        // Disabled, never hidden.
+        assert_eq!(row_menu_model(false, false).item_count(), 5);
+        let delete = m.find("delete").unwrap();
+        assert_eq!(delete.role, rovsti_ui::menu::model::MenuRole::Destructive);
+        assert_eq!(delete_prompt("Home"), "Delete Home?");
+    }
+
+    #[test]
+    fn the_more_menu_holds_the_list_tools() {
+        let m = more_menu_model(true);
+        assert_eq!(m.group_sizes(), vec![1, 2, 1]);
+        let labels: Vec<_> = m.labels().collect();
+        assert_eq!(labels, ["Copy list", "Export GPX", "Export JSON", "Import"]);
+        assert!(m.find("copy").unwrap().enabled);
+        assert!(!more_menu_model(false).find("copy").unwrap().enabled);
+    }
+
+    #[test]
+    fn the_sort_menu_checks_the_current_order() {
+        for current in [SavedSort::Saved, SavedSort::Name, SavedSort::Nearest] {
+            let m = sort_menu_model(current);
+            let checked: Vec<_> = m
+                .groups()
+                .iter()
+                .flat_map(|g| g.0.iter())
+                .filter(|i| i.checked)
+                .map(|i| i.key)
+                .collect();
+            assert_eq!(checked, [sort_key(current)]);
+            assert_eq!(sort_from_key(sort_key(current)), Some(current));
+        }
+        assert_eq!(sort_from_key("nope"), None);
     }
 
     #[test]
@@ -1329,14 +1389,12 @@ mod tests {
     }
 
     #[test]
-    fn the_sort_pill_cycles() {
-        let mut sort = SavedSort::Saved;
-        let mut seen = Vec::new();
-        for _ in 0..4 {
-            seen.push(sort_label(sort));
-            sort = next_sort(sort);
-        }
-        assert_eq!(seen, ["Saved", "Name", "Nearest", "Saved"]);
+    fn sort_labels() {
+        let labels: Vec<_> = [SavedSort::Saved, SavedSort::Name, SavedSort::Nearest]
+            .into_iter()
+            .map(sort_label)
+            .collect();
+        assert_eq!(labels, ["Saved", "Name", "Nearest"]);
     }
 
     #[test]

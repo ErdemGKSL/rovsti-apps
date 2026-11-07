@@ -524,44 +524,57 @@ impl StopsApp {
             crate::saved_ui::stop_detail(stop, self.map.position.map(|(c, _)| c), usage.as_deref());
         let title = crate::saved_ui::row_title(stop);
         let center = stop.center();
-        let row = |label: &'static str, key: &'static str| {
+        let favourite = stop.favourite;
+        let colour = crate::saved_ui::colour_label(stop.colour);
+        let row = |label: SharedString, key: &'static str| {
             list_row(theme, None, label, None, None).id(key)
         };
-        let rows = vec![
-            row("Start", "saved-sheet-start")
+        let mut rows = vec![
+            row("Start".into(), "saved-sheet-start")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.sheet.close();
                     this.start_saved_stop(id, cx);
                     cx.notify();
                 }))
                 .into_any_element(),
-            row("Share", "saved-sheet-share")
+            row("Share".into(), "saved-sheet-share")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.sheet.close();
                     this.share_stop(id, cx);
                     cx.notify();
                 }))
                 .into_any_element(),
-            row("Copy as", "saved-sheet-copy")
+            row("Copy as".into(), "saved-sheet-copy")
                 .on_click(cx.listener(move |this, _, _, cx| this.copy_stop_as(id, cx)))
                 .into_any_element(),
-            row("Open in maps", "saved-sheet-maps")
+            row(
+                if favourite {
+                    "Unfavourite"
+                } else {
+                    "Favourite"
+                }
+                .into(),
+                "saved-sheet-fav",
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_stop_favourite(id, cx)))
+            .into_any_element(),
+            row("Rename".into(), "saved-sheet-rename")
+                .on_click(cx.listener(move |this, _, _, cx| this.open_rename(id, cx)))
+                .into_any_element(),
+            row(colour.into(), "saved-sheet-colour")
+                .on_click(cx.listener(move |this, _, _, cx| this.cycle_stop_colour(id, cx)))
+                .into_any_element(),
+            row("QR code".into(), "saved-sheet-qr")
+                .on_click(cx.listener(move |this, _, _, cx| this.open_stop_qr(id, cx)))
+                .into_any_element(),
+            row("Home screen".into(), "saved-sheet-home")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.sheet.close();
-                    this.open_stop_in_maps(id, cx);
+                    this.pin_stop_home(id, cx);
                     cx.notify();
                 }))
                 .into_any_element(),
-            row("Open in Saved", "saved-sheet-saved")
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.sheet.close();
-                    this.confirm_delete = None;
-                    this.tabs.jump_to(1);
-                    this.expanded = Some(id);
-                    cx.notify();
-                }))
-                .into_any_element(),
-            row("Place a pin here", "saved-sheet-pin")
+            row("Place a pin here".into(), "saved-sheet-pin")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.sheet.close();
                     if this.pick.tap(Destination::dropped(center)) == crate::pick::TapOutcome::Full
@@ -572,6 +585,25 @@ impl StopsApp {
                 }))
                 .into_any_element(),
         ];
+        // On the Saved tab the row menu already has Open in maps, and this is
+        // the Saved tab: the two rows only help from the map.
+        if self.tabs.selected() != 1 {
+            let maps = row("Open in maps".into(), "saved-sheet-maps")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.sheet.close();
+                    this.open_stop_in_maps(id, cx);
+                    cx.notify();
+                }))
+                .into_any_element();
+            let saved = row("Open in Saved".into(), "saved-sheet-saved")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.sheet.close();
+                    this.tabs.jump_to(1);
+                    cx.notify();
+                }))
+                .into_any_element();
+            rows.splice(3..3, [maps, saved]);
+        }
         div()
             .flex()
             .flex_col()

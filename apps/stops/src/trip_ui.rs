@@ -13,7 +13,8 @@ use gpui::{
 };
 use rovsti_android::trip::{AlarmAction, TripAlarmEvent};
 use rovsti_geo::{
-    ActiveTrip, Coord, Diameter, FixOut, NoticeState, Side, TripState, tiles::tiles_for_circle,
+    ActiveTrip, Coord, Diameter, FixOut, NoticeState, Side, TripState, saved_stops::NEAREST_CHIP_M,
+    tiles::tiles_for_circle,
 };
 use rovsti_ui::{
     components::{backdrop, flat_glass, glass_pill, list_row, section},
@@ -32,6 +33,12 @@ use crate::{
 };
 
 // ---- pure ------------------------------------------------------------------------
+
+/// The idle Trip tab offers its nearest-saved-stop row only with a known
+/// position, nothing picked yet and no trip running.
+pub fn nearest_row_visible(has_here: bool, ends_empty: bool, trip: bool) -> bool {
+    has_here && ends_empty && !trip
+}
 
 /// "450 m", "1.2 km": metres to the nearest 10 below a kilometre.
 pub fn distance_text(metres: f64) -> String {
@@ -99,6 +106,35 @@ pub struct Live {
     pub next_fix_ms: Option<u64>,
     pub notice_sent: bool,
     pub notice_failed: bool,
+}
+
+/// The pill after an alarm was dismissed: its text and whether it offers
+/// Re-arm (only when the trip's ends were known).
+pub fn dismiss_pill(ends: Option<&(Destination, Destination)>) -> (&'static str, bool) {
+    ("Alarm dismissed", ends.is_some())
+}
+
+/// The trip's two ends as destinations, for Re-arm.
+fn trip_ends(trip: Option<&ActiveTrip>) -> Option<(Destination, Destination)> {
+    trip.map(|t| {
+        (
+            pick::dest_from_endpoint(&t.a),
+            pick::dest_from_endpoint(&t.b),
+        )
+    })
+}
+
+/// The pill text for the live card's status, from the pure helper.
+fn status_text(trip: &ActiveTrip, live: Option<&Live>, here: Option<Coord>) -> String {
+    let crossed = live.is_some_and(|l| l.state != TripState::Tracking);
+    rovsti_geo::status_share_text(
+        &trip.label(),
+        live.map(|l| l.line_m),
+        live.and_then(|l| l.eta_min),
+        here,
+        trip.trip.diameter.center(),
+        crossed,
+    )
 }
 
 /// The arrival-message line, if any. Sent wins over failed, failed over planned.
@@ -248,6 +284,19 @@ pub struct AlarmView {
     pub side: Option<Side>,
 }
 
+/// Title of the last-trip card.
+pub fn last_trip_title(record: &rovsti_geo::TripRecord) -> String {
+    match record.outcome {
+        rovsti_geo::Outcome::Arrived => format!("Arrived at {}", record.title()),
+        rovsti_geo::Outcome::Cancelled => format!("Trip stopped: {}", record.title()),
+    }
+}
+
+/// The card shows unless Close hid this very record.
+pub fn show_last_trip(id: u64, hidden: Option<u64>) -> bool {
+    hidden != Some(id)
+}
+
 // ---- views -----------------------------------------------------------------------
 
 impl StopsApp {
@@ -264,6 +313,12 @@ impl StopsApp {
                 page = page.child(map);
             }
             page = page.child(self.setup_cards(theme, cx));
+            if let Some(row) = self.nearest_saved_row(theme, cx) {
+                page = page.child(row);
+            }
+            if let Some(card) = self.last_trip_card(theme, cx) {
+                page = page.child(card);
+            }
         }
         if let Some(hint) = backend::full_screen_notice(&self.preflight) {
             let row = list_row(
@@ -303,6 +358,100 @@ impl StopsApp {
             page = page.child(section(theme, None, [row.into_any_element()]));
         }
         page.into_any_element()
+    }
+
+    /// One-tap start for the saved stop closest to the current position.
+    fn nearest_saved_row(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let here = self.map.position.map(|(c, _)| c);
+        if !nearest_row_visible(
+            here.is_some(),
+            self.pick.ends.is_empty(),
+            self.trip.is_some(),
+        ) {
+            return None;
+        }
+        let (stop, d) = self.saved.nearest(here?, NEAREST_CHIP_M)?;
+        let (a, b) = (
+            pick::dest_from_endpoint(&stop.a),
+            pick::dest_from_endpoint(&stop.b),
+        );
+        let row = list_row(
+            theme,
+            None,
+            format!("Nearest: {}", stop.name),
+            Some(format!("{} away", distance_text(d)).into()),
+            Some("Start".into()),
+        )
+        .id("nearest-saved-row")
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if this.busy {
+                return;
+            }
+            this.request_start(a.clone(), b.clone(), cx);
+        }));
+        Some(section(theme, None, [row.into_any_element()]).into_any_element())
+    }
+
+    /// After a trip ends: what happened, with Start again / Save as stop /
+    /// Share / Close.
+    fn last_trip_card(&mut self, theme: Theme, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let record = self.history.last_finished(now_ms())?;
+        if !show_last_trip(record.id, self.last_trip_hidden) {
+            return None;
+        }
+        let (id, title, summary) = (record.id, last_trip_title(record), record.summary_line());
+        let pair = record.pair();
+        let share = rovsti_geo::history_io::share_text(record, self.tz_offset_s);
+        let colors = theme::colors(theme);
+        let row = list_row(theme, None, title, Some(summary.into()), None).into_any_element();
+        let mut pills = div()
+            .px(px(16.0))
+            .pb(px(12.0))
+            .flex()
+            .flex_wrap()
+            .gap(px(12.0));
+        if let Some((a, b)) = pair {
+            pills = pills
+                .child(
+                    glass_pill(theme, "Start again")
+                        .id("last-trip-again")
+                        .text_color(colors.accent)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.start_again(&a, &b, cx);
+                        })),
+                )
+                .child(
+                    glass_pill(theme, "Save as stop")
+                        .id("last-trip-save")
+                        .text_color(colors.accent)
+                        .on_click(cx.listener(|this, _, _, cx| this.save_record_as_stop(0, cx))),
+                );
+        }
+        pills = pills
+            .child(
+                glass_pill(theme, "Share")
+                    .id("last-trip-share")
+                    .text_color(colors.accent)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.share_out("Trip".into(), share.clone(), cx);
+                    })),
+            )
+            .child(
+                glass_pill(theme, "Close")
+                    .id("last-trip-close")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.last_trip_hidden = Some(id);
+                        cx.notify();
+                    })),
+            );
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .child(section(theme, None, [row]))
+                .child(pills)
+                .into_any_element(),
+        )
     }
 
     /// Under the map while no trip runs: the pick bar, the other ways to pick,
@@ -557,6 +706,22 @@ impl StopsApp {
                             .child(d)
                     }))
                     .child(
+                        div()
+                            .flex()
+                            .gap(px(8.0))
+                            .pt(px(8.0))
+                            .child(
+                                glass_pill(theme, "Copy status")
+                                    .id("copy-status")
+                                    .on_click(cx.listener(|this, _, _, cx| this.copy_status(cx))),
+                            )
+                            .child(
+                                glass_pill(theme, "Share status")
+                                    .id("share-status")
+                                    .on_click(cx.listener(|this, _, _, cx| this.share_status(cx))),
+                            ),
+                    )
+                    .child(
                         glass_pill(theme, if busy { "Stopping..." } else { "Stop" })
                             .id("stop")
                             .mt(px(12.0))
@@ -566,6 +731,33 @@ impl StopsApp {
                     ),
             )
             .into_any_element()
+    }
+
+    fn status_now(&self) -> Option<String> {
+        let trip = self.trip.as_ref()?;
+        let here = self.map.position.map(|(c, _)| c);
+        Some(status_text(trip, self.live.as_ref(), here))
+    }
+
+    /// Copy status: the trip's status text to the clipboard.
+    fn copy_status(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.status_now() else {
+            return;
+        };
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        self.show_pill("Status copied", None, cx);
+    }
+
+    /// Share status: the system share sheet; elsewhere a pill says so.
+    fn share_status(&mut self, cx: &mut Context<Self>) {
+        let Some(text) = self.status_now() else {
+            return;
+        };
+        self.run_android(
+            "Share status",
+            move || rovsti_android::telecom::share_text(&text),
+            cx,
+        );
     }
 
     /// The arrival alarm, over everything, while the app is open.
@@ -756,6 +948,8 @@ impl StopsApp {
         dir: std::path::PathBuf,
         cx: &mut Context<Self>,
     ) {
+        self.map.follow_mode = self.map.follow_mode.on_pan();
+        self.sync_follow(true, cx);
         let notice = if self.notice_on && self.notice_available(cx) {
             self.prefs.notice.clone()
         } else {
@@ -1021,7 +1215,11 @@ impl StopsApp {
             TripAlarmEvent::Snoozed { at_ms } | TripAlarmEvent::TimedOut { at_ms } => {
                 self.on_snoozed(at_ms, cx);
             }
-            TripAlarmEvent::Dismissed => self.trip_over(cx),
+            TripAlarmEvent::Dismissed => {
+                let ends = trip_ends(self.trip.as_ref());
+                self.trip_over(cx);
+                self.dismissed(ends, cx);
+            }
         }
     }
 
@@ -1063,12 +1261,22 @@ impl StopsApp {
         cx.notify();
     }
 
+    /// The pill after Dismiss, with Re-arm when the ends are known.
+    fn dismissed(&mut self, ends: Option<(Destination, Destination)>, cx: &mut Context<Self>) {
+        let (text, offer) = dismiss_pill(ends.as_ref());
+        let action = ends
+            .filter(|_| offer)
+            .map(|(a, b)| crate::PillAction::Rearm(a, b));
+        self.show_pill(text, action, cx);
+    }
+
     /// Dismiss or Snooze on the alarm screen.
     pub(crate) fn alarm_action(&mut self, action: AlarmAction, cx: &mut Context<Self>) {
         let Some(dir) = self.dir.clone() else {
             return;
         };
         self.alarm = None;
+        let ends = trip_ends(self.trip.as_ref());
         cx.notify();
         cx.spawn(async move |this, cx| {
             let reply = cx
@@ -1077,7 +1285,11 @@ impl StopsApp {
                 .await;
             this.update(cx, |this, cx| match reply {
                 backend::AlarmReply::Snoozed { at_ms } => this.on_snoozed(at_ms, cx),
-                backend::AlarmReply::Dismissed | backend::AlarmReply::Ended => this.trip_over(cx),
+                backend::AlarmReply::Dismissed => {
+                    this.trip_over(cx);
+                    this.dismissed(ends, cx);
+                }
+                backend::AlarmReply::Ended => this.trip_over(cx),
                 // Kotlin answers with a `trip_alarm` event.
                 backend::AlarmReply::Sent => {}
                 backend::AlarmReply::Failed => {
@@ -1097,6 +1309,38 @@ mod tests {
     use super::*;
     use rovsti_geo::Coord;
 
+    #[test]
+    fn nearest_row_truth_table() {
+        for here in [false, true] {
+            for empty in [false, true] {
+                for trip in [false, true] {
+                    assert_eq!(
+                        nearest_row_visible(here, empty, trip),
+                        here && empty && !trip
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn last_trip_title_by_outcome() {
+        let mut r = rovsti_geo::TripRecord {
+            label: "Home".into(),
+            ..Default::default()
+        };
+        assert_eq!(last_trip_title(&r), format!("Arrived at {}", r.title()));
+        r.outcome = rovsti_geo::Outcome::Cancelled;
+        assert_eq!(last_trip_title(&r), format!("Trip stopped: {}", r.title()));
+    }
+
+    #[test]
+    fn close_hides_only_that_record() {
+        assert!(show_last_trip(3, None));
+        assert!(!show_last_trip(3, Some(3)));
+        assert!(show_last_trip(4, Some(3)));
+    }
+
     fn live(side: Option<Side>, inside: bool, circle_m: Option<f64>) -> Live {
         Live {
             state: TripState::Tracking,
@@ -1109,6 +1353,16 @@ mod tests {
             notice_sent: false,
             notice_failed: false,
         }
+    }
+
+    #[test]
+    fn dismiss_pill_offers_rearm_only_with_ends() {
+        assert_eq!(dismiss_pill(None), ("Alarm dismissed", false));
+        let ends = (
+            Destination::new("A", Coord::new(41.0, 29.0)),
+            Destination::new("B", Coord::new(41.1, 29.1)),
+        );
+        assert_eq!(dismiss_pill(Some(&ends)), ("Alarm dismissed", true));
     }
 
     #[test]

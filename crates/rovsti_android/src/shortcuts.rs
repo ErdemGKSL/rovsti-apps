@@ -20,6 +20,12 @@ pub fn pin_contact(spec_json: &str) -> Result<bool> {
     bridge::call_bool("pinContactShortcut", &[Arg::Str(spec_json)])
 }
 
+/// Asks the launcher to pin a saved-stop shortcut from `spec_json`
+/// (`rovsti_geo::StopShortcut`). `false` when it refused.
+pub fn pin_stop(spec_json: &str) -> Result<bool> {
+    bridge::call_bool("pinStopShortcut", &[Arg::Str(spec_json)])
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -29,5 +35,6 @@ mod tests {
     fn desktop_is_unsupported() {
         assert!(matches!(can_pin(), Err(Error::Unsupported)));
         assert!(matches!(pin_contact("{}"), Err(Error::Unsupported)));
+        assert!(matches!(pin_stop("{}"), Err(Error::Unsupported)));
     }
 }

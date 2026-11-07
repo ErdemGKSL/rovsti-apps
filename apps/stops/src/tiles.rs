@@ -84,6 +84,8 @@ pub struct MapTiles {
     root: Option<PathBuf>,
     /// The open cache of `source`; `None` while it is being opened.
     cache: Option<Arc<Mutex<DiskCache>>>,
+    /// Disk cap per server, bytes (from the prefs).
+    cap: u64,
     /// Bumped whenever the server changes, so late results are ignored.
     generation: u64,
     client: TileClient,
@@ -101,6 +103,7 @@ impl Default for MapTiles {
             source: TileSource::default(),
             root: None,
             cache: None,
+            cap: DEFAULT_CAP_BYTES,
             generation: 0,
             client: TileClient::new(),
             queue: FetchQueue::new(),
@@ -158,8 +161,15 @@ impl MapTiles {
     }
 
     /// The data directory is known and the prefs are read: use their server.
-    pub fn attach(&mut self, data_dir: &Path, source: TileSource, cx: &mut Context<StopsApp>) {
+    pub fn attach(
+        &mut self,
+        data_dir: &Path,
+        source: TileSource,
+        cap: u64,
+        cx: &mut Context<StopsApp>,
+    ) {
         self.root = Some(cache_root(data_dir));
+        self.cap = cap;
         self.set_source(source, cx);
     }
 
@@ -177,11 +187,11 @@ impl MapTiles {
         let Some(root) = self.root.clone() else {
             return;
         };
-        let (src, generation) = (self.source.clone(), self.generation);
+        let (src, generation, cap) = (self.source.clone(), self.generation, self.cap);
         cx.spawn(async move |this, cx| {
             let opened = cx
                 .background_executor()
-                .spawn(async move { DiskCache::open(&root, &src, DEFAULT_CAP_BYTES) })
+                .spawn(async move { DiskCache::open(&root, &src, cap) })
                 .await;
             this.update(cx, |app, cx| {
                 let tiles = &mut app.map_tiles;
@@ -199,6 +209,25 @@ impl MapTiles {
             .ok();
         })
         .detach();
+    }
+
+    /// Applies a new disk cap now: the open cache evicts on the background
+    /// executor; a cache still opening picks the cap up when it is (re)opened.
+    pub fn set_cap(&mut self, cap: u64, cx: &mut Context<StopsApp>) {
+        self.cap = cap;
+        let Some(cache) = self.cache.clone() else {
+            return;
+        };
+        cx.background_executor()
+            .spawn(async move {
+                if let Ok(mut cache) = cache.lock() {
+                    cache.set_cap(cap);
+                    if let Err(error) = cache.flush() {
+                        log::warn!("cannot write the tile index: {error}");
+                    }
+                }
+            })
+            .detach();
     }
 
     /// Changes whenever the tiles in memory do: what [`Self::gather`] returns

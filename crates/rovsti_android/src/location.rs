@@ -31,6 +31,13 @@ pub fn request_location() -> Result<bool> {
     bridge::call_bool("locateOnce", &[])
 }
 
+/// Starts (`true`) or stops (`false`) live fixes, each delivered as a
+/// `stops_location` event (every 2 s or 5 m). Idempotent. `false` when there is
+/// no permission or no provider.
+pub fn watch_location(on: bool) -> Result<bool> {
+    bridge::call_bool("watchLocation", &[bridge::Arg::Bool(on)])
+}
+
 /// Decodes `{"lat":..,"lon":..,"accuracy_m":..,"time_ms":..}`. `None` for
 /// malformed JSON, a missing field, a non-finite or out-of-range coordinate, or
 /// a negative accuracy. An empty string (no fix) is `None` too.
@@ -101,5 +108,13 @@ mod tests {
     fn desktop_is_unsupported() {
         assert!(matches!(last_location(), Err(crate::Error::Unsupported)));
         assert!(matches!(request_location(), Err(crate::Error::Unsupported)));
+        assert!(matches!(
+            watch_location(true),
+            Err(crate::Error::Unsupported)
+        ));
+        assert!(matches!(
+            watch_location(false),
+            Err(crate::Error::Unsupported)
+        ));
     }
 }

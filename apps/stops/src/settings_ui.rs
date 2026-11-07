@@ -137,12 +137,7 @@ const SEARCH_FROM: usize = 8;
 
 /// "under 1 min", "18 min", "1 h 05 min".
 pub fn duration_text(ms: u64) -> String {
-    let minutes = ms / 60_000;
-    match minutes {
-        0 => "under 1 min".to_owned(),
-        1..=59 => format!("{minutes} min"),
-        _ => format!("{} h {:02} min", minutes / 60, minutes % 60),
-    }
+    rovsti_geo::history::format_duration(ms)
 }
 
 /// "850 m" under a kilometre, then "3.4 km", "152 km" from 100 km.
@@ -168,6 +163,40 @@ pub fn tile_cache_texts(usage: Option<u64>, armed: bool) -> (&'static str, Strin
     (title, subtitle)
 }
 
+/// Label of the "Reset alarm settings" row; it asks for a second tap first.
+pub fn reset_alarm_label(armed: bool) -> &'static str {
+    if armed {
+        "Tap again to reset"
+    } else {
+        "Reset alarm settings"
+    }
+}
+
+/// Title and subtitle of the "Cache size" row.
+pub fn cache_size_text(cap_mb: u32, armed_mb: Option<u32>) -> (String, &'static str) {
+    match armed_mb {
+        Some(mb) => (
+            format!("Tap again to shrink to {mb} MB"),
+            "Older tiles are deleted now",
+        ),
+        None => (format!("{cap_mb} MB"), "Offline areas stay while they fit"),
+    }
+}
+
+/// Whether the current cache holds more than the new cap allows.
+pub fn needs_shrink_confirm(usage: u64, new_cap: u64) -> bool {
+    usage > new_cap
+}
+
+/// Bytes held by servers other than `current`.
+pub fn other_servers_bytes(sources: &[(String, u64)], current: &str) -> u64 {
+    sources
+        .iter()
+        .filter(|(key, _)| key != current)
+        .map(|(_, bytes)| bytes)
+        .sum()
+}
+
 /// Cache size: "None", "< 1 MB", "4.2 MB", "37 MB".
 pub fn bytes_text(bytes: u64) -> String {
     const MIB: u64 = 1024 * 1024;
@@ -186,11 +215,11 @@ pub fn outcome_text(outcome: Outcome) -> &'static str {
     }
 }
 
-/// "A â€“ B" for a trip with two points, the single label of a legacy record.
+/// "A – B" for a trip with two points, the single label of a legacy record.
 pub fn record_pair(record: &TripRecord) -> String {
     match (&record.a, &record.b) {
         (Some(a), Some(b)) => format!(
-            "{} â€“ {}",
+            "{} – {}",
             crate::pick::row_label(&a.label),
             crate::pick::row_label(&b.label)
         ),
@@ -199,10 +228,10 @@ pub fn record_pair(record: &TripRecord) -> String {
     }
 }
 
-/// "5 Nov  Â·  18 min  Â·  3.4 km" under a history row's title.
+/// "5 Nov  ·  18 min  ·  3.4 km" under a history row's title.
 pub fn record_details(record: &TripRecord, now_ms: i64, tz_offset_s: i32) -> String {
     format!(
-        "{}  Â·  {}  Â·  {}",
+        "{}  ·  {}  ·  {}",
         date_text(record.ended_ms, now_ms, tz_offset_s),
         duration_text(record.duration_ms()),
         distance_text(record.travelled_m)
@@ -223,7 +252,7 @@ pub fn stats_rows(stats: &Stats) -> Vec<(String, String)> {
     ];
     for (i, (label, count)) in stats.top.iter().enumerate() {
         let name = if i == 0 { "Top places" } else { "" };
-        rows.push((name.to_owned(), format!("{label}  Â·  {count}")));
+        rows.push((name.to_owned(), format!("{label}  ·  {count}")));
     }
     rows
 }
@@ -361,7 +390,7 @@ pub fn notice_summary(prefs: &StopsPrefs, connected: bool) -> String {
             } else {
                 &n.chat_name
             };
-            format!("{name}  Â·  {}", n.when.label().to_lowercase())
+            format!("{name}  ·  {}", n.when.label().to_lowercase())
         }
         _ => "Off".to_owned(),
     }
@@ -527,9 +556,13 @@ impl StopsApp {
     pub(crate) fn open_settings(&mut self, page: SettingsPage, cx: &mut Context<Self>) {
         self.settings_page = page;
         self.confirm_clear = false;
+        self.confirm_prune = None;
         self.history_open = None;
         self.confirm_remove_feed = false;
         self.confirm_clear_tiles = false;
+        self.shrink_armed = None;
+        self.confirm_clear_other = false;
+        self.confirm_reset_alarm = false;
         self.page.restart();
         self.history_list.scroll_to_top();
         self.notice_list.scroll_to_top();
@@ -708,6 +741,22 @@ impl StopsApp {
             }))
             .into_any_element(),
         );
+        if !self.prefs.alarm_is_default() {
+            let colors = theme::colors(theme);
+            alarm.push(
+                list_row(
+                    theme,
+                    None,
+                    reset_alarm_label(self.confirm_reset_alarm),
+                    None,
+                    None,
+                )
+                .id("set-reset-alarm")
+                .text_color(colors.red)
+                .on_click(cx.listener(|this, _, _, cx| this.reset_alarm_settings(cx)))
+                .into_any_element(),
+            );
+        }
 
         let mut reliability = vec![
             list_row(
@@ -840,6 +889,23 @@ impl StopsApp {
             .into_any_element(),
         ];
 
+        let backup_rows = vec![
+            list_row(
+                theme,
+                None,
+                "Export backup",
+                Some("Saved stops, trip history and settings".into()),
+                None,
+            )
+            .id("set-backup-export")
+            .on_click(cx.listener(|this, _, _, cx| this.export_backup(cx)))
+            .into_any_element(),
+            list_row(theme, None, "Restore backup", None, None)
+                .id("set-backup-restore")
+                .on_click(cx.listener(|this, _, _, cx| this.restore_backup(cx)))
+                .into_any_element(),
+        ];
+
         div()
             .flex()
             .flex_col()
@@ -847,6 +913,7 @@ impl StopsApp {
             .child(section(theme, Some("Alarm".into()), alarm))
             .child(section(theme, Some("Battery".into()), reliability))
             .child(self.transit_section(theme, cx))
+            .child(section(theme, Some("Backup".into()), backup_rows))
             .child(section(theme, None, more))
             .into_any_element()
     }
@@ -1029,6 +1096,28 @@ impl StopsApp {
                             })),
                     );
                 }
+                let share = rovsti_geo::history_io::share_text(r, self.tz_offset_s);
+                let copy = share.clone();
+                pills = pills
+                    .child(
+                        glass_pill(theme, "Share")
+                            .id(("history-share", i))
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.share_out("Trip".into(), share.clone(), cx);
+                            })),
+                    )
+                    .child(
+                        glass_pill(theme, "Copy")
+                            .id(("history-copy", i))
+                            .text_color(colors.accent)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                    copy.clone(),
+                                ));
+                                this.show_pill("Trip copied", None, cx);
+                            })),
+                    );
                 pills = pills.child(
                     glass_pill(theme, "Delete")
                         .id(("history-delete", i))
@@ -1044,19 +1133,43 @@ impl StopsApp {
                 } else {
                     "Clear history"
                 };
-                div()
+                let now = crate::store::now_ms();
+                let mut col = div()
                     .pt(px(20.0))
                     .flex()
-                    .justify_center()
-                    .child(
-                        glass_pill(theme, clear_label)
-                            .id("history-clear")
+                    .flex_col()
+                    .items_center()
+                    .gap(px(12.0));
+                for days in rovsti_geo::PRUNE_CHOICES_DAYS {
+                    let n = self.history.older_than(now, days);
+                    if n == 0 {
+                        continue;
+                    }
+                    let label = if self.confirm_prune == Some(days) {
+                        format!("Tap again to delete {n} {}", trip_noun(n))
+                    } else {
+                        rovsti_geo::prune_label(n, days)
+                    };
+                    col = col.child(
+                        glass_pill(theme, label)
+                            .id(("history-prune", days as usize))
                             .px(px(24.0))
                             .h(px(48.0))
                             .text_color(colors.red)
-                            .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx))),
-                    )
-                    .into_any_element()
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.prune_history(days, cx)),
+                            ),
+                    );
+                }
+                col.child(
+                    glass_pill(theme, clear_label)
+                        .id("history-clear")
+                        .px(px(24.0))
+                        .h(px(48.0))
+                        .text_color(colors.red)
+                        .on_click(cx.listener(|this, _, _, cx| this.clear_history(cx))),
+                )
+                .into_any_element()
             }
         }
     }
@@ -1158,7 +1271,7 @@ impl StopsApp {
     }
 
     /// "Start again": the same rule as starting a saved stop.
-    fn start_again(
+    pub(crate) fn start_again(
         &mut self,
         a: &rovsti_geo::Endpoint,
         b: &rovsti_geo::Endpoint,
@@ -1175,7 +1288,7 @@ impl StopsApp {
     }
 
     /// "Save as stop": keeps the trip's A and B in Saved; the pill offers Undo.
-    fn save_record_as_stop(&mut self, i: usize, cx: &mut Context<Self>) {
+    pub(crate) fn save_record_as_stop(&mut self, i: usize, cx: &mut Context<Self>) {
         let Some(r) = self.history.records.get(i) else {
             return;
         };
@@ -1218,6 +1331,7 @@ impl StopsApp {
 
     /// Two taps: the first asks, the second clears.
     fn clear_history(&mut self, cx: &mut Context<Self>) {
+        self.confirm_prune = None;
         if !self.confirm_clear {
             self.confirm_clear = true;
             cx.notify();
@@ -1233,6 +1347,30 @@ impl StopsApp {
         }
         self.show_pill(
             "History cleared",
+            Some(crate::PillAction::RestoreHistory(old)),
+            cx,
+        );
+    }
+
+    /// Two taps: the first arms, the second deletes trips older than `days`.
+    fn prune_history(&mut self, days: u32, cx: &mut Context<Self>) {
+        let (armed, delete) = prune_step(self.confirm_prune, days);
+        self.confirm_clear = false;
+        self.confirm_prune = armed;
+        if !delete {
+            cx.notify();
+            return;
+        }
+        let old = self.history.clone();
+        let n = self.history.remove_older_than(crate::store::now_ms(), days);
+        self.save_history_in_background(cx);
+        self.history_open = None;
+        if n == 0 {
+            cx.notify();
+            return;
+        }
+        self.show_pill(
+            prune_pill(n),
             Some(crate::PillAction::RestoreHistory(old)),
             cx,
         );
@@ -1263,7 +1401,7 @@ impl StopsApp {
         cx.notify();
     }
 
-    fn save_history_in_background(&self, cx: &mut Context<Self>) {
+    pub(crate) fn save_history_in_background(&self, cx: &mut Context<Self>) {
         if let Some(dir) = self.dir.clone() {
             let history = self.history.clone();
             cx.background_executor()
@@ -1580,6 +1718,38 @@ impl StopsApp {
         .id("tiles-clear")
         .on_click(cx.listener(|this, _, _, cx| this.clear_tiles(cx)))
         .into_any_element();
+        let (size_title, size_sub) = cache_size_text(self.prefs.tile_cache_mb, self.shrink_armed);
+        let size_row = list_row(
+            theme,
+            None,
+            size_title,
+            Some(size_sub.into()),
+            Some("Change".into()),
+        )
+        .id("tiles-cap")
+        .on_click(cx.listener(|this, _, _, cx| this.cycle_tile_cache(cx)))
+        .into_any_element();
+        let other = other_servers_bytes(&self.tile_sources, &self.prefs.tile_source().key());
+        let mut cache_rows = vec![downloaded, size_row];
+        if other > 0 {
+            let title = if self.confirm_clear_other {
+                "Tap again to clear"
+            } else {
+                "Other servers"
+            };
+            cache_rows.push(
+                list_row(
+                    theme,
+                    None,
+                    title,
+                    Some(bytes_text(other).into()),
+                    Some("Clear".into()),
+                )
+                .id("tiles-clear-other")
+                .on_click(cx.listener(|this, _, _, cx| this.clear_other_tiles(cx)))
+                .into_any_element(),
+            );
+        }
         let progress = self.area_progress_row(theme, "tiles-area-cancel", cx);
         div()
             .flex()
@@ -1617,11 +1787,11 @@ impl StopsApp {
                 false,
             ))
             .child(section(theme, None, [save, reset]))
-            .child(section(theme, None, [downloaded]))
+            .child(section(theme, None, cache_rows))
             .children(progress)
             .child(note(
                 theme,
-                "Kept for offline use, up to 128 MB per map server.",
+                "Kept for offline use, up to the cache size per map server.",
                 false,
             ))
             .into_any_element()
@@ -1632,15 +1802,22 @@ impl StopsApp {
         self.tile_usage = None;
         let Some(root) = self.map_tiles.root() else {
             self.tile_usage = Some(0);
+            self.tile_sources.clear();
             return;
         };
         cx.spawn(async move |this, cx| {
             let bytes = cx
                 .background_executor()
-                .spawn(async move { rovsti_tiles::disk_usage(&root) })
+                .spawn(async move {
+                    (
+                        rovsti_tiles::disk_usage(&root),
+                        rovsti_tiles::usage_by_source(&root),
+                    )
+                })
                 .await;
             this.update(cx, |this, cx| {
-                this.tile_usage = Some(bytes);
+                this.tile_usage = Some(bytes.0);
+                this.tile_sources = bytes.1;
                 cx.notify();
             })
             .ok();
@@ -1664,6 +1841,64 @@ impl StopsApp {
             app.tile_usage = Some(0);
             app.show_pill("Downloaded maps cleared", None, cx);
         });
+        cx.notify();
+    }
+
+    /// Cache size row: the next size; shrinking below the current usage
+    /// asks for a second tap first.
+    fn cycle_tile_cache(&mut self, cx: &mut Context<Self>) {
+        let next = self.prefs.next_tile_cache();
+        let shrinking = next < self.prefs.tile_cache_mb;
+        let new_bytes = u64::from(next) * 1024 * 1024;
+        let usage = self.tile_usage.unwrap_or(0);
+        if shrinking && needs_shrink_confirm(usage, new_bytes) && self.shrink_armed != Some(next) {
+            self.shrink_armed = Some(next);
+            cx.notify();
+            return;
+        }
+        self.shrink_armed = None;
+        self.prefs.tile_cache_mb = next;
+        self.save_prefs(cx);
+        self.map_tiles.set_cap(new_bytes, cx);
+        self.show_pill(format!("Cache limit {next} MB"), None, cx);
+        self.measure_tiles(cx);
+        cx.notify();
+    }
+
+    /// Other servers row: two taps, then their cached tiles are deleted.
+    fn clear_other_tiles(&mut self, cx: &mut Context<Self>) {
+        if self.trip.is_some() {
+            self.show_pill("Not while a trip is running", None, cx);
+            return;
+        }
+        if !self.confirm_clear_other {
+            self.confirm_clear_other = true;
+            cx.notify();
+            return;
+        }
+        self.confirm_clear_other = false;
+        let Some(root) = self.map_tiles.root() else {
+            return;
+        };
+        let keep = self.prefs.tile_source().key();
+        cx.spawn(async move |this, cx| {
+            let freed = cx
+                .background_executor()
+                .spawn(async move { rovsti_tiles::clear_except(&root, &keep) })
+                .await;
+            this.update(cx, |this, cx| {
+                match freed {
+                    Ok(bytes) => this.show_pill(format!("Freed {}", bytes_text(bytes)), None, cx),
+                    Err(error) => {
+                        log::warn!("cannot clear other tile caches: {error}");
+                        this.show_pill("Could not clear. Try again.", None, cx);
+                    }
+                }
+                this.measure_tiles(cx);
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
     }
 
@@ -1741,7 +1976,7 @@ impl StopsApp {
     }
 
     /// Saves `source` as the setting and switches the map to it.
-    fn use_tile_source(&mut self, source: TileSource, cx: &mut Context<Self>) {
+    pub(crate) fn use_tile_source(&mut self, source: TileSource, cx: &mut Context<Self>) {
         self.prefs.set_tile_url(&source);
         self.save_prefs(cx);
         self.map_tiles.set_source(source, cx);
@@ -1855,6 +2090,32 @@ impl StopsApp {
         cx.notify();
     }
 
+    /// Two taps: the first arms, the second resets only the alarm settings.
+    pub(crate) fn reset_alarm_settings(&mut self, cx: &mut Context<Self>) {
+        if !self.confirm_reset_alarm {
+            self.confirm_reset_alarm = true;
+            cx.notify();
+            return;
+        }
+        self.confirm_reset_alarm = false;
+        let before = self.prefs.clone();
+        self.prefs = self.prefs.with_alarm_defaults();
+        self.save_prefs(cx);
+        self.show_pill(
+            "Alarm settings reset",
+            Some(crate::PillAction::RestorePrefs(Box::new(before))),
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// Undo of "Reset alarm settings": puts the earlier settings back.
+    pub(crate) fn restore_prefs(&mut self, prefs: rovsti_geo::StopsPrefs, cx: &mut Context<Self>) {
+        self.prefs = prefs;
+        self.save_prefs(cx);
+        cx.notify();
+    }
+
     pub(crate) fn restore_alarm_sound(
         &mut self,
         old: Option<rovsti_geo::prefs::AlarmSound>,
@@ -1910,11 +2171,44 @@ impl StopsApp {
     }
 }
 
+/// "trip" or "trips" for `n`.
+fn trip_noun(n: usize) -> &'static str {
+    if n == 1 { "trip" } else { "trips" }
+}
+
+/// A tap on a prune pill: the first arms `days`, the second on the same value
+/// confirms. Returns the armed value afterwards and whether to delete now.
+pub(crate) fn prune_step(armed: Option<u32>, days: u32) -> (Option<u32>, bool) {
+    if armed == Some(days) {
+        (None, true)
+    } else {
+        (Some(days), false)
+    }
+}
+
+/// "Deleted 12 old trips", "Deleted 1 old trip".
+pub(crate) fn prune_pill(n: usize) -> String {
+    format!("Deleted {n} old {}", trip_noun(n))
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use rovsti_geo::Coord;
+
+    #[test]
+    fn prune_taps_arm_then_confirm() {
+        assert_eq!(prune_step(None, 30), (Some(30), false));
+        assert_eq!(prune_step(Some(30), 30), (None, true));
+        assert_eq!(prune_step(Some(30), 90), (Some(90), false));
+    }
+
+    #[test]
+    fn prune_pill_plurals() {
+        assert_eq!(prune_pill(12), "Deleted 12 old trips");
+        assert_eq!(prune_pill(1), "Deleted 1 old trip");
+    }
 
     #[test]
     fn reload_plan_keeps_rows_and_skips_overlap() {
@@ -1928,6 +2222,30 @@ mod tests {
             group: false,
         };
         assert_eq!(reload_plan(&ChatList::Ready(vec![row])), (true, false));
+    }
+
+    #[test]
+    fn cache_size_helpers() {
+        assert_eq!(cache_size_text(256, None).0, "256 MB");
+        assert_eq!(
+            cache_size_text(1024, Some(128)).0,
+            "Tap again to shrink to 128 MB"
+        );
+        assert!(needs_shrink_confirm(200, 100));
+        assert!(!needs_shrink_confirm(100, 100));
+        let s = vec![
+            ("a".to_owned(), 5),
+            ("b".to_owned(), 7),
+            ("c".to_owned(), 1),
+        ];
+        assert_eq!(other_servers_bytes(&s, "b"), 6);
+        assert_eq!(other_servers_bytes(&[], "b"), 0);
+    }
+
+    #[test]
+    fn reset_alarm_label_asks_for_a_second_tap() {
+        assert_eq!(reset_alarm_label(false), "Reset alarm settings");
+        assert_eq!(reset_alarm_label(true), "Tap again to reset");
     }
 
     #[test]
@@ -2073,7 +2391,7 @@ mod tests {
         // 14 Nov 2023, seen from 2023.
         assert_eq!(
             record_details(&legacy_record(), 1_700_100_000_000, 0),
-            "14 Nov  Â·  18 min  Â·  3.4 km"
+            "14 Nov  ·  18 min  ·  3.4 km"
         );
         assert_eq!(record_pair(&legacy_record()), "Kadikoy");
         let unnamed = TripRecord {
@@ -2091,7 +2409,7 @@ mod tests {
             coord: Coord::new(41.0, lon),
         };
         let r = TripRecord {
-            label: "Home â€“ Work".into(),
+            label: "Home – Work".into(),
             a: Some(end("Home", 29.0)),
             b: Some(end("Work", 29.01)),
             destination: None,
@@ -2099,9 +2417,9 @@ mod tests {
         };
         assert_eq!(
             record_details(&r, 1_700_100_000_000, 0),
-            "14 Nov  Â·  18 min  Â·  3.4 km"
+            "14 Nov  ·  18 min  ·  3.4 km"
         );
-        assert_eq!(record_pair(&r), "Home â€“ Work");
+        assert_eq!(record_pair(&r), "Home – Work");
     }
 
     #[test]
@@ -2122,8 +2440,8 @@ mod tests {
         assert_eq!(rows[2].1, "12.3 km");
         assert_eq!(rows[3].1, "10 min");
         assert_eq!(rows[4].1, "2");
-        assert_eq!(rows[5], ("Top places".into(), "Home  Â·  3".into()));
-        assert_eq!(rows[6], (String::new(), "Work  Â·  1".into()));
+        assert_eq!(rows[5], ("Top places".into(), "Home  ·  3".into()));
+        assert_eq!(rows[6], (String::new(), "Work  ·  1".into()));
     }
 
     #[test]
@@ -2257,7 +2575,7 @@ mod tests {
         });
         assert_eq!(
             notice_summary(&prefs, true),
-            "Family  Â·  10 min before the circle"
+            "Family  ·  10 min before the circle"
         );
         assert_eq!(notice_summary(&prefs, false), "Needs WhatsApp");
     }

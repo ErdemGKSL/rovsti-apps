@@ -33,7 +33,7 @@ use rovsti_geo::{
         ATTRIBUTION, ClassGeometry, DrawClass, MapStyle, Rgba8, Shape, TileCover, TileGeometry,
         TileLayer, build_layer, line_width, tiles_for_view,
     },
-    view::Viewport,
+    view::{FollowMode, Viewport},
 };
 use rovsti_ui::{
     components::{flat_glass, glass_pill},
@@ -53,6 +53,8 @@ use crate::{
     store::now_ms,
 };
 
+/// A tap this close (pixels) to the blue dot opens My location.
+pub const MY_LOCATION_RADIUS_PX: f32 = 24.0;
 /// Fixes kept for the breadcrumb.
 pub const BREADCRUMB_CAP: usize = 500;
 /// Stops drawn per frame.
@@ -347,16 +349,26 @@ pub fn maps_url(coord: Coord, label: &str) -> String {
     rovsti_geo::dest::point_qr_payload(coord, (!label.is_empty()).then_some(label))
 }
 
-/// Number of rows of the pin menu: Share, Copy, QR code, Open in maps, Move,
-/// Remove and, for a transit stop, Lines.
-#[cfg(test)]
+/// Number of rows of the pin menu: Share, Copy, QR code, Open in maps, Measure
+/// from here, Move, Remove and, for a transit stop, Lines.
 const fn pin_menu_rows(is_stop: bool) -> usize {
-    if is_stop { 7 } else { 6 }
+    if is_stop { 8 } else { 7 }
 }
 
 /// Width and height of the small menu over a tapped pin.
 pub const PIN_MENU_W: f32 = 180.0;
-pub const PIN_MENU_H: f32 = 248.0;
+/// Height of the details line under the rows.
+const PIN_MENU_DETAILS_H: f32 = 24.0;
+/// Height of the extra "from you" caption under the details line.
+const PIN_MENU_CAPTION_H: f32 = 16.0;
+
+/// Height of the pin menu: every row, the details line and, with a known
+/// position, the distance caption.
+pub fn pin_menu_height(is_stop: bool, has_here: bool) -> f32 {
+    pin_menu_rows(is_stop) as f32 * PIN_MENU_ROW_H
+        + PIN_MENU_DETAILS_H
+        + if has_here { PIN_MENU_CAPTION_H } else { 0.0 }
+}
 /// Height of one row of the pin menu.
 const PIN_MENU_ROW_H: f32 = 32.0;
 const PIN_MENU_MARGIN: f32 = 8.0;
@@ -367,7 +379,7 @@ const PIN_MENU_GAP: f32 = 14.0;
 /// `pin`, below it where there is no room, kept inside `size` with a margin.
 #[cfg(test)]
 pub fn pin_menu_rect(pin: (f32, f32), size: (f32, f32)) -> (f32, f32, f32, f32) {
-    pin_menu_rect_h(pin, size, PIN_MENU_H)
+    pin_menu_rect_h(pin, size, pin_menu_height(true, false))
 }
 
 /// [`pin_menu_rect`] for a menu `h` high (a pin that is no transit stop has one row less).
@@ -1459,6 +1471,10 @@ pub struct MapState {
     pub viewport: Viewport,
     /// The view fits you, the destination and the ring until the user moves it.
     pub follow: bool,
+    /// Whether the Me button centred once or keeps the view on live fixes.
+    pub follow_mode: FollowMode,
+    /// Whether the live location watch is switched on right now.
+    pub watching: bool,
     pub gestures: Gestures,
     pub trail: Breadcrumb,
     /// The last fix, kept after the trip for the stop search.
@@ -1530,6 +1546,8 @@ impl Default for MapState {
         Self {
             viewport: Viewport::new(Coord::new(0.0, 0.0), 2_000.0),
             follow: true,
+            follow_mode: FollowMode::Off,
+            watching: false,
             gestures: Gestures::default(),
             trail: Breadcrumb::default(),
             position: None,
@@ -1640,6 +1658,12 @@ pub fn measure_summary(m: &Measure) -> String {
     }
 }
 
+/// A tap within `radius` pixels of the blue dot (both in pixels from the view
+/// centre) is a tap on the dot.
+pub fn hits_position(tap: (f32, f32), dot: (f32, f32), radius: f32) -> bool {
+    dist(tap, dot) <= radius
+}
+
 /// Whether the pins can be grabbed: only while the pair can be edited and the
 /// measure tool is not taking the taps.
 pub fn pins_grabbable(trip: bool, alarm: bool, measuring: bool) -> bool {
@@ -1658,6 +1682,14 @@ impl MapState {
     pub fn start_measure(&mut self) {
         self.measure = Some(Measure::new());
         self.measure_armed = false;
+    }
+
+    /// Starts measuring with `c` as the first point (from a tapped pin).
+    pub fn measure_from(&mut self, c: Coord) {
+        self.start_measure();
+        if let Some(m) = self.measure.as_mut() {
+            m.push(c);
+        }
     }
 
     /// Turns the tool off and forgets its points; true when it was on.
@@ -1711,6 +1743,13 @@ impl MapState {
     /// trail is left alone.
     pub fn set_device_fix(&mut self, at: Coord, accuracy_m: f64, now_ms: i64) {
         self.position = Some((at, accuracy_m));
+        if self.follow_mode == FollowMode::Following {
+            // Keep the zoom the user chose; only the centre follows.
+            self.locate_pending = None;
+            self.viewport = Viewport::new(at, self.viewport.metres_per_px);
+            self.follow = false;
+            return;
+        }
         if let Some(asked) = self.locate_pending.take()
             && now_ms.saturating_sub(asked) <= LOCATE_WAIT_MS
         {
@@ -1738,6 +1777,7 @@ impl MapState {
     /// The user takes the view over from the automatic fit.
     fn take_over(&mut self) {
         self.follow = false;
+        self.follow_mode = self.follow_mode.on_pan();
     }
 
     pub fn reset(&mut self) {
@@ -2050,6 +2090,7 @@ impl StopsApp {
         let pin_labels = pin_labels(theme, &scene, dragging, &self.pick.ends, size);
         let paint = Rc::clone(&self.map.paint);
         let idle = self.trip.is_none();
+        let following = self.map.follow_mode == FollowMode::Following;
 
         let entity = cx.entity();
         let input = entity.clone();
@@ -2069,7 +2110,8 @@ impl StopsApp {
             control_button(theme, "Me")
                 .id("map-locate")
                 .text_size(typography::FOOTNOTE.size)
-                .on_click(cx.listener(|this, _, _, cx| this.locate_me(cx)))
+                .when(following, |b| b.bg(colors.accent.opacity(0.25)))
+                .on_click(cx.listener(|this, _, _, cx| this.on_me_tap(cx)))
         } else {
             control_button(theme, "Fit")
                 .id("map-fit")
@@ -2202,14 +2244,14 @@ impl StopsApp {
             .gtfs_stop
             .as_deref()
             .and_then(|id| stop_index(self.gtfs.as_deref(), id));
+        let here = self.map.position.map(|(c, _)| c);
+        let from_you = here.map(|h| rovsti_geo::coord_format::from_you_text(h, dest.coord));
+        let no_trip = self.trip.is_none();
+        let measure_coord = dest.coord;
         let rect = pin_menu_rect_h(
             (size.0 / 2.0 + pin.at.0, size.1 / 2.0 + pin.at.1),
             size,
-            if stop.is_some() {
-                PIN_MENU_H
-            } else {
-                PIN_MENU_H - PIN_MENU_ROW_H
-            },
+            pin_menu_height(stop.is_some(), here.is_some()),
         );
         let details = pick::details_text(dest);
         let share_dest = dest.clone();
@@ -2270,6 +2312,16 @@ impl StopsApp {
                     },
                 )),
             )
+            .children(no_trip.then(|| {
+                row("pin-measure", "Measure from here", colors.label).on_click(cx.listener(
+                    move |this, _, window, cx| {
+                        this.pick.close_menu();
+                        this.map.measure_from(measure_coord);
+                        haptics::perform(window, HapticFeedback::Selection);
+                        this.show_pill("Tap the map to measure from here", None, cx);
+                    },
+                ))
+            }))
             .child(row("pin-move", "Move", colors.label).on_click(cx.listener(
                 move |this, _, _, cx| {
                     this.pick.begin_move(slot);
@@ -2312,6 +2364,16 @@ impl StopsApp {
                     .text_color(colors.secondary_label)
                     .child(details),
             )
+            .children(from_you.map(|t| {
+                div()
+                    .px(px(14.0))
+                    .pb(px(6.0))
+                    .h(px(PIN_MENU_CAPTION_H))
+                    .truncate()
+                    .text_size(typography::CAPTION.size)
+                    .text_color(colors.secondary_label)
+                    .child(t)
+            }))
             .into_any_element();
         Some((rect, card))
     }
@@ -2337,6 +2399,7 @@ impl StopsApp {
         let m = self.map.measure.as_ref()?;
         let summary = measure_summary(m);
         let armed = self.map.measure_armed;
+        let count = m.points().len();
         let colors = theme::colors(theme);
         let clear_label = if armed { "Tap to clear" } else { "Clear" };
         let action = |label: &'static str| {
@@ -2397,6 +2460,11 @@ impl StopsApp {
                                     }
                                 })),
                         )
+                        .when(count >= 2, |row| {
+                            row.child(action("More").id("measure-more").on_click(
+                                cx.listener(|this, _, _, cx| this.open_measure_actions(cx)),
+                            ))
+                        })
                         .child(action("Done").id("measure-done").on_click(
                             cx.listener(|this, _, window, cx| this.toggle_measure(window, cx)),
                         )),
@@ -2411,6 +2479,7 @@ impl StopsApp {
         }
         self.map.take_over();
         self.map.viewport.zoom_about(factor, (0.0, 0.0));
+        self.sync_follow(true, cx);
         cx.notify();
     }
 
@@ -2427,6 +2496,7 @@ impl StopsApp {
         };
         if let Some(gesture) = gesture {
             self.apply_gesture(gesture, window);
+            self.sync_follow(true, cx);
             cx.notify();
         }
         let pin_end = matches!(
@@ -2531,6 +2601,13 @@ impl StopsApp {
         {
             return;
         }
+        // A tap while following only lets go of the view.
+        if self.map.follow_mode == FollowMode::Following {
+            self.map.take_over();
+            self.sync_follow(true, cx);
+            cx.notify();
+            return;
+        }
         // While measuring, a tap is a point on the ruler and never a pin.
         if self.map.measure.is_some() {
             self.map.take_over();
@@ -2544,6 +2621,13 @@ impl StopsApp {
                 cx.notify();
             }
             return;
+        }
+        if let Some((at_coord, accuracy)) = self.map.position {
+            let dot = self.map.viewport.project(at_coord);
+            if hits_position(at, dot, MY_LOCATION_RADIUS_PX) {
+                self.open_my_location(at_coord, accuracy, cx);
+                return;
+            }
         }
         // Keep the view where the user tapped: the idle fit would otherwise
         // recentre on the new pin and move it from under the finger.
@@ -2566,6 +2650,83 @@ impl StopsApp {
                 self.show_pill("Drag a pin to adjust it, or tap Clear.", None, cx);
             }
         }
+    }
+
+    /// The Me button: centre once, then follow live fixes, then let go.
+    pub(crate) fn on_me_tap(&mut self, cx: &mut Context<Self>) {
+        let next = self.map.follow_mode.on_me_tap(self.map.position.is_some());
+        match next {
+            FollowMode::Centred => {
+                self.locate_me(cx);
+                self.map.follow_mode = FollowMode::Centred;
+            }
+            FollowMode::Off => self.map.follow_mode = FollowMode::Off,
+            FollowMode::Following => {
+                if let Some((at, _)) = self.map.position {
+                    self.map.viewport = Viewport::new(at, self.map.viewport.metres_per_px);
+                }
+                self.map.follow = false;
+                self.map.follow_mode = FollowMode::Following;
+            }
+        }
+        self.sync_follow(true, cx);
+        cx.notify();
+    }
+
+    /// Switches the live location watch to match the follow mode and says so
+    /// when `announce` is set. Safe to call any time; it does nothing when the
+    /// watch already matches.
+    pub(crate) fn sync_follow(&mut self, announce: bool, cx: &mut Context<Self>) {
+        let want = self.map.follow_mode.watches();
+        if want == self.map.watching {
+            return;
+        }
+        self.map.watching = want;
+        if announce {
+            let text = if want {
+                "Following you"
+            } else {
+                "Stopped following"
+            };
+            self.show_pill(text, None, cx);
+        }
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { location::watch_location(want) })
+                .await;
+            if !want {
+                return;
+            }
+            let words = match result {
+                Ok(true) => return,
+                Ok(false) => "Allow location to follow you.",
+                Err(rovsti_android::Error::Unsupported) => "Following works on the phone only.",
+                Err(_) => "Could not follow you. Try again.",
+            };
+            this.update(cx, |this, cx| {
+                this.map.follow_mode = FollowMode::Off;
+                this.map.watching = false;
+                this.show_pill(words, None, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The app went to the background: free the sensor but keep the mode, so
+    /// `sync_follow` re-arms it on return.
+    pub(crate) fn pause_follow(&mut self, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.map.watching) {
+            return;
+        }
+        cx.spawn(async move |_, cx| {
+            cx.background_executor()
+                .spawn(async { location::watch_location(false) })
+                .await
+                .ok();
+        })
+        .detach();
     }
 
     /// The my-location button: centre on the last known position at once, then
@@ -2663,6 +2824,58 @@ mod tests {
     use super::*;
 
     const IST: Coord = Coord::new(41.0, 29.0);
+
+    #[test]
+    fn hits_position_is_inclusive_at_the_radius() {
+        assert!(hits_position((10.0, 10.0), (10.0, 10.0), 24.0));
+        assert!(hits_position((24.0, 0.0), (0.0, 0.0), 24.0));
+        assert!(!hits_position((17.0, 17.0), (0.0, 0.0), 24.0));
+        assert!(!hits_position((25.0, 0.0), (0.0, 0.0), 24.0));
+    }
+
+    #[test]
+    fn a_fix_while_following_moves_the_centre_and_keeps_the_zoom() {
+        let mut m = MapState {
+            follow: false,
+            follow_mode: FollowMode::Following,
+            viewport: Viewport::new(IST, 7.0),
+            ..MapState::default()
+        };
+        let fix = Coord::new(40.0, 30.0);
+        m.set_device_fix(fix, 5.0, 1_000);
+        assert_eq!(m.viewport.center, fix);
+        assert_eq!(m.viewport.metres_per_px, 7.0);
+        let next = Coord::new(40.1, 30.1);
+        m.set_device_fix(next, 5.0, 2_000);
+        assert_eq!(m.viewport.center, next);
+        assert_eq!(m.viewport.metres_per_px, 7.0);
+    }
+
+    #[test]
+    fn a_pan_ends_following() {
+        let mut m = MapState {
+            follow_mode: FollowMode::Following,
+            ..MapState::default()
+        };
+        m.take_over();
+        assert_eq!(m.follow_mode, FollowMode::Off);
+        m.viewport = Viewport::new(IST, 7.0);
+        m.set_device_fix(Coord::new(40.0, 30.0), 5.0, 1_000);
+        assert_eq!(m.viewport.center, IST);
+    }
+
+    #[test]
+    fn centred_ignores_later_fixes() {
+        let mut m = MapState {
+            follow: false,
+            follow_mode: FollowMode::Centred,
+            viewport: Viewport::new(IST, 7.0),
+            ..MapState::default()
+        };
+        m.set_device_fix(Coord::new(40.0, 30.0), 5.0, 1_000);
+        assert_eq!(m.viewport.center, IST);
+        assert_eq!(m.viewport.metres_per_px, 7.0);
+    }
 
     #[test]
     fn a_startup_fix_does_not_move_a_view_the_user_took_over() {
@@ -3844,7 +4057,7 @@ mod tests {
         ] {
             let r = pin_menu_rect(pin, size);
             assert!(inside(r), "{pin:?} -> {r:?}");
-            assert_eq!((r.2, r.3), (PIN_MENU_W, PIN_MENU_H));
+            assert_eq!((r.2, r.3), (PIN_MENU_W, pin_menu_height(true, false)));
         }
     }
 
@@ -3864,8 +4077,22 @@ mod tests {
     #[test]
     fn the_menu_rows_fit_the_menu_box() {
         // Every row of a transit stop's menu and the details line.
-        const { assert!(pin_menu_rows(true) as f32 * PIN_MENU_ROW_H + 24.0 <= PIN_MENU_H) };
         const { assert!(pin_menu_rows(false) < pin_menu_rows(true)) };
+        assert_eq!(pin_menu_height(false, false), 7.0 * 32.0 + 24.0);
+        assert_eq!(pin_menu_height(false, true), 7.0 * 32.0 + 24.0 + 16.0);
+        assert_eq!(pin_menu_height(true, false), 8.0 * 32.0 + 24.0);
+        assert_eq!(pin_menu_height(true, true), 8.0 * 32.0 + 24.0 + 16.0);
+    }
+
+    #[test]
+    fn measure_from_leaves_one_point_and_nothing_armed() {
+        let mut m = MapState {
+            measure_armed: true,
+            ..Default::default()
+        };
+        m.measure_from(Coord::new(41.0, 29.0));
+        assert_eq!(m.measure_points(), vec![Coord::new(41.0, 29.0)]);
+        assert!(!m.measure_armed);
     }
 
     #[test]
@@ -3878,7 +4105,7 @@ mod tests {
 
     #[test]
     fn the_pin_menu_opens_above_and_flips_below_near_the_top() {
-        // Tall enough for the menu to fit above the pin (it is PIN_MENU_H high).
+        // Tall enough for the menu to fit above the pin (it is pin_menu_height high).
         let size = (370.0, 640.0);
         let pin = (185.0, 500.0);
         let above = pin_menu_rect(pin, size);

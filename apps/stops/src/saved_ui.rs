@@ -13,6 +13,7 @@ use rovsti_android::Error as AndroidError;
 use rovsti_core::wire::DocumentResult;
 use rovsti_geo::{
     Coord, SavedStop, SavedStops,
+    backup::{self, Backup},
     places_io::{self, MergePlan},
     saved_stops::{self, SavedSort},
 };
@@ -37,6 +38,28 @@ pub enum ExportKind {
     #[default]
     SavedStops,
     History,
+    Backup,
+}
+
+/// Which import the file picker is for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImportKind {
+    #[default]
+    Places,
+    Backup,
+}
+
+/// The pill when Restore is tapped during a trip, else `None`.
+pub fn restore_blocked(trip_running: bool) -> Option<&'static str> {
+    trip_running.then_some("Not while a trip is running")
+}
+
+/// The restore sheet's text: what the file holds and what restoring does.
+pub fn restore_sheet_body(backup: &Backup, tz_offset_s: i32) -> String {
+    format!(
+        "{}.\n\nThis replaces your saved stops, trip history and settings.",
+        backup::summary(backup, tz_offset_s)
+    )
 }
 
 /// The pill for the answer of a save dialog: `None` when it was cancelled.
@@ -46,6 +69,7 @@ pub fn export_pill(kind: ExportKind, ok: bool, error: bool) -> Option<String> {
             match kind {
                 ExportKind::SavedStops => "Saved stops exported",
                 ExportKind::History => "History exported",
+                ExportKind::Backup => "Backup saved",
             }
             .to_owned(),
         )
@@ -86,6 +110,46 @@ pub fn visible_stops(
         .into_iter()
         .map(|st| st.id)
         .collect()
+}
+
+/// The list row title: a star in front of a favourite.
+pub fn row_title(stop: &SavedStop) -> String {
+    if stop.favourite {
+        format!("\u{2605} {}", stop.name)
+    } else {
+        stop.name.clone()
+    }
+}
+
+/// The pill after tapping Favourite; `state` is the new flag.
+pub fn favourite_pill(state: bool) -> &'static str {
+    if state {
+        "Added to favourites"
+    } else {
+        "Removed from favourites"
+    }
+}
+
+/// The pill after copying the visible list.
+pub fn copy_list_pill(n: usize) -> String {
+    format!("Copied {n} {}", if n == 1 { "stop" } else { "stops" })
+}
+
+/// Whether stop `id` has a neighbour with the same favourite flag `delta`
+/// places away (-1 up, 1 down); false at a group edge or for an unknown id.
+pub fn can_move(saved: &SavedStops, id: u64, delta: isize) -> bool {
+    let Some(at) = saved.stops.iter().position(|s| s.id == id) else {
+        return false;
+    };
+    let flag = saved.stops[at].favourite;
+    let mut i = at as isize + delta.signum();
+    while i >= 0 && (i as usize) < saved.stops.len() {
+        if saved.stops[i as usize].favourite == flag {
+            return true;
+        }
+        i += delta.signum();
+    }
+    false
 }
 
 /// Up and Down only make sense in the order the user arranged, unfiltered.
@@ -145,14 +209,18 @@ pub fn export_stamp(now_ms: i64, tz_offset_s: i32) -> String {
 
 /// The row subtitle: the gate length, then how far its middle is when your
 /// position is known.
-pub fn stop_detail(stop: &SavedStop, here: Option<Coord>) -> String {
+pub fn stop_detail(stop: &SavedStop, here: Option<Coord>, usage: Option<&str>) -> String {
     let gate = format!("Gate {}", distance_text(stop.length_m()));
-    match here {
+    let base = match here {
         Some(h) => format!(
             "{gate}, {} away",
             distance_text(h.distance_m(stop.center()))
         ),
         None => gate,
+    };
+    match usage {
+        Some(u) => format!("{base} · {u}"),
+        None => base,
     }
 }
 
@@ -240,7 +308,9 @@ impl StopsApp {
         let count = self.saved.stops.len();
         let here = self.map.position.map(|(c, _)| c);
         self.saved_visible = visible_stops(&self.saved, &self.saved_query, self.saved_sort, here);
-        let header = u64::from(show_search(count)) | (u64::from(show_sort(count)) << 1);
+        let header = u64::from(show_search(count))
+            | (u64::from(show_sort(count)) << 1)
+            | (u64::from(!self.saved_visible.is_empty()) << 2);
         // Its key changes when its height does, so it is measured again.
         let mut keys = vec![lists::key(0, header)];
         if self.saved_visible.is_empty() {
@@ -306,6 +376,16 @@ impl StopsApp {
             .flex_col()
             .child(large_title(theme, "Saved", None))
             .child(tools);
+        if !self.saved_visible.is_empty() {
+            header = header.child(
+                div().flex().px(px(16.0)).pb(px(10.0)).child(
+                    glass_pill(theme, "Copy list")
+                        .id("saved-copy-list")
+                        .flex_1()
+                        .on_click(cx.listener(|this, _, _, cx| this.copy_list(cx))),
+                ),
+            );
+        }
         if show_search(count) || show_sort(count) {
             let mut row = div()
                 .flex()
@@ -352,20 +432,18 @@ impl StopsApp {
             return div().into_any_element();
         };
         let reorder = reorderable(count, &self.saved_query, self.saved_sort);
-        let at = self
-            .saved
-            .stops
-            .iter()
-            .position(|st| st.id == stop.id)
-            .unwrap_or(0);
         let colors = theme::colors(theme);
         let id = stop.id;
-        let detail = stop_detail(stop, self.map.position.map(|(c, _)| c));
+        let usage = self
+            .history
+            .usage_of(stop.a.coord, stop.b.coord)
+            .map(|u| rovsti_geo::usage_text(u, crate::store::now_ms(), self.tz_offset_s));
+        let detail = stop_detail(stop, self.map.position.map(|(c, _)| c), usage.as_deref());
         let open = self.expanded == Some(id);
         let row = list_row(
             theme,
             None,
-            stop.name.clone(),
+            row_title(stop),
             Some(detail.into()),
             Some(if open { "Close" } else { "" }.into()),
         )
@@ -388,7 +466,7 @@ impl StopsApp {
             } else {
                 "Delete".to_string()
             };
-            let up: AnyElement = if reorder && at > 0 {
+            let up: AnyElement = if reorder && can_move(&self.saved, id, -1) {
                 glass_pill(theme, "Up")
                     .id(("stop-up", id as usize))
                     .flex_1()
@@ -400,7 +478,7 @@ impl StopsApp {
                     .text_color(colors.tertiary_label)
                     .into_any_element()
             };
-            let down: AnyElement = if reorder && at + 1 < count {
+            let down: AnyElement = if reorder && can_move(&self.saved, id, 1) {
                 glass_pill(theme, "Down")
                     .id(("stop-down", id as usize))
                     .flex_1()
@@ -421,6 +499,29 @@ impl StopsApp {
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.show_stop_on_map(id, cx);
                             })),
+                    )
+                    .child(
+                        glass_pill(theme, "Open in maps")
+                            .id(("stop-maps", id as usize))
+                            .flex_1()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.open_stop_in_maps(id, cx);
+                            })),
+                    )
+                    .child(
+                        glass_pill(
+                            theme,
+                            if stop.favourite {
+                                "Unfavourite"
+                            } else {
+                                "Favourite"
+                            },
+                        )
+                        .id(("stop-fav", id as usize))
+                        .flex_1()
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_stop_favourite(id, cx);
+                        })),
                     )
                     .child(
                         glass_pill(theme, "Start")
@@ -456,6 +557,14 @@ impl StopsApp {
                             .flex_1()
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.open_stop_qr(id, cx);
+                            })),
+                    )
+                    .child(
+                        glass_pill(theme, "Home screen")
+                            .id(("stop-pin", id as usize))
+                            .flex_1()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.pin_stop_home(id, cx);
                             })),
                     ),
             );
@@ -498,6 +607,45 @@ impl StopsApp {
         lists::grouped(theme, lists::Place::of(i, shown), item).into_any_element()
     }
 
+    fn toggle_stop_favourite(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(state) = self.saved.toggle_favourite(id) else {
+            return;
+        };
+        self.save_stops(cx);
+        self.saved_visible = visible_stops(
+            &self.saved,
+            &self.saved_query,
+            self.saved_sort,
+            self.map.position.map(|(c, _)| c),
+        );
+        self.show_pill(favourite_pill(state), None, cx);
+    }
+
+    fn open_stop_in_maps(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(stop) = self.saved.get(id) else {
+            return;
+        };
+        let url = crate::map::maps_url(stop.center(), &stop.name);
+        cx.open_url(&url);
+        self.show_pill("Opening in maps", None, cx);
+    }
+
+    /// Copies the visible stops (search and sort respected) as plain text.
+    fn copy_list(&mut self, cx: &mut Context<Self>) {
+        let stops: Vec<&SavedStop> = self
+            .saved_visible
+            .iter()
+            .filter_map(|id| self.saved.get(*id))
+            .collect();
+        if stops.is_empty() {
+            return;
+        }
+        let text = saved_stops::list_text(&stops, self.map.position.map(|(c, _)| c));
+        let n = stops.len();
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        self.show_pill(copy_list_pill(n), None, cx);
+    }
+
     fn move_stop(&mut self, id: u64, delta: isize, cx: &mut Context<Self>) {
         if self.saved.move_by(id, delta) {
             self.save_stops(cx);
@@ -528,6 +676,23 @@ impl StopsApp {
         self.share_out(name, text, cx);
     }
 
+    /// Asks the launcher to put a shortcut to the stop on the home screen.
+    fn pin_stop_home(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(stop) = self.saved.get(id).cloned() else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { backend::pin_stop_shortcut(&stop) })
+                .await;
+            let text = pin_pill(&result);
+            this.update(cx, |this, cx| this.show_pill(text, None, cx))
+                .ok();
+        })
+        .detach();
+    }
+
     /// Opens Copy as for the middle of the gate.
     fn copy_stop_as(&mut self, id: u64, cx: &mut Context<Self>) {
         let Some(stop) = self.saved.get(id) else {
@@ -554,7 +719,7 @@ impl StopsApp {
     }
 
     /// Hands `text` to the share sheet; without one it goes to the clipboard.
-    fn share_out(&mut self, name: String, text: String, cx: &mut Context<Self>) {
+    pub(crate) fn share_out(&mut self, name: String, text: String, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let sent = text.clone();
             let result = cx
@@ -639,6 +804,7 @@ impl StopsApp {
 
     /// Opens the file picker; the answer arrives in `on_places_picked`.
     fn import_places(&mut self, cx: &mut Context<Self>) {
+        self.pending_import = Some(ImportKind::Places);
         if let Err(words) = backend::pick_import() {
             self.show_pill(format!("Can't import: {words}"), None, cx);
         }
@@ -672,6 +838,161 @@ impl StopsApp {
                 }
             }
         }
+    }
+
+    /// Settings > Backup > Export: one JSON file with stops, trips and settings.
+    pub(crate) fn export_backup(&mut self, cx: &mut Context<Self>) {
+        let now = crate::store::now_ms();
+        let file = Backup::new(
+            self.saved.clone(),
+            self.history.clone(),
+            self.prefs.clone(),
+            now,
+        );
+        let name = backup::export_file_name(&export_stamp(now, self.tz_offset_s));
+        self.pending_export = Some(ExportKind::Backup);
+        if let Err(words) = backend::export_text(&name, "application/json", &backup::to_json(&file))
+        {
+            self.pending_export = None;
+            self.show_pill(format!("Can't export: {words}"), None, cx);
+        }
+    }
+
+    /// Settings > Backup > Restore: opens the file picker unless a trip runs.
+    pub(crate) fn restore_backup(&mut self, cx: &mut Context<Self>) {
+        if let Some(text) = restore_blocked(self.trip.is_some()) {
+            self.show_pill(text, None, cx);
+            return;
+        }
+        self.pending_import = Some(ImportKind::Backup);
+        if let Err(words) = backend::pick_import() {
+            self.pending_import = None;
+            self.show_pill(format!("Can't import: {words}"), None, cx);
+        }
+    }
+
+    /// The picked backup file: parse it and ask before replacing anything.
+    pub(crate) fn on_backup_picked(&mut self, result: &DocumentResult, cx: &mut Context<Self>) {
+        let Some(path) = result.path.as_deref().filter(|_| result.ok) else {
+            if result.error.is_some() {
+                self.show_pill("Can't restore: that file can't be read", None, cx);
+            }
+            return;
+        };
+        let text = match backend::read_import(path) {
+            Ok(text) => text,
+            Err(words) => {
+                self.show_pill(format!("Can't restore: {words}"), None, cx);
+                return;
+            }
+        };
+        match backup::parse(&text) {
+            Err(error) => self.show_pill(error.message(), None, cx),
+            Ok(file) => {
+                // A trip may have started while the picker was open.
+                if let Some(text) = restore_blocked(self.trip.is_some()) {
+                    self.show_pill(text, None, cx);
+                    return;
+                }
+                self.sheet_mode = SheetMode::RestoreBackup(Box::new(file));
+                self.sheet.open();
+                cx.notify();
+            }
+        }
+    }
+
+    /// The restore sheet: what the file holds, then Cancel / Replace everything.
+    pub(crate) fn restore_body(
+        &mut self,
+        theme: Theme,
+        file: &Backup,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = theme::colors(theme);
+        let confirm = file.clone();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(Self::sheet_title(theme, "Restore backup"))
+            .child(Self::footnote(
+                theme,
+                restore_sheet_body(file, self.tz_offset_s),
+            ))
+            .child(
+                div()
+                    .flex()
+                    .justify_end()
+                    .gap(px(10.0))
+                    .px(px(16.0))
+                    .pt(px(8.0))
+                    .child(
+                        glass_pill(theme, "Cancel")
+                            .id("restore-cancel")
+                            .on_click(cx.listener(|this, _, _, cx| this.close_sheet(cx))),
+                    )
+                    .child(
+                        glass_pill(theme, "Replace everything")
+                            .id("restore-confirm")
+                            .text_color(colors.red)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.confirm_restore(confirm.clone(), cx);
+                            })),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// Replaces stops, trips and settings by the backup, with Undo on the pill.
+    fn confirm_restore(&mut self, file: Backup, cx: &mut Context<Self>) {
+        self.sheet.close();
+        if let Some(text) = restore_blocked(self.trip.is_some()) {
+            self.show_pill(text, None, cx);
+            return;
+        }
+        let before = Box::new((
+            std::mem::take(&mut self.saved),
+            std::mem::take(&mut self.history),
+            self.prefs.clone(),
+        ));
+        self.apply_snapshot(file.saved, file.history, file.prefs, cx);
+        self.show_pill(
+            "Backup restored",
+            Some(crate::PillAction::UndoRestore(before)),
+            cx,
+        );
+    }
+
+    /// Makes `saved`, `history` and `prefs` the app's data: saves them and
+    /// applies what the settings drive. Restore and its Undo share this.
+    pub(crate) fn apply_snapshot(
+        &mut self,
+        saved: SavedStops,
+        history: rovsti_geo::History,
+        prefs: rovsti_geo::StopsPrefs,
+        cx: &mut Context<Self>,
+    ) {
+        self.saved = saved;
+        self.history = history;
+        self.prefs = prefs;
+        self.save_stops(cx);
+        self.save_history_in_background(cx);
+        self.save_prefs(cx);
+        self.apply_appearance(cx);
+        self.use_tile_source(self.prefs.tile_source(), cx);
+        let cap = self.prefs.tile_cache_bytes();
+        self.map_tiles.set_cap(cap, cx);
+        self.saved_visible = visible_stops(
+            &self.saved,
+            &self.saved_query,
+            self.saved_sort,
+            self.map.position.map(|(c, _)| c),
+        );
+        self.expanded = None;
+        self.confirm_delete = None;
+        self.last_trip_hidden = None;
+        self.history_open = None;
+        cx.notify();
     }
 
     /// The import sheet: what would be added, then Cancel / Add.
@@ -732,15 +1053,7 @@ impl StopsApp {
     fn confirm_import(&mut self, plan: MergePlan, cx: &mut Context<Self>) {
         let before = self.saved.clone();
         let now = crate::store::now_ms();
-        let end = |coord| rovsti_geo::Endpoint {
-            label: String::new(),
-            coord,
-        };
-        let added = plan
-            .add
-            .iter()
-            .filter(|st| self.saved.add(&st.name, end(st.a), end(st.b), now).is_ok())
-            .count();
+        let added = places_io::apply_plan(&mut self.saved, &plan, now);
         self.sheet.close();
         if added == 0 {
             self.show_pill("Nothing new to add", None, cx);
@@ -772,10 +1085,28 @@ impl StopsApp {
     }
 }
 
+/// The pill after asking the launcher for a shortcut.
+pub fn pin_pill(result: &Result<bool, AndroidError>) -> String {
+    match result {
+        Ok(true) => "Added to the home screen".to_owned(),
+        Ok(false) => "The launcher did not add it".to_owned(),
+        Err(_) => {
+            crate::settings_ui::android_notice("Home screen shortcut", result).unwrap_or_default()
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_shortcut_pill_covers_every_answer() {
+        assert_eq!(pin_pill(&Ok(true)), "Added to the home screen");
+        assert_eq!(pin_pill(&Ok(false)), "The launcher did not add it");
+        assert!(pin_pill(&Err(AndroidError::Unsupported)).contains("phone only"));
+    }
     use rovsti_geo::{Endpoint, SavedStops};
 
     fn stop(name: &str, lat_b: f64) -> SavedStop {
@@ -792,11 +1123,15 @@ mod tests {
     fn detail_names_the_gate_and_distance() {
         // 0.0038 degrees of latitude is about 420 m.
         let st = stop("Pier", 41.0038);
-        assert_eq!(stop_detail(&st, None), "Gate 420 m");
+        assert_eq!(stop_detail(&st, None, None), "Gate 420 m");
         let here = st.center();
-        assert_eq!(stop_detail(&st, Some(here)), "Gate 420 m, 0 m away");
+        assert_eq!(stop_detail(&st, Some(here), None), "Gate 420 m, 0 m away");
         let far = Coord::new(41.1, 29.0);
-        let text = stop_detail(&st, Some(far));
+        let text = stop_detail(&st, Some(far), None);
+        assert_eq!(
+            stop_detail(&st, None, Some("Used 4 times, last 5 Nov")),
+            "Gate 420 m · Used 4 times, last 5 Nov"
+        );
         assert!(
             text.starts_with("Gate 420 m, 10.") && text.ends_with(" km away"),
             "{text}"
@@ -891,6 +1226,49 @@ mod tests {
     }
 
     #[test]
+    fn row_title_stars_favourites() {
+        let mut s = six();
+        s.toggle_favourite(2);
+        assert_eq!(row_title(s.get(1).unwrap()), "Zeta");
+        assert_eq!(row_title(s.get(2).unwrap()), "\u{2605} alpha");
+    }
+
+    #[test]
+    fn favourite_and_copy_pills() {
+        assert_eq!(favourite_pill(true), "Added to favourites");
+        assert_eq!(favourite_pill(false), "Removed from favourites");
+        assert_eq!(copy_list_pill(1), "Copied 1 stop");
+        assert_eq!(copy_list_pill(12), "Copied 12 stops");
+    }
+
+    #[test]
+    fn can_move_stops_at_group_edges() {
+        let mut s = six();
+        s.toggle_favourite(3);
+        s.toggle_favourite(5);
+        // Order: 1 2 3* 4 5* 6. Non-favourites: 1 2 4 6; favourites: 3 5.
+        assert!(!can_move(&s, 1, -1));
+        assert!(can_move(&s, 1, 1));
+        assert!(can_move(&s, 4, -1));
+        assert!(can_move(&s, 4, 1));
+        assert!(!can_move(&s, 6, 1));
+        assert!(!can_move(&s, 3, -1));
+        assert!(can_move(&s, 3, 1));
+        assert!(can_move(&s, 5, -1));
+        assert!(!can_move(&s, 5, 1));
+        assert!(!can_move(&s, 99, 1));
+    }
+
+    #[test]
+    fn favourites_lead_under_a_query() {
+        let mut s = six();
+        s.toggle_favourite(4); // Mid
+        s.toggle_favourite(5); // Near
+        let ids = visible_stops(&s, "e", SavedSort::Saved, None);
+        assert_eq!(names(&s, &ids), ["Near", "Zeta", "Émile"]);
+    }
+
+    #[test]
     fn reordering_needs_saved_order_and_no_query() {
         assert!(reorderable(6, "  ", SavedSort::Saved));
         assert!(!reorderable(6, "a", SavedSort::Saved));
@@ -930,6 +1308,26 @@ mod tests {
         );
         assert!(export_pill(ExportKind::History, false, true).is_some());
         assert_eq!(export_pill(ExportKind::History, false, false), None);
+    }
+
+    #[test]
+    fn backup_texts() {
+        assert_eq!(
+            export_pill(ExportKind::Backup, true, false).as_deref(),
+            Some("Backup saved")
+        );
+        assert_eq!(restore_blocked(true), Some("Not while a trip is running"));
+        assert_eq!(restore_blocked(false), None);
+        assert_eq!(ImportKind::default(), ImportKind::Places);
+        let file = Backup::new(
+            SavedStops::default(),
+            rovsti_geo::History::default(),
+            rovsti_geo::StopsPrefs::default(),
+            1_793_000_000_000,
+        );
+        let body = restore_sheet_body(&file, 0);
+        assert!(body.starts_with("0 stops, 0 trips and settings from "));
+        assert!(body.ends_with("This replaces your saved stops, trip history and settings."));
     }
 
     #[test]

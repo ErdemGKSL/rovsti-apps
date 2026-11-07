@@ -46,6 +46,7 @@ mod headless;
 mod kotlin_contract;
 mod lists;
 mod map;
+mod map_actions;
 mod map_options;
 mod pick;
 mod picker;
@@ -81,6 +82,8 @@ pub(crate) enum Page {
 /// What the Undo button on the notice pill does.
 pub(crate) enum PillAction {
     UndoDelete(SavedStop, usize),
+    /// The stops, trips and settings from before a backup restore.
+    UndoRestore(Box<(SavedStops, History, StopsPrefs)>),
     RestoreHistory(History),
     RestoreRecord(rovsti_geo::TripRecord, usize),
     RestoreEnds(picker::Ends),
@@ -90,8 +93,22 @@ pub(crate) enum PillAction {
     /// The saved stops as they were before an import.
     RestoreSaved(SavedStops),
     RestoreAlarmSound(Option<rovsti_geo::prefs::AlarmSound>),
+    /// The settings as they were before "Reset alarm settings".
+    RestorePrefs(Box<StopsPrefs>),
     /// Takes back "Save as stop": the saved stop with this id.
     UndoSave(u64),
+    /// Takes a dismissed alarm back: the same trip again.
+    Rearm(Destination, Destination),
+}
+
+impl PillAction {
+    /// The pill button's text.
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Rearm(..) => "Re-arm",
+            _ => "Undo",
+        }
+    }
 }
 
 pub(crate) struct StopsApp {
@@ -180,8 +197,12 @@ pub(crate) struct StopsApp {
     pub(crate) chat_view: Vec<ChatRow>,
     /// Clear history was tapped once.
     pub(crate) confirm_clear: bool,
+    /// A prune pill (older than N days) was tapped once.
+    pub(crate) confirm_prune: Option<u32>,
     /// The History row whose actions (Use, Delete) are showing.
     pub(crate) history_open: Option<usize>,
+    /// The record id whose "last trip" card was closed; in memory only.
+    pub(crate) last_trip_hidden: Option<u64>,
     /// What the History search field holds; not persisted.
     pub(crate) history_query: String,
     pub(crate) history_field: Entity<TextField>,
@@ -191,6 +212,8 @@ pub(crate) struct StopsApp {
     pub(crate) history_view: Vec<usize>,
     /// The export whose save dialog is open, so its answer is worded right.
     pub(crate) pending_export: Option<saved_ui::ExportKind>,
+    /// The import whose file picker is open.
+    pub(crate) pending_import: Option<saved_ui::ImportKind>,
     /// The first tap on "Remove transit data" has armed the second.
     pub(crate) confirm_remove_feed: bool,
     /// The phone's time zone, seconds east of UTC, for the dates in History.
@@ -199,6 +222,13 @@ pub(crate) struct StopsApp {
     pub(crate) tile_usage: Option<u64>,
     /// The first tap on "Downloaded maps" has armed the second.
     pub(crate) confirm_clear_tiles: bool,
+    /// The cache size the first tap on "Cache size" asked to shrink to (MB).
+    pub(crate) shrink_armed: Option<u32>,
+    /// The first tap on "Other servers" has armed the second.
+    pub(crate) confirm_clear_other: bool,
+    pub(crate) confirm_reset_alarm: bool,
+    /// Bytes per server directory, measured with `tile_usage`.
+    pub(crate) tile_sources: Vec<(String, u64)>,
     /// The first tap on "Download this area" has armed the second.
     pub(crate) area_armed: bool,
 }
@@ -245,6 +275,13 @@ impl StopsApp {
             if window.is_window_active() {
                 this.refresh_preflight(cx);
                 this.refresh_trip(cx);
+                // Re-arm the watch when the map was still following. Kotlin
+                // stops it in onPause whether or not this window saw the
+                // deactivation, so ask again (the call is idempotent).
+                this.map.watching = false;
+                this.sync_follow(false, cx);
+            } else {
+                this.pause_follow(cx);
             }
         });
 
@@ -302,7 +339,8 @@ impl StopsApp {
                 this.prefs = data.prefs;
                 this.apply_appearance(cx);
                 let source = this.prefs.tile_source();
-                this.map_tiles.attach(&dir, source, cx);
+                let cap = this.prefs.tile_cache_bytes();
+                this.map_tiles.attach(&dir, source, cap, cx);
                 this.saved = data.saved;
                 this.history = data.history;
                 this.set_feed(data.gtfs);
@@ -378,16 +416,23 @@ impl StopsApp {
             chat_query,
             chat_view: Vec::new(),
             confirm_clear: false,
+            confirm_prune: None,
             history_open: None,
+            last_trip_hidden: None,
             history_query: String::new(),
             history_field,
             history_filter: rovsti_geo::OutcomeFilter::All,
             history_view: Vec::new(),
             pending_export: None,
+            pending_import: None,
             confirm_remove_feed: false,
             tz_offset_s: 0,
             tile_usage: None,
             confirm_clear_tiles: false,
+            shrink_armed: None,
+            confirm_clear_other: false,
+            confirm_reset_alarm: false,
+            tile_sources: Vec::new(),
             area_armed: false,
         };
         app.refresh_preflight_later(cx);
@@ -503,6 +548,27 @@ impl StopsApp {
         self.refresh_preflight_later(cx);
     }
 
+    /// A home screen shortcut asked to run a saved stop.
+    fn on_open_stop(&mut self, id: u64, cx: &mut Context<Self>) {
+        match open_stop_outcome(&self.saved, id, self.trip.is_some()) {
+            OpenStop::Gone => self.show_pill("That stop was deleted", None, cx),
+            OpenStop::Busy => self.show_pill("Not while a trip is running", None, cx),
+            OpenStop::Start => {
+                let Some(stop) = self.saved.get(id) else {
+                    return;
+                };
+                let text = format!("Starting {}", stop.name);
+                let (a, b) = (
+                    pick::dest_from_endpoint(&stop.a),
+                    pick::dest_from_endpoint(&stop.b),
+                );
+                self.tabs.jump_to(0);
+                self.request_start(a, b, cx);
+                self.show_pill(text, None, cx);
+            }
+        }
+    }
+
     /// One event from Kotlin.
     fn on_event(&mut self, event: &RawEvent, cx: &mut Context<Self>) {
         match event.kind.as_str() {
@@ -515,6 +581,10 @@ impl StopsApp {
             kind::STOPS_LOCATION => match parse_location_fix(&event.json) {
                 Some(fix) => self.apply_fix(fix, false, cx),
                 None => log::warn!("unreadable stops_location event"),
+            },
+            kind::OPEN_STOP => match rovsti_android::events::parse_open_stop(&event.json) {
+                Some(id) => self.on_open_stop(id, cx),
+                None => log::warn!("unreadable open_stop event"),
             },
             kind::ALARM_SOUND_PICKED => self.on_alarm_sound_picked(&event.json, cx),
             kind::PERMISSIONS_CHANGED => {
@@ -536,7 +606,10 @@ impl StopsApp {
                     }
                 }
                 Ok(result) if result.op == DocumentOp::ImportMessages => {
-                    self.on_places_picked(&result, cx);
+                    match self.pending_import.take().unwrap_or_default() {
+                        saved_ui::ImportKind::Places => self.on_places_picked(&result, cx),
+                        saved_ui::ImportKind::Backup => self.on_backup_picked(&result, cx),
+                    }
                 }
                 Ok(_) => {}
                 Err(error) => log::warn!("bad document_result: {error}"),
@@ -597,6 +670,7 @@ impl StopsApp {
             cx.notify();
         } else if self.tabs.select(0) {
             self.confirm_clear = false;
+            self.confirm_prune = None;
             self.map.end_measure();
             self.confirm_remove_feed = false;
             self.page.restart();
@@ -663,9 +737,8 @@ impl StopsApp {
         cx: &mut Context<Self>,
     ) {
         let undo = action.is_some();
-        let token = self
-            .pill
-            .show(text, undo.then(|| "Undo".into()), undo, false);
+        let label = action.as_ref().map(PillAction::label);
+        let token = self.pill.show(text, label.map(Into::into), undo, false);
         self.pill_action = action.map(|a| (token, a));
         cx.notify();
     }
@@ -680,13 +753,20 @@ impl StopsApp {
         }
         match action {
             PillAction::UndoDelete(stop, index) => self.undo_delete(stop, index, cx),
+            PillAction::UndoRestore(before) => {
+                let (saved, history, prefs) = *before;
+                self.apply_snapshot(saved, history, prefs, cx);
+            }
             PillAction::RestoreHistory(history) => self.restore_history(history, cx),
             PillAction::RestoreRecord(record, index) => self.restore_record(record, index, cx),
-            PillAction::RestartTrip(a, b) => self.request_start(a, b, cx),
+            PillAction::RestartTrip(a, b) | PillAction::Rearm(a, b) => {
+                self.request_start(a, b, cx);
+            }
             PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
             PillAction::RestoreSaved(saved) => self.restore_saved(saved, cx),
             PillAction::RestoreAlarmSound(sound) => self.restore_alarm_sound(sound, cx),
+            PillAction::RestorePrefs(prefs) => self.restore_prefs(*prefs, cx),
             PillAction::UndoSave(id) => self.undo_save(id, cx),
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);
@@ -815,11 +895,14 @@ impl Render for StopsApp {
                     entity.update(cx, |this, cx| {
                         this.tabs.press();
                         if this.tabs.select(index) {
+                            this.map.follow_mode = this.map.follow_mode.on_pan();
+                            this.sync_follow(true, cx);
                             this.expanded = None;
                             this.confirm_delete = None;
                             // Leaving disarms a half-done destructive tap and
                             // closes the pin menu nobody can see any more.
                             this.confirm_clear = false;
+                            this.confirm_prune = None;
                             this.confirm_remove_feed = false;
                             this.pick.close_menu();
                             this.map.end_measure();
@@ -894,4 +977,53 @@ fn main() {
         .expect("failed to open the Rovsti Stops window");
         cx.activate(true);
     });
+}
+
+/// What a home screen shortcut for a saved stop should do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OpenStop {
+    Start,
+    Busy,
+    Gone,
+}
+
+fn open_stop_outcome(saved: &SavedStops, id: u64, trip_running: bool) -> OpenStop {
+    if saved.get(id).is_none() {
+        OpenStop::Gone
+    } else if trip_running {
+        OpenStop::Busy
+    } else {
+        OpenStop::Start
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod open_stop_tests {
+    use super::*;
+    use rovsti_geo::{Coord, Endpoint};
+
+    fn saved_with_one() -> (SavedStops, u64) {
+        let mut saved = SavedStops::default();
+        let ep = |lat| Endpoint {
+            coord: Coord::new(lat, 29.0),
+            label: String::new(),
+        };
+        let id = saved.add("Home", ep(41.0), ep(41.1), 0).unwrap();
+        (saved, id)
+    }
+
+    #[test]
+    fn a_known_stop_starts_unless_a_trip_runs() {
+        let (saved, id) = saved_with_one();
+        assert_eq!(open_stop_outcome(&saved, id, false), OpenStop::Start);
+        assert_eq!(open_stop_outcome(&saved, id, true), OpenStop::Busy);
+    }
+
+    #[test]
+    fn a_deleted_stop_is_gone_even_during_a_trip() {
+        let (saved, id) = saved_with_one();
+        assert_eq!(open_stop_outcome(&saved, id + 99, false), OpenStop::Gone);
+        assert_eq!(open_stop_outcome(&saved, id + 99, true), OpenStop::Gone);
+    }
 }

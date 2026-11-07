@@ -3,6 +3,7 @@
 //! address-only queries are refused rather than resolved.
 
 use crate::Coord;
+use crate::coord_format::parse_coord;
 
 /// Longest label kept from a share, in characters.
 const MAX_LABEL_CHARS: usize = 100;
@@ -116,6 +117,16 @@ pub fn parse_location(text: &str) -> Result<SharedPlace, DestError> {
         if let Some((lat, lon, label)) = parse_pair(line) {
             match checked(lat, lon) {
                 Ok(coord) => return Ok(SharedPlace { coord, label }),
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
+            }
+        }
+    }
+    for line in text.lines() {
+        if let Some(c) = parse_coord(line) {
+            match checked(c.lat, c.lon) {
+                Ok(coord) => return Ok(SharedPlace { coord, label: None }),
                 Err(e) => {
                     first_err.get_or_insert(e);
                 }
@@ -519,6 +530,27 @@ mod tests {
         assert!((a.0 - lat).abs() < 1e-6, "lat {a:?}");
         assert!((a.1 - lon).abs() < 1e-6, "lon {a:?}");
         assert_eq!(a.2.as_deref(), label, "label {a:?}");
+    }
+
+    #[test]
+    fn parse_location_takes_dms_and_plus_code() {
+        close(
+            ok("41°01'32.2\"N 28°58'36.0\"E"),
+            41.025611,
+            28.976667,
+            None,
+        );
+        close(
+            ok("Meet here\nS 33 52.1 E 151 12.5"),
+            -33.868333,
+            151.208333,
+            None,
+        );
+        assert_eq!(
+            parse_location("91°00'00\"N 10°00'00\"E"),
+            Err(DestError::NotALocation)
+        );
+        assert!(parse_location("8FVC9G8F+6X").is_ok());
     }
 
     #[test]

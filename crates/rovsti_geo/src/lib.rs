@@ -6,6 +6,7 @@
 //! diameter is far away.
 
 pub mod alarm;
+pub mod backup;
 mod coord;
 pub mod coord_format;
 mod crossing;
@@ -36,15 +37,21 @@ pub use dest::{
     stop_share_text,
 };
 pub use gtfs::{Feed, FeedBuilder, FeedReport, GtfsError, Pattern, Route, Stop, read_zip};
-pub use history::{History, Outcome, OutcomeFilter, Stats, TripRecord};
+pub use history::{
+    DAY_MS, History, Outcome, OutcomeFilter, PRUNE_CHOICES_DAYS, Stats, TripRecord, Usage,
+    prune_label, usage_text,
+};
 pub use measure::Measure;
 pub use notice::{DEFAULT_TEMPLATE, TemplateError};
 pub use prefs::{
     AlarmSound, Appearance, NOTICE_MINUTES, NoticePrefs, NoticeWhen, SNOOZE_CHOICES, StopsPrefs,
 };
-pub use saved_stops::{LoadedStops, SavedStop, SavedStopError, SavedStops};
+pub use saved_stops::{
+    LoadedStops, SavedStop, SavedStopError, SavedStops, StopShortcut, shortcut_spec,
+};
 pub use session::{
     ActiveTrip, FixIn, FixOut, FixOutcome, FixPos, NoticeDelivery, NoticeState, Track,
+    format_distance, status_share_text,
 };
 pub use trip::{Fix, TripState};
-pub use view::Viewport;
+pub use view::{FollowMode, Viewport};

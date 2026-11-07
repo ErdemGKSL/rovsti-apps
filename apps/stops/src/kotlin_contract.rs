@@ -15,6 +15,10 @@ const ALARM_OPTIONS: &str =
     include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/AlarmOptions.kt");
 const STOPS_LOCATION: &str =
     include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/StopsLocation.kt");
+const SHORTCUTS: &str =
+    include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/Shortcuts.kt");
+const MAIN_ACTIVITY: &str =
+    include_str!("../platforms/android/app/src/main/kotlin/dev/rovsti/stops/MainActivity.kt");
 const TRIP_SERVICE_RECOVER: &str = "TripAlarm.recover(this)";
 const MANIFEST: &str = include_str!("../platforms/android/app/src/main/AndroidManifest.xml");
 
@@ -263,4 +267,46 @@ fn the_alarm_picker_is_an_alarm_picker_and_answers_once() {
         "postOneShot(\"{}\"",
         rovsti_android::events::kind::ALARM_SOUND_PICKED
     )));
+}
+
+#[test]
+fn shortcut_and_live_location_names_match_rust() {
+    for token in [
+        "const val EXTRA_STOP_ID = \"dev.rovsti.stops.STOP_ID\"",
+        "fun pinStop(",
+    ] {
+        assert!(SHORTCUTS.contains(token), "Shortcuts.kt lacks {token}");
+    }
+    for token in [
+        "fun pinStopShortcut(",
+        "fun deliverOpenStop(",
+        "fun watchLocation(",
+        "postOneShot(\"open_stop\"",
+    ] {
+        assert!(BRIDGE.contains(token), "RovstiBridge.kt lacks {token}");
+    }
+    assert_eq!(rovsti_android::events::kind::OPEN_STOP, "open_stop");
+    for token in [
+        "fun watch(",
+        "requestLocationUpdates(",
+        "removeUpdates(",
+        "2_000L",
+        "5f",
+    ] {
+        assert!(
+            STOPS_LOCATION.contains(token),
+            "StopsLocation.kt lacks {token}"
+        );
+    }
+    for token in [
+        "RovstiBridge.deliverOpenStop(intent)",
+        "override fun onNewIntent",
+        "RovstiBridge.watchLocation(false)",
+        "override fun onPause",
+    ] {
+        assert!(
+            MAIN_ACTIVITY.contains(token),
+            "MainActivity.kt lacks {token}"
+        );
+    }
 }

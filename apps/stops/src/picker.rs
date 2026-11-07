@@ -214,6 +214,12 @@ pub enum SheetMode {
     ImportStops(MergePlan),
     /// Appearance and the offline map area download.
     MapOptions,
+    /// The blue dot: its position and accuracy in metres.
+    MyLocation(Coord, f64),
+    /// The measure tool's Copy / Share / Save actions.
+    MeasureActions,
+    /// Confirming the replacement of all data by a backup file.
+    RestoreBackup(Box<rovsti_geo::backup::Backup>),
 }
 
 /// The stop search for one query, and the lines of the stop the sheet shows,
@@ -600,6 +606,14 @@ impl StopsApp {
             SheetMode::Qr(card) => ("QR code", self.qr_body(theme, card, cx)),
             SheetMode::ImportStops(plan) => ("Import stops", self.import_body(theme, &plan, cx)),
             SheetMode::MapOptions => ("Map options", self.map_options_body(theme, cx)),
+            SheetMode::MyLocation(at, accuracy) => (
+                "My location",
+                self.my_location_body(theme, at, accuracy, cx),
+            ),
+            SheetMode::MeasureActions => ("Measurement", self.measure_actions_body(theme, cx)),
+            SheetMode::RestoreBackup(file) => {
+                ("Restore backup", self.restore_body(theme, &file, cx))
+            }
         };
         let body = div()
             .flex()
@@ -676,7 +690,7 @@ impl StopsApp {
                         theme,
                         "dest-field",
                         &self.field,
-                        "Search stops, saved stops, or paste a link",
+                        "Search stops, or paste a link, coordinates or Plus Code",
                         window,
                         cx,
                     )))
@@ -742,7 +756,7 @@ impl StopsApp {
                 (
                     st.id,
                     st.name.clone(),
-                    crate::saved_ui::stop_detail(st, here),
+                    crate::saved_ui::stop_detail(st, here, None),
                 )
             })
             .collect();
@@ -872,7 +886,7 @@ impl StopsApp {
             }
             PickItem::Hint => Self::footnote(
                 theme,
-                "Share a location from any maps app to Rovsti Stops, or paste its link here.",
+                "Share a location from any maps app to Rovsti Stops, or paste a link, coordinates or Plus Code here.",
             ),
         }
     }
@@ -1252,6 +1266,14 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn offer_accepts_dms_and_plus_codes() {
+        let dms = offer("41°01'32.2\"N 28°58'36.0\"E");
+        assert!(matches!(dms, Offer::Confirm(_)), "{dms:?}");
+        let code = offer("8GHC2F62+PV");
+        assert!(matches!(code, Offer::Confirm(_)), "{code:?}");
+    }
 
     #[test]
     fn pasted_stop_pill_names_the_stop() {

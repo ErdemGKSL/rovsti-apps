@@ -317,7 +317,8 @@ impl ActiveTrip {
     }
 }
 
-fn format_distance(metres: f64) -> String {
+/// Short distance text: 10 m steps below a kilometre, then one decimal of km.
+pub fn format_distance(metres: f64) -> String {
     if metres < 1_000.0 {
         format!("{} m", (metres / 10.0).round() as i64 * 10)
     } else {
@@ -325,10 +326,74 @@ fn format_distance(metres: f64) -> String {
     }
 }
 
+/// Shareable status of a running trip, with a geo link on the second line.
+pub fn status_share_text(
+    label: &str,
+    line_m: Option<f64>,
+    eta_min: Option<u32>,
+    here: Option<Coord>,
+    target: Coord,
+    crossed: bool,
+) -> String {
+    let link = crate::point_qr_payload(target, Some(label));
+    if crossed {
+        return format!("Arrived at {label}.\n{link}");
+    }
+    let mut parts = Vec::new();
+    if let Some(m) = line_m.filter(|m| m.is_finite()) {
+        parts.push(format!("{} to the line", format_distance(m)));
+    }
+    if let Some(min) = eta_min {
+        parts.push(format!("about {} min", min.max(1)));
+    }
+    if let Some(h) = here {
+        parts.push(format!(
+            "heading {}",
+            crate::coord_format::cardinal(h.bearing_deg(target))
+        ));
+    }
+    let head = if parts.is_empty() {
+        format!("On my way to {label}.")
+    } else {
+        format!("On my way to {label}: {}.", parts.join(", "))
+    };
+    format!("{head}\n{link}")
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_text_variants() {
+        let t = Coord::new(41.0, 29.0);
+        let here = Coord::new(40.99, 28.99);
+        let s = status_share_text("Moda", Some(1234.0), Some(4), Some(here), t, false);
+        let mut lines = s.lines();
+        assert_eq!(
+            lines.next().unwrap(),
+            "On my way to Moda: 1.2 km to the line, about 4 min, heading NE."
+        );
+        assert!(lines.next().unwrap().starts_with("geo:"));
+        let s = status_share_text("Moda", Some(300.0), None, None, t, false);
+        assert!(s.starts_with("On my way to Moda: 300 m to the line.\n"));
+        let s = status_share_text("Moda", None, None, None, t, false);
+        assert!(s.starts_with("On my way to Moda.\ngeo:"));
+        let s = status_share_text("Moda", Some(5.0), Some(2), Some(here), t, true);
+        assert!(s.starts_with("Arrived at Moda.\ngeo:"));
+        assert_eq!(s.lines().count(), 2);
+    }
+
+    #[test]
+    fn format_distance_edges() {
+        assert_eq!(format_distance(0.0), "0 m");
+        assert_eq!(format_distance(4.0), "0 m");
+        assert_eq!(format_distance(994.0), "990 m");
+        assert_eq!(format_distance(1000.0), "1.0 km");
+        assert_eq!(format_distance(1250.0), "1.2 km");
+        assert_eq!(format_distance(12_340.0), "12.3 km");
+    }
 
     const MID: Coord = Coord::new(41.0, 29.0);
 

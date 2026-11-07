@@ -13,6 +13,8 @@ use crate::tiles::TileSource;
 
 /// Snooze lengths the Settings row cycles through, minutes.
 pub const SNOOZE_CHOICES: [u8; 5] = [1, 3, 5, 10, 15];
+/// Tile cache size choices the Settings row cycles through, megabytes.
+pub const TILE_CACHE_CHOICES_MB: [u32; 4] = [128, 256, 512, 1024];
 /// "Minutes before" choices for the arriving-soon message.
 pub const NOTICE_MINUTES: [u8; 3] = [5, 10, 15];
 
@@ -146,6 +148,13 @@ pub struct StopsPrefs {
     pub volume_pct: u8,
     /// `None`: the system default alarm sound.
     pub alarm_sound: Option<AlarmSound>,
+    /// Tile cache cap, megabytes (one of [`TILE_CACHE_CHOICES_MB`]).
+    #[serde(default = "default_tile_cache_mb")]
+    pub tile_cache_mb: u32,
+}
+
+fn default_tile_cache_mb() -> u32 {
+    TILE_CACHE_CHOICES_MB[0]
 }
 
 impl Default for StopsPrefs {
@@ -160,11 +169,37 @@ impl Default for StopsPrefs {
             vibration: VibrationPattern::default(),
             volume_pct: MIN_ALARM_VOLUME_PCT,
             alarm_sound: None,
+            tile_cache_mb: default_tile_cache_mb(),
         }
     }
 }
 
 impl StopsPrefs {
+    /// True when every alarm setting equals its default.
+    pub fn alarm_is_default(&self) -> bool {
+        let d = Self::default();
+        self.sound == d.sound
+            && self.vibrate == d.vibrate
+            && self.snooze_min == d.snooze_min
+            && self.vibration == d.vibration
+            && self.volume_pct == d.volume_pct
+            && self.alarm_sound == d.alarm_sound
+    }
+
+    /// A copy with only the alarm settings reset to their defaults.
+    pub fn with_alarm_defaults(&self) -> StopsPrefs {
+        let d = Self::default();
+        StopsPrefs {
+            sound: d.sound,
+            vibrate: d.vibrate,
+            snooze_min: d.snooze_min,
+            vibration: d.vibration,
+            volume_pct: d.volume_pct,
+            alarm_sound: d.alarm_sound,
+            ..self.clone()
+        }
+    }
+
     /// The chosen tile server; a missing or invalid stored value is the default.
     pub fn tile_source(&self) -> TileSource {
         self.tile_url
@@ -223,6 +258,22 @@ impl StopsPrefs {
         self.alarm_sound
             .as_ref()
             .map_or_else(|| "Default alarm".to_owned(), |s| s.title.clone())
+    }
+
+    /// The next cache size in [`TILE_CACHE_CHOICES_MB`] (wrapping); a stored
+    /// value not on the list snaps to the first choice.
+    pub fn next_tile_cache(&self) -> u32 {
+        TILE_CACHE_CHOICES_MB
+            .iter()
+            .position(|m| *m == self.tile_cache_mb)
+            .map_or(TILE_CACHE_CHOICES_MB[0], |i| {
+                TILE_CACHE_CHOICES_MB[(i + 1) % TILE_CACHE_CHOICES_MB.len()]
+            })
+    }
+
+    /// The tile cache cap in bytes.
+    pub fn tile_cache_bytes(&self) -> u64 {
+        u64::from(self.tile_cache_mb) * 1024 * 1024
     }
 
     /// The next snooze length in [`SNOOZE_CHOICES`] (wrapping); a stored
@@ -427,5 +478,55 @@ mod tests {
     fn old_prefs_json_has_no_tile_url() {
         let p: StopsPrefs = serde_json::from_str(r#"{"sound":false}"#).unwrap();
         assert_eq!(p.tile_url, None);
+    }
+
+    #[test]
+    fn tile_cache_default_cycle_and_snap() {
+        let mut p = StopsPrefs::default();
+        assert_eq!(p.tile_cache_mb, 128);
+        assert_eq!(p.tile_cache_bytes(), 128 * 1024 * 1024);
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            p.tile_cache_mb = p.next_tile_cache();
+            seen.push(p.tile_cache_mb);
+        }
+        assert_eq!(seen, [256, 512, 1024, 128, 256]);
+        p.tile_cache_mb = 300;
+        assert_eq!(p.next_tile_cache(), 128);
+        let old: StopsPrefs = serde_json::from_str(r#"{"sound":false}"#).unwrap();
+        assert_eq!(old.tile_cache_mb, 128);
+    }
+
+    #[test]
+    fn alarm_is_default_tracks_changes() {
+        let mut p = StopsPrefs::default();
+        assert!(p.alarm_is_default());
+        p.snooze_min = 10;
+        assert!(!p.alarm_is_default());
+    }
+
+    #[test]
+    fn with_alarm_defaults_resets_only_alarm_fields() {
+        let p = StopsPrefs {
+            sound: false,
+            vibrate: true,
+            snooze_min: 15,
+            notice: Some(NoticePrefs::default()),
+            tile_url: Some("https://t.example/{z}/{x}/{y}.pbf".into()),
+            appearance: Appearance::Dark,
+            vibration: VibrationPattern::Long,
+            volume_pct: 100,
+            alarm_sound: Some(AlarmSound {
+                uri: "content://x".into(),
+                title: "X".into(),
+            }),
+            tile_cache_mb: 512,
+        };
+        let r = p.with_alarm_defaults();
+        assert!(r.alarm_is_default());
+        assert_eq!(r.appearance, Appearance::Dark);
+        assert_eq!(r.tile_cache_mb, 512);
+        assert_eq!(r.tile_url, p.tile_url);
+        assert_eq!(r.notice, p.notice);
     }
 }

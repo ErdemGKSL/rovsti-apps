@@ -1,8 +1,8 @@
-# Rovsti Stops: everyday utilities (rounds 1 and 2)
+# Rovsti Stops: everyday utilities (rounds 1-5)
 
 Everything here is local. Pure logic lives in `crates/rovsti_geo` (unit-tested); the GPUI code in
 `apps/stops/src` is thin glue, and Android calls go through `rovsti_android` (desktop returns
-`Error::Unsupported`). Backlog and status: `_bmad-output/plans/util-stops.md` (R1) and `_bmad-output/plans/util-stops-r2.md` (R2 and later).
+`Error::Unsupported`). Backlog and status: `_bmad-output/plans/util-stops.md` (R1) and `_bmad-output/plans/util-stops-r2.md` (R2), `_bmad-output/plans/util-stops-r3.md` (R3), `_bmad-output/plans/util-stops-r4.md` (R4), `_bmad-output/plans/util-stops-r5.md` (R5 and later backlog).
 
 | # | Utility | What it does | Where |
 |---|---------|--------------|-------|
@@ -22,6 +22,42 @@ Everything here is local. Pure logic lives in `crates/rovsti_geo` (unit-tested);
 | S14 | Alarm volume and Test volume | Volume cycles 80 / 90 / 100 % ("Never quieter than this."). Test volume plays the chosen sound for 3 seconds, pill "Playing for 3 seconds". | `alarm::{VOLUME_CHOICES, next_volume}`; `settings_ui.rs::volume_text`; `trip::preview_alarm_sound`; Settings > Alarm |
 | S15 | History search, filter, Start again, Save as stop | Search field (more than 5 trips, accent-insensitive on label and A/B), All / Arrived / Cancelled filter, "No trips match" empty state. An open trip offers Start again (pill "Not while a trip is running" during a trip), Save as stop (pill "Saved as <name>" with Undo, or "Already saved as <name>"), Use and Delete. | `rovsti_geo::history::{OutcomeFilter, matching, TripRecord::pair}`; `settings_ui.rs` (`history_controls`, `start_again`, `save_record_as_stop`), `saved_ui.rs::history_field_visible`; Settings > History |
 | S16 | Export history as CSV / GPX | Header pills "Export CSV" / "Export GPX" open the system save dialog; pill "History exported". CSV: RFC 4180, CRLF, local ISO times; GPX: one route per trip with A and B. | `rovsti_geo::history_io::{to_csv, to_gpx, export_file_name}`; `saved_ui.rs` (`ExportKind::History`), `backend::export_text`; Settings > History |
+| S17 | Follow-me | The Me button cycles Off, Centred (one jump to your position), Following (live fixes keep the map centred, zoom unchanged). Button tinted while following. Pills "Following you" / "Stopped following"; desktop answers "Following works on the phone only.", denied permission "Allow location to follow you." | `rovsti_geo::view::FollowMode::{on_me_tap, on_pan, watches}`; `map.rs` (`follow_mode`, `sync_follow`, `pause_follow`), `location::watch_location`; reach: Me button on the map |
+| S18 | Home screen shortcut for a saved stop | Pins a launcher shortcut that opens the app and starts that stop's trip. Pills "Added to the home screen" or "The launcher did not add it"; desktop shows the Android-only notice. | `rovsti_geo::saved_stops::shortcut_spec`; `rovsti_android::shortcuts::pin_stop`; `backend::{pin_stop_shortcut, can_pin_shortcut}`; `saved_ui.rs` (`pin_pill`); reach: Saved tab > open a stop > "Home screen" |
+| S20 | Copy / share live trip status | "On my way to Kadikoy - Moda: 1.2 km to the line, about 4 min, heading NE." plus a geo link line; "Arrived at ..." once crossed. Pills "Status copied"; share opens the system share sheet. | `rovsti_geo::session::{status_share_text, format_distance}`; `trip_ui.rs` (copy / share status); reach: Trip tab live card, "Copy status" and "Share status" |
+| S21 | Re-arm after dismiss | Dismissing the alarm shows the pill "Alarm dismissed" with a "Re-arm" action that starts the same A/B trip again (an explicit tap; no pill action when the ends are unknown). | `trip_ui.rs::dismiss_pill`, `PillAction::Rearm` in `main.rs`; reach: alarm Dismiss |
+| S22 | Tile cache size and other servers | "Cache size" cycles 128 / 256 / 512 / 1024 MB, applied live. Lowering below current usage needs a second tap ("Tap again to shrink to 128 MB"), then pill "Cache limit 128 MB". "Other servers" (only when > 0) shows their usage; two taps clear it, pill "Freed 12 MB". | `rovsti_tiles::cache::{DiskCache::set_cap, usage_by_source, clear_except}`; `rovsti_geo::prefs::{TILE_CACHE_CHOICES_MB, next_tile_cache, tile_cache_bytes}`; `settings_ui.rs` (`cache_size_text`, `needs_shrink_confirm`, `other_servers_bytes`); Settings > Map tiles |
+| S23 | Paste DMS / DDM / Plus Code | The picker accepts `41°01'32.2"N 28°58'36.0"E`, `41° 1.537' N, 28° 58.600' E`, `N 41.0256 E 28.9767` and full Plus Codes (not short ones), alongside links and plain decimals. Out-of-range values give the usual error. | `rovsti_geo::coord_format::{parse_coord, plus_code_decode}`, `dest::parse_location`; `picker.rs` paste field and search box |
+| S25 | Share my current location | Tapping the blue dot (idle map, not measuring) opens "My location" ("Accurate to 15 m") with Copy as, Share, QR code, Use as A and Use as B instead of placing a pin. | `map.rs::hits_position`; `map_actions.rs::open_my_location`; reuses `open_copy_as`, `open_qr`, `share_point`; reach: tap the dot |
+| S26 | Measure actions | "More" on the measure card (2 or more points) opens Copy result (pill "Measurement copied"), Share as GPX (save dialog, pill "Measurement exported") and Save as stop (first and last point, only when they form a valid gate; pill "Saved as <name>" with Undo, or "Already saved as <name>"). | `rovsti_geo::measure::{summary_text, to_gpx, as_gate, export_file_name}`; `map_actions.rs` (`measure_actions`, `copy_measurement`, `export_measurement`, `save_measurement_as_stop`); reach: Ruler > More |
+| S24 | Favourite saved stops | A star marks a stop and lists it first in every sort (Saved / Name / Nearest). Up/Down reordering stays inside the favourites or the other group, and is disabled at the group edge. Kept in JSON export/import and backup. Pills "Added to favourites" / "Removed from favourites"; the same tap undoes it, so no confirm. | `rovsti_geo::saved_stops::{SavedStop::favourite, toggle_favourite, sorted, move_by}`, `places_io`; `saved_ui.rs` (`row_title`, `favourite_pill`, `can_move`); reach: Saved tab > open a stop > "Favourite" / "Unfavourite" |
+| S27 | Last trip card | The idle Trip tab shows the newest finished trip for 12 hours: "Arrived at Home – Work" (or "Trip stopped: ..."), "18 min · 3.4 km · 1 snooze", with Start again, Save as stop, Share and Close. Close only hides the card. | `rovsti_geo::history::{History::last_finished, TripRecord::{title, summary_line}, format_duration, snoozes_text}`; `trip_ui.rs` (`last_trip_title`, `show_last_trip`); reach: Trip tab after a trip |
+| S28 | Map scale bar | Round-length scale bar in the map card. Pre-existing before R4, no change. | `map.rs::scale_bar` |
+| S29 | Open a saved stop in maps | Opens the stop's `geo:` link in the user's maps app. Pill "Opening in maps". | `saved_ui.rs` (opened row), `map::maps_url`; reach: Saved tab > open a stop > "Open in maps" |
+| S30 | Copy saved stops as text | Copies the visible stops (search and sort respected) as lines "★ Name: 40.99000, 29.02000 (1.2 km away)" plus an OpenStreetMap link. Pill "Copied 12 stops" / "Copied 1 stop". | `rovsti_geo::saved_stops::list_text`; `saved_ui.rs::copy_list_pill`; reach: Saved tab header "Copy list" (shown when a stop is visible) |
+| S31 | History text fix | Garbled separators in History rows and stats (double-encoded "–" and "·") are fixed; no behaviour change. | `settings_ui.rs` |
+| S32 | Backup and restore | One JSON file with saved stops, trip history and settings. Restore asks first and can be undone. Pills "Backup saved", "Backup restored" (Undo). See Backup below. | `rovsti_geo::backup::{Backup, to_json, parse, summary, export_file_name}`; `saved_ui.rs` (`on_backup_picked`, `restore_blocked`, `restore_sheet_body`); `backend::{export_text, pick_import, read_import}`; reach: Settings > Backup |
+| S33 | Share and copy a trip | A history record offers Share (system share sheet) and Copy (pill "Trip copied"): "Arrived at Home – Work on 5 Nov 2026, 18:42. 18 min · 3.4 km · 1 snooze." plus a geo link of B. | `rovsti_geo::history_io::share_text`; `settings_ui.rs`; reach: Settings > History > open a trip |
+
+| S34 | Distance from you and Measure from here | The pin menu footer adds "1.2 km from you, NE" (or "You are here" under 10 m) when a fix exists. "Measure from here" starts the ruler with that pin as the first point (hidden during a trip). Pill "Tap the map to measure from here". No confirm needed. | `rovsti_geo::coord_format::from_you_text`; `map.rs` (`pin_menu`, `pin_menu_height`, `MapState::measure_from`); reach: tap a pin > "Measure from here" |
+| S36 | Delete old trips | History shows "Delete 12 trips older than 30 days" / "90 days" pills (only when some match). First tap arms ("Tap again to delete 12 trips"), second deletes. Pill "Deleted 12 old trips" with Undo (restores the whole history). | `rovsti_geo::history::{older_than, remove_older_than, prune_label, PRUNE_CHOICES_DAYS}`; `settings_ui.rs` (`prune_history`, `prune_step`, `prune_pill`), `PillAction::RestoreHistory`; reach: Settings > History |
+| S37 | Nearest saved stop | The idle Trip tab shows "Nearest: Home gate", "350 m away", with Start, when a fix exists, no ends are picked and a saved stop lies within 2 km. Start uses the normal path (pill "Starting <name>" or the usual error). | `rovsti_geo::saved_stops::{SavedStops::nearest, NEAREST_CHIP_M}`; `trip_ui.rs` (`nearest_row_visible`); reach: Trip tab, idle |
+| S38 | Usage on saved stops | The Saved row subtitle adds "Used 4 times, last 5 Nov" (or "Used once, today") from the trip history; matches the gate in either direction. Read-only. | `rovsti_geo::history::{History::usage_of, usage_text, Usage}`; `saved_ui.rs::stop_detail`; reach: Saved tab |
+| S39 | Reset alarm settings | Last row of Settings > Alarm, shown only when something differs from the defaults. First tap arms ("Tap again to reset"), second resets sound, vibration, pattern, volume, snooze and alarm sound (appearance and tile settings untouched). Pill "Alarm settings reset" with Undo. | `rovsti_geo::prefs::StopsPrefs::{alarm_is_default, with_alarm_defaults}`; `settings_ui.rs` (`reset_alarm_label`), `PillAction::RestorePrefs`; reach: Settings > Alarm |
+
+
+## Backup (S32)
+
+- **Contains:** saved stops (with favourites), trip history and the app settings (appearance, alarm, tile
+  server and cache size, and so on), as pretty JSON named `rovsti-stops-backup-<date>.json`.
+- **Leaves out:** the tile cache, the GTFS feed, and the WhatsApp link (the connect key lives with
+  `rovsti_wa_client` and is never written).
+- **Restore:** Settings > Backup > Restore backup. Blocked during a trip (pill "Not while a trip is
+  running"). A bad file shows a pill (not a backup, another app, newer version, damaged stops). A good one
+  opens the confirm sheet "Restore backup" with a summary such as "12 stops, 48 trips and settings from 5
+  Nov 2026"; Cancel or the red "Replace everything". Afterwards the pill "Backup restored" offers Undo,
+  which puts back the previous stops, history and settings.
+- Tests: `rovsti_geo::backup` and the `saved_ui` helpers.
 
 ## Measure tool (S8)
 
@@ -56,3 +92,25 @@ Everything here is local. Pure logic lives in `crates/rovsti_geo` (unit-tested);
   works before the first trip and reflects changes at once.
 - Tests: `rovsti_geo` (`alarm`, `prefs`), `rovsti_android::trip` (desktop `Unsupported`, picker parser) and
   `apps/stops/src/kotlin_contract.rs` (Kotlin files carry the expected names).
+
+## Shortcuts and follow-me (S17, S18)
+
+- **open_stop one-shot.** The pinned shortcut carries the extra `dev.rovsti.stops.STOP_ID` (Long). Stops
+  `MainActivity` calls `RovstiBridge.deliverOpenStop(intent)` in `onCreate` and `onNewIntent`; it posts the
+  one-shot event `open_stop` (`{id}`) and removes the extra, so a rotation or resume never replays it.
+  Rust parses it with `rovsti_android::events::parse_open_stop`; `main.rs::on_event` then applies
+  `open_stop_outcome`: a running trip gives the pill "Not while a trip is running", a deleted stop "That stop
+  was deleted", otherwise the trip starts through `request_start`, the Trip tab opens and the pill says
+  "Starting <name>".
+- **watchLocation lifecycle.** `RovstiBridge.watchLocation(true)` registers one listener on the first enabled
+  provider (every 2 s or 5 m, main looper) and emits the same `stops_location` events as the one-shot fix;
+  `false` removes it. Both are idempotent, and `true` returns false without the location permission. The
+  map turns it on only in Following mode (`sync_follow`) and off on: a second Me tap, any pan, drag or
+  pinch, trip start, tab change, and the window going inactive (`pause_follow`; Kotlin `onPause` also calls
+  `watchLocation(false)`). On resume the app re-arms it if the mode is still Following.
+- **Battery.** Continuous updates run only while the map is visibly following in the foreground, so leaving
+  the app, panning or starting a trip stops the GPS use. The trip service has its own location handling and
+  is unaffected.
+- Tests: `rovsti_geo` (`view`, `coord_format`, `session`, `measure`, `saved_stops`, `prefs`), `rovsti_tiles`
+  cache, `rovsti_android` (`events`, `shortcuts`, `location` desktop `Unsupported`), and the Stops crate
+  (`map`, `picker`, `trip_ui`, `settings_ui`, `kotlin_contract`).

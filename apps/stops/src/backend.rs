@@ -16,7 +16,7 @@ use rovsti_android::{
 };
 use rovsti_geo::{
     ActiveTrip, AlarmPlan, Diameter, DiameterError, Endpoint, Feed, FixIn, History, NoticePrefs,
-    Outcome, SavedStops, StopsPrefs, saved_stops::load_saved_stops,
+    Outcome, SavedStop, SavedStops, StopsPrefs, saved_stops::load_saved_stops, shortcut_spec,
 };
 use rovsti_ui::storage;
 use serde_json::json;
@@ -500,6 +500,21 @@ fn done(result: rovsti_android::Result<bool>) -> Result<(), String> {
         Ok(true) => Ok(()),
         Ok(false) => Err("Android refused".to_owned()),
         Err(error) => Err(android_words(&error)),
+    }
+}
+
+/// Whether the launcher can pin a shortcut (false on desktop).
+#[allow(dead_code)] // the pill is always shown; desktop answers with a notice
+pub fn can_pin_shortcut() -> bool {
+    rovsti_android::shortcuts::can_pin().unwrap_or(false)
+}
+
+/// Asks the launcher to pin a home screen shortcut that opens `stop`.
+/// `Ok(false)` means the launcher did not take it.
+pub fn pin_stop_shortcut(stop: &SavedStop) -> rovsti_android::Result<bool> {
+    match serde_json::to_string(&shortcut_spec(stop)) {
+        Ok(spec) => rovsti_android::shortcuts::pin_stop(&spec),
+        Err(_) => Ok(false),
     }
 }
 

@@ -339,6 +339,9 @@ object RovstiBridge {
 
     @JvmStatic fun pinContactShortcut(specJson: String): Boolean = Shortcuts.pinContact(app, specJson)
 
+    /** Pins a saved-stop shortcut from `rovsti_geo::StopShortcut` JSON. */
+    @JvmStatic fun pinStopShortcut(json: String): Boolean = Shortcuts.pinStop(app, json)
+
     /** Copies the content [uri] (at most [maxBytes]) to `cacheDir/shared/`; its path, "too-big" when over the limit, or "" on failure. */
     @JvmStatic
     fun readSharedUri(uri: String, maxBytes: Int): String {
@@ -570,6 +573,19 @@ object RovstiBridge {
         intent.removeExtra(BirthdayReminders.EXTRA_CONTACT_ID)
         if (id <= 0) return false
         postOneShot("open_contact", JSONObject().put("id", id).toString())
+        return true
+    }
+
+    /**
+     * Call from the Stops activity's `onCreate` and `onNewIntent`: a tap on a stop shortcut queues
+     * `open_stop` `{id}` (through the mailbox) and removes the extra. True when it did.
+     */
+    fun deliverOpenStop(intent: Intent?): Boolean {
+        if (intent == null || !intent.hasExtra(Shortcuts.EXTRA_STOP_ID)) return false
+        val id = intent.getLongExtra(Shortcuts.EXTRA_STOP_ID, 0)
+        intent.removeExtra(Shortcuts.EXTRA_STOP_ID)
+        if (id <= 0) return false
+        postOneShot("open_stop", JSONObject().put("id", id).toString())
         return true
     }
 
@@ -1039,6 +1055,10 @@ object RovstiBridge {
     /** Asks for one fresh fix, answered by the `stops_location` event; false without permission or provider. */
     @JvmStatic
     fun locateOnce(): Boolean = StopsLocation.once(app)
+
+    /** Starts (`on`) or stops live fixes, each emitted as `stops_location`; idempotent. False without permission or provider. */
+    @JvmStatic
+    fun watchLocation(on: Boolean): Boolean = StopsLocation.watch(app, on)
 
     // ---- Window --------------------------------------------------------
 

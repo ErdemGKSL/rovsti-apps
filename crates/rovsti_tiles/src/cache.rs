@@ -125,6 +125,13 @@ impl DiskCache {
         Ok(())
     }
 
+    /// Changes the size cap and evicts least recently used tiles to fit it.
+    pub fn set_cap(&mut self, cap: u64) {
+        self.cap = cap;
+        self.dirty = true;
+        self.evict();
+    }
+
     fn evict(&mut self) {
         for k in self.index.evict_to(self.cap) {
             if let Some(id) = parse_key(&k)
@@ -258,6 +265,46 @@ pub fn clear_all(root: &Path) -> io::Result<()> {
         Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
     }
+}
+
+/// Bytes used per server directory under `root`, biggest first (ties by
+/// name). Empty when `root` does not exist.
+pub fn usage_by_source(root: &Path) -> Vec<(String, u64)> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, u64)> = entries
+        .flatten()
+        .filter(|e| e.metadata().is_ok_and(|m| m.is_dir()))
+        .map(|e| {
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                disk_usage(&e.path()),
+            )
+        })
+        .collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    out
+}
+
+/// Deletes every server directory under `root` except `keep_key` and returns
+/// the bytes freed. A missing `root` frees 0.
+pub fn clear_except(root: &Path, keep_key: &str) -> io::Result<u64> {
+    let entries = match fs::read_dir(root) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let mut freed = 0;
+    for e in entries.flatten() {
+        if e.file_name().to_string_lossy() == keep_key || !e.metadata()?.is_dir() {
+            continue;
+        }
+        let size = disk_usage(&e.path());
+        fs::remove_dir_all(e.path())?;
+        freed += size;
+    }
+    Ok(freed)
 }
 
 fn to_geometry(id: TileId, bytes: &[u8]) -> Result<TileGeometry, TileError> {
@@ -436,6 +483,45 @@ mod tests {
         assert!(g.vertices > 0);
         let e = load(&cache, &client, &src, id(1), true).unwrap();
         assert_eq!(e.vertices, 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn set_cap_evicts_lru_files() {
+        let root = tmp();
+        let mut c = open(&root, 1000);
+        for x in 1..=3 {
+            c.put(id(x), &[0; 10]).unwrap();
+        }
+        c.get(id(1)).unwrap();
+        c.set_cap(20);
+        assert!(!c.contains(id(2)) && !c.path(id(2)).exists());
+        assert!(c.contains(id(1)) && c.contains(id(3)));
+        assert!(c.total_bytes() <= 20);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn usage_by_source_and_clear_except() {
+        let root = tmp();
+        assert!(usage_by_source(&root).is_empty());
+        assert_eq!(clear_except(&root, "x").unwrap(), 0);
+        let other = TileSource::parse("https://tiles.example.org/{z}/{x}/{y}").unwrap();
+        let mut a = open(&root, 1000);
+        let mut b = DiskCache::open(&root, &other, 1000).unwrap();
+        a.put(id(1), &[0; 10]).unwrap();
+        b.put(id(1), &[0; 500]).unwrap();
+        a.flush().unwrap();
+        b.flush().unwrap();
+        let usage = usage_by_source(&root);
+        assert_eq!(usage.len(), 2);
+        assert_eq!(usage[0].0, other.key());
+        assert!(usage[0].1 >= 500 && usage[0].1 > usage[1].1);
+        let keep = TileSource::default_source().key();
+        let freed = clear_except(&root, &keep).unwrap();
+        assert_eq!(freed, usage[0].1);
+        assert!(root.join(&keep).is_dir() && !root.join(other.key()).exists());
+        assert_eq!(usage_by_source(&root).len(), 1);
         let _ = fs::remove_dir_all(root);
     }
 }

@@ -8,7 +8,8 @@
   add `gpui` from crates.io or zed-industries.
 - Never invent GPUI APIs. The fork moves fast, so grep its source at the pinned rev
   (`~/.cargo/git/checkouts/gpui-fusion-*/d6c8412/crates/gpui`).
-- UI follows `.claude/skills/liquid-glass-gpui` (read its SKILL.md before UI work).
+- UI follows `.claude/skills/liquid-glass-gpui` (read its SKILL.md before UI work). Layout, spacing, safe area and
+  component anatomy: `docs/design/layout.md`.
   Product choices are set in `crates/rovsti_ui/src/lib.rs`
   (`ANIMATED_RESIZE = false`, `FOLLOW_SYSTEM_THEME = true`).
 - Rust style follows `.claude/skills/rust-best-practices`.

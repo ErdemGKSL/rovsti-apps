@@ -497,3 +497,5 @@ thin clients of it through `rovsti_wa_client`. Setup and operation:
 
 WhatsApp does not endorse third-party clients; see the warning in
 [whatsapp-gateway.md](whatsapp-gateway.md#terms-of-service).
+
+Layout and spacing for every app is specified in [design/layout.md](design/layout.md).

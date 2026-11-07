@@ -43,6 +43,8 @@ impl FieldKind {
     pub const NUMBER_KINDS: [Self; 3] = [Self::Mobile, Self::Home, Self::Work];
     /// The kinds the editor offers for an email, in cycling order.
     pub const EMAIL_KINDS: [Self; 3] = [Self::Home, Self::Work, Self::Other];
+    /// The kinds the editor offers for a postal address, in cycling order.
+    pub const ADDRESS_KINDS: [Self; 3] = [Self::Home, Self::Work, Self::Other];
 
     /// What the editor shows on the kind button.
     pub fn title(self) -> &'static str {
@@ -93,6 +95,65 @@ impl DraftField {
     }
 }
 
+/// The kind of a dated event of a contact.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventKind {
+    #[default]
+    Birthday,
+    Anniversary,
+    /// An event the owner named; the text is in [`DraftEvent::label`].
+    Custom,
+    #[serde(other)]
+    Other,
+}
+
+/// The kinds the editor offers for an event, in cycling order.
+pub const EVENT_KINDS: [EventKind; 3] = [
+    EventKind::Birthday,
+    EventKind::Anniversary,
+    EventKind::Custom,
+];
+
+impl EventKind {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Birthday => "Birthday",
+            Self::Anniversary => "Anniversary",
+            Self::Custom | Self::Other => "Other",
+        }
+    }
+}
+
+/// A dated event of a contact. `date` is `YYYY-MM-DD`, or `--MM-DD` when the
+/// year is unknown.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DraftEvent {
+    pub date: String,
+    pub kind: EventKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+impl DraftEvent {
+    pub fn new(date: impl Into<String>, kind: EventKind) -> Self {
+        Self {
+            date: date.into(),
+            kind,
+            label: None,
+        }
+    }
+
+    /// The label shown next to the date.
+    pub fn title(&self) -> String {
+        match (self.kind, self.label.as_deref().map(str::trim)) {
+            (EventKind::Custom, Some(label)) if !label.is_empty() => label.to_owned(),
+            (kind, _) => kind.title().to_owned(),
+        }
+    }
+}
+
 /// A contact being created, edited, imported or exported.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -106,6 +167,12 @@ pub struct ContactDraft {
     pub note: String,
     pub numbers: Vec<DraftField>,
     pub emails: Vec<DraftField>,
+    /// Postal addresses (the value may span lines).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub addresses: Vec<DraftField>,
+    /// Birthdays, anniversaries and other dated events.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<DraftEvent>,
     /// Ids of the groups the contact belongs to.
     pub groups: Vec<i64>,
     pub starred: bool,
@@ -125,6 +192,8 @@ pub enum DraftError {
     BadNumber(usize),
     #[error("Email {} needs an @ and a domain.", .0 + 1)]
     BadEmail(usize),
+    #[error("Date {} is not a real date.", .0 + 1)]
+    BadDate(usize),
 }
 
 impl ContactDraft {
@@ -177,6 +246,8 @@ impl ContactDraft {
         self.note = clip(self.note.trim(), MAX_NOTE_CHARS).to_owned();
         clean_fields(&mut self.numbers, digits_key);
         clean_fields(&mut self.emails, |value| value.to_lowercase());
+        clean_fields(&mut self.addresses, |value| value.to_lowercase());
+        clean_events(&mut self.events);
         self.groups.sort_unstable();
         self.groups.dedup();
     }
@@ -191,6 +262,13 @@ impl ContactDraft {
         }
         if let Some(i) = self.emails.iter().position(|e| !plausible_email(&e.value)) {
             return Err(DraftError::BadEmail(i));
+        }
+        if let Some(i) = self
+            .events
+            .iter()
+            .position(|e| crate::contact_dates::parse(&e.date).is_none())
+        {
+            return Err(DraftError::BadDate(i));
         }
         Ok(())
     }
@@ -435,6 +513,25 @@ fn clean_fields(fields: &mut Vec<DraftField>, key: impl Fn(&str) -> String) {
     fields.truncate(MAX_FIELDS);
 }
 
+/// Trims events, drops empty and repeated ones and keeps at most
+/// [`MAX_FIELDS`].
+fn clean_events(events: &mut Vec<DraftEvent>) {
+    let mut seen = std::collections::HashSet::new();
+    events.retain_mut(|event| {
+        event.date = event.date.trim().to_owned();
+        event.label = event
+            .label
+            .take()
+            .map(|l| clip(l.trim(), MAX_TEXT_CHARS).to_owned())
+            .filter(|l| !l.is_empty());
+        if event.kind == EventKind::Custom && event.label.is_none() {
+            event.kind = EventKind::Other;
+        }
+        !event.date.is_empty() && seen.insert((event.date.clone(), event.kind, event.label.clone()))
+    });
+    events.truncate(MAX_FIELDS);
+}
+
 /// Membership edits for one group: ids to add and ids to remove.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SelectionChange {
@@ -636,6 +733,64 @@ mod tests {
         let refs: Vec<&str> = numbers.iter().map(String::as_str).collect();
         let saved = draft("Ayşe", &refs).finish().expect("valid");
         assert_eq!(saved.numbers.len(), MAX_FIELDS);
+    }
+
+    #[test]
+    fn old_json_without_events_or_addresses_reads() {
+        let d: ContactDraft = serde_json::from_str(r#"{"given":"Ayşe"}"#).expect("parses");
+        assert!(d.events.is_empty() && d.addresses.is_empty());
+        let back = serde_json::to_string(&d).expect("serialises");
+        assert!(!back.contains("events") && !back.contains("addresses"));
+    }
+
+    #[test]
+    fn events_and_addresses_round_trip_and_unknown_kind() {
+        let json = r#"{"given":"A","events":[{"date":"--03-04","kind":"zodiac"},{"date":"1990-01-02"}],"addresses":[{"value":"1 Main St","kind":"home"}]}"#;
+        let d: ContactDraft = serde_json::from_str(json).expect("parses");
+        assert_eq!(d.events[0].kind, EventKind::Other);
+        assert_eq!(d.events[1].kind, EventKind::Birthday);
+        let back: ContactDraft =
+            serde_json::from_str(&serde_json::to_string(&d).expect("ser")).expect("de");
+        assert_eq!(back, d);
+    }
+
+    #[test]
+    fn clean_trims_and_dedups_events_and_addresses() {
+        let mut d = draft("Ayşe", &[]);
+        d.events = vec![
+            DraftEvent::new(" 1990-01-02 ", EventKind::Birthday),
+            DraftEvent::new("1990-01-02", EventKind::Birthday),
+            DraftEvent::new("  ", EventKind::Birthday),
+            DraftEvent::new("2010-05-06", EventKind::Custom),
+        ];
+        d.addresses = vec![
+            DraftField::new(" 1 Main St ", FieldKind::Home),
+            DraftField::new("1 MAIN ST", FieldKind::Work),
+            DraftField::new("", FieldKind::Work),
+        ];
+        let d = d.finish().expect("valid");
+        assert_eq!(d.events.len(), 2);
+        assert_eq!(d.events[0].date, "1990-01-02");
+        assert_eq!(d.events[1].kind, EventKind::Other);
+        assert_eq!(d.addresses.len(), 1);
+        assert_eq!(d.addresses[0].value, "1 Main St");
+    }
+
+    #[test]
+    fn a_bad_date_is_refused() {
+        let mut d = draft("Ayşe", &[]);
+        d.events = vec![
+            DraftEvent::new("--02-29", EventKind::Birthday),
+            DraftEvent::new("1990-02-30", EventKind::Anniversary),
+        ];
+        assert_eq!(d.finish(), Err(DraftError::BadDate(1)));
+        assert_eq!(EventKind::Anniversary.title(), "Anniversary");
+        assert_eq!(EVENT_KINDS.len(), 3);
+        let e = DraftEvent {
+            label: Some("Moved".into()),
+            ..DraftEvent::new("--01-01", EventKind::Custom)
+        };
+        assert_eq!(e.title(), "Moved");
     }
 
     #[test]

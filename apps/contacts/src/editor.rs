@@ -67,6 +67,9 @@ pub(crate) struct Editor {
     pending_photo: Option<String>,
     /// The form as it opened: leaving with anything else asks first.
     initial: ContactDraft,
+    /// Not editable here yet; carried through so a save keeps them.
+    events: Vec<rovsti_core::contact_edit::DraftEvent>,
+    addresses: Vec<DraftField>,
 }
 
 /// The account a new contact starts in: the remembered one while it is still
@@ -132,6 +135,8 @@ impl Editor {
             saving: false,
             pending_photo: None,
             initial: ContactDraft::default(),
+            events: draft.events.clone(),
+            addresses: draft.addresses.clone(),
         };
         // Read back from the form (with its blank first number), so an
         // untouched form compares equal.
@@ -163,6 +168,8 @@ impl Editor {
             note: self.note.read(cx).text().to_owned(),
             numbers: rows(&self.numbers),
             emails: rows(&self.emails),
+            addresses: self.addresses.clone(),
+            events: self.events.clone(),
             groups: self.groups.iter().copied().collect(),
             starred: self.starred,
             account: self.account.clone(),

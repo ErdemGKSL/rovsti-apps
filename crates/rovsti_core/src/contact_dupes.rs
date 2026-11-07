@@ -217,6 +217,22 @@ pub fn merge(keeper: &ContactDraft, others: &[ContactDraft]) -> ContactDraft {
         &others.iter().map(|o| &o.emails).collect::<Vec<_>>(),
         |v| Some(v.trim().to_lowercase()).filter(|k| !k.is_empty()),
     );
+    union_fields(
+        &mut out.addresses,
+        &others.iter().map(|o| &o.addresses).collect::<Vec<_>>(),
+        |v| Some(v.trim().to_lowercase()).filter(|k| !k.is_empty()),
+    );
+    for o in others {
+        for e in &o.events {
+            if !out
+                .events
+                .iter()
+                .any(|x| x.date.trim() == e.date.trim() && x.kind == e.kind)
+            {
+                out.events.push(e.clone());
+            }
+        }
+    }
     for o in others.iter().filter(|o| o.account == keeper.account) {
         out.groups.extend(o.groups.iter().copied());
     }
@@ -326,6 +342,26 @@ mod tests {
         a.id = None;
         b.id = None;
         assert!(find(&[a, b]).is_empty());
+    }
+
+    #[test]
+    fn merge_unions_events_and_addresses() {
+        use crate::contact_edit::{DraftEvent, EventKind};
+        let mut k = c(1, "Keep", &[], &[]);
+        k.events = vec![DraftEvent::new("1990-01-02", EventKind::Birthday)];
+        k.addresses = vec![DraftField::new("1 Main St", FieldKind::Home)];
+        let mut o = c(2, "Other", &[], &[]);
+        o.events = vec![
+            DraftEvent::new("1990-01-02", EventKind::Birthday),
+            DraftEvent::new("--06-07", EventKind::Anniversary),
+        ];
+        o.addresses = vec![
+            DraftField::new("1 main st", FieldKind::Work),
+            DraftField::new("2 Side Rd", FieldKind::Work),
+        ];
+        let m = merge(&k, &[o]);
+        assert_eq!(m.events.len(), 2);
+        assert_eq!(m.addresses.len(), 2);
     }
 
     #[test]

@@ -19,6 +19,8 @@ pub mod chat_find;
 pub mod chat_gallery;
 pub mod contact;
 pub mod contact_card;
+/// Birthdays and anniversaries: parsing, next occurrence, upcoming list.
+pub mod contact_dates;
 /// Duplicate detection and merging of contacts.
 pub mod contact_dupes;
 pub mod contact_edit;

@@ -89,6 +89,12 @@ pub struct Reply {
 pub struct OpenTag {
     #[serde(default)]
     pub tag: String,
+    /// The message to glow (a message reminder tap); empty for a plain notification tap.
+    #[serde(default)]
+    pub message_id: String,
+    /// That message's time (epoch ms), 0 when absent.
+    #[serde(default)]
+    pub at_ms: i64,
 }
 
 /// The recent messages of each notified conversation, newest last.
@@ -163,6 +169,16 @@ pub fn plan(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn open_tag_parses_old_and_new_json() {
+        let old: super::OpenTag = serde_json::from_str(r#"{"tag":"sms:3"}"#).expect("old");
+        assert_eq!(old.tag, "sms:3");
+        assert_eq!((old.message_id.as_str(), old.at_ms), ("", 0));
+        let new: super::OpenTag =
+            serde_json::from_str(r#"{"tag":"wa:x","message_id":"m1","at_ms":99}"#).expect("new");
+        assert_eq!((new.message_id.as_str(), new.at_ms), ("m1", 99));
+    }
+
     use super::*;
 
     fn message(thread: ThreadId, direction: MessageDirection) -> Message {

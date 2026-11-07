@@ -426,6 +426,14 @@ object RovstiBridge {
 
     @JvmStatic fun rearmCallReminders(): Boolean = CallReminders.rearmAll(app)
 
+    @JvmStatic fun armMessageReminder(json: String): Boolean = MessageReminders.arm(app, json)
+
+    @JvmStatic fun disarmMessageReminder(id: String): Boolean = id.toLongOrNull()?.let { MessageReminders.disarm(app, it) } ?: false
+
+    @JvmStatic fun armedMessageReminders(): String = MessageReminders.armedJson(app)
+
+    @JvmStatic fun rearmMessageReminders(): Boolean = MessageReminders.rearmAll(app)
+
     @JvmStatic fun showMessageNotification(specJson: String): Boolean = MessageNotifications.show(app, specJson)
 
     @JvmStatic fun cancelMessageNotification(tag: String): Boolean = MessageNotifications.cancel(app, tag)
@@ -466,12 +474,19 @@ object RovstiBridge {
 
     /**
      * Call from the launch activity's `onCreate` and `onNewIntent`: a tap on a message notification
-     * queues `open_thread` `{tag}` (through the mailbox, so it survives a cold start). True when it did.
+     * queues `open_thread` `{tag}` (plus `message_id` and `at_ms` for a message reminder; through the mailbox, so it survives a cold start). True when it did.
      */
     fun deliverOpenThread(intent: Intent?): Boolean {
         val tag = intent?.getStringExtra(MessageNotifications.EXTRA_TAG) ?: return false
         intent.removeExtra(MessageNotifications.EXTRA_TAG)
-        postOneShot("open_thread", JSONObject().put("tag", tag).toString())
+        val json = JSONObject().put("tag", tag)
+        intent.getStringExtra(MessageReminders.EXTRA_MESSAGE_ID)?.let { json.put("message_id", it) }
+        if (intent.hasExtra(MessageReminders.EXTRA_MESSAGE_AT)) {
+            json.put("at_ms", intent.getLongExtra(MessageReminders.EXTRA_MESSAGE_AT, 0))
+        }
+        intent.removeExtra(MessageReminders.EXTRA_MESSAGE_ID)
+        intent.removeExtra(MessageReminders.EXTRA_MESSAGE_AT)
+        postOneShot("open_thread", json.toString())
         MessageNotifications.cancel(app, tag)
         return true
     }

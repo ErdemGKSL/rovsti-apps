@@ -31,36 +31,45 @@ data class ReminderItem(val id: Long, val number: String, val atMs: Long, val ti
     }
 }
 
-/** The armed payloads as one JSON array; [read] and [write] are SharedPreferences in production. */
-class ReminderStore(private val read: (String) -> String?, private val write: (String, String) -> Unit) {
-    private fun items(): List<ReminderItem> {
+/**
+ * The armed payloads as one JSON array; [read] and [write] are SharedPreferences in production.
+ * Generic over the item type: [parse] reads one object, [id] and [raw] give its key and payload.
+ */
+class ReminderStore<T>(
+    private val read: (String) -> String?,
+    private val write: (String, String) -> Unit,
+    private val parse: (JSONObject) -> T?,
+    private val idOf: (T) -> Long,
+    private val raw: (T) -> JSONObject,
+) {
+    private fun items(): List<T> {
         val array = try {
             JSONArray(read(ARMED) ?: "[]")
         } catch (_: org.json.JSONException) {
             JSONArray()
         }
-        return (0 until array.length()).mapNotNull { array.optJSONObject(it)?.let(ReminderItem::from) }
+        return (0 until array.length()).mapNotNull { array.optJSONObject(it)?.let(parse) }
     }
 
-    private fun save(list: List<ReminderItem>) = write(ARMED, JSONArray(list.map { it.raw }).toString())
+    private fun save(list: List<T>) = write(ARMED, JSONArray(list.map(raw)).toString())
 
     @Synchronized
-    fun arm(item: ReminderItem) = save(items().filter { it.id != item.id } + item)
+    fun arm(item: T) = save(items().filter { idOf(it) != idOf(item) } + item)
 
     /** True when the id was armed. */
     @Synchronized
     fun disarm(id: Long): Boolean {
         val all = items()
-        if (all.none { it.id == id }) return false
-        save(all.filter { it.id != id })
+        if (all.none { idOf(it) == id }) return false
+        save(all.filter { idOf(it) != id })
         return true
     }
 
     @Synchronized
-    fun get(id: Long): ReminderItem? = items().firstOrNull { it.id == id }
+    fun get(id: Long): T? = items().firstOrNull { idOf(it) == id }
 
     @Synchronized
-    fun all(): List<ReminderItem> = items()
+    fun all(): List<T> = items()
 
     companion object {
         const val ARMED = "armed"
@@ -79,9 +88,12 @@ object CallReminders {
     const val CHANNEL = "reminders"
     private const val PREFS = "rovsti_call_reminders"
 
-    private fun store(context: Context): ReminderStore {
+    private fun store(context: Context): ReminderStore<ReminderItem> {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        return ReminderStore({ prefs.getString(it, null) }, { k, v -> prefs.edit().putString(k, v).apply() })
+        return ReminderStore(
+            { prefs.getString(it, null) }, { k, v -> prefs.edit().putString(k, v).apply() },
+            ReminderItem::from, { it.id }, { it.raw },
+        )
     }
 
     private fun pending(context: Context, id: Long): PendingIntent {

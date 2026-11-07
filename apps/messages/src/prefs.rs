@@ -28,6 +28,11 @@ pub fn default_spam_rules() -> SpamRules {
     }
 }
 
+/// The numeric thread id of an `sms:<id>` tag.
+fn sms_thread_id(tag: &str) -> Option<i64> {
+    tag.strip_prefix("sms:")?.parse().ok()
+}
+
 /// What [`MessagesPrefs::mark_spam`] changed, so Undo can restore it exactly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpamMark {
@@ -70,6 +75,12 @@ pub struct MessagesPrefs {
     /// `muted` without an entry here are muted until the user unmutes.
     #[serde(default)]
     pub mute_until: BTreeMap<String, i64>,
+    /// Local pin / archive / mark-unread on SMS threads (data, kept by reset).
+    #[serde(default)]
+    pub sms_marks: rovsti_core::thread_marks::SmsMarks,
+    /// The size of the text in message bubbles.
+    #[serde(default)]
+    pub chat_text_size: rovsti_core::text_scale::ChatTextSize,
 }
 
 impl Default for MessagesPrefs {
@@ -84,6 +95,8 @@ impl Default for MessagesPrefs {
             voice_speed: rovsti_core::voice_player::Speed::default(),
             sms_stars: rovsti_core::starred::LocalStars::default(),
             mute_until: BTreeMap::new(),
+            sms_marks: rovsti_core::thread_marks::SmsMarks::default(),
+            chat_text_size: rovsti_core::text_scale::ChatTextSize::default(),
         }
     }
 }
@@ -96,6 +109,7 @@ impl MessagesPrefs {
             sim_choices: self.sim_choices.clone(),
             quick_replies: self.quick_replies.clone(),
             sms_stars: self.sms_stars.clone(),
+            sms_marks: self.sms_marks.clone(),
             ..MessagesPrefs::default()
         }
     }
@@ -175,6 +189,9 @@ impl MessagesPrefs {
             return false;
         }
         let mut changed = false;
+        if let (Some(old), Some(new)) = (sms_thread_id(from_tag), sms_thread_id(into_tag)) {
+            changed |= self.sms_marks.rekey(old, new);
+        }
         if self.muted.remove(from_tag) {
             self.muted.insert(into_tag.to_owned());
             changed = true;
@@ -452,6 +469,36 @@ mod tests {
         assert!(prefs.sms_stars.is_starred("sms:2"));
         let kept = prefs.sms_stars.clone();
         assert_eq!(prefs.reset().sms_stars, kept);
+    }
+
+    #[test]
+    fn old_prefs_file_loads_with_new_fields_defaulted() {
+        let prefs: MessagesPrefs =
+            serde_json::from_str(r#"{"notifications":false}"#).expect("old file");
+        assert!(!prefs.notifications);
+        assert_eq!(prefs.sms_marks, Default::default());
+        assert_eq!(prefs.chat_text_size, Default::default());
+    }
+
+    #[test]
+    fn reset_keeps_marks_and_resets_text_size() {
+        let mut prefs = MessagesPrefs::default();
+        prefs.sms_marks.set_archived(4, true);
+        prefs.chat_text_size = rovsti_core::text_scale::ChatTextSize::Larger;
+        assert!(!prefs.is_reset());
+        let reset = prefs.reset();
+        assert!(reset.sms_marks.is_archived(4));
+        assert_eq!(reset.chat_text_size, Default::default());
+    }
+
+    #[test]
+    fn rekey_carries_sms_marks() {
+        let mut prefs = MessagesPrefs::default();
+        prefs.sms_marks.set_archived(4, true);
+        assert!(prefs.rekey_thread("sms:4", "sms:9"));
+        assert!(prefs.sms_marks.is_archived(9));
+        assert!(!prefs.sms_marks.is_archived(4));
+        assert!(!prefs.rekey_thread("sms:4", "sms:9"));
     }
 
     #[test]

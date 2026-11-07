@@ -107,6 +107,7 @@
         <!-- Shared bridge receivers (crates/rovsti_android/kotlin). None is exported. -->
         <receiver android:name="dev.rovsti.bridge.ReplyReceiver" android:exported="false" />
         <receiver android:name="dev.rovsti.bridge.ScheduledSmsReceiver" android:exported="false" />
+        <receiver android:name="dev.rovsti.bridge.MessageReminderReceiver" android:exported="false" />
         <receiver android:name="dev.rovsti.bridge.SmsStatusReceiver" android:exported="false" />
         <receiver android:name="dev.rovsti.bridge.MmsResultReceiver" android:exported="false" />
 

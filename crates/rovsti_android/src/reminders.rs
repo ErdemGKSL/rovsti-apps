@@ -33,6 +33,29 @@ pub fn rearm_all() -> Result<bool> {
     bridge::call_bool("rearmCallReminders", &[])
 }
 
+/// Message reminders (`MessageReminders.kt`): the same alarm scheme on the
+/// `message_reminders` channel; a tap opens the chat and the message, and
+/// `message_reminder_fired` `{id}` is emitted. Stores the payload and sets the
+/// alarm. `false` for a malformed payload.
+pub fn arm_message(reminder_json: &str) -> Result<bool> {
+    bridge::call_bool("armMessageReminder", &[Arg::Str(reminder_json)])
+}
+
+/// Cancels the message reminder's alarm and forgets it. `false` when it was not armed.
+pub fn disarm_message(id: i64) -> Result<bool> {
+    bridge::call_bool("disarmMessageReminder", &[Arg::Str(&id.to_string())])
+}
+
+/// The armed message reminders as a JSON array.
+pub fn armed_messages() -> Result<String> {
+    bridge::call_string("armedMessageReminders", &[])
+}
+
+/// Sets every stored message-reminder alarm again (due ones fire at once).
+pub fn rearm_messages() -> Result<bool> {
+    bridge::call_bool("rearmMessageReminders", &[])
+}
+
 #[cfg(all(test, not(target_os = "android")))]
 mod tests {
     use super::*;
@@ -44,5 +67,9 @@ mod tests {
         assert!(matches!(disarm(1), Err(Error::Unsupported)));
         assert!(matches!(armed(), Err(Error::Unsupported)));
         assert!(matches!(rearm_all(), Err(Error::Unsupported)));
+        assert!(matches!(arm_message("{}"), Err(Error::Unsupported)));
+        assert!(matches!(disarm_message(1), Err(Error::Unsupported)));
+        assert!(matches!(armed_messages(), Err(Error::Unsupported)));
+        assert!(matches!(rearm_messages(), Err(Error::Unsupported)));
     }
 }

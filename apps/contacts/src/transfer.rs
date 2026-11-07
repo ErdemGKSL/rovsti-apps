@@ -336,7 +336,7 @@ impl ContactsApp {
     }
 
     /// Asks before adding the new ones among `cards` (a scanned code).
-    fn plan_cards(&mut self, cards: Vec<ContactDraft>, cx: &mut Context<Self>) {
+    pub(crate) fn plan_cards(&mut self, cards: Vec<ContactDraft>, cx: &mut Context<Self>) {
         let existing: Vec<WireContact> = self
             .index()
             .map(|index| index.all().cloned().collect())

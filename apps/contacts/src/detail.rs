@@ -10,11 +10,11 @@ use rovsti_core::{
     contact_card::ContactCard,
     contact_dates,
     contact_edit::{ContactDraft, DraftEvent, DraftField, EventKind, default_action, web_url},
-    contact_select, vcard,
+    contact_select, number_format, vcard,
 };
 use rovsti_ui::{
     Icon,
-    components::{glass_icon_button, section},
+    components::{glass_icon_button, list_row, section},
     glass::{GlassSpec, glass},
     theme::{self, hue_pair},
     tokens::{Theme, metrics, shadow, typography},
@@ -94,6 +94,8 @@ pub(crate) enum FieldAction {
     OpenLink,
     /// Make the entry the default (`false`) or clear the default (`true`).
     SetDefault(bool),
+    /// Open the list of number forms to copy.
+    CopyAs,
 }
 
 impl FieldAction {
@@ -107,6 +109,7 @@ impl FieldAction {
             Self::OpenLink => "Open Link",
             Self::SetDefault(true) => "Clear default",
             Self::SetDefault(false) => "Set as default",
+            Self::CopyAs => "Copy as…",
         }
     }
 
@@ -120,6 +123,7 @@ impl FieldAction {
             Self::OpenMaps => Icon::LucideMapPin,
             Self::OpenLink => Icon::LucideExternalLink,
             Self::SetDefault(_) => Icon::LucideStar,
+            Self::CopyAs => Icon::LucideClipboardPaste,
         }
     }
 
@@ -133,6 +137,7 @@ impl FieldAction {
             Self::OpenMaps => "field-maps",
             Self::OpenLink => "field-link",
             Self::SetDefault(_) => "field-default",
+            Self::CopyAs => "field-copy-as",
         }
     }
 }
@@ -146,15 +151,18 @@ fn default_row(slot: Option<Slot>) -> Option<FieldAction> {
 
 impl FieldTarget {
     /// The rows the field sheet offers, top to bottom.
-    pub(crate) fn actions(&self) -> Vec<FieldAction> {
+    pub(crate) fn actions(&self, home_cc: Option<&str>) -> Vec<FieldAction> {
         match self {
-            Self::Number { slot, .. } => [
+            Self::Number { slot, raw, .. } => [
                 FieldAction::Call,
                 FieldAction::Message,
                 FieldAction::Copy("Copy Number"),
-                FieldAction::Share("Share Number"),
             ]
             .into_iter()
+            .chain(
+                (number_format::copy_forms(raw, home_cc).len() >= 2).then_some(FieldAction::CopyAs),
+            )
+            .chain([FieldAction::Share("Share Number")])
             .chain(default_row(*slot))
             .collect(),
             Self::Email { slot, .. } => [FieldAction::SendEmail, FieldAction::Copy("Copy Email")]
@@ -302,6 +310,7 @@ impl ContactsApp {
     pub(crate) fn close_field_sheet_now(&mut self) {
         self.field_sheet.close();
         self.field_target = None;
+        self.field_copy_as = false;
         self.share_sheet.close();
         self.qr_sheet.close();
         self.qr_card = None;
@@ -309,6 +318,7 @@ impl ContactsApp {
 
     pub(crate) fn open_field_sheet(&mut self, target: FieldTarget, cx: &mut Context<Self>) {
         self.field_target = Some(target);
+        self.field_copy_as = false;
         self.field_sheet.open();
         cx.notify();
     }
@@ -554,6 +564,10 @@ impl ContactsApp {
                 cx,
             ),
             FieldAction::SetDefault(clear) => self.set_default_entry(target, clear, cx),
+            FieldAction::CopyAs => {
+                self.field_copy_as = true;
+                cx.notify();
+            }
             FieldAction::OpenMaps => {
                 self.field_sheet.close();
                 match contact_dates::maps_url(&text) {
@@ -662,8 +676,34 @@ impl ContactsApp {
                 .text_color(colors.label)
                 .child(title.clone()),
         );
-        let rows: Vec<AnyElement> = target
-            .actions()
+        let copy_forms = match (&target, self.field_copy_as) {
+            (FieldTarget::Number { raw, .. }, true) => {
+                number_format::copy_forms(raw, self.home_cc.as_deref())
+            }
+            _ => Vec::new(),
+        };
+        let actions = if copy_forms.is_empty() {
+            target.actions(self.home_cc.as_deref())
+        } else {
+            Vec::new()
+        };
+        let form_rows: Vec<AnyElement> = copy_forms
+            .into_iter()
+            .enumerate()
+            .map(|(i, (form, text))| {
+                let copy = text.clone();
+                list_row(theme, None, text, Some(form.label().into()), None)
+                    .id(("copy-as", i))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()));
+                        this.field_sheet.close();
+                        this.notice = Some(number_format::copied_notice(form).into());
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        let rows: Vec<AnyElement> = actions
             .into_iter()
             .map(|action| {
                 let target = target.clone();
@@ -680,7 +720,7 @@ impl ContactsApp {
                 .into_any_element()
             })
             .collect();
-        body = body.children(rows);
+        body = body.children(rows).children(form_rows);
         let entity = cx.entity();
         let drag = entity.clone();
         self.field_sheet.render(
@@ -1621,6 +1661,27 @@ mod tests {
     }
 
     #[test]
+    fn copy_as_needs_two_forms() {
+        let number = |raw: &str| FieldTarget::Number {
+            raw: raw.into(),
+            display: raw.into(),
+            slot: None,
+        };
+        // National and international differ for a local number.
+        let local = number("0532 111 22 33");
+        assert!(local.actions(Some("90")).contains(&FieldAction::CopyAs));
+        // Nothing to choose from: one form only.
+        let junk = number("123");
+        assert!(!junk.actions(None).contains(&FieldAction::CopyAs));
+        // Other targets never offer it.
+        assert!(
+            !FieldTarget::Note("n".into())
+                .actions(Some("90"))
+                .contains(&FieldAction::CopyAs)
+        );
+    }
+
+    #[test]
     fn field_sheet_actions_per_target() {
         let number = FieldTarget::Number {
             raw: "+90".into(),
@@ -1628,11 +1689,12 @@ mod tests {
             slot: None,
         };
         assert_eq!(
-            number.actions(),
+            number.actions(None),
             vec![
                 FieldAction::Call,
                 FieldAction::Message,
                 FieldAction::Copy("Copy Number"),
+                FieldAction::CopyAs,
                 FieldAction::Share("Share Number")
             ]
         );
@@ -1643,13 +1705,13 @@ mod tests {
                 address: "a@b.c".into(),
                 slot: None
             }
-            .actions()[0],
+            .actions(None)[0],
             FieldAction::SendEmail
         );
-        assert_eq!(FieldTarget::Note("n".into()).actions().len(), 1);
+        assert_eq!(FieldTarget::Note("n".into()).actions(None).len(), 1);
         let site = FieldTarget::Website("example.com".into());
         assert_eq!(
-            site.actions(),
+            site.actions(None),
             vec![
                 FieldAction::OpenLink,
                 FieldAction::Copy("Copy Link"),
@@ -1666,7 +1728,7 @@ mod tests {
         assert_eq!(org_line("", " "), None);
         let address = FieldTarget::Address("\n 1 Main St\nIzmir".into());
         assert_eq!(
-            address.actions(),
+            address.actions(None),
             vec![
                 FieldAction::Copy("Copy Address"),
                 FieldAction::Share("Share Address"),
@@ -1675,7 +1737,7 @@ mod tests {
         );
         assert_eq!(address.title(), "1 Main St");
         let date = FieldTarget::Date("Birthday · 7 Mar".into());
-        assert_eq!(date.actions(), vec![FieldAction::Copy("Copy Date")]);
+        assert_eq!(date.actions(None), vec![FieldAction::Copy("Copy Date")]);
         assert_eq!(date.title(), "Date");
     }
 
@@ -1703,18 +1765,18 @@ mod tests {
         ] {
             assert!(
                 !target
-                    .actions()
+                    .actions(None)
                     .iter()
                     .any(|a| matches!(a, FieldAction::SetDefault(_))),
                 "{target:?}"
             );
         }
         assert_eq!(
-            number_with(slot(2, false)).actions().last(),
+            number_with(slot(2, false)).actions(None).last(),
             Some(&FieldAction::SetDefault(false))
         );
         assert_eq!(
-            number_with(slot(3, true)).actions().last(),
+            number_with(slot(3, true)).actions(None).last(),
             Some(&FieldAction::SetDefault(true))
         );
         let email = FieldTarget::Email {
@@ -1722,7 +1784,7 @@ mod tests {
             slot: slot(2, true),
         };
         assert_eq!(
-            email.actions(),
+            email.actions(None),
             vec![
                 FieldAction::SendEmail,
                 FieldAction::Copy("Copy Email"),

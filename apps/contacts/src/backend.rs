@@ -639,7 +639,6 @@ pub(crate) fn can_pin() -> bool {
 
 /// What a shared or opened file holds. Android copies the `content://` uri into
 /// the cache first; desktop reads a plain path.
-#[allow(dead_code, reason = "used by the UI steps that follow")]
 pub(crate) fn shared_file(uri: &str) -> Result<Intake, String> {
     let max = contact_intake::MAX_SHARED_BYTES;
     let (path, cached) = match documents::copy_shared(uri, max) {

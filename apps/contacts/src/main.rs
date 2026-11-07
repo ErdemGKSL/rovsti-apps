@@ -17,6 +17,7 @@ mod editor;
 mod field;
 mod groups;
 mod history;
+mod intake;
 mod photo_crop;
 mod photo_viewer;
 mod photos;
@@ -295,6 +296,12 @@ struct ContactsApp {
     confirm: Option<Confirm>,
     /// Open this contact once the next pull lands (after a save).
     pending_open: Option<i64>,
+    /// A shared file read before the book loaded, and how many extra files it came with.
+    pending_intake: Option<(rovsti_core::contact_intake::Intake, usize)>,
+    /// The calling code most numbers in the book start with.
+    home_cc: Option<String>,
+    /// The field sheet shows the "Copy as" list.
+    field_copy_as: bool,
     /// Open this group once the next pull lands (after it was created).
     pending_group: Option<i64>,
     /// A file picker is open.
@@ -392,7 +399,24 @@ struct ContactsApp {
 }
 
 impl ContactsApp {
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        shares: futures::channel::mpsc::UnboundedReceiver<intake::Incoming>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        // Files and text shared to the app, and files opened with it.
+        let mut shares = shares;
+        cx.spawn(async move |this, cx| {
+            while let Some(incoming) = shares.next().await {
+                if this
+                    .update(cx, |this, cx| this.receive_incoming(incoming, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
         let field = cx.new(TextField::new);
         cx.observe(&field, |this, field, cx| {
             let edits = field.read(cx).edits;
@@ -546,6 +570,9 @@ impl ContactsApp {
             group_edit: None,
             confirm: None,
             pending_open: None,
+            pending_intake: None,
+            home_cc: None,
+            field_copy_as: false,
             pending_group: None,
             transfer_busy: false,
             exported: None,
@@ -652,6 +679,7 @@ impl ContactsApp {
                     this.rebuild(cx);
                     this.load_upcoming(cx);
                     this.load_cleanup(cx);
+                    this.run_pending_intake(cx);
                     if let Some(id) = this.pending_open.take() {
                         this.open_contact(id, cx);
                     }
@@ -688,6 +716,13 @@ impl ContactsApp {
     /// from the book, the query and the name style.
     fn rebuild(&mut self, cx: &mut Context<Self>) {
         self.rebuild_rows(cx);
+        self.home_cc = self.index().and_then(|index| {
+            rovsti_core::number_format::infer_home_cc(
+                index
+                    .all()
+                    .flat_map(|c| c.numbers.iter().map(|n| n.raw.as_str())),
+            )
+        });
         let Some(index) = self.index().cloned() else {
             self.favorites.clear();
             self.group_rows.clear();
@@ -1851,6 +1886,15 @@ impl ContactsApp {
                     .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
                     .on_click(cx.listener(|this, _, _, cx| this.scan_qr(cx)))
                     .into_any_element(),
+                    tap_row(
+                        theme,
+                        "paste-contact",
+                        Some(Icon::LucideClipboardPaste),
+                        "Paste contact",
+                        Tone::Accent,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.paste_contact(cx)))
+                    .into_any_element(),
                     self.trash_entry(theme, cx),
                 ],
             ))
@@ -2318,29 +2362,42 @@ impl Render for ContactsApp {
 fn main() {
     // Keeps the JNI entry points in the final library (see `bridge::keep_symbols`).
     rovsti_android::bridge::keep_symbols();
-    gpui_platform::application()
-        .with_assets(IconAssets::new())
-        .run(|cx: &mut App| {
-            cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                        None,
-                        size(px(402.0), px(874.0)),
-                        cx,
-                    ))),
-                    ..Default::default()
-                },
-                |window, cx| {
-                    let app = cx.new(|cx| ContactsApp::new(window, cx));
-                    // System Back steps out of the top-most layer, then to the first tab.
-                    let weak = app.downgrade();
-                    window.on_system_back(cx, move |_, cx| {
-                        weak.update(cx, |this, cx| this.go_back(cx)).ok();
-                    });
-                    app
-                },
-            )
-            .expect("failed to open the Rovsti Contacts window");
-            cx.activate(true);
-        });
+    // Files and text shared to the app, and links opened with it.
+    let (share_tx, share_rx) = futures::channel::mpsc::unbounded::<intake::Incoming>();
+    let app = gpui_platform::application().with_assets(IconAssets::new());
+    let link_tx = share_tx.clone();
+    app.on_open_urls(move |urls| {
+        for url in urls {
+            let _ = link_tx.unbounded_send(intake::Incoming::Url(url));
+        }
+    });
+    app.on_receive_share(move |share, _| match share {
+        Ok(share) => {
+            let _ = share_tx.unbounded_send(intake::Incoming::Share(share));
+        }
+        Err(error) => log::warn!("could not read the shared content: {error}"),
+    });
+    app.run(move |cx: &mut App| {
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(402.0), px(874.0)),
+                    cx,
+                ))),
+                ..Default::default()
+            },
+            |window, cx| {
+                let app = cx.new(|cx| ContactsApp::new(share_rx, window, cx));
+                // System Back steps out of the top-most layer, then to the first tab.
+                let weak = app.downgrade();
+                window.on_system_back(cx, move |_, cx| {
+                    weak.update(cx, |this, cx| this.go_back(cx)).ok();
+                });
+                app
+            },
+        )
+        .expect("failed to open the Rovsti Contacts window");
+        cx.activate(true);
+    });
 }

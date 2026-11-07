@@ -88,6 +88,7 @@ pub(crate) enum PillAction {
     RestoreNotice(rovsti_geo::NoticePrefs),
     /// The saved stops as they were before an import.
     RestoreSaved(SavedStops),
+    RestoreAlarmSound(Option<rovsti_geo::prefs::AlarmSound>),
 }
 
 pub(crate) struct StopsApp {
@@ -483,6 +484,7 @@ impl StopsApp {
                 Some(fix) => self.apply_fix(fix, false, cx),
                 None => log::warn!("unreadable stops_location event"),
             },
+            kind::ALARM_SOUND_PICKED => self.on_alarm_sound_picked(&event.json, cx),
             kind::PERMISSIONS_CHANGED => {
                 self.refresh_preflight(cx);
                 self.resume_pending_start(cx);
@@ -651,6 +653,7 @@ impl StopsApp {
             PillAction::RestoreTileUrl(url) => self.restore_tile_url(url, cx),
             PillAction::RestoreNotice(notice) => self.restore_notice(notice, cx),
             PillAction::RestoreSaved(saved) => self.restore_saved(saved, cx),
+            PillAction::RestoreAlarmSound(sound) => self.restore_alarm_sound(sound, cx),
             PillAction::RestoreEnds(ends) => {
                 self.pick.restore(ends);
                 self.map.follow = true;

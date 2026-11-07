@@ -9,14 +9,17 @@
 
 use std::time::Duration;
 
+use gpui::HapticFeedback;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, Context, InteractiveElement, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement, Styled, Window, div, list, px,
 };
-use rovsti_android::{Error as AndroidError, trip, trip::AlarmAction, xiaomi};
+use rovsti_android::{Error as AndroidError, trip, xiaomi};
 use rovsti_geo::{
     NoticePrefs, NoticeWhen, Outcome, Stats, StopsPrefs, TripRecord,
+    alarm::MIN_ALARM_VOLUME_PCT,
+    next_volume,
     notice::DEFAULT_TEMPLATE,
     tiles::{DEFAULT_TILE_URL, TileSource, TileUrlError},
 };
@@ -25,7 +28,7 @@ use rovsti_ui::{
     Icon,
     components::{empty_state, glass_icon_button, glass_pill, large_title, list_row, section},
     field::field_box,
-    theme,
+    haptics, theme,
     tokens::Theme,
 };
 use rovsti_wa_proto::ChatSummary;
@@ -449,6 +452,16 @@ pub fn android_notice(what: &str, result: &Result<bool, AndroidError>) -> Option
     }
 }
 
+/// The volume row's value: "80 %".
+pub fn volume_text(pct: u8) -> String {
+    format!("{} %", pct.clamp(MIN_ALARM_VOLUME_PCT, 100))
+}
+
+/// The pattern row only matters while vibration is on.
+pub fn pattern_row_visible(prefs: &StopsPrefs) -> bool {
+    prefs.vibrate
+}
+
 // ---- UI ----------------------------------------------------------------------------
 
 fn on_off(on: bool) -> SharedString {
@@ -540,7 +553,7 @@ impl StopsApp {
         let pre = self.preflight;
         let connected = self.whatsapp.read(cx).is_connected();
 
-        let alarm = vec![
+        let mut alarm = vec![
             list_row(theme, None, "Sound", None, Some(on_off(self.prefs.sound)))
                 .id("set-sound")
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -594,16 +607,107 @@ impl StopsApp {
             list_row(
                 theme,
                 None,
+                "Alarm sound",
+                None,
+                Some(self.prefs.alarm_sound_label().into()),
+            )
+            .id("set-alarm-sound")
+            .on_click(cx.listener(|this, _, _, cx| {
+                let current = this.prefs.alarm_sound.as_ref().map(|s| s.uri.clone());
+                this.run_android(
+                    "Alarm sound",
+                    move || trip::pick_alarm_sound(current.as_deref()),
+                    cx,
+                );
+            }))
+            .into_any_element(),
+            list_row(
+                theme,
+                None,
+                "Volume",
+                Some("Never quieter than this.".into()),
+                Some(volume_text(self.prefs.volume_pct).into()),
+            )
+            .id("set-volume")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.prefs.volume_pct = next_volume(this.prefs.volume_pct);
+                this.save_prefs(cx);
+                let text = format!("Volume: {}", volume_text(this.prefs.volume_pct));
+                this.show_pill(text, None, cx);
+                cx.notify();
+            }))
+            .into_any_element(),
+            list_row(
+                theme,
+                None,
+                "Test volume",
+                Some("Plays your alarm sound for 3 seconds.".into()),
+                Some("Play".into()),
+            )
+            .id("set-test-volume")
+            .on_click(cx.listener(|this, _, _, cx| {
+                let plan = serde_json::to_string(&this.prefs.alarm_plan()).unwrap_or_default();
+                cx.spawn(async move |this, cx| {
+                    let result = cx
+                        .background_executor()
+                        .spawn(async move { trip::preview_alarm_sound(&plan, 3000) })
+                        .await;
+                    let text = android_notice("Test volume", &result)
+                        .unwrap_or_else(|| "Playing for 3 seconds".to_owned());
+                    this.update(cx, |this, cx| this.show_pill(text, None, cx))
+                        .ok();
+                })
+                .detach();
+            }))
+            .into_any_element(),
+        ];
+        if pattern_row_visible(&self.prefs) {
+            alarm.push(
+                list_row(
+                    theme,
+                    None,
+                    "Vibration pattern",
+                    None,
+                    Some(self.prefs.vibration.label().into()),
+                )
+                .id("set-vibration-pattern")
+                .on_click(cx.listener(|this, _, window, cx| {
+                    let next = this.prefs.vibration.next();
+                    this.prefs.vibration = next;
+                    this.save_prefs(cx);
+                    haptics::perform(window, HapticFeedback::Selection);
+                    let ms = next.preview_ms();
+                    cx.spawn(async move |this, cx| {
+                        let result = cx
+                            .background_executor()
+                            .spawn(async move { trip::preview_vibration(&ms) })
+                            .await;
+                        let text = android_notice("Vibration", &result)
+                            .unwrap_or_else(|| format!("Vibration: {}", next.label()));
+                        this.update(cx, |this, cx| this.show_pill(text, None, cx))
+                            .ok();
+                    })
+                    .detach();
+                    cx.notify();
+                }))
+                .into_any_element(),
+            );
+        }
+        alarm.push(
+            list_row(
+                theme,
+                None,
                 "Test alarm",
                 Some("Rings once with your sound and vibration.".into()),
                 Some("Ring".into()),
             )
             .id("set-test-alarm")
             .on_click(cx.listener(|this, _, _, cx| {
-                this.run_android("Test alarm", || trip::alarm(AlarmAction::Test), cx);
+                let json = this.prefs.test_ring_json();
+                this.run_android("Test alarm", move || trip::test_alarm(&json), cx);
             }))
             .into_any_element(),
-        ];
+        );
 
         let mut reliability = vec![
             list_row(
@@ -1504,6 +1608,39 @@ impl StopsApp {
     }
 
     /// Undo of "turn off": brings the message setup back.
+    /// A picked alarm sound (`None` = the default alarm) with an Undo.
+    pub(crate) fn on_alarm_sound_picked(&mut self, json: &str, cx: &mut Context<Self>) {
+        let Some(picked) = trip::parse_alarm_sound_picked(json) else {
+            log::warn!("unreadable alarm_sound_picked event");
+            return;
+        };
+        // A cancelled picker leaves everything as it was.
+        let Some((uri, title)) = picked else {
+            return;
+        };
+        let old = self.prefs.alarm_sound.take();
+        let title = if title.is_empty() {
+            "Alarm".to_owned()
+        } else {
+            title
+        };
+        let text = format!("Alarm sound: {title}");
+        self.prefs.alarm_sound = Some(rovsti_geo::prefs::AlarmSound { uri, title });
+        self.save_prefs(cx);
+        self.show_pill(text, Some(crate::PillAction::RestoreAlarmSound(old)), cx);
+        cx.notify();
+    }
+
+    pub(crate) fn restore_alarm_sound(
+        &mut self,
+        old: Option<rovsti_geo::prefs::AlarmSound>,
+        cx: &mut Context<Self>,
+    ) {
+        self.prefs.alarm_sound = old;
+        self.save_prefs(cx);
+        cx.notify();
+    }
+
     pub(crate) fn restore_notice(&mut self, old: rovsti_geo::NoticePrefs, cx: &mut Context<Self>) {
         self.prefs.notice = Some(old);
         self.save_prefs(cx);
@@ -1914,6 +2051,17 @@ mod tests {
         );
         let text = android_notice("Test alarm", &Err(AndroidError::NotInitialized)).unwrap();
         assert_eq!(text, "Test alarm did not work. Try again.");
+    }
+
+    #[test]
+    fn volume_and_pattern_helpers() {
+        assert_eq!(volume_text(80), "80 %");
+        assert_eq!(volume_text(100), "100 %");
+        assert_eq!(volume_text(10), "80 %");
+        let mut prefs = StopsPrefs::default();
+        assert!(pattern_row_visible(&prefs));
+        prefs.vibrate = false;
+        assert!(!pattern_row_visible(&prefs));
     }
 
     #[test]

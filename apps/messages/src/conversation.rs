@@ -21,6 +21,7 @@ use rovsti_core::{
     ThreadId,
     chat_export::{self, ExportLine},
     chat_find::{self, FindCursor},
+    multi_select::{self, Selection},
     quick_replies,
     recents::LocaleTime,
     starred::{self, StarCandidate, StarredRow},
@@ -126,6 +127,8 @@ pub enum ConversationEvent {
     Menu,
     /// The Copy pill of a message: the page puts the text on the clipboard.
     Copy(String),
+    /// Select mode's Copy: the page copies the block and answers with this pill text.
+    CopyBlock { text: String, notice: String },
     /// The Call pill of a contact card.
     Call(String),
     /// The Message pill of a contact card: start a chat with the number.
@@ -352,6 +355,10 @@ pub struct Conversation {
     hidden: HashSet<String>,
     /// The Delete menu.
     delete_confirm: Option<DeleteTarget>,
+    /// Select mode: the ticked message ids.
+    select: Option<Selection<String>>,
+    /// Select mode's "Delete {n} messages for you?" card is open.
+    select_delete: bool,
     /// The open Info or Select text sheet.
     info_sheet: Option<crate::info_ui::InfoSheet>,
     /// The message a quote tap jumped to (it glows for a moment).
@@ -500,6 +507,8 @@ impl Conversation {
             star_override: HashMap::new(),
             hidden: HashSet::new(),
             delete_confirm: None,
+            select: None,
+            select_delete: false,
             info_sheet: None,
             starred_open: false,
             gallery: None,
@@ -580,7 +589,11 @@ impl Conversation {
     /// System Back inside the page: closes the Delete menu, a message's menu,
     /// or the edit or reply bar; `false` when there is none of them.
     pub fn go_back(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.gallery.is_some() {
+        if self.select_delete {
+            self.select_delete = false;
+        } else if self.select.is_some() {
+            self.end_select();
+        } else if self.gallery.is_some() {
             self.gallery = None;
         } else if self.info_sheet.is_some() {
             self.info_sheet = None;
@@ -600,6 +613,194 @@ impl Conversation {
         }
         cx.notify();
         true
+    }
+
+    /// Whether a bubble can be ticked: confirmed (not pending or failed), not deleted.
+    fn selectable(&self, item: &Item) -> bool {
+        let id = &item.message.id;
+        !matches!(
+            item.state,
+            ItemState::Pending { .. } | ItemState::Failed { .. }
+        ) && !self.timeline.meta(id).is_some_and(|m| m.revoked)
+            && !self.hidden.contains(id)
+    }
+
+    /// The Select pill: enters select mode with this message ticked.
+    fn begin_select(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.strip = None;
+        self.delete_confirm = None;
+        let mut selection = Selection::new();
+        selection.toggle(id.to_owned());
+        self.select = Some(selection);
+        self.rows_dirty = true;
+        cx.notify();
+    }
+
+    fn end_select(&mut self) {
+        self.select = None;
+        self.select_delete = false;
+        self.rows_dirty = true;
+    }
+
+    /// A tap or long press on a bubble in select mode.
+    fn toggle_select(&mut self, id: &str, cx: &mut Context<Self>) {
+        let selectable = self
+            .timeline
+            .items()
+            .iter()
+            .find(|i| i.message.id == id)
+            .is_some_and(|i| self.selectable(i));
+        if !selectable {
+            return;
+        }
+        if let Some(selection) = &mut self.select
+            && !selection.toggle(id.to_owned())
+        {
+            cx.emit(ConversationEvent::Notice(multi_select::cap_notice()));
+        }
+        self.rows_dirty = true;
+        cx.notify();
+    }
+
+    /// Ids of every loaded message that can be ticked, in timeline order.
+    fn selectable_ids(&self) -> Vec<String> {
+        self.timeline
+            .items()
+            .iter()
+            .filter(|i| self.selectable(i))
+            .map(|i| i.message.id.clone())
+            .collect()
+    }
+
+    fn select_all_loaded(&mut self, cx: &mut Context<Self>) {
+        let ids = self.selectable_ids();
+        let total = ids.len();
+        if let Some(selection) = &mut self.select {
+            selection.select_all(ids);
+            if selection.len() < total {
+                cx.emit(ConversationEvent::Notice(multi_select::cap_notice()));
+            }
+        }
+        self.rows_dirty = true;
+        cx.notify();
+    }
+
+    /// The ticked ids in timeline order.
+    fn selected_ids(&self) -> Vec<String> {
+        let Some(selection) = &self.select else {
+            return Vec::new();
+        };
+        self.timeline
+            .items()
+            .iter()
+            .filter(|i| selection.contains(&i.message.id))
+            .map(|i| i.message.id.clone())
+            .collect()
+    }
+
+    /// The copied block of the ticked messages (those with text), as the chat export writes them.
+    fn select_block(&self, ids: &[String], cx: &gpui::App) -> Option<String> {
+        let picked: Vec<&Item> = self
+            .timeline
+            .items()
+            .iter()
+            .filter(|i| ids.contains(&i.message.id))
+            .collect();
+        let authors: Vec<String> = picked
+            .iter()
+            .map(|item| {
+                let message = &item.message;
+                let meta = self.timeline.meta(&message.id);
+                self.author(message.from_me, message.sender.as_deref(), meta, cx)
+            })
+            .collect();
+        let texts: Vec<Option<String>> = picked
+            .iter()
+            .map(|item| copy_text_of(&item.message.body, self.timeline.meta(&item.message.id)))
+            .collect();
+        let lines: Vec<ExportLine<'_>> = picked
+            .iter()
+            .zip(authors.iter().zip(&texts))
+            .filter_map(|(item, (author, text))| {
+                Some(ExportLine {
+                    at_ms: item.message.timestamp_ms,
+                    author,
+                    text: text.as_deref()?,
+                })
+            })
+            .collect();
+        if lines.is_empty() {
+            return None;
+        }
+        Some(multi_select::copy_block(&lines, self.locale.tz_offset_s))
+    }
+
+    fn select_copy(&mut self, cx: &mut Context<Self>) {
+        let ids = self.selected_ids();
+        match self.select_block(&ids, cx) {
+            Some(text) => cx.emit(ConversationEvent::CopyBlock {
+                text,
+                notice: multi_select::copied_notice(ids.len()),
+            }),
+            None => cx.emit(ConversationEvent::Notice("Nothing to copy".to_owned())),
+        }
+        self.end_select();
+        cx.notify();
+    }
+
+    fn select_forward(&mut self, cx: &mut Context<Self>) {
+        use rovsti_core::forward::ForwardBody;
+        let ids = self.selected_ids();
+        let single = match ids.as_slice() {
+            [one] => self
+                .timeline
+                .items()
+                .iter()
+                .find(|i| i.message.id == *one)
+                .and_then(|i| self.forward_item(&i.message, self.timeline.meta(&i.message.id)))
+                .filter(|f| f.picture.is_some()),
+            _ => None,
+        };
+        let item = single.or_else(|| {
+            self.select_block(&ids, cx)
+                .map(|text| crate::forward_ui::ForwardItem {
+                    body: ForwardBody::Text(text),
+                    picture: None,
+                })
+        });
+        match item {
+            Some(item) => cx.emit(ConversationEvent::Forward(item)),
+            None => cx.emit(ConversationEvent::Notice("Nothing to forward".to_owned())),
+        }
+        self.end_select();
+        cx.notify();
+    }
+
+    fn select_star(&mut self, cx: &mut Context<Self>) {
+        let ids = self.selected_ids();
+        let states: Vec<bool> = ids.iter().map(|id| self.starred(id)).collect();
+        let star = multi_select::star_all(&states);
+        for id in &ids {
+            self.set_starred(id, star, cx);
+        }
+        cx.emit(ConversationEvent::Notice(multi_select::starred_notice(
+            ids.len(),
+            star,
+        )));
+        self.end_select();
+        cx.notify();
+    }
+
+    fn select_delete_now(&mut self, cx: &mut Context<Self>) {
+        let ids = self.selected_ids();
+        for id in &ids {
+            self.delete_for_me(id, cx);
+        }
+        cx.emit(ConversationEvent::Notice(multi_select::deleted_notice(
+            ids.len(),
+        )));
+        self.end_select();
+        cx.notify();
     }
 
     /// The ✕ of the reply or edit bar.
@@ -2504,6 +2705,16 @@ impl Conversation {
     /// items changed. Runs only after a change, never per frame.
     fn sync_rows(&mut self) {
         self.rows_dirty = false;
+        if let Some(selection) = &mut self.select {
+            let live: HashSet<&str> = self
+                .timeline
+                .items()
+                .iter()
+                .filter(|i| !self.hidden.contains(&i.message.id))
+                .map(|i| i.message.id.as_str())
+                .collect();
+            selection.retain(|id| live.contains(id.as_str()));
+        }
         let items = self.timeline.items();
         let breaks = day_breaks(items, self.locale.tz_offset_s);
         let mut entries = Vec::with_capacity(items.len() + breaks.len());
@@ -2916,7 +3127,9 @@ impl Conversation {
                 .then(|| meta.and_then(|m| m.location.as_ref()).map(geo_url))
                 .flatten();
             bubble = bubble.on_click(cx.listener(move |this, _, _, cx| {
-                if this.strip.take().is_some() {
+                if this.select.is_some() {
+                    // The row toggles the tick.
+                } else if this.strip.take().is_some() {
                     this.rows_dirty = true;
                     cx.notify();
                 } else if let Some(url) = &map_url {
@@ -2924,6 +3137,9 @@ impl Conversation {
                 }
             }));
             bubble = bubble.on_long_press(cx.listener(move |this, _, _, cx| {
+                if this.select.is_some() {
+                    return;
+                }
                 this.strip = Some(id.clone());
                 this.rows_dirty = true;
                 cx.notify();
@@ -2950,10 +3166,53 @@ impl Conversation {
             }
             column = column.child(self.actions(theme, item, meta, now, cx));
         }
-        div()
+        let row = div()
             .flex()
             .when(own, |row| row.justify_end())
-            .child(column)
+            .child(column);
+        let Some(selection) = &self.select else {
+            return row.into_any_element();
+        };
+        if !self.selectable(item) {
+            return row.opacity(0.5).into_any_element();
+        }
+        let picked = selection.contains(&message.id);
+        let (toggle, hold) = (message.id.clone(), message.id.clone());
+        let ring = if picked {
+            colors.accent
+        } else {
+            colors.tertiary_label
+        };
+        let mark = div()
+            .flex_none()
+            .size(px(22.0))
+            .rounded_full()
+            .border_1()
+            .border_color(ring)
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(picked, |m| {
+                m.bg(colors.accent).child(
+                    gpui::svg()
+                        .path(Icon::LucideCheck.path())
+                        .size(px(14.0))
+                        .text_color(gpui::white()),
+                )
+            });
+        div()
+            .id(SharedString::from(format!("sel-{}", message.id)))
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .py(px(2.0))
+            .px(px(4.0))
+            .rounded(radius::CARD)
+            .when(picked, |r| r.bg(colors.accent.opacity(0.15)))
+            .child(mark)
+            .child(div().flex_1().min_w_0().child(row))
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_select(&toggle, cx)))
+            .on_long_press(cx.listener(move |this, _, _, cx| this.toggle_select(&hold, cx)))
             .into_any_element()
     }
 
@@ -3012,6 +3271,9 @@ impl Conversation {
                     ),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
+                if this.select.is_some() {
+                    return;
+                }
                 cx.stop_propagation();
                 this.jump_to(&target, cx);
             }))
@@ -3076,7 +3338,7 @@ impl Conversation {
                     .rounded(radius::CARD)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         // An open strip is closed by the bubble's own tap.
-                        if this.strip.is_none() {
+                        if this.strip.is_none() && this.select.is_none() {
                             cx.stop_propagation();
                             let (items, index) = this.viewer_items(&tapped);
                             cx.emit(ConversationEvent::OpenMedia { items, index });
@@ -3156,6 +3418,9 @@ impl Conversation {
                 let id = message.id.clone();
                 let mime = mime.clone();
                 inner = inner.on_click(cx.listener(move |this, _, _, cx| {
+                    if this.select.is_some() {
+                        return;
+                    }
                     this.fetch_media(id.clone(), mime.clone(), cx);
                 }));
             }
@@ -3165,6 +3430,9 @@ impl Conversation {
                 let mime = mime.clone();
                 let name = save_name(kind, media, &mime, &id);
                 inner = inner.on_click(cx.listener(move |this, _, _, cx| {
+                    if this.select.is_some() {
+                        return;
+                    }
                     this.save_media(id.clone(), kind, mime.clone(), name.clone(), cx);
                 }));
             }
@@ -3362,6 +3630,13 @@ impl Conversation {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.set_starred(&target, !starred, cx);
                 })),
+            );
+        }
+        if self.selectable(item) {
+            let target = id.clone();
+            row = row.child(
+                pill("select", Icon::LucideCircleCheck, "Select", false)
+                    .on_click(cx.listener(move |this, _, _, cx| this.begin_select(&target, cx))),
             );
         }
         if !revoked && let Some(forward) = self.forward_item(&item.message, meta) {
@@ -3818,8 +4093,132 @@ impl Conversation {
         )
     }
 
+    /// Select mode's glass bar: Close, the count, Select all, then the bulk actions.
+    fn select_bar(&self, theme: Theme, cx: &mut Context<Self>) -> gpui::AnyElement {
+        let colors = theme::colors(theme);
+        let n = self.select.as_ref().map_or(0, Selection::len);
+        let close = glass_icon_button(theme, Icon::LucideX, 0.0, false)
+            .id("sel-close")
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.end_select();
+                cx.notify();
+            }))
+            .into_any_element();
+        let all = glass_pill(theme, "Select all")
+            .id("sel-all")
+            .on_click(cx.listener(|this, _, _, cx| this.select_all_loaded(cx)))
+            .into_any_element();
+        let ids = self.selected_ids();
+        let states: Vec<bool> = ids.iter().map(|id| self.starred(id)).collect();
+        let star = multi_select::star_all(&states);
+        let pill = |key: &'static str, icon: Icon, label: &str, danger: bool| {
+            let color = if danger { colors.red } else { colors.label };
+            glass_pill(theme, label.to_owned())
+                .id(key)
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .text_color(color)
+                .child(
+                    gpui::svg()
+                        .path(icon.path())
+                        .size(px(14.0))
+                        .text_color(color),
+                )
+        };
+        let actions = div()
+            .flex()
+            .flex_wrap()
+            .gap(px(6.0))
+            .px(px(8.0))
+            .pb(px(8.0))
+            .when(n > 0, |row| {
+                row.child(
+                    pill("sel-copy", Icon::LucideCopy, "Copy", false)
+                        .on_click(cx.listener(|this, _, _, cx| this.select_copy(cx))),
+                )
+                .child(
+                    pill("sel-forward", Icon::LucideForward, "Forward", false)
+                        .on_click(cx.listener(|this, _, _, cx| this.select_forward(cx))),
+                )
+                .child(
+                    pill(
+                        "sel-star",
+                        Icon::LucideStar,
+                        if star { "Star" } else { "Unstar" },
+                        false,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| this.select_star(cx))),
+                )
+                .child(
+                    pill("sel-delete", Icon::LucideTrash2, "Delete", true).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            this.select_delete = true;
+                            cx.notify();
+                        },
+                    )),
+                )
+            });
+        div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .child(header_bar_with(
+                theme,
+                close,
+                None,
+                multi_select::title(n).into(),
+                None,
+                Some(all),
+            ))
+            .child(actions)
+            .into_any_element()
+    }
+
     /// "Delete for everyone / for me" over the conversation.
     fn delete_overlay(&self, theme: Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        if self.select_delete {
+            let colors = theme::colors(theme);
+            let n = self.select.as_ref().map_or(0, Selection::len);
+            let items = vec![
+                crate::menu_item(
+                    theme,
+                    "seldel-ok",
+                    Icon::LucideTrash2,
+                    "Delete".into(),
+                    colors.red,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.select_delete_now(cx)))
+                .into_any_element(),
+                crate::menu_item(
+                    theme,
+                    "seldel-cancel",
+                    Icon::LucideX,
+                    "Cancel".into(),
+                    colors.label,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.select_delete = false;
+                    cx.notify();
+                }))
+                .into_any_element(),
+            ];
+            let title = if n == 1 {
+                "Delete 1 message for you?".to_owned()
+            } else {
+                format!("Delete {n} messages for you?")
+            };
+            return Some(crate::menu_card(
+                theme,
+                "select-delete-menu",
+                title.into(),
+                items,
+                cx.listener(|this, _, _, cx| {
+                    this.select_delete = false;
+                    cx.notify();
+                }),
+            ));
+        }
         let target = self.delete_confirm.as_ref()?;
         let colors = theme::colors(theme);
         let mut items = Vec::new();
@@ -3944,14 +4343,19 @@ impl Render for Conversation {
             .child(mute)
             .into_any_element();
         let avatar = self.header_avatar(theme, cx);
-        let header = header_bar_with(
-            theme,
-            back,
-            Some(avatar),
-            self.title.clone(),
-            self.subtitle(now),
-            Some(trailing),
-        );
+        let header = if self.select.is_some() {
+            self.select_bar(theme, cx)
+        } else {
+            header_bar_with(
+                theme,
+                back,
+                Some(avatar),
+                self.title.clone(),
+                self.subtitle(now),
+                Some(trailing),
+            )
+            .into_any_element()
+        };
         let find_row = self.find.as_ref().map(|find| {
             find_bar(
                 theme,

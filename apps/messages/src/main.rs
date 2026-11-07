@@ -1165,6 +1165,9 @@ impl MessagesApp {
             ConversationEvent::Menu => this.open_wa_page_menu(cx),
             ConversationEvent::OpenSettings => this.open_settings_tab(cx),
             ConversationEvent::Copy(text) => this.copy_text(text.clone().into(), false, cx),
+            ConversationEvent::CopyBlock { text, notice } => {
+                this.copy_text_with(text.clone().into(), false, notice.clone(), cx);
+            }
             ConversationEvent::CopyLink(url) => {
                 this.copy_text_with(url.clone().into(), false, "Link copied", cx);
             }
@@ -3740,9 +3743,10 @@ impl MessagesApp {
         &mut self,
         code: SharedString,
         sensitive: bool,
-        done: &'static str,
+        done: impl Into<SharedString>,
         cx: &mut Context<Self>,
     ) {
+        let done: SharedString = done.into();
         let text = code.clone();
         let task = cx
             .background_executor()

@@ -53,6 +53,8 @@ mod picker;
 mod qr_sheet;
 mod saved_ui;
 mod settings_ui;
+#[cfg(all(test, feature = "shots"))]
+mod shots;
 #[allow(dead_code)] // wired into the map in a later step
 mod snap;
 mod store;

@@ -25,6 +25,10 @@ serde_json.workspace = true
 [dev-dependencies]
 zip.workspace = true
 
+[features]
+# Headless screenshot tests (`docs/screenshots.md`). Never in release.
+shots = ["rovsti_ui/shots"]
+
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true
 

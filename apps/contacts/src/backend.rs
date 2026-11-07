@@ -186,10 +186,10 @@ pub(crate) fn delete_group(group_id: i64) -> Result<(), String> {
 }
 
 /// Every contact (with or without a number) as vCard text, and how many that is.
-/// `hidden` is a contact in its Undo window: it is left out of the file.
-pub(crate) fn export_text(hidden: Option<i64>) -> Result<(String, usize), String> {
+/// `hidden` are contacts in their Undo window: they are left out of the file.
+pub(crate) fn export_text(hidden: &[i64]) -> Result<(String, usize), String> {
     let mut contacts = pull_full()?;
-    contacts.retain(|c| hidden.is_none() || c.id != hidden);
+    contacts.retain(|c| c.id.is_none_or(|id| !hidden.contains(&id)));
     Ok((vcard::write(&contacts), contacts.len()))
 }
 
@@ -212,16 +212,12 @@ pub(crate) fn pull_full() -> Result<Vec<ContactDraft>, String> {
     Ok(contacts)
 }
 
-/// The chosen contacts as vCard text, and how many that is. `hidden` is a
-/// contact in its Undo window: it is left out even when chosen.
-#[allow(dead_code)] // used by the selection export (plan step S7)
-pub(crate) fn export_selection(
-    ids: &[i64],
-    hidden: Option<i64>,
-) -> Result<(String, usize), String> {
+/// The chosen contacts as vCard text, and how many that is. `hidden` are
+/// contacts in their Undo window: they are left out even when chosen.
+pub(crate) fn export_selection(ids: &[i64], hidden: &[i64]) -> Result<(String, usize), String> {
     let all = pull_full()?;
     let mut cards = contact_select::pick_drafts(&all, ids);
-    cards.retain(|c| hidden.is_none() || c.id != hidden);
+    cards.retain(|c| c.id.is_none_or(|id| !hidden.contains(&id)));
     Ok((vcard::write(&cards), cards.len()))
 }
 
@@ -609,11 +605,11 @@ mod tests {
             delete(1).expect_err("desktop cannot delete"),
             "this needs an Android phone"
         );
-        let (text, count) = export_text(None).expect("sample exports");
+        let (text, count) = export_text(&[]).expect("sample exports");
         assert_eq!(count, sample::contacts().len());
         assert!(text.contains("BEGIN:VCARD"));
         let first = sample::contacts()[0].id;
-        let (_, fewer) = export_text(Some(first)).expect("sample exports");
+        let (_, fewer) = export_text(&[first]).expect("sample exports");
         assert_eq!(fewer, count - 1);
     }
 
@@ -657,18 +653,18 @@ mod tests {
         let all = pull_full().expect("sample");
         assert_eq!(all.len(), sample::contacts().len());
         assert!(all.iter().all(|c| c.validate().is_ok()));
-        let (_, count) = export_text(None).expect("export");
+        let (_, count) = export_text(&[]).expect("export");
         assert_eq!(count, all.len());
     }
 
     #[test]
     fn export_selection_writes_only_the_chosen_cards() {
-        let (text, count) = export_selection(&[1, 3], None).expect("sample");
+        let (text, count) = export_selection(&[1, 3], &[]).expect("sample");
         assert_eq!(count, 2);
         assert_eq!(text.matches("BEGIN:VCARD").count(), 2);
-        let (_, none) = export_selection(&[], None).expect("sample");
+        let (_, none) = export_selection(&[], &[]).expect("sample");
         assert_eq!(none, 0);
-        let (_, left) = export_selection(&[1, 3], Some(1)).expect("sample");
+        let (_, left) = export_selection(&[1, 3], &[1]).expect("sample");
         assert_eq!(left, 1);
     }
 }

@@ -31,13 +31,17 @@ impl ContactsApp {
         }
         self.transfer_busy = true;
         self.notice = Some("Preparing the file…".into());
-        let hidden = self.pending_delete.as_ref().map(|p| p.id);
+        let hidden: Vec<i64> = self
+            .pending_delete
+            .as_ref()
+            .map(|p| p.ids.clone())
+            .unwrap_or_default();
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let (text, count) = backend::export_text(hidden)?;
+                    let (text, count) = backend::export_text(&hidden)?;
                     if count == 0 {
                         return Ok(0);
                     }

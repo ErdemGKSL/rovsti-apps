@@ -5,11 +5,13 @@
 use std::sync::Arc;
 
 use gpui::{AnyElement, Context, IntoElement, SharedString, StatefulInteractiveElement};
-use rovsti_core::{contact_edit::ContactDraft, contacts_view, search::ContactIndex};
+use rovsti_core::{
+    contact_edit::ContactDraft, contact_select, contacts_view, search::ContactIndex,
+};
 use rovsti_ui::tokens::Theme;
 
 use crate::{
-    Book, ContactsApp, NoticeAction, PendingDelete, UNDO_LIFE, UNDO_NOTICE, backend,
+    Book, ContactsApp, NoticeAction, PendingDelete, UNDO_LIFE, backend,
     ui::{confirm_card, pill},
 };
 
@@ -18,6 +20,10 @@ pub(crate) enum Confirm {
     DeleteContact {
         id: i64,
         name: SharedString,
+    },
+    /// Select mode's Delete: these contacts would be removed.
+    DeleteMany {
+        ids: Vec<i64>,
     },
     DeleteGroup {
         id: i64,
@@ -82,6 +88,11 @@ fn import_summary(add: usize, duplicates: usize, unreadable: usize) -> String {
     }
 }
 
+/// Title and body of the card for deleting `n` selected contacts.
+fn delete_many_text(n: usize) -> (String, String) {
+    rovsti_core::contact_select::delete_confirm(n)
+}
+
 /// The title of the remove-photo card.
 fn remove_photo_title() -> &'static str {
     "Remove photo?"
@@ -134,7 +145,11 @@ impl ContactsApp {
             return;
         }
         match confirm {
-            Confirm::DeleteContact { id, .. } => self.delete_contact(id, cx),
+            Confirm::DeleteContact { id, .. } => self.delete_contacts(vec![id], cx),
+            Confirm::DeleteMany { ids } => {
+                self.select = None;
+                self.delete_contacts(ids, cx);
+            }
             Confirm::DeleteGroup { id, .. } => self.delete_group(id, cx),
             Confirm::UseWaPhoto { id, jid, .. } => self.use_wa_photo(id, jid, cx),
             Confirm::RemovePhoto { id, .. } => {
@@ -147,12 +162,15 @@ impl ContactsApp {
         }
     }
 
-    /// Hides the contact at once and deletes it for real after `UNDO_LIFE`,
-    /// unless the owner taps Undo.
-    fn delete_contact(&mut self, id: i64, cx: &mut Context<Self>) {
+    /// Hides the contacts at once and deletes them for real after
+    /// `UNDO_LIFE`, unless the owner taps Undo.
+    fn delete_contacts(&mut self, ids: Vec<i64>, cx: &mut Context<Self>) {
+        if ids.is_empty() {
+            return;
+        }
         self.commit_pending_delete(cx);
         if let Some(index) = self.index() {
-            let rest = contacts_view::without(index.all(), &[id]);
+            let rest = contacts_view::without(index.all(), &ids);
             self.book = Book::Ready(Arc::new(ContactIndex::new(rest)));
         }
         self.editor = None;
@@ -160,7 +178,7 @@ impl ContactsApp {
         self.open_draft = None;
         self.page.restart();
         self.rebuild(cx);
-        self.notice = Some(UNDO_NOTICE.into());
+        self.notice = Some(contact_select::deleted_notice(ids.len()).into());
         self.notice_action = Some(NoticeAction::UndoDelete);
         // A second delete within the window must restart the timer.
         self.notice_timer = None;
@@ -169,13 +187,13 @@ impl ContactsApp {
             this.update(cx, |this, cx| this.commit_pending_delete(cx))
                 .ok();
         });
-        self.pending_delete = Some(PendingDelete { id, task });
+        self.pending_delete = Some(PendingDelete { ids, task });
         cx.notify();
     }
 
     /// Runs the delete that is waiting for its Undo window, now.
     pub(crate) fn commit_pending_delete(&mut self, cx: &mut Context<Self>) {
-        let Some(PendingDelete { id, task }) = self.pending_delete.take() else {
+        let Some(PendingDelete { ids, task }) = self.pending_delete.take() else {
             return;
         };
         drop(task);
@@ -183,13 +201,31 @@ impl ContactsApp {
         self.notice_action = None;
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let result = cx
+            let total = ids.len();
+            let failure = cx
                 .background_executor()
-                .spawn(async move { backend::delete(id) })
+                .spawn(async move {
+                    let mut failed = 0usize;
+                    let mut words = String::new();
+                    for id in ids {
+                        if let Err(error) = backend::delete(id) {
+                            failed += 1;
+                            words = error;
+                        }
+                    }
+                    (failed > 0).then_some((failed, words))
+                })
                 .await;
             this.update(cx, |this, cx| {
-                if let Err(words) = result {
-                    this.notice = Some(format!("Can't delete the contact: {words}.").into());
+                if let Some((failed, words)) = failure {
+                    this.notice = Some(
+                        if total == 1 {
+                            format!("Can't delete the contact: {words}.")
+                        } else {
+                            format!("Can't delete {}: {words}.", contacts_words(failed))
+                        }
+                        .into(),
+                    );
                 }
                 this.reload(cx);
             })
@@ -208,7 +244,10 @@ impl ContactsApp {
         };
         self.notice = None;
         self.notice_action = None;
-        self.pending_open = Some(pending.id);
+        // One contact comes back with its card; several just reappear.
+        if let [id] = pending.ids[..] {
+            self.pending_open = Some(id);
+        }
         self.reload(cx);
         cx.notify();
     }
@@ -258,6 +297,10 @@ impl ContactsApp {
                 "The contact is removed from this phone and from any account it syncs with.",
                 vec![cancel, yes("Delete", true, cx)],
             ),
+            Confirm::DeleteMany { ids } => {
+                let (title, body) = delete_many_text(ids.len());
+                confirm_card(theme, title, body, vec![cancel, yes("Delete", true, cx)])
+            }
             Confirm::DeleteGroup { title, .. } => confirm_card(
                 theme,
                 format!("Delete “{title}”?"),
@@ -328,6 +371,14 @@ mod tests {
             remove_photo_body("Ada"),
             "Ada's photo is removed from this phone and from any account it syncs with."
         );
+    }
+
+    #[test]
+    fn the_delete_many_card_counts_the_contacts() {
+        let (title, body) = delete_many_text(3);
+        assert_eq!(title, "Delete 3 contacts?");
+        assert!(body.contains("removed from the phone"));
+        assert_eq!(delete_many_text(1).0, "Delete this contact?");
     }
 
     #[test]

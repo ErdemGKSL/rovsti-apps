@@ -4,7 +4,7 @@
 use std::collections::BTreeSet;
 
 use crate::contact_dates;
-use crate::contact_edit::{ContactDraft, SelectionChange};
+use crate::contact_edit::{ContactDraft, Group, SelectionChange};
 
 /// Most contacts one selection may hold.
 pub const MAX_SELECTED: usize = 500;
@@ -17,14 +17,118 @@ fn contacts(n: usize) -> String {
     }
 }
 
-/// The selected ids in ascending order, without the contact whose delete is
+/// The selected ids in ascending order, without the contacts whose delete is
 /// still pending (`hidden`).
-pub fn export_ids(selected: &BTreeSet<i64>, hidden: Option<i64>) -> Vec<i64> {
+pub fn export_ids(selected: &BTreeSet<i64>, hidden: &[i64]) -> Vec<i64> {
     selected
         .iter()
         .copied()
-        .filter(|id| Some(*id) != hidden)
+        .filter(|id| !hidden.contains(id))
         .collect()
+}
+
+/// What the select bar can do with the selection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectAction {
+    Share,
+    SaveToFile,
+    AddToGroup,
+    /// Stars or unstars, as [`crate::multi_select::star_all`] decides.
+    Star,
+    Delete,
+}
+
+/// The bulk actions to offer for `n` selected contacts: none while nothing is
+/// selected (the bar then only has Cancel and Select all), and no Add to group
+/// when the phone has no groups.
+pub fn select_bar_actions(n: usize, has_groups: bool) -> Vec<SelectAction> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut actions = vec![SelectAction::Share, SelectAction::SaveToFile];
+    if has_groups {
+        actions.push(SelectAction::AddToGroup);
+    }
+    actions.push(SelectAction::Star);
+    actions.push(SelectAction::Delete);
+    actions
+}
+
+/// The header title of select mode.
+pub fn title(n: usize) -> String {
+    if n == 0 {
+        "Select contacts".to_owned()
+    } else {
+        format!("{n} selected")
+    }
+}
+
+/// Shown when the selection hit its cap.
+pub fn cap_notice() -> String {
+    format!(
+        "You can select up to {} contacts",
+        crate::multi_select::MAX_SELECTED
+    )
+}
+
+/// "Starred 3 contacts" / "Unstarred 1 contact".
+pub fn starred_notice(n: usize, star: bool) -> String {
+    let verb = if star { "Starred" } else { "Unstarred" };
+    format!("{verb} {}", contacts(n))
+}
+
+/// The pill after a delete: the Undo button rides on it.
+pub fn deleted_notice(n: usize) -> String {
+    if n == 1 {
+        "Contact deleted.".to_owned()
+    } else {
+        format!("{n} contacts deleted.")
+    }
+}
+
+/// A group the selection can join, with the selected contacts that belong to
+/// the group's account.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupTarget {
+    pub group_id: i64,
+    pub title: String,
+    pub account: String,
+    pub eligible: Vec<i64>,
+    /// Selected contacts of other accounts, left out.
+    pub skipped: usize,
+}
+
+/// The groups that fit at least one of `selected` (id, account), in the order
+/// of `groups`.
+pub fn group_targets(groups: &[Group], selected: &[(i64, String)]) -> Vec<GroupTarget> {
+    groups
+        .iter()
+        .filter_map(|g| {
+            let eligible: Vec<i64> = selected
+                .iter()
+                .filter(|(_, account)| *account == g.account)
+                .map(|(id, _)| *id)
+                .collect();
+            (!eligible.is_empty()).then(|| GroupTarget {
+                group_id: g.id,
+                title: g.title.clone(),
+                account: g.account.clone(),
+                skipped: selected.len() - eligible.len(),
+                eligible,
+            })
+        })
+        .collect()
+}
+
+/// [`added_notice`] plus how many contacts were left out for being in another
+/// account.
+pub fn added_with_skipped(n: usize, group_title: &str, skipped: usize) -> String {
+    let base = added_notice(n, group_title);
+    if skipped == 0 {
+        base
+    } else {
+        format!("{base}. {skipped} skipped: other account")
+    }
 }
 
 /// The drafts whose id is in `ids`, in the order of `all`.
@@ -187,9 +291,10 @@ mod tests {
     #[test]
     fn export_ids_sorts_and_drops_hidden() {
         let set: BTreeSet<i64> = [9, 2, 5].into();
-        assert_eq!(export_ids(&set, Some(5)), vec![2, 9]);
-        assert_eq!(export_ids(&set, None), vec![2, 5, 9]);
-        assert!(export_ids(&BTreeSet::new(), Some(1)).is_empty());
+        assert_eq!(export_ids(&set, &[5]), vec![2, 9]);
+        assert_eq!(export_ids(&set, &[]), vec![2, 5, 9]);
+        assert_eq!(export_ids(&set, &[9, 2, 77]), vec![5]);
+        assert!(export_ids(&BTreeSet::new(), &[1]).is_empty());
     }
 
     #[test]
@@ -278,5 +383,63 @@ mod tests {
         assert_eq!(full_text(&c), "Ayşe\n\"Ayo\"\nCTO, Acme\nWebsite: acme.com");
         c.org.clear();
         assert_eq!(full_text(&c), "Ayşe\n\"Ayo\"\nCTO\nWebsite: acme.com");
+    }
+
+    #[test]
+    fn the_bar_offers_nothing_for_an_empty_selection() {
+        assert!(select_bar_actions(0, true).is_empty());
+    }
+
+    #[test]
+    fn add_to_group_needs_a_group() {
+        assert!(select_bar_actions(2, true).contains(&SelectAction::AddToGroup));
+        let without = select_bar_actions(2, false);
+        assert_eq!(
+            without,
+            vec![
+                SelectAction::Share,
+                SelectAction::SaveToFile,
+                SelectAction::Star,
+                SelectAction::Delete
+            ]
+        );
+    }
+
+    #[test]
+    fn select_texts_count_contacts() {
+        assert_eq!(title(0), "Select contacts");
+        assert_eq!(title(3), "3 selected");
+        assert_eq!(starred_notice(1, true), "Starred 1 contact");
+        assert_eq!(starred_notice(4, false), "Unstarred 4 contacts");
+        assert_eq!(deleted_notice(1), "Contact deleted.");
+        assert_eq!(deleted_notice(3), "3 contacts deleted.");
+        assert!(cap_notice().contains("200"));
+    }
+
+    #[test]
+    fn group_targets_split_by_account() {
+        let g = |id, title: &str, account: &str| Group {
+            id,
+            title: title.into(),
+            account: account.into(),
+            ..Group::default()
+        };
+        let groups = [g(1, "Family", "a"), g(2, "Work", "b"), g(3, "Empty", "c")];
+        let selected = [
+            (10, "a".to_owned()),
+            (11, "b".to_owned()),
+            (12, "a".to_owned()),
+        ];
+        let targets = group_targets(&groups, &selected);
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0].eligible, vec![10, 12]);
+        assert_eq!(targets[0].skipped, 1);
+        assert_eq!(targets[1].eligible, vec![11]);
+        assert_eq!(targets[1].skipped, 2);
+        assert_eq!(
+            added_with_skipped(2, "Family", 1),
+            "Added 2 contacts to Family. 1 skipped: other account"
+        );
+        assert_eq!(added_with_skipped(1, "Work", 0), "Added 1 contact to Work");
     }
 }

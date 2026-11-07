@@ -20,6 +20,7 @@ mod picker;
 mod prefs;
 mod qr_sheet;
 mod sample;
+mod select;
 mod transfer;
 mod ui;
 mod upcoming;
@@ -29,10 +30,10 @@ use std::{iter, path::PathBuf, sync::Arc};
 
 use futures::StreamExt;
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, FocusHandle, ListAlignment,
-    ListOffset, ListState, MouseButton, ParentElement, Pixels, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, div, list, prelude::*,
-    px, size, svg,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, FocusHandle, KeyDownEvent,
+    ListAlignment, ListOffset, ListState, MouseButton, ParentElement, Pixels, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement, Styled, Window, WindowBounds, WindowOptions, canvas,
+    div, list, prelude::*, px, size, svg,
 };
 use rovsti_android::{
     events,
@@ -98,8 +99,6 @@ const DATA_DIR_RETRY: std::time::Duration = std::time::Duration::from_millis(400
 const NOTICE_LIFE: std::time::Duration = std::time::Duration::from_secs(4);
 /// A notice with an action (Undo) stays this long.
 const UNDO_LIFE: std::time::Duration = std::time::Duration::from_secs(5);
-/// The text of the notice that carries the Undo button.
-const UNDO_NOTICE: &str = "Contact deleted.";
 /// Space kept between a focused editor field and the keyboard.
 const REVEAL_MARGIN: f32 = 16.0;
 
@@ -141,15 +140,32 @@ mod notice_tests {
     }
 
     #[test]
+    fn undo_of_a_multi_delete_is_kept_while_pending() {
+        // The bulk delete uses the same action; only `pending` matters.
+        assert!(keeps_undo(Some(NoticeAction::UndoDelete), true, true));
+        assert!(!keeps_undo(Some(NoticeAction::UndoDelete), false, true));
+    }
+
+    #[test]
+    fn a_multi_delete_hides_every_id_from_the_export() {
+        let ids = vec![2_i64, 5, 9];
+        let set: std::collections::BTreeSet<i64> = [1, 2, 5, 7, 9].into();
+        assert_eq!(
+            rovsti_core::contact_select::export_ids(&set, &ids),
+            vec![1, 7]
+        );
+    }
+
+    #[test]
     fn no_action_is_dropped() {
         assert!(!keeps_undo(None, true, true));
         assert!(!keeps_undo(None, false, false));
     }
 }
 
-/// A deleted contact, hidden but not yet removed from Android.
+/// Deleted contacts, hidden but not yet removed from Android.
 struct PendingDelete {
-    pub(crate) id: i64,
+    pub(crate) ids: Vec<i64>,
     task: gpui::Task<()>,
 }
 
@@ -299,7 +315,10 @@ struct ContactsApp {
     row_letters: Vec<char>,
     scrub_letters: Vec<char>,
     scrub: upcoming::Scrub,
-    /// The contact whose delete waits for its Undo window.
+    /// Select mode in the Contacts list: the ticked contacts.
+    select: Option<rovsti_core::multi_select::Selection<i64>>,
+    select_ui: select::SelectUi,
+    /// The contacts whose delete waits for their Undo window.
     pending_delete: Option<PendingDelete>,
     /// The timer that clears `notice` (the text it was started for).
     notice_timer: Option<(SharedString, gpui::Task<()>)>,
@@ -479,6 +498,8 @@ impl ContactsApp {
             scrub_letters: Vec::new(),
             scrub: upcoming::Scrub::default(),
             pending_delete: None,
+            select: None,
+            select_ui: select::SelectUi::default(),
             notice_timer: None,
             reveal_focus: None,
             reveal_keyboard: px(0.0),
@@ -526,12 +547,18 @@ impl ContactsApp {
                     let book = match (book, this.pending_delete.as_ref()) {
                         (Book::Ready(index), Some(pending)) => {
                             Book::Ready(Arc::new(rovsti_core::search::ContactIndex::new(
-                                rovsti_core::contacts_view::without(index.all(), &[pending.id]),
+                                rovsti_core::contacts_view::without(index.all(), &pending.ids),
                             )))
                         }
                         (book, _) => book,
                     };
                     this.book = book;
+                    let alive: Option<std::collections::HashSet<i64>> = this
+                        .index()
+                        .map(|index| index.all().map(|c| c.id).collect());
+                    if let (Some(select), Some(alive)) = (this.select.as_mut(), alive) {
+                        select.retain(|id| alive.contains(id));
+                    }
                     this.groups = groups;
                     this.accounts = accounts;
                     if this.import_settle.take_if(|id| *id <= pull_id).is_some() {
@@ -745,6 +772,8 @@ impl ContactsApp {
             || self.dupes.open
             || self.dupes.sheet.is_open()
             || self.upcoming_open
+            || self.select_ui.sheet.is_open()
+            || self.select.is_some()
             || self.tabs.selected() != CONTACTS_TAB
             || !self.field.read(cx).text().is_empty()
     }
@@ -753,6 +782,9 @@ impl ContactsApp {
     fn go_back(&mut self, cx: &mut Context<Self>) {
         if self.confirm.is_some() {
             self.answer(false, cx);
+        } else if self.select_ui.sheet.is_open() {
+            self.select_ui.sheet.close();
+            cx.notify();
         } else if self.photo_sheet.is_open() {
             self.close_photo_sheet(cx);
         } else if self.qr_sheet.is_open() {
@@ -787,6 +819,8 @@ impl ContactsApp {
             {
                 self.set_whatsapp_open(false, cx);
             }
+        } else if self.select.is_some() {
+            self.leave_select(cx);
         } else if self.tabs.select(CONTACTS_TAB) {
             self.clear_notice();
             self.page.restart();
@@ -1094,15 +1128,35 @@ impl ContactsApp {
         let picture =
             self.avatar_picture(id, row.vm.photo_uri.is_some(), row.wa_jid.as_deref(), cx);
         let photo = picture.as_ref().map(|(image, opacity)| (image, *opacity));
+        // Select mode lives on the Contacts tab: its rows show a check.
+        let ticked = (key == "contact")
+            .then(|| self.select.as_ref().map(|s| s.contains(&id)))
+            .flatten();
         list_row(
             theme,
             Some(photo_avatar(theme, row.monogram.clone(), 40.0, tint, photo).into_any_element()),
             row.name.clone(),
             row.subtitle.clone(),
-            row.trailing.clone(),
+            if ticked.is_some() {
+                None
+            } else {
+                row.trailing.clone()
+            },
         )
+        .children(ticked.map(|on| select::check_mark(theme, on)))
         .id((key, usize::try_from(id).unwrap_or_default()))
-        .on_click(cx.listener(move |this, _, _, cx| this.open_contact(id, cx)))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            if key == "contact" && this.select.is_some() {
+                this.toggle_selected(id, cx);
+            } else {
+                this.open_contact(id, cx);
+            }
+        }))
+        .on_long_press(cx.listener(move |this, _, _, cx| {
+            if key == "contact" {
+                this.long_press_contact(id, cx);
+            }
+        }))
         .into_any_element()
     }
 
@@ -1286,10 +1340,25 @@ impl ContactsApp {
         if ix > 0 {
             return self.contact_item(theme, RowSet::Contacts, ix - 1, cx);
         }
+        if self.select.is_some() {
+            return self.select_header(theme, window, cx);
+        }
         let trailing = matches!(self.book, Book::Ready(_)).then(|| {
-            glass_icon_button(theme, Icon::LucidePlus, 0.0, false)
-                .id("new-contact")
-                .on_click(cx.listener(|this, _, _, cx| this.open_new_editor(cx)))
+            let select = (!self.rows.is_empty()).then(|| {
+                glass_pill(theme, "Select")
+                    .id("select-mode")
+                    .on_click(cx.listener(|this, _, _, cx| this.enter_select(None, cx)))
+            });
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .children(select)
+                .child(
+                    glass_icon_button(theme, Icon::LucidePlus, 0.0, false)
+                        .id("new-contact")
+                        .on_click(cx.listener(|this, _, _, cx| this.open_new_editor(cx))),
+                )
                 .into_any_element()
         });
         let body = if let Some(state) = self.book_state(theme, cx) {
@@ -1608,7 +1677,10 @@ impl ContactsApp {
     fn keep_notice_timer(&mut self, cx: &mut Context<Self>) {
         // The button belongs to the Undo notice only: any other text drops it.
         let owns_button = match self.notice_action {
-            Some(NoticeAction::UndoDelete) => self.notice.as_deref() == Some(UNDO_NOTICE),
+            Some(NoticeAction::UndoDelete) => self.pending_delete.as_ref().is_some_and(|p| {
+                self.notice.as_deref()
+                    == Some(rovsti_core::contact_select::deleted_notice(p.ids.len()).as_str())
+            }),
             Some(NoticeAction::UndoMerge) => self
                 .merge_undo
                 .as_ref()
@@ -1674,7 +1746,9 @@ impl ContactsApp {
                     content_bottom_inset()
                         + px(8.0)
                         // Above the viewer's bottom bar.
-                        + px(if self.viewer.is_some() { 88.0 } else { 0.0 }),
+                        + px(if self.viewer.is_some() { 88.0 } else { 0.0 })
+                        // Above the select bar.
+                        + px(if self.select.is_some() { 76.0 } else { 0.0 }),
                 )
                 .flex()
                 .justify_center()
@@ -1726,6 +1800,8 @@ impl Render for ContactsApp {
                 | self.share_sheet.tick_real(real)
                 | self.qr_sheet.tick(dt)
                 | self.qr_sheet.tick_real(real)
+                | self.select_ui.sheet.tick(dt)
+                | self.select_ui.sheet.tick_real(real)
                 | self.dupes.sheet.tick(dt)
                 | self.dupes.sheet.tick_real(real)
         });
@@ -1835,14 +1911,34 @@ impl Render for ContactsApp {
             } else {
                 None
             })
-            // No tab bar while a form is open: no stray tap loses the edits.
-            .children((!editing && !picking).then(|| {
+            .children(self.select_bar_view(theme, cx))
+            .children(self.select.is_some().then(|| {
+                let entity = cx.entity();
+                canvas(
+                    |_, _, _| (),
+                    move |_, (), window, _| {
+                        let entity = entity.clone();
+                        window.on_key_event(move |event: &KeyDownEvent, phase, _, cx| {
+                            if phase.bubble() && event.keystroke.key == "escape" {
+                                entity.update(cx, |this, cx| this.go_back(cx));
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_full()
+            }))
+            // No tab bar while a form is open or ticking: no stray tap loses the edits.
+            .children((!editing && !picking && self.select.is_none()).then(|| {
                 self.tabs.render(
                     theme,
                     move |index, _, cx| {
                         entity.update(cx, |this, cx| {
                             this.tabs.press();
                             let changed = this.tabs.select(index);
+                            if changed {
+                                this.select = None;
+                            }
                             if changed
                                 || this.open.is_some()
                                 || this.group_page.is_some()
@@ -1899,6 +1995,7 @@ impl Render for ContactsApp {
             .children(self.share_sheet_view(theme, window, cx))
             .children(self.qr_sheet_view(theme, window, cx))
             .children(self.dupes_sheet_view(theme, window, cx))
+            .children(self.select_sheet_view(theme, window, cx))
     }
 }
 

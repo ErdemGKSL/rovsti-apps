@@ -264,6 +264,12 @@ impl Editor {
         editor
     }
 
+    /// The first-name box, for the screenshot rig to focus.
+    #[cfg(all(test, feature = "shots"))]
+    pub(crate) fn given_focus(&self, cx: &gpui::App) -> gpui::FocusHandle {
+        self.given.read(cx).focus_handle()
+    }
+
     /// Whether the owner changed anything since the form opened.
     fn is_dirty(&self, cx: &gpui::App) -> bool {
         self.pending_photo.is_some() || self.draft(cx) != self.initial

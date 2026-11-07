@@ -45,6 +45,14 @@ fn updated_ms(id: i64) -> Option<i64> {
 
 /// The sample contacts, sorted by folded name like the provider sorts them.
 pub(crate) fn contacts() -> Vec<WireContact> {
+    #[cfg(test)]
+    if rich::enabled() {
+        return rich::contacts();
+    }
+    base_contacts()
+}
+
+fn base_contacts() -> Vec<WireContact> {
     let mut all = vec![
         contact(
             1,
@@ -140,6 +148,10 @@ pub(crate) fn accounts() -> Vec<Account> {
 
 /// The sample groups: two on the phone, one in the Google account.
 pub(crate) fn groups() -> Vec<Group> {
+    #[cfg(test)]
+    if rich::enabled() {
+        return rich::groups();
+    }
     vec![
         Group {
             id: 1,
@@ -164,6 +176,12 @@ pub(crate) fn groups() -> Vec<Group> {
 
 /// Fixed birthdays, an anniversary and a home address for a few samples.
 fn dates_and_places(id: i64) -> (Vec<DraftEvent>, Vec<DraftField>) {
+    #[cfg(test)]
+    if rich::enabled()
+        && let Some(found) = rich::dates_and_places(id)
+    {
+        return found;
+    }
     let event = |date: &str, kind| vec![DraftEvent::new(date, kind)];
     match id {
         1 => (
@@ -276,6 +294,186 @@ pub(crate) fn draft(id: i64) -> Option<ContactDraft> {
             .unwrap_or_default(),
         ..ContactDraft::default()
     })
+}
+
+/// A larger address book for the screenshot rig and its tests: 40 contacts
+/// with Turkish initials (Ç, Ö, Ş, Ü, İ), favourites, groups, a birthday on
+/// the shot day and one duplicate pair. Off unless the rig turns it on, so
+/// the plain sample the other tests count on does not change.
+#[cfg(test)]
+pub(crate) mod rich {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::*;
+
+    static ON: AtomicBool = AtomicBool::new(false);
+
+    /// Whether [`contacts`] and friends answer with the larger book.
+    pub(crate) fn enabled() -> bool {
+        ON.load(Ordering::Relaxed)
+    }
+
+    /// Turns the larger book on (the shots test does, once).
+    #[cfg(feature = "shots")]
+    pub(crate) fn enable() {
+        ON.store(true, Ordering::Relaxed);
+    }
+
+    /// The month and day of the shot day (2026-11-07), as `--MM-DD`.
+    pub(crate) const BIRTHDAY_TODAY: &str = "--11-07";
+
+    /// Id, name, number, label, starred. Ids 13 and up; 1 to 12 are the plain sample.
+    const EXTRA: [(i64, &str, &str, &str, bool); 28] = [
+        (13, "Çağla Aksu", "0535 100 20 30", "Mobile", true),
+        (14, "Çetin Bozkurt", "0536 200 30 40", "Mobile", false),
+        (15, "Ömer Faruk Yıldırım", "0537 300 40 50", "Work", false),
+        (16, "Özlem Tuncer", "0539 400 50 60", "Mobile", true),
+        (17, "Şebnem Ünal", "0541 500 60 70", "Mobile", false),
+        (18, "Şükrü Saraçoğlu", "0542 600 70 80", "Home", false),
+        (19, "Ümit Kılıç", "0543 700 80 90", "Mobile", false),
+        (20, "Ülkü Başaran", "0545 800 90 10", "Mobile", true),
+        (21, "İbrahim Ergin", "0546 900 10 20", "Mobile", false),
+        (22, "İrem Doğan", "0547 110 20 30", "Work", false),
+        (23, "Alper Tekin", "0548 120 30 40", "Mobile", false),
+        (24, "Berrin Sezer", "0549 130 40 50", "Mobile", false),
+        (25, "Cem Karaca", "0551 140 50 60", "Mobile", false),
+        (26, "Dilara Eren", "0552 150 60 70", "Mobile", true),
+        (27, "Emre Polat", "0553 160 70 80", "Work", false),
+        (28, "Fatma Nur Çakır", "0554 170 80 90", "Mobile", false),
+        (29, "Gökhan Işık", "0555 180 90 10", "Mobile", false),
+        (30, "Hülya Avcı", "0556 190 10 20", "Home", false),
+        (31, "Kemal Sunal", "0557 210 20 30", "Mobile", false),
+        (32, "Leyla Yavuz", "0558 220 30 40", "Mobile", false),
+        (33, "Murat Çınar", "0559 230 40 50", "Mobile", false),
+        (34, "Nilüfer Şen", "0561 240 50 60", "Mobile", true),
+        (35, "Orhan Gencebay", "0562 250 60 70", "Mobile", false),
+        (36, "Pelin Güler", "0563 260 70 80", "Work", false),
+        (37, "Rüya Özkan", "0564 270 80 90", "Mobile", false),
+        (38, "Selim Yüce", "0565 280 90 10", "Mobile", false),
+        (39, "Tuğba Işıklı", "0566 290 10 20", "Mobile", false),
+        (
+            40,
+            "Zübeyde Hanım Çiftçioğlu Mühendislik ve Danışmanlık",
+            "0567 310 20 30",
+            "Work",
+            false,
+        ),
+    ];
+
+    /// The 40 contacts, sorted like the provider sorts them.
+    pub(crate) fn contacts() -> Vec<WireContact> {
+        let mut all = base_contacts();
+        all.extend(EXTRA.iter().map(|&(id, name, raw, label, starred)| {
+            contact(id, name, vec![number(raw, Some(label), false)], starred)
+        }));
+        for c in &mut all {
+            c.lookup_key = Some(format!("key-{}", c.id));
+        }
+        all.sort_by_cached_key(|c| (rovsti_core::search::fold(&c.display_name), c.id));
+        all
+    }
+
+    /// The plain groups plus a bigger Family and a Neighbours group.
+    pub(crate) fn groups() -> Vec<Group> {
+        vec![
+            Group {
+                id: 1,
+                title: "Family".to_owned(),
+                members: vec![1, 4, 6, 16, 21, 30],
+                ..Group::default()
+            },
+            Group {
+                id: 2,
+                title: "Work".to_owned(),
+                members: vec![3, 9, 15, 22, 27, 36, 40],
+                ..Group::default()
+            },
+            Group {
+                id: 3,
+                title: "Friends".to_owned(),
+                members: vec![11, 13, 17, 25, 26, 34],
+                account: GOOGLE_ACCOUNT.to_owned(),
+            },
+            Group {
+                id: 4,
+                title: "Komşular".to_owned(),
+                members: vec![18, 19, 20],
+                ..Group::default()
+            },
+        ]
+    }
+
+    /// Dates for the extra contacts: a birthday today, two soon, an anniversary.
+    pub(crate) fn dates_and_places(id: i64) -> Option<(Vec<DraftEvent>, Vec<DraftField>)> {
+        let event = |date: &str, kind| vec![DraftEvent::new(date, kind)];
+        match id {
+            17 => Some((event(BIRTHDAY_TODAY, EventKind::Birthday), Vec::new())),
+            13 => Some((event("1990-11-12", EventKind::Birthday), Vec::new())),
+            26 => Some((event("--11-21", EventKind::Birthday), Vec::new())),
+            34 => Some((event("2012-12-02", EventKind::Anniversary), Vec::new())),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use rovsti_core::contact_dupes;
+
+        use super::*;
+
+        #[test]
+        fn the_larger_book_has_forty_unique_contacts() {
+            let all = contacts();
+            assert_eq!(all.len(), 40);
+            let mut ids: Vec<i64> = all.iter().map(|c| c.id).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), 40);
+        }
+
+        #[test]
+        fn every_turkish_initial_is_present() {
+            let all = contacts();
+            for initial in ['Ç', 'Ö', 'Ş', 'Ü', 'İ'] {
+                assert!(
+                    all.iter().any(|c| c.display_name.starts_with(initial)),
+                    "no contact starts with {initial}"
+                );
+            }
+        }
+
+        #[test]
+        fn it_has_favourites_and_a_birthday_today() {
+            let all = contacts();
+            assert!(all.iter().filter(|c| c.starred).count() >= 8);
+            let today = dates_and_places(17).expect("dates").0;
+            assert_eq!(today[0].date, BIRTHDAY_TODAY);
+        }
+
+        #[test]
+        fn every_group_member_exists_and_one_duplicate_pair_remains() {
+            let all = contacts();
+            for group in groups() {
+                assert!(group.members.iter().all(|m| all.iter().any(|c| c.id == *m)));
+            }
+            let drafts: Vec<ContactDraft> = all
+                .iter()
+                .map(|c| {
+                    let mut d = ContactDraft::default();
+                    let wire = c.clone();
+                    d.id = Some(wire.id);
+                    d.given = wire.display_name;
+                    d.numbers = wire
+                        .numbers
+                        .iter()
+                        .map(|n| DraftField::new(n.raw.clone(), FieldKind::Mobile))
+                        .collect();
+                    d
+                })
+                .collect();
+            assert_eq!(contact_dupes::find(&drafts).len(), 1);
+        }
+    }
 }
 
 #[cfg(test)]

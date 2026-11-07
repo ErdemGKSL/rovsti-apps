@@ -31,6 +31,8 @@ mod quick;
 mod recent;
 mod sample;
 mod select;
+#[cfg(all(test, feature = "shots"))]
+mod shots;
 mod transfer;
 mod trash;
 mod trash_store;

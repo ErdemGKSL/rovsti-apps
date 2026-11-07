@@ -264,7 +264,10 @@ impl StopsApp {
             if window.is_window_active() {
                 this.refresh_preflight(cx);
                 this.refresh_trip(cx);
-                // Re-arm the watch when the map was still following.
+                // Re-arm the watch when the map was still following. Kotlin
+                // stops it in onPause whether or not this window saw the
+                // deactivation, so ask again (the call is idempotent).
+                this.map.watching = false;
                 this.sync_follow(false, cx);
             } else {
                 this.pause_follow(cx);

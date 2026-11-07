@@ -6,7 +6,9 @@
 
 use gpui::Context;
 use rovsti_android::events::{RawEvent, kind};
+use rovsti_core::contact_intake::Intake;
 use rovsti_core::{
+    contact_csv, contact_dates,
     contact_edit::ContactDraft,
     contact_photo::{self, CropView},
     contact_scan::{self, Scanned},
@@ -17,6 +19,7 @@ use rovsti_core::{
 use crate::{
     ContactsApp, backend,
     confirm::Confirm,
+    intake,
     trash::{self, ScanRoute},
 };
 
@@ -29,9 +32,58 @@ pub(crate) fn export_words(count: usize) -> String {
     }
 }
 
+/// The file formats of "Contacts file" in Settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExportFormat {
+    Vcf,
+    Csv,
+}
+
+/// One export row of Settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ExportRow {
+    pub(crate) id: &'static str,
+    pub(crate) label: &'static str,
+    pub(crate) format: ExportFormat,
+}
+
+/// The export rows, in the order Settings shows them.
+pub(crate) fn export_rows() -> [ExportRow; 2] {
+    [
+        ExportRow {
+            id: "export-vcf",
+            label: "Export to a .vcf file",
+            format: ExportFormat::Vcf,
+        },
+        ExportRow {
+            id: "export-csv",
+            label: "Export to a CSV file",
+            format: ExportFormat::Csv,
+        },
+    ]
+}
+
+/// The pill after a "save as" answer for an export. `None` for any other
+/// operation. Inner `None`: say nothing (the picker was cancelled).
+pub(crate) fn document_op_notice(
+    op: &DocumentOp,
+    ok: bool,
+    has_error: bool,
+    count: Option<usize>,
+) -> Option<Option<String>> {
+    if !matches!(op, DocumentOp::ExportContacts | DocumentOp::ExportCalls) {
+        return None;
+    }
+    Some(match (ok, has_error, count) {
+        (true, _, Some(count)) => Some(export_words(count)),
+        (false, true, _) => Some("Can't save the file.".to_owned()),
+        _ => None,
+    })
+}
+
 impl ContactsApp {
-    /// Reads every contact and offers it as `contacts.vcf`.
-    pub(crate) fn export_contacts(&mut self, cx: &mut Context<Self>) {
+    /// Reads every contact and offers it in `format`.
+    pub(crate) fn export_as(&mut self, format: ExportFormat, cx: &mut Context<Self>) {
         if self.transfer_busy {
             self.say_busy(cx);
             return;
@@ -43,16 +95,29 @@ impl ContactsApp {
             .as_ref()
             .map(|p| p.ids.clone())
             .unwrap_or_default();
+        let today = contact_dates::local_ymd(crate::whatsapp::now_ms(), self.wa.offset_s);
         cx.notify();
         cx.spawn(async move |this, cx| {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let (text, count) = backend::export_text(&hidden)?;
-                    if count == 0 {
-                        return Ok(0);
+                    match format {
+                        ExportFormat::Vcf => {
+                            let (text, count) = backend::export_text(&hidden)?;
+                            if count == 0 {
+                                return Ok(0);
+                            }
+                            backend::start_export(&text).map(|()| count)
+                        }
+                        ExportFormat::Csv => {
+                            let (text, count) = backend::csv_text(&hidden)?;
+                            if count == 0 {
+                                return Ok(0);
+                            }
+                            let name = contact_csv::file_name(count, today);
+                            backend::start_export_csv(&name, &text).map(|()| count)
+                        }
                     }
-                    backend::start_export(&text).map(|()| count)
                 })
                 .await;
             this.update(cx, |this, cx| {
@@ -204,15 +269,13 @@ impl ContactsApp {
             }
         };
         match result.op {
-            DocumentOp::ExportContacts => {
+            ref op @ (DocumentOp::ExportContacts | DocumentOp::ExportCalls) => {
                 self.transfer_busy = false;
                 let count = self.exported.take();
                 // A cancelled picker answers `ok: false` with no error: say nothing.
-                self.notice = match (result.ok, result.error, count) {
-                    (true, _, Some(count)) => Some(export_words(count).into()),
-                    (false, Some(_), _) => Some("Can't save the file.".into()),
-                    _ => None,
-                };
+                self.notice = document_op_notice(op, result.ok, result.error.is_some(), count)
+                    .flatten()
+                    .map(Into::into);
                 cx.notify();
             }
             DocumentOp::ImportContacts => {
@@ -371,16 +434,29 @@ impl ContactsApp {
         self.notice = Some("Reading the file…".into());
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let (plan, unreadable) = cx
+            let (plan, unreadable, single) = cx
                 .background_executor()
                 .spawn(async move {
                     let (cards, skipped) = backend::cards_of(&text);
-                    (import_plan::plan(&existing, cards), skipped)
+                    // One card with a picture opens the form, like a shared file.
+                    let intake = Intake::Cards(cards);
+                    let photo = intake::photo_path(&intake, &text);
+                    let Intake::Cards(cards) = intake else {
+                        unreachable!("built above");
+                    };
+                    if photo.is_some() && skipped == 0 {
+                        return (import_plan::plan(&[], Vec::new()), 0, Some((cards, photo)));
+                    }
+                    (import_plan::plan(&existing, cards), skipped, None)
                 })
                 .await;
             this.update(cx, |this, cx| {
                 this.clear_notice();
                 this.transfer_busy = false;
+                if let Some((cards, photo)) = single {
+                    this.route_intake(Intake::Cards(cards), intake::Source::Shared, photo, cx);
+                    return;
+                }
                 this.confirm = Some(Confirm::Import {
                     cards: plan.add,
                     duplicates: plan.duplicates,
@@ -396,12 +472,53 @@ impl ContactsApp {
 
 #[cfg(test)]
 mod tests {
-    use super::export_words;
+    use super::*;
 
     #[test]
     fn export_words_by_count() {
         assert_eq!(export_words(0), "There are no contacts to export.");
         assert_eq!(export_words(1), "Saved 1 contact to the file.");
         assert_eq!(export_words(12), "Saved 12 contacts to the file.");
+    }
+
+    #[test]
+    fn settings_lists_both_exports() {
+        let rows = export_rows();
+        assert_eq!(rows[0].format, ExportFormat::Vcf);
+        assert_eq!(rows[0].label, "Export to a .vcf file");
+        assert_eq!(rows[1].format, ExportFormat::Csv);
+        assert_eq!(rows[1].label, "Export to a CSV file");
+        assert_ne!(rows[0].id, rows[1].id);
+    }
+
+    #[test]
+    fn export_calls_is_noticed_like_export_contacts() {
+        for (ok, error, count) in [
+            (true, false, Some(412)),
+            (true, false, None),
+            (false, true, Some(3)),
+            (false, false, None),
+        ] {
+            assert_eq!(
+                document_op_notice(&DocumentOp::ExportCalls, ok, error, count),
+                document_op_notice(&DocumentOp::ExportContacts, ok, error, count),
+            );
+        }
+        assert_eq!(
+            document_op_notice(&DocumentOp::ExportCalls, true, false, Some(412)),
+            Some(Some("Saved 412 contacts to the file.".to_owned()))
+        );
+        assert_eq!(
+            document_op_notice(&DocumentOp::ExportCalls, false, true, None),
+            Some(Some("Can't save the file.".to_owned()))
+        );
+        assert_eq!(
+            document_op_notice(&DocumentOp::ExportCalls, false, false, None),
+            Some(None)
+        );
+        assert_eq!(
+            document_op_notice(&DocumentOp::ImportContacts, true, false, Some(1)),
+            None
+        );
     }
 }

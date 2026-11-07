@@ -210,7 +210,6 @@ pub(crate) fn export_text(hidden: &[i64]) -> Result<(String, usize), String> {
 
 /// Every contact as a Google-style CSV, and how many that is. `hidden` are
 /// contacts in their Undo window: they are left out of the file.
-#[allow(dead_code)] // used by plan steps S5 and S6
 pub(crate) fn csv_text(hidden: &[i64]) -> Result<(String, usize), String> {
     let mut contacts = pull_full()?;
     contacts.retain(|c| c.id.is_none_or(|id| !hidden.contains(&id)));
@@ -244,7 +243,6 @@ pub(crate) fn frequent(contacts: &[WireContact], now_ms: i64) -> Result<Vec<Freq
 
 /// Cards of an opened file: a contacts CSV or vCard text, and how many cards
 /// were unusable.
-#[allow(dead_code)] // used by plan steps S5 and S6
 pub(crate) fn cards_of(text: &str) -> (Vec<ContactDraft>, usize) {
     let parsed = if contact_csv::looks_like_csv(None, "", text.as_bytes()) {
         contact_csv::parse(text)
@@ -255,7 +253,6 @@ pub(crate) fn cards_of(text: &str) -> (Vec<ContactDraft>, usize) {
 }
 
 /// The photo of a text holding exactly one vCard.
-#[allow(dead_code)] // used by plan steps S5 and S6
 pub(crate) fn single_photo(text: &str) -> Option<CardPhoto> {
     let mut photos = vcard::photos(text);
     if photos.len() == 1 {
@@ -398,7 +395,6 @@ pub(crate) fn start_export_named(name: &str, text: &str) -> Result<(), String> {
 
 /// Opens "save as" for a `.csv` under the suggested `name`. The answer is a
 /// `document_result` with op `export_calls`.
-#[allow(dead_code)] // used by plan steps S5 and S6
 pub(crate) fn start_export_csv(name: &str, csv: &str) -> Result<(), String> {
     done(documents::export_calls(name, csv))
 }
@@ -742,11 +738,11 @@ pub(crate) fn can_pin() -> bool {
 
 /// What a shared or opened file holds. Android copies the `content://` uri into
 /// the cache first; desktop reads a plain path.
-pub(crate) fn shared_file(uri: &str) -> Result<Intake, String> {
+pub(crate) fn shared_file(uri: &str) -> Result<(Intake, Option<String>), String> {
     let max = contact_intake::MAX_SHARED_BYTES;
     let (path, cached) = match documents::copy_shared(uri, max) {
-        Ok(path) if path == "too-big" => return Ok(Intake::TooBig),
-        Ok(path) if path.is_empty() => return Ok(Intake::Unreadable),
+        Ok(path) if path == "too-big" => return Ok((Intake::TooBig, None)),
+        Ok(path) if path.is_empty() => return Ok((Intake::Unreadable, None)),
         Ok(path) => (PathBuf::from(path), true),
         Err(Error::Unsupported) => (
             PathBuf::from(uri.strip_prefix("file://").unwrap_or(uri)),
@@ -759,13 +755,16 @@ pub(crate) fn shared_file(uri: &str) -> Result<Intake, String> {
         let _ = std::fs::remove_file(&path);
     }
     let Ok(bytes) = read else {
-        return Ok(Intake::Unreadable);
+        return Ok((Intake::Unreadable, None));
     };
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or_default();
-    Ok(contact_intake::from_file(None, name, &bytes))
+    let intake = contact_intake::from_file(None, name, &bytes);
+    let photo =
+        contact_intake::decode(&bytes).and_then(|text| crate::intake::photo_path(&intake, &text));
+    Ok((intake, photo))
 }
 
 /// Counts over the whole address book.
@@ -806,7 +805,8 @@ mod tests {
             "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ayse Yilmaz\r\nN:Yilmaz;Ayse;;;\r\nTEL:+905321112233\r\nEND:VCARD\r\n",
         )
         .expect("writes");
-        let intake = shared_file(path.to_str().expect("utf8")).expect("reads");
+        let (intake, photo) = shared_file(path.to_str().expect("utf8")).expect("reads");
+        assert_eq!(photo, None);
         let Intake::Cards(cards) = intake else {
             panic!("expected cards, got {intake:?}");
         };
@@ -814,7 +814,7 @@ mod tests {
         let missing = dir.join("none.vcf");
         assert_eq!(
             shared_file(missing.to_str().expect("utf8")).expect("ok"),
-            Intake::Unreadable
+            (Intake::Unreadable, None)
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -298,7 +298,7 @@ struct ContactsApp {
     /// Open this contact once the next pull lands (after a save).
     pending_open: Option<i64>,
     /// A shared file read before the book loaded, and how many extra files it came with.
-    pending_intake: Option<(rovsti_core::contact_intake::Intake, usize)>,
+    pending_intake: Option<(rovsti_core::contact_intake::Intake, usize, Option<String>)>,
     /// The calling code most numbers in the book start with.
     home_cc: Option<String>,
     /// The field sheet shows the "Copy as" list.
@@ -408,6 +408,21 @@ struct ContactsApp {
 }
 
 impl ContactsApp {
+    /// One export row of Settings, "Contacts file".
+    fn export_row(
+        &self,
+        theme: Theme,
+        row: transfer::ExportRow,
+        icon: Icon,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let format = row.format;
+        tap_row(theme, row.id, Some(icon), row.label, Tone::Accent)
+            .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
+            .on_click(cx.listener(move |this, _, _, cx| this.export_as(format, cx)))
+            .into_any_element()
+    }
+
     fn new(
         shares: futures::channel::mpsc::UnboundedReceiver<intake::Incoming>,
         window: &mut Window,
@@ -1857,22 +1872,26 @@ impl ContactsApp {
                 theme,
                 Some("Contacts file".into()),
                 [
-                    tap_row(
+                    self.export_row(theme, transfer::export_rows()[0], Icon::LucideUpload, cx),
+                    self.export_row(
                         theme,
-                        "export-vcf",
-                        Some(Icon::LucideUpload),
-                        "Export to a .vcf file",
-                        Tone::Accent,
-                    )
-                    .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
-                    .on_click(cx.listener(|this, _, _, cx| this.export_contacts(cx)))
-                    .into_any_element(),
+                        transfer::export_rows()[1],
+                        Icon::LucideStickyNote,
+                        cx,
+                    ),
                     tap_row(
                         theme,
                         "import-vcf",
                         Some(Icon::LucideDownload),
-                        "Import from a .vcf file",
+                        "Import from a file",
                         Tone::Accent,
+                    )
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(typography::FOOTNOTE.size)
+                            .text_color(colors.secondary_label)
+                            .child(".vcf or .csv"),
                     )
                     .opacity(if self.transfer_busy { 0.4 } else { 1.0 })
                     .on_click(cx.listener(|this, _, _, cx| this.import_contacts(cx)))

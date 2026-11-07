@@ -315,6 +315,21 @@ pub(crate) fn first_email(draft: Option<&ContactDraft>) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The vCard of one contact, with its photo when it has one. Blocks.
+fn card_vcard(draft: &ContactDraft, photo_uri: Option<&str>) -> String {
+    let photo = photo_uri.and_then(backend::card_photo);
+    vcard::write_one(draft, photo.as_ref())
+}
+
+/// The pill after "Copy as vCard".
+pub(crate) fn copied_vcard_words(with_photo: bool) -> &'static str {
+    if with_photo {
+        "vCard copied (with photo)"
+    } else {
+        contact_select::copied_vcard_notice()
+    }
+}
+
 impl ContactsApp {
     /// Closes the field sheet without animation (the card is going away).
     pub(crate) fn close_field_sheet_now(&mut self) {
@@ -389,10 +404,25 @@ impl ContactsApp {
                 };
                 let today = contact_dates::local_ymd(crate::whatsapp::now_ms(), self.wa.offset_s);
                 let name = vcard::export_name(std::slice::from_ref(&draft), today);
-                let outcome = backend::share_vcf(&name, &vcard::write(&[draft]));
-                if let Err(words) = outcome {
-                    self.notice = Some(format!("Can't share the contact file: {words}.").into());
-                }
+                let photo_uri = self.open_photo_uri();
+                self.notice = Some("Preparing the contact file…".into());
+                cx.spawn(async move |this, cx| {
+                    let outcome = cx
+                        .background_executor()
+                        .spawn(async move {
+                            let text = card_vcard(&draft, photo_uri.as_deref());
+                            backend::share_vcf(&name, &text)
+                        })
+                        .await;
+                    this.update(cx, |this, cx| {
+                        this.notice = outcome
+                            .err()
+                            .map(|words| format!("Can't share the contact file: {words}.").into());
+                        cx.notify();
+                    })
+                    .ok();
+                })
+                .detach();
                 cx.notify();
             }
             ShareChoice::SaveFile => self.save_card_file(cx),
@@ -403,23 +433,37 @@ impl ContactsApp {
                     cx.notify();
                     return;
                 };
-                let (payload, done) = if choice == ShareChoice::CopyText {
-                    (
-                        contact_select::full_text(&draft),
-                        contact_select::copied_contact_notice(),
-                    )
-                } else {
-                    (
-                        vcard::write(&[draft]),
-                        contact_select::copied_vcard_notice(),
-                    )
-                };
+                if choice == ShareChoice::CopyVcard {
+                    let photo_uri = self.open_photo_uri();
+                    cx.spawn(async move |this, cx| {
+                        let (payload, with_photo) = cx
+                            .background_executor()
+                            .spawn(async move {
+                                let photo = photo_uri.as_deref().and_then(backend::card_photo);
+                                (vcard::write_one(&draft, photo.as_ref()), photo.is_some())
+                            })
+                            .await;
+                        this.update(cx, |this, cx| {
+                            this.act(
+                                "copy the contact",
+                                move || rovsti_android::telecom::copy_text(&payload),
+                                cx,
+                            );
+                            this.notice = Some(copied_vcard_words(with_photo).into());
+                            cx.notify();
+                        })
+                        .ok();
+                    })
+                    .detach();
+                    return;
+                }
+                let payload = contact_select::full_text(&draft);
                 self.act(
                     "copy the contact",
                     move || rovsti_android::telecom::copy_text(&payload),
                     cx,
                 );
-                self.notice = Some(done.into());
+                self.notice = Some(contact_select::copied_contact_notice().into());
                 cx.notify();
             }
             ShareChoice::Qr => self.open_qr(cx),
@@ -431,6 +475,12 @@ impl ContactsApp {
                 cx.notify();
             }
         }
+    }
+
+    /// The photo link of the open contact, if it has a photo.
+    fn open_photo_uri(&self) -> Option<String> {
+        let id = self.open.as_ref()?.id;
+        self.photo_uri_of(id).map(str::to_owned)
     }
 
     /// "Save to file": the system "save as" for this one contact. The answer
@@ -449,13 +499,30 @@ impl ContactsApp {
         }
         let today = contact_dates::local_ymd(crate::whatsapp::now_ms(), self.wa.offset_s);
         let name = vcard::export_name(std::slice::from_ref(&draft), today);
-        match backend::start_export_named(&name, &vcard::write(&[draft])) {
-            Ok(()) => {
-                self.transfer_busy = true;
-                self.exported = Some(1);
-            }
-            Err(words) => self.notice = Some(format!("Can't save the file: {words}.").into()),
-        }
+        let photo_uri = self.open_photo_uri();
+        self.transfer_busy = true;
+        self.notice = Some("Preparing the file…".into());
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let text = card_vcard(&draft, photo_uri.as_deref());
+                    backend::start_export_named(&name, &text)
+                })
+                .await;
+            this.update(cx, |this, cx| {
+                match result {
+                    Ok(()) => this.exported = Some(1),
+                    Err(words) => {
+                        this.transfer_busy = false;
+                        this.notice = Some(format!("Can't save the file: {words}.").into());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
         cx.notify();
     }
 
@@ -1656,6 +1723,12 @@ mod tests {
                 .collect(),
             ..ContactDraft::default()
         }
+    }
+
+    #[test]
+    fn copied_vcard_pill_mentions_the_photo() {
+        assert_eq!(copied_vcard_words(true), "vCard copied (with photo)");
+        assert_eq!(copied_vcard_words(false), "vCard copied");
     }
 
     #[test]

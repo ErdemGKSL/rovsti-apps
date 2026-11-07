@@ -102,6 +102,23 @@ pub fn chip_label(filter: InboxFilter, count: usize) -> String {
     }
 }
 
+/// Largest count shown as is; above it the chip reads "999+".
+pub const COUNT_CAP: usize = 999;
+
+/// Chip text split for display: the label and, when there is a number worth
+/// showing, the count for a small badge ("999+" above [`COUNT_CAP`]). All and
+/// zero counts have no badge. [`chip_label`] stays the accessibility text.
+pub fn chip_parts(filter: InboxFilter, count: usize) -> (&'static str, Option<String>) {
+    let badge = if filter == InboxFilter::All || count == 0 {
+        None
+    } else if count > COUNT_CAP {
+        Some(format!("{COUNT_CAP}+"))
+    } else {
+        Some(count.to_string())
+    };
+    (filter.label(), badge)
+}
+
 /// Text shown when `filter` matches no rows.
 pub fn empty_text(filter: InboxFilter) -> &'static str {
     match filter {
@@ -232,5 +249,23 @@ mod tests {
         assert_eq!(empty_text(InboxFilter::WhatsApp), "No WhatsApp chats");
         assert_eq!(empty_text(InboxFilter::Sms), "No SMS conversations");
         assert_eq!(empty_text(InboxFilter::Groups), "No group chats");
+    }
+
+    #[test]
+    fn chip_parts_split_label_and_count() {
+        assert_eq!(chip_parts(InboxFilter::All, 12), ("All", None));
+        assert_eq!(chip_parts(InboxFilter::Unread, 0), ("Unread", None));
+        assert_eq!(
+            chip_parts(InboxFilter::Sms, 277),
+            ("SMS", Some("277".to_string()))
+        );
+        assert_eq!(
+            chip_parts(InboxFilter::Groups, 999),
+            ("Groups", Some("999".to_string()))
+        );
+        assert_eq!(
+            chip_parts(InboxFilter::WhatsApp, 1000),
+            ("WhatsApp", Some("999+".to_string()))
+        );
     }
 }

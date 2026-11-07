@@ -14,7 +14,9 @@ use liquid_glass_kit::tokens::{Theme, typography};
 
 use super::{PHONE, Rig, ShotSpec, isolate_data_dir};
 use crate::{
-    Icon, components,
+    Icon,
+    chips::{ChipSpec, filter_chip_row},
+    components,
     layout::{self, MARGIN, geom, space},
     page::{HeaderAction, PageHeader, empty_state, section_header},
     row::{BadgeTone, Inset, ListRow, SourceKind, StackItem, avatar_stack, with_source_badges},
@@ -39,6 +41,20 @@ impl Render for Gallery {
                     .action(HeaderAction::new("g-new", Icon::LucidePlus, "New chat").badge(true))
                     .render(window, theme),
             )
+            .child(filter_chip_row(
+                "g-chips",
+                theme,
+                &[
+                    ChipSpec::new("All", None),
+                    ChipSpec::new("Unread", Some("12".into())),
+                    ChipSpec::new("WhatsApp", Some("230".into())),
+                    ChipSpec::new("SMS", Some("277".into())),
+                    ChipSpec::new("Groups", Some("999+".into())),
+                    ChipSpec::new("Archived", Some("4".into())),
+                ],
+                1,
+                |_, _, _| {},
+            ))
             .child(section_header(theme, "Recent"))
             .child(
                 ListRow::new("Ayşe Yılmaz")

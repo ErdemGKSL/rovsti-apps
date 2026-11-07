@@ -46,6 +46,12 @@
       "variables": {
         "min_sdk": "34",
         "target_sdk": "36"
+      },
+      "signing": {
+        "keystore": "/home/erdem/.config/rovsti/rovsti-release.jks",
+        "key-alias": "rovsti",
+        "store-password-env": "ANDROID_STORE_PASSWORD",
+        "key-password-env": "ANDROID_KEY_PASSWORD"
       }
     },
     "desktop": {

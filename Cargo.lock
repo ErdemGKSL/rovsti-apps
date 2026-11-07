@@ -6240,9 +6240,12 @@ dependencies = [
 name = "rovsti_ui"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "gpui",
  "gpui_android",
  "gpui_icons",
+ "gpui_wgpu",
+ "image",
  "liquid_glass_kit",
  "log",
  "rovsti_core",

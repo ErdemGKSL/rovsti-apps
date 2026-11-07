@@ -12,6 +12,8 @@ pub mod motion;
 pub mod notice_pill;
 pub mod perf;
 pub mod sheet;
+#[cfg(feature = "shots")]
+pub mod shots;
 pub mod storage;
 pub mod tab_bar;
 pub mod theme;

@@ -14,6 +14,9 @@ log.workspace = true
 rovsti_core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+anyhow = { workspace = true, optional = true }
+gpui_wgpu = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 gpui_android.workspace = true
@@ -21,6 +24,8 @@ gpui_android.workspace = true
 [features]
 # Frame diagnostics and the RovstiPerf recorder (story 12.1). Off in release.
 perf = []
+# Headless screenshot rig (desktop tests only, never enabled on Android).
+shots = ["gpui/test-support", "dep:anyhow", "dep:gpui_wgpu", "dep:image"]
 
 [lints]
 workspace = true

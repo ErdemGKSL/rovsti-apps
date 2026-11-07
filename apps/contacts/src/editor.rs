@@ -561,7 +561,7 @@ impl ContactsApp {
         .detach();
     }
 
-    /// "Remove photo": a saved contact loses it at once, a new one drops the
+    /// "Remove photo": a saved contact asks first, a new one drops the
     /// image it was holding.
     fn remove_photo(&mut self, cx: &mut Context<Self>) {
         self.photo_sheet.close();
@@ -577,7 +577,19 @@ impl ContactsApp {
             return;
         };
         match editor.id {
-            Some(id) => self.clear_photo(id, cx),
+            Some(id) => {
+                // A saved contact's photo is gone for good: ask first.
+                let name = editor.initial.display_name();
+                let name = if name.is_empty() {
+                    "This contact".to_owned()
+                } else {
+                    name
+                };
+                self.confirm = Some(crate::confirm::Confirm::RemovePhoto {
+                    id,
+                    name: name.into(),
+                });
+            }
             None => editor.pending_photo = None,
         }
         cx.notify();

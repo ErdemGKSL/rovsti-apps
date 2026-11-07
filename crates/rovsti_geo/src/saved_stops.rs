@@ -256,7 +256,34 @@ impl SavedStops {
             .filter(|s| q.is_empty() || fold(&s.name).contains(&q))
             .collect()
     }
+
+    /// The saved stop whose centre is closest to `here`, with that distance in
+    /// metres, if within `max_m`. Stops without a valid gate are skipped. Ties
+    /// go to a favourite, then to the earlier one.
+    pub fn nearest(&self, here: Coord, max_m: f64) -> Option<(&SavedStop, f64)> {
+        let mut best: Option<(&SavedStop, f64)> = None;
+        for stop in &self.stops {
+            if stop.diameter().is_err() {
+                continue;
+            }
+            let d = here.distance_m(stop.center());
+            if !d.is_finite() || d > max_m {
+                continue;
+            }
+            let better = match best {
+                None => true,
+                Some((b, bd)) => d < bd || (d == bd && stop.favourite && !b.favourite),
+            };
+            if better {
+                best = Some((stop, d));
+            }
+        }
+        best
+    }
 }
+
+/// Nearest-stop chip shows only within this distance, metres.
+pub const NEAREST_CHIP_M: f64 = 2_000.0;
 
 /// Order of the Saved list.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -774,5 +801,70 @@ mod tests {
         let near = list_text(&v, Some(here));
         assert!(near.contains(&format!("{c0} (0 m away)")));
         assert!(near.lines().nth(3).unwrap().ends_with(" km away)"));
+    }
+
+    #[test]
+    fn nearest_empty_and_out_of_range() {
+        let mut s = SavedStops::default();
+        let here = Coord::new(41.0, 29.0);
+        assert!(s.nearest(here, NEAREST_CHIP_M).is_none());
+        let (a, b) = gate(0.1);
+        s.add("Far", a, b, 1).unwrap();
+        assert!(s.nearest(here, NEAREST_CHIP_M).is_none());
+    }
+
+    #[test]
+    fn nearest_picks_closest() {
+        let mut s = SavedStops::default();
+        let (a, b) = gate(0.01);
+        s.add("Mid", a, b, 1).unwrap();
+        let (a, b) = gate(0.002);
+        let near = s.add("Near", a, b, 2).unwrap();
+        let (a, b) = gate(0.005);
+        s.add("Other", a, b, 3).unwrap();
+        let (stop, d) = s.nearest(Coord::new(41.0, 29.0), NEAREST_CHIP_M).unwrap();
+        assert_eq!(stop.id, near);
+        assert!(d > 200.0 && d < 400.0, "{d}");
+    }
+
+    #[test]
+    fn nearest_tie_goes_to_favourite_then_earlier() {
+        let mut s = SavedStops::default();
+        let (a, b) = gate(0.002);
+        let first = s.add("First", a.clone(), b.clone(), 1).unwrap();
+        let second = s.add(
+            "Second",
+            ep("A2", a.coord.lat, 29.0),
+            ep("B2", b.coord.lat, 29.0),
+            2,
+        );
+        // Same gate is a duplicate, so build the tie by hand.
+        assert!(second.is_err());
+        let mut twin = s.get(first).unwrap().clone();
+        twin.id = 2;
+        twin.name = "Twin".into();
+        s.stops.push(twin);
+        let here = Coord::new(41.0, 29.0);
+        assert_eq!(s.nearest(here, NEAREST_CHIP_M).unwrap().0.id, first);
+        s.toggle_favourite(2);
+        assert_eq!(s.nearest(here, NEAREST_CHIP_M).unwrap().0.id, 2);
+    }
+
+    #[test]
+    fn nearest_skips_invalid_gate() {
+        let mut s = SavedStops::default();
+        s.stops.push(SavedStop {
+            id: 1,
+            name: "Broken".into(),
+            a: pa(),
+            b: pa(),
+            created_ms: 0,
+            favourite: true,
+        });
+        assert!(s.nearest(Coord::new(41.0, 29.0), NEAREST_CHIP_M).is_none());
+        let (a, b) = gate(0.01);
+        let ok = s.add("Ok", a, b, 1).unwrap();
+        let (stop, _) = s.nearest(Coord::new(41.0, 29.0), NEAREST_CHIP_M).unwrap();
+        assert_eq!(stop.id, ok);
     }
 }

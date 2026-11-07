@@ -175,6 +175,31 @@ impl Default for StopsPrefs {
 }
 
 impl StopsPrefs {
+    /// True when every alarm setting equals its default.
+    pub fn alarm_is_default(&self) -> bool {
+        let d = Self::default();
+        self.sound == d.sound
+            && self.vibrate == d.vibrate
+            && self.snooze_min == d.snooze_min
+            && self.vibration == d.vibration
+            && self.volume_pct == d.volume_pct
+            && self.alarm_sound == d.alarm_sound
+    }
+
+    /// A copy with only the alarm settings reset to their defaults.
+    pub fn with_alarm_defaults(&self) -> StopsPrefs {
+        let d = Self::default();
+        StopsPrefs {
+            sound: d.sound,
+            vibrate: d.vibrate,
+            snooze_min: d.snooze_min,
+            vibration: d.vibration,
+            volume_pct: d.volume_pct,
+            alarm_sound: d.alarm_sound,
+            ..self.clone()
+        }
+    }
+
     /// The chosen tile server; a missing or invalid stored value is the default.
     pub fn tile_source(&self) -> TileSource {
         self.tile_url
@@ -470,5 +495,38 @@ mod tests {
         assert_eq!(p.next_tile_cache(), 128);
         let old: StopsPrefs = serde_json::from_str(r#"{"sound":false}"#).unwrap();
         assert_eq!(old.tile_cache_mb, 128);
+    }
+
+    #[test]
+    fn alarm_is_default_tracks_changes() {
+        let mut p = StopsPrefs::default();
+        assert!(p.alarm_is_default());
+        p.snooze_min = 10;
+        assert!(!p.alarm_is_default());
+    }
+
+    #[test]
+    fn with_alarm_defaults_resets_only_alarm_fields() {
+        let p = StopsPrefs {
+            sound: false,
+            vibrate: true,
+            snooze_min: 15,
+            notice: Some(NoticePrefs::default()),
+            tile_url: Some("https://t.example/{z}/{x}/{y}.pbf".into()),
+            appearance: Appearance::Dark,
+            vibration: VibrationPattern::Long,
+            volume_pct: 100,
+            alarm_sound: Some(AlarmSound {
+                uri: "content://x".into(),
+                title: "X".into(),
+            }),
+            tile_cache_mb: 512,
+        };
+        let r = p.with_alarm_defaults();
+        assert!(r.alarm_is_default());
+        assert_eq!(r.appearance, Appearance::Dark);
+        assert_eq!(r.tile_cache_mb, 512);
+        assert_eq!(r.tile_url, p.tile_url);
+        assert_eq!(r.notice, p.notice);
     }
 }

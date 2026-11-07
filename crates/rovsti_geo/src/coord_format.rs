@@ -405,6 +405,20 @@ pub fn cardinal(deg: f64) -> &'static str {
     POINTS[(((d + 22.5) / 45.0) as usize) % 8]
 }
 
+/// "1.2 km from you, NE": distance and compass point of `to` seen from `here`.
+/// Under 10 m it is "You are here".
+pub fn from_you_text(here: Coord, to: Coord) -> String {
+    let d = here.distance_m(to);
+    if d < 10.0 {
+        return "You are here".to_string();
+    }
+    format!(
+        "{} from you, {}",
+        crate::session::format_distance(d),
+        cardinal(here.bearing_deg(to))
+    )
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -649,5 +663,22 @@ mod tests {
         assert_eq!(cardinal(359.9), "N");
         assert_eq!(cardinal(-90.0), "W");
         assert_eq!(cardinal(f64::NAN), "N");
+    }
+
+    #[test]
+    fn from_you_text_cases() {
+        let here = Coord::new(41.0, 29.0);
+        assert_eq!(
+            from_you_text(here, Coord::new(41.007631, 29.010111)),
+            "1.2 km from you, NE"
+        );
+        assert_eq!(
+            from_you_text(here, Coord::new(41.00005, 29.0)),
+            "You are here"
+        );
+        assert_eq!(
+            from_you_text(here, Coord::new(40.995953, 29.0)),
+            "450 m from you, S"
+        );
     }
 }

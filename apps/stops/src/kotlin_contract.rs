@@ -214,3 +214,18 @@ fn idle_location_seam_is_in_kotlin() {
         "stops_location"
     );
 }
+
+#[test]
+fn share_provider_is_declared_like_the_phone_app() {
+    for token in [
+        "dev.rovsti.bridge.RovstiShareProvider",
+        "${applicationId}.rovstishare",
+        "android:exported=\"false\"",
+        "android:grantUriPermissions=\"true\"",
+    ] {
+        assert!(MANIFEST.contains(token), "manifest lacks {token}");
+    }
+    let share =
+        include_str!("../../../crates/rovsti_android/kotlin/dev/rovsti/bridge/MediaShare.kt");
+    assert!(share.contains("\"${context.packageName}.rovstishare\""));
+}

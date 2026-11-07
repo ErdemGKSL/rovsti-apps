@@ -107,5 +107,11 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+        <!-- Images handed to the share sheet (cache/share only, read-only). -->
+        <provider
+            android:name="dev.rovsti.bridge.RovstiShareProvider"
+            android:authorities="${applicationId}.rovstishare"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

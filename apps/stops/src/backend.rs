@@ -479,6 +479,114 @@ pub fn simulate_tick(dir: &Path) -> Option<String> {
     Some(crate::headless::handle("trip_fix", &request.to_string()))
 }
 
+// ---- files and the share sheet ---------------------------------------------------------
+
+/// Biggest places file the importer accepts, bytes.
+#[allow(dead_code)] // used by the places import UI in a later step
+pub const IMPORT_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+/// What the notice line says after "Can't ...: " when an Android call fails.
+fn android_words(error: &AndroidError) -> String {
+    match error {
+        AndroidError::Unsupported => "this needs an Android phone".to_owned(),
+        other => {
+            log::warn!("android call failed: {other}");
+            "something went wrong".to_owned()
+        }
+    }
+}
+
+fn done(result: rovsti_android::Result<bool>) -> Result<(), String> {
+    match result {
+        Ok(true) => Ok(()),
+        Ok(false) => Err("Android refused".to_owned()),
+        Err(error) => Err(android_words(&error)),
+    }
+}
+
+/// A file name that is safe on every file system.
+fn safe_name(name: &str) -> String {
+    let clean: String = name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let clean = clean.trim_matches(['_', '.']);
+    if clean.is_empty() {
+        "stops".to_owned()
+    } else {
+        clean.chars().take(60).collect()
+    }
+}
+
+fn write_temp(name: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
+    let words = || "the temporary file can't be written".to_owned();
+    let dir = std::env::temp_dir().join("rovsti-stops");
+    std::fs::create_dir_all(&dir).map_err(|_| words())?;
+    let path = dir.join(safe_name(name));
+    std::fs::write(&path, bytes).map_err(|_| words())?;
+    Ok(path)
+}
+
+/// Saves `bytes` (a PNG) to the gallery as `name`.
+#[allow(dead_code)] // used by the share-as-QR UI in a later step
+pub fn save_png(name: &str, bytes: &[u8]) -> Result<(), String> {
+    let path = write_temp(name, bytes)?;
+    done(rovsti_android::media::save_image_to_gallery(
+        &path.to_string_lossy(),
+        name,
+        "image/png",
+    ))
+}
+
+/// Opens the share sheet with `bytes` as a PNG file called `name`.
+#[allow(dead_code)] // used by the share-as-QR UI in a later step
+pub fn share_png(name: &str, bytes: &[u8]) -> Result<(), String> {
+    let stem = name.strip_suffix(".png").unwrap_or(name);
+    let file = format!("{}.png", safe_name(stem));
+    let path = write_temp(&file, bytes)?;
+    done(rovsti_android::media::share_image(
+        &path.to_string_lossy(),
+        "image/png",
+        &file,
+    ))
+}
+
+/// Hands `text` to the system save dialog as the file `name` of type `mime`.
+/// The answer is a `document_result` with op `ExportMessages`.
+#[allow(dead_code)] // used by the places export UI in a later step
+pub fn export_text(name: &str, mime: &str, text: &str) -> Result<(), String> {
+    let file = safe_name(name);
+    let path = write_temp(&file, text.as_bytes())?;
+    done(rovsti_android::documents::export_file(
+        &file,
+        mime,
+        &path.to_string_lossy(),
+    ))
+}
+
+/// Opens the system file picker for a places file (up to 2 MB). The answer is
+/// a `document_result` with op `ImportMessages` and the cache copy in `path`.
+#[allow(dead_code)] // used by the places import UI in a later step
+pub fn pick_import() -> Result<(), String> {
+    done(rovsti_android::documents::import_file(IMPORT_MAX_BYTES))
+}
+
+/// Reads the picked file at `path`, then deletes the cache copy.
+#[allow(dead_code)] // used by the places import UI in a later step
+pub fn read_import(path: &str) -> Result<String, String> {
+    let text = std::fs::read_to_string(path).map_err(|_| "that file can't be read".to_owned());
+    if let Err(error) = std::fs::remove_file(path) {
+        log::debug!("could not remove the import copy: {error}");
+    }
+    text
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -749,6 +857,32 @@ mod tests {
         assert!(out.ring);
         assert_eq!(out.state, TripState::Arrived);
         assert_eq!(out.side, Some(Side::Right));
+    }
+
+    #[test]
+    fn android_wrappers_are_unsupported_on_desktop() {
+        assert!(save_png("qr.png", &[1]).is_err());
+        assert!(share_png("qr", &[1]).is_err());
+        assert!(export_text("places.gpx", "application/gpx+xml", "<gpx/>").is_err());
+        assert_eq!(pick_import(), Err("this needs an Android phone".to_owned()));
+    }
+
+    #[test]
+    fn read_import_reads_and_removes_the_copy() {
+        let dir = tmp("backend-import");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("places.json");
+        std::fs::write(&file, "{\"a\":1}").unwrap();
+        let path = file.to_string_lossy().into_owned();
+        assert_eq!(read_import(&path).unwrap(), "{\"a\":1}");
+        assert!(!file.exists());
+        assert!(read_import(&path).is_err());
+    }
+
+    #[test]
+    fn safe_names_drop_separators() {
+        assert_eq!(safe_name("a/b c.gpx"), "a_b_c.gpx");
+        assert_eq!(safe_name("///"), "stops");
     }
 
     #[test]

@@ -473,10 +473,30 @@ impl StopsApp {
                 Ok(result) if result.op == DocumentOp::ImportGtfs => {
                     self.on_feed_picked(&result, cx);
                 }
+                Ok(result) if result.op == DocumentOp::ExportMessages => {
+                    let text = if result.ok {
+                        "Saved stops exported"
+                    } else {
+                        "Can't export: the file was not saved"
+                    };
+                    self.show_pill(text, None, cx);
+                }
+                Ok(result) if result.op == DocumentOp::ImportMessages => {
+                    self.on_places_picked(&result, cx);
+                }
                 Ok(_) => {}
                 Err(error) => log::warn!("bad document_result: {error}"),
             },
             _ => {}
+        }
+    }
+
+    /// The `document_result` of the places picker. The import itself comes in
+    /// a later step: for now the pick is logged.
+    fn on_places_picked(&mut self, result: &DocumentResult, _cx: &mut Context<Self>) {
+        match result.path.as_deref().filter(|_| result.ok) {
+            Some(path) => log::info!("places file picked: {path}"),
+            None => log::debug!("places pick cancelled or refused"),
         }
     }
 

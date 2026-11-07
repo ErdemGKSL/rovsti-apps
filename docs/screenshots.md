@@ -42,6 +42,20 @@ cargo clippy -p rovsti_phone -p rovsti_messages -p rovsti_contacts -p rovsti_sto
 at a time if your cargo version rejects the combined form:
 `cargo clippy -p rovsti_phone --features shots --all-targets -- -D warnings`.)
 
+## Text-field gallery
+
+`01-fields-{dark,light}.png` shows one field per state, numbered by the captions:
+1 placeholder, 2 focused empty, 3 short text, 4 caret mid-text with insertion handle,
+5 selected word with handles, 6 edit menu open, 7 long Turkish URL scrolled to the caret
+(no ellipsis), 8 unfocused long text (end ellipsis), 9 composing text (underlined),
+10 multiline 3 lines, 11 secret (Password mode, masked), 12 phone purpose, 13 empty
+with the Paste-only menu. `02-field-touch-*` covers the touch states. To add a state,
+append to `STATES` in `crates/rovsti_ui/src/shots/fields.rs` and raise the array length.
+
+The caret blinks (530 ms on/off) on a device. The shots must be stable, so the rig calls
+`rovsti_ui::field::set_blink(false)` (the caret stays solid). Do the same in any new
+harness or test that captures a focused field.
+
 ## Output
 
 Files go to `target/shots/<app>/` (or `$CARGO_TARGET_DIR/shots/<app>/`):

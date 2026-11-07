@@ -22,10 +22,19 @@ against `cc05989`, and its shader validation still passes on this rev.
 
 ## Layers
 
+Text input: every text box in every app is `rovsti_ui::field::TextField`, drawn on top of
+`rovsti_core::text_edit::EditBuffer`. The buffer owns text, selection and composing range
+and has no GPUI types, so the logic is tested on the desktop. The old per-app copies
+(`apps/contacts/src/field.rs`, `apps/phone/src/field.rs`) are gone; add new inputs with
+`TextField::new`, `with_input` or `multiline`, never a second `EntityInputHandler`.
+
 ```
 apps/{phone,messages,contacts,stops}  GPUI views, one window per app
         │
-crates/rovsti_ui                   glass components, tab bar, theme, data dirs
+crates/rovsti_ui                   glass components, tab bar, theme, data dirs, text field
+                                   (`rovsti_ui::field`, the only IME input handler)
+crates/rovsti_core::text_edit      pure edit model behind the field (selection, IME
+                                   composing range, graphemes, UTF-16 offsets; unit tested)
 crates/liquid_glass_kit            glass material (WGSL), springs, tokens
         │
 crates/rovsti_wa_ui                shared WhatsApp settings screen (two options)

@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import dev.rovsti.design.backdrop.Backdrop
+import dev.rovsti.design.backdrop.BackdropDebug
 import dev.rovsti.design.backdrop.catalog.utils.InteractiveHighlight
 import dev.rovsti.design.backdrop.drawBackdrop
 import dev.rovsti.design.backdrop.effects.blur
@@ -94,6 +95,8 @@ fun Modifier.iosGlass(
     interactive: Boolean = false,
     backdrop: Backdrop = IosTheme.backdrop,
     wash: Color = Color.Transparent,
+    /** Rovsti: names this call site in [BackdropDebug] records. */
+    debugTag: String? = null,
 ): Modifier {
     val colors = IosTheme.colors
     val isDark = colors.isDark
@@ -126,6 +129,7 @@ fun Modifier.iosGlass(
     val effectiveTintAlpha = (activeTint.alpha * tintOpacity).coerceIn(0f, 1f)
 
     if (!isRenderEffectSupported() || LocalGlassSettings.current.reduceTransparency) {
+        BackdropDebug.fallback(debugTag)
         if (style == IosGlassStyle.Prominent) {
             val prominent = if (tint.isSpecified) tint else colors.accent
             return clip(shape).background(prominent.copy(alpha = 0.82f)).background(wash)
@@ -141,6 +145,7 @@ fun Modifier.iosGlass(
 
     return this
         .drawBackdrop(
+            debugTag = debugTag,
             backdrop = backdrop,
             shape = { shape },
             effects = {

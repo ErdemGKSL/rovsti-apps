@@ -4,6 +4,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,13 +23,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
-import dev.rovsti.design.glass.GlassSource
-import dev.rovsti.design.glass.GlassSpec
-import dev.rovsti.design.glass.GlassTier
-import dev.rovsti.design.glass.LocalGlassConditions
-import dev.rovsti.design.glass.glass
-import dev.rovsti.design.glass.glassTier
-import dev.rovsti.design.glass.rememberGlassSource
+import dev.rovsti.design.glass.panelGlass
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.theme.RovstiTheme
@@ -69,28 +64,16 @@ internal fun rememberContextPanelState(
 /**
  * The glass card with the action rows. It has its final size from the first frame (the caller animates its layer from
  * outside), grabs keyboard focus-ability (arrows, Enter, Escape) and scrolls when taller than the room it was given.
- * The Flat glass is opaque: whatever is behind would read through it.
  */
 @Composable
 internal fun ContextPanelCard(
     items: ImmutableList<MenuItem>,
     panel: MenuPanelState,
-    source: GlassSource?,
     focus: FocusRequester,
     dismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = RovstiTheme.colors
-    val conditions = LocalGlassConditions.current
-    val tier = glassTier(conditions.copy(sourceAvailable = source != null))
-    val baseSpec = GlassSpec.popover(RovstiTheme.glass, colors, tier, MenuMetrics.CardRadius.value)
-    val spec =
-        when {
-            conditions.reduceTransparency -> baseSpec.copy(flatAlpha = 1f, fill = baseSpec.flatBase)
-            tier == GlassTier.Flat -> baseSpec.copy(flatAlpha = 1f)
-            else -> baseSpec
-        }
-    val glassSource = source ?: rememberGlassSource()
+    val panelShape = remember { RoundedCornerShape(MenuMetrics.CardRadius) }
     val scrollState = rememberScrollState()
     panel.scrollPx = { scrollState.value }
     Box(
@@ -118,7 +101,7 @@ internal fun ContextPanelCard(
                 translationY = panel.dy.value
             },
     ) {
-        Box(Modifier.matchParentSize().glass(glassSource, spec))
+        Box(Modifier.matchParentSize().panelGlass(panelShape, "context.panel"))
         Box(
             Modifier
                 .padding(MenuMetrics.CardPadding)

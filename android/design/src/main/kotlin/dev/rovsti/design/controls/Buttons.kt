@@ -19,7 +19,6 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -27,11 +26,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.GlassSource
-import dev.rovsti.design.glass.GlassSpec
-import dev.rovsti.design.glass.LocalGlassConditions
-import dev.rovsti.design.glass.glass
-import dev.rovsti.design.glass.glassTier
+import dev.rovsti.design.glass.GlassPreset
+import dev.rovsti.design.glass.rovstiGlass
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.press.glassPress
 import dev.rovsti.design.press.scalePress
@@ -49,11 +45,10 @@ const val DisabledAlpha = 0.35f
 enum class CapsuleStyle { Glass, Filled }
 
 private val IconSize = 20.dp
-private val Hairline = 0.5.dp
 
 /**
  * A 44 dp round glass button holding one icon, inside a 48 dp touch target (the extra 2 dp on every side is not
- * drawn). Without a [glass] source the surface is a flat translucent disc with a hairline. The press is the glass
+ * drawn). The surface is Convx liquid glass over the app backdrop. The press is the glass
  * press (a layer transform, so neighbours never move) and the fill lights up at once and fades back over 200 ms.
  */
 @Composable
@@ -62,7 +57,6 @@ fun GlassIconButton(
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    glass: GlassSource? = null,
     enabled: Boolean = true,
     tint: Color = Color.Unspecified,
 ) {
@@ -85,7 +79,7 @@ fun GlassIconButton(
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier.size(Sizes.button).glassSurface(glass, press),
+            Modifier.size(Sizes.button).glassSurface(press, "button.icon"),
             contentAlignment = Alignment.Center,
         ) {
             RovstiIcon(icon, null, tint = tint.takeOrElse { RovstiTheme.glass.foreground }, size = IconSize)
@@ -106,7 +100,6 @@ fun CapsuleButton(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     style: CapsuleStyle = CapsuleStyle.Glass,
-    glass: GlassSource? = null,
     enabled: Boolean = true,
     tint: Color = Color.Unspecified,
 ) {
@@ -124,7 +117,7 @@ fun CapsuleButton(
                 press,
             )
         } else {
-            Modifier.glassSurface(glass, press)
+            Modifier.glassSurface(press, "button.capsule")
         }
     Box(
         modifier
@@ -211,7 +204,6 @@ fun DestructiveButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
-    glass: GlassSource? = null,
     enabled: Boolean = true,
 ) {
     CapsuleButton(
@@ -219,36 +211,22 @@ fun DestructiveButton(
         onClick = onClick,
         modifier = modifier,
         icon = icon,
-        glass = glass,
         enabled = enabled,
         tint = RovstiTheme.colors.destructive,
     )
 }
 
 /**
- * Glass surface of a button. With a source: the glass node, then the pressed fill over it. Without: a flat translucent
- * fill and a hairline. Both are capsules (radius = half the height).
+ * Glass surface of a button: the app backdrop through [rovstiGlass] ([GlassPreset.Button], a capsule), then the pressed
+ * fill over it.
  */
 @Composable
 internal fun Modifier.glassSurface(
-    source: GlassSource?,
     press: Animatable<Float, *>,
+    debugTag: String = "button",
 ): Modifier {
-    val colors = RovstiTheme.colors
     val tokens = RovstiTheme.glass
-    val base =
-        if (source != null) {
-            val tier = glassTier(LocalGlassConditions.current)
-            Modifier.glass(source, GlassSpec.bar(tokens, colors, tier))
-        } else {
-            val fill = colors.groupedSurface.copy(alpha = GlassSpec.FLAT_ALPHA_BAR)
-            Modifier.drawBehind {
-                val radius = CornerRadius(size.height / 2f)
-                drawRoundRect(fill, cornerRadius = radius)
-                drawRoundRect(tokens.edge, cornerRadius = radius, style = Stroke(Hairline.toPx()))
-            }
-        }
-    return this.then(base).drawBehind {
+    return this.rovstiGlass(GlassPreset.Button, RovstiShapes.capsule, debugTag).drawBehind {
         val amount = press.value
         if (amount > 0f) {
             drawRoundRect(

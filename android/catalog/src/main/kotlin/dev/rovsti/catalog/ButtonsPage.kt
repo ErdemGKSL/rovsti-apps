@@ -21,14 +21,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.chrome.BackdropScope
 import dev.rovsti.design.controls.CapsuleButton
 import dev.rovsti.design.controls.CapsuleStyle
 import dev.rovsti.design.controls.DestructiveButton
 import dev.rovsti.design.controls.GlassIconButton
 import dev.rovsti.design.controls.TextButton
-import dev.rovsti.design.glass.GlassSource
-import dev.rovsti.design.glass.glassSource
-import dev.rovsti.design.glass.rememberGlassSource
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.theme.RovstiShapes
 import dev.rovsti.design.theme.RovstiText
@@ -83,19 +81,18 @@ internal fun ButtonsPage() {
             }
             SectionLabel("Over a backdrop")
         }
-        val source = rememberGlassSource()
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(
-                    150.dp,
-                ).padding(horizontal = Spacing.gutter)
-                .clip(RovstiShapes.card)
-                .clipToBounds(),
-        ) {
-            Box(Modifier.fillMaxSize().glassSource(source, c.page)) { StripedBackdrop() }
-            BackdropButtons(source)
-        }
+        BackdropScope(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(
+                        150.dp,
+                    ).padding(horizontal = Spacing.gutter)
+                    .clip(RovstiShapes.card)
+                    .clipToBounds(),
+            content = { StripedBackdrop() },
+            chrome = { BackdropButtons() },
+        )
         RovstiText(
             "Glass buttons sample the stripes; filled buttons stay opaque.",
             style = RovstiTheme.type.footnote,
@@ -105,22 +102,20 @@ internal fun ButtonsPage() {
     }
 }
 
-private fun Modifier.fillMaxSize(): Modifier = this.fillMaxSize()
-
 @Composable
-private fun BackdropButtons(source: GlassSource) {
+private fun BackdropButtons() {
     Column(
         Modifier.fillMaxSize().padding(Spacing.l),
         verticalArrangement = Arrangement.spacedBy(Spacing.s, Alignment.CenterVertically),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalAlignment = Alignment.CenterVertically) {
-            GlassIconButton(RovstiIcons.Back, "Back", {}, glass = source)
-            GlassIconButton(RovstiIcons.Ellipsis, "More", {}, glass = source)
-            CapsuleButton("Glass", {}, glass = source, icon = RovstiIcons.Search)
+            GlassIconButton(RovstiIcons.Back, "Back", {})
+            GlassIconButton(RovstiIcons.Ellipsis, "More", {})
+            CapsuleButton("Glass", {}, icon = RovstiIcons.Search)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalAlignment = Alignment.CenterVertically) {
             CapsuleButton("Filled", {}, style = CapsuleStyle.Filled)
-            DestructiveButton("Delete", {}, glass = source)
+            DestructiveButton("Delete", {})
         }
     }
 }

@@ -15,8 +15,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.GlassLensShader
-import dev.rovsti.design.glass.LensOptions
 import dev.rovsti.testing.ShotTest
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -72,9 +70,6 @@ class RuntimeShaderProbeTest : ShotTest() {
                             "uniform shader content; half4 main(float2 c) { return content.eval(c) * 0.0 + half4(0.0, 1.0, 0.0, 1.0); }",
                         )
                     RenderEffect.createRuntimeShaderEffect(shader, "content")
-                },
-                probe("GlassLensShader.effect (the real lens)") {
-                    GlassLensShader.effect(Size(120f, 120f), 30f, LensOptions.Glass, 1f)
                 },
             )
         val text = lines.joinToString("\n")

@@ -40,7 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.glass
+import dev.rovsti.design.glass.panelGlass
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.motion.RovstiMotion
 import dev.rovsti.design.press.rowPress
@@ -131,7 +131,6 @@ class AlertEntry(
             ) { if (it) 1f else 0f }
         val focus = remember { FocusRequester() }
         val shape = remember { RoundedCornerShape(AlertMetrics.Radius) }
-        val (glassSource, spec) = rememberPanelGlass(AlertMetrics.Radius.value, null)
         val close: (AlertAction) -> Unit = { action ->
             host.controller.dismiss(this)
             action.onClick()
@@ -177,7 +176,7 @@ class AlertEntry(
                         }
                     },
             ) {
-                Box(Modifier.matchParentSize().glass(glassSource, spec))
+                Box(Modifier.matchParentSize().panelGlass(shape, "alert.panel"))
                 Column(Modifier.clip(shape)) {
                     Column(
                         Modifier

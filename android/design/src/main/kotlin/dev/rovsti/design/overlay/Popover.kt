@@ -12,6 +12,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -43,13 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.GlassSource
-import dev.rovsti.design.glass.GlassSpec
-import dev.rovsti.design.glass.GlassTier
-import dev.rovsti.design.glass.LocalGlassConditions
-import dev.rovsti.design.glass.glass
-import dev.rovsti.design.glass.glassTier
-import dev.rovsti.design.glass.rememberGlassSource
+import dev.rovsti.design.glass.panelGlass
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.motion.RovstiMotion
 import dev.rovsti.design.theme.RovstiTheme
@@ -67,29 +62,6 @@ object PopoverMetrics {
 }
 
 /**
- * The glass of a floating panel (menus, popovers, alerts, sheets of actions) for the current conditions. Flat glass has
- * no blur, so it is made opaque: whatever sits behind the panel would read through it. Also opaque with reduce
- * transparency.
- */
-@Composable
-internal fun rememberPanelGlass(
-    cornerDp: Float,
-    source: GlassSource?,
-): Pair<GlassSource, GlassSpec> {
-    val colors = RovstiTheme.colors
-    val conditions = LocalGlassConditions.current
-    val tier = glassTier(conditions.copy(sourceAvailable = source != null))
-    val base = GlassSpec.popover(RovstiTheme.glass, colors, tier, cornerDp)
-    val spec =
-        when {
-            conditions.reduceTransparency -> base.copy(flatAlpha = 1f, fill = base.flatBase)
-            tier == GlassTier.Flat -> base.copy(flatAlpha = 1f)
-            else -> base
-        }
-    return (source ?: rememberGlassSource()) to spec
-}
-
-/**
  * A popover with arbitrary [content] (a date chooser, a small form), arrowless (ORIGINAL layout, glisse morph).
  *
  * It grows out of [anchor] the way the button menu does, but carries no glyph. It is at most [maxWidth] wide, placed by
@@ -100,7 +72,6 @@ internal fun rememberPanelGlass(
 class PopoverEntry(
     private val anchor: Rect,
     private val maxWidth: Dp = PopoverMetrics.MaxWidth,
-    private val source: GlassSource? = null,
     title: String = "Popover",
     private val content: @Composable () -> Unit,
 ) : OverlayEntry(modal = true, title = title) {
@@ -172,7 +143,7 @@ class PopoverEntry(
         body: State<@Composable () -> Unit>,
     ) {
         val cornerDp = PopoverMetrics.CornerRadius.value
-        val (glassSource, spec) = rememberPanelGlass(cornerDp, source)
+        val panelShape = remember(cornerDp) { RoundedCornerShape(cornerDp.dp) }
         val from = Size(anchor.width, anchor.height)
         val scrollState = rememberScrollState()
 
@@ -225,7 +196,7 @@ class PopoverEntry(
                                     surfaceRadius(from, cornerDp * density, t.value),
                                 )
                         }
-                    }.glass(glassSource, spec),
+                    }.panelGlass(panelShape, "popover.panel"),
             )
             Box(
                 Modifier
@@ -280,13 +251,11 @@ class PopoverEntry(
 fun Modifier.popoverTrigger(
     controller: OverlayController,
     label: String = "Open popover",
-    source: GlassSource? = null,
     content: @Composable () -> Unit,
 ): Modifier {
     val holder = remember { AnchorHolder() }
     val live = remember { arrayOfNulls<PopoverEntry>(1) }
     val latest = rememberUpdatedState(content)
-    val latestSource = rememberUpdatedState(source)
 
     fun toggle() {
         val current = live[0]
@@ -294,7 +263,7 @@ fun Modifier.popoverTrigger(
             controller.dismiss(current)
         } else {
             val entry =
-                PopoverEntry(holder.rect, source = latestSource.value, title = label) { latest.value() }
+                PopoverEntry(holder.rect, title = label) { latest.value() }
             live[0] = entry
             controller.present(entry)
         }

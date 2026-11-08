@@ -46,11 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.GlassSource
-import dev.rovsti.design.glass.GlassTier
-import dev.rovsti.design.glass.LocalGlassConditions
-import dev.rovsti.design.glass.glassSource
-import dev.rovsti.design.glass.glassTier
+import dev.rovsti.design.glass.LocalGlassSettings
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -122,7 +118,6 @@ fun LargeTitleScaffold(
     title: String,
     state: LazyListState,
     actions: ImmutableList<ToolbarAction>,
-    glass: GlassSource,
     modifier: Modifier = Modifier,
     navigation: NavigationButton? = null,
     onOverflow: ((anchor: Rect, hidden: ImmutableList<ToolbarAction>) -> Unit)? = null,
@@ -135,10 +130,7 @@ fun LargeTitleScaffold(
     val metrics = root ?: remember { ChromeMetrics() }
     val insets = if (root != null) LocalContentInsets.current else metrics.contentInsets()
     val statusTop = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
-    val conditions = LocalGlassConditions.current
-    val reduceTransparency = conditions.reduceTransparency
-    // The top chrome samples `glass`, so the tier it would get decides whether rows may show through the bar band.
-    val flat = glassTier(conditions.copy(sourceAvailable = true)) == GlassTier.Flat
+    val reduceTransparency = LocalGlassSettings.current.reduceTransparency
 
     var titleHeightPx by remember { mutableFloatStateOf(0f) }
     var toolbarWidthPx by remember { mutableIntStateOf(0) }
@@ -159,82 +151,85 @@ fun LargeTitleScaffold(
     val toolbarWidth = with(density) { toolbarWidthPx.toDp() }
     val capped = Modifier.widthIn(max = Sizes.contentMaxWidth)
 
-    Box(modifier.fillMaxSize().background(colors.page).testTag("large-title-scaffold")) {
-        Box(capped.fillMaxSize().align(Alignment.TopCenter).glassSource(glass, colors.page)) {
-            LazyColumn(
-                state = state,
-                contentPadding = contentPadding,
-                modifier = Modifier.fillMaxSize().testTag("scaffold-list"),
+    BackdropScope(
+        modifier = modifier.fillMaxSize().background(colors.page).testTag("large-title-scaffold"),
+        baseBg = colors.page,
+        content = {
+            Box(capped.fillMaxSize().align(Alignment.TopCenter)) {
+                LazyColumn(
+                    state = state,
+                    contentPadding = contentPadding,
+                    modifier = Modifier.fillMaxSize().testTag("scaffold-list"),
+                ) {
+                    item(key = "title") {
+                        LargeTitle(
+                            title = title,
+                            collapse = collapse,
+                            hasNavigation = navigation != null,
+                            endReserve = if (navigation == null) toolbarWidth + Spacing.m else 0.dp,
+                            onHeight = { titleHeightPx = it },
+                        )
+                    }
+                    content()
+                }
+            }
+        },
+        chrome = {
+            if (reduceTransparency) {
+                SolidBar(collapse, barBand)
+            } else {
+                TopScrim(barBand, collapse, Modifier.align(Alignment.TopCenter))
+            }
+
+            Box(
+                capped
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .onSizeChanged { metrics.topBarPx = it.height }
+                    .padding(
+                        PaddingValues.Absolute(
+                            left = insets.calculateLeftPadding(LayoutDirection.Ltr),
+                            right = insets.calculateRightPadding(LayoutDirection.Ltr),
+                            top = statusTop,
+                        ),
+                    ).height(ScaffoldSpec.BarHeight)
+                    .testTag("title-bar"),
             ) {
-                item(key = "title") {
-                    LargeTitle(
-                        title = title,
-                        collapse = collapse,
-                        hasNavigation = navigation != null,
-                        endReserve = if (navigation == null) toolbarWidth + Spacing.m else 0.dp,
-                        onHeight = { titleHeightPx = it },
+                val leading = if (navigation != null) Spacing.gutter + Sizes.button else Spacing.gutter
+                val side = maxOf(leading, Spacing.gutter + toolbarWidth) + Spacing.s
+                RovstiText(
+                    title,
+                    style = RovstiTheme.type.headline,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier =
+                        Modifier
+                            .align(Alignment.Center)
+                            .padding(horizontal = side)
+                            .graphicsLayer { alpha = inlineTitleAlpha(collapse.value) }
+                            .clearAndSetSemantics {}
+                            .testTag("inline-title"),
+                )
+                if (navigation != null) {
+                    BackButton(
+                        onClick = navigation.onClick,
+                        label = navigation.label,
+                        modifier = Modifier.align(Alignment.CenterStart).padding(start = Spacing.gutter - 2.dp),
                     )
                 }
-                content()
-            }
-        }
-
-        if (reduceTransparency) {
-            SolidBar(collapse, barBand)
-        } else {
-            TopScrim(barBand, collapse, flat, Modifier.align(Alignment.TopCenter))
-        }
-
-        Box(
-            capped
-                .fillMaxWidth()
-                .align(Alignment.TopCenter)
-                .onSizeChanged { metrics.topBarPx = it.height }
-                .padding(
-                    PaddingValues.Absolute(
-                        left = insets.calculateLeftPadding(LayoutDirection.Ltr),
-                        right = insets.calculateRightPadding(LayoutDirection.Ltr),
-                        top = statusTop,
-                    ),
-                ).height(ScaffoldSpec.BarHeight)
-                .testTag("title-bar"),
-        ) {
-            val leading = if (navigation != null) Spacing.gutter + Sizes.button else Spacing.gutter
-            val side = maxOf(leading, Spacing.gutter + toolbarWidth) + Spacing.s
-            RovstiText(
-                title,
-                style = RovstiTheme.type.headline,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier =
-                    Modifier
-                        .align(Alignment.Center)
-                        .padding(horizontal = side)
-                        .graphicsLayer { alpha = inlineTitleAlpha(collapse.value) }
-                        .clearAndSetSemantics {}
-                        .testTag("inline-title"),
-            )
-            if (navigation != null) {
-                BackButton(
-                    onClick = navigation.onClick,
-                    glass = glass,
-                    label = navigation.label,
-                    modifier = Modifier.align(Alignment.CenterStart).padding(start = Spacing.gutter - 2.dp),
+                Toolbar(
+                    actions = actions,
+                    onOverflow = onOverflow,
+                    modifier =
+                        Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = Spacing.gutter)
+                            .onSizeChanged { toolbarWidthPx = it.width },
                 )
             }
-            Toolbar(
-                actions = actions,
-                glass = glass,
-                onOverflow = onOverflow,
-                modifier =
-                    Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = Spacing.gutter)
-                        .onSizeChanged { toolbarWidthPx = it.width },
-            )
-        }
-    }
+        },
+    )
 }
 
 @Composable
@@ -276,7 +271,6 @@ private fun LargeTitle(
 private fun TopScrim(
     barBand: Dp,
     collapse: State<Float>,
-    flat: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val page = RovstiTheme.colors.page
@@ -291,8 +285,7 @@ private fun TopScrim(
                 // title out); the scrim only firms up as the title leaves and rows start to pass under the bar.
                 val c = collapse.value
                 val peak = ScaffoldSpec.ScrimPeakCollapsed * c
-                // Flat has no blur: once collapsed the bar band is fully opaque so no row text can be read through it.
-                val bandPeak = if (flat) max(peak, c * c * c) else peak
+                val bandPeak = peak
                 val brush =
                     Brush.verticalGradient(
                         colorStops =

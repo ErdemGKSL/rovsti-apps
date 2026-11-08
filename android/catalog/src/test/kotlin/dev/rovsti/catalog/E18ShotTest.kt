@@ -6,8 +6,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
-import dev.rovsti.design.glass.GlassConditions
-import dev.rovsti.design.glass.LocalGlassConditions
+import dev.rovsti.design.glass.GlassSettings
+import dev.rovsti.design.glass.LocalGlassSettings
 import dev.rovsti.testing.ShotTest
 import dev.rovsti.testing.ShotVariant
 import kotlinx.coroutines.runBlocking
@@ -74,8 +74,7 @@ class E18ShotTest : ShotTest() {
         for (dark in listOf(false, true)) {
             val state = LazyListState()
             composeFrame(dark = dark) {
-                val base = LocalGlassConditions.current
-                CompositionLocalProvider(LocalGlassConditions provides base.copy(reduceTransparency = true)) {
+                CompositionLocalProvider(LocalGlassSettings provides GlassSettings(reduceTransparency = true)) {
                     LargeTitlePage(listState = state)
                 }
             }

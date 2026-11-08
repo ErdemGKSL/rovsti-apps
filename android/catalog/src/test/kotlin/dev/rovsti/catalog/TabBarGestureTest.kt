@@ -17,8 +17,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.chrome.RovstiTabBar
-import dev.rovsti.design.glass.glassSource
-import dev.rovsti.design.glass.rememberGlassSource
 import dev.rovsti.design.haptics.HapticEvent
 import dev.rovsti.testing.RecordingHaptics
 import dev.rovsti.testing.ShotTest
@@ -33,11 +31,10 @@ class TabBarGestureTest : ShotTest() {
 
     private fun show() {
         composeFrame {
-            val glass = rememberGlassSource()
             val scroll = rememberScrollState()
             scrollValue = { scroll.value }
             var current by remember { mutableIntStateOf(0) }
-            Column(Modifier.glassSource(glass, androidx.compose.ui.graphics.Color.White).verticalScroll(scroll)) {
+            Column(Modifier.verticalScroll(scroll)) {
                 Box(Modifier.fillMaxWidth().height(200.dp))
                 RovstiTabBar(
                     tabs = CatalogTabs,
@@ -47,7 +44,6 @@ class TabBarGestureTest : ShotTest() {
                         selected = it
                     },
                     onReselect = { reselected = it },
-                    glass = glass,
                     imeVisible = { false },
                 )
                 Box(Modifier.fillMaxWidth().height(2000.dp))
@@ -155,9 +151,8 @@ class TabBarGestureTest : ShotTest() {
             androidx.compose.runtime.CompositionLocalProvider(
                 dev.rovsti.design.haptics.LocalRovstiHaptics provides rec,
             ) {
-                val glass = rememberGlassSource()
                 var current by remember { mutableIntStateOf(0) }
-                RovstiTabBar(CatalogTabs, current, { current = it }, {}, glass, imeVisible = { false })
+                RovstiTabBar(CatalogTabs, current, { current = it }, {}, imeVisible = { false })
             }
         }
         val g = BarGeometry(this)

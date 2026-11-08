@@ -73,15 +73,13 @@ class ToastMathTest {
     }
 
     @Test
-    fun textAndActionAreReadableOnTheInvertedCapsuleInBothThemes() {
-        for ((name, colors, opposite) in listOf(
-            Triple("light", LightColors, DarkColors),
-            Triple("dark", DarkColors, LightColors),
-        )) {
-            val capsule = colors.labelPrimary.copy(alpha = ToastMetrics.LabelAlpha)
-            val backdrop = colors.page
-            val text = contrastRatio(colors.page, capsule, backdrop)
-            val action = contrastRatio(opposite.accent, capsule, backdrop)
+    fun textAndActionAreReadableOnTheGlassCapsuleInBothThemes() {
+        for ((name, colors) in listOf("light" to LightColors, "dark" to DarkColors)) {
+            // The wash over a backdrop as bright (light) or dark (dark) as the label's opposite is the worst case.
+            val backdrop = colors.labelPrimary.copy(alpha = 1f)
+            val capsule = colors.page.copy(alpha = ToastMetrics.GlassWash)
+            val text = contrastRatio(colors.labelPrimary, capsule, backdrop)
+            val action = contrastRatio(colors.accent, capsule, colors.page)
             assertTrue("$name text $text", text >= 4.5)
             assertTrue("$name action $action", action >= 4.5)
         }

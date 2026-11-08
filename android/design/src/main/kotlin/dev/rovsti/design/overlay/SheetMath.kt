@@ -12,6 +12,9 @@ import kotlin.math.tanh
 
 /** Numbers of the sheet (SKILL overlays 5). */
 object SheetMetrics {
+    /** Opacity of the grouped-surface wash over the sheet glass: a bare glass sheet is unreadable under a list. */
+    const val GlassWash = 0.92f
+
     val CornerRadius = 28.dp
     val GrabberWidth = 36.dp
     val GrabberHeight = 5.dp

@@ -59,9 +59,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.GlassShadow
-import dev.rovsti.design.glass.glass
+import dev.rovsti.design.glass.panelGlass
 import dev.rovsti.design.haptics.LocalRovstiHaptics
+import dev.rovsti.design.ios.foundation.IosMenuMaterial
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.press.rowPress
 import dev.rovsti.design.theme.RovstiText
@@ -177,7 +177,6 @@ class ActionSheetEntry(
         ) {
             // One shadow for both groups, drawn behind them as a single layer: a shadow per group let the Cancel
             // group's shadow fall over the last action row (F3).
-            val shadow = rememberPanelGlass(ActionSheetMetrics.Radius.value, null).second.shadow
             var cancelHeightPx by remember { mutableIntStateOf(0) }
             val gapPx = with(LocalDensity.current) { ActionSheetMetrics.GroupGap.roundToPx() }
             val radiusPx = with(LocalDensity.current) { ActionSheetMetrics.Radius.toPx() }
@@ -196,9 +195,9 @@ class ActionSheetEntry(
                     .dropShadow(
                         groupsShape,
                         Shadow(
-                            radius = shadow.radiusDp.dp,
-                            color = shadow.color,
-                            offset = DpOffset(0.dp, shadow.yDp.dp),
+                            radius = IosMenuMaterial.PanelShadow.radius,
+                            color = IosMenuMaterial.PanelShadow.color,
+                            offset = IosMenuMaterial.PanelShadow.offset,
                         ),
                     ).testTag("action-sheet")
                     .focusRequester(focus)
@@ -284,10 +283,8 @@ private fun SheetGroup(
     content: @Composable () -> Unit,
 ) {
     val shape = remember { RoundedCornerShape(ActionSheetMetrics.Radius) }
-    val (source, panel) = rememberPanelGlass(ActionSheetMetrics.Radius.value, null)
-    val spec = remember(panel) { panel.copy(shadow = GlassShadow.None) }
     Box(modifier.fillMaxWidth()) {
-        Box(Modifier.matchParentSize().glass(source, spec))
+        Box(Modifier.matchParentSize().panelGlass(shape, "actionsheet.group", shadow = false))
         Box(Modifier.clip(shape)) { content() }
     }
 }

@@ -15,7 +15,6 @@ import androidx.compose.ui.platform.testTag
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.NavigationButton
 import dev.rovsti.design.chrome.ToolbarAction
-import dev.rovsti.design.glass.rememberGlassSource
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.list.ListRow
@@ -41,7 +40,6 @@ internal fun LargeTitlePage(
     onCollapseChanged: ((Float) -> Unit)? = null,
     initialPushed: Int = -1,
 ) {
-    val glass = rememberGlassSource()
     var pushed by rememberSaveable { mutableIntStateOf(initialPushed) }
     val overlay = LocalOverlayOrNull.current
     if (pushed >= 0) {
@@ -51,7 +49,6 @@ internal fun LargeTitlePage(
             title = contactName(pushed),
             state = subState,
             actions = persistentListOf(),
-            glass = glass,
             navigation = NavigationButton(onClick = { pushed = -1 }),
             modifier = Modifier.testTag("large-title-subpage"),
         ) {
@@ -64,9 +61,8 @@ internal fun LargeTitlePage(
             title = "Contacts",
             state = listState,
             actions = actions,
-            glass = glass,
             onOverflow = { anchor, hidden ->
-                overlay?.present(ButtonMenuEntry(anchor, overflowItems(hidden), glass))
+                overlay?.present(ButtonMenuEntry(anchor, overflowItems(hidden)))
             },
             onCollapseChanged = onCollapseChanged,
             modifier = Modifier.testTag("large-title-page"),

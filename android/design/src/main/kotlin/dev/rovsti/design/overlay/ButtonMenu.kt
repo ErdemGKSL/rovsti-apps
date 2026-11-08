@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -76,13 +77,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.GlassSource
-import dev.rovsti.design.glass.GlassSpec
-import dev.rovsti.design.glass.GlassTier
-import dev.rovsti.design.glass.LocalGlassConditions
-import dev.rovsti.design.glass.glass
-import dev.rovsti.design.glass.glassTier
-import dev.rovsti.design.glass.rememberGlassSource
+import dev.rovsti.design.glass.panelGlass
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
@@ -122,14 +117,13 @@ internal class CardGeometry {
  * retargeted (never restarted) when the direction changes, so a fast tap-tap keeps its velocity. The entry stays
  * composed until `t` is back at 0.
  *
- * [anchor] is the trigger's rect in window pixels, captured once by the caller. [source] is the page's glass source
- * (for the glass tiers); without one, and in every test, the surface is the Flat popover fill. With reduce motion the
+ * [anchor] is the trigger's rect in window pixels, captured once by the caller. The surface samples the app backdrop
+ * (`LocalIosBackdrop`, provided by `RovstiBackdropRoot`) through Convx's menu material. With reduce motion the
  * card does not morph, it fades in 100 ms; with reduce transparency its fill is opaque.
  */
 class ButtonMenuEntry(
     private val anchor: Rect,
     private val items: ImmutableList<MenuItem>,
-    private val source: GlassSource? = null,
     private val triggerGlyph: ImageVector? = RovstiIcons.Ellipsis,
 ) : OverlayEntry(modal = true, title = "Menu"),
     SlideTarget {
@@ -254,20 +248,8 @@ class ButtonMenuEntry(
         reduceMotion: Boolean,
     ) {
         val colors = RovstiTheme.colors
-        val conditions = LocalGlassConditions.current
-        val sourceNow = source
-        val tier = glassTier(conditions.copy(sourceAvailable = sourceNow != null))
         val cornerDp = MenuMetrics.CardRadius.value
-        val baseSpec = GlassSpec.popover(RovstiTheme.glass, colors, tier, cornerDp)
-        // The Flat fallback has no blur, so rows and the trigger behind the card would read through it: opaque there,
-        // and with reduce transparency.
-        val spec =
-            when {
-                conditions.reduceTransparency -> baseSpec.copy(flatAlpha = 1f, fill = baseSpec.flatBase)
-                tier == GlassTier.Flat -> baseSpec.copy(flatAlpha = 1f)
-                else -> baseSpec
-            }
-        val glassSource = sourceNow ?: rememberGlassSource()
+        val panelShape = remember(cornerDp) { RoundedCornerShape(cornerDp.dp) }
         val from = Size(anchor.width, anchor.height)
         val glyph = triggerGlyph?.let { rememberVectorPainter(it) }
         val glyphTint = colors.labelPrimary
@@ -337,7 +319,7 @@ class ButtonMenuEntry(
                                     surfaceRadius(from, cornerDp * density, t.value),
                                 )
                         }
-                    }.glass(glassSource, spec),
+                    }.panelGlass(panelShape, "menu.panel"),
             )
             // The rows, scaled up from the trigger centre. Their layer covers the whole card (the padding is inside).
             Box(
@@ -464,13 +446,11 @@ fun Modifier.menuTrigger(
     controller: OverlayController,
     items: ImmutableList<MenuItem>,
     glyph: ImageVector? = RovstiIcons.Ellipsis,
-    source: GlassSource? = null,
     label: String = "Open menu",
 ): Modifier {
     val holder = remember { AnchorHolder() }
     val live = remember { arrayOfNulls<ButtonMenuEntry>(1) }
     val latestItems by rememberUpdatedState(items)
-    val latestSource by rememberUpdatedState(source)
     val latestGlyph by rememberUpdatedState(glyph)
 
     /** The entry this touch opened, or `null` when it closed the menu that was already open. */
@@ -480,7 +460,7 @@ fun Modifier.menuTrigger(
             controller.dismiss(current)
             return null
         }
-        val entry = ButtonMenuEntry(holder.rect, latestItems, latestSource, latestGlyph)
+        val entry = ButtonMenuEntry(holder.rect, latestItems, latestGlyph)
         live[0] = entry
         controller.present(entry)
         return entry

@@ -36,7 +36,6 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.GlassSource
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.motion.RovstiMotion
@@ -91,7 +90,6 @@ fun Modifier.longPressMenu(
     items: ImmutableList<MenuItem>,
     style: ContextMenuStyle,
     onTap: (() -> Unit)? = null,
-    source: GlassSource? = null,
     label: String = "Show actions",
 ): Modifier {
     val target = remember { ContextMenuTarget() }
@@ -99,7 +97,6 @@ fun Modifier.longPressMenu(
     val live = remember { arrayOfNulls<OverlayEntry>(1) }
     val latestItems = androidx.compose.runtime.rememberUpdatedState(items)
     val latestStyle = androidx.compose.runtime.rememberUpdatedState(style)
-    val latestSource = androidx.compose.runtime.rememberUpdatedState(source)
     return contextMenu(
         anchor = target.anchor,
         press = press,
@@ -111,11 +108,11 @@ fun Modifier.longPressMenu(
                     when (val s = latestStyle.value) {
                         is ContextMenuStyle.Lifted -> {
                             target.cover.floatValue = 1f
-                            ContextMenuEntry(rect, latestItems.value, target, latestSource.value, s.preview)
+                            ContextMenuEntry(rect, latestItems.value, target, s.preview)
                         }
 
                         is ContextMenuStyle.Card -> {
-                            PreviewCardEntry(rect, latestItems.value, target, latestSource.value, s.card, s.cardHeight)
+                            PreviewCardEntry(rect, latestItems.value, target, s.card, s.cardHeight)
                         }
                     }
                 live[0] = entry
@@ -173,7 +170,6 @@ class ContextMenuEntry(
     private val anchor: Rect,
     private val items: ImmutableList<MenuItem> = persistentListOf(),
     private val target: ContextMenuTarget? = null,
-    private val source: GlassSource? = null,
     private val preview: @Composable () -> Unit,
 ) : OverlayEntry(modal = true, title = "Actions") {
     @Composable
@@ -243,7 +239,7 @@ class ContextMenuEntry(
                 ) {
                     preview()
                 }
-                ContextPanelCard(items, panel, source, focus, dismiss, Modifier.layoutId(PanelId))
+                ContextPanelCard(items, panel, focus, dismiss, Modifier.layoutId(PanelId))
             },
             modifier = Modifier.fillMaxSize(),
         ) { measurables, constraints ->

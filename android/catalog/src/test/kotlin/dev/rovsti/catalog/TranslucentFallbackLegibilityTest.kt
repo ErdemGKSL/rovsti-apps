@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,11 +22,12 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.chrome.BackdropScope
 import dev.rovsti.design.chrome.ChromeMetrics
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.RovstiTabBar
-import dev.rovsti.design.glass.glassSource
-import dev.rovsti.design.glass.rememberGlassSource
+import dev.rovsti.design.glass.GlassSettings
+import dev.rovsti.design.glass.LocalGlassSettings
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.testing.ShotTest
 import kotlinx.collections.immutable.persistentListOf
@@ -33,8 +35,11 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** F1: Flat chrome (the tier every test runs in) must not let busy content be read through it. */
-class FlatLegibilityTest : ShotTest() {
+/**
+ * F1: with reduce transparency on, the translucent fallback of chrome must not let busy content be read through it.
+ * (This is the only test class that runs glass in its fallback; every other test runs the real backdrop path.)
+ */
+class TranslucentFallbackLegibilityTest : ShotTest() {
     private fun luminance(c: Color) = 0.2126f * c.red + 0.7152f * c.green + 0.0722f * c.blue
 
     /** Max minus min luminance over a patch of [side] px at ([x], [y]). */
@@ -77,21 +82,22 @@ class FlatLegibilityTest : ShotTest() {
     fun tabBarShowsAtMostFourPercentOfHighContrastBackdrop() {
         for (dark in listOf(false, true)) {
             composeFrame(dark = dark) {
-                val glass = rememberGlassSource()
                 val chrome = remember { ChromeMetrics() }
-                Box(Modifier.fillMaxSize()) {
-                    Box(
-                        Modifier.fillMaxSize().glassSource(glass, RovstiTheme.colors.page),
-                    ) { Stripes(Modifier.fillMaxSize()) }
-                    RovstiTabBar(
-                        tabs = CatalogTabs,
-                        selected = 3,
-                        onSelect = {},
-                        onReselect = {},
-                        glass = glass,
-                        modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
-                        chrome = chrome,
-                        imeVisible = { false },
+                CompositionLocalProvider(LocalGlassSettings provides GlassSettings(reduceTransparency = true)) {
+                    BackdropScope(
+                        modifier = Modifier.fillMaxSize(),
+                        content = { Stripes(Modifier.fillMaxSize()) },
+                        chrome = {
+                            RovstiTabBar(
+                                tabs = CatalogTabs,
+                                selected = 3,
+                                onSelect = {},
+                                onReselect = {},
+                                modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
+                                chrome = chrome,
+                                imeVisible = { false },
+                            )
+                        },
                     )
                 }
             }
@@ -112,25 +118,25 @@ class FlatLegibilityTest : ShotTest() {
         for (dark in listOf(false, true)) {
             val state = LazyListState()
             composeFrame(dark = dark) {
-                val glass = rememberGlassSource()
-                LargeTitleScaffold(
-                    title = "Title",
-                    state = state,
-                    actions = persistentListOf(),
-                    glass = glass,
-                ) {
-                    items(80) {
-                        Box(
-                            Modifier.fillMaxWidth().height(4.dp).background(
-                                if (it % 2 ==
-                                    0
-                                ) {
-                                    Color.Black
-                                } else {
-                                    Color.White
-                                },
-                            ),
-                        )
+                CompositionLocalProvider(LocalGlassSettings provides GlassSettings(reduceTransparency = true)) {
+                    LargeTitleScaffold(
+                        title = "Title",
+                        state = state,
+                        actions = persistentListOf(),
+                    ) {
+                        items(80) {
+                            Box(
+                                Modifier.fillMaxWidth().height(4.dp).background(
+                                    if (it % 2 ==
+                                        0
+                                    ) {
+                                        Color.Black
+                                    } else {
+                                        Color.White
+                                    },
+                                ),
+                            )
+                        }
                     }
                 }
             }

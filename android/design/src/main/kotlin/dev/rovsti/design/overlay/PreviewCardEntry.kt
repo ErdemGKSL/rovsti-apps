@@ -32,7 +32,6 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.GlassSource
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.motion.RovstiMotion
@@ -87,7 +86,6 @@ class PreviewCardEntry(
     private val anchor: Rect,
     private val items: ImmutableList<MenuItem> = persistentListOf(),
     private val target: ContextMenuTarget? = null,
-    private val source: GlassSource? = null,
     private val card: @Composable () -> Unit,
     private val cardHeight: Dp = 200.dp,
 ) : OverlayEntry(modal = true, title = "Preview and actions"),
@@ -206,7 +204,7 @@ class PreviewCardEntry(
                 ) {
                     card()
                 }
-                ContextPanelCard(items, panel, source, focus, dismiss, Modifier.layoutId(PanelId))
+                ContextPanelCard(items, panel, focus, dismiss, Modifier.layoutId(PanelId))
             },
             modifier = Modifier.fillMaxSize(),
         ) { measurables, constraints ->

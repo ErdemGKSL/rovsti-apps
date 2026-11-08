@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.glass.sheetGlass
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.motion.RovstiMotion
 import dev.rovsti.design.theme.RovstiTheme
@@ -219,9 +220,7 @@ class SheetEntry(
                     scaleY = s
                     transformOrigin = TransformOrigin(0.5f, 0f)
                     translationY = -liftPx * p
-                }.then(if (modal) Modifier else Modifier.shadow(16.dp, shape, clip = false))
-                .clip(shape)
-                .background(colors.groupedSurface)
+                }.sheetGlass(shape, "sheet", wash = colors.groupedSurface.copy(alpha = SheetMetrics.GlassWash))
                 .drawWithContent {
                     drawContent()
                     val p = stepBack()

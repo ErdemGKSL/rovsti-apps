@@ -10,7 +10,6 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.LayoutDirection
 import dev.rovsti.design.controls.GlassIconButton
-import dev.rovsti.design.glass.GlassSource
 import dev.rovsti.design.icons.RovstiIcons
 
 /**
@@ -21,7 +20,6 @@ import dev.rovsti.design.icons.RovstiIcons
 fun BackButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    glass: GlassSource? = null,
     label: String = "Back",
 ) {
     val mirrored = LocalLayoutDirection.current == LayoutDirection.Rtl
@@ -30,7 +28,6 @@ fun BackButton(
             icon = RovstiIcons.Back,
             contentDescription = label,
             onClick = onClick,
-            glass = glass,
             modifier = Modifier.testTag("back-button"),
         )
     }

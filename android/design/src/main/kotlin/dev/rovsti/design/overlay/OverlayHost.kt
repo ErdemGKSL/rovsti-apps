@@ -223,72 +223,112 @@ fun OverlayHost(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    CompositionLocalProvider(LocalOverlay provides controller, LocalOverlayOrNull provides controller) {
+        Box(modifier.fillMaxSize()) {
+            OverlayPage(controller, content = content)
+            OverlayEntries(controller)
+        }
+    }
+}
+
+/**
+ * Provides [controller] to [content] (the two halves of [OverlayHost] can then be placed apart: `RovstiBackdropRoot`
+ * records the page half and draws the entries half outside the recorded subtree).
+ */
+@Composable
+fun OverlayProvider(
+    controller: OverlayController,
+    content: @Composable () -> Unit,
+) {
+    CompositionLocalProvider(
+        LocalOverlay provides controller,
+        LocalOverlayOrNull provides controller,
+        content = content,
+    )
+}
+
+/**
+ * The page half of [OverlayHost]: [content] steps back behind a modal sheet and is hidden from screen readers while a
+ * modal entry is open. The black the shrunk page leaves visible is drawn inside, so a recording of this node (the root
+ * backdrop) shows the page exactly as it is seen.
+ */
+@Composable
+fun OverlayPage(
+    controller: OverlayController,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
     val anyModal by remember(controller) {
         derivedStateOf { controller.entries.any { it.modal && it.state.targetState } }
     }
-    CompositionLocalProvider(LocalOverlay provides controller, LocalOverlayOrNull provides controller) {
-        val density = LocalDensity.current
-        val statusBarPx = WindowInsets.statusBars.getTop(density).toFloat()
-        val cornerPx = with(density) { SheetMetrics.PushBackCorner.toPx() }
+    val density = LocalDensity.current
+    val statusBarPx = WindowInsets.statusBars.getTop(density).toFloat()
+    val cornerPx = with(density) { SheetMetrics.PushBackCorner.toPx() }
+    Box(
+        modifier.fillMaxSize().drawBehind {
+            // The black the shrunk page leaves visible around itself.
+            if (controller.pushBackProgress() > 0f) drawRect(Color.Black)
+        },
+    ) {
+        // The page behind a modal entry is not reachable by a screen reader (and not by touch: the scrim eats it).
         Box(
-            modifier.fillMaxSize().drawBehind {
-                // The black the shrunk page leaves visible around itself.
-                if (controller.pushBackProgress() > 0f) drawRect(Color.Black)
-            },
-        ) {
-            // The page behind a modal entry is not reachable by a screen reader (and not by touch: the scrim eats it).
-            Box(
-                (if (anyModal) Modifier.clearAndSetSemantics { } else Modifier)
-                    .fillMaxSize()
-                    .sheetPushBack(controller::pushBackProgress, statusBarPx, cornerPx),
-            ) { content() }
-            for (entry in controller.entries) {
-                key(entry) {
-                    BoxWithConstraints(
-                        Modifier.fillMaxSize().semantics {
-                            paneTitle = entry.title
-                            isTraversalGroup = true
-                        },
-                    ) {
-                        val density = LocalDensity.current
-                        val direction = LocalLayoutDirection.current
-                        val insets = WindowInsets.safeDrawing
-                        val size = Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat())
-                        val left = insets.getLeft(density, direction)
-                        val top = insets.getTop(density)
-                        val right = insets.getRight(density, direction)
-                        val bottom = insets.getBottom(density)
-                        val scope =
-                            remember(size, left, top, right, bottom, density, controller) {
-                                OverlayScope(
-                                    windowSize = size,
-                                    safe =
-                                        Rect(
-                                            left.toFloat(),
-                                            top.toFloat(),
-                                            (size.width - right).coerceAtLeast(left.toFloat()),
-                                            (size.height - bottom).coerceAtLeast(top.toFloat()),
-                                        ),
-                                    density = density,
-                                    controller = controller,
-                                )
-                            }
-                        entry.Content(scope)
-                    }
+            (if (anyModal) Modifier.clearAndSetSemantics { } else Modifier)
+                .fillMaxSize()
+                .sheetPushBack(controller::pushBackProgress, statusBarPx, cornerPx),
+        ) { content() }
+    }
+}
+
+/** The entries half of [OverlayHost]: every presented entry in list order, plus Back handling and removal. */
+@Composable
+fun OverlayEntries(controller: OverlayController) {
+    Box(Modifier.fillMaxSize()) {
+        for (entry in controller.entries) {
+            key(entry) {
+                BoxWithConstraints(
+                    Modifier.fillMaxSize().semantics {
+                        paneTitle = entry.title
+                        isTraversalGroup = true
+                    },
+                ) {
+                    val density = LocalDensity.current
+                    val direction = LocalLayoutDirection.current
+                    val insets = WindowInsets.safeDrawing
+                    val size = Size(constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat())
+                    val left = insets.getLeft(density, direction)
+                    val top = insets.getTop(density)
+                    val right = insets.getRight(density, direction)
+                    val bottom = insets.getBottom(density)
+                    val scope =
+                        remember(size, left, top, right, bottom, density, controller) {
+                            OverlayScope(
+                                windowSize = size,
+                                safe =
+                                    Rect(
+                                        left.toFloat(),
+                                        top.toFloat(),
+                                        (size.width - right).coerceAtLeast(left.toFloat()),
+                                        (size.height - bottom).coerceAtLeast(top.toFloat()),
+                                    ),
+                                density = density,
+                                controller = controller,
+                            )
+                        }
+                    entry.Content(scope)
                 }
             }
         }
-        // Registered after the page's own handlers, and re-registered whenever the number of entries changes, so the
-        // host is always asked first while an overlay is open.
-        key(controller.entries.size) {
-            val top = controller.entries.lastOrNull { it.state.targetState && !it.passesBack }
-            BackHandler(enabled = top?.handlesBack == false) {
-                controller.dismissTop()
-            }
+    }
+    // Registered after the page's own handlers, and re-registered whenever the number of entries changes, so the
+    // host is always asked first while an overlay is open.
+    key(controller.entries.size) {
+        val top = controller.entries.lastOrNull { it.state.targetState && !it.passesBack }
+        BackHandler(enabled = top?.handlesBack == false) {
+            controller.dismissTop()
         }
-        LaunchedEffect(controller) {
-            snapshotFlow { controller.entries.map { it.isRemovable } }
-                .collect { controller.removeFinished() }
-        }
+    }
+    LaunchedEffect(controller) {
+        snapshotFlow { controller.entries.map { it.isRemovable } }
+            .collect { controller.removeFinished() }
     }
 }

@@ -56,10 +56,11 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.chrome.ChromeMetrics
 import dev.rovsti.design.haptics.LocalRovstiHaptics
+import dev.rovsti.design.ios.foundation.IosGlassSpec
+import dev.rovsti.design.ios.foundation.IosGlassStyle
+import dev.rovsti.design.ios.foundation.iosGlass
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.motion.RovstiMotion
-import dev.rovsti.design.theme.DarkColors
-import dev.rovsti.design.theme.LightColors
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -75,7 +76,9 @@ object ToastMetrics {
     const val UndoMs = 5000L
     const val InMs = 350
     const val OutMs = 180
-    const val LabelAlpha = 0.92f
+
+    /** Opacity of the page-colour wash over the toast's glass. */
+    const val GlassWash = 0.55f
     const val MaxLines = 2
 
     /** Space between the toast and the bar (or the navigation inset) under it. */
@@ -183,10 +186,10 @@ class ToastEntry internal constructor(
             }
         }
 
-        val fill = colors.labelPrimary.copy(alpha = ToastMetrics.LabelAlpha)
-        val textColor = colors.page
-        // The capsule is an inverted surface, so the action takes the accent of the opposite theme.
-        val actionColor = if (colors.isDark) LightColors.accent else DarkColors.accent
+        // Convx glass (iosGlass, the chrome spec) with a page-colour wash so the label reads over any backdrop.
+        val wash = colors.page.copy(alpha = ToastMetrics.GlassWash)
+        val textColor = colors.labelPrimary
+        val actionColor = colors.accent
         val shape = remember { RoundedCornerShape(ToastMetrics.Radius) }
 
         Box(
@@ -220,9 +223,7 @@ class ToastEntry internal constructor(
         ) {
             Row(
                 Modifier
-                    .shadow(ToastMetrics.Shadow, shape, clip = false)
-                    .clip(shape)
-                    .background(fill)
+                    .iosGlass(shape, IosGlassStyle.Regular, IosGlassSpec.Chrome, wash = wash, debugTag = "toast")
                     .testTag("toast")
                     .pointerInput(Unit) {
                         awaitEachGesture {

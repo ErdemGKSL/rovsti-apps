@@ -34,7 +34,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.controls.glassSurface
 import dev.rovsti.design.controls.rememberPressFill
-import dev.rovsti.design.glass.GlassSource
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.press.scalePress
@@ -60,13 +59,11 @@ private val IconSize = 20.dp
 
 /**
  * A glass capsule that groups 44 dp buttons. The capsule is 44 dp tall (the glass); its layout box is 48 dp so every
- * button keeps a 48 dp tall touch target, the extra 2 dp above and below being transparent. Without a [glass] source
- * the capsule is a flat translucent fill with a hairline.
+ * button keeps a 48 dp tall touch target, the extra 2 dp above and below being transparent. The glass is Convx liquid glass over the app backdrop.
  */
 @Composable
 fun ToolbarCapsule(
     modifier: Modifier = Modifier,
-    glass: GlassSource? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val rest = remember { Animatable(0f) }
@@ -76,7 +73,7 @@ fun ToolbarCapsule(
                 .matchParentSize()
                 .padding(vertical = (Sizes.touch - Sizes.button) / 2)
                 .testTag("toolbar-capsule")
-                .glassSurface(glass, rest),
+                .glassSurface(rest, "toolbar.capsule"),
         )
         Row(Modifier.fillMaxHeight(), verticalAlignment = Alignment.CenterVertically, content = content)
     }
@@ -132,7 +129,6 @@ fun ToolbarButton(
 fun Toolbar(
     actions: ImmutableList<ToolbarAction>,
     modifier: Modifier = Modifier,
-    glass: GlassSource? = null,
     onOverflow: ((anchor: Rect, hidden: ImmutableList<ToolbarAction>) -> Unit)? = null,
 ) {
     val shown = remember(actions) { actions.take(MaxToolbarActions) }
@@ -141,7 +137,7 @@ fun Toolbar(
     if (shown.isEmpty() && !hasOverflow) return
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         if (shown.isNotEmpty()) {
-            ToolbarCapsule(glass = glass) {
+            ToolbarCapsule {
                 for (action in shown) {
                     ToolbarButton(
                         icon = action.icon,
@@ -155,7 +151,7 @@ fun Toolbar(
         if (shown.isNotEmpty() && hasOverflow) ToolbarSpacer()
         if (hasOverflow) {
             var anchor by remember { mutableStateOf(Rect.Zero) }
-            ToolbarCapsule(glass = glass) {
+            ToolbarCapsule {
                 ToolbarButton(
                     icon = RovstiIcons.Ellipsis,
                     label = "More",

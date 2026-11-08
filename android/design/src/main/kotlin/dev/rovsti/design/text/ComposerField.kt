@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldDecorator
@@ -36,6 +37,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -51,6 +53,8 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.glass.GlassPreset
+import dev.rovsti.design.glass.rovstiGlass
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.theme.RovstiText
@@ -107,7 +111,7 @@ fun ComposerField(
         label = "sendPop",
     )
     val fill by animateColorAsState(
-        if (focused) tokens.glassActive else tokens.glass,
+        if (focused) tokens.glassActive else Color.Transparent,
         tween(FILL_MS),
         label = "composerFill",
     )
@@ -131,6 +135,7 @@ fun ComposerField(
                 fieldModifier
                     .fillMaxWidth()
                     .heightIn(min = FieldMinHeight)
+                    .rovstiGlass(GlassPreset.Bar, RoundedCornerShape(ComposerRadius), "composer", outerShadow = false)
                     .drawBehind {
                         val radius = CornerRadius(minOf(ComposerRadius.toPx(), size.height / 2f))
                         drawRoundRect(fill, cornerRadius = radius)

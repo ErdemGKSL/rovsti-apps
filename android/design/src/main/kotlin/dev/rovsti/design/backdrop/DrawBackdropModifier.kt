@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.toSize
 import dev.rovsti.design.backdrop.backdrops.LayerBackdrop
+import dev.rovsti.design.backdrop.backdrops.emptyBackdrop
 import dev.rovsti.design.backdrop.highlight.Highlight
 import dev.rovsti.design.backdrop.highlight.HighlightElement
 import dev.rovsti.design.backdrop.internal.ShapeProvider
@@ -102,6 +103,7 @@ fun Modifier.drawPlainBackdrop(
                 backdropScale = backdropScale.coerceIn(0.05f, 1f),
                 frozen = frozen,
                 loopBucket = null,
+                debugTag = null,
             ),
         )
 }
@@ -125,6 +127,8 @@ fun Modifier.drawBackdrop(
     frozen: () -> Boolean = NeverFrozen,
     // Cache one processed layer per bucket for looping backdrops; null uses one layer.
     loopBucket: (() -> Int)? = null,
+    // Rovsti: names the call site in BackdropDebug records (tests only; no cost when BackdropDebug.enabled is false).
+    debugTag: String? = null,
 ): Modifier {
     val shapeProvider = ShapeProvider(shape)
     return this
@@ -175,6 +179,7 @@ fun Modifier.drawBackdrop(
                 backdropScale = backdropScale.coerceIn(0.05f, 1f),
                 frozen = frozen,
                 loopBucket = loopBucket,
+                debugTag = debugTag,
             ),
         )
 }
@@ -192,6 +197,7 @@ private class DrawBackdropElement(
     val backdropScale: Float,
     val frozen: () -> Boolean,
     val loopBucket: (() -> Int)?,
+    val debugTag: String?,
 ) : ModifierNodeElement<DrawBackdropNode>() {
     override fun create(): DrawBackdropNode =
         DrawBackdropNode(
@@ -207,6 +213,7 @@ private class DrawBackdropElement(
             backdropScale = backdropScale,
             frozen = frozen,
             loopBucket = loopBucket,
+            debugTag = debugTag,
         )
 
     override fun update(node: DrawBackdropNode) {
@@ -233,6 +240,7 @@ private class DrawBackdropElement(
         node.onDrawFront = onDrawFront
         node.backdropScale = backdropScale
         node.frozen = frozen
+        node.debugTag = debugTag
         if (node.loopBucket !== loopBucket) {
             // Bucket changes invalidate the pool and the current surface capture.
             node.loopBucket = loopBucket
@@ -273,6 +281,7 @@ private class DrawBackdropElement(
         if (onDrawSurface != other.onDrawSurface) return false
         if (onDrawFront != other.onDrawFront) return false
         if (backdropScale != other.backdropScale) return false
+        if (debugTag != other.debugTag) return false
 
         return true
     }
@@ -288,6 +297,7 @@ private class DrawBackdropElement(
         result = 31 * result + (onDrawSurface?.hashCode() ?: 0)
         result = 31 * result + (onDrawFront?.hashCode() ?: 0)
         result = 31 * result + backdropScale.hashCode()
+        result = 31 * result + (debugTag?.hashCode() ?: 0)
         return result
     }
 }
@@ -305,6 +315,7 @@ private class DrawBackdropNode(
     var backdropScale: Float,
     var frozen: () -> Boolean,
     var loopBucket: (() -> Int)?,
+    var debugTag: String?,
 ) : Modifier.Node(),
     LayoutModifierNode,
     DrawModifierNode,
@@ -557,6 +568,7 @@ private class DrawBackdropNode(
 
         onDrawBehind?.invoke(this)
         val contentRecorded = drawBackdropLayer()
+        if (BackdropDebug.enabled) recordDebug()
         onDrawSurface?.invoke(this)
         drawContent()
         onDrawFront?.invoke(this)
@@ -572,6 +584,24 @@ private class DrawBackdropNode(
             }
         }
         surfaceDirty = false
+    }
+
+    /** Rovsti: one [BackdropDebug] record per draw, so tests can prove the real RenderEffect path ran. */
+    private fun recordDebug() {
+        val source = backdrop as? LayerBackdrop
+        BackdropDebug.add(
+            BackdropDebug.Record(
+                tag = debugTag,
+                hasRenderEffect = graphicsLayer?.renderEffect != null,
+                backdropKind =
+                    when {
+                        source != null -> BackdropDebug.Kind.Layer
+                        backdrop === emptyBackdrop() -> BackdropDebug.Kind.Empty
+                        else -> BackdropDebug.Kind.Other
+                    },
+                recorded = source?.hasRecording == true && recordedBackdropSize != IntSize.Zero,
+            ),
+        )
     }
 
     override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
@@ -637,6 +667,44 @@ private class DrawBackdropNode(
         recordedBackdropVersion = null
         recordedBackdropOffset = null
         recordedBackdropSize = IntSize.Zero
+    }
+}
+
+/**
+ * Rovsti test instrumentation (no Convx counterpart): when [enabled] every [DrawBackdropNode] draw appends a [Record].
+ * A plain field, false in release; the cost when off is one branch per draw.
+ */
+object BackdropDebug {
+    @JvmField
+    var enabled: Boolean = false
+
+    enum class Kind { Layer, Empty, Other }
+
+    data class Record(
+        val tag: String?,
+        val hasRenderEffect: Boolean,
+        val backdropKind: Kind,
+        val recorded: Boolean,
+    )
+
+    private val records = ArrayList<Record>()
+
+    @Synchronized
+    internal fun add(record: Record) {
+        records += record
+    }
+
+    /** A surface that painted its translucent fallback instead of the backdrop effect. */
+    fun fallback(tag: String?) {
+        if (enabled) add(Record(tag, hasRenderEffect = false, backdropKind = Kind.Empty, recorded = false))
+    }
+
+    @Synchronized
+    fun snapshot(): List<Record> = records.toList()
+
+    @Synchronized
+    fun clear() {
+        records.clear()
     }
 }
 

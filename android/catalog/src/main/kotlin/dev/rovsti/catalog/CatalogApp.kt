@@ -30,11 +30,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.rovsti.design.chrome.RovstiBackdropRoot
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.ListRowChevron
 import dev.rovsti.design.overlay.OverlayController
-import dev.rovsti.design.overlay.OverlayHost
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
@@ -46,7 +46,7 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
     BackHandler(enabled = page != CatalogPage.Home) { page = CatalogPage.Home }
 
     val overlays = remember { OverlayController() }
-    OverlayHost(overlays) {
+    RovstiBackdropRoot(overlays, route = page.name) {
         Box(
             modifier = Modifier.fillMaxSize().background(RovstiTheme.colors.page),
             contentAlignment = Alignment.TopCenter,

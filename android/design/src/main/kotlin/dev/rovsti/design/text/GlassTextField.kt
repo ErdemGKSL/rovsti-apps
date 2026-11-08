@@ -44,8 +44,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.glass.GlassPreset
+import dev.rovsti.design.glass.rovstiGlass
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
+import dev.rovsti.design.theme.RovstiShapes
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 
@@ -97,7 +100,7 @@ fun GlassTextField(
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val fill by animateColorAsState(
-        if (focused) tokens.glassActive else tokens.glass,
+        if (focused) tokens.glassActive else Color.Transparent,
         tween(FILL_MS),
         label = "fieldFill",
     )
@@ -109,6 +112,7 @@ fun GlassTextField(
             modifier
                 .heightIn(min = FieldMinHeight)
                 .alpha(if (enabled) 1f else DISABLED_ALPHA)
+                .rovstiGlass(GlassPreset.Bar, RovstiShapes.capsule, "field", outerShadow = false)
                 .drawBehind { drawPill(fill, tokens.edge) }
                 .pointerInput(enabled) {
                     detectTapGestures {

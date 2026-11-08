@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.backdrop.Backdrop
+import dev.rovsti.design.backdrop.BackdropDebug
 import dev.rovsti.design.backdrop.catalog.utils.InteractiveHighlight
 import dev.rovsti.design.backdrop.drawBackdrop
 import dev.rovsti.design.backdrop.effects.blur
@@ -206,6 +207,10 @@ fun Modifier.iosMenuSurface(
      * would punch a window through the sheet, so the fill is laid on flat instead.
      */
     frosted: Boolean = true,
+    /** Rovsti: false when the caller draws the elevation itself (two stacked groups share one shadow). */
+    panelShadow: Boolean = true,
+    /** Rovsti: names this call site in [BackdropDebug] records. */
+    debugTag: String? = null,
 ): Modifier {
     val fill = IosMenuMaterial.colors.fill
     val frostBase = if (IosTheme.colors.isDark) Color(0xFF2C2C2E) else Color(0xFFEDEDED)
@@ -230,6 +235,7 @@ fun Modifier.iosMenuSurface(
                 .background(fill)
         } else if (!isRenderEffectSupported() || LocalGlassSettings.current.reduceTransparency) {
             // No RenderEffect: the fill alone, opaque enough to read over anything.
+            BackdropDebug.fallback(debugTag)
             val opaque = if (IosTheme.colors.isDark) IosMenuMaterial.DarkPanelFill else Color(0xFFF2F2F2)
             withStretch.clip(shape).background(opaque)
         } else if (LocalMenuLiquid.current && LocalMenuLongPress.current) {
@@ -249,6 +255,7 @@ fun Modifier.iosMenuSurface(
             val lensHeightPx = with(density) { IosMenuMaterial.LongPressLensHeight.toPx() } * scale
             val lensAmountPx = with(density) { IosMenuMaterial.LongPressLensAmount.toPx() } * scale
             withStretch.drawBackdrop(
+                debugTag = debugTag,
                 backdrop = backdrop,
                 shape = { shape },
                 effects = {
@@ -268,7 +275,7 @@ fun Modifier.iosMenuSurface(
                             ),
                     )
                 },
-                shadow = { IosMenuMaterial.PanelShadow },
+                shadow = if (panelShadow) ({ IosMenuMaterial.PanelShadow }) else null,
                 onDrawBehind = { drawOutline(shape.createOutline(size, layoutDirection, this), frostBase) },
                 onDrawSurface = { drawRect(fill) },
             )
@@ -279,6 +286,7 @@ fun Modifier.iosMenuSurface(
             val blurFullPx = with(density) { IosMenuMaterial.LiquidBlurRadius.toPx() }
             val scale = (3f / blurFullPx).coerceIn(0.05f, 0.25f)
             withStretch.drawBackdrop(
+                debugTag = debugTag,
                 backdrop = backdrop,
                 shape = { shape },
                 effects = {
@@ -291,7 +299,7 @@ fun Modifier.iosMenuSurface(
                 },
                 backdropScale = scale,
                 highlight = null,
-                shadow = { IosMenuMaterial.PanelShadow },
+                shadow = if (panelShadow) ({ IosMenuMaterial.PanelShadow }) else null,
                 onDrawBehind = { drawOutline(shape.createOutline(size, layoutDirection, this), frostBase) },
                 onDrawSurface = { drawRect(fill) },
             )
@@ -303,6 +311,7 @@ fun Modifier.iosMenuSurface(
             val blurFullPx = with(LocalDensity.current) { IosMenuMaterial.BlurRadius.toPx() }
             val scale = (6f / blurFullPx).coerceIn(0.05f, 0.25f)
             withStretch.drawBackdrop(
+                debugTag = debugTag,
                 backdrop = backdrop,
                 shape = { shape },
                 effects = {
@@ -311,7 +320,7 @@ fun Modifier.iosMenuSurface(
                 },
                 backdropScale = scale,
                 highlight = null,
-                shadow = { IosMenuMaterial.PanelShadow },
+                shadow = if (panelShadow) ({ IosMenuMaterial.PanelShadow }) else null,
                 // Draw the frost while the backdrop snapshot initializes to prevent a transparent first frame.
                 onDrawBehind = { drawOutline(shape.createOutline(size, layoutDirection, this), frostBase) },
                 onDrawSurface = { drawRect(fill) },

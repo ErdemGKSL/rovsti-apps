@@ -77,14 +77,8 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.rovsti.design.glass.GlassShadow
-import dev.rovsti.design.glass.GlassSource
-import dev.rovsti.design.glass.GlassSpec
-import dev.rovsti.design.glass.GlassTier
-import dev.rovsti.design.glass.LensOptions
-import dev.rovsti.design.glass.LocalGlassConditions
-import dev.rovsti.design.glass.glass
-import dev.rovsti.design.glass.glassTier
+import dev.rovsti.design.glass.GlassPreset
+import dev.rovsti.design.glass.rovstiGlass
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.motion.LocalReduceMotion
@@ -93,6 +87,7 @@ import dev.rovsti.design.motion.gated
 import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.press.HoldResult
 import dev.rovsti.design.press.awaitHold
+import dev.rovsti.design.theme.RovstiShapes
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
@@ -141,7 +136,6 @@ fun RovstiTabBar(
     selected: Int,
     onSelect: (Int) -> Unit,
     onReselect: (Int) -> Unit,
-    glass: GlassSource,
     modifier: Modifier = Modifier,
     minimizer: TabBarMinimizer? = null,
     folded: Boolean = false,
@@ -168,7 +162,6 @@ fun RovstiTabBar(
     val haptics = LocalRovstiHaptics.current
     val colors = RovstiTheme.colors
     val tokens = RovstiTheme.glass
-    val tier = glassTier(LocalGlassConditions.current)
     val slop = LocalViewConfiguration.current.touchSlop
 
     val puck = remember(scope) { SelectionPuck(selectedNow, tabs.size, scope) { reduceNow } }
@@ -264,7 +257,7 @@ fun RovstiTabBar(
                         }
                     }.onSizeChanged { chrome?.bottomBarPx = it.height }
                     .testTag("tab-surface")
-                    .barSurface(glass, tier)
+                    .barSurface()
                     .selectableGroup()
                     .then(
                         if (folded) {
@@ -321,8 +314,6 @@ fun RovstiTabBar(
                     puck = puck,
                     fold = fold,
                     rect = ::rect,
-                    glass = glass,
-                    tier = tier,
                     folded = folded,
                     onTabClick = { index ->
                         puck.select(index)
@@ -341,15 +332,9 @@ fun RovstiTabBar(
 private const val UNIT = 0.001f
 private const val MINIMIZE_FADE = 0.35f
 
-/** The glass capsule of the bar (clear glass over the page; Flat in tests and when blur is unavailable). */
+/** The glass capsule of the bar: Convx liquid glass over the app backdrop. */
 @Composable
-private fun Modifier.barSurface(
-    glass: GlassSource,
-    tier: GlassTier,
-): Modifier {
-    val spec = GlassSpec.bar(RovstiTheme.glass, RovstiTheme.colors, tier)
-    return this.glass(glass, spec)
-}
+private fun Modifier.barSurface(): Modifier = this.rovstiGlass(GlassPreset.Bar, RovstiShapes.capsule, "tabbar")
 
 /**
  * Everything inside the bar at its full width: puck under the labels, labels (drawn once outside the puck), the tinted
@@ -368,8 +353,6 @@ private fun Stage(
     puck: SelectionPuck,
     fold: Animatable<Float, AnimationVector1D>,
     rect: () -> Rect,
-    glass: GlassSource,
-    tier: GlassTier,
     folded: Boolean,
     onTabClick: (Int) -> Unit,
     dark: Boolean,
@@ -412,7 +395,7 @@ private fun Stage(
         )
         // Light page: the lens lies under the labels and grows from nothing after half the lift.
         if (!dark) {
-            PuckLens(rect, glass, tier, amount = {
+            PuckLens(rect, amount = {
                 ((puck.lift.value - TabBarSpec.Under) / (1f - TabBarSpec.Under)).coerceIn(0f, 1f) * (1f - fold.value)
             })
         }
@@ -447,7 +430,7 @@ private fun Stage(
         )
         // Dark page: the lens lies over the labels.
         if (dark) {
-            PuckLens(rect, glass, tier, amount = { puck.lift.value.coerceIn(0f, 1f) * (1f - fold.value) })
+            PuckLens(rect, amount = { puck.lift.value.coerceIn(0f, 1f) * (1f - fold.value) })
         }
     }
 }
@@ -471,39 +454,17 @@ private fun PuckBox(
 }
 
 /**
- * The lifted selection. Flat tier: a raised fill with a hairline. Frost and Liquid: real glass with the tab
- * lens (glisse `segments.tsx` `LENS`). [amount] is read in the draw phase only.
+ * The lifted selection: real glass with the tab lens ([GlassPreset.Thumb]). [amount] is read in the draw phase only.
  */
 @Composable
 private fun PuckLens(
     rect: () -> Rect,
-    source: GlassSource,
-    tier: GlassTier,
     amount: () -> Float,
 ) {
-    val tokens = RovstiTheme.glass
-    val colors = RovstiTheme.colors
-    val spec =
-        remember(tier, tokens, colors) {
-            GlassSpec.bar(tokens, colors, tier, GlassSpec.CAPSULE).copy(
-                blurDp = 2f,
-                lens = LensOptions.TabLens,
-                fill = tokens.lens,
-                scrim = Color.Transparent,
-                shadow = GlassShadow(10f, 2f, Color.Black.copy(alpha = 0.12f)),
-            )
-        }
-    val surface =
-        if (tier == GlassTier.Flat) {
-            Modifier.drawBehind {
-                val corner = CornerRadius(size.height / 2f)
-                drawRoundRect(tokens.glassActive, cornerRadius = corner)
-                drawRoundRect(tokens.edge, cornerRadius = corner, style = Stroke(1.dp.toPx()))
-            }
-        } else {
-            Modifier.glass(source, spec)
-        }
-    PuckBox(rect, Modifier.graphicsLayer { alpha = amount() }.then(surface))
+    PuckBox(
+        rect,
+        Modifier.graphicsLayer { alpha = amount() }.rovstiGlass(GlassPreset.Thumb, RovstiShapes.capsule, "tabbar.puck"),
+    )
 }
 
 /** The row of icon-over-label cells, all in [tint], with [modifier] drawn around it (the clip passes). */

@@ -23,8 +23,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
-import dev.rovsti.design.glass.GlassConditions
-import dev.rovsti.design.glass.LocalGlassConditions
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.time.LocalRovstiClock
 import dev.rovsti.design.time.RovstiClock
@@ -187,8 +185,6 @@ abstract class ShotTest {
             LocalDensity provides Density(base.density, current.fontScale),
             LocalLayoutDirection provides if (current.rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
             LocalRovstiClock provides clock,
-            // Glass is Flat in every test: JVM renderers do not run RenderEffect or AGSL like a GPU.
-            LocalGlassConditions provides GlassConditions.Default.copy(forTests = true),
         ) {
             RovstiTheme(darkTheme = current.dark) {
                 key(current.id) {

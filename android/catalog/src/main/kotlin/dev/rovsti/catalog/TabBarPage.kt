@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
+import dev.rovsti.design.chrome.BackdropScope
 import dev.rovsti.design.chrome.BottomScrim
 import dev.rovsti.design.chrome.ChromeMetrics
 import dev.rovsti.design.chrome.LocalChromeMetrics
@@ -31,8 +32,6 @@ import dev.rovsti.design.chrome.RovstiTabBar
 import dev.rovsti.design.chrome.TabItem
 import dev.rovsti.design.chrome.rememberTabBarMinimizer
 import dev.rovsti.design.controls.CapsuleButton
-import dev.rovsti.design.glass.glassSource
-import dev.rovsti.design.glass.rememberGlassSource
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.list.ListRow
@@ -66,49 +65,53 @@ internal fun TabBarPage(
     imeVisible: @Composable () -> Boolean = { WindowInsets.isImeVisible },
 ) {
     val colors = RovstiTheme.colors
-    val glass = rememberGlassSource()
     val chrome = remember { ChromeMetrics() }
     val minimizer = rememberTabBarMinimizer()
     var selected by rememberSaveable { mutableIntStateOf(0) }
-    Box(Modifier.fillMaxSize().testTag("tabbar-page")) {
-        CompositionLocalProvider(LocalContentInsets provides chrome.contentInsets()) {
-            Box(Modifier.fillMaxSize().nestedScroll(minimizer).glassSource(glass, colors.page)) {
-                LazyColumn(
-                    state = listState,
-                    contentPadding = LocalContentInsets.current,
-                    modifier = Modifier.fillMaxSize().testTag("tabbar-list"),
-                ) {
-                    item(key = "title") {
-                        PageHeader(
-                            "Tab bar",
-                            "Scroll to minimise, drag the puck, tap to select. ${CatalogTabs[selected].label} is selected.",
-                        )
-                    }
-                    itemsIndexed(List(CatalogRowCount) { it }, key = { _, i -> i }) { _, i ->
-                        ListRow(
-                            title = rowName(i),
-                            secondary = "Row $i of $CatalogRowCount",
-                            leading = { Avatar(rowName(i)) },
-                            modifier = Modifier.testTag("row-$i"),
-                        )
+    BackdropScope(
+        modifier = Modifier.fillMaxSize().testTag("tabbar-page"),
+        baseBg = colors.page,
+        content = {
+            CompositionLocalProvider(LocalContentInsets provides chrome.contentInsets()) {
+                Box(Modifier.fillMaxSize().nestedScroll(minimizer)) {
+                    LazyColumn(
+                        state = listState,
+                        contentPadding = LocalContentInsets.current,
+                        modifier = Modifier.fillMaxSize().testTag("tabbar-list"),
+                    ) {
+                        item(key = "title") {
+                            PageHeader(
+                                "Tab bar",
+                                "Scroll to minimise, drag the puck, tap to select. ${CatalogTabs[selected].label} is selected.",
+                            )
+                        }
+                        itemsIndexed(List(CatalogRowCount) { it }, key = { _, i -> i }) { _, i ->
+                            ListRow(
+                                title = rowName(i),
+                                secondary = "Row $i of $CatalogRowCount",
+                                leading = { Avatar(rowName(i)) },
+                                modifier = Modifier.testTag("row-$i"),
+                            )
+                        }
                     }
                 }
             }
-        }
-        CompositionLocalProvider(LocalChromeMetrics provides chrome) {
-            BottomScrim(chrome, Modifier.align(Alignment.BottomCenter))
-            RovstiTabBar(
-                tabs = CatalogTabs,
-                selected = selected,
-                onSelect = { selected = it },
-                onReselect = {},
-                glass = glass,
-                modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
-                minimizer = minimizer,
-                imeVisible = imeVisible,
-            )
-        }
-    }
+        },
+        chrome = {
+            CompositionLocalProvider(LocalChromeMetrics provides chrome) {
+                BottomScrim(chrome, Modifier.align(Alignment.BottomCenter))
+                RovstiTabBar(
+                    tabs = CatalogTabs,
+                    selected = selected,
+                    onSelect = { selected = it },
+                    onReselect = {},
+                    modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
+                    minimizer = minimizer,
+                    imeVisible = imeVisible,
+                )
+            }
+        },
+    )
 }
 
 /**
@@ -117,34 +120,34 @@ internal fun TabBarPage(
  */
 @Composable
 internal fun FoldedTabBarPage() {
-    val glass = rememberGlassSource()
     val chrome = remember { ChromeMetrics() }
     var selected by rememberSaveable { mutableIntStateOf(3) }
     var folded by remember { mutableStateOf(true) }
-    Box(Modifier.fillMaxSize().testTag("folded-page")) {
-        Box(Modifier.fillMaxSize().glassSource(glass, RovstiTheme.colors.page)) { StripedBackdrop() }
-        CapsuleButton(
-            text = if (folded) "Expand" else "Fold",
-            onClick = { folded = !folded },
-            glass = glass,
-            modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(Spacing.gutter),
-        )
-        RovstiText(
-            "Stops",
-            style = RovstiTheme.type.title2,
-            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(Spacing.gutter),
-        )
-        RovstiTabBar(
-            tabs = CatalogTabs,
-            selected = selected,
-            onSelect = { selected = it },
-            onReselect = {},
-            glass = glass,
-            modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
-            folded = folded,
-            onFoldedClick = { folded = false },
-            chrome = chrome,
-            imeVisible = { false },
-        )
-    }
+    BackdropScope(
+        modifier = Modifier.fillMaxSize().testTag("folded-page"),
+        content = { StripedBackdrop() },
+        chrome = {
+            CapsuleButton(
+                text = if (folded) "Expand" else "Fold",
+                onClick = { folded = !folded },
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(Spacing.gutter),
+            )
+            RovstiText(
+                "Stops",
+                style = RovstiTheme.type.title2,
+                modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(Spacing.gutter),
+            )
+            RovstiTabBar(
+                tabs = CatalogTabs,
+                selected = selected,
+                onSelect = { selected = it },
+                onReselect = {},
+                modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
+                folded = folded,
+                onFoldedClick = { folded = false },
+                chrome = chrome,
+                imeVisible = { false },
+            )
+        },
+    )
 }

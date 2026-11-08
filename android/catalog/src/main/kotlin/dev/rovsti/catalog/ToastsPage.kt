@@ -18,14 +18,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import dev.rovsti.design.chrome.BackdropScope
 import dev.rovsti.design.chrome.BottomScrim
 import dev.rovsti.design.chrome.ChromeMetrics
 import dev.rovsti.design.chrome.LocalChromeMetrics
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.RovstiTabBar
 import dev.rovsti.design.controls.CapsuleButton
-import dev.rovsti.design.glass.glassSource
-import dev.rovsti.design.glass.rememberGlassSource
 import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
@@ -38,75 +37,79 @@ import dev.rovsti.design.theme.Spacing
 internal fun ToastsPage() {
     val controller = LocalOverlay.current
     val colors = RovstiTheme.colors
-    val glass = rememberGlassSource()
     val chrome = remember { ChromeMetrics() }
     var selected by remember { mutableIntStateOf(0) }
     var result by remember { mutableStateOf("Nothing happened yet") }
-    Box(Modifier.fillMaxSize().testTag("toasts-page")) {
-        CompositionLocalProvider(LocalContentInsets provides chrome.contentInsets()) {
-            Box(Modifier.fillMaxSize().glassSource(glass, colors.page)) {
-                Column(
-                    Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(LocalContentInsets.current),
-                ) {
-                    PageHeader("Toasts", "They sit above the tab bar and the page keeps working underneath.")
+    BackdropScope(
+        modifier = Modifier.fillMaxSize().testTag("toasts-page"),
+        baseBg = colors.page,
+        content = {
+            CompositionLocalProvider(LocalContentInsets provides chrome.contentInsets()) {
+                Box(Modifier.fillMaxSize()) {
                     Column(
-                        Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter),
-                        verticalArrangement = Arrangement.spacedBy(Spacing.s),
+                        Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(LocalContentInsets.current),
                     ) {
-                        CapsuleButton(
-                            text = "Show toast",
-                            onClick = { controller.showToast("Number copied") },
-                            modifier = Modifier.testTag("toast-show"),
-                        )
-                        CapsuleButton(
-                            text = "Show long toast",
-                            onClick = {
-                                controller.showToast(
-                                    "Connect key copied. Paste it in Messages or Contacts to share the WhatsApp " +
-                                        "link without scanning the code again.",
-                                )
-                            },
-                            modifier = Modifier.testTag("toast-long"),
-                        )
-                        CapsuleButton(
-                            text = "Delete with undo",
-                            onClick = {
-                                result = "Deleted"
-                                controller.showUndo("Conversation deleted", onUndo = { result = "Restored" })
-                            },
-                            modifier = Modifier.testTag("toast-undo"),
-                        )
-                        CapsuleButton(
-                            text = "Replace",
-                            onClick = {
-                                controller.showToast("Saving to Contacts")
-                                controller.showToast("Saved to Contacts")
-                            },
-                            modifier = Modifier.testTag("toast-replace"),
-                        )
-                        RovstiText(
-                            result,
-                            modifier = Modifier.padding(top = Spacing.s).testTag("toast-result"),
-                            style = RovstiTheme.type.footnote,
-                            color = colors.labelSecondary,
-                        )
+                        PageHeader("Toasts", "They sit above the tab bar and the page keeps working underneath.")
+                        Column(
+                            Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter),
+                            verticalArrangement = Arrangement.spacedBy(Spacing.s),
+                        ) {
+                            CapsuleButton(
+                                text = "Show toast",
+                                onClick = { controller.showToast("Number copied") },
+                                modifier = Modifier.testTag("toast-show"),
+                            )
+                            CapsuleButton(
+                                text = "Show long toast",
+                                onClick = {
+                                    controller.showToast(
+                                        "Connect key copied. Paste it in Messages or Contacts to share the WhatsApp " +
+                                            "link without scanning the code again.",
+                                    )
+                                },
+                                modifier = Modifier.testTag("toast-long"),
+                            )
+                            CapsuleButton(
+                                text = "Delete with undo",
+                                onClick = {
+                                    result = "Deleted"
+                                    controller.showUndo("Conversation deleted", onUndo = { result = "Restored" })
+                                },
+                                modifier = Modifier.testTag("toast-undo"),
+                            )
+                            CapsuleButton(
+                                text = "Replace",
+                                onClick = {
+                                    controller.showToast("Saving to Contacts")
+                                    controller.showToast("Saved to Contacts")
+                                },
+                                modifier = Modifier.testTag("toast-replace"),
+                            )
+                            RovstiText(
+                                result,
+                                modifier = Modifier.padding(top = Spacing.s).testTag("toast-result"),
+                                style = RovstiTheme.type.footnote,
+                                color = colors.labelSecondary,
+                            )
+                        }
                     }
                 }
             }
-        }
-        CompositionLocalProvider(LocalChromeMetrics provides chrome) {
-            BottomScrim(chrome, Modifier.align(Alignment.BottomCenter))
-            RovstiTabBar(
-                tabs = CatalogTabs,
-                selected = selected,
-                onSelect = { selected = it },
-                onReselect = {},
-                glass = glass,
-                modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
-            )
-        }
-    }
+        },
+        chrome = {
+            CompositionLocalProvider(LocalChromeMetrics provides chrome) {
+                BottomScrim(chrome, Modifier.align(Alignment.BottomCenter))
+                RovstiTabBar(
+                    tabs = CatalogTabs,
+                    selected = selected,
+                    onSelect = { selected = it },
+                    onReselect = {},
+                    modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
+                )
+            }
+        },
+    )
 }

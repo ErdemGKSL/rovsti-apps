@@ -75,14 +75,10 @@ class ScaffoldTest : ShotTest() {
         var hidden: List<String>? = null
         var anchor = Rect.Zero
         composeFrame {
-            val glass =
-                dev.rovsti.design.glass
-                    .rememberGlassSource()
             dev.rovsti.design.chrome.LargeTitleScaffold(
                 title = "Title",
                 state = LazyListState(),
                 actions = threeActions {},
-                glass = glass,
                 onOverflow = { rect, rest ->
                     anchor = rect
                     hidden = rest.map { it.id }

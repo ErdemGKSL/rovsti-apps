@@ -49,7 +49,7 @@ verified: `android/` has no module, no `build-logic`).
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E1.1 | Modules, convention plugins, screenshot harness, catalog shell | R1 | in-progress |
+| E1.1 | Modules, convention plugins, screenshot harness, catalog shell | R1 | done |
 | E1.2 | Theme: colours, type, spacing, shapes, contrast test | R1 | in-progress |
 | E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | in-progress |
 | E1.4 | Press feedback, hold rule, haptics | R1 | in-progress |
@@ -86,6 +86,17 @@ verified: `android/` has no module, no `build-logic`).
 - AC5 `docs/kotlin-ui/api-notes.md` lists each Compose/Navigation API the skill names, checked against the pinned
   sources (name, artifact, version, file).
 - Screenshots: `e1.1-catalog-home-{light,dark}`.
+- Evidence (E1.1, uncommitted at time of writing): `android/build-logic` (plugins `rovsti.android.library|app`, `rovsti.compose`,
+  `rovsti.screenshots`, `RovstiSdk` 37/34/36), `:design` (`RovstiTheme` stub, `RovstiClock`), `:testing` (`ShotTest`,
+  `FixedClock`, `StripedBackdrop`, `ShotVariant`), `:catalog` (`CatalogActivity`, `CatalogPage`, `CatalogApp`).
+  Opened with Read: `e1.1-catalog-home-light.png` and `-dark.png` (title, subtitle, Pages and Planned sections on the
+  page colour; first line sits below the simulated 28 dp status bar, last row ends well above the simulated gesture bar,
+  secondary text legible), plus `e1.1-catalog-toolchain-{light,dark,fs2-*,rtl-*,landscape-*}.png` (fs2 wraps and fits,
+  RTL mirrors rows and title, landscape caps content at 640 dp and centres it). Two consecutive
+  `:catalog:verifyRoborazziDebug` runs pass; `-PcomposeReports` writes `android/design/build/compose_reports`.
+  Findings: `enableAccessibilityChecks` is not public in ui-test 1.12.1 (see `docs/kotlin-ui/api-notes.md`);
+  changing Robolectric qualifiers recreates the activity, so landscape renders in its own activity inside `ShotTest`
+  and must be the last `shot()` of a test.
 
 ### E1.2 Theme
 - AC1 `RovstiTheme` with light and dark colour sets, follows the system theme; page, grouped background, labels

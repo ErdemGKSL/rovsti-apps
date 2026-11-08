@@ -43,6 +43,10 @@ android/
   design/        :design       tokens, theme, motion, haptics, glass, overlays, controls, text fields, tab bar,
                                large-title scaffold, rows, chips, avatars, photo viewer. No domain types, no
                                Android providers, no Rust.
+  testing/       :testing      test-only library (dev.rovsti.testing): ShotTest (Robolectric native graphics, pinned
+                               window, locale, zone, clock, simulated system bars, light/dark/fs2/rtl/landscape
+                               capture), FixedClock, StripedBackdrop. Used as testImplementation(project(":testing"))
+                               only. A module instead of AGP test fixtures keeps Kotlin test-fixture flags out.
   catalog/       :catalog      debug-only demo app (dev.rovsti.catalog) with one page per :design component and
                                its states; its screenshot tests are E1's proof.
   core-bridge/   :core-bridge  Kotlin side of the Rust core: JNI externs, the Rust dispatcher, typed facades per

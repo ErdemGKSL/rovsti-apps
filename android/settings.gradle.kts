@@ -1,4 +1,5 @@
 pluginManagement {
+    includeBuild("build-logic")
     repositories {
         google()
         mavenCentral()
@@ -15,3 +16,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "rovsti-android"
+
+include(":design")
+include(":catalog")
+include(":testing")

@@ -23,6 +23,13 @@ compileSdk must be 37 because Compose BOM 2026.09 libraries require it.
   Kotlin, plus the `kotlin.plugin.compose` compiler plugin), Compose BOM 2026.09.00, coroutines 1.11.0,
   Robolectric 4.17, Roborazzi 1.77.0, Spotless 8.11.0 with ktlint 1.8.0 (`android/.editorconfig`;
   `@Composable` functions may be PascalCase).
+- Convention plugins live in the included build `android/build-logic` (`rovsti.android.library`,
+  `rovsti.android.app`, `rovsti.compose`, `rovsti.screenshots`). SDK levels (compileSdk 37, minSdk 34, targetSdk 36)
+  are the `RovstiSdk` object there. `-PcomposeReports` writes Compose compiler reports and metrics to
+  `<module>/build/compose_reports` (run `./gradlew :design:compileDebugKotlin --no-build-cache --rerun -PcomposeReports`; a build-cache hit writes no reports); stability overrides go in `android/compose_stability.conf` (`//` comments only).
+  Roborazzi writes goldens to `<module>/screenshots/`.
+- Modules so far: `:design` (library), `:testing` (test-only library with `ShotTest`, `FixedClock`, `StripedBackdrop`),
+  `:catalog` (demo app, `dev.rovsti.catalog`). Compose API checks are in [api-notes.md](api-notes.md).
 - Modules are added in `settings.gradle.kts` (`include(":phone")`, ...; the layout is in [architecture.md](architecture.md) section 2). The toolchain was proven with a
   throwaway `:sample` module (Compose + Robolectric native graphics + Roborazzi screenshot, lint, assemble),
   then removed. Module recipe: apply `android.application`/`android.library`, `kotlin.compose`,

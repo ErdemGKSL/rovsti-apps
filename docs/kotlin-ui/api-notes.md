@@ -154,3 +154,15 @@ line itself, so the hairline is drawn only when no rim is.
   The design module's JVM tests now have robolectric and compose-ui-test-junit4 (`StaticRegionTest`, `NavTransitionFreezeTest`).
 - Test pitfalls: a 3 dp stripe pattern needs the sampled patch off a stripe edge; red 0xD32F2F and blue 0x1565C0 have equal luminance,
   so variance checks use red and white.
+
+## E1.25 (glass layer, tokens, iOS foundation)
+
+- Haze: Convx pins 1.3.1. 2.x split the artifact (`haze-blur`, `haze-blur-materials`, no `haze-materials:2.1.0`) and changes the API,
+  so `libs.versions.toml` pins the newest 1.x, 1.7.3. `TopFadeBlur` (`hazeEffect`, `HazeProgressive.verticalGradient`,
+  `HazeMaterials.ultraThin`, `HazeInputScale.Fixed`) compiles unchanged against BOM 2026.09; the single-pass backdrop branch is
+  the one the catalog shot exercises (`TopBarBlurStyle.SinglePass`).
+- `GlassEffect.kt` is a second file of package `dev.rovsti.design.glass` until S4 deletes the old engine: its facade is renamed
+  with `@file:JvmName("ConvxGlassEffect")` to avoid a duplicate `GlassEffectKt`.
+- `androidx.core.graphics.ColorUtils` calls `android.graphics.Color`, so `GlassTintTokensTest` runs under Robolectric.
+- Test fixes: `GlassTintTokensTest` expected a dark neutral tint alpha of 0.06 and dark hero opacity 0.30; the tokens are 0 on
+  purpose (measured, see the comments in `GlassTintTokens.kt`), so the assertions were updated. `AppleColorsTest` passes as is.

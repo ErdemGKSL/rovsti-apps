@@ -78,7 +78,7 @@ SOFTWARE.
 ## Haze
 
 - Source: https://github.com/chrisbanes/haze. Licence: Apache-2.0. Copyright Chris Banes.
-- Status: only if a later step adds the dependency (Convx `TopFadeBlur.kt` uses Haze 1.3.1).
+- Status: used. `:design` depends on `dev.chrisbanes.haze:haze` and `haze-materials` 1.7.3 for `glass/TopFadeBlur.kt` (ported from Convx, which pins 1.3.1).
 
 ## Apache License 2.0
 

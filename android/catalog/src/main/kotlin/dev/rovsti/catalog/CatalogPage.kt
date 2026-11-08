@@ -12,6 +12,7 @@ enum class CatalogPage(
     Press("Press feedback"),
     Glass("Glass"),
     BackdropEngine("Backdrop engine"),
+    IosGlass("iOS glass materials"),
     Buttons("Buttons"),
     Rows("Rows"),
     GroupedSection("Grouped sections"),

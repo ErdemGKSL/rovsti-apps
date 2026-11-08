@@ -8,8 +8,19 @@ ktlint_standard_no-wildcard-imports = enabled
 ktlint_standard_property-naming = disabled
 
 # Ported Convx / Kyant0 sources stay close to upstream: keep their naming, comment and KDoc layout.
-[**/dev/rovsti/design/{backdrop,shapes}/**.kt]
+[**/dev/rovsti/design/{backdrop,shapes,ios}/**.kt]
 ktlint_standard_kdoc = disabled
 ktlint_standard_function-naming = disabled
 ktlint_standard_backing-property-naming = disabled
 ktlint_standard_no-consecutive-comments = disabled
+
+[**/dev/rovsti/design/glass/{TopFadeBlur,convx/GlassEffect}.kt]
+ktlint_standard_kdoc = disabled
+ktlint_standard_no-consecutive-comments = disabled
+
+[**/dev/rovsti/design/theme/{AppleTokens,GlassTintTokens,AppleColors}.kt]
+ktlint_standard_kdoc = disabled
+ktlint_standard_no-consecutive-comments = disabled
+
+[**/src/test/**/{GlassEffectTest,GlassTintTokensTest,AppleColorsTest}.kt]
+ktlint_standard_filename = disabled

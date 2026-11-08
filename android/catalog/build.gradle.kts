@@ -24,5 +24,6 @@ android {
 dependencies {
     implementation(project(":design"))
     implementation(libs.activity.compose)
+    implementation(libs.haze)
     testImplementation(project(":testing"))
 }

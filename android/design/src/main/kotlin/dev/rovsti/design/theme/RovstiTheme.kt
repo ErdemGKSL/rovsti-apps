@@ -12,6 +12,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import dev.rovsti.design.ios.foundation.IosTheme
+import dev.rovsti.design.ios.foundation.iosColorsFrom
 import dev.rovsti.design.text.rovstiSelectionColors
 
 val LocalRovstiColors = staticCompositionLocalOf { LightColors }
@@ -41,14 +43,17 @@ fun RovstiTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    val palette = if (darkTheme) DarkColors else LightColors
     CompositionLocalProvider(
-        LocalRovstiColors provides if (darkTheme) DarkColors else LightColors,
+        LocalRovstiColors provides palette,
         LocalGlassTokens provides if (darkTheme) GlassTokens.Dark else GlassTokens.Light,
         LocalRovstiType provides RovstiType.Default,
         LocalRovstiTextStyle provides RovstiType.Default.body,
-        LocalTextSelectionColors provides rovstiSelectionColors(if (darkTheme) DarkColors else LightColors),
-        content = content,
-    )
+        LocalTextSelectionColors provides rovstiSelectionColors(palette),
+    ) {
+        // Every ported Convx component reads IosTheme; it is fed from the Rovsti palette.
+        IosTheme(colors = iosColorsFrom(palette), content = content)
+    }
 }
 
 /** Text on [BasicText]: theme style and colour, no Material. [color] wins over the colour in [style]. */

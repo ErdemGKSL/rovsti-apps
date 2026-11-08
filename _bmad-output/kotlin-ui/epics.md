@@ -90,7 +90,7 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
 | E1.28 | Convx sheets (IosSheet, IosPageSheet, IosSheetPresentation, BottomSheet) | R3 | done (SheetEntry facade keeps detents, stacking, non-modal; release rule, pushback, corner, grabber from Convx) |
 | E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | done |
 | E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3/R4 | done (R3 swipe/IosButton/APK; R4 Step 2 tab bar; R4 Step 3 top chrome, glass circle button, list drawing, overscroll) |
-| E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | todo (planned, round-04) |
+| E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | done (R4-4; evidence below) |
 | E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | todo (planned, round-04) |
 | E1.20 | Image loading and the photo viewer | R4 | todo (planned, round-04) |
 | E1.21 | Performance harness and convention tests | R4 | todo (planned, round-04) |
@@ -411,7 +411,15 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
 - AC2 Push/pop tweens with depth parallax and dim, tab crossfade ~200 ms, predictive back scrubs the pop.
 - AC3 Shared-bounds helper (avatar -> detail) (SKILL motion 8).
 - AC4 `chromeFor(route)` pattern documented in `:shell` usage notes.
-- Screenshots: `e1.18-push-mid`, `e1.18-predictive-back-50pct`.
+- Screenshots: `e1.18-push-mid`, `e1.18-predictive-back-50pct`, `e1.18-shared-avatar-mid`, `e1.18-tab-switch-mid`.
+- Evidence (R4-4): `design/transition/{TabNavigator,NavTransitions,RovstiNavHost,SharedBounds,ChromeSpec,ArtworkMotion}.kt`;
+  `NavTransitions` ports Convx `AppNavHost.kt:55-98` and `AppRootContent.kt:990` (one deviation: pop-enter parallax sign, see
+  `api-notes.md`); `rememberNavTransitionFreeze` is wired through `RovstiBackdropRoot(route, lastNavWasPop)`; catalog has the
+  Components/Demo tabs with avatar -> detail -> notes. Tests: `TabNavigatorTest`, `ChromeSpecTest`, `NavTest` (11), `NavFreezeTest` (3),
+  `CatalogNavigationTest`. Docs: `docs/kotlin-ui/shell-usage.md`, `api-notes.md`. PNGs opened: push-mid shows the detail 8 % from the left edge over
+  the list shifted 0.3 W left, no blank band, tab bar kept (detail is Visible); predictive-back-50pct shows the detail almost gone (the iOS curve
+  puts 50 % gesture at ~90 % of the distance) and the avatar in return flight; shared-avatar-mid shows the avatar unclipped over both pages;
+  tab-switch-mid shows both tab pages cross-fading at x = 0 with the puck mid-move.
 
 ### E1.19 Swipe row and alphabet rail
 - AC1 Swipe-to-reveal: 76 dp per action, full-swipe threshold with haptic, settle 1.0/500, custom accessibility actions.

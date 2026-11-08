@@ -27,7 +27,7 @@ import kotlinx.collections.immutable.persistentListOf
 
 internal const val LargeTitleRowCount = 40
 
-private fun contactName(i: Int) = "Contact ${i.toString().padStart(2, '0')}"
+internal fun contactName(i: Int) = "Contact ${i.toString().padStart(2, '0')}"
 
 /**
  * A contacts-like page: the large-title scaffold with 40 rows, two actions and an overflow button. A row opens a pushed

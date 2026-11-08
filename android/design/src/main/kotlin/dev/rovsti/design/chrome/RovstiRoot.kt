@@ -35,7 +35,8 @@ import dev.rovsti.design.theme.RovstiTheme
  * the capture while a list scrolls. [chrome] (floating bars) and the overlay entries come after it as siblings, with
  * [LocalAppBackdrop], [LocalIosBackdrop], [LocalAppBackdropFrozen] and [LocalAppMotionFrozen] provided, so every glass
  * surface in them samples the recorded page. [route] names the current page: a change freezes the capture for a
- * moment while the transition runs.
+ * moment while the transition runs, unless [lastNavWasPop] says the change was a pop (a predictive-back pop is
+ * gesture driven and must not freeze).
  *
  * No page creates its own source. A page that has its own floating bars over its own scrolling content uses
  * [BackdropScope] for them; everything else just draws.
@@ -46,10 +47,11 @@ fun RovstiBackdropRoot(
     modifier: Modifier = Modifier,
     baseBg: Color = RovstiTheme.colors.page,
     route: String? = null,
+    lastNavWasPop: () -> Boolean = { false },
     chrome: @Composable BoxScope.() -> Unit = {},
     content: @Composable () -> Unit,
 ) {
-    val state = rememberAppBackdropState(baseBg = baseBg, currentRoute = route)
+    val state = rememberAppBackdropState(baseBg = baseBg, currentRoute = route, lastNavWasPop = lastNavWasPop)
     OverlayProvider(overlays) {
         Box(modifier.fillMaxSize()) {
             Box(Modifier.fillMaxSize().layerBackdrop(state.appBackdrop).nestedScroll(state.scrollConnection)) {

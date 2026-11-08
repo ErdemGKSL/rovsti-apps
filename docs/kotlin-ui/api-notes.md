@@ -166,3 +166,38 @@ line itself, so the hairline is drawn only when no rim is.
 - `androidx.core.graphics.ColorUtils` calls `android.graphics.Color`, so `GlassTintTokensTest` runs under Robolectric.
 - Test fixes: `GlassTintTokensTest` expected a dark neutral tint alpha of 0.06 and dark hero opacity 0.30; the tokens are 0 on
   purpose (measured, see the comments in `GlassTintTokens.kt`), so the assertions were updated. `AppleColorsTest` passes as is.
+
+## E1.18 (Navigation 3 1.2.1; checked with `javap` and the `-sources.jar` of `navigation3-ui-android` / `-runtime-android`)
+
+- Dependencies: `androidx.navigation3:navigation3-runtime:1.2.1`, `navigation3-ui:1.2.1`, `kotlinx-serialization-json:1.9.0` and the
+  `org.jetbrains.kotlin.plugin.serialization` plugin (version = kotlin 2.4.21). `:design` exposes `kotlinx-serialization-json` as `api`
+  (`TabNavigator.saver` takes a `KSerializer`); the Nav3 artifacts stay `implementation`.
+- `androidx.navigation3.ui.NavDisplay` (package `...navigation3.ui`) has five overloads. The one used: `NavDisplay(backStack: List<T>,
+  modifier, contentAlignment, onBack: () -> Unit, entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator()),
+  sceneStrategies, sceneDecoratorStrategies, sharedTransitionScope: SharedTransitionScope?, sizeTransform, transitionSpec,
+  popTransitionSpec, predictivePopTransitionSpec, entryProvider: (T) -> NavEntry<T>)`. `transitionSpec` /
+  `popTransitionSpec` are `AnimatedContentTransitionScope<Scene<T>>.() -> ContentTransform`; `predictivePopTransitionSpec` is
+  `AnimatedContentTransitionScope<Scene<T>>.(Int swipeEdge) -> ContentTransform`. The scope's `initialState` / `targetState` are
+  `Scene<T>`, not routes.
+- Differences from the plan: `NavEntry.key` is **private** (`NavEntry(key, contentKey, metadata, content)`), so a transition spec cannot
+  read the route from a scene's entries; `RovstiNavHost` stores its `StackKey` in `NavEntry.metadata` (`StackKeyMetadata`) and the specs
+  read `scene.metadata`. `Scene` has `key`, `entries`, `previousEntries`, `content`, `metadata`.
+- `entryProvider { entry<K> { } }` exists (`EntryProviderScope`), keyed by the back-stack element type. Because our back-stack element is
+  the wrapper `StackKey(tab, depth, route)`, the host takes its own `RovstiEntries<R>.entry<K : R>` and builds `NavEntry` directly.
+- `rememberSaveableStateHolderNavEntryDecorator()` is the default decorator; `contentKey` defaults to the string `"$key:${key::class}"`
+  (saveable), so keys need no `Bundle` support.
+- `LocalNavAnimatedContentScope: ProvidableCompositionLocal<AnimatedContentScope>` (package `...navigation3.ui`) throws outside an entry.
+  It is the `AnimatedVisibilityScope` for `sharedBounds`. `SharedTransitionLayout`, `Modifier.sharedBounds(sharedContentState,
+  animatedVisibilityScope, boundsTransform, renderInOverlayDuringTransition, zIndexInOverlay)`, `rememberSharedContentState(key)`,
+  `BoundsTransform { initial, target -> FiniteAnimationSpec<Rect> }` are `androidx.compose.animation` (`@ExperimentalSharedTransitionApi`).
+- Predictive back: `NavDisplay` registers a `NavigationBackHandler` (navigationevent) and scrubs a `SeekableTransitionState` with the
+  pop spec; `ComponentActivity.onBackPressedDispatcher.dispatchOnBackStarted/Progressed/Cancelled` drive it under Robolectric. The scrub
+  maps gesture progress to the transition's time, so with the iOS push curve (0.32, 0.72, 0, 1) 50 % progress is already about 90 % of
+  the distance; that is Convx's behaviour too.
+- Back order: `NavigationBackHandler` is composed with the pages, the overlay host's `BackHandler` later (in `OverlayEntries`), so an
+  open overlay closes first (`NavTest.overlayClosesBeforeTheStackPops`).
+- Convx deviation: `AppNavHost.kt` pop-enter is `slideInHorizontally(push) { parallaxOffset(-it) }`, which is +0.3 W (the page below starts
+  to the right and leaves a blank band on the left while the leaving page slides off). `NavTransitions` uses `parallaxOffset(it)`
+  (-0.3 W, the mirror of the push exit).
+- Test pitfall: `NavTransitionFreeze` reads `System.nanoTime()`, so tests need real time (`Thread.sleep`) plus
+  `ShadowSystemClock.advanceBy` to leave the 330 ms window; the Compose manual clock does not move it.

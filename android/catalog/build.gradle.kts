@@ -2,6 +2,7 @@ plugins {
     id("rovsti.android.app")
     id("rovsti.compose")
     id("rovsti.screenshots")
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -25,5 +26,7 @@ dependencies {
     implementation(project(":design"))
     implementation(libs.activity.compose)
     implementation(libs.haze)
+    implementation(libs.navigation3.runtime)
+    implementation(libs.navigation3.ui)
     testImplementation(project(":testing"))
 }

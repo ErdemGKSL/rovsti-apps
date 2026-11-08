@@ -133,4 +133,7 @@ object RovstiMotion {
     const val PushParallax = 0.30f
     const val PushDimAlpha = 0.85f
     const val PressScale = 0.96f
+
+    /** Convx `Motion.parallaxOffset`: how far the outgoing page travels under an incoming one (a negative px offset). */
+    fun parallaxOffset(fullWidth: Int): Int = -(fullWidth * PushParallax).toInt()
 }

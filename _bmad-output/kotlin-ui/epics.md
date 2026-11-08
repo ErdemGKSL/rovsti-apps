@@ -63,6 +63,10 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 residue under open menus), F6 (text over text under the collapsed bar), F7 (page-sheet row inset), orphan goldens; finish
 E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `ScreenChrome`, `GlassCircleButton`,
 `IosOverscroll`) under our facades; then E1.18-E1.22 and close E1.
+R4 implemented in `8bd4989`..`86c994f`, verified in code by the round-5 planner: E1.18-E1.21 done; E1.22 only partly
+(no `docs/kotlin-ui/screenshots/design.png`, no `e1.22-*` goldens, no checklist record), so E1 is not closed yet.
+**R5** -> `_bmad-output/kotlin-ui/plans/round-05.md` (planned 2026-11-08 at base `86c994f`): fix F9 (inline title off
+centre: asymmetric title reserve in `FrostedTopBar.kt`, Convx pads 96 dp both sides), finish E1.22, close E1.
 
 | Story | Title | Round | Status |
 |---|---|---|---|
@@ -94,7 +98,7 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
 | E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | done (R4-5; evidence below) |
 | E1.20 | Image loading and the photo viewer | R4 | done (R4 step 6: Coil 3.6.3 loader, slot-sized images, PhotoViewer; ZoomMathTest, PhotoViewerTest, ImageSlotTest, e1.20-* screenshots) |
 | E1.21 | Performance harness and convention tests | R4 | done (R4-7; evidence below) |
-| E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4 | todo (planned, round-04) |
+| E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4/R5 | in-progress (R4: states page, nav test, design-system.md, notices, APK; R5: contact sheet, states goldens, checklist record, F9) |
 
 ### E1.1 Modules, convention plugins, screenshot harness, catalog shell
 - AC1 `android/build-logic` with convention plugins (`rovsti.android.library`, `rovsti.android.app`, `rovsti.compose`,
@@ -478,6 +482,10 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
   points to the skill for numbers).
 - AC3 Checklist (SKILL `references/checklist.md`) run over the catalog; findings fixed or written down.
 - Screenshots: the contact sheet.
+- R4 delivered (verified by the round-5 planner): `catalog/.../OverlayStatesPage.kt` + `CatalogPage.OverlayStates`,
+  `CatalogNavigationTest` (every page), `build-logic/.../ContactSheetTask.kt` (`:catalog:contactSheet`, never run: the PNG
+  is missing), `docs/kotlin-ui/design-system.md`, notices for Coil and Navigation 3, catalog APK (37.5 MB). R5 finishes
+  AC1 goldens, AC2 sheet, AC3 checklist record (`round-05.md` Steps 2-5).
 
 ---
 

@@ -6187,6 +6187,7 @@ dependencies = [
  "gpui_wgpu",
  "log",
  "rovsti_android",
+ "rovsti_app_core",
  "rovsti_core",
  "rovsti_ui",
  "rovsti_wa_client",

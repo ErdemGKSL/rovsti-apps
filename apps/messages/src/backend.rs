@@ -130,15 +130,7 @@ pub fn decode<T: DeserializeOwned + Default>(raw: rovsti_android::Result<String>
     }
 }
 
-/// The state of the thread list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Access {
-    Loading,
-    Ready,
-    /// `READ_SMS` is not granted.
-    Denied,
-    Unavailable,
-}
+pub use rovsti_app_core::messages::access::Access;
 
 /// The SIM a new message should use: the thread's remembered one while it is
 /// still active, else the system default when active, else none (Android picks).

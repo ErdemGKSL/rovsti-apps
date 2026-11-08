@@ -107,3 +107,50 @@ fn the_whatsapp_link_fixture_loads_and_saves_byte_for_byte() {
     StoredLink::remove(&dir).expect("remove");
     assert!(StoredLink::load(&dir).is_none());
 }
+
+#[test]
+fn the_messages_prefs_fixture_loads_with_spam_rules_and_voice_speed() {
+    use rovsti_app_core::messages::prefs::{MessagesPrefs, PREFS_FILE};
+    use rovsti_core::{spam::SpamRule, voice_player::Speed};
+
+    let dir = store::test_support::tmp("fx-msg-prefs");
+    fs::copy(fixture("messages-prefs.json"), dir.join(PREFS_FILE)).expect("copy");
+    let prefs = MessagesPrefs::load(&dir);
+    assert_eq!(prefs.voice_speed, Speed::X2);
+    assert!(prefs.spam.rules.contains(&SpamRule::UnknownWithLink));
+    assert!(
+        prefs
+            .spam
+            .rules
+            .contains(&SpamRule::Keyword { text: "win".into() })
+    );
+    assert!(prefs.is_muted("sms:7"));
+    prefs.save(&dir).expect("save");
+    assert_eq!(
+        fs::read(dir.join(PREFS_FILE)).expect("read"),
+        fs::read(fixture("messages-prefs.json")).expect("fixture"),
+        "saving rewrites the file the old code wrote"
+    );
+}
+
+#[test]
+fn the_drafts_fixture_loads_and_saves_byte_for_byte() {
+    use rovsti_app_core::messages::drafts::{DRAFTS_FILE, Drafts};
+    use rovsti_core::ThreadId;
+    use std::collections::BTreeMap;
+
+    let dir = store::test_support::tmp("fx-drafts");
+    fs::copy(fixture("drafts.json"), dir.join(DRAFTS_FILE)).expect("copy");
+    let map: BTreeMap<String, String> = storage::load_json(&dir, DRAFTS_FILE).expect("map");
+    let drafts = Drafts::from_map(&map);
+    assert_eq!(drafts.get(&ThreadId::Sms(3)), Some("running late"));
+    assert_eq!(
+        drafts.get(&ThreadId::WhatsApp("1@s.whatsapp.net".into())),
+        Some("hello")
+    );
+    storage::save_json(&dir, DRAFTS_FILE, &drafts.to_map()).expect("save");
+    assert_eq!(
+        fs::read(dir.join(DRAFTS_FILE)).expect("read"),
+        fs::read(fixture("drafts.json")).expect("fixture"),
+    );
+}

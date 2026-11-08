@@ -34,7 +34,7 @@ use serde_json::{Value, json};
 
 /// The Messages preferences file. Only the part the cold paths need is read here;
 /// unknown fields are ignored, so the UI can grow the file freely.
-pub const PREFS_FILE: &str = "messages-prefs.json";
+pub use rovsti_app_core::messages::prefs::PREFS_FILE;
 
 /// Largest attachment `mms_send_req` reads from disk. Carriers refuse far less.
 /// The attach button picks no larger file (`backend::ATTACH_MAX_BYTES`).

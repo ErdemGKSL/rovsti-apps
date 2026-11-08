@@ -138,3 +138,19 @@ line itself, so the hairline is drawn only when no rim is.
 - Test facts: Robolectric's platform `Magnifier` throws in `dismiss()` during long-press selection; `ShotTest` installs `ShadowNoopMagnifier`.
   `ShotTest.setSimulatedIme(dp)` dispatches an IME inset. A Ctrl+V key injection types a literal "v" in Robolectric; use the toolbar item or
   `SemanticsActions.PasteText`. Caret position: click at `14 dp + layout.getCursorRect(n).left` (`SemanticsActions.GetTextLayoutResult`).
+
+## E1.24 Convx backdrop engine port (Compose BOM 2026.09, Kotlin 2.4.21)
+
+- All 42 files of Convx `ui/component/backdrop/**` and 15 of `ui/component/shapes/**` compile against BOM 2026.09 unchanged:
+  no Compose API drift was found, only package renames (`dev.rovsti.design.backdrop`, `dev.rovsti.design.shapes`) and ktlint formatting.
+- `.editorconfig` disables the ktlint rules kdoc, function-naming, backing-property-naming and no-consecutive-comments for
+  `design/{backdrop,shapes}/**` so the ported files stay close to upstream.
+- `rememberNavTransitionFreeze(currentRoute, lastNavWasPop = { false })`: Convx's global `lastNavWasPop()` (SharedArtwork) is a parameter.
+- `LiquidToggle/Slider/BottomTabs`: `glassUsesDarkAppearance()` became `RovstiTheme.colors.isDark`.
+- `rememberAppBackdropState(baseBg, currentRoute, extraFrozen, lastNavWasPop)` replaces Convx's `pureBlack` and floating-bar connection.
+- `LayerBackdrop.staticRegions` is filled during draw, after layout. The first draw declares nothing (fail-safe: always record);
+  tests need a second draw (`captureToImage` forces it under Robolectric).
+- Robolectric NATIVE runs the backdrop effect chain (blur, vibrancy, AGSL lens, highlight): `BackdropEngineTest` measures it.
+  The design module's JVM tests now have robolectric and compose-ui-test-junit4 (`StaticRegionTest`, `NavTransitionFreezeTest`).
+- Test pitfalls: a 3 dp stripe pattern needs the sampled patch off a stripe edge; red 0xD32F2F and blue 0x1565C0 have equal luminance,
+  so variance checks use red and white.

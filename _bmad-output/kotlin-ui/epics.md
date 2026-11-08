@@ -77,7 +77,7 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 | E1.15 | Toast and undo pill | R2 | done |
 | E1.16 | Text field, search field, composer field | R2 | done |
 | E1.23 | Relicense to GPL-3.0-or-later, third-party notices, skill/docs licensing rule | R3 | todo |
-| E1.24 | Port Convx backdrop engine (Kyant0 backdrop + Convx pool/freeze/static region) and continuous shapes | R3 | todo |
+| E1.24 | Port Convx backdrop engine (Kyant0 backdrop + Convx pool/freeze/static region) and continuous shapes | R3 | done (R3 step 2) |
 | E1.25 | Port Convx `liquidGlass`, AppleTokens/GlassTintTokens, TopFadeBlur, iOS foundation (IosGlass, IosMenuMaterial, IosTheme, IosColors, IosDesignSystem) | R3 | todo |
 | E1.26 | One root backdrop, migrate every glass caller, delete the old engine, real-path test (API >= 33), catalog APK | R3 | todo |
 | E1.27 | Convx menus and context menus (IosMenu, AppleContextMenu, IosContextMenu, OverlayMenu) in `OverlayHost` | R3 | todo |

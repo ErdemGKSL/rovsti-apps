@@ -14,4 +14,8 @@ dependencies {
     implementation(libs.coroutines.core)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
+    // StaticRegionTest and NavTransitionFreezeTest compose a real LayerBackdrop under Robolectric.
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.robolectric)
+    testImplementation(libs.compose.ui.test.junit4)
 }

@@ -11,6 +11,7 @@ enum class CatalogPage(
     Motion("Motion: spring curves"),
     Press("Press feedback"),
     Glass("Glass"),
+    BackdropEngine("Backdrop engine"),
     Buttons("Buttons"),
     Rows("Rows"),
     GroupedSection("Grouped sections"),

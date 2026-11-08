@@ -60,6 +60,7 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
                     CatalogPage.Motion -> MotionPage()
                     CatalogPage.Press -> PressPage()
                     CatalogPage.Glass -> GlassPage()
+                    CatalogPage.BackdropEngine -> BackdropEnginePage()
                     CatalogPage.Buttons -> ButtonsPage()
                     CatalogPage.Rows -> RowsPage()
                     CatalogPage.GroupedSection -> GroupedSectionPage()

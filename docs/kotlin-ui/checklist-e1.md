@@ -26,7 +26,7 @@ Font scale 2.0, light (31 pages) and RTL dark (31 pages):
   capsules, the alphabet rail (moves to the left edge), tab order and the page-sheet rows all mirror. Numbers inside
   English strings keep Unicode bidi order (for example `+9.4%` reads `9.4%+` in the Motion legend and trailing full stops
   move to the left); that is bidi of English demo text, not a layout bug.
-- **Found and fixed (3):**
+- **Found and fixed (4):**
   1. Lists page, fs 2.0: the phone numbers ran under the alphabet rail (`0100` touching the letters). `ListRow` got
      `endInset: Dp = 0.dp` (extra end padding inside the row, the press fill stays full bleed); `ListScrollRailWidth` is
      public; the Lists page passes it. Test `ListRailInsetTest` (fs 1.0 and 2.0: row text ends before the rail).

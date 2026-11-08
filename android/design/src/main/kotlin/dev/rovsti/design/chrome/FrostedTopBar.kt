@@ -8,7 +8,7 @@
  * ambient colour is gone; the preference key became LocalGlassSettings (reduceDynamicBlur or reduceTransparency draw
  * the solid bar); the back button is the 44 dp GlassCircleButton in a 48 dp touch target at the 16 dp gutter;
  * titleSideReserve/titleEndReserve let the scaffold size the reserve to the toolbar instead of Convx's fixed 96 dp;
- * like Convx's symmetric padding(horizontal = 96.dp) the larger one is applied to both sides, so the title is centred.
+ * like Convx's symmetric padding(horizontal = 96.dp) the title sits on the bar's centre line when it fits between the larger reserve on both sides; when it only fits in the asymmetric span it is shifted into that span (Convx's fixed 96 dp never meets a wide toolbar, ours can) instead of being truncated to "Con..." while there is room.
  */
 package dev.rovsti.design.chrome
 
@@ -49,6 +49,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.isSpecified
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -119,7 +120,7 @@ fun FrostedTopBar(
     pullFraction: () -> Float = { 0f },
     // Room each side of the title (back button or actions); Convx reserves a fixed 96 dp.
     titleSideReserve: Dp = 96.dp,
-    // The larger of the two reserves is used on both sides, so the title stays on the bar's centre line.
+    // The title is centred when it fits inside the larger reserve on both sides, else shifted into the free span.
     titleEndReserve: Dp = titleSideReserve,
     actions: @Composable () -> Unit = {},
 ) {
@@ -190,11 +191,10 @@ fun FrostedTopBar(
                         .align(Alignment.Center)
                         // Reserve room for the back button/logo and the actions so a long title truncates instead of
                         // running under them.
-                        .padding(horizontal = maxOf(titleSideReserve, titleEndReserve))
+                        .titleSpan(titleSideReserve, titleEndReserve)
                         // A few dp below true center: the fade's readability scrim is strongest right under the
                         // status bar and thins going down, so a title sitting slightly lower reads clearer against it.
                         .padding(top = 4.dp)
-                        .fillMaxWidth()
                         .graphicsLayer { alpha = titleAlphaProvider?.invoke() ?: titleAlpha }
                         .testTag("inline-title")
                         .clearAndSetSemantics {},
@@ -298,3 +298,29 @@ private fun RefreshLine(
 }
 
 private val LINE_HEIGHT = 2.5.dp
+
+/**
+ * Rovsti: lays the inline title out in the span between the leading and trailing reserves. Centred on the bar when the
+ * text fits between the larger reserve on both sides (iOS and Convx look), otherwise slid toward the free side so a
+ * short title is not truncated just because the toolbar on the other side is wide.
+ */
+private fun Modifier.titleSpan(
+    leading: Dp,
+    trailing: Dp,
+): Modifier =
+    layout { measurable, constraints ->
+        val ltr = layoutDirection == LayoutDirection.Ltr
+        val left = (if (ltr) leading else trailing).roundToPx()
+        val right = (if (ltr) trailing else leading).roundToPx()
+        val total = constraints.maxWidth
+        val span = (total - left - right).coerceAtLeast(0)
+        val placeable = measurable.measure(constraints.copy(minWidth = 0, maxWidth = span))
+        val sym = total - 2 * maxOf(left, right)
+        val x =
+            if (placeable.width <= sym) {
+                (total - placeable.width) / 2
+            } else {
+                left + (span - placeable.width) / 2
+            }
+        layout(total, placeable.height) { placeable.place(x, 0) }
+    }

@@ -20,7 +20,7 @@ Research reports with more detail: `_bmad-output/kotlin-ui/research/convx-motion
 | 2 | During a drag the finger writes the value with `snapTo` in the same input event (`CoroutineStart.UNDISPATCHED`); comment says the card trailed one frame without it. | `U/component/BottomSheet.kt:638-644` |
 | 3 | Release velocity seeds the settle spring (`initialVelocity`) and the target is picked from the **projected** rest point (`v/1000 * 0.998/(1-0.998)`), not from where the finger lifted. | `U/utils/FlingProjection.kt:19-21`; `IosSheet.kt:265-274`; `U/ios/component/IosSwipeActions.kt:85` |
 | 4 | Every per-frame value is read in a layer/draw lambda, so a 120 Hz animation recomposes nothing. | `IosSheet.kt:157-161`; `U/component/IosSheetPresentation.kt:72-100` |
-| 5 | Overshoot sits on surfaces, not content. User feedback quoted in code: "overshoot of the surface or body only, not the icons or items". | `U/component/floatingtabbar/BarMotion.kt:176-184` |
+| 5 | Overshoot sits on surfaces, not content. The authors' code comment records user feedback to that effect (bounce the body, not the icons or items). | `U/component/floatingtabbar/BarMotion.kt:176-184` |
 | 6 | One clock per visual object. When several values must finish on the same frame Convx uses a tween whose easing is a spring step response, not several springs (earlier multi-clock version caused an "icon pop"). | `U/component/floatingtabbar/FloatingTabBarMotion.kt:56-64`; `BarMotion.kt:146-174` |
 | 7 | Press feedback is small (0.94-0.96 scale or glisse's +15 dp grow), springy, and never changes layout. | `U/utils/ModifierExt.kt:136,160`; `U/ios/component/IosButton.kt:123-127`; `G/internal/press.ts:13-16` |
 | 8 | Scrubbable transitions (predictive back, drag-to-dismiss) are tweens/progress; only settle phases are springs. Comment: "Tween, not spring: predictive back scrubs this by gesture progress". | `U/screens/NavigationBuilder.kt:779-780` |
@@ -161,7 +161,7 @@ fun <T> FiniteAnimationSpec<T>.gated(reduceMotion: Boolean): FiniteAnimationSpec
 
 UI code uses Compose `Animatable` + `spring()` (draw-phase reads, frame clock, cancellation). Use this exact closed-form
 solver only for JVM tests (step a spring without a frame clock and compare against `GlisseSpring.spec`), and inside a custom
-`Modifier.Node` that must step a spring by hand from `withFrameNanos`. Exact for any `dt`, so it is frame-rate independent.
+`Modifier.Node` that must step a spring by hand from `withFrameNanos`. Exact for any `dt` up to the 0.1 s clamp, so it is frame-rate independent.
 
 ```kotlin
 // Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
@@ -280,8 +280,8 @@ travel at the recorded velocity.
 ## 4. Momentum projection and rubber band (ORIGINAL, pure Kotlin, JVM-tested)
 
 Apple's "Designing Fluid Interfaces" (WWDC 2018) projection, which Convx implements and explicitly prefers over the
-textbook `v^2/2a` (`U/utils/FlingProjection.kt:19-56`). UIKit's rubber band with c = 0.55 scaled by the viewport
-(`U/utils/IosOverscroll.kt:47,70-75`).
+textbook `v^2/2a` (`U/utils/FlingProjection.kt:19-56`). UIKit's rubber-band constant c = 0.55 scaled by the viewport
+(`U/utils/IosOverscroll.kt:47,70-75`; the algebra below is our own simplification).
 
 ```kotlin
 // ORIGINAL
@@ -298,31 +298,30 @@ object Fling {
     fun restingPoint(position: Float, velocityPxPerSec: Float, rate: Float = 0.998f): Float =
         position + projectedDistance(velocityPxPerSec, rate)
 
-    /** Snap point closest to the projected rest; a tie goes in the direction of travel. */
+    /** Snap point closest to the projected rest; on an exact tie the point lying in the direction of travel wins. */
     fun nearestSnap(points: FloatArray, rest: Float, velocityPxPerSec: Float): Float {
         require(points.isNotEmpty())
-        var best = points[0]
-        var bestDistance = abs(points[0] - rest)
-        for (i in 1 until points.size) {
-            val d = abs(points[i] - rest)
-            val tieTowardTravel = d == bestDistance && sign(points[i] - best) == sign(velocityPxPerSec)
-            if (d < bestDistance || tieTowardTravel) { best = points[i]; bestDistance = d }
-        }
-        return best
+        val travel = sign(velocityPxPerSec)
+        return points.asList().minWith(
+            compareBy<Float> { abs(it - rest) }.thenBy { -sign(it - rest) * travel },
+        )
     }
 }
 
 object Rubber {
-    /** Displayed offset for a raw pull. Slope 1 at 0, asymptote dimension / c. */
+    /**
+     * Displayed offset for a raw pull: `x * D / (D + c * x)`. Slope 1 at 0, asymptote D / c.
+     * (UIKit's own curve is `D * x * c / (D + c * x)`: same shape, slope c, asymptote D. Ours keeps the first
+     * pixels 1:1 so a touch-follow feels attached; pick one and keep it app-wide.)
+     */
     fun band(raw: Float, dimension: Float, c: Float = 0.55f): Float {
         if (dimension <= 0f || raw == 0f) return 0f
-        val x = abs(raw)
-        return sign(raw) * (1f - 1f / (x * c / dimension + 1f)) * dimension / c
+        return raw * dimension / (dimension + c * abs(raw))
     }
 }
 ```
 
-Tests: `projectedDistance(1000f) == 499f` (+-0.5); `nearestSnap` with ties; `band` monotonic, `band'(0) ~ 1`,
+Tests: `projectedDistance(1000f) == 499f` (+-0.5); `nearestSnap` with ties (rest exactly between two points picks the one in the travel direction; zero velocity picks the lower index); `band` monotonic and odd, `band'(0) ~ 1`,
 `band(1e9, D) < D / 0.55`.
 
 ---
@@ -364,6 +363,11 @@ class DragAxis(initial: Float, private val scope: CoroutineScope) {
 
 APIs: `androidx.compose.ui.input.pointer.util.VelocityTracker` (`addPointerInputChange`, `calculateVelocity`,
 `resetTracking`), `Animatable.snapTo/animateTo(targetValue, animationSpec, initialVelocity)`. All API levels.
+
+Alternative: foundation's `AnchoredDraggableState` + `Modifier.anchoredDraggable` (stable since 1.7) already does snapTo-while-dragging,
+`positionalThreshold` / `velocityThreshold` snapping and a settle animation. It decides by thresholds, not by 0.998 projection, and
+cannot rubber-band past the end anchor, so Rovsti uses `DragAxis` for sheets, swipe rows and pucks; reach for `AnchoredDraggable`
+only for simple two-anchor toggles where a threshold is enough (verify the pinned version's `AnchoredDraggableState` constructor).
 
 Rules:
 - Drag writes clamp at hard bounds (Convx: rubber-banding the live drag made the player sheet jitter, `BottomSheet.kt:620-650`);
@@ -478,13 +482,13 @@ instead (section 7), which already gives grow + directional stretch + 8 dp trans
 ## 6. Squash, stretch, morphs, staggering
 
 - **Fixed-duration spring easing** (one clock for many values). Step response of a damped oscillator squeezed into
-  `[0,1]` with `omega*T = 7.8` (residual under 0.6%) plus a linear correction so `f(1) == 1` (`BarMotion.kt:146-174`).
+  `[0,1]` with `omega*T = 7.8` (residual under 0.6%), renormalised so `f(1) == 1` (the idea is Convx's, `BarMotion.kt:146-174`; the renormalisation below is ours).
   Overshoot `exp(-zeta*pi/sqrt(1-zeta^2))`: zeta 0.66 -> 6%, 0.74 -> 3%.
 
 ```kotlin
 // ORIGINAL
 class SpringStepEasing(private val dampingRatio: Float, private val omegaT: Float = 7.8f) : Easing {
-    private val endResidual = 1f - raw(1f)
+    private val endValue = raw(1f)                   // just under 1: the oscillator has not fully landed at t = 1
     private fun raw(t: Float): Float {
         val w = omegaT * t
         val z = dampingRatio
@@ -492,8 +496,9 @@ class SpringStepEasing(private val dampingRatio: Float, private val omegaT: Floa
         val root = sqrt(1f - z * z)
         return 1f - exp(-z * w) * (cos(root * w) + (z / root) * sin(root * w))
     }
+    /** Affine renormalisation so f(0) = 0 and f(1) = 1 exactly (a shear, not an additive ramp). */
     override fun transform(fraction: Float): Float =
-        if (fraction >= 1f) 1f else raw(fraction) + endResidual * fraction
+        if (fraction >= 1f) 1f else (raw(fraction) - endValue * fraction) / (1f - endValue)
 }
 /** Critically damped curve used for shared artwork/title bounds (x = 9t, normalised). */
 val CriticalEasing = Easing { t -> (1f - (1f + 9f * t) * exp(-9f * t)) / (1f - 10f * exp(-9f)) }
@@ -593,17 +598,21 @@ private class GlassPressNode(var enabled: Boolean) : DelegatingNode(), LayoutMod
                 val grow = feel.growDp.dp.toPx()
                 val stretch = 6.dp.toPx()
                 val shift = 8.dp.toPx()
-                animate(pressTargets(w, h, 0f, 0f, grow, stretch, shift), feel.press)
-                while (true) {
-                    val event = awaitPointerEvent(PointerEventPass.Final)
-                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                    if (!change.pressed) break
-                    // A scroll parent took the gesture: let go.
-                    if (change.isConsumed && change.positionChange() != Offset.Zero) break
-                    val d = change.position - down.position
-                    animate(pressTargets(w, h, d.x, d.y, grow, stretch, shift), feel.press)
+                try {
+                    animate(pressTargets(w, h, 0f, 0f, grow, stretch, shift), feel.press)
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Final)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+                        // A scroll parent took the gesture: let go.
+                        if (change.isConsumed && change.positionChange() != Offset.Zero) break
+                        val d = change.position - down.position
+                        animate(pressTargets(w, h, d.x, d.y, grow, stretch, shift), feel.press)
+                    }
+                } finally {
+                    // Also runs when the pointer-input coroutine is cancelled (node detached, recomposed away).
+                    animate(floatArrayOf(1f, 1f, 0f, 0f), feel.release)
                 }
-                animate(floatArrayOf(1f, 1f, 0f, 0f), feel.release)
             }
         })
     }

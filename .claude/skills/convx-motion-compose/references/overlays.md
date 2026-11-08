@@ -207,7 +207,7 @@ Layers inside the entry, bottom to top (`IosContextMenu.kt:178-233`):
 |---|---|---|
 | Scrim | black 0.28 dark / 0.14 light; in 180 ms, out 140 ms; tap dismisses; alpha read in `drawBehind` | `IosContextMenu.kt:155-160,276`; `AppleContextMenu.kt:279` |
 | Lifted source | a **dedicated preview composable** (not a second composition of a stateful row; Convx's re-composition restarts row state, `IosContextMenu.kt:193-201`) placed at the anchor's window rect, scale 1.0 -> 1.05, 150 ms in / 120 ms out; the real row stays in layout at alpha 0 | `IosContextMenu.kt:162-168,277` |
-| Panel | progress spring (0.78, 700) open / 150 ms `menuExit` close; alpha `clamp(p/0.35)`; per-axis scale from `anchorSize/panelSize` (min 0.08) to 1; `transformOrigin` = `Placement.origin`; blur 20 dp -> 0 while **opening only** (API 31 `RenderEffect`), plain fade-shrink on close ("a blur that clears reads as glass condensing") | `IosContextMenu.kt:145-150,204-226,271-275` |
+| Panel | progress spring (0.78, 700) open / 150 ms `menuExit` close; alpha `clamp(p/0.35)`; per-axis scale from `anchorSize/panelSize` (min 0.08) to 1; `transformOrigin` = `Placement.origin`; blur 20 dp -> 0 while **opening only** (API 31 `RenderEffect`), plain fade-shrink on close ((a blur that clears while opening reads as glass condensing)) | `IosContextMenu.kt:145-150,204-226,271-275` |
 
 ```kotlin
 // ORIGINAL: panel layer block (p = progress, gx/gy = per-axis grow springs, all Animatables read here only)

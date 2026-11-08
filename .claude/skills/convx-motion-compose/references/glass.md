@@ -23,7 +23,7 @@ behind it, taken from one recorded source layer and translated so the right regi
 (2) an effect chain on that replay: saturation (free, as a colour filter at composite) -> blur -> refraction lens
 (`C/GlassEffect.kt:393-421`, `B/effects/ColorFilter.kt:19-32`); (3) a translucent fill and the content; (4) the edges:
 a two-sided specular rim, an outer hairline and a soft shadow (`B/highlight/*`, `B/shadow/*`). Chrome is always a
-**sibling drawn after** the content subtree, never inside it ("avoid a recursive RenderNode draw", `AppRootContent.kt:~1194`).
+**sibling drawn after** the content subtree, never inside it (a source-code comment gives recursive RenderNode drawing as the reason, `AppRootContent.kt:~1194`).
 
 glisse gets the same optics on the web with only `blur(3px) + saturate(1.5) + translucent fill` (`G/styles.css:91-130`)
 plus its lens bend and rim; the optical character comes from the lens and rim, not from heavy blur. Rovsti follows that:
@@ -92,10 +92,16 @@ private class GlassNode(
         }
         val offset = src.localPositionOf(here, Offset.Zero)
         // Re-record only when this surface moved or resized relative to the source. Pixel changes inside the
-        // source flow through automatically: the recording holds a reference to the source's RenderNode.
+        // source should flow through: the recording references the source's RenderNode. VERIFY this on an
+        // emulator with a scrolling list first (JVM renderers cannot show it); if the replay goes stale, drop
+        // the cache and re-record on every source draw (accept the cost, then lean on the freeze gate).
         if (offset != recordedOffset || size != recordedSize) {
             val s = spec.captureScale                                   // section 5.2
-            layer.record(IntSize((size.width * s).roundToInt(), (size.height * s).roundToInt())) {
+            // Named args: the first positional parameter of GraphicsLayer.record is the Density, not the size.
+            layer.record(
+                density = this, layoutDirection = layoutDirection,
+                size = IntSize((size.width * s).roundToInt(), (size.height * s).roundToInt()),
+            ) {
                 scale(s, s, pivot = Offset.Zero) { translate(-offset.x, -offset.y) { drawLayer(source.layer) } }
             }
             recordedOffset = offset; recordedSize = size
@@ -253,8 +259,11 @@ fun lensPull(x: Float, y: Float, w: Float, h: Float, radius0: Float, o: LensOpti
 fun spectrum(dispersion: Float) = floatArrayOf(1f + 0.2f * dispersion, 1f + 0.1f * dispersion, 1f)
 ```
 
-AGSL (store as `res/raw/glass_lens.agsl` or a Kotlin string; one `RuntimeShader` per thread, updated by uniforms, never
-recompiled per frame; Convx caches by key, `B/RuntimeShaderCache.kt`):
+AGSL (store as `res/raw/glass_lens.agsl` or a Kotlin string). One `RuntimeShader` **instance per glass surface** (instances
+carry their own uniforms; sharing one between two surfaces makes them overwrite each other), created once in `onAttach`, never
+per frame. After changing uniforms, assign a fresh `RenderEffect.createRuntimeShaderEffect(...)` to the layer, because an
+already-built effect does not reliably pick up later uniform writes. Cache by key if many identical surfaces exist
+(Convx does, `B/RuntimeShaderCache.kt`):
 
 ```glsl
 // Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
@@ -322,7 +331,7 @@ the tab bar milestone needs it (glisse.md 5.2 has the full formula); evaluate th
 Measured by glisse's author from iOS 26.1 `.glassEffect()`: brightest at the very edge, gone 1.22 px in; light from the
 top-left lights the left and top sides, its reflection the right and bottom; fades over the other two corners; under it a
 0.5 px edge line. Shine 0.3 on light pages, 0.13 on dark. Draw it as a `ShaderBrush(RuntimeShader)` rect over the glass
-(after content), cached per (size, radius, shine, edge colour); animate alpha, not geometry (Convx re-records its rim only
+(after content; the shader's `coord` is in the canvas space of the draw call, so draw the rect at the surface origin or `translate` first so `p = coord - size/2` is centred), cached per (size, radius, shine, edge colour); animate alpha, not geometry (Convx re-records its rim only
 on geometry change, `B/highlight/HighlightModifier.kt:118-148`).
 
 ```glsl

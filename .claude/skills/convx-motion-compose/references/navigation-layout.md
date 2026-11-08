@@ -380,8 +380,8 @@ class RovstiHaptics(private val view: View, private val vibrator: Vibrator?, pri
 Fire on: tab reselect (tick), puck lands on a new tab (selection), sheet snaps to a detent (tick), long-press menu opens
 (longPress), slide over a new menu row (textHandle), toggle commit (toggle), swipe row crosses full-swipe (tick), destructive
 confirm (confirm), invalid action (reject). Never on scroll or continuously during a drag. One app preference: Off / System
-(default) / Strong. Compose's `LocalHapticFeedback` gained matching types in 1.8 (`Confirm`, `Reject`, `SegmentTick`,
-`ToggleOn`, ...); verify at the pinned version if you prefer it.
+(default) / Strong. Compose's `LocalHapticFeedback` gained matching types around 1.7-1.8 (`Confirm`, `Reject`, `SegmentTick`,
+`ToggleOn`, ...); verify at the pinned version if you prefer it (it goes through `performHapticFeedback`, so the Samsung problem above remains).
 
 ## 9. Stops: full-screen map, everything floats
 

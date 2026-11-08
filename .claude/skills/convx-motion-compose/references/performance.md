@@ -9,7 +9,7 @@ Prefix: Convx `A/` = `app/src/main/kotlin/com/convx/music/`, `UI/` = `A/ui/`.
 
 Budget: 120 Hz = 8.33 ms per frame. Aim for <= ~4 ms composition + layout and <= ~4 ms draw on the main thread, with the
 RenderThread (blur, lens) under ~3 ms for chrome while scrolling. Convx reasons against 8.33 ms in comments
-(`UI/screens/HomeSectionOrder.kt:61-65`: "content alone measured 14ms/frame against an 8.33ms budget").
+(`UI/screens/HomeSectionOrder.kt:61-65`: a comment records the Home content alone costing about 14 ms per frame against that budget).
 
 ---
 
@@ -19,7 +19,7 @@ Every per-frame value travels as a `State<T>` holder or `() -> T` lambda and is 
 `Modifier.graphicsLayer {}`, `drawBehind {}`, `drawWithContent {}`, `drawWithCache { onDrawBehind {} }`, `Canvas {}`,
 `Modifier.offset { IntOffset }`, `Modifier.layout {}` / `placeWithLayer {}`. Composition reacts only to coarse booleans or
 enums derived with `derivedStateOf`. Convx applies this to sheet scrim and translation (`UI/ios/component/IosSheet.kt:157-161,217`),
-sheet pushback (`UI/component/IosSheetPresentation.kt:72-100`, "zero-recomposition 120Hz smoothness"), hero scroll progress
+sheet pushback (`UI/component/IosSheetPresentation.kt:72-100`, (the stated goal is zero recomposition at 120 Hz)), hero scroll progress
 returned as `State<Float>` (`UI/component/HeroArtwork.kt:342-372`), seek bar isolated in its own composable
 (`UI/player/Player_v2.kt:1579-1590`), shimmer read in `drawWithCache` (`UI/component/Skeletons.kt:50-80`).
 
@@ -68,10 +68,10 @@ Traps:
 - Every `item`/`items` has `key` (stable id) and `contentType` (row kind). One composable per row kind.
 - No allocation, `map`, `filter`, `sortedBy` inside item lambdas or arguments; precompute in the ViewModel / Rust layer.
 - No per-row blur, shadow, glass, marquee or infinite animation. If something must animate in a row, gate it on visibility
-  (`boundsInWindow()` non-empty; Convx `UI/utils/MotionModifiers.kt:239-275`: a plain marquee "drives an animation frame forever"
+  (`boundsInWindow()` non-empty; Convx `UI/utils/MotionModifiers.kt:239-275`: a plain marquee keeps requesting frames forever
   for every row Compose keeps around, including prefetched ones).
 - Avoid `Modifier.animateItem()` on huge lists unless reordering/inserting is visible; it adds per-item layout work.
-- Scrubbing (alphabet rail): `scrollToItem`, never `animateScrollToItem` ("each animation would be cancelled by the next",
+- Scrubbing (alphabet rail): `scrollToItem`, never `animateScrollToItem` (each animated scroll would cancel the previous one,
   `UI/component/AlphabetScrollBar.kt:333-338`).
 - Cap simultaneously composed heavy sections (Convx caps Home sections because each added ~12 composed rows,
   `UI/screens/HomeSectionOrder.kt:61-72`).
@@ -160,7 +160,7 @@ change (once per second for a clock), `flowOn(Default)`, `conflate()`.
 
 ## 8. Frame rate
 
-- On API 30+, set `window.attributes.preferredDisplayModeId` to the highest-refresh mode with the **same resolution** as the
+- `window.attributes.preferredDisplayModeId` (API 23+; minSdk 34 here) to the highest-refresh mode with the **same resolution** as the
   current mode (avoid reflow); user toggle to force 60 Hz (`A/AppStartupEffects.kt:67-105`).
 - Convx never uses frame-rate hints. On the compileSdk we pin, check for window/view frame-rate category APIs (for example
   `View.setRequestedFrameRate` on API 35) in the SDK sources before use; give static screens a low category, animating ones high.

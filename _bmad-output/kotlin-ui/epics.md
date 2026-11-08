@@ -47,7 +47,10 @@ before any app screen is written. Spec: SKILL `references/*` (all), ARCH 4, 9.
 Round plans: R1 -> `_bmad-output/kotlin-ui/plans/round-01.md` (planned 2026-11-08; implemented in `6cf6b37`..`c46d5dc`,
 verified in code by the round-2 planner). R2 -> `_bmad-output/kotlin-ui/plans/round-02.md` (planned 2026-11-08 at base
 `c46d5dc`; also fixes two R1 screenshot findings: content readable through Flat chrome, and both titles visible at
-mid-scroll).
+mid-scroll). R2 implemented in `d0f16a5`..`d0dcf08`, verified in code by the round-3 planner (every file and test
+named in the E1.9-E1.16 evidence lines exists; 166 goldens). R3 -> `_bmad-output/kotlin-ui/plans/round-03.md` (planned
+2026-11-08 at base `d0dcf08`; E1.17-E1.22 plus R2 screenshot fixes F3 action-sheet shadow haze and F4 stacked sheets
+step back; Navigation 3 1.2.1 and Coil 3.6.3 checked usable with BOM 2026.09.00).
 
 | Story | Title | Round | Status |
 |---|---|---|---|
@@ -185,6 +188,10 @@ mid-scroll).
 - Round-2 re-judgement (planner, opened `e1.8-title-expanded-light`, `-collapsed-dark`, `-mid-scroll-light`,
   `e1.7-tabbar-rest-light`, `e1.7-tabbar-drag-mid-dark`): rows readable through the Flat tab bar and the collapsed top
   band; large and inline titles both half visible at mid-scroll. Fixed in R2 step 1 (F1, F2); stories stay `done`.
+- Round-3 re-judgement (planner, opened `e1.13-sheet-medium-light`, `e1.13-sheet-pushback-dark`,
+  `e1.13-sheet-nonmodal-over-stripes-light`, `e1.14-action-sheet-light`, `e1.16-field-with-selection-light`,
+  `e1.16-composer-ime-open-dark`): the Cancel group's shadow veils the last action row (F3); the stacked-sheet shot shows
+  only the top sheet, the lower one fully hidden at the same detent (F4). Fixed in R3 step 1; E1.13/E1.14 stay `done`.
 
 - Evidence (E1.8, commit 7959075, review fixes c46d5dc): `android/design/.../chrome/` (`TitleCollapse.kt`, `LargeTitleScaffold.kt`, `Toolbar.kt`, `BackButton.kt`; `controls/Buttons.kt` `glassSurface` made internal). Tests: JVM `TitleCollapseTest` (fraction, clamps, NaN/zero height, top scrim stops); Robolectric `ScaffoldTest` (collapse fraction read through `onCollapseChanged`, which is the inline alpha by construction: strictly between 0 and 1 at half scroll, 1 when collapsed; third action goes to the overflow with its anchor rect; capsule height 44 dp and centre within 4 dp of the title's first line via `TextLayoutResult`; `topBarPx` = 80 dp; title is item 0 key "title"; back button pops the sub-page), `ScaffoldWideTest` (list and bar <= 640 dp and centred at w840). Catalog page Large title (40 rows, 2 actions + overflow, pushed sub-page; `TODO(E1.10)` for the menu). Opened `e1.8-title-expanded/collapsed/mid-scroll/fs2/landscape/w840/pushed(-rtl)/reduce-transparency` light/dark: capsules level with the title line and 44 dp; collapsed inline title centred with rows fading under a firm scrim (first pass at 0.42 left row text legible beside the title, so the scrim over the bar firms up to 0.94 as the title collapses); mid-scroll shows both titles partly; fs2 title clear of capsules (capsules stay in the 52 dp band, so at fs2 they sit above the first line centre); w840 centred 640 dp column (root now paints the page colour full width, the first landscape shot showed the sides unpainted); RTL pushed page has the mirrored chevron on the leading (right) edge; reduce transparency shows a solid bar with a 0.5 dp divider. Known: Flat glass in screenshots; no simulated display cutout in the harness (cutout handled by `safeDrawing` insets, not visually verified); inline title is hidden from accessibility (the large title carries the heading) so it is unannounced once item 0 is scrolled off; the pushed page's title sits below the button row (iOS style), so capsules only align with the title line on root pages.
 

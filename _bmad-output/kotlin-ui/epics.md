@@ -515,6 +515,11 @@ Round plans: **R1** -> `_bmad-output/kotlin-ui/plans/round-06.md` (planned 2026-
 headless handlers with golden answers; `rovsti_ffi`; `:core-bridge` with `testRustBridge`; contract fixtures, Kotlin
 models and fallback, catalog APK with `librovsti_ffi.so`). E1 re-verified done by this planner (R5 review fix of the
 inline title judged: it slides off centre only when a centred title would run under a wide toolbar).
+**R2** -> `_bmad-output/kotlin-ui/plans/round-07.md` (planned 2026-11-08 at base `09a4343`): E2.9-E2.14 in 8 steps (op
+registry + `OPS.md` inventory + typed Kotlin facades + shared number ops; Phone + `ContactIndex` handle and the 5 000-contact
+bench; Contacts + `qr.*`; Messages core; Messages chat tools; Stops + `ActiveTrip`; tiles binary buffer
+(`docs/kotlin-ui/tile-buffer.md`) and offline jobs; WhatsApp ops, events, call audio, close E2). R1 re-verified done (42
+fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack serde (plan Rule 3).
 
 | Story | Title | Round | Status |
 |---|---|---|---|
@@ -526,13 +531,13 @@ inline title judged: it slides off centre only when a centred title would run un
 | E2.6 | `:core-bridge`: cargo-ndk and host build tasks, `RustNative`, dispatcher, init | R1 | done (round-06 step 7) |
 | E2.7 | Contract fixtures and Kotlin models | R1 | done (round-06 step 8) |
 | E2.8 | `headless` entry compatible with today's receivers | R1 | done (round-06 steps 5 and 8) |
-| E2.9 | Phone domain ops | R2 | todo |
-| E2.10 | Contacts domain ops | R2 | todo |
-| E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | todo |
-| E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | todo |
-| E2.12 | Stops domain ops | R2 | todo |
-| E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | todo |
-| E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | todo |
+| E2.9 | Phone domain ops | R2 | in-progress (round-07 step 2) |
+| E2.10 | Contacts domain ops | R2 | in-progress (round-07 step 3) |
+| E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | in-progress (round-07 step 4) |
+| E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | in-progress (round-07 step 5) |
+| E2.12 | Stops domain ops | R2 | in-progress (round-07 step 6) |
+| E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | in-progress (round-07 step 7) |
+| E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | in-progress (round-07 step 8) |
 
 #### Evidence, E2 R1 (E2.1-E2.8 done, round-06)
 - E2.1-E2.4: commits `07ab3a5` (app_core, storage, Stops store/pick/snap), `e099053` (`wa_link`), `eadb490` (Messages prefs, drafts,

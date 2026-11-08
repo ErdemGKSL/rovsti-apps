@@ -69,8 +69,8 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 | E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | done |
 | E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | done |
 | E1.9 | Overlay host and placement | R2 | done |
-| E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | done (rendering to be replaced by E1.27) |
-| E1.11 | Long-press context menu (simple and preview-card variants) | R2 | done (rendering to be replaced by E1.27) |
+| E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | done; rendering replaced by E1.27 (`ButtonMenuEntry` is a facade over `IosContextMenuEntry`; `MenuPanel` and the glyph morph are gone) |
+| E1.11 | Long-press context menu (simple and preview-card variants) | R2 | done; rendering replaced by E1.27 (`ContextMenuEntry` / `PreviewCardEntry` are facades over `IosContextMenuEntry` / `AppleContextMenuEntry`) |
 | E1.12 | Popover (anchored arbitrary content) | R2 | done (rendering to be replaced by E1.27) |
 | E1.13 | Sheets with detents, pushback, background interaction | R2 | done (rendering to be replaced by E1.28) |
 | E1.14 | Alert, action sheet, confirm | R2 | done |
@@ -80,7 +80,7 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 | E1.24 | Port Convx backdrop engine (Kyant0 backdrop + Convx pool/freeze/static region) and continuous shapes | R3 | done (R3 step 2) |
 | E1.25 | Port Convx `liquidGlass`, AppleTokens/GlassTintTokens, TopFadeBlur, iOS foundation (IosGlass, IosMenuMaterial, IosTheme, IosColors, IosDesignSystem) | R3 | todo |
 | E1.26 | One root backdrop, migrate every glass caller, delete the old engine, real-path test, catalog APK | R3 | done |
-| E1.27 | Convx menus and context menus (IosMenu, AppleContextMenu, IosContextMenu, OverlayMenu) in `OverlayHost` | R3 | todo |
+| E1.27 | Convx menus and context menus (IosMenu, AppleContextMenu, IosContextMenu, OverlayMenu) in `OverlayHost` | R3 | done |
 | E1.28 | Convx sheets (IosSheet, IosPageSheet, IosSheetPresentation, BottomSheet) | R3 | todo |
 | E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | todo |
 | E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3 | todo |
@@ -333,7 +333,13 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 ### E1.27 Menus and context menus (Step 5)
 - AC1 Convx `IosMenu`, `AppleContextMenu`, `IosContextMenu`, `OverlayMenu` ported; `Popup` replaced by `OverlayEntry`;
   our `ButtonMenu`/`contextMenu` APIs are facades; menu tests green (numbers updated to Convx with citations).
-- Screenshots: `e1.27-menu-open`, `e1.27-context-menu-preview`, `e1.27-context-menu-submenu`.
+- Screenshots: `e1.27-menu-open`, `e1.27-context-menu-preview`, `e1.27-context-menu-submenu` (the inline picker section with
+  header and check column plus quick actions: Convx has no nested drill-down menu), `e1.27-context-menu-row`.
+- Evidence: `ios/component/{IosMenu,AppleContextMenu,IosContextMenu,OverlayMenu,IosText,IosGlyph,IosButtonRole,MenuActionColumns}.kt`;
+  `Popup` became `OverlayEntry`s (`IosContextMenuEntry`, `AppleContextMenuEntry`, `OverlayMenuEntry`); `MenuModel.toSections()`
+  maps the facade items; Convx numbers now rule (panel 238 dp, rows 44 dp, 8 dp gap, 12 dp margin, springs 0.78/700 etc.);
+  `MenuMorph` stays because `Popover` still uses it. Removed: `MenuPanel`, `ContextMenuPanel`, `PreviewCardEntry` class,
+  `PreviewCardLayout` (+ tests). Added `IosMenuTest`, `MenuActionColumnCountTest`, `E127ShotTest`.
 
 ### E1.28 Sheets (Step 6)
 - AC1 Convx `IosSheet`, `IosPageSheet`, `IosSheetPresentation`, `BottomSheet` (no player code) ported; detents,

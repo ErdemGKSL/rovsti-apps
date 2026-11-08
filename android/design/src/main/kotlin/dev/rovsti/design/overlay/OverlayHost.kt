@@ -131,6 +131,13 @@ class OverlayController {
         (entry as? SlideTarget)?.onSlide(positions)
     }
 
+    /** Drops [entry] at once, without an exit (a context menu whose item is being dragged away instead). */
+    fun removeNow(entry: OverlayEntry) {
+        entry.state.targetState = false
+        entries.remove(entry)
+        pushBackSources.remove(entry)
+    }
+
     /** Starts the exit transition of [entry]; it is removed once the transition has finished. */
     fun dismiss(entry: OverlayEntry) {
         entry.state.targetState = false

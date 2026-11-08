@@ -201,8 +201,9 @@ class MenuSlideTest : ShotTest() {
         pressTrigger()
         lift()
         val card = compose.onNodeWithTag("menu-card")
-        card.performKeyInput { pressKey(Key.DirectionDown) }
-        card.performKeyInput { pressKey(Key.DirectionDown) } // wraps back to One, skipping Off
+        card.performKeyInput { pressKey(Key.DirectionDown) } // no row is focused yet: the first enabled one, One
+        card.performKeyInput { pressKey(Key.DirectionDown) } // skips Off: Three
+        card.performKeyInput { pressKey(Key.DirectionDown) } // wraps back to One
         card.performKeyInput { pressKey(Key.DirectionUp) } // wraps to Three
         advance(200)
         assertTrue("the keyboard path is silent", haptics.events.isEmpty())
@@ -256,7 +257,7 @@ class MenuSlideTest : ShotTest() {
         compose.onNodeWithTag("menu-row-3").assertIsNotEnabled()
         val density = compose.activity.resources.displayMetrics.density
         for (i in 0..3) {
-            assertTrue("row $i >= 48 dp", bounds("menu-row-$i").height >= 48f * density - 1f)
+            assertTrue("row $i >= 44 dp (Convx IosMenu.kt)", bounds("menu-row-$i").height >= 44f * density - 1f)
         }
     }
 

@@ -24,6 +24,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.controls.GlassIconButton
 import dev.rovsti.design.icons.RovstiIcons
+import dev.rovsti.design.ios.component.IosButtonRole
+import dev.rovsti.design.ios.component.IosContextMenu
+import dev.rovsti.design.ios.component.IosGlyph
+import dev.rovsti.design.ios.component.IosMenuItem
+import dev.rovsti.design.ios.component.IosMenuSection
 import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.RowSeparator
@@ -69,6 +74,7 @@ internal fun ContextMenuPage() {
             color = RovstiTheme.colors.labelSecondary,
             modifier = Modifier.padding(horizontal = Spacing.gutter).testTag("ctx-status"),
         )
+        SortChip { last = it }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = Spacing.gutter, vertical = Spacing.m),
             horizontalArrangement = Arrangement.spacedBy(Spacing.m),
@@ -191,5 +197,71 @@ private fun ContactCard(
             style = RovstiTheme.type.footnote,
             color = RovstiTheme.colors.labelTertiary,
         )
+    }
+}
+
+/**
+ * A chip that opens the ported `IosContextMenu` directly (not through the `MenuItem` facade): quick actions on top and a
+ * picker section with a header and a checkmark column, the way a menu carries a "Sort by" submenu inline.
+ */
+@Composable
+private fun SortChip(onResult: (String) -> Unit) {
+    var sort by remember { mutableStateOf("Name") }
+    val sections =
+        remember(sort) {
+            listOf(
+                IosMenuSection(
+                    header = "Sort by",
+                    items =
+                        listOf("Name", "Recent", "Most called").map { option ->
+                            IosMenuItem(
+                                title = option,
+                                selected = option == sort,
+                                onClick = {
+                                    sort = option
+                                    onResult("Sort $option")
+                                },
+                            )
+                        },
+                ),
+                IosMenuSection(
+                    items =
+                        listOf(
+                            IosMenuItem(
+                                "Select",
+                                description = "Choose several people",
+                                onClick = { onResult("Select") },
+                            ),
+                            IosMenuItem(
+                                "Delete all",
+                                role = IosButtonRole.Destructive,
+                                onClick = { onResult("Delete all") },
+                            ),
+                        ),
+                ),
+            )
+        }
+    val quick =
+        remember {
+            listOf("Share", "Favourite", "Add").map { title ->
+                IosMenuItem(
+                    title = title,
+                    icon = { tint -> IosGlyph(RovstiIcons.Ellipsis, tint, 22.dp) },
+                    onClick = { onResult(title) },
+                )
+            }
+        }
+    Box(Modifier.padding(horizontal = Spacing.gutter).padding(top = Spacing.s)) {
+        IosContextMenu(sections = sections, quickActions = quick) {
+            RovstiText(
+                "Sort: $sort",
+                style = RovstiTheme.type.callout,
+                modifier =
+                    Modifier
+                        .testTag("ctx-sort")
+                        .background(RovstiTheme.colors.fillSecondary, RoundedCornerShape(50))
+                        .padding(horizontal = Spacing.l, vertical = Spacing.s),
+            )
+        }
     }
 }

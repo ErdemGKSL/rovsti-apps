@@ -44,8 +44,13 @@ class ButtonMenuTest : ShotTest() {
         compose.onNodeWithTag("menu-card").assertIsDisplayed()
         assertEquals("settled", rest, bounds("menu-trigger-top"))
         val density = compose.activity.resources.displayMetrics.density
-        assertEquals("card is 220 dp wide", 220f * density, bounds("menu-card").width, 1f)
-        assertEquals("row is 48 dp tall", 48f * density, bounds("menu-row-0").height, 1f)
+        assertEquals("card is 238 dp wide (IosMenuMaterial.Width)", 238f * density, bounds("menu-card").width, 1f)
+        assertEquals(
+            "row is 44 dp tall (Convx IosMenu.kt row min height)",
+            44f * density,
+            bounds("menu-row-0").height,
+            1f,
+        )
         back()
         assertEquals("after close", rest, bounds("menu-trigger-top"))
     }
@@ -75,25 +80,27 @@ class ButtonMenuTest : ShotTest() {
     }
 
     @Test
-    fun nearTheTopTheMenuOpensBelowFlushWithTheTrigger() {
+    fun nearTheTopTheMenuOpensBelowTheTriggerWithAnEightDpGap() {
         composeFrame { CatalogApp(initialPage = CatalogPage.ButtonMenu) }
+        val density = compose.activity.resources.displayMetrics.density
         val trigger = bounds("menu-trigger-top")
         compose.onNodeWithTag("menu-trigger-top").performClick()
         advance(1200)
         val card = bounds("menu-card")
-        assertEquals(trigger.top, card.top, 1f)
-        assertEquals(trigger.left, card.left, 1f)
-        assertTrue(card.bottom > trigger.bottom)
+        // Convx IosContextMenu.kt: anchorGap = 8.dp, centred on the anchor, kept 12 dp off the edge.
+        assertEquals(trigger.bottom + 8f * density, card.top, 1f)
+        assertTrue(card.left >= 12f * density - 1f)
     }
 
     @Test
-    fun nearTheBottomTheMenuOpensAbove() {
+    fun nearTheBottomTheMenuOpensAboveWithAnEightDpGap() {
         composeFrame { CatalogApp(initialPage = CatalogPage.ButtonMenu) }
         val trigger = bounds("menu-trigger-bottom")
         compose.onNodeWithTag("menu-trigger-bottom").performClick()
         advance(1200)
         val card = bounds("menu-card")
-        assertEquals(trigger.bottom, card.bottom, 1f)
+        val density = compose.activity.resources.displayMetrics.density
+        assertEquals(trigger.top - 8f * density, card.bottom, 1f)
         assertTrue(card.top < trigger.top)
     }
 

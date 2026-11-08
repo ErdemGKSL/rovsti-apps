@@ -3,6 +3,11 @@ package dev.rovsti.design.overlay
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.ios.component.IosButtonRole
+import dev.rovsti.design.ios.component.IosGlyph
+import dev.rovsti.design.ios.component.IosMenuItem
+import dev.rovsti.design.ios.component.IosMenuSection
+import kotlinx.collections.immutable.ImmutableList
 
 /** One entry of a menu card (ORIGINAL). Menus are `ImmutableList<MenuItem>` so Compose can skip them. */
 sealed interface MenuItem {
@@ -24,7 +29,40 @@ sealed interface MenuItem {
     data object Separator : MenuItem
 }
 
-/** Dimensions of the menu card (SKILL overlays 4.2; glisse `styles.css:912-1067` made touch-sized). */
+/**
+ * The Convx menu items for [this] list (ORIGINAL facade): a [MenuItem.Separator] starts a new section, a checked row
+ * is a selected row of a picker, a destructive row has the destructive role, an icon is drawn 20 dp in the row's colour.
+ */
+fun ImmutableList<MenuItem>.toSections(): List<IosMenuSection> {
+    val sections = mutableListOf<IosMenuSection>()
+    var current = mutableListOf<IosMenuItem>()
+    for (item in this) {
+        when (item) {
+            is MenuItem.Separator -> {
+                if (current.isNotEmpty()) sections += IosMenuSection(current)
+                current = mutableListOf()
+            }
+
+            is MenuItem.Action -> {
+                val icon = item.icon
+                current +=
+                    IosMenuItem(
+                        title = item.label,
+                        icon = icon?.let { vector -> { tint -> IosGlyph(vector, tint, MenuMetrics.IconSize) } },
+                        role = if (item.destructive) IosButtonRole.Destructive else null,
+                        selected = item.checked == true,
+                        enabled = item.enabled,
+                        onClick = item.onClick,
+                        checkable = item.checked != null,
+                    )
+            }
+        }
+    }
+    if (current.isNotEmpty()) sections += IosMenuSection(current)
+    return sections
+}
+
+/** Dimensions of the popover card (SKILL overlays 4.2; glisse `styles.css:912-1067` made touch-sized). Menus use `IosMenuMaterial`. */
 object MenuMetrics {
     val CardWidth = 220.dp
     val CardRadius = 20.dp

@@ -1,3 +1,4 @@
+// Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
 package dev.rovsti.design.chrome
 
 import androidx.compose.animation.core.Animatable

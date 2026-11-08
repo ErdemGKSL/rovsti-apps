@@ -106,6 +106,74 @@ object RovstiIcons {
         }
     }
 
+    /** A box with an arrow leaving its top: share. */
+    val Share: ImageVector by lazy {
+        stroked("Share") {
+            moveTo(12f, 15f)
+            lineTo(12f, 3.5f)
+            moveTo(8f, 7.5f)
+            lineTo(12f, 3.5f)
+            lineTo(16f, 7.5f)
+            moveTo(8f, 10f)
+            lineTo(6.5f, 10f)
+            quadTo(5f, 10f, 5f, 11.5f)
+            lineTo(5f, 18.5f)
+            quadTo(5f, 20f, 6.5f, 20f)
+            lineTo(17.5f, 20f)
+            quadTo(19f, 20f, 19f, 18.5f)
+            lineTo(19f, 11.5f)
+            quadTo(19f, 10f, 17.5f, 10f)
+            lineTo(16f, 10f)
+        }
+    }
+
+    /** An arrow into a tray: save to the device. */
+    val Download: ImageVector by lazy {
+        stroked("Download") {
+            moveTo(12f, 4f)
+            lineTo(12f, 15f)
+            moveTo(7.5f, 10.5f)
+            lineTo(12f, 15f)
+            lineTo(16.5f, 10.5f)
+            moveTo(5f, 15.5f)
+            lineTo(5f, 18f)
+            quadTo(5f, 19.5f, 6.5f, 19.5f)
+            lineTo(17.5f, 19.5f)
+            quadTo(19f, 19.5f, 19f, 18f)
+            lineTo(19f, 15.5f)
+        }
+    }
+
+    /** An arrow curving right: forward. */
+    val Forward: ImageVector by lazy {
+        stroked("Forward") {
+            moveTo(20f, 11f)
+            lineTo(14f, 5f)
+            moveTo(20f, 11f)
+            lineTo(14f, 17f)
+            moveTo(20f, 11f)
+            lineTo(10f, 11f)
+            quadTo(4.5f, 11f, 4.5f, 17f)
+            lineTo(4.5f, 19f)
+        }
+    }
+
+    /** A pencil: edit. */
+    val Pencil: ImageVector by lazy {
+        stroked("Pencil") {
+            moveTo(5f, 19f)
+            lineTo(5.8f, 15.2f)
+            lineTo(15.6f, 5.4f)
+            quadTo(16.5f, 4.5f, 17.4f, 5.4f)
+            lineTo(18.6f, 6.6f)
+            quadTo(19.5f, 7.5f, 18.6f, 8.4f)
+            lineTo(8.8f, 18.2f)
+            close()
+            moveTo(14f, 7f)
+            lineTo(17f, 10f)
+        }
+    }
+
     val Phone: ImageVector by lazy {
         stroked("Phone") {
             moveTo(5f, 3.5f)

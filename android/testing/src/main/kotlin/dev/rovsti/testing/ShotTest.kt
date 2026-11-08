@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
+import dev.rovsti.design.media.LocalRovstiImageLoader
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.time.LocalRovstiClock
 import dev.rovsti.design.time.RovstiClock
@@ -42,8 +43,9 @@ import java.util.TimeZone
  *
  * Pins everything that could make a golden differ between runs: native graphics, sdk 35,
  * a 411 x 891 dp xxhdpi window, en-US, UTC, a manual Compose clock and a [FixedClock].
- * (No randomness exists in the design system yet; avatar colours are a pure hash of the name.
- * TODO(E1.20): install a fake image fetcher here when Coil arrives.)
+ * (No randomness exists in the design system; avatar colours are a pure hash of the name. Every image goes through
+ * [images], a [FakeImageLoader] that draws deterministic bitmaps and records each request; override [imageProducer]
+ * to draw something else.)
  *
  * [shot] writes `screenshots/<name>-light.png` and `-dark.png` (plus `-fs2-*`, `-rtl-*` and
  * `-landscape-*` for the requested [ShotVariant]s) into the test module's directory. Record with
@@ -55,6 +57,16 @@ import java.util.TimeZone
 abstract class ShotTest {
     @get:Rule
     val compose = createAndroidComposeRule<ComponentActivity>()
+
+    /** What the fake image loader draws for a request; tests with their own picture models override it. */
+    protected open val imageProducer: (
+        data: Any,
+        widthPx: Int,
+        heightPx: Int,
+    ) -> android.graphics.Bitmap? = ::gradientImage
+
+    /** The loader every composable sees through [LocalRovstiImageLoader]; it records the size of each request. */
+    val images: FakeImageLoader by lazy { FakeImageLoader(RuntimeEnvironment.getApplication(), imageProducer) }
 
     /** The clock composables see through [LocalRovstiClock]. */
     protected open val clock: RovstiClock = FixedClock()
@@ -185,6 +197,7 @@ abstract class ShotTest {
             LocalDensity provides Density(base.density, current.fontScale),
             LocalLayoutDirection provides if (current.rtl) LayoutDirection.Rtl else LayoutDirection.Ltr,
             LocalRovstiClock provides clock,
+            LocalRovstiImageLoader provides images.loader,
         ) {
             RovstiTheme(darkTheme = current.dark) {
                 key(current.id) {

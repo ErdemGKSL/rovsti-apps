@@ -92,7 +92,7 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
 | E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3/R4 | done (R3 swipe/IosButton/APK; R4 Step 2 tab bar; R4 Step 3 top chrome, glass circle button, list drawing, overscroll) |
 | E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | done (R4-4; evidence below) |
 | E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | done (R4-5; evidence below) |
-| E1.20 | Image loading and the photo viewer | R4 | todo (planned, round-04) |
+| E1.20 | Image loading and the photo viewer | R4 | done (R4 step 6: Coil 3.6.3 loader, slot-sized images, PhotoViewer; ZoomMathTest, PhotoViewerTest, ImageSlotTest, e1.20-* screenshots) |
 | E1.21 | Performance harness and convention tests | R4 | todo (planned, round-04) |
 | E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4 | todo (planned, round-04) |
 

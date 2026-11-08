@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
+import dev.rovsti.design.media.RowImage
 import dev.rovsti.design.theme.Sizes
 import kotlinx.collections.immutable.ImmutableList
 
@@ -86,7 +87,7 @@ private const val GLYPH_RATIO = 0.55f
 private const val CAP_HEIGHT = 0.72f
 
 /**
- * A round avatar: a [photo], or the initials of [name] on [avatarColor], or a person glyph when there are none. The
+ * A round avatar: a [photo] or [photoModel], or the initials of [name] on [avatarColor], or a person glyph when there are none. The
  * initials are measured once in `drawWithCache` (the layout is rebuilt only when the size or text changes) and the
  * text size follows the avatar's pixels, not the font scale. Decorative unless [contentDescription] is given.
  */
@@ -98,6 +99,28 @@ fun Avatar(
     photo: ImageBitmap? = null,
     colorKey: String = name,
     contentDescription: String? = null,
+    // A Coil model (content:// or file URI): decoded at the avatar's own pixels over the initials, which stay when
+    // the model is empty or fails to load. No SubcomposeAsyncImage: the initials are always the layer below.
+    photoModel: Any? = null,
+) {
+    if (photoModel == null) {
+        AvatarFace(name, modifier, size, photo, colorKey, contentDescription)
+        return
+    }
+    Box(modifier.size(size).clip(CircleShape)) {
+        AvatarFace(name, Modifier, size, photo, colorKey, contentDescription)
+        RowImage(photoModel, size)
+    }
+}
+
+@Composable
+private fun AvatarFace(
+    name: String,
+    modifier: Modifier,
+    size: Dp,
+    photo: ImageBitmap?,
+    colorKey: String,
+    contentDescription: String?,
 ) {
     val described =
         if (contentDescription !=

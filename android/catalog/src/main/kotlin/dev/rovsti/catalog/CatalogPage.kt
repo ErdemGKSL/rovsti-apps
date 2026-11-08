@@ -20,6 +20,7 @@ enum class CatalogPage(
     Lists("Lists, alphabet rail"),
     GroupedSection("Grouped sections"),
     Avatars("Avatars"),
+    Photos("Photos, viewer"),
     Chips("Chips"),
     EmptyState("Empty states"),
     TabBar("Tab bar"),

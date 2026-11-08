@@ -294,3 +294,9 @@ The Apache-licensed files above keep their own copyright and licence notices in 
    See the License for the specific language governing permissions and
    limitations under the License.
 ```
+
+## Coil
+
+- Source: https://github.com/coil-kt/coil (`io.coil-kt.coil3:coil-core`, `coil-compose`, version 3.6.3)
+- Licence: Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0). Used as a dependency only (image loading in
+  `:design` `media/`); no Coil source is copied into this repository.

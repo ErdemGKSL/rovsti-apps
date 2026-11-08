@@ -90,6 +90,7 @@ private fun PageContent(page: CatalogPage) {
         CatalogPage.Lists -> ListsPage()
         CatalogPage.GroupedSection -> GroupedSectionPage()
         CatalogPage.Avatars -> AvatarsPage()
+        CatalogPage.Photos -> PhotosPage()
         CatalogPage.Chips -> ChipsPage()
         CatalogPage.EmptyState -> EmptyStatePage()
         CatalogPage.TabBar -> TabBarPage()

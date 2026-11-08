@@ -182,7 +182,8 @@ fun Modifier.contextMenu(
                     }
                 }
             }
-        }.semantics {
+        }.semantics(mergeDescendants = true) {
+            // Merged so a screen reader reads the row's own text for the tap and the long press.
             onLongClick(label = label) {
                 latestOpen(anchor.rect)
                 true

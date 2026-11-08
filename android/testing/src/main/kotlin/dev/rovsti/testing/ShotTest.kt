@@ -112,6 +112,44 @@ abstract class ShotTest {
         settle()
         applySimulatedInsets()
         settle()
+        if (accessibilityChecks) assertAccessible()
+    }
+
+    private var accessibilityChecks = false
+    private val suppressions = mutableListOf<Pair<String, String>>()
+
+    /**
+     * Turns on the accessibility checks of `Accessibility.kt` (`accessibilityFindings`): from now on every
+     * [composeFrame] (so every screenshot) fails on a clickable node smaller than 48 dp, without a speakable label, or
+     * toggleable without a role. Later epics write their screen tests with [screenTest], which calls this.
+     */
+    fun enableAccessibilityChecks() {
+        accessibilityChecks = true
+    }
+
+    /** Silences findings whose text contains [contains]. [reason] is mandatory and should say why the design is right. */
+    fun suppressAccessibility(
+        contains: String,
+        reason: String,
+    ) {
+        require(reason.isNotBlank()) { "a suppressed accessibility finding needs a written reason" }
+        suppressions += contains to reason
+    }
+
+    /** Fails with every unsuppressed finding of the current frame. Callable from a test after an interaction too. */
+    fun assertAccessible() {
+        val density = compose.activity.resources.displayMetrics.density
+        val findings =
+            compose.accessibilityFindings(density).filter { f ->
+                suppressions.none { (text, _) -> text in f.toString() }
+            }
+        check(findings.isEmpty()) { "Accessibility findings:\n" + findings.joinToString("\n") { "  $it" } }
+    }
+
+    /** The wrapper screen tests use: accessibility checks on, then [block]. */
+    fun screenTest(block: ShotTest.() -> Unit) {
+        enableAccessibilityChecks()
+        block()
     }
 
     /** Renders [content] in light and dark (and each requested variant) and captures every one. */

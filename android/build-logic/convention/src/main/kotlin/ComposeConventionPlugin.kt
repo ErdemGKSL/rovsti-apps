@@ -26,6 +26,15 @@ class ComposeConventionPlugin : Plugin<Project> {
                 }
             }
 
+            // Reports exist only for a compile run with -PcomposeReports; `hot` stays empty (task is a no-op list check
+            // that fails on missing reports) until a module names its hot composables.
+            tasks.register("checkComposeStability", CheckComposeStabilityTask::class.java) {
+                group = "verification"
+                description = "Fails if a named hot composable is not restartable skippable (needs -PcomposeReports)."
+                reports.set(layout.buildDirectory.dir("compose_reports"))
+                dependsOn("compileDebugKotlin")
+            }
+
             dependencies {
                 add("implementation", platform(libs.findLibrary("compose-bom").get()))
                 add("androidTestImplementation", platform(libs.findLibrary("compose-bom").get()))

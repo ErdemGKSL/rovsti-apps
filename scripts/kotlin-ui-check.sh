@@ -54,6 +54,10 @@ if [[ -z "${SKIP_GRADLE:-}" ]]; then
   else
     step "gradle spotlessCheck (no Android modules yet)" gradle spotlessCheck
   fi
+  # E1.21 AC3: the hot composables must be restartable skippable in the compiler report. -PcomposeReports changes the
+  # compiler arguments of :design (a recompile), so it runs as its own invocation after the test run.
+  step "gradle :design:checkComposeStability (-PcomposeReports)" \
+    gradle -PcomposeReports=true :design:checkComposeStability
   # A golden no test compares any more is dead weight that hides deletions; needs the run above.
   step "orphan goldens" bash scripts/orphan-goldens.sh
 fi

@@ -8,6 +8,18 @@ android {
     namespace = "dev.rovsti.design"
 }
 
+android {
+    testOptions {
+        unitTests.all {
+            // Source-scanning tests (ConventionTest, NoFlatInTestsTest) read every module's sources: re-run when they change.
+            it.inputs
+                .files(
+                    rootProject.fileTree(rootDir) { include("*/src/**/*.kt") },
+                ).withPropertyName("allKotlinSources")
+        }
+    }
+}
+
 dependencies {
     // Public signatures take ImmutableList (stable for Compose), so the type is part of the API.
     api(libs.collections.immutable)
@@ -29,4 +41,36 @@ dependencies {
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.robolectric)
     testImplementation(libs.compose.ui.test.junit4)
+}
+
+// Compose compiler report gate (E1.21 AC3): `bash scripts/kotlin-ui-check.sh` runs
+// `./gradlew -PcomposeReports=true :design:checkComposeStability`. These are the hot composables of the Convx port
+// (they recompose on every frame of a drag or scroll); every overload must be restartable and skippable.
+tasks.named<CheckComposeStabilityTask>("checkComposeStability") {
+    hot.set(
+        listOf(
+            "FloatingTabBar",
+            "FoldingTabBar",
+            "FoldingTabGroup",
+            "FoldingTabCell",
+            "Tab",
+            "RovstiTabBar",
+            "FrostedTopBar",
+            "IosNavigationBar",
+            "IosTabBar",
+            "TabBarItem",
+            "IosList",
+            "IosListRowContainer",
+            "IosSwipeableRow",
+            "IosMenu",
+            "IosMenuRow",
+            "IosMenuQuickAction",
+            "IosMenuSeparator",
+            "IosToggle",
+            "IosSlider",
+            "SegmentedControl",
+            "GlassTextField",
+            "AlphabetScrollBar",
+        ),
+    )
 }

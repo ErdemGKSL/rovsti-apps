@@ -93,7 +93,7 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
 | E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | done (R4-4; evidence below) |
 | E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | done (R4-5; evidence below) |
 | E1.20 | Image loading and the photo viewer | R4 | done (R4 step 6: Coil 3.6.3 loader, slot-sized images, PhotoViewer; ZoomMathTest, PhotoViewerTest, ImageSlotTest, e1.20-* screenshots) |
-| E1.21 | Performance harness and convention tests | R4 | todo (planned, round-04) |
+| E1.21 | Performance harness and convention tests | R4 | done (R4-7; evidence below) |
 | E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4 | todo (planned, round-04) |
 
 ### E1.1 Modules, convention plugins, screenshot harness, catalog shell
@@ -450,6 +450,27 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
 - AC2c Every screen test in later epics calls `enableAccessibilityChecks()` (ARCH 9); the helper is in `ShotTest`.
 - AC3 Compiler-report check: named hot composables are restartable and skippable.
 - Screenshots: none.
+- Evidence (E1.21, R4-7): `testing/.../Recomposition.kt` (`RecompositionCounter`, `CountRecompositions`, `CountedStatic`),
+  `catalog/.../RecompositionTest` (tab-bar drag over four tabs, menu open, sheet medium to large, slider drag, swipe-row drag;
+  each counted slot <= 2 recompositions, each test also asserts the interaction happened; a control test proves the counter
+  sees a state-reading slot). Counted slots are the ones callers hand to components plus static siblings (the components
+  carry no test hooks); the list is in the test KDoc. `design/.../conventions/ConventionRules + ConventionTest`: 11 rules
+  (material3, composed, window Popup/Dialog only under `design/overlay`, FlowRow, rail `animateScrollToItem`, `Thread.sleep`,
+  wall clock outside `design/time`, app-module raw dp and literal text), each with positive and negative fixtures, plus a
+  scan of every `src/main/kotlin` tree; the one existing hit (`composed {` in the ported `IosPressable.kt`) was fixed by
+  moving it onto the `rowPress` Modifier node, and the allow-list is empty. `testing/.../Accessibility.kt`: ui-test's own
+  `enableAccessibilityChecks()` is still not public in 1.12.1, so `ShotTest.enableAccessibilityChecks()`, `assertAccessible()`,
+  `suppressAccessibility(contains, reason)` and `screenTest {}` run our own checks (touch target >= 48 dp, speakable label, role
+  on toggles); `CatalogAccessibilityTest` runs them over all 30 catalog pages in light and dark and found the context-menu
+  rows and tiles without a label (fixed: merged semantics in `longPressMenu`, content description on the page rows);
+  `AccessibilityHelperTest` has the failing fixtures. `:design:checkComposeStability` (build-logic `CheckComposeStabilityTask`,
+  wired in `scripts/kotlin-ui-check.sh` with `-PcomposeReports=true`) requires every overload of 22 hot Convx composables
+  (tab bar cells, `FrostedTopBar`, `IosList`, `IosSwipeableRow`, `IosMenu*`, `IosToggle`, `IosSlider`, `SegmentedControl`,
+  `GlassTextField`, `AlphabetScrollBar`) to be restartable skippable and fails on a name missing from the report; all pass today.
+  `FrozenRecordCountTest` (`:design`, real `drawBackdrop`): `BackdropDebug.samplerRecords` and `rootRecords` show the source
+  layer keeps recording its animated content while a sampling surface records once and stays flat through a freeze. Note: the
+  source layer itself does re-record when its content changes (Convx only freezes the samplers), so "the root layer is not
+  re-recorded" in the plan is read as "the glass samplers are not re-recorded". No screenshots (no visual change).
 
 ### E1.22 Catalog complete
 - AC1 The catalog has a page for every component and state above; a "states" page per overlay.

@@ -21,6 +21,7 @@ import androidx.compose.ui.node.GlobalPositionAwareModifierNode
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.platform.InspectorInfo
+import dev.rovsti.design.backdrop.BackdropDebug
 import dev.rovsti.design.backdrop.internal.recordLayer
 
 /**
@@ -75,6 +76,8 @@ private class LayerBackdropNode(
         // Cleared every generation, before children (backdropStaticRegion among
         // them) redraw and repopulate it below — see LayerBackdrop.staticRegions.
         backdrop.staticRegions.clear()
+
+        if (BackdropDebug.enabled) BackdropDebug.rootRecords++
 
         // Record once and composite to the screen; glass samplers reuse this layer.
         recordLayer(this@LayerBackdropNode, backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }

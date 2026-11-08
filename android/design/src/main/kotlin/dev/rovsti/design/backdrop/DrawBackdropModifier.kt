@@ -519,6 +519,7 @@ private class DrawBackdropNode(
                     (geometryChanged || versionChanged) && !versionChangeIsElsewhere
                 }
             if (needsRecord) {
+                if (BackdropDebug.enabled) BackdropDebug.samplerRecords++
                 recordLayer(
                     this@DrawBackdropNode,
                     layer,
@@ -689,6 +690,17 @@ object BackdropDebug {
 
     private val records = ArrayList<Record>()
 
+    /**
+     * How many times a sampling glass surface re-recorded its own backdrop layer (the expensive step the freezes
+     * hold back), and how many times the source layer was recorded. Counted only while [enabled]; plain fields
+     * written on the draw thread, read by tests after the frame settled. Cleared by [clear].
+     */
+    @JvmField
+    var samplerRecords: Int = 0
+
+    @JvmField
+    var rootRecords: Int = 0
+
     @Synchronized
     internal fun add(record: Record) {
         records += record
@@ -705,6 +717,8 @@ object BackdropDebug {
     @Synchronized
     fun clear() {
         records.clear()
+        samplerRecords = 0
+        rootRecords = 0
     }
 }
 

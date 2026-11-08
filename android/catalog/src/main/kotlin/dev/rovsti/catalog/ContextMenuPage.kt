@@ -21,6 +21,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.controls.GlassIconButton
 import dev.rovsti.design.icons.RovstiIcons
@@ -105,7 +107,8 @@ internal fun ContextMenuPage() {
                             items = items,
                             style = ContextMenuStyle.Lifted(preview = { PersonRow(name, secondary, {}) }),
                             onTap = { last = "opened $name" },
-                        ).testTag("ctx-row-$index"),
+                        ).semantics { contentDescription = "$name, $secondary" }
+                        .testTag("ctx-row-$index"),
                 ) {
                     PersonRow(name, secondary) { last = "more $name" }
                 }

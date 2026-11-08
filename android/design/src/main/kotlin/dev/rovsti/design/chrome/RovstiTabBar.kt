@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -89,6 +90,7 @@ import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.motion.RovstiMotion
 import dev.rovsti.design.motion.gated
+import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.press.HoldResult
 import dev.rovsti.design.press.awaitHold
 import dev.rovsti.design.theme.RovstiTheme
@@ -149,6 +151,12 @@ fun RovstiTabBar(
     selectedDescription: String = "Selected",
 ) {
     val hidden = imeVisible()
+    val overlays = LocalOverlayOrNull.current
+    // Entries above the page (toasts) read the bar from the controller: they are composed outside the bar's locals.
+    DisposableEffect(overlays, chrome) {
+        if (chrome != null) overlays?.chromeMetrics = chrome
+        onDispose { if (overlays?.chromeMetrics === chrome) overlays?.chromeMetrics = null }
+    }
     LaunchedEffect(hidden, chrome) { if (hidden) chrome?.bottomBarPx = 0 }
     if (hidden || tabs.isEmpty()) return
 

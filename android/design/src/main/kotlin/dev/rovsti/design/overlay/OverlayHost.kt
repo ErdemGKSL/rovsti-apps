@@ -17,7 +17,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -33,6 +35,7 @@ import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Density
+import dev.rovsti.design.chrome.ChromeMetrics
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -44,6 +47,16 @@ import kotlinx.coroutines.flow.Flow
 class OverlayController {
     internal val entries = mutableStateListOf<OverlayEntry>()
     private val pushBackSources = mutableStateMapOf<OverlayEntry, () -> Float>()
+
+    /**
+     * The floating bars of the screen on show, registered by the bar itself (see `RovstiTabBar`) so an entry that
+     * lives above the page can keep clear of them. `null` while there is no bar.
+     */
+    var chromeMetrics: ChromeMetrics? by mutableStateOf(null)
+        internal set
+
+    /** The toast on show or leaving (see `showToast`); a new toast replaces it. */
+    internal var toast: ToastEntry? = null
 
     /**
      * How many modal sheets are holding the page back. The page stays pushed back until the last one has left, so
@@ -102,7 +115,7 @@ class OverlayController {
      * Back instead. Returns whether an entry took the event.
      */
     fun dismissTop(): Boolean {
-        val top = entries.lastOrNull { it.state.targetState } ?: return false
+        val top = entries.lastOrNull { it.state.targetState && !it.passesBack } ?: return false
         if (top.dismissOnBack) top.onBack(this)
         return true
     }
@@ -132,6 +145,9 @@ abstract class OverlayEntry(
      * Back to it while it is topmost.
      */
     open val handlesBack: Boolean get() = false
+
+    /** True for entries that never take Back (a toast): the system Back goes on to the page or the next entry. */
+    open val passesBack: Boolean get() = false
 
     /** Whether the host may drop the entry: its exit has finished. Entries that animate without a transition override it. */
     open val isRemovable: Boolean get() = !state.currentState && !state.targetState
@@ -233,7 +249,8 @@ fun OverlayHost(
         // Registered after the page's own handlers, and re-registered whenever the number of entries changes, so the
         // host is always asked first while an overlay is open.
         key(controller.entries.size) {
-            BackHandler(enabled = controller.entries.lastOrNull { it.state.targetState }?.handlesBack == false) {
+            val top = controller.entries.lastOrNull { it.state.targetState && !it.passesBack }
+            BackHandler(enabled = top?.handlesBack == false) {
                 controller.dismissTop()
             }
         }

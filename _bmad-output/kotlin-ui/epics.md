@@ -65,7 +65,7 @@ mid-scroll).
 | E1.12 | Popover (anchored arbitrary content) | R2 | done |
 | E1.13 | Sheets with detents, pushback, background interaction | R2 | done |
 | E1.14 | Alert, action sheet, confirm | R2 | done |
-| E1.15 | Toast and undo pill | R2 | in-progress |
+| E1.15 | Toast and undo pill | R2 | done |
 | E1.16 | Text field, search field, composer field | R2 | done |
 | E1.17 | Switch, slider, segmented control | R3 | todo |
 | E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R3 | todo |
@@ -233,6 +233,7 @@ mid-scroll).
 - AC3 Back on a sheet: predictive preview 35 % then dismiss.
 - Screenshots: `e1.13-sheet-peek`, `e1.13-sheet-medium`, `e1.13-sheet-large`, `e1.13-sheet-pushback`,
   `e1.13-sheet-nonmodal-over-stripes`.
+- Evidence (E1.13, commit 6bc19e9): `android/design/.../overlay/` `SheetEntry.kt`, `SheetState.kt` (detent physics, nested-scroll hand-off), `SheetMath.kt` (pure detents, dismiss rule), `PushBack.kt` (page scale .91, 32 dp corner), `OverlayHost.kt` (pushback registry, `handlesBack`). Catalog `SheetsPage`. Tests: JVM `SheetMathTest`; Robolectric `SheetGestureTest` (detent swipes, fling dismiss/expand, list-then-sheet hand-off, stacked sheets keep the page back, pushback .91, predictive back preview then cancel/complete, only the top sheet closes, non-modal passes taps and has no scrim, scrim tap, one tick per new detent, focus cleared on close, grab while settling). Shots `e1.13-sheet-peek/-medium/-large/-pushback/-nonmodal-over-stripes` light/dark recorded in that commit.
 
 ### E1.14 Alert, action sheet, confirm
 - AC1 Alert 270 dp, 1.2 -> 1 + fade, out 150 ms; action sheet up to 500 dp, 56 dp rows, cancel separate; destructive
@@ -243,6 +244,7 @@ mid-scroll).
 - AC1 Capsule above the measured tab bar, 3 s, swipe to dismiss, live region; undo pill with action and countdown;
   one at a time with replace semantics.
 - Screenshots: `e1.15-toast-above-bar`, `e1.15-undo-pill`.
+- Evidence (E1.15): `android/design/.../overlay/Toast.kt` (ORIGINAL; `ToastEntry`, `OverlayController.showToast/showUndo` with replace semantics via `OverlayController.toast`), `ToastMath.kt` (pure: swipe outcome by `Fling` projection, bar gap, ring sweep, upward rubber). Capsule `labelPrimary` 0.92 with page-coloured subheadline, max 2 lines, padding 18/12, radius 24, max 420 dp, 350 ms rise / 180 ms exit, liveRegion Polite + `dismiss` action, not modal (`OverlayEntry.passesBack`: Back is never taken by a toast). Placement reads `OverlayController.chromeMetrics` (registered by `RovstiTabBar`, since entries are composed outside the bar's locals) in the layout phase: bar top - 8 dp, or nav inset + 8 dp without a bar. Timer runs on the frame clock (animator scale cannot cut it short) and holds under a finger; ring is a draw-phase arc; Undo runs once and is dead once the pill is leaving; the action takes the opposite theme's accent (the capsule is an inverted surface; contrast >= 4.5 in a JVM test). Catalog `ToastsPage` with the tab bar. Tests: JVM `ToastMathTest`; Robolectric `ToastTest` (3 s auto-dismiss, replace + fresh timer, swipe down/sideways, short drag springs back, timer holds under finger, undo once, double tap same frame, dead after 5 s while fading, dead once replaced, bottom <= bar top - 8 dp and within 2 px, long toast 2 lines, no-bar placement, live region + page still takes input, Back not swallowed). Opened `e1.15-toast-above-bar`, `-undo-pill`, `-toast-long-fs2` light/dark: dark capsule with 8 dp clear of the bar and its shadow over the bar's top edge only; dark theme gives a light capsule with dark text; the Undo label and ring read clearly in both; ring about 60 % full at 2 s of 5; at font scale 2 the long text clips to two lines with an ellipsis and the capsule spans the gutters above the bar. Known: the toast does not animate when the bar minimises (it follows instantly); a 3 s toast is short for TalkBack users (no extended timeout yet).
 
 ### E1.16 Text fields
 - AC1 `GlassTextField` and `SearchField` ported from glisse `input.tsx` / `search-field.tsx` (header), over
@@ -255,6 +257,7 @@ mid-scroll).
   handles visible), `e1.16-field-selection-toolbar` (platform toolbar if Robolectric draws it; otherwise the test asserts
   the toolbar was requested and the shot shows the selection), `e1.16-search-with-clear`, `e1.16-composer-3-lines`,
   `e1.16-composer-ime-open`.
+- Evidence (E1.16, commit 1898350): `android/design/.../text/` `GlassTextField.kt`, `SearchField.kt` (glisse headers), `ComposerField.kt` (up to 6 lines, send, hardware Enter / Shift+Enter), `TextSelection.kt`; all over `BasicTextField(TextFieldState)`. Catalog `TextFieldsPage`. Tests: JVM `TextSelectionTest`; Robolectric `TextFieldsTest` (tap places caret, long-press selects word, selection via semantics, paste through toolbar and semantics, IME action once, clear keeps focus, composer above keyboard, font scale 2, 6-line growth, send once, blank sends nothing, platform toolbar asked on long-press). Shots `e1.16-field-empty/-focused/-focused-fs2/-with-selection/-selection-toolbar`, `-search-with-clear`, `-composer-3-lines`, `-composer-ime-open` light/dark recorded in that commit.
 
 ### E1.17 Switch, slider, segmented
 - AC1 Ported glisse geometry and gesture rules (deadzones, rubber band /22, near = 24, drag = 6, round to slot), toggle

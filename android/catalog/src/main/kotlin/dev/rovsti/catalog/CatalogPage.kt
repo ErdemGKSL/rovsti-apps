@@ -27,4 +27,5 @@ enum class CatalogPage(
     Dialogs("Alerts and sheets"),
     Sheets("Sheets"),
     TextFields("Text fields"),
+    Toasts("Toasts"),
 }

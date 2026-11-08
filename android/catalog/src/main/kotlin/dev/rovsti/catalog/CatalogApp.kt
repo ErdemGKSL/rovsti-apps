@@ -76,6 +76,7 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
                     CatalogPage.Dialogs -> DialogsPage()
                     CatalogPage.Sheets -> SheetsPage()
                     CatalogPage.TextFields -> TextFieldsPage()
+                    CatalogPage.Toasts -> ToastsPage()
                 }
             }
         }
@@ -95,11 +96,6 @@ private fun HomePage(onOpen: (CatalogPage) -> Unit) {
         InsetGroupedSection(header = "Pages", modifier = Modifier.testTag("home-pages")) {
             for (target in CatalogPage.entries.filter { it != CatalogPage.Home }) {
                 row { ListRow(title = target.title, trailing = { ListRowChevron() }, onClick = { onOpen(target) }) }
-            }
-        }
-        InsetGroupedSection(header = "Planned", modifier = Modifier.padding(top = Spacing.sectionGap - Spacing.s)) {
-            for (item in Planned) {
-                row { ListRow(title = item.first, meta = item.second) }
             }
         }
     }
@@ -135,8 +131,3 @@ internal fun SectionLabel(
         modifier = modifier.padding(bottom = 8.dp),
     )
 }
-
-private val Planned =
-    listOf(
-        "Toast and undo pill" to "E1.15",
-    )

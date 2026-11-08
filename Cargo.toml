@@ -34,6 +34,7 @@ gpui_wgpu = { git = "https://github.com/cradiy/gpui-fusion", rev = "d6c84124af87
 liquid_glass_kit = { path = "crates/liquid_glass_kit" }
 rovsti_app_core = { path = "crates/rovsti_app_core" }
 rovsti_core = { path = "crates/rovsti_core" }
+rovsti_ffi = { path = "crates/rovsti_ffi" }
 rovsti_ui = { path = "crates/rovsti_ui" }
 rovsti_android = { path = "crates/rovsti_android" }
 rovsti_geo = { path = "crates/rovsti_geo" }

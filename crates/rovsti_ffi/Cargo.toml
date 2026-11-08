@@ -1,0 +1,25 @@
+[package]
+name = "rovsti_ffi"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The only JNI library of the Kotlin apps: envelope, panic guard, handles, event sink, ops."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# core.panic and core.emit_test for Kotlin-side tests that load the host library.
+test-ops = []
+
+[dependencies]
+jni.workspace = true
+log.workspace = true
+rovsti_app_core.workspace = true
+rovsti_core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

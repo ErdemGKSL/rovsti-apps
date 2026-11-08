@@ -6164,6 +6164,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rovsti_ffi"
+version = "0.1.0"
+dependencies = [
+ "jni",
+ "log",
+ "rovsti_app_core",
+ "rovsti_core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rovsti_geo"
 version = "0.1.0"
 dependencies = [

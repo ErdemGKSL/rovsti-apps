@@ -9,7 +9,7 @@ source scripts/android-env.sh
 
 # Rust crates the Kotlin apps use. The deprecated GPUI crates (apps/*, rovsti_ui,
 # rovsti_wa_ui, liquid_glass_kit) are deliberately excluded.
-RUST_PKGS=(-p rovsti_core -p rovsti_app_core -p rovsti_geo -p rovsti_tiles -p rovsti_wa_proto -p rovsti_wa_client -p rovsti_android)
+RUST_PKGS=(-p rovsti_core -p rovsti_app_core -p rovsti_geo -p rovsti_tiles -p rovsti_wa_proto -p rovsti_wa_client -p rovsti_android -p rovsti_ffi)
 
 step() {
   local name="$1"; shift
@@ -42,6 +42,9 @@ if [[ -z "${SKIP_RUST:-}" ]]; then
     step "cargo build rovsti_android aarch64-linux-android" \
       cargo build -p rovsti_android --target aarch64-linux-android
   fi
+  step "cargo build rovsti_ffi aarch64-linux-android" \
+    cargo build -p rovsti_ffi --target aarch64-linux-android
+  step "ffi exports (nm -D)" bash scripts/check-ffi-exports.sh
 fi
 
 if [[ -z "${SKIP_GRADLE:-}" ]]; then

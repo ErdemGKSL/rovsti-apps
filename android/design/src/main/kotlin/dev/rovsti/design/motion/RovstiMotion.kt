@@ -61,6 +61,12 @@ object RovstiMotion {
 
     fun <T : Any> pushBack(t: T): SpringSpec<T> = spring(1f, 380f, t)
 
+    /**
+     * Mounting a [dev.rovsti.design.ios.component.BottomSheet]: Convx `constants/Dimensions.kt` NavigationBarAnimationSpec,
+     * `spring(DampingRatioMediumBouncy = 0.5, StiffnessLow = 200)`.
+     */
+    fun bottomSheetMount(): SpringSpec<androidx.compose.ui.unit.Dp> = spring(0.5f, 200f)
+
     fun <T : Any> swipeSettle(t: T): SpringSpec<T> = spring(1f, 500f, t)
 
     fun <T : Any> menuGrowX(t: T): SpringSpec<T> = spring(0.62f, 560f, t)

@@ -1,30 +1,43 @@
+// Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/ios/component/IosSheet.kt
+// (release rule and sheet numbers; the detent maths, rubber band and stack clamp are Rovsti's own)
 package dev.rovsti.design.overlay
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.motion.Fling
+import dev.rovsti.design.ios.component.IosSheetLargeGap
+import dev.rovsti.design.ios.component.PresentedCornerRadius
+import dev.rovsti.design.ios.component.PresentedDim
+import dev.rovsti.design.ios.component.PresentedScale
+import dev.rovsti.design.ios.foundation.IosMetrics
+import dev.rovsti.design.ios.foundation.nearestProjectedSnap
+import dev.rovsti.design.ios.foundation.projectedEndpoint
 import dev.rovsti.design.motion.Rubber
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.tanh
 
-/** Numbers of the sheet (SKILL overlays 5). */
+/**
+ * Numbers of the sheet. Where Convx has the number it is cited: ios/component/IosSheet.kt (corner via
+ * IosMetrics.SheetCornerRadius, Large gap, scrim 0.32, dismiss margin 0.12) and component/IosSheetPresentation.kt
+ * (pushback scale, corner, dim).
+ */
 object SheetMetrics {
-    /** Opacity of the grouped-surface wash over the sheet glass: a bare glass sheet is unreadable under a list. */
-    const val GlassWash = 0.92f
+    /** Opacity of the grouped-surface wash over the sheet glass; lowered from 0.92, which hid the pushed page as haze. */
+    const val GlassWash = 0.6f
 
-    val CornerRadius = 28.dp
+    /** IosMetrics.SheetCornerRadius, Convx ios/foundation/IosDesignSystem.kt. */
+    val CornerRadius = IosMetrics.SheetCornerRadius
     val GrabberWidth = 36.dp
     val GrabberHeight = 5.dp
 
-    /** Space above the grabber and below it. */
-    val GrabberTop = 5.dp
-    val GrabberBottom = 8.dp
+    /** Space above the grabber and below it (Convx IosSheet.kt `padding(top = 6.dp, bottom = 2.dp)`). */
+    val GrabberTop = 6.dp
+    val GrabberBottom = 2.dp
 
     /** The Large detent stops this far under the status bar (the page behind shows as a strip). */
-    val LargeGap = 24.dp
+    val LargeGap = IosSheetLargeGap
 
     /** Default height of the Peek detent. */
     val PeekHeight = 120.dp
@@ -44,9 +57,9 @@ object SheetMetrics {
     val GrabberStretchReference = 320.dp
 
     // Pushback of the page behind a modal sheet.
-    const val PushBackScale = 0.91f
-    val PushBackCorner = 32.dp
-    const val PushBackDim = 0.22f
+    const val PushBackScale = PresentedScale
+    val PushBackCorner = PresentedCornerRadius
+    const val PushBackDim = PresentedDim
 
     // A sheet presented over a sheet steps the lower one back (ORIGINAL; iOS behaviour, no source).
     const val StackScale = 0.94f
@@ -126,9 +139,10 @@ sealed interface SheetTarget {
 }
 
 /**
- * The release rule. The flick is projected with UIKit's normal deceleration (0.998); if it would end further than 12 %
- * of the window below the lowest detent and the sheet may be dismissed, the sheet leaves; otherwise it settles on the
- * detent nearest to the projected point. [offsets] is ascending as [detentOffsets] returns it.
+ * The release rule, Convx ios/component/IosSheet.kt `settleSheet`: the flick is projected with UIKit's normal
+ * deceleration (0.998); if the projected point is further than 12 % of the window below the lowest detent and the sheet
+ * may be dismissed, the sheet leaves; otherwise it settles on the detent nearest to the projected point (a tie goes
+ * to the direction of travel). [offsets] is ascending as [detentOffsets] returns it.
  */
 fun sheetReleaseTarget(
     offset: Float,
@@ -137,9 +151,11 @@ fun sheetReleaseTarget(
     containerHeight: Float,
     dismissible: Boolean,
 ): SheetTarget {
-    val rest = Fling.restingPoint(offset, velocity, Fling.NormalRate)
-    if (dismissible && rest > offsets.last() + SheetMetrics.DismissMargin * containerHeight) return SheetTarget.Dismiss
-    return SheetTarget.Snap(Fling.nearestSnap(offsets, rest, velocity))
+    val projected = projectedEndpoint(offset, velocity)
+    if (dismissible && projected > offsets.last() + SheetMetrics.DismissMargin * containerHeight) {
+        return SheetTarget.Dismiss
+    }
+    return SheetTarget.Snap(nearestProjectedSnap(offset, velocity, offsets.toList()) ?: offsets.last())
 }
 
 /** 0 when dismissed, 1 at the lowest detent or higher: drives the scrim and the pushback of the page. */

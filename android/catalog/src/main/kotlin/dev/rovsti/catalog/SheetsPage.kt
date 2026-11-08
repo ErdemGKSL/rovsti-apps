@@ -27,6 +27,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.controls.CapsuleButton
+import dev.rovsti.design.ios.component.presentPageSheet
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.overlay.Detent
 import dev.rovsti.design.overlay.LocalOverlay
@@ -195,6 +196,17 @@ internal fun SheetsPage() {
         )
     }
 
+    fun pageSheet() {
+        controller.presentPageSheet("New list") {
+            RovstiText(
+                "A full-screen page sheet: edge to edge, ten points under the status bar.",
+                style = RovstiTheme.type.subheadline,
+                modifier = Modifier.padding(top = Spacing.s),
+            )
+            ListRow(title = "Name", secondary = "Weekend stops", modifier = Modifier.testTag("page-sheet-row"))
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         if (striped) StripedBackdrop()
         Column(
@@ -213,6 +225,7 @@ internal fun SheetsPage() {
                 CapsuleButton("Large sheet", { modal(Detent.Large, "Recents") }, Modifier.testTag("sheet-large"))
                 CapsuleButton("Stacked sheets", ::stacked, Modifier.testTag("sheet-stacked"))
                 CapsuleButton("Non-modal sheet", ::nonModal, Modifier.testTag("sheet-nonmodal"))
+                CapsuleButton("Page sheet", ::pageSheet, Modifier.testTag("sheet-page"))
                 CapsuleButton(
                     text = "Page taps: $taps",
                     onClick = { taps++ },

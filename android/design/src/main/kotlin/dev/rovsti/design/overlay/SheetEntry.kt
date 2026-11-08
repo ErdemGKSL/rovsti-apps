@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -49,6 +48,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.glass.sheetGlass
 import dev.rovsti.design.haptics.LocalRovstiHaptics
+import dev.rovsti.design.ios.foundation.TopRoundedShape
 import dev.rovsti.design.motion.RovstiMotion
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -196,7 +196,7 @@ class SheetEntry(
     ) {
         val colors = RovstiTheme.colors
         val shape =
-            remember { RoundedCornerShape(topStart = SheetMetrics.CornerRadius, topEnd = SheetMetrics.CornerRadius) }
+            remember { TopRoundedShape(SheetMetrics.CornerRadius) }
         val connection = remember(sheet) { sheetScrollConnection(sheet) }
         val drag = rememberDraggableState { sheet.drag(it) }
         val bottomInset = with(host.density) { (host.windowSize.height - host.safe.bottom).coerceAtLeast(0f).toDp() }

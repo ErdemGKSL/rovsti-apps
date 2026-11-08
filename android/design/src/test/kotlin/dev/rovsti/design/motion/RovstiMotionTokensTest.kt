@@ -48,6 +48,14 @@ class RovstiMotionTokensTest {
         assertEquals(0.920f, RovstiMotion.SelectRest.dampingRatio, 0.001f)
     }
 
+    /** Convx constants/Dimensions.kt NavigationBarAnimationSpec: MediumBouncy (0.5) and StiffnessLow (200). */
+    @Test
+    fun bottomSheetMountIsConvxsNavigationBarSpec() {
+        val spec = RovstiMotion.bottomSheetMount() as androidx.compose.animation.core.SpringSpec<*>
+        org.junit.Assert.assertEquals(0.5f, spec.dampingRatio, 0f)
+        org.junit.Assert.assertEquals(200f, spec.stiffness, 0f)
+    }
+
     @Test
     fun rovstiSpringsKeepTheirPicks() {
         val t = 0.001f

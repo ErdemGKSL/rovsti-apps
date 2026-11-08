@@ -36,6 +36,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Density
 import dev.rovsti.design.chrome.ChromeMetrics
+import dev.rovsti.design.ios.component.iosSheetPresentation
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -270,7 +271,7 @@ fun OverlayPage(
     }
     val density = LocalDensity.current
     val statusBarPx = WindowInsets.statusBars.getTop(density).toFloat()
-    val cornerPx = with(density) { SheetMetrics.PushBackCorner.toPx() }
+    val topInset = with(density) { statusBarPx.toDp() }
     Box(
         modifier.fillMaxSize().drawBehind {
             // The black the shrunk page leaves visible around itself.
@@ -281,7 +282,7 @@ fun OverlayPage(
         Box(
             (if (anyModal) Modifier.clearAndSetSemantics { } else Modifier)
                 .fillMaxSize()
-                .sheetPushBack(controller::pushBackProgress, statusBarPx, cornerPx),
+                .iosSheetPresentation(controller::pushBackProgress, topInset),
         ) { content() }
     }
 }

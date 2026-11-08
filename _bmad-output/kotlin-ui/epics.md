@@ -81,7 +81,7 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 | E1.25 | Port Convx `liquidGlass`, AppleTokens/GlassTintTokens, TopFadeBlur, iOS foundation (IosGlass, IosMenuMaterial, IosTheme, IosColors, IosDesignSystem) | R3 | todo |
 | E1.26 | One root backdrop, migrate every glass caller, delete the old engine, real-path test, catalog APK | R3 | done |
 | E1.27 | Convx menus and context menus (IosMenu, AppleContextMenu, IosContextMenu, OverlayMenu) in `OverlayHost` | R3 | done |
-| E1.28 | Convx sheets (IosSheet, IosPageSheet, IosSheetPresentation, BottomSheet) | R3 | todo |
+| E1.28 | Convx sheets (IosSheet, IosPageSheet, IosSheetPresentation, BottomSheet) | R3 | done (SheetEntry facade keeps detents, stacking, non-modal; release rule, pushback, corner, grabber from Convx) |
 | E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | todo |
 | E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3 | todo |
 | E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | todo |

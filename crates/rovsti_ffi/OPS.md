@@ -78,6 +78,25 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
 - `view.*` (`project`, `step`, `tiles`, `frac_to_coord`, `follow`) wrap `rovsti_geo::view` and the slippy maths of `rovsti_geo::tiles`.
   Their fixtures are the cross-check data for the Kotlin `MapCamera` (E7): same centre, scale and pixel in, same coordinate or tile set out.
 
+Tiles (E2.13): `tiles.open {server_url?, cache_cap?, dir?}` answers `{handle, key, template, is_default, cap_bytes, cached_bytes,
+cached_tiles}`, a `TileClient`, a `TileSource` and the per-server `DiskCache` (`dir` defaults to `<cache dir>/tiles`). The `tile(handle, z, x, y,
+flags)` export of `RustNative` reads the handle (cache or download, `TileGeometry`, style, encode) and answers the `RVT1` buffer of
+`docs/kotlin-ui/tile-buffer.md`, or an error envelope; the caller tells them apart by the magic (`RVT1` against `{`). Flag bit 0 asks for the dark
+style, bit 1 for the cache only (a tile that is not cached is `not_found` with `detail.reason = "not_cached"`, no network is touched).
+
+- Cache ops take the handle: `tiles.usage` (all servers, this server, the cap), `tiles.usage_by_source`, `tiles.clear_all`, `tiles.clear_except`
+  (keeps this server unless `keep_key` names another), `tiles.set_cap`. `tiles.test_server {server_url}` answers the layer count of tile 0/0/0.
+- Download errors are envelopes with a sentence in `message` and a stable `detail.reason`: `unreachable` (`network`), `refused` (`auth`),
+  `no_tile` (`not_found`), `status` (`network`, with `status`), `too_large` (`invalid`), `not_vector` (`parse`), `storage` (`io`); a bad server URL is
+  `invalid` with `scheme`, `placeholder`, `whitespace`, `too_long` or `empty`.
+- `tiles.offline_start {handle, bbox | circle, zooms?}` plans the tiles (`bbox {south, west, north, east}` with `tiles_for_area` and the 2 500-tile
+  budget, or `circle {center, radius_m, margin_m?, budget?}` with `tiles_for_circle` for a trip), answers `{handle, total, top_zoom, capped,
+  estimate_bytes}` and downloads on a background thread with four workers. Progress arrives as `tiles.offline` events `{job, done, saved, failed,
+  total, fraction, text, finished, cancelled}` (at most every 100 ms, and always the last one with `finished: true`). `tiles.offline_cancel {job}`
+  stops the queue (the downloads in flight finish and stay cached); releasing the job handle cancels too.
+- `tiles.encode_mvt {mvt, z, x, y, flags}` is the pure half of `tile` (no cache, no network); its fixtures hold the real `.mvt` of
+  `crates/rovsti_geo/src/tiles/testdata` and the buffer it becomes, which the Kotlin `TileBuffer` test decodes.
+
 | Item | Used by | Domain | Class | Target |
 |---|---|---|---|---|
 | `(bridge) core.version` | - | bridge | op | core.version |
@@ -649,49 +668,49 @@ the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, t
 | `rovsti_geo::share_text` | stops | stops | op | stops.dest_parse, stops.dest_share |
 | `rovsti_geo::shortcut_spec` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
 | `rovsti_geo::status_share_text` | stops | stops | op | stops.pick_labels, stops.trip_status_share |
-| `rovsti_geo::tiles::AREA_MIN_ZOOM` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::AREA_TILE_BUDGET` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::ATTRIBUTION` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::AreaDownload` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::AreaPlan` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::ClassGeometry` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::DEFAULT_TILE_URL` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::DrawClass` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::FetchQueue` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::LruIndex` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::MAX_TILE_ZOOM` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::MapStyle` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::Priority` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::Rgba8` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::Shape` | stops | tiles | todo | - |
+| `rovsti_geo::tiles::AREA_MIN_ZOOM` | stops | tiles | op | tiles.offline_start |
+| `rovsti_geo::tiles::AREA_TILE_BUDGET` | stops | tiles | op | tiles.offline_start |
+| `rovsti_geo::tiles::ATTRIBUTION` | stops | tiles | op | stops.prefs_choices |
+| `rovsti_geo::tiles::AreaDownload` | stops | tiles | op | tiles.offline_start, tiles.offline_cancel |
+| `rovsti_geo::tiles::AreaPlan` | stops | tiles | op | tiles.offline_start |
+| `rovsti_geo::tiles::ClassGeometry` | stops | tiles | op | tiles.encode_mvt |
+| `rovsti_geo::tiles::DEFAULT_TILE_URL` | stops | tiles | op | stops.prefs_choices, tiles.open |
+| `rovsti_geo::tiles::DrawClass` | stops | tiles | op | tiles.encode_mvt |
+| `rovsti_geo::tiles::FetchQueue` | stops | tiles | kotlin | :stops TileScheduler.kt (dedupes view requests; every `tile` call is one blocking Rust read, offline downloads use four Rust workers) |
+| `rovsti_geo::tiles::LruIndex` | stops | tiles | op | tiles.open, tiles.usage, tiles.set_cap |
+| `rovsti_geo::tiles::MAX_TILE_ZOOM` | stops | tiles | op | tiles.offline_start |
+| `rovsti_geo::tiles::MapStyle` | stops | tiles | op | tiles.encode_mvt |
+| `rovsti_geo::tiles::Priority` | stops | tiles | kotlin | :stops TileScheduler.kt (view requests before prefetch) |
+| `rovsti_geo::tiles::Rgba8` | stops | tiles | op | tiles.encode_mvt |
+| `rovsti_geo::tiles::Shape` | stops | tiles | op | tiles.encode_mvt |
 | `rovsti_geo::tiles::TileCover` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
-| `rovsti_geo::tiles::TileGeometry` | stops | tiles | todo | - |
+| `rovsti_geo::tiles::TileGeometry` | stops | tiles | op | tiles.encode_mvt |
 | `rovsti_geo::tiles::TileId` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
-| `rovsti_geo::tiles::TileLayer` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::TileSource` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::TileTransform` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::TileUrlError` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::build_layer` | stops | tiles | todo | - |
+| `rovsti_geo::tiles::TileLayer` | stops | tiles | kotlin | :stops MapTileLayer.kt (per-frame transform of the RVT1 buffer to the canvas) |
+| `rovsti_geo::tiles::TileSource` | stops | tiles | op | tiles.open, tiles.test_server |
+| `rovsti_geo::tiles::TileTransform` | stops | tiles | kotlin | :stops MapTileLayer.kt (tile units to screen, same corner maths as view.project) |
+| `rovsti_geo::tiles::TileUrlError` | stops | tiles | op | tiles.open, tiles.test_server |
+| `rovsti_geo::tiles::build_layer` | stops | tiles | kotlin | :stops MapTileLayer.kt (clip and merge per frame; vertex budget by class) |
 | `rovsti_geo::tiles::display_zoom` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
-| `rovsti_geo::tiles::estimate_bytes` | stops | tiles | todo | - |
+| `rovsti_geo::tiles::estimate_bytes` | stops | tiles | op | tiles.offline_start |
 | `rovsti_geo::tiles::frac_to_coord` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
-| `rovsti_geo::tiles::line_width` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::stand_in` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::tiles_for_area` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::tiles_for_circle` | stops | tiles | todo | - |
+| `rovsti_geo::tiles::line_width` | stops | tiles | kotlin | :stops MapTileLayer.kt (`w14 * 2^clamp(zoom - 14, -3, 2)`, at least 0.5 px; width14 is in the buffer) |
+| `rovsti_geo::tiles::stand_in` | stops | tiles | op | tiles.stand_in |
+| `rovsti_geo::tiles::tiles_for_area` | stops | tiles | op | tiles.offline_start |
+| `rovsti_geo::tiles::tiles_for_circle` | stops | tiles | op | tiles.offline_start |
 | `rovsti_geo::tiles::tiles_for_view` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rovsti_geo::usage_text` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
 | `rovsti_geo::view::FollowMode` | stops | stops | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rovsti_geo::view::Viewport` | stops | stops | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
-| `rovsti_tiles::DEFAULT_CAP_BYTES` | stops | tiles | todo | - |
-| `rovsti_tiles::DiskCache` | stops | tiles | todo | - |
-| `rovsti_tiles::TileClient` | stops | tiles | todo | - |
-| `rovsti_tiles::TileError` | stops | tiles | todo | - |
-| `rovsti_tiles::clear_all` | stops | tiles | todo | - |
-| `rovsti_tiles::clear_except` | stops | tiles | todo | - |
-| `rovsti_tiles::disk_usage` | stops | tiles | todo | - |
-| `rovsti_tiles::load` | stops | tiles | todo | - |
-| `rovsti_tiles::usage_by_source` | stops | tiles | todo | - |
+| `rovsti_tiles::DEFAULT_CAP_BYTES` | stops | tiles | op | tiles.open |
+| `rovsti_tiles::DiskCache` | stops | tiles | op | tiles.open, tiles.usage, tiles.set_cap |
+| `rovsti_tiles::TileClient` | stops | tiles | op | tiles.open, tiles.test_server |
+| `rovsti_tiles::TileError` | stops | tiles | op | tiles.test_server |
+| `rovsti_tiles::clear_all` | stops | tiles | op | tiles.clear_all |
+| `rovsti_tiles::clear_except` | stops | tiles | op | tiles.clear_except |
+| `rovsti_tiles::disk_usage` | stops | tiles | op | tiles.usage |
+| `rovsti_tiles::load` | stops | tiles | op | tiles.open |
+| `rovsti_tiles::usage_by_source` | stops | tiles | op | tiles.usage_by_source |
 | `rovsti_core::phone_number::PhoneNumber::matches` | - | shared | op | phone_number.same |
 | `rovsti_core::calling_code::COUNTRIES` | - | shared | op | calling_code.list |
 | `rovsti_core::number_format::available` | - | shared | op | format.available |

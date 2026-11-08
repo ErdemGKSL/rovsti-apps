@@ -118,16 +118,26 @@ fn contract_fixtures_match() {
             };
             // A case that needs a handle opens it first; the live number stands in for the placeholder.
             let mut live: Vec<i64> = Vec::new();
-            let text = match &case.setup {
-                Some((setup_op, setup_req)) => {
-                    let opened = call(setup_op, setup_req.to_string().as_bytes());
-                    let opened: serde_json::Value = serde_json::from_slice(&opened).expect("json");
-                    let handle = opened["ok"]["handle"].as_i64().unwrap_or_else(|| {
-                        panic!("{stem}: setup {setup_op} gave no handle: {opened}")
-                    });
-                    live.push(handle);
-                    text.replace(&PLACEHOLDER_HANDLE.to_string(), &handle.to_string())
+            for (setup_op, setup_req) in &case.setup {
+                let mut setup_text = setup_req
+                    .to_string()
+                    .replace("$DATA", data_dir().to_str().expect("utf-8 data dir"));
+                if let Some(dir) = &tmp {
+                    setup_text = setup_text.replace("$DIR", dir.to_str().expect("utf-8 temp dir"));
                 }
+                if let Some(previous) = live.last() {
+                    setup_text =
+                        setup_text.replace(&PLACEHOLDER_HANDLE.to_string(), &previous.to_string());
+                }
+                let opened = call(setup_op, setup_text.as_bytes());
+                let opened: serde_json::Value = serde_json::from_slice(&opened).expect("json");
+                let handle = opened["ok"]["handle"]
+                    .as_i64()
+                    .unwrap_or_else(|| panic!("{stem}: setup {setup_op} gave no handle: {opened}"));
+                live.push(handle);
+            }
+            let text = match live.last() {
+                Some(handle) => text.replace(&PLACEHOLDER_HANDLE.to_string(), &handle.to_string()),
                 None => text,
             };
             let mut answer = String::from_utf8(call(spec.name, text.as_bytes())).expect("utf-8");

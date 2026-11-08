@@ -536,8 +536,23 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 | E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | done (round-07 step 4; evidence below) |
 | E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | done (round-07 step 5; evidence below) |
 | E2.12 | Stops domain ops | R2 | done (round-07 step 6; evidence below) |
-| E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | in-progress (round-07 step 7) |
+| E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | done (round-07 step 7; evidence below) |
 | E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | in-progress (round-07 step 8) |
+
+#### Evidence, E2.13 (round-07 step 7)
+- Format: `docs/kotlin-ui/tile-buffer.md` (`RVT1` v1, little-endian; header, class records, parts of tile-local f32 points; flags bit 0 dark,
+  bit 1 cache only; paint ids, casing as bit 15 of the id; polygon = exterior then holes by ring orientation, filled even-odd per polygon).
+- Rust: `rovsti_ffi/src/tile_buffer.rs` (encoder, reference decoder, self-decode tests on `osm-14-9520-6130.mvt`: vertex count equals
+  `TileGeometry::vertices`) and `src/ops/tiles.rs` (`tiles.{open, usage, usage_by_source, clear_all, clear_except, set_cap, test_server,
+  stand_in, encode_mvt, offline_start, offline_cancel}`); the `tile` JNI export reads the `tiles.open` handle (cache hit or download,
+  `TileGeometry::from_bytes`, style, encode; errors stay envelopes, told apart by the magic). The offline job runs four workers, emits
+  `tiles.offline` `{job, done, saved, failed, total, fraction, text, finished, cancelled}` and cancels on `offline_cancel` or when its
+  handle is released; `offline_start` takes a `bbox` or a `circle` (the trip prefetch). Unit tests use a localhost stub server.
+- Fixtures: 11 ops, 27 pairs (`tiles.encode_mvt` is built from the real `.mvt`); the fixture harness now chains `Case::after`.
+- OPS.md: no `todo` row of the tiles domain (`tiles` joins `DONE_DOMAINS`).
+- Kotlin: `TilesOps` / `NativeTilesOps`, `TileHandle` (decoded `tile()`, cache ops, `startOffline` -> `OfflineJob.progress`), `TileBuffer.decode`,
+  `model.stops.Tile*` models, `TilesContracts`; `TileBufferTest` (decodes the fixture), `testRustBridge` `TileHandleTest` (cache-only on a
+  seeded dir, cache ops, offline progress and cancel against a localhost server).
 
 #### Evidence, E2.12 (round-07 step 6)
 - Rust: `rovsti_ffi/src/ops/stops/{trip,pick,places,history,store,misc,view}.rs`, 69 ops. `stops.trip_*` is a handle over

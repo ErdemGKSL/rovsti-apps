@@ -4,7 +4,6 @@
 //! the work under the panic guard, write the answer. They are compiled on every target.
 //! `RustNative` is a Kotlin `object`, so the second parameter is the instance (`JObject`).
 
-use crate::envelope::{Answer, FfiError, encode};
 use crate::events::{self, EventSink, JniSink};
 use crate::guard::{guarded, or_fallback};
 use crate::{handles, ops, state};
@@ -85,20 +84,20 @@ pub extern "system" fn Java_dev_rovsti_core_RustNative_headless<'l>(
     })
 }
 
-/// Binary map tiles arrive with E2.13; until then every call is `unsupported`.
+/// One binary map tile of a `tiles.open` handle (`docs/kotlin-ui/tile-buffer.md`): the `RVT1` buffer, or an error
+/// envelope (JSON, starts with `{`). `flags` bit 0 asks for the dark style, bit 1 for the cache only.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_rovsti_core_RustNative_tile<'l>(
     env: JNIEnv<'l>,
     _this: JObject<'l>,
-    _handle: jlong,
-    _z: jint,
-    _x: jint,
-    _y: jint,
-    _flags: jint,
+    handle: jlong,
+    z: jint,
+    x: jint,
+    y: jint,
+    flags: jint,
 ) -> jbyteArray {
     or_fallback(null_mut(), || {
-        let error = FfiError::unsupported("tile is not available yet");
-        write_bytes(&env, &encode(&Answer::Err(error)))
+        write_bytes(&env, &ops::tile_export(handle, z, x, y, flags))
     })
 }
 

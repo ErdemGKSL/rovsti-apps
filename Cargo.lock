@@ -6174,6 +6174,7 @@ dependencies = [
  "rovsti_app_core",
  "rovsti_core",
  "rovsti_geo",
+ "rovsti_tiles",
  "rovsti_wa_proto",
  "serde",
  "serde_json",

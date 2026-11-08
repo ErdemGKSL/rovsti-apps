@@ -18,9 +18,9 @@ pub struct Case {
     /// A directory under `rovsti_app_core/tests/fixtures/dirs` copied to a temp dir; `$DIR` in the request text
     /// stands for it.
     pub seed: Option<&'static str>,
-    /// An op to run first whose answer holds a `handle`: the request names that handle as
-    /// [`PLACEHOLDER_HANDLE`], and the fixture test swaps in the live one.
-    pub setup: Option<(&'static str, Value)>,
+    /// Ops to run first, in order; each answer holds a `handle`. The next setup request (and finally the case
+    /// request) names the latest handle as [`PLACEHOLDER_HANDLE`], and the fixture test swaps in the live one.
+    pub setup: Vec<(&'static str, Value)>,
 }
 
 impl Case {
@@ -30,7 +30,7 @@ impl Case {
             label: "",
             request,
             seed: None,
-            setup: None,
+            setup: Vec::new(),
         }
     }
 
@@ -40,7 +40,7 @@ impl Case {
             label,
             request,
             seed: None,
-            setup: None,
+            setup: Vec::new(),
         }
     }
 
@@ -49,9 +49,10 @@ impl Case {
         self
     }
 
-    /// Runs `op` with `request` first; its answer's `handle` replaces [`PLACEHOLDER_HANDLE`] in this case.
+    /// Runs `op` with `request` first; its answer's `handle` replaces [`PLACEHOLDER_HANDLE`] in the next request.
+    /// Several calls chain: each setup sees the handle of the one before.
     pub fn after(mut self, op: &'static str, request: Value) -> Self {
-        self.setup = Some((op, request));
+        self.setup.push((op, request));
         self
     }
 
@@ -122,6 +123,7 @@ pub fn all() -> impl Iterator<Item = &'static OpSpec> {
         .chain(super::chat::TABLES.iter().flat_map(|table| table.iter()))
         .chain(super::stops::TABLES.iter().flat_map(|table| table.iter()))
         .chain(super::qr::OPS.iter())
+        .chain(super::tiles::OPS.iter())
 }
 
 /// The op with this wire name.

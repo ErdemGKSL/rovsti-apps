@@ -16,6 +16,7 @@ pub mod jni_exports;
 pub mod logger;
 pub mod ops;
 pub mod state;
+pub mod tile_buffer;
 
 /// Version of the Kotlin/Rust contract; bumped when an export changes shape.
 pub const ABI: u32 = 1;

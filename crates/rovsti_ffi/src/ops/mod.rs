@@ -10,6 +10,9 @@ pub mod registry;
 mod search;
 mod shared;
 mod stops;
+mod tiles;
+
+pub use tiles::tile_export;
 
 use crate::envelope::FfiError;
 use crate::guard::guarded;

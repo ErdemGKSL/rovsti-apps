@@ -10,6 +10,7 @@ import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SearchOps
 import dev.rovsti.core.ops.SharedOps
 import dev.rovsti.core.ops.StopsOps
+import dev.rovsti.core.ops.TilesOps
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -67,6 +68,7 @@ class ContractFixturesTest {
                 "MessagesOps" to MessagesOps.ops,
                 "ChatOps" to ChatOps.ops,
                 "StopsOps" to StopsOps.ops,
+                "TilesOps" to TilesOps.ops,
             )
         val missing =
             facades.flatMap { (facade, ops) ->

@@ -21,6 +21,7 @@ qrcode.workspace = true
 rovsti_app_core.workspace = true
 rovsti_core.workspace = true
 rovsti_geo.workspace = true
+rovsti_tiles.workspace = true
 rovsti_wa_proto.workspace = true
 serde.workspace = true
 serde_json.workspace = true

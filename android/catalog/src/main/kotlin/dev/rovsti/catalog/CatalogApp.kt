@@ -63,6 +63,7 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
                 CatalogPage.EmptyState -> EmptyStatePage()
                 CatalogPage.TabBar -> TabBarPage()
                 CatalogPage.FoldedTabBar -> FoldedTabBarPage()
+                CatalogPage.LargeTitle -> LargeTitlePage()
             }
         }
     }
@@ -124,5 +125,5 @@ internal fun SectionLabel(
 
 private val Planned =
     listOf(
-        "Large-title scaffold" to "E1.8",
+        "Overlay host and placement" to "E1.9",
     )

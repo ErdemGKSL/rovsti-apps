@@ -19,4 +19,5 @@ enum class CatalogPage(
     EmptyState("Empty states"),
     TabBar("Tab bar"),
     FoldedTabBar("Tab bar: folded"),
+    LargeTitle("Large title"),
 }

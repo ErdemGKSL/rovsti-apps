@@ -230,7 +230,7 @@ fun DestructiveButton(
  * fill and a hairline. Both are capsules (radius = half the height).
  */
 @Composable
-private fun Modifier.glassSurface(
+internal fun Modifier.glassSurface(
     source: GlassSource?,
     press: Animatable<Float, *>,
 ): Modifier {

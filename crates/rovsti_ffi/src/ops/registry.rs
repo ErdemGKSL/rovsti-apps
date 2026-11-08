@@ -120,6 +120,7 @@ pub fn all() -> impl Iterator<Item = &'static OpSpec> {
                 .flat_map(|table| table.iter()),
         )
         .chain(super::chat::TABLES.iter().flat_map(|table| table.iter()))
+        .chain(super::stops::TABLES.iter().flat_map(|table| table.iter()))
         .chain(super::qr::OPS.iter())
 }
 

@@ -6173,6 +6173,7 @@ dependencies = [
  "qrcode",
  "rovsti_app_core",
  "rovsti_core",
+ "rovsti_geo",
  "rovsti_wa_proto",
  "serde",
  "serde_json",

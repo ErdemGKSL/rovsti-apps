@@ -535,9 +535,24 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 | E2.10 | Contacts domain ops, `qr.encode` / `qr.decode` | R2 | done (round-07 step 3; evidence below) |
 | E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | done (round-07 step 4; evidence below) |
 | E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | done (round-07 step 5; evidence below) |
-| E2.12 | Stops domain ops | R2 | in-progress (round-07 step 6) |
+| E2.12 | Stops domain ops | R2 | done (round-07 step 6; evidence below) |
 | E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | in-progress (round-07 step 7) |
 | E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | in-progress (round-07 step 8) |
+
+#### Evidence, E2.12 (round-07 step 6)
+- Rust: `rovsti_ffi/src/ops/stops/{trip,pick,places,history,store,misc,view}.rs`, 69 ops. `stops.trip_*` is a handle over
+  `rovsti_geo::ActiveTrip` (start, restore, fix -> `FixOut`, notice result, snooze, timeout, dismiss, status share, end); a `dir` makes
+  the op also write `trip.json` under `rovsti_app_core::stops::store::lock()`, the lock of the headless service (headless fixtures
+  unchanged). Also `crossing_{validate, read}` (`DiameterError::message` in the envelope message), `dest_{parse, share}`,
+  `pick_{replay, labels, save_offer}` and `snap`, `saved_{load, edit, list, suggest_name, shortcut}`, `places_{export, import}`,
+  `history_{list, edit, prune_plan, usage, recent, export, text}`, `stats`, `store_*`, `prefs_{load, save, edit, choices}`,
+  `notice_{render, validate}`, `alarm_plan`, `poll`, `gtfs_{import, search}` (tiny zip `rovsti_ffi/tests/data/gtfs-tiny.zip`),
+  `coord_{format, parse}`, `measure`, `backup_{export, parse}`, `arrival_clock`, `format_distance`; `view.{project, step, tiles,
+  frac_to_coord, follow}` are the `MapCamera` cross-check fixtures for E7.
+- OPS.md: no `todo` row of the stops domain (`stops` joins `DONE_DOMAINS`); the `tiles` rows stay for E2.13.
+- Kotlin: `StopsOps` / `NativeStopsOps`, `ActiveTripHandle`, `model.stops.*` (strict contract fixtures for every case),
+  `StopsContracts`; `testRustBridge` `StopsOpsNativeTest` (create, fix, ring, snooze, dismiss, end, close, restore, `dir` file,
+  gtfs import).
 
 #### Evidence, E2.11b (round-07 step 5)
 - Rust: `rovsti_ffi/src/ops/chat/{search,gallery,jump,marks,detect}.rs` (44 ops, all stateless; offsets into a body or snippet are

@@ -57,6 +57,27 @@ takes `w * h` 8-bit luma bytes (row-major, base64, at most 1600 x 1600) and answ
 size mismatch is `invalid`, bad base64 `parse`. The decoder is `rqrr` (through `contact_scan::decode_luma`); there is no ZXing or ML Kit.
 Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 
+Stops (E2.12): `stops.trip_start` / `stops.trip_restore` answer `{handle, ...}` (a `TripView` with the whole persisted trip as `snapshot`),
+the handle of an `ActiveTrip`; `stops.trip_{state, fix, notice_result, snooze, timeout, dismiss, status_share, end}` send it back and
+`RustNative.release` frees it (Kotlin: `ActiveTripHandle`). Every other `stops.*` and `view.*` op is stateless. Choices worth knowing:
+
+- Persistence: a trip op that names `dir` also writes `trip.json` under `rovsti_app_core::stops::store::lock()`, the lock the
+  headless kinds (`trip_fix`, `trip_alarm`, `trip_end`) take on the service thread; `stops.store_trip_{load, save, end}` hold it for
+  their whole read-modify-write. The headless fixtures are untouched. `stops.store_read` / `stops.store_write` cover `saved.json`,
+  `history.json` and `draft.json` (the file's shape is checked on write); `stops.prefs_load` / `stops.prefs_save` cover `stops-prefs.json`.
+- Errors that are sentences for the user (`DiameterError`, `SavedStopError`, `DestError`, `BackupError`, `ImportError`, `TemplateError`,
+  `TileUrlError`) answer `invalid` with the sentence as `message` and a stable `detail.reason` (`too_short`, `same_point`,
+  `duplicate` + `id`, `no_coordinates`, `newer`, ...).
+- `stops.pick_replay` replays gesture events (`tap`, `place`, `drag_start`, `drag_to`, `drag_end`, `swap`, ...) on a fresh `Picking`, the
+  same stateless shape as `sms_timeline.build`; the pin following the finger frame by frame stays Kotlin.
+- `stops.saved_edit`, `stops.history_edit` and `stops.prefs_edit` apply one named edit to the value in the request and answer the new
+  value (Kotlin saves it); the rules (name length, duplicates, the 200-stop cap, favourites first, sound-or-vibrate) stay in Rust.
+- `stops.gtfs_import {zip, now_ms, save?, dir?}` reads the zip at a path (a tiny feed lives in `tests/data/gtfs-tiny.zip`; fixture requests
+  write it as `$DATA/gtfs-tiny.zip`) and answers the `FeedReport`; `save` writes `gtfs.json`, which `stops.gtfs_search` and
+  `stops.saved_suggest_name` read. `stops.measure` takes the point list (Kotlin keeps it; undo drops the last point).
+- `view.*` (`project`, `step`, `tiles`, `frac_to_coord`, `follow`) wrap `rovsti_geo::view` and the slippy maths of `rovsti_geo::tiles`.
+  Their fixtures are the cross-check data for the Kotlin `MapCamera` (E7): same centre, scale and pixel in, same coordinate or tile set out.
+
 | Item | Used by | Domain | Class | Target |
 |---|---|---|---|---|
 | `(bridge) core.version` | - | bridge | op | core.version |
@@ -79,10 +100,10 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rovsti_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed |
 | `rovsti_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |
-| `rovsti_app_core::stops::pick` | stops | stops | todo | - |
-| `rovsti_app_core::stops::snap` | stops | stops | todo | - |
-| `rovsti_app_core::stops::store` | stops | stops | todo | - |
-| `rovsti_app_core::stops::types` | stops | stops | todo | - |
+| `rovsti_app_core::stops::pick` | stops | stops | op | stops.pick_replay, stops.pick_labels, stops.pick_save_offer |
+| `rovsti_app_core::stops::snap` | stops | stops | op | stops.snap |
+| `rovsti_app_core::stops::store` | stops | stops | op | stops.store_trip_load, stops.store_trip_save, stops.store_trip_end, stops.store_read, stops.store_write |
+| `rovsti_app_core::stops::types` | stops | stops | op | stops.pick_replay, stops.pick_labels, stops.pick_save_offer |
 | `rovsti_app_core::storage::BackupRefusal` | rovsti_ui | platform | todo | - |
 | `rovsti_app_core::storage::Loaded` | rovsti_ui | platform | todo | - |
 | `rovsti_app_core::storage::Origin` | rovsti_ui | platform | todo | - |
@@ -555,79 +576,79 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_core::zoom::Point` | contacts,messages,phone | input | kotlin | :design Zoom.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::zoom::Size` | contacts,messages,phone | input | kotlin | :design Zoom.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::zoom::ZoomView` | contacts,messages,phone | input | kotlin | :design Zoom.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
-| `rovsti_geo::ActiveTrip` | stops | stops | todo | - |
-| `rovsti_geo::AlarmPlan` | stops | stops | todo | - |
-| `rovsti_geo::Appearance` | stops | stops | todo | - |
-| `rovsti_geo::Coord` | stops | stops | todo | - |
-| `rovsti_geo::DAY_MS` | stops | stops | todo | - |
-| `rovsti_geo::Diameter` | stops | stops | todo | - |
-| `rovsti_geo::DiameterError` | stops | stops | todo | - |
-| `rovsti_geo::EARTH_RADIUS_M` | stops | stops | todo | - |
-| `rovsti_geo::Endpoint` | stops | stops | todo | - |
-| `rovsti_geo::Feed` | stops | stops | todo | - |
-| `rovsti_geo::FeedReport` | stops | stops | todo | - |
-| `rovsti_geo::Fix` | stops | stops | todo | - |
-| `rovsti_geo::FixIn` | stops | stops | todo | - |
-| `rovsti_geo::FixOut` | stops | stops | todo | - |
-| `rovsti_geo::FixPos` | stops | stops | todo | - |
-| `rovsti_geo::History` | stops | stops | todo | - |
-| `rovsti_geo::Measure` | stops | stops | todo | - |
-| `rovsti_geo::NoticePrefs` | stops | stops | todo | - |
-| `rovsti_geo::NoticeState` | stops | stops | todo | - |
-| `rovsti_geo::NoticeWhen` | stops | stops | todo | - |
-| `rovsti_geo::Outcome` | stops | stops | todo | - |
-| `rovsti_geo::OutcomeFilter` | stops | stops | todo | - |
-| `rovsti_geo::PRUNE_CHOICES_DAYS` | stops | stops | todo | - |
-| `rovsti_geo::Pattern` | stops | stops | todo | - |
-| `rovsti_geo::Route` | stops | stops | todo | - |
-| `rovsti_geo::SavedStop` | stops | stops | todo | - |
-| `rovsti_geo::SavedStopError` | stops | stops | todo | - |
-| `rovsti_geo::SavedStops` | stops | stops | todo | - |
-| `rovsti_geo::Side` | stops | stops | todo | - |
-| `rovsti_geo::Stats` | stops | stops | todo | - |
-| `rovsti_geo::Stop` | stops | stops | todo | - |
-| `rovsti_geo::StopColour` | stops | stops | todo | - |
-| `rovsti_geo::StopsPrefs` | stops | stops | todo | - |
-| `rovsti_geo::TripRecord` | stops | stops | todo | - |
-| `rovsti_geo::TripState` | stops | stops | todo | - |
-| `rovsti_geo::alarm::MIN_ALARM_VOLUME_PCT` | stops | stops | todo | - |
-| `rovsti_geo::arrival_clock` | stops | stops | todo | - |
-| `rovsti_geo::backup::Backup` | stops | stops | todo | - |
-| `rovsti_geo::coord_format::CoordFormat` | stops | stops | todo | - |
-| `rovsti_geo::coord_format::cardinal` | stops | stops | todo | - |
-| `rovsti_geo::coord_format::from_you_text` | stops | stops | todo | - |
-| `rovsti_geo::coord_format::map_view_share_text` | stops | stops | todo | - |
-| `rovsti_geo::coord_format::osm_view_url` | stops | stops | todo | - |
-| `rovsti_geo::dest::SharedPlace` | stops | stops | todo | - |
-| `rovsti_geo::dest::parse_location` | stops | stops | todo | - |
-| `rovsti_geo::dest::parse_stop_share` | stops | stops | todo | - |
-| `rovsti_geo::dest::point_qr_payload` | stops | stops | todo | - |
-| `rovsti_geo::dest::stop_share_text` | stops | stops | todo | - |
-| `rovsti_geo::history::format_duration` | stops | stops | todo | - |
-| `rovsti_geo::history_io::export_file_name` | stops | stops | todo | - |
-| `rovsti_geo::history_io::share_text` | stops | stops | todo | - |
-| `rovsti_geo::history_io::to_csv` | stops | stops | todo | - |
-| `rovsti_geo::history_io::to_gpx` | stops | stops | todo | - |
-| `rovsti_geo::measure::MAX_POINTS` | stops | stops | todo | - |
-| `rovsti_geo::next_volume` | stops | stops | todo | - |
-| `rovsti_geo::notice::DEFAULT_TEMPLATE` | stops | stops | todo | - |
-| `rovsti_geo::notice::render` | stops | stops | todo | - |
-| `rovsti_geo::notice::validate` | stops | stops | todo | - |
-| `rovsti_geo::places_io::MergePlan` | stops | stops | todo | - |
-| `rovsti_geo::poll::MAX_POLL` | stops | stops | todo | - |
-| `rovsti_geo::poll::MIN_POLL` | stops | stops | todo | - |
-| `rovsti_geo::poll::retry_after` | stops | stops | todo | - |
-| `rovsti_geo::prefs::AlarmSound` | stops | stops | todo | - |
-| `rovsti_geo::prune_label` | stops | stops | todo | - |
-| `rovsti_geo::read_zip` | stops | stops | todo | - |
-| `rovsti_geo::saved_stops::FORMAT_VERSION` | stops | stops | todo | - |
-| `rovsti_geo::saved_stops::NEAREST_CHIP_M` | stops | stops | todo | - |
-| `rovsti_geo::saved_stops::SavedSort` | stops | stops | todo | - |
-| `rovsti_geo::saved_stops::load_saved_stops` | stops | stops | todo | - |
-| `rovsti_geo::saved_stops::suggest_name` | stops | stops | todo | - |
-| `rovsti_geo::share_text` | stops | stops | todo | - |
-| `rovsti_geo::shortcut_spec` | stops | stops | todo | - |
-| `rovsti_geo::status_share_text` | stops | stops | todo | - |
+| `rovsti_geo::ActiveTrip` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
+| `rovsti_geo::AlarmPlan` | stops | stops | op | stops.alarm_plan |
+| `rovsti_geo::Appearance` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
+| `rovsti_geo::Coord` | stops | stops | op | stops.crossing_validate, stops.crossing_read |
+| `rovsti_geo::DAY_MS` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::Diameter` | stops | stops | op | stops.crossing_validate, stops.crossing_read |
+| `rovsti_geo::DiameterError` | stops | stops | op | stops.crossing_validate, stops.crossing_read |
+| `rovsti_geo::EARTH_RADIUS_M` | stops | stops | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
+| `rovsti_geo::Endpoint` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
+| `rovsti_geo::Feed` | stops | stops | op | stops.gtfs_import, stops.gtfs_search |
+| `rovsti_geo::FeedReport` | stops | stops | op | stops.gtfs_import, stops.gtfs_search |
+| `rovsti_geo::Fix` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
+| `rovsti_geo::FixIn` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
+| `rovsti_geo::FixOut` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
+| `rovsti_geo::FixPos` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
+| `rovsti_geo::History` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::Measure` | stops | stops | op | stops.measure |
+| `rovsti_geo::NoticePrefs` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
+| `rovsti_geo::NoticeState` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
+| `rovsti_geo::NoticeWhen` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
+| `rovsti_geo::Outcome` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::OutcomeFilter` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::PRUNE_CHOICES_DAYS` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::Pattern` | stops | stops | op | stops.gtfs_import, stops.gtfs_search |
+| `rovsti_geo::Route` | stops | stops | op | stops.gtfs_import, stops.gtfs_search |
+| `rovsti_geo::SavedStop` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::SavedStopError` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::SavedStops` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::Side` | stops | stops | op | stops.crossing_validate, stops.crossing_read |
+| `rovsti_geo::Stats` | stops | stops | op | stops.stats |
+| `rovsti_geo::Stop` | stops | stops | op | stops.gtfs_import, stops.gtfs_search |
+| `rovsti_geo::StopColour` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::StopsPrefs` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
+| `rovsti_geo::TripRecord` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::TripState` | stops | stops | op | stops.trip_start, stops.trip_restore, stops.trip_state, stops.trip_fix, stops.trip_notice_result, stops.trip_snooze, stops.trip_timeout, stops.trip_dismiss, stops.trip_status_share, stops.trip_end |
+| `rovsti_geo::alarm::MIN_ALARM_VOLUME_PCT` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
+| `rovsti_geo::arrival_clock` | stops | stops | op | stops.arrival_clock, stops.format_distance |
+| `rovsti_geo::backup::Backup` | stops | stops | op | stops.backup_export, stops.backup_parse |
+| `rovsti_geo::coord_format::CoordFormat` | stops | stops | op | stops.coord_format, stops.coord_parse |
+| `rovsti_geo::coord_format::cardinal` | stops | stops | op | stops.coord_format, stops.coord_parse |
+| `rovsti_geo::coord_format::from_you_text` | stops | stops | op | stops.coord_format, stops.coord_parse |
+| `rovsti_geo::coord_format::map_view_share_text` | stops | stops | op | stops.coord_format, stops.coord_parse |
+| `rovsti_geo::coord_format::osm_view_url` | stops | stops | op | stops.coord_format, stops.coord_parse |
+| `rovsti_geo::dest::SharedPlace` | stops | stops | op | stops.dest_parse, stops.dest_share |
+| `rovsti_geo::dest::parse_location` | stops | stops | op | stops.dest_parse, stops.dest_share |
+| `rovsti_geo::dest::parse_stop_share` | stops | stops | op | stops.dest_parse, stops.dest_share |
+| `rovsti_geo::dest::point_qr_payload` | stops | stops | op | stops.dest_parse, stops.dest_share |
+| `rovsti_geo::dest::stop_share_text` | stops | stops | op | stops.dest_parse, stops.dest_share |
+| `rovsti_geo::history::format_duration` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::history_io::export_file_name` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::history_io::share_text` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::history_io::to_csv` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::history_io::to_gpx` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::measure::MAX_POINTS` | stops | stops | op | stops.measure |
+| `rovsti_geo::next_volume` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
+| `rovsti_geo::notice::DEFAULT_TEMPLATE` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
+| `rovsti_geo::notice::render` | stops | stops | op | stops.notice_render, stops.notice_validate |
+| `rovsti_geo::notice::validate` | stops | stops | op | stops.notice_render, stops.notice_validate |
+| `rovsti_geo::places_io::MergePlan` | stops | stops | op | stops.places_export, stops.places_import |
+| `rovsti_geo::poll::MAX_POLL` | stops | stops | op | stops.poll |
+| `rovsti_geo::poll::MIN_POLL` | stops | stops | op | stops.poll |
+| `rovsti_geo::poll::retry_after` | stops | stops | op | stops.poll |
+| `rovsti_geo::prefs::AlarmSound` | stops | stops | op | stops.prefs_load, stops.prefs_save, stops.prefs_edit, stops.prefs_choices |
+| `rovsti_geo::prune_label` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::read_zip` | stops | stops | op | stops.gtfs_import, stops.gtfs_search |
+| `rovsti_geo::saved_stops::FORMAT_VERSION` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::saved_stops::NEAREST_CHIP_M` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::saved_stops::SavedSort` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::saved_stops::load_saved_stops` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::saved_stops::suggest_name` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::share_text` | stops | stops | op | stops.dest_parse, stops.dest_share |
+| `rovsti_geo::shortcut_spec` | stops | stops | op | stops.saved_load, stops.saved_edit, stops.saved_list, stops.saved_suggest_name, stops.saved_shortcut |
+| `rovsti_geo::status_share_text` | stops | stops | op | stops.pick_labels, stops.trip_status_share |
 | `rovsti_geo::tiles::AREA_MIN_ZOOM` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::AREA_TILE_BUDGET` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::ATTRIBUTION` | stops | tiles | todo | - |
@@ -643,25 +664,25 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_geo::tiles::Priority` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::Rgba8` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::Shape` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::TileCover` | stops | tiles | todo | - |
+| `rovsti_geo::tiles::TileCover` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rovsti_geo::tiles::TileGeometry` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::TileId` | stops | tiles | todo | - |
+| `rovsti_geo::tiles::TileId` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rovsti_geo::tiles::TileLayer` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::TileSource` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::TileTransform` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::TileUrlError` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::build_layer` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::display_zoom` | stops | tiles | todo | - |
+| `rovsti_geo::tiles::display_zoom` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rovsti_geo::tiles::estimate_bytes` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::frac_to_coord` | stops | tiles | todo | - |
+| `rovsti_geo::tiles::frac_to_coord` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rovsti_geo::tiles::line_width` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::stand_in` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::tiles_for_area` | stops | tiles | todo | - |
 | `rovsti_geo::tiles::tiles_for_circle` | stops | tiles | todo | - |
-| `rovsti_geo::tiles::tiles_for_view` | stops | tiles | todo | - |
-| `rovsti_geo::usage_text` | stops | stops | todo | - |
-| `rovsti_geo::view::FollowMode` | stops | stops | todo | - |
-| `rovsti_geo::view::Viewport` | stops | stops | todo | - |
+| `rovsti_geo::tiles::tiles_for_view` | stops | tiles | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
+| `rovsti_geo::usage_text` | stops | stops | op | stops.history_list, stops.history_edit, stops.history_prune_plan, stops.history_usage, stops.history_recent, stops.history_export, stops.history_text |
+| `rovsti_geo::view::FollowMode` | stops | stops | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
+| `rovsti_geo::view::Viewport` | stops | stops | op | view.project, view.step, view.tiles, view.frac_to_coord, view.follow |
 | `rovsti_tiles::DEFAULT_CAP_BYTES` | stops | tiles | todo | - |
 | `rovsti_tiles::DiskCache` | stops | tiles | todo | - |
 | `rovsti_tiles::TileClient` | stops | tiles | todo | - |

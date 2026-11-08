@@ -1,0 +1,1 @@
+{"ok":{"history":{"records":[{"id":3,"label":"Ferry","a":{"label":"Home","coord":{"lat":41.0,"lon":28.994}},"b":{"label":"Ferry","coord":{"lat":41.02,"lon":29.0}},"started_ms":1789826120000,"ended_ms":1789827200000,"outcome":"Cancelled","travelled_m":120.0,"snoozes":1,"notice_sent":false}]},"taken":null,"removed":0}}

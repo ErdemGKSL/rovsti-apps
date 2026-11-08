@@ -20,6 +20,7 @@ object AllContracts {
             QrContracts,
             MessagesContracts,
             ChatContracts,
+            StopsContracts,
         )
 
     val models: Map<String, KSerializer<*>> =

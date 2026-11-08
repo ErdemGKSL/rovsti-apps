@@ -33,6 +33,11 @@ fn app_core_dirs() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../rovsti_app_core/tests/fixtures/dirs")
 }
 
+/// `crates/rovsti_ffi/tests/data`: files fixture requests name as `$DATA/<file>` (the GTFS zip).
+fn data_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data")
+}
+
 fn updating() -> bool {
     std::env::var("UPDATE_FIXTURES").is_ok_and(|v| v == "1")
 }
@@ -96,7 +101,10 @@ fn contract_fixtures_match() {
     for spec in registry::all() {
         for case in (spec.cases)() {
             let stem = case.stem(spec.name);
-            let text = case.request.to_string();
+            let text = case
+                .request
+                .to_string()
+                .replace("$DATA", data_dir().to_str().expect("utf-8 data dir"));
             let (text, tmp) = match case.seed {
                 Some(seed) => {
                     let tmp = std::env::temp_dir()

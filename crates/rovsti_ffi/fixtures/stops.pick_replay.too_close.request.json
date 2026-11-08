@@ -1,0 +1,1 @@
+{"events":[{"kind":"place","slot":"a","dest":{"label":"","coord":{"lat":41.0,"lon":29.0},"gtfs_stop":null,"pattern":null}},{"kind":"place","slot":"b","dest":{"label":"","coord":{"lat":41.0,"lon":29.0001},"gtfs_stop":null,"pattern":null}}]}

@@ -1,0 +1,1 @@
+{"events":[{"kind":"tap","dest":{"label":"","coord":{"lat":41.0,"lon":28.994},"gtfs_stop":null,"pattern":null}},{"kind":"begin_move","slot":"a"},{"kind":"remove","slot":"b"},{"kind":"drag_start","slot":"b"}]}

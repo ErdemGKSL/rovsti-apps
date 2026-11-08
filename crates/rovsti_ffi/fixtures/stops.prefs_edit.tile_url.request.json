@@ -1,0 +1,1 @@
+{"prefs":{"sound":true,"vibrate":true,"snooze_min":5,"notice":null,"tile_url":null,"appearance":"auto","vibration":"standard","volume_pct":80,"alarm_sound":null,"tile_cache_mb":128,"show_saved_on_map":true},"edit":{"kind":"set_tile_url","url":"https://tiles.example.org/{z}/{x}/{y}"}}

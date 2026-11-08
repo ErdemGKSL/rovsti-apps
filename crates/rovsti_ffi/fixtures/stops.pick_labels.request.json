@@ -1,0 +1,1 @@
+{"ends":{"a":{"label":"Home","coord":{"lat":41.0,"lon":28.994},"gtfs_stop":"S1","pattern":4},"b":{"label":"","coord":{"lat":41.0,"lon":29.006},"gtfs_stop":null,"pattern":null}},"paste":"  41.0082,\n 28.9784  ","query":" moda ","has_feed":false,"row_label":"  ","endpoint":{"label":"Point A","coord":{"lat":41.0,"lon":28.994}}}

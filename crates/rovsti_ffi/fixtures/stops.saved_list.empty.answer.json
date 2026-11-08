@@ -1,0 +1,1 @@
+{"ok":{"rows":[],"total":0,"nearest":null,"nearest_chip_m":2000.0,"text":"","max_stops":200,"max_name_chars":60,"colours":[{"id":"orange","label":"Orange","next":"red"},{"id":"red","label":"Red","next":"green"},{"id":"green","label":"Green","next":"blue"},{"id":"blue","label":"Blue","next":"orange"}]}}

@@ -9,6 +9,7 @@ mod qr;
 pub mod registry;
 mod search;
 mod shared;
+mod stops;
 
 use crate::envelope::FfiError;
 use crate::guard::guarded;

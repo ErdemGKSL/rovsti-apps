@@ -1,0 +1,1 @@
+{"ok":{"ends":{"a":{"label":"","coord":{"lat":41.0,"lon":28.994},"gtfs_stop":null,"pattern":null},"b":null},"outcomes":["placed_a","ok","ok","empty"],"hint":{"kind":"set_b","text":"Tap the map to set B","metres":null},"can_start":false,"moving":null,"menu":null,"dragging":null,"sheet_slot":"b","confirm_slot":"b","tap_slot":"b"}}

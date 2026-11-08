@@ -1,0 +1,1 @@
+{"events":[{"kind":"tap","dest":{"label":"","coord":{"lat":41.0,"lon":28.994},"gtfs_stop":null,"pattern":null}},{"kind":"tap","dest":{"label":"Work","coord":{"lat":41.0,"lon":29.006},"gtfs_stop":"S1","pattern":4}}]}

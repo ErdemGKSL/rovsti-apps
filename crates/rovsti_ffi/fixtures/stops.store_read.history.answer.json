@@ -1,0 +1,1 @@
+{"ok":{"file":"history.json","value":{"records":[{"id":4,"label":"Work","a":{"label":"Home","coord":{"lat":41.0,"lon":28.994}},"b":{"label":"Work","coord":{"lat":41.0,"lon":29.006}},"started_ms":1789996400000,"ended_ms":1789999999000,"outcome":"Arrived","travelled_m":3400.0,"snoozes":0,"notice_sent":true}]},"discarded":false}}

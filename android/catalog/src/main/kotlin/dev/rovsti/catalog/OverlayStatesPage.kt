@@ -5,32 +5,41 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 import dev.rovsti.design.controls.CapsuleButton
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
+import dev.rovsti.design.list.Avatar
+import dev.rovsti.design.media.ViewerAction
+import dev.rovsti.design.media.showPhotoViewer
 import dev.rovsti.design.overlay.ActionSheetAction
 import dev.rovsti.design.overlay.ActionSheetEntry
 import dev.rovsti.design.overlay.AlertAction
 import dev.rovsti.design.overlay.AlertEntry
 import dev.rovsti.design.overlay.AlertRole
+import dev.rovsti.design.overlay.ContextMenuStyle
 import dev.rovsti.design.overlay.Detent
 import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.confirmDestructive
+import dev.rovsti.design.overlay.longPressMenu
 import dev.rovsti.design.overlay.menuTrigger
 import dev.rovsti.design.overlay.popoverTrigger
 import dev.rovsti.design.overlay.showToast
@@ -40,6 +49,7 @@ import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toPersistentList
 
 /**
  * E1.22: every overlay in every state from one page, driven by buttons so nobody needs to time a gesture. Anchored
@@ -200,6 +210,43 @@ internal fun OverlayStatesPage() {
                 Modifier.testTag("states-confirm"),
             )
         }
+        Section("Context menu") {
+            Column(
+                Modifier
+                    .longPressMenu(
+                        controller = controller,
+                        items = menuItems,
+                        style = ContextMenuStyle.Card(card = { StatesContactCard() }, cardHeight = 216.dp),
+                        label = "Show actions for Ayla Demir",
+                    ).background(colors.fillSecondary, RoundedCornerShape(20.dp))
+                    .padding(vertical = Spacing.m, horizontal = Spacing.l)
+                    .testTag("states-context-preview"),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Avatar("Ayla Demir", size = 48.dp)
+                RovstiText("Ayla Demir", style = RovstiTheme.type.callout, maxLines = 1)
+                RovstiText(
+                    "Hold to grow into a card",
+                    style = RovstiTheme.type.caption1,
+                    color = colors.labelSecondary,
+                    maxLines = 1,
+                )
+            }
+        }
+        Section("Photo viewer") {
+            val photos = remember { (1..CatalogPhotoCount).map { catalogPhotoModel(it) }.toPersistentList<Any?>() }
+            CapsuleButton(
+                "Photo viewer",
+                {
+                    controller.showPhotoViewer(
+                        photos = photos,
+                        initialPage = 2,
+                        actions = persistentListOf(ViewerAction("share", RovstiIcons.Share, "Share") {}),
+                    )
+                },
+                Modifier.testTag("states-photo-viewer"),
+            )
+        }
         Section("Toast and undo") {
             CapsuleButton("Toast", { controller.showToast("Number copied") }, Modifier.testTag("states-toast"))
             CapsuleButton(
@@ -208,11 +255,40 @@ internal fun OverlayStatesPage() {
                 Modifier.testTag("states-undo"),
             )
         }
+        Section("Menu, above placement") {
+            Box(
+                Modifier
+                    .size(Sizes.button)
+                    .background(colors.fillSecondary, CircleShape)
+                    .menuTrigger(controller, menuItems)
+                    .testTag("states-menu-above"),
+                contentAlignment = Alignment.Center,
+            ) { RovstiIcon(RovstiIcons.Ellipsis, contentDescription = null) }
+        }
+        Spacer(Modifier.height(Spacing.l))
+    }
+}
+
+/** What the context-menu tile grows into. */
+@Composable
+private fun StatesContactCard() {
+    Column(
+        Modifier.fillMaxSize().padding(Spacing.l),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Avatar("Ayla Demir", size = 88.dp)
         RovstiText(
-            "Context menus need a held row: see the Context menu page.",
-            style = RovstiTheme.type.footnote,
-            color = colors.labelSecondary,
-            modifier = Modifier.padding(horizontal = Spacing.gutter, vertical = Spacing.m),
+            "Ayla Demir",
+            style = RovstiTheme.type.title2,
+            maxLines = 1,
+            modifier = Modifier.padding(top = Spacing.m),
+        )
+        RovstiText(
+            "+90 532 111 22 33",
+            style = RovstiTheme.type.subheadline,
+            color = RovstiTheme.colors.labelSecondary,
+            maxLines = 1,
         )
     }
 }

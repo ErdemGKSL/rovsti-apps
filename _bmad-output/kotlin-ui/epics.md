@@ -13,6 +13,17 @@ Branch: `ui-overhaul` (never push to `main`).
   `_bmad-output/kotlin-ui/plans/<epic>-r<n>.md`, and updates the **Status** column here: `todo`, `in-progress`,
   `done`. Add an **Evidence** line under a story when it is done (commit, the PNGs that were opened and what was
   seen).
+- **Hard dependencies** (a round may start only when these are `done`; the planner checks this table first):
+
+  | Needs | Stories |
+  |---|---|
+  | E3 `:shell` and `:wa` | E1.1-E1.8, E1.18 (nav), E2.6 |
+  | E4 Contacts | E1 done; E2.7, E2.10; E3.2, E3.6, E3.8a/b, E3.10, E3.11 |
+  | E5 Phone | E1 done; E2.9, E2.10 (`ContactIndex`), E2.14; E3.2, E3.3, E3.5, E3.8a/b, E3.9, E3.10, E3.11 |
+  | E6 Messages | E1 done; E2.8, E2.11a/b, E2.14; E3.4, E3.6, E3.9, E3.10, E3.11 |
+  | E7 Stops | E1 done; E2.8, E2.12, E2.13; E3.7, E3.8a/b, E3.11 |
+  | E8 | all of E4-E7; E8.7 (owner acceptance) before E8.6 (removal) |
+
 - Every app epic first reaches **feature parity** with its GPUI app (the parity table lists every feature ID from
   `_bmad-output/plans/util-*.md` and the roadmap, `docs/roadmap.md`, and the story that delivers it), then polish.
 - Definition of done for every story (not repeated below):
@@ -66,6 +77,9 @@ before any app screen is written. Spec: SKILL `references/*` (all), ARCH 4, 9.
 - AC3 Roborazzi output dir is `<module>/screenshots/`; `ShotTest` helper renders light and dark and optional
   `FontScale2`, `Rtl`; a sample shot is recorded and verified.
 - AC4 Compose compiler reports and metrics land in `build/compose_reports` through a Gradle property.
+- AC6 `ShotTest` pins locale `en-US`, time zone UTC, a fake `Clock`, a seeded `Random`, a fake image fetcher, and sets
+  the Roborazzi `changeThreshold` (ARCH 9 "Determinism"); two consecutive `verifyRoborazziDebug` runs pass without
+  re-recording.
 - AC5 `docs/kotlin-ui/api-notes.md` lists each Compose/Navigation API the skill names, checked against the pinned
   sources (name, artifact, version, file).
 - Screenshots: `e1.1-catalog-home-{light,dark}`.
@@ -137,7 +151,8 @@ before any app screen is written. Spec: SKILL `references/*` (all), ARCH 4, 9.
   12 dp, progressive top scrim; reduce-transparency variant with solid bar and divider.
 - AC2 Toolbar capsules (44 dp glass buttons grouped; a spacer splits capsules) sharing the title baseline (fixes X6).
 - AC3 Back button for pushed pages; header actions limited to two plus an overflow menu.
-- Screenshots: `e1.8-title-expanded`, `e1.8-title-collapsed`, `e1.8-title-mid-scroll`, `e1.8-title-fs2`.
+- AC4 Width cap 640 dp centred on wide screens (ARCH 9 "Adaptive layout"); landscape keeps the bars usable.
+- Screenshots: `e1.8-title-landscape`, `e1.8-title-w840`, `e1.8-title-expanded`, `e1.8-title-collapsed`, `e1.8-title-mid-scroll`, `e1.8-title-fs2`.
 
 ### E1.9 Overlay host and placement
 - AC1 `OverlayHost`, `OverlayController`, `OverlayEntry` as SKILL overlays 1; back closes only the top entry; exit
@@ -231,6 +246,10 @@ before any app screen is written. Spec: SKILL `references/*` (all), ARCH 4, 9.
   composable.
 - AC2 Convention tests (ARCH 4.3): no Material3 import, no `composed {`, no `Popup(`/`Dialog(` outside overlay, no raw dp
   in app modules, no `FlowRow` chips.
+- AC2b Convention tests also forbid string literals passed to `Text(`/`contentDescription` in app modules (text comes from
+  `strings.xml` or Rust sentences), `System.currentTimeMillis()`/`Instant.now()` outside the injected `Clock`, and
+  `Thread.sleep`.
+- AC2c Every screen test in later epics calls `enableAccessibilityChecks()` (ARCH 9); the helper is in `ShotTest`.
 - AC3 Compiler-report check: named hot composables are restartable and skippable.
 - Screenshots: none.
 
@@ -260,10 +279,11 @@ tests and the cold-path `headless` entry. Spec: ARCH 6.
 | E2.8 | `headless` entry compatible with today's receivers | R1 | todo |
 | E2.9 | Phone domain ops | R2 | todo |
 | E2.10 | Contacts domain ops | R2 | todo |
-| E2.11 | Messages domain ops | R2 | todo |
+| E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | todo |
+| E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | todo |
 | E2.12 | Stops domain ops | R2 | todo |
 | E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | todo |
-| E2.14 | WhatsApp client ops, event stream, call audio frames | R2 | todo |
+| E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | todo |
 
 ### E2.1-E2.4 Move app logic out of the GPUI crates
 - AC1 Each moved module keeps its unit tests; the GPUI app now calls the moved function (no duplicate copy).
@@ -274,7 +294,7 @@ tests and the cold-path `headless` entry. Spec: ARCH 6.
 - Moves: E2.1 `apps/stops/src/{store,pick,snap,headless}.rs` (pure parts); E2.2
   `apps/messages/src/{prefs,drafts,access,headless}.rs`; E2.3 `apps/contacts/src/{trash_store,prefs,whatsapp}.rs`,
   `apps/phone/src/{notes,wa_call}.rs` (non-drawing parts) and Phone prefs/backup glue; E2.4
-  `rovsti_wa_ui::headless` and the link file.
+  `rovsti_wa_ui::headless`, the link file, and the pure halves of `rovsti_wa_ui::{avatar_book, names}` (profile-picture fetch plan, 429 back-off, disk naming/pruning, display-name rule).
 - Screenshots: none.
 
 ### E2.5 `rovsti_ffi`
@@ -287,7 +307,9 @@ tests and the cold-path `headless` entry. Spec: ARCH 6.
 - AC1 `cargoBuildAndroid` and `cargoBuildHost` tasks (ARCH 6.7), incremental (second run is UP-TO-DATE); cargo-ndk in
   `scripts/android-setup.sh`.
 - AC2 `RustNative` (externs), `RustDispatcher`, debug `assertNotMain`, `Rust.init` from `Application`.
-- AC3 A Robolectric test loads the host `.so`, calls `init` with a temp dir and a round-trip op.
+- AC3 A **plain JUnit** test (no Robolectric, task `testRustBridge`, ARCH 6.7 "Classloader trap") loads the host `.so`, calls
+  `init` with a temp dir and a round-trip op. A second test proves a Robolectric test in the same Gradle invocation still
+  passes with a fake facade (the split works).
 - AC4 APK of `:catalog` (or a test app) contains `lib/arm64-v8a/librovsti_ffi.so`; export list checked.
 
 ### E2.7 Contract fixtures
@@ -302,6 +324,7 @@ tests and the cold-path `headless` entry. Spec: ARCH 6.
 - AC2 Fallback rules of AD-MSG4 hold (library missing, panic, empty answer -> Kotlin posts a plain notification).
 
 ### E2.9-E2.12 Domain ops
+- AC0 `qr.encode` / `qr.decode` ops (ARCH 6.6) land with E2.10 (first user, Contacts); Phone, Stops and `:wa` reuse them.
 - AC1 Every op listed for the domain in ARCH 6.6 exists, has a fixture and a Kotlin facade method (`suspend`).
 - AC2 Stateful objects are handles (`ContactIndex` for search-as-you-type, `ActiveTrip` view).
 - AC3 A search-as-you-type benchmark on the host: 5 000 contacts, query answer < 5 ms per keystroke.
@@ -317,6 +340,7 @@ tests and the cold-path `headless` entry. Spec: ARCH 6.
 - AC1 Ops for link/relink, keys, chats, messages, send text/media, react, mark read, chat state, groups, presence,
   lookup, statuses, scheduled, calls, push wake parse (ARCH 6.6).
 - AC2 Event stream handle: start, `reconnect_now`, stop; events through the sink with instance id.
+- AC2b `wa.avatars` / `wa.names` ops (ARCH 6.6).
 - AC3 Call audio: `audioPush`/`audioPull` with 1 920-byte frames; a loopback test against a fake gateway in
   `rovsti_wa_client` tests.
 
@@ -336,8 +360,9 @@ WhatsApp settings screen and app shell exist. Spec: ARCH 7, 5.
 | E3.5 | Telecom core: CallRegistry, audio path, proximity, call notifications | R1 | todo |
 | E3.6 | Notifications, reminders, shortcuts | R1 | todo |
 | E3.7 | Location, TripService, TripAlarm, AlarmSound, AlarmActivity | R1 | todo |
-| E3.8 | Files, media, share, clipboard, picker, camera, handoff, roles, permissions, OEM settings | R1 | todo |
-| E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads | R2 | todo |
+| E3.8a | Files, media store, share, clipboard, Photo Picker, camera capture, SAF import/export | R2 | todo |
+| E3.8b | Handoff, roles, `PermissionController` + `PermissionState` rules, special access, OEM settings (ARCH 7.5) | R2 | todo |
+| E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads, `WaAvatars` | R2 | todo |
 | E3.10 | Shared WhatsApp settings screen | R2 | todo |
 | E3.11 | `:shell`: RovstiRoot, base activity, containers, permission UI, common settings, licences | R2 | todo |
 
@@ -349,7 +374,7 @@ WhatsApp settings screen and app shell exist. Spec: ARCH 7, 5.
 - AC4 Library manifest declares no components; a test asserts it.
 - AC5 SharedPreferences names unchanged (test lists them, ARCH 7.1).
 
-### E3.2-E3.8 Repositories and services
+### E3.2-E3.8b Repositories and services
 - AC1 Each repository is an interface + Android implementation + fake for tests; provider-backed reads are `Flow`s that
   re-query on change (conflated).
 - AC2 Robolectric tests with shadow providers for the main reads and writes (contacts save with every mime of
@@ -358,13 +383,21 @@ WhatsApp settings screen and app shell exist. Spec: ARCH 7, 5.
   `IncomingCallTest`, `OngoingCallTest`) green.
 - AC4 E3.7 keeps AD-SA1 to AD-SA9; the Kotlin contract with the Rust alarm plan (`apps/stops/src/kotlin_contract.rs`) is
   moved to `rovsti_app_core` and still checks the Kotlin defaults.
-- AC5 E3.8 `PermissionController` exposes state per group as `StateFlow` and asks through the activity result API;
+- AC5 E3.8b `PermissionController` exposes state per group as `StateFlow` and asks through the activity result API;
   rationale and "open settings" decisions come from the pure access rules (`rovsti_app_core::messages::access` style).
+  `PermissionState` covers never asked / granted / denied once / denied for good / revoked while running (ARCH 7.5);
+  table-tested per app. Special access (full-screen intent, exact alarm, battery optimisation, role) has one
+  `SpecialAccess` interface with a fake; role checks use `RoleManager.isRoleHeld`.
+- AC6 E3.8b The HANDOFF signature permission declarations and `uses-permission` lines are exactly those of the GPUI
+  manifests (ARCH 7.2); a test lists them. Foreground-service start failures map to a UI state (ARCH 7.5 rules).
+- AC7 E3.8a Camera capture uses `ACTION_IMAGE_CAPTURE` with a `FileProvider`-style `RovstiShareProvider` URI (no `CAMERA`
+  permission); Photo Picker is used instead of storage permissions everywhere (`READ_MEDIA_*` are not requested).
 
 ### E3.9 `:wa`
 - AC1 `WaRepository` (ARCH 7.4): link state, events, chats, messages, `wake()` on push, resync on gap.
 - AC2 `WaCalls`: place, accept, reject, end, mute, speaker; audio record/play threads with voice-communication attributes.
 - AC3 Fake gateway tests for link, resync and call state.
+- AC4 `WaAvatars`: fetch plan from Rust, 429 back-off honoured, disk pruning, picture shown through Coil; fake gateway test.
 
 ### E3.10 WhatsApp settings screen
 - AC1 Exactly two options when not linked: Link WhatsApp (QR or pairing code) / Connect with a key (paste field
@@ -514,12 +547,13 @@ Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56,
 | Features | Story |
 |---|---|
 | App, ROLE_DIALER, manifest (DIAL, VIEW tel, InCallService, receivers, FCM flavor, share provider), tabs (Favorites, Recents, Contacts, Keypad), setup sheet checklist (`rovsti_core::setup`), hidden Diagnostics page, notice line | E5.1 |
-| Keypad: number field (paste works), T9 suggestions, speed dial (long-press digit), voicemail on 1 (glyph, "No voicemail number set"), U6 pause/wait, U14/U53 field menu (Copy, Paste, Clear+Undo, Share, Copy as +E.164), U29 add/create contact, U31 redial, U32 smart paste chooser, U47 long-press Call: SIM / WhatsApp, Message, WhatsApp chip, keypad tones | E5.2 |
-| Recents: grouped by person, missed badges, U15 date sections, U3 search + filter chips (All, Missed, Incoming, Outgoing, WhatsApp) + U35 With notes, U21 notes search, U39 mark missed seen, row menu (call back, message, WhatsApp call, U20 quick reply, U13 remind later, U25/U56 copy number/country, U4 copy/share as, add to contacts, block, delete with Undo), U12/U45 select mode (delete, block, share), U48 country of unknown number, WhatsApp calls with badge | E5.3 |
-| Contact/Number sheets: quick actions (Message, Copy, Share, Block), history lines, U11 call details (copy, share, U8 note, delete this call, U44 remind me), U7 per-person stats, U16 export person CSV, U18 share stats, U26 share details, U36 copy all numbers, U9 QR | E5.4 |
+| Keypad: number field (paste works), T9 suggestions, speed dial (long-press digit), voicemail on 1 (glyph, "No voicemail number set"), U6 pause/wait, U14/U53 field menu (Copy, Paste, Clear+Undo, Share, Copy as +E.164), U29 add/create contact, U31 redial, U32 smart paste chooser, U47 long-press Call: SIM / WhatsApp, Message, WhatsApp chip, keypad tones, dual-SIM chooser sheet when no SIM is remembered (`sim_ui`, `sim-choices.json`) | E5.2 |
+| Recents: grouped by person, missed badges, U15 date sections, U3 search + filter chips (All, Missed, Incoming, Outgoing, WhatsApp) + U35 With notes, U21 notes search, U39 mark missed seen, row menu (call back, message, WhatsApp call, U20 quick reply, U13 remind later, U25/U56 copy number/country, U4 copy/share as, add to contacts, block, delete with Undo), U12/U45 select mode (delete, block, share), U48 country of unknown number, WhatsApp calls with badge, SIM chip on rows of a dual-SIM phone (S26), Block flow with confirmation and Undo (`block_ui`, S27) | E5.3 |
+| Contact/Number sheets: quick actions (Message, Copy, Share, Block), history lines, U11 call details (copy, share, U8 note, delete this call, U44 remind me), U7 per-person stats, U16 export person CSV, U18 share stats, U26 share details, U36 copy all numbers, U9 QR (`qr.encode`), Delete call history confirm sheet (`history_ui`), per-person quick reply and CSV export (`person_ui`) | E5.4 |
 | Favorites (order, drag, Move earlier/later, Frequent) and Contacts tab (search, sections, open sheet) | E5.5 |
 | Incoming: full screen and lock screen, answer/decline, decline with message (reply sheet), silence, waiting-call card, answer replacing/holding/ending held, CallStyle notification first, first-frame report, native fallback | E5.6 |
-| In-call: mute, audio route picker (earpiece, speaker, Bluetooth, endpoints), keypad (DTMF, U49 paste tones + Stop, U50 copy digits, U51 remember tones), hold, add call, swap, merge, split, end all, timer, U17 note + copy number, U37 copy timer / share summary, proximity, aura and shared-element moments (S3, S4, S6, S8, S19-S21 of `apps/phone/src/{aura,flight,zone}.rs`) | E5.7 |
+| In-call (basics, E5.7a): mute, audio route picker (earpiece, speaker, Bluetooth, endpoints), keypad (DTMF, U49 paste tones + Stop, U50 copy digits, U51 remember tones), hold, timer, U17 note + copy number, U37 copy timer / share summary, proximity, SIM chip on the call screen, post-call notice pill with Block / Undo (`notice.rs`, 17.3-17.4), aura and shared-element moments S3, S4, S6, S8 (`aura`, `flight`) | E5.7a |
+| In-call multi-call (E5.7b): Add call sheet (`addcall`: keypad, Favorites, Contacts without leaving the call), swap, merge, split, end all, Held card, conference panel, one/two/three-call faces and S19-S22 moments (`zone`, `zone_ui`) | E5.7b |
 | WhatsApp calls: CallSource WhatsApp on Incoming/In-Call (Mute, Speaker, End; others dimmed with the sentence), arbitration, place from Recents/sheet/keypad chip, FCM wake to Incoming, answer from notification after cold start, call_end, missed WA calls in Recents, snapshot re-sync (AD-WA5, AD-WA10) | E5.8 |
 | Settings: Blocked (list, U34 paste many, U55 prefix range, U27 share/unblock all + Undo, U38 export/import file, blocked calls), quick replies, speed dial page (U22 share, clear + Undo), WhatsApp, SIM choices, haptics, Data (U5 export CSV with U19 note column, U41 export names, U43 delete older, U24 delete all + Undo, U54 export contacts .vcf), prefs backup/restore | E5.9 |
 | U7 statistics page (this week, last 7 days, last 8 weeks, top people), U28 CSV, U40 share, U46 tap a day, U52 records | E5.10 |
@@ -536,8 +570,9 @@ Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56,
 | E5.4 | Contact, Number and Call details sheets | R1 | todo |
 | E5.5 | Favorites and Contacts tabs | R1 | todo |
 | E5.6 | Incoming call | R1 | todo |
-| E5.7 | In-call | R1 | todo |
+| E5.7a | In-call: single call | R1 | todo |
 | E5.8 | WhatsApp calls | R1 | todo |
+| E5.7b | In-call: multi-call, Add call, conference | R2 | todo |
 | E5.9 | Settings | R2 | todo |
 | E5.10 | Statistics | R2 | todo |
 | E5.11 | Notes page | R2 | todo |
@@ -557,11 +592,11 @@ Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56,
   press-feedback buttons with tones; the number is a `BasicTextField` with the soft keyboard suppressed, caret and
   selection working, paste working.
 - AC2 T9 suggestion list above the keypad from the `ContactIndex` handle.
-- Screenshots: `e5.2-keypad-empty`, `e5.2-keypad-typing-t9`, `e5.2-keypad-field-menu`, `e5.2-keypad-selection`,
+- Screenshots: `e5.2-sim-chooser-sheet`, `e5.2-keypad-empty`, `e5.2-keypad-typing-t9`, `e5.2-keypad-field-menu`, `e5.2-keypad-selection`,
   `e5.2-call-longpress-menu`, `e5.2-smart-paste-chooser`, `e5.2-keypad-fs2`, `e5.2-keypad-small-screen`.
 
 ### E5.3 Recents
-- Screenshots: `e5.3-recents`, `e5.3-recents-end-above-bar`, `e5.3-recents-missed-filter`, `e5.3-recents-chips-scrolled`,
+- Screenshots: `e5.3-recents-dual-sim-chip`, `e5.3-block-confirm`, `e5.3-recents`, `e5.3-recents-end-above-bar`, `e5.3-recents-missed-filter`, `e5.3-recents-chips-scrolled`,
   `e5.3-recents-row-menu`, `e5.3-recents-select-mode`, `e5.3-recents-search`, `e5.3-recents-whatsapp-badge`.
 
 ### E5.4 Sheets
@@ -577,11 +612,15 @@ Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56,
 - Screenshots: `e5.6-incoming`, `e5.6-incoming-lockscreen-variant`, `e5.6-decline-with-message-sheet`,
   `e5.6-waiting-call-card`.
 
-### E5.7 In-call
-- AC1 Multi-call scenes from `rovsti_core::scene` through the bridge; springs of hold-away, swap, merge; aura is an
-  ambient animation obeying ARCH 10 rule 5.
-- Screenshots: `e5.7-incall-active`, `e5.7-incall-keypad`, `e5.7-route-picker-popover`, `e5.7-incall-hold-two-calls`,
-  `e5.7-incall-conference`, `e5.7-incall-ended-summary`.
+### E5.7a In-call (single call)
+- AC1 Aura is an ambient animation obeying ARCH 10 rule 5; route picker lists endpoints and tolerates a missing
+  `BLUETOOTH_CONNECT` grant (ARCH 7.5); the screen is shown over the lock screen only while a call is live.
+- Screenshots: `e5.7-incall-active`, `e5.7-incall-keypad`, `e5.7-route-picker-popover`, `e5.7-incall-sim-chip`,
+  `e5.7-incall-ended-summary`, `e5.7-post-call-block-pill`.
+
+### E5.7b In-call (multi-call)
+- AC1 Multi-call scenes from `rovsti_core::scene` through the bridge; springs of hold-away, swap, merge.
+- Screenshots: `e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet`.
 
 ### E5.8 WhatsApp calls
 - Screenshots: `e5.8-wa-incoming`, `e5.8-wa-incall-dimmed-controls`, `e5.8-wa-waiting-during-cellular`.
@@ -597,7 +636,7 @@ Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56,
 - Screenshots: `e5.11-notes`, `e5.11-notes-search`.
 
 ### E5.12 Reminders and setup flows
-- Screenshots: `e5.12-remind-later-menu`, `e5.12-xiaomi-setup-rows`.
+- Screenshots: `e5.12-remind-later-menu`, `e5.12-xiaomi-setup-rows`, `e5.12-full-screen-intent-revoked-row`.
 
 ### E5.13 Photo viewer
 - Screenshots: `e5.13-viewer`, `e5.13-photo-edit-menu`.
@@ -620,7 +659,7 @@ AD-MSG9, AD-WA11), then polish.
 | App, ROLE_SMS components (SMS_DELIVER, WAP_PUSH, RESPOND_VIA_MESSAGE, SENDTO/SEND, boot, reply, scheduled receivers), firebase flavor, tabs (Chats, WhatsApp, Settings), permission asks and refresh on return (`access.rs`) | E6.1 |
 | Unified inbox (one person one row, AD-MSG3), one avatar, source glyph once, M30 filter chips (All, Unread, WhatsApp, SMS) one row with counts as labels, M36 pins, M37 archive + Undo, M38 mark unread, mute, M7 mark all read, row menu, swipe actions, M39 bulk select, M21 avatar opens photo, WhatsApp Status row and feed (no overlapping avatar stack), M18 global search with jump, drafts marker | E6.2 |
 | SMS/MMS conversation: timeline, delivery reports, dual-SIM send, composer, M45 undo send 4 s, drafts survive restarts, failed message Copy/Delete, M15 delete single + Undo, MMS view/save, attachments, M46 paste image (MMS), unblock and make-default rows | E6.3 |
-| WhatsApp conversation: history paging, text, media send (optimistic bubble, retry, 16 MiB rule), reactions, M32 double-tap react, M49 recent emoji, M31 swipe to reply, quoted replies, group sender names, typing, ticks, edited/forwarded marks, M17 voice notes with speed and scrubbing, keyboard Send, M46 paste image, save received files | E6.4 |
+| WhatsApp conversation (E6.4a thread, text, paging, ticks, edited/forwarded marks, group sender names, typing, keyboard Send, WhatsApp avatars with back-off; E6.4b the rest): history paging, text, media send (optimistic bubble, retry, 16 MiB rule), reactions, M32 double-tap react, M49 recent emoji, M31 swipe to reply, quoted replies, group sender names, typing, ticks, edited/forwarded marks, M17 voice notes with speed and scrubbing, keyboard Send, M46 paste image, save received files | E6.4a / E6.4b |
 | Message context menu (preview card + reaction bar): reply, copy, M16 select text, M9 forward, M14 info, star, M33 remind me, delete; M20 select mode copy/forward as block; detection pills: M8 phone/email, M25 links, M19 dates, M40 maps links, M35 location card, OTP Copy code (SMS and M44 WhatsApp) | E6.5 |
 | Conversation tools: M5 search with jump + glow, M24 jump to date (popover), M12 scroll-to-bottom with count + unread divider, M43 next unread, M13 media/links/docs gallery, M6 export .txt / share text, M48 export .zip, M27 clear chat, M42 header long-press copy, M29 mute override, M50 group sender mini card, M22 message privately | E6.6 |
 | M1 image viewer, M3 swipe between images "3 of 7", M2 save/share, M4 header photo, M26 shared contact card sheet (save .vcf, add to contacts), M28 non-image attachment copy/share, Status viewer | E6.7 |
@@ -637,8 +676,9 @@ AD-MSG9, AD-WA11), then polish.
 | E6.1 | App module, SMS role, manifest parity, tabs, permissions, migration test | R1 | todo |
 | E6.2 | Unified inbox | R1 | todo |
 | E6.3 | SMS and MMS conversation | R1 | todo |
-| E6.4 | WhatsApp conversation | R1 | todo |
-| E6.5 | Message context menu, select mode, detection pills | R1 | todo |
+| E6.4a | WhatsApp conversation: thread, text, ticks, groups, paging | R1 | todo |
+| E6.4b | WhatsApp conversation: media send, voice notes, reactions, replies, paste image | R2 | todo |
+| E6.5 | Message context menu, select mode, detection pills | R2 | todo |
 | E6.6 | Conversation tools | R1 | todo |
 | E6.7 | Viewers: images, status, contact card, attachments | R1 | todo |
 | E6.8 | New conversation, forward, share-in, intents | R1 | todo |
@@ -659,6 +699,7 @@ AD-MSG9, AD-WA11), then polish.
   merged person row shows no pill, the latest channel glyph only), preview one line, time, unread dot/badge, pin glyph,
   muted glyph. No row carries a source pill.
 - AC2 Filter chips never wrap; counts are small secondary labels.
+- AC4 WhatsApp avatars come from `WaAvatars` (E3.9); names follow the Rust rule contact name, WhatsApp name, number.
 - AC3 Status row: one ring avatar of the latest update + "N new updates" text, never a stack (fixes layout.md M1).
 - Screenshots: `e6.2-inbox`, `e6.2-inbox-end-above-bar`, `e6.2-inbox-chips-unread`, `e6.2-inbox-row-menu`,
   `e6.2-inbox-swipe`, `e6.2-inbox-select-mode`, `e6.2-inbox-empty`, `e6.2-status-row`, `e6.2-global-search`,
@@ -670,7 +711,8 @@ AD-MSG9, AD-WA11), then polish.
 - Screenshots: `e6.3-sms-thread`, `e6.3-sms-keyboard-open`, `e6.3-composer-multiline-selection`, `e6.3-undo-send-pill`,
   `e6.3-failed-message-menu`, `e6.3-mms-bubble`, `e6.3-dual-sim-chooser`.
 
-### E6.4 WhatsApp conversation
+### E6.4a / E6.4b WhatsApp conversation
+- E6.4a shots: `e6.4-wa-thread`, `e6.4-wa-group-thread`, `e6.4-wa-keyboard-open`. E6.4b shots: the rest below.
 - Screenshots: `e6.4-wa-thread`, `e6.4-wa-group-thread`, `e6.4-wa-reply-swipe`, `e6.4-wa-quoted-composer`,
   `e6.4-wa-media-pending`, `e6.4-wa-voice-note`, `e6.4-wa-keyboard-open`.
 
@@ -724,10 +766,10 @@ to AD-SA9, AD-SX1 to AD-SX8), as a **full-screen map with floating controls** (A
 | Features | Story |
 |---|---|
 | App, manifest (TripService location FGS, AlarmActivity, boot, `geo:`/maps VIEW, SEND text/plain, exact alarm, full-screen intent), full-screen map home with floating chrome, folded tab bar, sheet host | E7.1 |
-| Tile map: own renderer over `rovsti_tiles` (camera, pan, pinch, fling, double-tap zoom, bitmap LRU, parent stand-ins, colorful/eclipse by theme, radar look where tiles are missing, attribution), S28 scale bar | E7.2 |
+| Tile map: own renderer over `rovsti_tiles` (camera, pan, pinch, fling, double-tap zoom: E7.2a; bitmap LRU, parent stand-ins, colorful/eclipse by theme, radar look where tiles are missing, attribution, S28 scale bar: E7.2b) | E7.2a / E7.2b |
 | Radar layers: A and B pins, circle + diameter line + halves, position + accuracy, breadcrumb, GTFS stops and line, S40 saved stops on the map (toggle, tap opens the stop) | E7.3 |
 | Picking (AD-ST9): first tap A, second B, circle at once, third tap hint, pin drag (`PIN_GRAB_PX`, second finger -> pinch), snap to GTFS stop on flick, Move, Swap, Clear, labels "Point A"/"A-B 850 m"; pin menu: S1 copy as (decimal, DMS, DDM, Plus Code, geo:, OSM), S3 QR, S4 open in maps, S34 distance from you + Measure from here, save as stop | E7.4 |
-| Trip: start/stop, preflight (location, background recommended row AD-SA7, notifications, exact alarm, full-screen intent, battery), live card (distance, S9 bearing arrow, S41 arrival clock), S20 copy/share status, arriving-soon toggle per trip, restart refused handling (AD-SA8) | E7.5 |
+| Trip: start/stop, preflight (location, background recommended row AD-SA7, notifications, exact alarm, full-screen intent, battery), live card (distance, S9 bearing arrow, S41 arrival clock, the line-aware "N stops before" alarm from imported GTFS, `transit.rs`), S20 copy/share status, arriving-soon toggle per trip, restart refused handling (AD-SA8) | E7.5 |
 | Alarm: in-app alarm screen, native AlarmActivity over the lock screen, snooze, timeout re-ring (AD-SA5), S21 ring again in N min, S27 trip summary after arrival (share, save as stop) | E7.6 |
 | Saved stops: list, S6 search and sort (saved order, name, nearest), reorder, rename, delete + Undo, S24 pin favourites, S35 colour tag, S44 note, S19 reverse and duplicate, S2 share text (paste fills A and B), S3 QR, S18 home screen shortcut, S29 open in maps + distance, S30 copy all, S38 used N times | E7.7 |
 | Pick sheets: paste field (S23 DMS / DDM / Plus Code), recent trips, saved stops, GTFS stop search, S7 stop sheet (copy name/code, share, distance), Confirm sheet for shared links, S37 nearest saved stop chip | E7.8 |
@@ -741,18 +783,19 @@ to AD-SA9, AD-SX1 to AD-SX8), as a **full-screen map with floating controls** (A
 | Story | Title | Round | Status |
 |---|---|---|---|
 | E7.1 | App module, manifest parity, full-screen map home skeleton, migration test | R1 | todo |
-| E7.2 | Tile renderer and camera | R1 | todo |
+| E7.2a | Camera, gestures, tile request/cancel, decode (`MapCamera`, `tile()` client) | R1 | todo |
+| E7.2b | Tile rasteriser, bitmap LRU, stand-ins, styles, scale bar, JVM render benchmark | R1 | todo |
 | E7.3 | Radar layers | R1 | todo |
 | E7.4 | Picking and the pin menu | R1 | todo |
 | E7.5 | Trip start, preflight, live card | R1 | todo |
 | E7.6 | Alarm and arrival | R1 | todo |
 | E7.7 | Saved stops | R1 | todo |
-| E7.8 | Pick sheets | R1 | todo |
+| E7.8 | Pick sheets | R2 | todo |
 | E7.9 | Map options, measure, share location | R2 | todo |
 | E7.10 | Settings | R2 | todo |
 | E7.11 | History, stats, backup | R2 | todo |
 | E7.12 | Saved stops import and export | R2 | todo |
-| E7.13 | Tile renderer performance gate | R2 | todo |
+| E7.13 | Tile renderer device check and MapLibre decision record | R2 | todo |
 | E7.14 | Polish | R2 | todo |
 
 Shared AC for every E7 story: the map is the full window in every state; no screen shows a map inside a box; every
@@ -769,7 +812,8 @@ buttons ride the sheet by translation only; camera padding follows the settled s
 - Screenshots: `e7.1-home-idle`, `e7.1-home-idle-dark`, `e7.1-home-sheet-peek`, `e7.1-home-sheet-medium`,
   `e7.1-home-landscape`, `e7.1-home-fs2`.
 
-### E7.2 Tile renderer
+### E7.2a / E7.2b Tile renderer
+- Split: E7.2a is ARCH 8.4 steps 1-2 (camera, gestures, requests, cancellation, decode, offline fake source); E7.2b is step 3 and the visuals.
 - AC1 Pipeline of ARCH 8.4 steps 1-3; camera holder read in draw; a pinch recomposes nothing (recomposition test).
 - AC2 Bitmap LRU sized from memory class; tiles leaving the viewport are cancelled (test with a fake source); parent
   stand-in drawn while children load.
@@ -788,7 +832,8 @@ buttons ride the sheet by translation only; camera padding follows the settled s
   `e7.4-third-tap-hint`.
 
 ### E7.5 Trip
-- Screenshots: `e7.5-preflight-sheet`, `e7.5-trip-live-card`, `e7.5-trip-live-card-dark`, `e7.5-background-row`,
+- AC1 Preflight rows follow ARCH 7.5: location (fine) then background (separate step, recommended only), notifications, exact alarm n/a, full-screen intent, battery; a revoked grant while a trip runs shows the row and keeps the trip.
+- Screenshots: `e7.5-line-aware-alarm-setting`, `e7.5-preflight-sheet`, `e7.5-trip-live-card`, `e7.5-trip-live-card-dark`, `e7.5-background-row`,
   `e7.5-restart-refused-row`.
 
 ### E7.6 Alarm
@@ -818,8 +863,9 @@ buttons ride the sheet by translation only; camera padding follows the settled s
 - Screenshots: `e7.12-import-summary`.
 
 ### E7.13 Performance gate
-- AC1 JVM benchmark: rasterise a dense city tile (testdata) in < 25 ms on the host; draw 16 cached bitmaps per frame with no
-  allocation (allocation-count test).
+- AC1 (moved earlier: runs inside E7.2b so a failing renderer is known before E7.3-E7.8 build on it) JVM benchmark: rasterise a dense
+  city tile (testdata) in < 25 ms on the host; draw 16 cached bitmaps per frame with no allocation (allocation-count test).
+  E7.13 keeps AC2, the owner-device check.
 - AC2 Owner device checklist entry: pan and pinch at 120 Hz over a city, frame stats recorded (`dumpsys gfxinfo`); if p90
   > 8.3 ms after the listed fixes, open a decision record on MapLibre.
 
@@ -837,19 +883,20 @@ buttons ride the sheet by translation only; camera padding follows the settled s
 | E8.3 | Baseline profiles and the Macrobenchmark module | R1 | todo |
 | E8.4 | In-place upgrade: migration tests for all apps, data and role checklist | R1 | todo |
 | E8.5 | Docs: architecture, android.md, CLAUDE.md rules, screenshots, notices audit | R1 | todo |
-| E8.6 | Remove the GPUI apps and crates from the default build | R1 | todo |
-| E8.7 | Owner device acceptance checklist | R1 | todo |
+| E8.7 | Owner device acceptance checklist (runs before removal) | R1 | todo |
+| E8.6 | Remove the GPUI apps and crates from the default build (only after E8.7 signed off) | R1 | todo |
 | E8.8 | targetSdk 37 review | R1 | todo |
 
 ### E8.1 Release builds
-- AC1 `assembleRelease` for the four apps with the release keystore from env (`scripts/signing.sh` style); versionCode
+- AC1 `assembleRelease` for the four apps with the release keystore from env (`scripts/signing.sh` style; when `ANDROID_STORE_PASSWORD` or the keystore file is absent, as on the agent machine where `gpuiforge.json` points at `/home/erdem/...`, `assembleRelease` signs with the debug key and `check-apk.sh` prints `UNSIGNED-FOR-RELEASE`); versionCode
   `100 + build number` (> GPUI's 1); arm64-v8a only in release.
 - AC2 `scripts/build-apks.sh` builds the Kotlin APKs; `scripts/check-apk.sh` checks id, version, signer, ABI, `.so` exports.
 
 ### E8.2 R8
 - AC1 `isMinifyEnabled` and `isShrinkResources`; keep rules only for `RustNative`/`RustEvents`, serialization and manifest
-  classes; no package wildcards; a release smoke test (Robolectric on the minified classes, or an instrumented test when a
-  device exists) calls one bridge op.
+  classes; no package wildcards; a release check that cannot use Robolectric (it cannot run minified classes): a Gradle task parses `mapping.txt` and fails if
+  `RustNative`, `RustEvents`, their members, `@Serializable` models or any manifest class were renamed or removed, and `check-apk.sh`
+  lists the `.so` exports; an instrumented bridge call is added to `acceptance.md` for a device.
 
 ### E8.3 Baseline profiles
 - AC1 `androidx.profileinstaller` in every app; hand-written rules for first screen, rows, overlay host, map node;
@@ -874,7 +921,8 @@ buttons ride the sheet by translation only; camera padding follows the settled s
 - AC2 All checks green without the GPUI dependency (`cargo test --workspace` no longer fetches gpui-fusion).
 
 ### E8.7 Owner device acceptance
-- AC1 One checklist per app in `docs/kotlin-ui/acceptance.md` covering what cannot be verified here: Liquid glass look,
+- AC0 Ordering: the Kotlin apps are installed as release-signed updates on the owner's phone, the checklist is signed off, and only then E8.6 deletes or moves the GPUI code (the GPUI apps stay the rollback until then).
+- AC1 One checklist per app in `docs/kotlin-ui/acceptance.md` covering what cannot be verified here: cross-app handoff (same signer, HANDOFF), permission revocation rows (ARCH 7.5), Turkish-vs-English decision (ARCH 12),  Liquid glass look,
   120 Hz, incoming call on the lock screen, SMS role, FCM wake, trip and alarm under Doze, map pan speed, text selection
   toolbar and magnifier on device.
 

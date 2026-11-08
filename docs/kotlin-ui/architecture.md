@@ -347,6 +347,8 @@ Kotlin (dev.rovsti.core.RustNative)                          Rust (rovsti_ffi)
 | `stops.*` (session, crossing, dest parsing, pick, snap, saved, history, stats, prefs, notice, alarm plan, poll, gtfs import, coord formats, measure, backup, csv/gpx) | `rovsti_geo::*`, `rovsti_app_core::stops` | Stops |
 | `tiles.*` + binary `tile()` | `rovsti_tiles`, `rovsti_geo::tiles` | Stops |
 | `wa.*` (link, relink, keys list/mint/revoke, chats, messages, send text/media, react, mark read, chat state, groups, presence, lookup, statuses, scheduled, calls place/accept/reject/end/mute, snapshot plan, arbitration, push wake parse) | `rovsti_wa_client::Gateway`, `rovsti_wa_proto::*`, `rovsti_app_core::wa_link` | all four (link), Phone (calls), Messages (chats), Contacts (lookup), Stops (notice) |
+| `qr.encode`, `qr.decode` | `qrcode` and `rqrr` as used by `rovsti_core` (`contact_qr`/`location_link` style helpers) and `rovsti_wa_ui::qr` | Contacts (share QR, scan from image), Phone (number QR), Stops (point QR), `:wa` (link QR, connect-key QR). Encode returns the module matrix (`BooleanArray` + side), Kotlin draws it; decode takes a luma plane (`ByteArray`, w, h) from a `Bitmap`. No ZXing / ML Kit dependency. |
+| `wa.avatars`, `wa.names` | `rovsti_wa_ui::{avatar_book, names}` logic moved to `rovsti_app_core::wa_link` (E2.4): which profile picture to fetch when, 429 back-off, on-disk naming and pruning; "contact name, then WhatsApp name, then number" | Messages, Phone, Contacts |
 | `headless(kind, json)` | `rovsti_app_core::{messages,stops}::headless` | cold paths |
 
 Not exposed (the Kotlin UI does not need them; the platform does the job): `text_edit`, `text_touch`,
@@ -364,6 +366,16 @@ for the GPUI apps until E8 and are then deleted or kept only if another crate us
 - `cargoBuildHost` builds `rovsti_ffi` for the host and every `testDebugUnitTest` task gets
   `systemProperty("java.library.path", ...)`; `RustNative` loads it with `System.loadLibrary("rovsti_ffi")`.
   Tests that should not need Rust use fakes of the facade interfaces.
+- **Classloader trap.** A JVM allows a native library to be bound by one classloader only, and Robolectric builds a
+  new instrumenting classloader per SDK/config sandbox, so `RustNative` loaded from two Robolectric configurations
+  (or from a Robolectric and a plain test in one JVM) fails with `UnsatisfiedLinkError: already loaded in another
+  classloader`. Rule: tests that really call Rust are **plain JUnit tests without Robolectric** (`RustNative` and
+  the facades take no `Context`; the `Context`-dependent pieces are in `:platform`), run in their own Gradle test
+  task `testRustBridge` with `forkEvery = 0` and one JVM. Robolectric and Compose tests use fakes of the facade
+  interfaces, never the real library. E2.6 proves this split.
+- The Android `.so` must not need the NDK sysroot at link time beyond what `scripts/android-env.sh` already
+  configures (TLS is rustls + graviola, no OpenSSL or `ring`: `rovsti_wa_client`, `rovsti_tiles` Cargo.toml). A new
+  dependency of `rovsti_ffi` that needs a C toolchain, OpenSSL or a system library is refused in review.
 - ABIs: `arm64-v8a` for release (Phone already ships arm64 only, `apps/phone/gpuiforge.json`), `x86_64` added for
   debug and emulator builds. One `.so` per ABI shared by all four APKs (each APK packages its own copy).
 - Strip and LTO in the release profile; the symbol list is checked by a test that the 8 exports exist
@@ -408,8 +420,16 @@ and `src/firebase/AndroidManifest.xml`) and `gpuiforge.json` (permissions, URL s
   authorities (`RovstiShareProvider`). Alarms set by the GPUI build, pinned shortcuts and the role grants keep
   working after the update.
 - The dialer and SMS roles need all their components declared (`docs/architecture.md` "What each app needs from
-  Android"); a manifest test (aapt dump of the merged manifest in a JVM test) compares the component and
-  permission sets with a committed list per app.
+  Android"); a manifest test compares the component and permission sets with a committed list per app. The test
+  parses the merged manifest the build already produces (`build/intermediates/merged_manifests/<variant>/**/AndroidManifest.xml`,
+  a Gradle test input wired from `processDebugMainManifest`) with a plain XML parser; no `aapt` binary is needed.
+  It checks `exported`, intent filters (including `android:permission` on handoff-protected components), `uses-feature`
+  (`android.hardware.telephony` is required in Messages), `<queries>` and the `allowBackup`/`dataExtractionRules`
+  attributes against the GPUI manifest, so a library manifest cannot silently add one.
+- The signature permission `dev.rovsti.permission.HANDOFF` is declared today by Contacts, Messages and Phone
+  (`apps/*/platforms/android/app/src/main/AndroidManifest.xml`); the Kotlin apps keep exactly those declarations and
+  `uses-permission` lines. It works only between APKs with the same signer, so cross-app handoff (AD-CT5) is
+  verifiable only between release-signed builds; the acceptance checklist says so (E8.7).
 - The GPUI-only host classes (`dev.gpui.android.*`, `GpuiFileProvider`) are dropped; nothing outside the app
   refers to them.
 
@@ -446,7 +466,36 @@ connected, logged out, error), `events: Flow<GatewayEvent>` (from the sink, filt
 accept, reject, end, mute and the audio pump (`audioPush`/`audioPull` on the two audio threads). The shared
 `WhatsAppSettingsScreen` (Compose) has exactly the two options of today (link for the first time / connect with a
 key), Show connect key (mints a fresh one), key list with revoke, Link again and Delete instance (AD-WA2, AD-WA8).
-Gateway URL rules come from `rovsti_wa_proto::url` through the bridge (AD-WA3).
+Gateway URL rules come from `rovsti_wa_proto::url` through the bridge (AD-WA3). `WaAvatars` is the Kotlin half of
+`rovsti_wa_ui::avatars`: Rust decides what to fetch and when (`wa.avatars`, 429 back-off, pruning), Kotlin does the
+download and decode off the main thread and hands bitmaps to the Coil loader; it is part of `:wa` because Messages,
+Phone and Contacts all draw WhatsApp people.
+
+### 7.5 Roles and permissions
+
+Source of truth: `apps/*/gpuiforge.json` `permissions`, the ejected manifests, `docs/architecture.md` "What each
+app needs from Android". `:shell`'s `PermissionController` knows this table; the manifest test (7.2) pins it.
+
+| App | Roles | Runtime permissions (asked on first use, never at launch) | Special access (Settings page, can be revoked at any time) | Install-time |
+|---|---|---|---|---|
+| Phone | `ROLE_DIALER` (`RoleManager.createRequestRoleIntent`; the role carries the phone and call-log grants the app asks for, the setup sheet re-checks `isRoleHeld` on every resume) | `CALL_PHONE`, `READ_CALL_LOG`, `WRITE_CALL_LOG`, `READ_CONTACTS`, `WRITE_CONTACTS`, `READ_PHONE_STATE`, `POST_NOTIFICATIONS`, `BLUETOOTH_CONNECT` (route picker; a denied grant hides Bluetooth endpoints, not the screen), `RECORD_AUDIO` (WhatsApp calls only) | full-screen intent (`NotificationManager.canUseFullScreenIntent`, revocable since API 34, deep link `ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT`), ignore battery optimisation, Xiaomi background start (E5.12) | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_PHONE_CALL`, `VIBRATE`, `WAKE_LOCK`, `INTERNET`, HANDOFF |
+| Messages | `ROLE_SMS` (grants SMS/phone permissions; if the role is lost the UI falls back to the "make default" row and read-only provider access, `access.rs` rules) | `READ_SMS`, `SEND_SMS`, `RECEIVE_SMS`, `RECEIVE_MMS`, `RECEIVE_WAP_PUSH`, `READ_CONTACTS`, `READ_PHONE_STATE` (dual SIM), `POST_NOTIFICATIONS` | exact alarms (`SCHEDULE_EXACT_ALARM`; `AlarmManager.canScheduleExactAlarms()`, revocable; scheduled SMS falls back to an inexact window with a visible note, AD-MSG6) | `RECEIVE_BOOT_COMPLETED`, `ACCESS_NETWORK_STATE`, `INTERNET`, HANDOFF |
+| Contacts | none | `READ_CONTACTS`, `WRITE_CONTACTS`, `READ_CALL_LOG` (recent calls on the card, optional), `POST_NOTIFICATIONS` (birthday reminders, asked when the first reminder is switched on, AD-CT7), camera capture goes through the system camera app (`ACTION_IMAGE_CAPTURE`, no `CAMERA` permission) | exact alarms are not used (birthday reminders are inexact) | `INTERNET` (WhatsApp lookup), HANDOFF |
+| Stops | none | `ACCESS_FINE_LOCATION` + `ACCESS_COARSE_LOCATION` (one dialog, precise requested), then `ACCESS_BACKGROUND_LOCATION` as a **separate** second step with its own rationale (AD-SA7: recommended, not required), `POST_NOTIFICATIONS` | `USE_EXACT_ALARM` is install-time for alarm-clock apps, so no Settings page; full-screen intent (as Phone); ignore battery optimisation | `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, `VIBRATE`, `WAKE_LOCK`, `RECEIVE_BOOT_COMPLETED`, `ACCESS_NETWORK_STATE`, `INTERNET` |
+
+Rules the code follows:
+- Foreground service type `location` can be started only while a location grant exists and (API 34+) from a
+  visible activity or an exempt context; `TripService` start is therefore always initiated from the UI or the boot
+  receiver path that exists today, and the failure (`ForegroundServiceStartNotAllowedException`) maps to the
+  "trip could not start" row, never a crash. Same for `phoneCall` in Phone.
+- Every permission has a pure `PermissionState` decision (never asked / granted / denied once / denied for good /
+  revoked while running) from `rovsti_app_core::messages::access`-style Rust rules or a Kotlin twin with JVM tests;
+  the UI shows a row with the next action (ask, open Settings page), not a dead end. Revocation is observed on
+  `ON_RESUME`, and a process that is killed by a revocation restarts into the same route (`routeFor`).
+- A missing permission degrades one feature and never blocks the app: no call-log permission means Recents shows
+  the setup row, no contacts permission means names stay numbers.
+- OEM: Xiaomi/MIUI background and lock-screen-display pages are opened by `XiaomiOps` with a fallback to the generic
+  app-details page; any `ActivityNotFoundException` is caught.
 
 ## 8. Per app
 
@@ -517,6 +566,17 @@ separate decision; the floating-chrome layout does not change.
   Rtl, Landscape` add more; glass is forced to the **Flat** tier in tests (`glassTier(forTests = true)`), plus one
   probe test (E1.5) that records whether Robolectric executes `RuntimeShader`; if it does, Liquid-tier shots are
   added for the glass components, over a striped fake backdrop.
+- **Determinism.** Every shot test pins locale `en-US`, time zone UTC, a fixed `Clock` injected through the
+  container (never `System.currentTimeMillis()` in a composable or a ViewModel; a convention test greps for it),
+  a fixed `Random` seed for avatar colours, no network (Coil with a fake fetcher, a fake tile source) and
+  `mainClock.autoAdvance = false`. Roborazzi `changeThreshold` is 0.5 % so anti-aliasing noise does not fail
+  `verifyRoborazziDebug`; goldens are produced and verified on the same toolchain image only (system fonts differ
+  by machine), and the contact sheets are the human-readable view.
+- **Accessibility in tests.** Compose UI tests call `enableAccessibilityChecks()` (touch target >= 48 dp,
+  contrast, labels) for every screen test; failures are fixed or suppressed with a written reason in the story.
+- **Adaptive layout.** Phone-portrait is the design target. Landscape, 600 dp+ widths and split-screen must not break:
+  content is centred with a 640 dp maximum width except the Stops map layer, the tab bar and sheets cap at 560 dp;
+  one `-landscape` shot per app (Stops already has one) and one `w840dp` shot per app.
 - Animations are captured at fixed frames with `mainClock.autoAdvance = false` and `advanceTimeBy` (menu at closed,
   +40 ms, +100 ms, settled; sheet at each detent) (`references/overlays.md` 9).
 - Required shots per screen (`references/checklist.md` H): light/dark, font scale 2.0, RTL for one screen per app,
@@ -570,6 +630,10 @@ default build.
 |---|---|---|
 | Robolectric does not execute AGSL, so Liquid glass is unverified without a device | Flat tier in shots; CPU twins of lens and rim tested on JVM; probe test; owner device checklist | E1.5, E8.7 |
 | Navigation 3 API differs at the pinned BOM | Verify first; documented fallback | E1.18 |
-| Own map renderer too slow on the phone | Bitmap tiles, parent stand-ins, settle-only rasterising; device perf check; MapLibre re-evaluation | E7.2, E7.13 |
+| Own map renderer too slow on the phone | Bitmap tiles, parent stand-ins, settle-only rasterising; device perf check; MapLibre re-evaluation | E7.2b, E7.13 |
 | Moving app logic out of GPUI crates breaks the GPUI apps before E8 | Move with tests; GPUI crates call the moved code; workspace tests stay green | E2.1-E2.4 |
+| A native library cannot be loaded by two Robolectric classloaders, so a bridge test breaks unrelated tests | Real-Rust tests are plain JUnit in `testRustBridge`; Robolectric uses facade fakes | E2.6 |
+| Permission or special access revoked while running (full-screen intent, exact alarm, background location, role) | 7.5 `PermissionState` rules, resume re-check, degrade one feature | E3.8b, E5.12, E7.5 |
+| Strings: the GPUI apps are English literals; the owner may want Turkish | Default English; all user-facing text comes from Rust sentences or `strings.xml` (no literals in composables, convention test), so Turkish is a later resource addition. Owner confirms before E8 | E1.21, E8.7 |
+| Release keystore path in `gpuiforge.json` (`/home/erdem/...`) does not exist on the agent machine | Release tasks read the keystore from env; without it `assembleRelease` signs with the debug key and `check-apk.sh` says so | E8.1 |
 | In-place upgrade loses data or roles | Same id, key, component names, channel ids, prefs names; migration tests; release-signed acceptance | E8.4 |

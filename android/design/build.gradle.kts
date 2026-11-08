@@ -6,3 +6,7 @@ plugins {
 android {
     namespace = "dev.rovsti.design"
 }
+
+dependencies {
+    testImplementation(libs.junit)
+}

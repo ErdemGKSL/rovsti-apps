@@ -50,7 +50,7 @@ verified: `android/` has no module, no `build-logic`).
 | Story | Title | Round | Status |
 |---|---|---|---|
 | E1.1 | Modules, convention plugins, screenshot harness, catalog shell | R1 | done |
-| E1.2 | Theme: colours, type, spacing, shapes, contrast test | R1 | in-progress |
+| E1.2 | Theme: colours, type, spacing, shapes, contrast test | R1 | done |
 | E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | in-progress |
 | E1.4 | Press feedback, hold rule, haptics | R1 | in-progress |
 | E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | in-progress |
@@ -108,6 +108,13 @@ verified: `android/` has no module, no `build-logic`).
 - AC4 JVM test: every label colour on every background and glass preset is >= 4.5:1 in light and dark (fixes X5, X7 of
   `docs/design/layout.md`).
 - Screenshots: `e1.2-palette`, `e1.2-type-scale`, `e1.2-type-scale-fs2`.
+- Evidence (E1.2, uncommitted): `android/design/.../theme/` `RovstiColors`, `GlassTokens` (glisse header), `RovstiType`, `Spacing`/`Sizes`/`RovstiShapes`/`concentric`,
+  `RovstiTheme` + `RovstiText`, `Contrast.kt`; JVM `ContrastTest`, `ConcentricTest`, `SpacingTokensTest` green; catalog `PalettePage`/`TypeScalePage`
+  with `ThemePageTest`. Design decision: glass fills over white/black backdrops cannot give 4.5:1 to labels (dark glass over white is 4.3:1 for pure
+  white), so `RovstiColors.glassScrim` (white or black at 40 %) sits under every glass fill; E1.5 must paint it. Accent/destructive/success are 4.5:1 on
+  flat surfaces and 3:1 on glass (glyph or bold text). Opened e1.2-palette-{light,dark}, e1.2-type-scale-{light,dark}, e1.2-type-scale-fs2-{light,dark}:
+  measured ratios drawn on the swatches are legible (secondary 7.4-12.6:1 on page, tertiary 4.3+ light, glass tiles 3.3-21:1), selected pill reads, fs2 wraps
+  to three lines without clipping (page scrolls, lower styles checked by `everyTypeStyleIsListedAtFontScale2`).
 
 ### E1.3 Motion
 - AC1 `RovstiMotion` holds every spring/tween token of SKILL motion 2.1-2.3, each spring with `visibilityThreshold`;

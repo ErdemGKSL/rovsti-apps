@@ -1,54 +1,39 @@
 package dev.rovsti.design.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 
-/**
- * Minimal palette so the catalog and the screenshot harness have a page colour and legible text.
- * E1.2 replaces it with the full colour set, typography and contrast tests.
- */
-@Immutable
-class RovstiColors(
-    val page: Color,
-    val labelPrimary: Color,
-    val labelSecondary: Color,
-    val separator: Color,
-    val accent: Color,
-    val isDark: Boolean,
-)
+val LocalRovstiColors = staticCompositionLocalOf { LightColors }
+val LocalRovstiType = staticCompositionLocalOf { RovstiType.Default }
+val LocalGlassTokens = staticCompositionLocalOf { GlassTokens.Light }
 
-private val LightColors =
-    RovstiColors(
-        page = Color(0xFFF2F2F7),
-        labelPrimary = Color(0xFF000000),
-        labelSecondary = Color(0xFF4A4A4F),
-        separator = Color(0x33000000),
-        accent = Color(0xFF0062CC),
-        isDark = false,
-    )
-
-private val DarkColors =
-    RovstiColors(
-        page = Color(0xFF000000),
-        labelPrimary = Color(0xFFFFFFFF),
-        labelSecondary = Color(0xFFAEAEB2),
-        separator = Color(0x33FFFFFF),
-        accent = Color(0xFF4DA3FF),
-        isDark = true,
-    )
-
-private val LocalRovstiColors = staticCompositionLocalOf { LightColors }
+/** Default style of [RovstiText] when none is passed. */
+val LocalRovstiTextStyle = staticCompositionLocalOf { RovstiType.Default.body }
 
 object RovstiTheme {
     val colors: RovstiColors
-        @Composable get() = LocalRovstiColors.current
+        @Composable @ReadOnlyComposable
+        get() = LocalRovstiColors.current
+
+    val type: RovstiType
+        @Composable @ReadOnlyComposable
+        get() = LocalRovstiType.current
+
+    val glass: GlassTokens
+        @Composable @ReadOnlyComposable
+        get() = LocalGlassTokens.current
 }
 
-/** [darkTheme] is a parameter, not read from the system, so tests can force either theme. */
+/** [darkTheme] is a parameter, not read from the system only, so tests can force either theme. */
 @Composable
 fun RovstiTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -56,6 +41,29 @@ fun RovstiTheme(
 ) {
     CompositionLocalProvider(
         LocalRovstiColors provides if (darkTheme) DarkColors else LightColors,
+        LocalGlassTokens provides if (darkTheme) GlassTokens.Dark else GlassTokens.Light,
+        LocalRovstiType provides RovstiType.Default,
+        LocalRovstiTextStyle provides RovstiType.Default.body,
         content = content,
+    )
+}
+
+/** Text on [BasicText]: theme style and colour, no Material. [color] wins over the colour in [style]. */
+@Composable
+fun RovstiText(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = LocalRovstiTextStyle.current,
+    color: Color = RovstiTheme.colors.labelPrimary,
+    textAlign: TextAlign? = null,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip,
+) {
+    BasicText(
+        text = text,
+        modifier = modifier,
+        style = style.merge(TextStyle(color = color, textAlign = textAlign ?: TextAlign.Unspecified)),
+        maxLines = maxLines,
+        overflow = overflow,
     )
 }

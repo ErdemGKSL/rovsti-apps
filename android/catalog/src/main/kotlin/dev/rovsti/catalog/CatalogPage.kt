@@ -6,4 +6,6 @@ enum class CatalogPage(
 ) {
     Home("Rovsti catalog"),
     Toolchain("Toolchain"),
+    ThemePalette("Theme: palette"),
+    ThemeType("Theme: type scale"),
 }

@@ -36,9 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.rovsti.design.theme.RovstiTheme
-
-private val Gutter = 16.dp
-private val MaxContentWidth = 640.dp
+import dev.rovsti.design.theme.Sizes
+import dev.rovsti.design.theme.Spacing
 
 /** The catalog shell: one current page, saved across recreation, Back returns to Home. */
 @Composable
@@ -50,19 +49,21 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
         modifier = Modifier.fillMaxSize().background(RovstiTheme.colors.page),
         contentAlignment = Alignment.TopCenter,
     ) {
-        Column(Modifier.fillMaxHeight().widthIn(max = MaxContentWidth).fillMaxWidth()) {
+        Column(Modifier.fillMaxHeight().widthIn(max = Sizes.contentMaxWidth).fillMaxWidth()) {
             when (page) {
                 CatalogPage.Home -> HomePage(onOpen = { page = it })
                 CatalogPage.Toolchain -> ToolchainPage()
+                CatalogPage.ThemePalette -> PalettePage()
+                CatalogPage.ThemeType -> TypeScalePage()
             }
         }
     }
 }
 
 @Composable
-private fun pagePadding(): PaddingValues =
+internal fun pagePadding(): PaddingValues =
     WindowInsets.safeDrawing
-        .add(WindowInsets(left = Gutter, top = Gutter, right = Gutter, bottom = Gutter))
+        .add(WindowInsets(left = Spacing.gutter, top = Spacing.gutter, right = Spacing.gutter, bottom = Spacing.gutter))
         .asPaddingValues()
 
 @Composable
@@ -111,7 +112,7 @@ private fun ToolchainPage() {
 }
 
 @Composable
-private fun SectionLabel(
+internal fun SectionLabel(
     text: String,
     modifier: Modifier = Modifier,
 ) {
@@ -149,7 +150,7 @@ private fun CatalogRow(
         }
     Column(Modifier.fillMaxWidth()) {
         Row(
-            modifier = clickModifier.fillMaxWidth().heightIn(min = 56.dp),
+            modifier = clickModifier.fillMaxWidth().heightIn(min = Sizes.rowMin),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BasicText(
@@ -178,7 +179,6 @@ private fun CatalogRow(
 
 private val Planned =
     listOf(
-        "Theme and typography" to "E1.2",
         "Motion tokens" to "E1.3",
         "Press feedback" to "E1.4",
         "Glass" to "E1.5",

@@ -8,4 +8,5 @@ enum class CatalogPage(
     Toolchain("Toolchain"),
     ThemePalette("Theme: palette"),
     ThemeType("Theme: type scale"),
+    Motion("Motion: spring curves"),
 }

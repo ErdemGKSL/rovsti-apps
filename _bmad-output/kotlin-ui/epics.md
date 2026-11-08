@@ -51,7 +51,7 @@ verified: `android/` has no module, no `build-logic`).
 |---|---|---|---|
 | E1.1 | Modules, convention plugins, screenshot harness, catalog shell | R1 | done |
 | E1.2 | Theme: colours, type, spacing, shapes, contrast test | R1 | done |
-| E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | in-progress |
+| E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | done |
 | E1.4 | Press feedback, hold rule, haptics | R1 | in-progress |
 | E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | in-progress |
 | E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | in-progress |
@@ -125,6 +125,7 @@ verified: `android/` has no module, no `build-logic`).
 - AC4 Reduce-motion gate `.gated()` (no squash, parallax, bounce when on) and `MotionGate` (edge-only freeze, SKILL
   performance 5) with tests.
 - Screenshots: none (pure); `e1.3-spring-curves` chart drawn by a test canvas to eyeball the curves.
+- Evidence (E1.3, uncommitted): `android/design/.../motion/` `RovstiMotion` (glisse header, all tokens of motion.md 2.1-2.3, thresholds required), `SpringState` (ported, header), `Fling`, `Rubber`, `ReduceMotion` (reads `ANIMATOR_DURATION_SCALE` directly, observer-driven; `bounceless` only touches under-damped springs), `MotionGate`. JVM tests: token pin, RK4 at 1 kHz (3 regimes), step splitting, retarget, GlassPressUp overshoot 28 %, Fling 499, Rubber, MotionGate edges. Catalog `MotionPage`; `e1.3-spring-curves-{light,dark,fs2-*}.png` opened: GlassPressUp (red) overshoots once, then dips slightly under, Toggle never overshoots, axes labelled (time ms, progress, target line), legend shows computed ratio/stiffness/overshoot. `scripts/kotlin-ui-check.sh` ALL GREEN.
 
 ### E1.4 Press, hold, haptics
 - AC1 Glass press node ported from glisse `press.ts` (grow, stretch toward finger, release bounce), scale press 0.96,

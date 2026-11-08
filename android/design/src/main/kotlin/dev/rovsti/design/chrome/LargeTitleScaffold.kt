@@ -46,7 +46,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.lerp
 import dev.rovsti.design.glass.GlassSource
 import dev.rovsti.design.glass.LocalGlassConditions
 import dev.rovsti.design.glass.glassSource
@@ -67,7 +66,7 @@ object ScaffoldSpec {
     /** The large title rises this far while it fades. */
     val TitleLift: Dp = 12.dp
 
-    /** The most page colour the scrim ever lays over the content. */
+    /** Default peak of the scrim stop curve (the live scrim scales it by the title collapse, see TopScrim). */
     const val ScrimPeak = 0.42f
 
     /** Once the title has collapsed, rows pass under the inline title, so the scrim over the bar firms up to this. */
@@ -279,7 +278,9 @@ private fun TopScrim(
             .fillMaxWidth()
             .height(total)
             .drawBehind {
-                val peak = lerp(ScaffoldSpec.ScrimPeak, ScaffoldSpec.ScrimPeakCollapsed, collapse.value)
+                // The expanded title lives in the list under this scrim, so no page colour may lie over it (it would grey the
+                // title out); the scrim only firms up as the title leaves and rows start to pass under the bar.
+                val peak = ScaffoldSpec.ScrimPeakCollapsed * collapse.value
                 val brush =
                     Brush.verticalGradient(
                         colorStops =

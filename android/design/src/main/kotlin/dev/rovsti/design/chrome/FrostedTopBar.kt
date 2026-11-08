@@ -7,7 +7,8 @@
  * (TopBarAccountButton, an account-photo button) are gone, the refresh line is drawn with a Canvas; the artwork
  * ambient colour is gone; the preference key became LocalGlassSettings (reduceDynamicBlur or reduceTransparency draw
  * the solid bar); the back button is the 44 dp GlassCircleButton in a 48 dp touch target at the 16 dp gutter;
- * titleSideReserve lets the scaffold reserve exactly the toolbar width instead of Convx's fixed 96 dp.
+ * titleSideReserve/titleEndReserve let the scaffold size the reserve to the toolbar instead of Convx's fixed 96 dp;
+ * like Convx's symmetric padding(horizontal = 96.dp) the larger one is applied to both sides, so the title is centred.
  */
 package dev.rovsti.design.chrome
 
@@ -118,7 +119,7 @@ fun FrostedTopBar(
     pullFraction: () -> Float = { 0f },
     // Room each side of the title (back button or actions); Convx reserves a fixed 96 dp.
     titleSideReserve: Dp = 96.dp,
-    // Rovsti: asymmetric reserves centre the title in the span between the back button and the toolbar.
+    // The larger of the two reserves is used on both sides, so the title stays on the bar's centre line.
     titleEndReserve: Dp = titleSideReserve,
     actions: @Composable () -> Unit = {},
 ) {
@@ -189,7 +190,7 @@ fun FrostedTopBar(
                         .align(Alignment.Center)
                         // Reserve room for the back button/logo and the actions so a long title truncates instead of
                         // running under them.
-                        .padding(start = titleSideReserve, end = titleEndReserve)
+                        .padding(horizontal = maxOf(titleSideReserve, titleEndReserve))
                         // A few dp below true center: the fade's readability scrim is strongest right under the
                         // status bar and thins going down, so a title sitting slightly lower reads clearer against it.
                         .padding(top = 4.dp)

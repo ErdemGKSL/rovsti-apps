@@ -76,6 +76,8 @@ line itself, so the hairline is drawn only when no rim is.
 - `glass/GlassSpec`: new field `flatAlpha: Float` (default `FLAT_ALPHA` 0.85); constants `FLAT_ALPHA_BAR` 0.96,
   `FLAT_ALPHA_POPOVER` 0.97, `FLAT_ALPHA_SHEET` 0.98; `bar()`, `popover()`, `sheet()` set theirs, `thumb()` keeps 0.85.
   `GlassNode` draws the Flat base at `spec.flatAlpha`.
+- `chrome/FrostedTopBar.kt` (F9): the inline title is padded `horizontal = max(titleSideReserve, titleEndReserve)` on both sides (Convx's symmetric
+  `padding(horizontal = 96.dp)`), so it is centred on the bar; both parameters stay for callers, the larger one wins.
 - `chrome/TitleCollapse.kt`: `inlineTitleAlpha(f)` = smoothstep((f - 0.65) / 0.35), `largeTitleAlpha(f)` = 1 - smoothstep(f / 0.65);
   their product is 0 for every f. `topScrimStops(barFraction, peak, bandPeak = peak)` gained `bandPeak` (the share over the bar band).
 - `overlay/OverlayHost.kt`: `OverlayController` (`present`, `dismiss`, `dismissTop(): Boolean`, `hasEntries`, internal

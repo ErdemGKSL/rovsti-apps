@@ -62,7 +62,7 @@ internal fun GlassPage() {
                                 .heightIn(min = Sizes.button),
                             contentAlignment = Alignment.Center,
                         ) {
-                            RovstiText(label, style = RovstiTheme.type.body)
+                            RovstiText(label, style = RovstiTheme.type.body, maxLines = 1)
                         }
                     }
                 }

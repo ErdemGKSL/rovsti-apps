@@ -5,6 +5,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -28,6 +29,7 @@ import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import dev.rovsti.design.backdrop.Backdrop
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
@@ -79,6 +81,7 @@ fun ListRow(
     actions: ImmutableList<CustomAction> = persistentListOf(),
     titleColor: Color = Color.Unspecified,
     extraSemantics: (SemanticsPropertyReceiver.() -> Unit)? = null,
+    endInset: Dp = 0.dp,
 ) {
     val colors = RovstiTheme.colors
     val type = RovstiTheme.type
@@ -114,7 +117,14 @@ fun ListRow(
             ).semantics(mergeDescendants = true) {
                 if (accessibilityActions.isNotEmpty()) customActions = accessibilityActions
                 extraSemantics?.invoke(this)
-            }.padding(horizontal = Spacing.gutter, vertical = Spacing.s),
+            }.padding(
+                PaddingValues(
+                    start = Spacing.gutter,
+                    end = Spacing.gutter + endInset,
+                    top = Spacing.s,
+                    bottom = Spacing.s,
+                ),
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {

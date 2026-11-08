@@ -42,7 +42,11 @@ fun ComposeContentTestRule.accessibilityFindings(density: Float): List<Accessibi
         val name = node.describe()
         val wDp = bounds.width / density
         val hDp = bounds.height / density
-        if (wDp < MinTargetDp - 0.5f || hDp < MinTargetDp - 0.5f) {
+        // An item scrolled half out of a row or list is clipped by its scroller, not too small: judge it by the size
+        // it lays out at (a chip at the edge of an overflowing chip row, in either layout direction).
+        val laidOutBigEnough =
+            node.size.width / density >= MinTargetDp - 0.5f && node.size.height / density >= MinTargetDp - 0.5f
+        if (!laidOutBigEnough && (wDp < MinTargetDp - 0.5f || hDp < MinTargetDp - 0.5f)) {
             out +=
                 AccessibilityFinding(name, "touch target %.0f x %.0f dp is below %.0f dp".format(wDp, hDp, MinTargetDp))
         }

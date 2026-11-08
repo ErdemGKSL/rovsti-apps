@@ -95,8 +95,12 @@ val ContactSections: ImmutableList<Char> = (('A'..'Z') + listOf('#')).toImmutabl
  */
 const val AlphabetScrollBarMinItems = 20
 
-/** Wide enough to be a comfortable thumb target, narrow enough not to cover list text. */
-private val RailWidth = 28.dp
+/**
+ * Width of the alphabet rail: wide enough to be a comfortable thumb target. Rows under it pass this as
+ * `ListRow(endInset = ...)` so their text stops before it.
+ */
+val ListScrollRailWidth = 28.dp
+private val RailWidth = ListScrollRailWidth
 
 /** Space between the bubble and the rail. */
 private val BubbleGap = 12.dp

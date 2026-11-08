@@ -32,6 +32,7 @@ import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.list.ContactSections
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.ListScrollRail
+import dev.rovsti.design.list.ListScrollRailWidth
 import dev.rovsti.design.list.SectionHeader
 import dev.rovsti.design.list.SwipeAction
 import dev.rovsti.design.list.SwipeRow
@@ -215,6 +216,7 @@ internal fun ListsPage(imeVisible: @Composable () -> Boolean = { WindowInsets.is
                                                         null
                                                     },
                                                 onClick = { log = "Open ${contact.name}" },
+                                                endInset = ListScrollRailWidth,
                                             )
                                         }
                                     }

@@ -1,0 +1,1 @@
+{"snapshot":{"v":1,"seq":2,"now_ms":1790000000000,"foreground_call_id":10,"calls":[{"id":10,"state":"active","children":[11,12,13],"connect_time_ms":1789999000000},{"id":11,"state":"active","number_raw":"0532 123 45 67","display_name":"Ayşe Yılmaz"},{"id":12,"state":"active","number_raw":"+90 212 555 01 02"}]}}

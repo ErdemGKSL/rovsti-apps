@@ -18,6 +18,9 @@ pub struct Case {
     /// A directory under `rovsti_app_core/tests/fixtures/dirs` copied to a temp dir; `$DIR` in the request text
     /// stands for it.
     pub seed: Option<&'static str>,
+    /// An op to run first whose answer holds a `handle`: the request names that handle as
+    /// [`PLACEHOLDER_HANDLE`], and the fixture test swaps in the live one.
+    pub setup: Option<(&'static str, Value)>,
 }
 
 impl Case {
@@ -27,6 +30,7 @@ impl Case {
             label: "",
             request,
             seed: None,
+            setup: None,
         }
     }
 
@@ -36,11 +40,18 @@ impl Case {
             label,
             request,
             seed: None,
+            setup: None,
         }
     }
 
     pub fn seeded(mut self, seed: &'static str) -> Self {
         self.seed = Some(seed);
+        self
+    }
+
+    /// Runs `op` with `request` first; its answer's `handle` replaces [`PLACEHOLDER_HANDLE`] in this case.
+    pub fn after(mut self, op: &'static str, request: Value) -> Self {
+        self.setup = Some((op, request));
         self
     }
 
@@ -53,6 +64,10 @@ impl Case {
         }
     }
 }
+
+/// The handle value fixtures carry. Real handles depend on test order; the fixture test swaps this number for
+/// the live handle before running a case and back in the answer, so the files stay stable.
+pub const PLACEHOLDER_HANDLE: i64 = 7_777_777_777;
 
 /// A registered op: its wire name, its handler on raw request bytes and its fixture cases.
 pub struct OpSpec {
@@ -89,7 +104,11 @@ macro_rules! op {
 
 /// Every registered op, in table order.
 pub fn all() -> impl Iterator<Item = &'static OpSpec> {
-    super::core::OPS.iter().chain(super::shared::OPS.iter())
+    super::core::OPS
+        .iter()
+        .chain(super::shared::OPS.iter())
+        .chain(super::search::OPS.iter())
+        .chain(super::phone::TABLES.iter().flat_map(|table| table.iter()))
 }
 
 /// The op with this wire name.

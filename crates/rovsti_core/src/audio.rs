@@ -14,7 +14,8 @@ use crate::wire::{Endpoint, EndpointHint, EndpointType};
 pub const MAX_ROWS: usize = 8;
 
 /// What a row is, for icon choice and ordering.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RowKind {
     Bluetooth,
     WiredHeadset,
@@ -74,7 +75,8 @@ impl Row {
 }
 
 /// What a tap on the Audio control does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Decision {
     /// Only Phone and Speaker exist: flip between them.
     Toggle,
@@ -83,7 +85,7 @@ pub enum Decision {
 }
 
 /// Endpoints added, lost and re-selected between two lists.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Diff {
     pub added: Vec<String>,
     pub removed: Vec<String>,

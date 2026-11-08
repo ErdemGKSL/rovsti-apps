@@ -531,13 +531,25 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 | E2.6 | `:core-bridge`: cargo-ndk and host build tasks, `RustNative`, dispatcher, init | R1 | done (round-06 step 7) |
 | E2.7 | Contract fixtures and Kotlin models | R1 | done (round-06 step 8) |
 | E2.8 | `headless` entry compatible with today's receivers | R1 | done (round-06 steps 5 and 8) |
-| E2.9 | Phone domain ops | R2 | in-progress (round-07 step 2) |
+| E2.9 | Phone domain ops | R2 | done (round-07 step 2; evidence below) |
 | E2.10 | Contacts domain ops | R2 | in-progress (round-07 step 3) |
 | E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | in-progress (round-07 step 4) |
 | E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | in-progress (round-07 step 5) |
 | E2.12 | Stops domain ops | R2 | in-progress (round-07 step 6) |
 | E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | in-progress (round-07 step 7) |
 | E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | in-progress (round-07 step 8) |
+
+#### Evidence, E2.9 (round-07 step 2)
+- Rust: `rovsti_ffi/src/ops/search.rs` (`search.{index_new, index_replace, set_call_counts, query, query_loose, match_number, fold}`,
+  `t9.query`: a handle over `ContactIndex` + `T9Scratch`) and `ops/phone/{log,people,dial,calls,store}.rs` (74 ops: `recents.*`,
+  `call_log.*`, `call_notes.*`, `call_stats.*`, `speed_dial.*`, `blocklist.*`, `dial.*`, `sim.*`, `setup.*`, `audio.*`, `scene.*`,
+  `phone.*` incl. `phone.wa_tracker_*`). Serde derives added to the `rovsti_core` types they carry (Rule 3), no DTO copies except
+  `scene`, `audio`, `sim`. `OPS.md`: every phone, search and t9 row is op, kotlin or none (`DONE_DOMAINS` += phone, search, t9).
+- Fixtures: cases may open a handle first (`Case::after`); the fixture test swaps `PLACEHOLDER_HANDLE` for the live handle.
+- Bench (`tests/search_bench.rs`, 5 000 seeded Latin/Turkish/Cyrillic contacts, 20 queries, JSON both ways): release p95
+  `search.query` 0.74 ms, `search.query_loose` 0.90 ms, `t9.query` 0.72 ms (limit 5 ms); debug median under 25 ms.
+- Kotlin: `SearchOps`/`NativeSearchOps` + `ContactIndexHandle : RustHandle`, `PhoneOps`/`NativePhoneOps`, models
+  `model.search`, `model.phone`; `ContactIndexTest` and `PhoneOpsNativeTest` in `testRustBridge`.
 
 #### Evidence, E2 R1 (E2.1-E2.8 done, round-06)
 - E2.1-E2.4: commits `07ab3a5` (app_core, storage, Stops store/pick/snap), `e099053` (`wa_link`), `eadb490` (Messages prefs, drafts,

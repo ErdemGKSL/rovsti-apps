@@ -15,7 +15,8 @@ use crate::{
 };
 
 /// What the leading glyph in the subtitle shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Direction {
     Incoming,
     Outgoing,
@@ -54,7 +55,7 @@ impl Direction {
 pub const UNKNOWN_NUMBER: &str = "Unknown number";
 
 /// One ready-to-draw Recents line.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RowView {
     /// Name, or the number as stored.
     pub title: String,
@@ -81,7 +82,7 @@ pub struct RowView {
 
 /// Time-zone offset and clock style of the phone, injected so tests and the
 /// desktop preview never read the host locale.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LocaleTime {
     pub tz_offset_s: i32,
     pub format: TimeFormat,
@@ -129,7 +130,7 @@ pub fn build(rows: &[RecentsRow], now_ms: i64, locale: LocaleTime) -> Vec<RowVie
 }
 
 /// What a call-log refresh changed at the top of the list (story 10.3).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RefreshDelta {
     /// Leading rows that are new or have a newer call than before: these fade in.
     pub fresh: usize,
@@ -238,7 +239,7 @@ fn view(row: &RecentsRow, now_ms: i64, locale: LocaleTime) -> RowView {
 /// A call that did not come from the phone's call log (WhatsApp, kept by the
 /// app itself), in the terms Recents needs. Generic on purpose: `rovsti_core`
 /// knows nothing about where such calls come from.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExtraCall {
     /// The number as it should be dialed (`+905551234567`).
     pub number_raw: String,
@@ -352,7 +353,7 @@ pub fn missed_extras(extras: &[ExtraCall], last_seen_ms: i64) -> u32 {
 }
 
 /// One call in a contact's or number's history.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct HistoryLine {
     /// The log row or WhatsApp call this line comes from.
     pub entry: EntryRef,

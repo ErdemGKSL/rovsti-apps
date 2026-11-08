@@ -1,0 +1,1 @@
+{"text":"number,name\r\n0532 111 22 33,Spam\r\n+49 151 2345678,Known\r\nnot a number,x\r\n","emergency":{"numbers":["155"]},"blocked":[{"id":1,"number_raw":"+49 151 2345678","normalized":"+491512345678"},{"id":2,"number_raw":"0850 333 44 55","normalized":"08503334455"}]}

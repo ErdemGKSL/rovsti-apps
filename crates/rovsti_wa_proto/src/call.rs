@@ -113,7 +113,7 @@ pub const FALLBACK_PEER_LABEL: &str = "WhatsApp call";
 
 /// What a call screen shows, derived from the gateway's [`CallUpdate`]s. Pure:
 /// the clock is passed in.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WaCallView {
     pub call_id: String,
     /// The peer's JID.

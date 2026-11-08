@@ -274,7 +274,8 @@ pub fn is_emergency(typed: &str, list: &crate::wire::EmergencyList) -> bool {
 }
 
 /// An action in the keypad number field's long-press menu.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FieldAction {
     Copy,
     Paste,
@@ -402,7 +403,8 @@ fn is_duplicate(cleaned: &str, found: &[String]) -> bool {
 }
 
 /// What a paste of clipboard text should do.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PastePlan {
     /// No number in the text.
     Nothing,
@@ -443,14 +445,15 @@ pub const PAUSE_MS: u64 = 2000;
 pub const TONE_MAX: usize = 40;
 
 /// One step of a tone sequence.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ToneStep {
     Tone(char),
     Pause,
 }
 
 /// Tones to send during a call, built from pasted text.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TonePlan {
     pub steps: Vec<ToneStep>,
     pub tones: usize,

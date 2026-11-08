@@ -1,0 +1,1 @@
+{"ok":{"visible":true,"ask":true,"default_key":null,"default_label":"Ask every time","accounts":[{"key":"tel#1","label":"Turkcell","chip":"Turkcell","title":"SIM 1","color_argb":-16776961,"slot":0,"enabled":true},{"key":"tel#2","label":"Vodafone Türkiye Mobil","chip":"Vodafon…","title":"SIM 2","color_argb":-65536,"slot":1,"enabled":true}]}}

@@ -10,13 +10,17 @@ use crate::search::fold;
 use crate::wire::{CallLogEntry, CallLogKind};
 
 /// Which calls Recents shows.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum RecentsFilter {
     #[default]
     All,
     Missed,
     Incoming,
     Outgoing,
+    #[serde(rename = "whatsapp")]
     WhatsApp,
     /// Calls that have a note; needs the notes, see [`apply_with_notes`].
     WithNotes,
@@ -57,7 +61,7 @@ impl RecentsFilter {
 }
 
 /// Search text plus filter chip.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Query {
     pub text: String,
     pub filter: RecentsFilter,
@@ -351,7 +355,8 @@ pub fn person_export(
 }
 
 /// How old a call must be to be pruned from the log.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PruneAge {
     Days30,
     Days90,

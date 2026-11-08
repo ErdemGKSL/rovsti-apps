@@ -14,6 +14,11 @@ Classes:
 - `none <reason>`: not needed by the Kotlin apps.
 - `todo`: not yet decided or built; allowed only for domains that are not in `DONE_DOMAINS`.
 
+Handles (E2.9): `search.index_new` and `phone.wa_tracker_new` answer `{"handle": <long>}`; every later op of that
+object sends the handle back, and `RustNative.release` frees it (a released or foreign handle answers `not_found`). The
+contact index owns its `T9Scratch`, so `t9.query` narrows the previous digits' candidates. Every other op is stateless: the
+request carries the data (call-log entries, notes, speed-dial map) and the answer the new data.
+
 | Item | Used by | Domain | Class | Target |
 |---|---|---|---|---|
 | `(bridge) core.version` | - | bridge | op | core.version |
@@ -31,8 +36,8 @@ Classes:
 | `rovsti_app_core::messages::prefs` | messages | messages | todo | - |
 | `rovsti_app_core::messages::tags` | messages | messages | todo | - |
 | `rovsti_app_core::permission::Access` | messages | platform | todo | - |
-| `rovsti_app_core::phone::notes` | phone | phone | todo | - |
-| `rovsti_app_core::phone::wa_call` | phone | phone | todo | - |
+| `rovsti_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
+| `rovsti_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed |
 | `rovsti_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |
 | `rovsti_app_core::stops::pick` | stops | stops | todo | - |
 | `rovsti_app_core::stops::snap` | stops | stops | todo | - |
@@ -59,12 +64,12 @@ Classes:
 | `rovsti_core::MessageDirection` | messages | messages | todo | wire types of the messages ops |
 | `rovsti_core::PhoneNumber` | messages,phone | shared | op | phone_number.parse, phone_number.same |
 | `rovsti_core::ThreadId` | messages | messages | todo | wire types of the messages ops |
-| `rovsti_core::audio::Decision` | phone | phone | todo | - |
-| `rovsti_core::audio::Diff` | phone | phone | todo | - |
-| `rovsti_core::audio::EndpointList` | phone | phone | todo | - |
-| `rovsti_core::audio::MAX_ROWS` | phone | phone | todo | - |
-| `rovsti_core::audio::Row` | phone | phone | todo | - |
-| `rovsti_core::audio::RowKind` | phone | phone | todo | - |
+| `rovsti_core::audio::Decision` | phone | phone | op | audio.rows, audio.diff |
+| `rovsti_core::audio::Diff` | phone | phone | op | audio.rows, audio.diff |
+| `rovsti_core::audio::EndpointList` | phone | phone | op | audio.rows, audio.diff |
+| `rovsti_core::audio::MAX_ROWS` | phone | phone | op | audio.rows, audio.diff |
+| `rovsti_core::audio::Row` | phone | phone | op | audio.rows, audio.diff |
+| `rovsti_core::audio::RowKind` | phone | phone | op | audio.rows, audio.diff |
 | `rovsti_core::avatar::AvatarKey` | phone | contacts | todo | - |
 | `rovsti_core::avatar::avatar_hue` | phone | contacts | todo | - |
 | `rovsti_core::avatar::hue_index` | phone | contacts | todo | - |
@@ -74,57 +79,57 @@ Classes:
 | `rovsti_core::birthday_reminder::DEFAULT_HOUR` | contacts | contacts | todo | - |
 | `rovsti_core::birthday_reminder::HOUR_CHOICES` | contacts | contacts | todo | - |
 | `rovsti_core::birthday_reminder::hour_label` | contacts | contacts | todo | - |
-| `rovsti_core::blocklist::BlockInputError` | phone | phone | todo | - |
-| `rovsti_core::blocklist::BlockRefusal` | messages,phone | phone | todo | - |
-| `rovsti_core::blocklist::BlockSet` | messages,phone | phone | todo | - |
-| `rovsti_core::blocklist::can_block` | messages,phone | phone | todo | - |
+| `rovsti_core::blocklist::BlockInputError` | phone | phone | op | blocklist.parse_input |
+| `rovsti_core::blocklist::BlockRefusal` | messages,phone | phone | op | blocklist.check |
+| `rovsti_core::blocklist::BlockSet` | messages,phone | phone | op | blocklist.check |
+| `rovsti_core::blocklist::can_block` | messages,phone | phone | op | blocklist.check |
 | `rovsti_core::bubble_gesture::SwipeReply` | messages | input | kotlin | :messages BubbleGesture.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
-| `rovsti_core::call::CallModel` | phone | phone | todo | - |
-| `rovsti_core::call::CallState` | phone | phone | todo | - |
-| `rovsti_core::call::after_call_text` | phone | phone | todo | - |
-| `rovsti_core::call::caller_label` | phone | phone | todo | - |
-| `rovsti_core::call::format_elapsed` | phone | phone | todo | - |
+| `rovsti_core::call::CallModel` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::call::CallState` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::call::after_call_text` | phone | phone | op | scene.texts |
+| `rovsti_core::call::caller_label` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::call::format_elapsed` | phone | phone | op | scene.texts |
 | `rovsti_core::call::format_number` | phone | shared | op | format.render |
-| `rovsti_core::call::incoming_announcement` | phone | phone | todo | - |
-| `rovsti_core::call::is_missed` | phone | phone | todo | - |
-| `rovsti_core::call::missed_headline` | phone | phone | todo | - |
-| `rovsti_core::call::status_text` | phone | phone | todo | - |
-| `rovsti_core::call_log::CallType` | contacts,phone | phone | todo | - |
-| `rovsti_core::call_log::DateOrder` | phone | phone | todo | - |
-| `rovsti_core::call_log::EntryRef` | contacts,phone | phone | todo | - |
-| `rovsti_core::call_log::FREQUENT_LIMIT` | phone | phone | todo | - |
-| `rovsti_core::call_log::FREQUENT_WINDOW_DAYS` | phone | phone | todo | - |
-| `rovsti_core::call_log::RecentsRow` | phone | phone | todo | - |
-| `rovsti_core::call_log::TimeFormat` | phone | phone | todo | - |
-| `rovsti_core::call_log::badge_label` | phone | phone | todo | - |
-| `rovsti_core::call_log::blocked_ids_for_numbers` | phone | phone | todo | - |
-| `rovsti_core::call_log::deleted_text` | phone | phone | todo | - |
-| `rovsti_core::call_log::entries_by_id` | phone | phone | todo | - |
-| `rovsti_core::call_log::frequent` | phone | phone | todo | - |
-| `rovsti_core::call_log::ids_for_numbers` | phone | phone | todo | - |
-| `rovsti_core::call_log::missed_badge` | phone | phone | todo | - |
-| `rovsti_core::call_log::relative_time` | messages,phone | phone | todo | - |
-| `rovsti_core::call_log_query::PruneAge` | phone | phone | todo | - |
-| `rovsti_core::call_log_query::Query` | phone | phone | todo | - |
-| `rovsti_core::call_log_query::RecentsFilter` | phone | phone | todo | - |
-| `rovsti_core::call_log_query::csv_file_name` | phone | phone | todo | - |
-| `rovsti_core::call_log_query::delete_selected_text` | phone | phone | todo | - |
-| `rovsti_core::call_log_query::ids_older_than` | phone | phone | todo | - |
-| `rovsti_core::call_log_query::person_export` | phone | phone | todo | - |
-| `rovsti_core::call_log_query::prune_none_text` | phone | phone | todo | - |
-| `rovsti_core::call_log_query::prune_text` | phone | phone | todo | - |
-| `rovsti_core::call_log_query::to_csv_with_notes` | phone | phone | todo | - |
-| `rovsti_core::call_notes::CallDetails` | phone | phone | todo | - |
-| `rovsti_core::call_notes::CallNote` | phone | phone | todo | - |
-| `rovsti_core::call_notes::Notes` | phone | phone | todo | - |
-| `rovsti_core::call_notes::SetOutcome` | phone | phone | todo | - |
-| `rovsti_core::call_notes::details` | phone | phone | todo | - |
-| `rovsti_core::call_notes::notes_csv_file_name` | phone | phone | todo | - |
-| `rovsti_core::call_stats::DayBar` | phone | phone | todo | - |
-| `rovsti_core::call_stats::Range` | phone | phone | todo | - |
-| `rovsti_core::call_stats::StatCall` | phone | phone | todo | - |
-| `rovsti_core::call_stats::StatDir` | phone | phone | todo | - |
-| `rovsti_core::call_stats::Totals` | phone | phone | todo | - |
+| `rovsti_core::call::incoming_announcement` | phone | phone | op | scene.texts |
+| `rovsti_core::call::is_missed` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::call::missed_headline` | phone | phone | op | scene.texts |
+| `rovsti_core::call::status_text` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::call_log::CallType` | contacts,phone | phone | op | recents.group, recents.build |
+| `rovsti_core::call_log::DateOrder` | phone | phone | op | recents.group, recents.build |
+| `rovsti_core::call_log::EntryRef` | contacts,phone | phone | op | recents.group, recents.build |
+| `rovsti_core::call_log::FREQUENT_LIMIT` | phone | phone | op | call_log.frequent, call_log.counts |
+| `rovsti_core::call_log::FREQUENT_WINDOW_DAYS` | phone | phone | op | call_log.frequent, call_log.counts |
+| `rovsti_core::call_log::RecentsRow` | phone | phone | op | recents.group, recents.build |
+| `rovsti_core::call_log::TimeFormat` | phone | phone | op | recents.group, recents.build |
+| `rovsti_core::call_log::badge_label` | phone | phone | op | recents.missed_extras |
+| `rovsti_core::call_log::blocked_ids_for_numbers` | phone | phone | op | call_log.ids_for_numbers |
+| `rovsti_core::call_log::deleted_text` | phone | phone | kotlin | :phone res/values/strings.xml (user-facing sentences live in Android resources, localised) |
+| `rovsti_core::call_log::entries_by_id` | phone | phone | kotlin | :phone RecentsRepository.kt (a filter by id over the list Kotlin already holds) |
+| `rovsti_core::call_log::frequent` | phone | phone | op | call_log.frequent, call_log.counts |
+| `rovsti_core::call_log::ids_for_numbers` | phone | phone | op | call_log.ids_for_numbers |
+| `rovsti_core::call_log::missed_badge` | phone | phone | op | recents.missed_extras |
+| `rovsti_core::call_log::relative_time` | messages,phone | phone | op | recents.build, recents.history_text |
+| `rovsti_core::call_log_query::PruneAge` | phone | phone | op | call_log.prune_plan |
+| `rovsti_core::call_log_query::Query` | phone | phone | op | call_log.query |
+| `rovsti_core::call_log_query::RecentsFilter` | phone | phone | op | call_log.query |
+| `rovsti_core::call_log_query::csv_file_name` | phone | phone | op | call_log.csv |
+| `rovsti_core::call_log_query::delete_selected_text` | phone | phone | kotlin | :phone res/values/strings.xml (user-facing sentences live in Android resources, localised) |
+| `rovsti_core::call_log_query::ids_older_than` | phone | phone | op | call_log.prune_plan |
+| `rovsti_core::call_log_query::person_export` | phone | phone | op | call_log.csv |
+| `rovsti_core::call_log_query::prune_none_text` | phone | phone | op | call_log.prune_plan |
+| `rovsti_core::call_log_query::prune_text` | phone | phone | op | call_log.prune_plan |
+| `rovsti_core::call_log_query::to_csv_with_notes` | phone | phone | op | call_log.csv |
+| `rovsti_core::call_notes::CallDetails` | phone | phone | op | call_notes.details |
+| `rovsti_core::call_notes::CallNote` | phone | phone | op | call_notes.set, call_notes.remove, call_notes.restore, call_notes.rows, call_notes.for_calls |
+| `rovsti_core::call_notes::Notes` | phone | phone | op | call_notes.set, call_notes.remove, call_notes.restore, call_notes.rows, call_notes.for_calls |
+| `rovsti_core::call_notes::SetOutcome` | phone | phone | op | call_notes.set, call_notes.remove, call_notes.restore, call_notes.rows, call_notes.for_calls |
+| `rovsti_core::call_notes::details` | phone | phone | op | call_notes.details |
+| `rovsti_core::call_notes::notes_csv_file_name` | phone | phone | op | call_notes.export |
+| `rovsti_core::call_stats::DayBar` | phone | phone | op | call_stats.overview, call_stats.person, call_stats.bucket |
+| `rovsti_core::call_stats::Range` | phone | phone | op | call_stats.overview, call_stats.person, call_stats.bucket |
+| `rovsti_core::call_stats::StatCall` | phone | phone | op | call_stats.overview, call_stats.person, call_stats.bucket |
+| `rovsti_core::call_stats::StatDir` | phone | phone | op | call_stats.overview, call_stats.person, call_stats.bucket |
+| `rovsti_core::call_stats::Totals` | phone | phone | op | call_stats.overview, call_stats.person, call_stats.bucket |
 | `rovsti_core::calling_code::country_line` | phone | shared | op | calling_code.line |
 | `rovsti_core::chat_export::ExportLine` | messages | messages | todo | - |
 | `rovsti_core::chat_find::FindCursor` | messages | messages | todo | - |
@@ -192,13 +197,13 @@ Classes:
 | `rovsti_core::contact_photo::plan_for` | contacts | contacts | todo | - |
 | `rovsti_core::contact_photo::rotated_size` | contacts | contacts | todo | - |
 | `rovsti_core::contact_quick::QuickAction` | contacts | contacts | todo | - |
-| `rovsti_core::contact_recent::AddedMark` | contacts | phone | todo | - |
-| `rovsti_core::contact_recent::CLEAR_VIEWED` | contacts | phone | todo | - |
-| `rovsti_core::contact_recent::RecentTab` | contacts | phone | todo | - |
-| `rovsti_core::contact_recent::VIEWED_KEEP` | contacts | phone | todo | - |
-| `rovsti_core::contact_recent::note_created` | contacts | phone | todo | - |
-| `rovsti_core::contact_recent::note_pull` | contacts | phone | todo | - |
-| `rovsti_core::contact_recent::show_entry` | contacts | phone | todo | - |
+| `rovsti_core::contact_recent::AddedMark` | contacts | contacts | todo | - |
+| `rovsti_core::contact_recent::CLEAR_VIEWED` | contacts | contacts | todo | - |
+| `rovsti_core::contact_recent::RecentTab` | contacts | contacts | todo | - |
+| `rovsti_core::contact_recent::VIEWED_KEEP` | contacts | contacts | todo | - |
+| `rovsti_core::contact_recent::note_created` | contacts | contacts | todo | - |
+| `rovsti_core::contact_recent::note_pull` | contacts | contacts | todo | - |
+| `rovsti_core::contact_recent::show_entry` | contacts | contacts | todo | - |
 | `rovsti_core::contact_scan::Scanned` | contacts | contacts | todo | - |
 | `rovsti_core::contact_select::GroupTarget` | contacts | contacts | todo | - |
 | `rovsti_core::contact_select::SHARE_FORMATS` | contacts | contacts | todo | - |
@@ -232,11 +237,11 @@ Classes:
 | `rovsti_core::date_jump::later_notice` | messages | messages | todo | - |
 | `rovsti_core::date_jump::quick_picks` | messages | messages | todo | - |
 | `rovsti_core::date_jump::starts_later` | messages | messages | todo | - |
-| `rovsti_core::dial::FieldAction` | phone | input | kotlin | :phone Dial.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
+| `rovsti_core::dial::FieldAction` | phone | input | op | dial.field_menu |
 | `rovsti_core::dial::Push` | phone | input | kotlin | :phone Dial.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
-| `rovsti_core::dial::TonePlan` | phone | input | kotlin | :phone Dial.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
-| `rovsti_core::dial::ToneStep` | phone | input | kotlin | :phone Dial.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
-| `rovsti_core::dial::from_tel_uri` | phone | input | kotlin | :phone Dial.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
+| `rovsti_core::dial::TonePlan` | phone | input | op | dial.tone_plan, dial.tones_text, dial.tone_preview, dial.paste_tones_label |
+| `rovsti_core::dial::ToneStep` | phone | input | op | dial.tone_plan, dial.tones_text, dial.tone_preview, dial.paste_tones_label |
+| `rovsti_core::dial::from_tel_uri` | phone | input | op | dial.from_tel_uri |
 | `rovsti_core::forward::ForwardBody` | messages | messages | todo | - |
 | `rovsti_core::forward::ForwardPlan` | messages | messages | todo | - |
 | `rovsti_core::forward::ForwardTo` | messages | messages | todo | - |
@@ -246,15 +251,15 @@ Classes:
 | `rovsti_core::gesture::Dir` | phone | input | kotlin | :design Gesture.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::gesture::Release` | phone | input | kotlin | :design Gesture.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::gesture::Tick` | phone | input | kotlin | :design Gesture.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
-| `rovsti_core::global_search::JumpStep` | messages | phone | todo | - |
-| `rovsti_core::global_search::JumpTarget` | messages | phone | todo | - |
-| `rovsti_core::global_search::MIN_QUERY_CHARS` | messages | phone | todo | - |
-| `rovsti_core::global_search::SearchCandidate` | messages | phone | todo | - |
-| `rovsti_core::global_search::SearchHit` | messages | phone | todo | - |
-| `rovsti_core::global_search::Source` | messages | phone | todo | - |
-| `rovsti_core::global_search::WA_CHATS` | messages | phone | todo | - |
-| `rovsti_core::global_search::jump_notice` | messages | phone | todo | - |
-| `rovsti_core::global_search::jump_step` | messages | phone | todo | - |
+| `rovsti_core::global_search::JumpStep` | messages | messages | todo | - |
+| `rovsti_core::global_search::JumpTarget` | messages | messages | todo | - |
+| `rovsti_core::global_search::MIN_QUERY_CHARS` | messages | messages | todo | - |
+| `rovsti_core::global_search::SearchCandidate` | messages | messages | todo | - |
+| `rovsti_core::global_search::SearchHit` | messages | messages | todo | - |
+| `rovsti_core::global_search::Source` | messages | messages | todo | - |
+| `rovsti_core::global_search::WA_CHATS` | messages | messages | todo | - |
+| `rovsti_core::global_search::jump_notice` | messages | messages | todo | - |
+| `rovsti_core::global_search::jump_step` | messages | messages | todo | - |
 | `rovsti_core::group_tools::Kind` | contacts | contacts | todo | - |
 | `rovsti_core::import_plan::number_key` | contacts | contacts | todo | - |
 | `rovsti_core::import_plan::photo_targets` | contacts | contacts | todo | - |
@@ -316,68 +321,68 @@ Classes:
 | `rovsti_core::quick_replies::ReplyError` | messages | messages | todo | - |
 | `rovsti_core::quick_replies::insert_into` | messages | messages | todo | - |
 | `rovsti_core::quick_replies::restore` | messages | messages | todo | - |
-| `rovsti_core::recents::Direction` | phone | phone | todo | - |
-| `rovsti_core::recents::ExtraCall` | phone | phone | todo | - |
-| `rovsti_core::recents::HistoryLine` | contacts,phone | phone | todo | - |
-| `rovsti_core::recents::LocaleTime` | contacts,messages,phone,stops | phone | todo | - |
-| `rovsti_core::recents::RowView` | phone | phone | todo | - |
-| `rovsti_core::recents::extra_ids_for_numbers` | phone | phone | todo | - |
-| `rovsti_core::recents::split_refs` | phone | phone | todo | - |
+| `rovsti_core::recents::Direction` | phone | phone | op | recents.build |
+| `rovsti_core::recents::ExtraCall` | phone | phone | op | recents.merge_extras |
+| `rovsti_core::recents::HistoryLine` | contacts,phone | phone | op | recents.history, recents.blocked_history, recents.history_text |
+| `rovsti_core::recents::LocaleTime` | contacts,messages,phone,stops | phone | op | recents.build |
+| `rovsti_core::recents::RowView` | phone | phone | op | recents.build |
+| `rovsti_core::recents::extra_ids_for_numbers` | phone | phone | op | call_log.ids_for_numbers |
+| `rovsti_core::recents::split_refs` | phone | phone | kotlin | :phone RecentsRepository.kt (a when over the two ref kinds) |
 | `rovsti_core::reminder::Reminder` | phone | messages | todo | - |
 | `rovsti_core::reminder::Slot` | messages,phone | messages | todo | - |
 | `rovsti_core::reminder::arm_json` | phone | messages | todo | - |
 | `rovsti_core::reminder::clock` | messages | messages | todo | - |
 | `rovsti_core::reminder::parse_list` | phone | messages | todo | - |
-| `rovsti_core::scene::CallScene` | phone | phone | todo | - |
-| `rovsti_core::scene::Control` | phone | phone | todo | - |
-| `rovsti_core::scene::DisabledReason` | phone | phone | todo | - |
-| `rovsti_core::scene::Layout` | phone | phone | todo | - |
-| `rovsti_core::scene::Participants` | phone | phone | todo | - |
-| `rovsti_core::scene::SceneDiff` | phone | phone | todo | - |
+| `rovsti_core::scene::CallScene` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::scene::Control` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::scene::DisabledReason` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::scene::Layout` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::scene::Participants` | phone | phone | op | scene.of, scene.diff |
+| `rovsti_core::scene::SceneDiff` | phone | phone | op | scene.of, scene.diff |
 | `rovsti_core::schedule::FiredSms` | messages | messages | todo | - |
 | `rovsti_core::schedule::MIN_LEAD_MS` | messages | messages | todo | - |
 | `rovsti_core::schedule::ScheduleError` | messages | messages | todo | - |
 | `rovsti_core::schedule::ScheduleQueue` | messages | messages | todo | - |
 | `rovsti_core::schedule::ScheduleTarget` | messages | messages | todo | - |
 | `rovsti_core::schedule::ScheduledSms` | messages | messages | todo | - |
-| `rovsti_core::search::ContactIndex` | contacts,messages,phone | contacts | todo | - |
-| `rovsti_core::search::fold` | contacts,phone,stops | contacts | todo | - |
+| `rovsti_core::search::ContactIndex` | contacts,messages,phone | search | op | search.index_new, search.index_replace, search.set_call_counts, search.query, search.query_loose, search.match_number |
+| `rovsti_core::search::fold` | contacts,phone,stops | search | op | search.fold |
 | `rovsti_core::settings::BACKUP_KIND` | phone | platform | todo | - |
-| `rovsti_core::settings::DEFAULT_REPLIES` | phone | platform | todo | - |
-| `rovsti_core::settings::HapticKind` | rovsti_ui | platform | todo | - |
+| `rovsti_core::settings::DEFAULT_REPLIES` | phone | phone | op | phone.reply_choices |
+| `rovsti_core::settings::HapticKind` | rovsti_ui | phone | kotlin | :design Haptics.kt (per-tap check, main thread; Rust table mirrored as a JVM test) |
 | `rovsti_core::settings::ImportPreview` | phone | platform | todo | - |
-| `rovsti_core::settings::MAX_REPLIES` | phone | platform | todo | - |
-| `rovsti_core::settings::MAX_REPLY_CHARS` | phone | platform | todo | - |
-| `rovsti_core::settings::PrefsV2` | phone | platform | todo | - |
-| `rovsti_core::settings::REPLY_COUNTER_AT` | phone | platform | todo | - |
-| `rovsti_core::settings::SPEED_DIAL_DIGITS` | phone | platform | todo | - |
-| `rovsti_core::settings::Settings` | phone | platform | todo | - |
-| `rovsti_core::settings::SortBy` | contacts,phone | platform | todo | - |
-| `rovsti_core::settings::SpeedDialEntry` | phone | platform | todo | - |
+| `rovsti_core::settings::MAX_REPLIES` | phone | phone | op | phone.reply_choices |
+| `rovsti_core::settings::MAX_REPLY_CHARS` | phone | phone | op | phone.reply_choices |
+| `rovsti_core::settings::PrefsV2` | phone | phone | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_core::settings::REPLY_COUNTER_AT` | phone | phone | op | phone.reply_choices |
+| `rovsti_core::settings::SPEED_DIAL_DIGITS` | phone | phone | op | speed_dial.assign, speed_dial.free_digits |
+| `rovsti_core::settings::Settings` | phone | phone | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_core::settings::SortBy` | contacts,phone | phone | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_core::settings::SpeedDialEntry` | phone | phone | op | phone.prefs_load, phone.prefs_save |
 | `rovsti_core::settings::backup_file_name` | phone | platform | todo | - |
-| `rovsti_core::settings::effective_keypad_tones` | phone | platform | todo | - |
-| `rovsti_core::settings::haptic_allowed` | rovsti_ui | platform | todo | - |
-| `rovsti_core::settings::reply_choices` | phone | platform | todo | - |
-| `rovsti_core::setup::ItemState` | phone | platform | todo | - |
-| `rovsti_core::setup::ItemStatus` | phone | platform | todo | - |
-| `rovsti_core::setup::OpenedThisSession` | phone | platform | todo | - |
-| `rovsti_core::setup::Reading` | phone | platform | todo | - |
-| `rovsti_core::setup::SetupChecklist` | phone | platform | todo | - |
-| `rovsti_core::setup::SetupFacts` | phone | platform | todo | - |
-| `rovsti_core::setup::SetupItem` | phone | platform | todo | - |
-| `rovsti_core::setup::XiaomiConfirmations` | phone | platform | todo | - |
-| `rovsti_core::setup::can_confirm` | phone | platform | todo | - |
-| `rovsti_core::setup::changed_title` | phone | platform | todo | - |
-| `rovsti_core::setup::still_reopened` | phone | platform | todo | - |
+| `rovsti_core::settings::effective_keypad_tones` | phone | phone | op | phone.keypad_tones |
+| `rovsti_core::settings::haptic_allowed` | rovsti_ui | phone | kotlin | :design Haptics.kt (per-tap check, main thread; Rust table mirrored as a JVM test) |
+| `rovsti_core::settings::reply_choices` | phone | phone | op | phone.reply_choices |
+| `rovsti_core::setup::ItemState` | phone | phone | op | setup.steps, setup.checklist |
+| `rovsti_core::setup::ItemStatus` | phone | phone | op | setup.steps, setup.checklist |
+| `rovsti_core::setup::OpenedThisSession` | phone | phone | op | setup.xiaomi |
+| `rovsti_core::setup::Reading` | phone | phone | op | setup.steps, setup.checklist |
+| `rovsti_core::setup::SetupChecklist` | phone | phone | op | setup.steps, setup.checklist |
+| `rovsti_core::setup::SetupFacts` | phone | phone | op | setup.steps, setup.checklist |
+| `rovsti_core::setup::SetupItem` | phone | phone | op | setup.steps, setup.checklist |
+| `rovsti_core::setup::XiaomiConfirmations` | phone | phone | op | setup.xiaomi |
+| `rovsti_core::setup::can_confirm` | phone | phone | op | setup.xiaomi |
+| `rovsti_core::setup::changed_title` | phone | phone | op | setup.reopened |
+| `rovsti_core::setup::still_reopened` | phone | phone | op | setup.reopened |
 | `rovsti_core::shared_card::CardField` | messages | contacts | todo | - |
 | `rovsti_core::shared_card::CardView` | messages | contacts | todo | - |
 | `rovsti_core::shared_card::insert_json` | messages | contacts | todo | - |
 | `rovsti_core::shared_card::primary_number` | messages | contacts | todo | - |
-| `rovsti_core::sim::DOT_MIN_CONTRAST` | phone | phone | todo | - |
-| `rovsti_core::sim::SimAccount` | phone | phone | todo | - |
-| `rovsti_core::sim::SimInfo` | phone | phone | todo | - |
-| `rovsti_core::sim::argb_rgb` | phone | phone | todo | - |
-| `rovsti_core::sim::clamp_dot` | phone | phone | todo | - |
+| `rovsti_core::sim::DOT_MIN_CONTRAST` | phone | phone | op | sim.dot |
+| `rovsti_core::sim::SimAccount` | phone | phone | op | sim.build |
+| `rovsti_core::sim::SimInfo` | phone | phone | op | sim.build |
+| `rovsti_core::sim::argb_rgb` | phone | phone | op | sim.dot |
+| `rovsti_core::sim::clamp_dot` | phone | phone | op | sim.dot |
 | `rovsti_core::small_text::SmallText` | phone | input | kotlin | :design SmallText.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::sms::DeliveryState` | messages | messages | todo | - |
 | `rovsti_core::sms::MmsPart` | messages | messages | todo | - |
@@ -395,19 +400,19 @@ Classes:
 | `rovsti_core::sms_timeline::SmsItem` | messages | messages | todo | - |
 | `rovsti_core::sms_timeline::SmsKey` | messages | messages | todo | - |
 | `rovsti_core::sms_timeline::SmsTimeline` | messages | messages | todo | - |
-| `rovsti_core::spam::RuleError` | messages | phone | todo | - |
-| `rovsti_core::spam::SpamRule` | messages | phone | todo | - |
-| `rovsti_core::spam::SpamRules` | messages | phone | todo | - |
-| `rovsti_core::spam::contains_link` | messages | phone | todo | - |
-| `rovsti_core::spam::open_links` | messages | phone | todo | - |
-| `rovsti_core::speed_dial::HoldDigit` | phone | phone | todo | - |
-| `rovsti_core::speed_dial::badges` | phone | phone | todo | - |
+| `rovsti_core::spam::RuleError` | messages | messages | todo | - |
+| `rovsti_core::spam::SpamRule` | messages | messages | todo | - |
+| `rovsti_core::spam::SpamRules` | messages | messages | todo | - |
+| `rovsti_core::spam::contains_link` | messages | messages | todo | - |
+| `rovsti_core::spam::open_links` | messages | messages | todo | - |
+| `rovsti_core::speed_dial::HoldDigit` | phone | phone | op | speed_dial.on_hold, speed_dial.assign, speed_dial.unassign, speed_dial.free_digits, speed_dial.digit_for |
+| `rovsti_core::speed_dial::badges` | phone | phone | op | speed_dial.badges |
 | `rovsti_core::starred::LocalStar` | messages | messages | todo | - |
 | `rovsti_core::starred::StarCandidate` | messages | messages | todo | - |
 | `rovsti_core::starred::StarredRow` | messages | messages | todo | - |
-| `rovsti_core::t9::MAX_HITS` | phone | contacts | todo | - |
-| `rovsti_core::t9::T9Hit` | phone | contacts | todo | - |
-| `rovsti_core::t9::T9Scratch` | phone | contacts | todo | - |
+| `rovsti_core::t9::MAX_HITS` | phone | t9 | op | t9.query |
+| `rovsti_core::t9::T9Hit` | phone | t9 | op | t9.query |
+| `rovsti_core::t9::T9Scratch` | phone | t9 | op | t9.query |
 | `rovsti_core::text_detect::DetectAction` | messages | messages | todo | - |
 | `rovsti_core::text_edit::EditBuffer` | rovsti_ui | input | kotlin | :design TextEdit.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::text_edit::History` | rovsti_ui | input | kotlin | :design TextEdit.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
@@ -463,9 +468,9 @@ Classes:
 | `rovsti_core::unread_jump::next_unread_label` | messages | messages | todo | - |
 | `rovsti_core::vcard::CardPhoto` | contacts | contacts | todo | - |
 | `rovsti_core::vcard::PhotoFormat` | contacts | contacts | todo | - |
-| `rovsti_core::voice_player::PlayerState` | messages | phone | todo | - |
-| `rovsti_core::voice_player::Speed` | messages | phone | todo | - |
-| `rovsti_core::voice_player::TogglePlan` | messages | phone | todo | - |
+| `rovsti_core::voice_player::PlayerState` | messages | messages | todo | - |
+| `rovsti_core::voice_player::Speed` | messages | messages | todo | - |
+| `rovsti_core::voice_player::TogglePlan` | messages | messages | todo | - |
 | `rovsti_core::wire::AudioRoute` | phone | wa | todo | - |
 | `rovsti_core::wire::AudioState` | phone | wa | todo | - |
 | `rovsti_core::wire::BlockReason` | phone | wa | todo | - |
@@ -634,3 +639,15 @@ Classes:
 | `rovsti_core::number_format::render` | - | shared | op | format.render |
 | `rovsti_core::calling_code::country_of_cc` | - | shared | op | calling_code.of_cc |
 | `rovsti_core::calling_code::country_of` | - | shared | op | calling_code.country_of |
+| `rovsti_core::dial::normalise_paste` | phone | input | op | dial.normalise_paste |
+| `rovsti_core::dial::validate` | phone | input | op | dial.validate |
+| `rovsti_core::dial::extract_numbers` | phone | input | op | dial.extract_numbers |
+| `rovsti_core::dial::paste_plan` | phone | input | op | dial.paste_plan |
+| `rovsti_core::dial::redial_target` | phone | input | op | dial.redial_target |
+| `rovsti_core::dial::is_emergency` | phone | input | op | dial.is_emergency |
+| `rovsti_core::blocklist::parse_many` | phone | phone | op | blocklist.parse_many |
+| `rovsti_core::blocklist::parse_file` | phone | phone | op | blocklist.parse_file |
+| `rovsti_core::blocklist::numbers_line` | phone | phone | op | blocklist.lines |
+| `rovsti_core::blocklist::call_line` | phone | phone | op | blocklist.call_line |
+| `rovsti_core::recents::refresh_delta` | phone | phone | op | recents.refresh_delta |
+| `rovsti_core::recents::section_starts` | phone | phone | op | recents.section_starts |

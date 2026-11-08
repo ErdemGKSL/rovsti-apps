@@ -6171,6 +6171,7 @@ dependencies = [
  "log",
  "rovsti_app_core",
  "rovsti_core",
+ "rovsti_wa_proto",
  "serde",
  "serde_json",
 ]

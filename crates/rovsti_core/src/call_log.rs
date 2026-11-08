@@ -12,7 +12,8 @@ use crate::wire::{CallLogEntry, CallLogKind};
 pub const MAX_ENTRIES: usize = 500;
 
 /// Row type shown in Recents.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CallType {
     Incoming,
     Outgoing,
@@ -39,16 +40,20 @@ impl CallType {
 }
 
 /// Identifies one stored call behind a Recents row, for deleting or restoring it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum EntryRef {
     /// A row of the phone's call log (`CallLog.Calls._ID`).
     Log(i64),
     /// A WhatsApp call kept by the app (its call id).
+    #[serde(rename = "whatsapp")]
     WhatsApp(String),
 }
 
 /// One line in Recents: a run of consecutive same-number, same-type calls.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RecentsRow {
     /// Number as the newest entry stored it; pass to the dialer unchanged.
     pub number_raw: String,
@@ -256,7 +261,8 @@ pub fn badge_label(count: u32) -> Option<SmallText<3>> {
 }
 
 /// Order of day, month and year in short dates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DateOrder {
     DayMonthYear,
     MonthDayYear,
@@ -264,7 +270,7 @@ pub enum DateOrder {
 }
 
 /// Locale choices injected by the caller, so tests never read the host locale.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TimeFormat {
     /// `3:14 pm` when true, `15:14` when false.
     pub hour12: bool,
@@ -422,7 +428,7 @@ pub const FREQUENT_WINDOW_DAYS: i64 = 90;
 pub const FREQUENT_LIMIT: usize = 4;
 
 /// One person (or number) in the Frequent row.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Frequent {
     /// Number as the newest counted call stored it; pass to the dialer unchanged.
     pub number_raw: String,

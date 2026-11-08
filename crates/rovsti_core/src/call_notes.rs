@@ -23,7 +23,8 @@ pub struct CallNote {
 }
 
 /// What `Notes::set` did.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SetOutcome {
     Added,
     Updated,
@@ -273,7 +274,7 @@ impl Notes {
 }
 
 /// The texts of the call details sheet.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CallDetails {
     /// "Incoming call", "WhatsApp Missed call".
     pub title: String,
@@ -390,7 +391,7 @@ pub fn row_subtitle(when: &str, preview: &str) -> String {
 }
 
 /// One line of the Notes page.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NoteRow {
     /// Position in `Notes::notes`.
     pub index: usize,

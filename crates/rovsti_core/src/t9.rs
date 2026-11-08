@@ -116,7 +116,7 @@ impl NameCodes {
 }
 
 /// One suggestion.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct T9Hit {
     /// Position in the contacts payload ([`ContactIndex::contact`]).
     pub contact_idx: u32,

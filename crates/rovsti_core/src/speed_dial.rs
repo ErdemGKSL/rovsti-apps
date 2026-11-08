@@ -12,7 +12,8 @@ use crate::phone_number::PhoneNumber;
 use crate::settings::{MAX_FIELD_CHARS, SPEED_DIAL_DIGITS, SpeedDialEntry};
 
 /// What holding a dialpad digit should do.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HoldDigit {
     /// Call the voicemail number.
     Voicemail,

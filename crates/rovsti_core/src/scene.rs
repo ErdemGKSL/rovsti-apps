@@ -351,7 +351,8 @@ fn can_hold(call: &WireCall) -> bool {
 }
 
 /// A control on the In-Call Screen that can be dimmed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Control {
     Mute,
     Keypad,
@@ -365,7 +366,8 @@ pub enum Control {
 }
 
 /// What the shared Hold / Swap slot does now.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HoldSlot {
     Hold,
     Swap,
@@ -373,7 +375,8 @@ pub enum HoldSlot {
 
 /// Why a control is dimmed. Each variant has one English string, used by the
 /// Notice pill on long-press and as the control's TalkBack hint.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DisabledReason {
     Emergency,
     /// An operation (answer, swap, merge) is still running.
@@ -416,7 +419,7 @@ impl DisabledReason {
 }
 
 /// Which parts of the scene a snapshot changed.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SceneDiff {
     /// The snapshot was newer and replaced the held one.
     pub applied: bool,

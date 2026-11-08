@@ -75,7 +75,10 @@ impl BlockSet {
 }
 
 /// Why a number cannot be added to the blocklist.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum BlockRefusal {
     /// Emergency numbers can never be blocked.
     #[error("emergency numbers can't be blocked")]
@@ -104,7 +107,10 @@ pub fn can_block(raw: &str, emergency: &EmergencyList) -> Result<(), BlockRefusa
 }
 
 /// Why typed text cannot be added to the blocklist (story 17.5).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum BlockInputError {
     /// Letters, dial codes, nothing: "Not a valid number".
     #[error("Not a valid number")]
@@ -127,7 +133,7 @@ pub fn parse_input(typed: &str, emergency: &EmergencyList) -> Result<String, Blo
 }
 
 /// What one row of the Blocked numbers page says (stories 17.5, 17.6).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockedLine {
     pub title: String,
     pub subtitle: String,
@@ -224,7 +230,7 @@ pub fn list_text(rows: &[BlockedNumber], name_of: impl Fn(&str) -> Option<String
 }
 
 /// What pasting several numbers into "Block a number" would do.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BulkParse {
     /// Canonical numbers to block, without repeats.
     pub to_block: Vec<String>,
@@ -305,7 +311,7 @@ pub fn csv_file_name(now_ms: i64, tz_offset_s: i32) -> String {
 }
 
 /// What reading a blocked-numbers file would do.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FileImport {
     pub bulk: BulkParse,
     /// Lines that held no usable number.

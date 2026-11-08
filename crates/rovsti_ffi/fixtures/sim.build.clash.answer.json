@@ -1,0 +1,1 @@
+{"ok":{"visible":true,"ask":false,"default_key":"b","default_label":"SIM 2","accounts":[{"key":"a","label":"Operator","chip":"SIM 1","title":"SIM 1","color_argb":0,"slot":null,"enabled":true},{"key":"b","label":"Operator","chip":"SIM 2","title":"SIM 2","color_argb":0,"slot":null,"enabled":true}]}}

@@ -20,14 +20,15 @@ const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StatDir {
     Incoming,
     Outgoing,
     Missed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct StatCall {
     /// The number as stored (raw).
     pub number: String,
@@ -79,7 +80,7 @@ pub fn from_sources(entries: &[CallLogEntry], extras: &[ExtraCall]) -> Vec<StatC
     from_log.chain(from_extras).collect()
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Totals {
     pub calls: u32,
     pub incoming: u32,
@@ -137,7 +138,7 @@ pub fn for_numbers(calls: &[StatCall], numbers: &[&str]) -> Totals {
     totals_since(&calls_for_numbers(calls, numbers), i64::MIN)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DayBar {
     pub day_start_ms: i64,
     /// Start of the next bucket; calls with `date_ms < end_ms` belong here.
@@ -216,7 +217,7 @@ pub fn last_weeks(calls: &[StatCall], now_ms: i64, tz_offset_s: i32, n: usize) -
     )
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PersonStat {
     /// The canonical number, the same for national and international forms.
     pub key: String,
@@ -297,7 +298,8 @@ pub fn top_people(calls: &[StatCall], since_ms: i64, limit: usize) -> Vec<Person
 }
 
 /// The span a statistics page looks at.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Range {
     /// Since Monday 00:00 local.
     #[default]

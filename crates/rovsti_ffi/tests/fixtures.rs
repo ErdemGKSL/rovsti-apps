@@ -17,7 +17,11 @@ use std::{
 use rovsti_app_core::headless::{Handler, handle_any};
 use rovsti_ffi::{
     envelope::ErrorKind,
-    ops::{call, registry},
+    handles,
+    ops::{
+        call,
+        registry::{self, PLACEHOLDER_HANDLE},
+    },
     state,
 };
 
@@ -104,7 +108,31 @@ fn contract_fixtures_match() {
                 }
                 None => (text, None),
             };
-            let answer = String::from_utf8(call(spec.name, text.as_bytes())).expect("utf-8");
+            // A case that needs a handle opens it first; the live number stands in for the placeholder.
+            let mut live: Vec<i64> = Vec::new();
+            let text = match &case.setup {
+                Some((setup_op, setup_req)) => {
+                    let opened = call(setup_op, setup_req.to_string().as_bytes());
+                    let opened: serde_json::Value = serde_json::from_slice(&opened).expect("json");
+                    let handle = opened["ok"]["handle"].as_i64().unwrap_or_else(|| {
+                        panic!("{stem}: setup {setup_op} gave no handle: {opened}")
+                    });
+                    live.push(handle);
+                    text.replace(&PLACEHOLDER_HANDLE.to_string(), &handle.to_string())
+                }
+                None => text,
+            };
+            let mut answer = String::from_utf8(call(spec.name, text.as_bytes())).expect("utf-8");
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&answer)
+                && let Some(handle) = parsed["ok"]["handle"].as_i64()
+                && !live.contains(&handle)
+            {
+                live.push(handle);
+            }
+            for handle in live {
+                answer = answer.replace(&handle.to_string(), &PLACEHOLDER_HANDLE.to_string());
+                handles::global().release(handle);
+            }
             if let Some(tmp) = tmp {
                 let _ = fs::remove_dir_all(tmp);
             }

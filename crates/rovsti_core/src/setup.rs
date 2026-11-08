@@ -111,7 +111,10 @@ impl SetupItem {
 }
 
 /// A setting that may or may not be readable on this device.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum Reading {
     Granted,
     Denied,
@@ -132,7 +135,8 @@ impl Reading {
 }
 
 /// What Android lets the app read about itself.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct SetupFacts {
     pub role_held: bool,
     pub phone_and_call_log_granted: bool,
@@ -149,7 +153,8 @@ pub struct SetupFacts {
 }
 
 /// State of one item.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ItemState {
     Done,
     NotDone,
@@ -228,14 +233,14 @@ pub fn can_confirm(item: SetupItem, opened_this_session: OpenedThisSession) -> b
     item.is_xiaomi() && opened_this_session.contains(item)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ItemStatus {
     pub item: SetupItem,
     pub state: ItemState,
 }
 
 /// "{done} of {total}" and whether everything is done.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Progress {
     pub done: usize,
     pub total: usize,

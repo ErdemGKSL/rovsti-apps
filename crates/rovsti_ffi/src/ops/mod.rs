@@ -1,7 +1,9 @@
 //! `call(op, request)`: `"<domain>.<verb>"` dispatch. One module per domain.
 
 mod core;
+mod phone;
 pub mod registry;
+mod search;
 mod shared;
 
 use crate::envelope::FfiError;

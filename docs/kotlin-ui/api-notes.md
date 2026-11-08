@@ -221,3 +221,23 @@ line itself, so the hairline is drawn only when no rim is.
 - `testRustBridge` reuses the `testDebugUnitTest` classpath and class dirs, filters to package `dev.rovsti.core.rust` and
   `testDebugUnitTest` excludes that package (those tests load the real `.so`, the Robolectric JVM must not).
 - Debug `.so` files are unstripped: about 36 MB per ABI, the catalog debug APK is about 108 MB. Release builds use `--release`.
+
+## Bridge contract (E2.7, E2.8)
+
+- Fixtures: `crates/rovsti_ffi/fixtures/<op>.{request,answer}.json` (`core.version`, `core.echo`, `core.data_dir`,
+  `core.fail.<kind>`) and `headless.<kind>.{request,answer}.json`. `core.*` answers are the full envelope bytes; headless
+  answers are the handler string. Headless requests are authored inputs (`$DIR` = data dir seeded from
+  `rovsti_app_core/tests/fixtures/dirs/<app>`); the answers are generated and compared by `tests/fixtures.rs`
+  (`UPDATE_FIXTURES=1` rewrites). `core.version` carries the crate version, so a version bump needs one rewrite.
+- Models live in `dev.rovsti.core.model.core` and `.headless`; the registry in `ContractFixturesTest` maps every fixture stem
+  to a serializer. Adding an op in Rust without a fixture+model pair, or a fixture without a model, fails a test.
+- kotlinx.serialization conventions in the models: wire names via `@SerialName`; fields a fixture does not carry are
+  `@EncodeDefault(NEVER)`; failure shapes (`{"ok":false,"error":..}`) decode into the same class, so success-only fields
+  default to null. The contract test uses `encodeDefaults = true` and compares numbers numerically (a double may render
+  differently on the JVM).
+- Unknown error kinds (a newer library) are `RustError.Unknown(kind)`, not a crash; a malformed envelope is `RustError.Parse`.
+- `HeadlessClient.ask(kind, json)` returns `HeadlessAnswer?`: `null` for library missing, `""`, `RustError`, any runtime
+  error (the caller posts the plain notification); `CancellationException` propagates. It loads the library itself, so a
+  receiver needs no `Rust.init`.
+- Platform 26 decision (see above): cargo-ndk links for the minSdk, not ARCH level 34.
+- Disk note: the build cache of Gradle (`~/.gradle/caches/build-cache-1`, ~5 GB) is safe to delete between steps.

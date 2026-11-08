@@ -99,19 +99,20 @@ class RustBridgeTest {
     @Test
     fun smsClassifyEqualsTheStep5Golden() =
         runBlocking {
-            val fixtures = File(System.getProperty("rovsti.fixtures") ?: error("rovsti.fixtures not set"))
-            val dir = File(fixtures, "dirs/messages")
+            val seeds = File(System.getProperty("rovsti.fixtures") ?: error("rovsti.fixtures not set"))
+            val contract = File(System.getProperty("rovsti.contract") ?: error("rovsti.contract not set"))
+            val dir = File(seeds, "dirs/messages")
             val tmp =
                 kotlin.io.path
                     .createTempDirectory("rovsti-golden")
                     .toFile()
             dir.copyRecursively(tmp, overwrite = true)
             val request =
-                File(fixtures, "headless/sms_classify.request.json")
+                File(contract, "headless.sms_classify.request.json")
                     .readText()
                     .trim()
                     .replace("\$DIR", tmp.absolutePath)
-            val golden = File(fixtures, "headless/sms_classify.answer.json").readText()
+            val golden = File(contract, "headless.sms_classify.answer.json").readText()
             assertEquals(golden, core.headless("sms_classify", request))
             tmp.deleteRecursively()
             Unit

@@ -56,8 +56,15 @@ sealed class RustError(
         detail: JsonElement? = null,
     ) : RustError(message, detail)
 
+    /** A kind this build does not know (a newer library): handled like any failure, never a crash. */
+    class Unknown(
+        val kind: String,
+        message: String,
+        detail: JsonElement? = null,
+    ) : RustError(message, detail)
+
     companion object {
-        /** Maps a wire name (`"not_found"`) to its subclass; an unknown name is a [Parse] error about the name. */
+        /** Maps a wire name (`"not_found"`) to its subclass; an unknown name is [Unknown]. */
         fun of(
             kind: String,
             message: String,
@@ -72,7 +79,7 @@ sealed class RustError(
                 "auth" -> Auth(message, detail)
                 "unsupported" -> Unsupported(message, detail)
                 "panic" -> Panic(message, detail)
-                else -> Parse("unknown error kind \"$kind\": $message", detail)
+                else -> Unknown(kind, "unknown error kind \"$kind\": $message", detail)
             }
     }
 }

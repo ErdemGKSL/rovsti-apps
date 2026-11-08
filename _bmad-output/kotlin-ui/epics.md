@@ -518,14 +518,14 @@ inline title judged: it slides off centre only when a centred title would run un
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E2.1 | `rovsti_app_core` crate, storage, Stops logic moved (store, pick, snap, headless) | R1 | in-progress (round-06) |
-| E2.2 | Messages logic moved (prefs, drafts, access, headless) | R1 | in-progress (round-06) |
-| E2.3 | Contacts and Phone logic moved (trash store, prefs, WhatsApp glue, notes, WA call tracker) | R1 | in-progress (round-06) |
-| E2.4 | `wa_link` moved (link file, headless send) | R1 | in-progress (round-06) |
-| E2.5 | `rovsti_ffi`: exports, envelope, panic guard, handles, event sink, desktop build | R1 | in-progress (round-06) |
+| E2.1 | `rovsti_app_core` crate, storage, Stops logic moved (store, pick, snap, headless) | R1 | done (round-06 steps 1 and 5) |
+| E2.2 | Messages logic moved (prefs, drafts, access, headless) | R1 | done (round-06 step 3) |
+| E2.3 | Contacts and Phone logic moved (trash store, prefs, WhatsApp glue, notes, WA call tracker) | R1 | done (round-06 step 4) |
+| E2.4 | `wa_link` moved (link file, headless send) | R1 | done (round-06 step 2) |
+| E2.5 | `rovsti_ffi`: exports, envelope, panic guard, handles, event sink, desktop build | R1 | done (round-06 step 6) |
 | E2.6 | `:core-bridge`: cargo-ndk and host build tasks, `RustNative`, dispatcher, init | R1 | done (round-06 step 7) |
-| E2.7 | Contract fixtures and Kotlin models | R1 | in-progress (round-06) |
-| E2.8 | `headless` entry compatible with today's receivers | R1 | in-progress (round-06) |
+| E2.7 | Contract fixtures and Kotlin models | R1 | done (round-06 step 8) |
+| E2.8 | `headless` entry compatible with today's receivers | R1 | done (round-06 steps 5 and 8) |
 | E2.9 | Phone domain ops | R2 | todo |
 | E2.10 | Contacts domain ops | R2 | todo |
 | E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | todo |
@@ -533,6 +533,32 @@ inline title judged: it slides off centre only when a centred title would run un
 | E2.12 | Stops domain ops | R2 | todo |
 | E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | todo |
 | E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | todo |
+
+#### Evidence, E2 R1 (E2.1-E2.8 done, round-06)
+- E2.1-E2.4: commits `07ab3a5` (app_core, storage, Stops store/pick/snap), `e099053` (`wa_link`), `eadb490` (Messages prefs, drafts,
+  access), `1eaba7c` (Contacts and Phone pure halves), `0e8fcb0` (headless handlers). `rovsti_app_core` has no gpui/jni
+  dependency (`crates/rovsti_app_core/tests/deps.rs`); `cargo test -p rovsti_app_core`: 210 lib tests + the store, headless
+  golden (14) and deps tests, all green.
+- E2.5: `7f72cca`. `cargo test -p rovsti_ffi`: 20 lib tests (envelope per `ErrorKind`, panic guard, 10 000-handle leak test,
+  1 000-event sink order) + 2 fixture tests; `scripts/check-ffi-exports.sh` lists the 8 `Java_dev_rovsti_core_RustNative_*`
+  symbols in the aarch64 `.so` (also run on the packaged `.so` by `scripts/check-catalog-apk.sh`).
+- E2.6: `8cd30b5`. `:core-bridge:testRustBridge` (real host `.so`: version, 1 MB echo, error kinds, `core.panic`, headless golden,
+  1 000 events in order) and `FakeRustCoreTest` pass in one Gradle invocation.
+- E2.7: `crates/rovsti_ffi/tests/fixtures.rs` writes/compares 11 `core.*` and 10 `headless.*` pairs in
+  `crates/rovsti_ffi/fixtures/` (42 files; `UPDATE_FIXTURES=1` rewrites; a stray file or a differing byte fails).
+  `ContractFixturesTest` (6 tests): every fixture decodes strictly (`ignoreUnknownKeys = false`) into
+  `dev.rovsti.core.model.{core,headless}` and re-encodes to equal JSON; a fixture without a model and a model without a
+  fixture both fail. `RustErrorTest` (4 tests): all 8 kinds map, unknown kind -> `RustError.Unknown`, malformed envelopes ->
+  `Parse`. Models are listed in `android/compose_stability.conf`.
+- E2.8: Rust half in `0e8fcb0` (goldens now live in `crates/rovsti_ffi/fixtures/headless.<kind>.*`, read by
+  `rovsti_app_core/tests/headless_golden.rs`). Kotlin half: `HeadlessClient` (`HeadlessClientTest`, 9 tests: library missing,
+  link error at call time, panic/empty answer, `RustError`, runtime error -> `null`; cancellation propagates).
+- Rust gate (full, disk 11 GB free before): `cargo fmt --all`, `cargo clippy --workspace --all-targets` (0 warnings; the moved
+  tests got a crate-level `cfg_attr(test, allow(clippy::unwrap_used))` in `rovsti_app_core`), `cargo test --workspace` (3547 passed,
+  0 failed), `cargo check -p rovsti_android --target aarch64-linux-android` ok. `bash scripts/kotlin-ui-check.sh` ALL GREEN.
+- Catalog APK (109 237 553 bytes, 104 MiB): `android/catalog/build/outputs/apk/debug/catalog-debug.apk` carries `lib/{arm64-v8a,x86_64}/librovsti_ffi.so`.
+- Hand-off: next planner does E2 R2 (E2.9-E2.14 domain ops, each op with a fixture pair and a Kotlin model, or the
+  fixture test fails) and/or E3 R1 (`:shell` starts with `Rust.init` in `Application.onCreate` and `HeadlessClient` in `:platform`).
 
 ### E2.1-E2.4 Move app logic out of the GPUI crates
 - AC1 Each moved module keeps its unit tests; the GPUI app now calls the moved function (no duplicate copy).

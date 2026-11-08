@@ -25,9 +25,14 @@ dependencies {
 // run (testDebugUnitTest) skips them. One JVM for all classes: the library keeps process-wide state.
 val rustTestPackage = "dev.rovsti.core.rust"
 
+// The contract fixtures E2.7 (crates/rovsti_ffi/fixtures): ContractFixturesTest reads them as a plain directory.
+val contractFixtures = rootProject.projectDir.parentFile.resolve("crates/rovsti_ffi/fixtures")
+
 android {
     testOptions {
         unitTests.all {
+            it.systemProperty("rovsti.contract", contractFixtures.absolutePath)
+            it.inputs.dir(contractFixtures).withPropertyName("contractFixtures")
             if (it.name == "testDebugUnitTest" || it.name == "testReleaseUnitTest") {
                 it.filter.excludeTestsMatching("$rustTestPackage.*")
             }
@@ -54,10 +59,12 @@ tasks.register<Test>("testRustBridge") {
     maxParallelForks = 1
     maxHeapSize = "512m"
     systemProperty("java.library.path", rustHostLib.get().asFile.absolutePath)
-    // The Step 5 goldens of the headless handlers (crates/rovsti_app_core/tests/fixtures).
-    val fixtures = rootProject.projectDir.parentFile.resolve("crates/rovsti_app_core/tests/fixtures")
-    systemProperty("rovsti.fixtures", fixtures.absolutePath)
-    inputs.dir(fixtures).withPropertyName("fixtures")
+    // The headless goldens (crates/rovsti_ffi/fixtures) and the seed dirs they run against (rovsti_app_core).
+    val seeds = rootProject.projectDir.parentFile.resolve("crates/rovsti_app_core/tests/fixtures")
+    systemProperty("rovsti.fixtures", seeds.absolutePath)
+    systemProperty("rovsti.contract", contractFixtures.absolutePath)
+    inputs.dir(seeds).withPropertyName("seeds")
+    inputs.dir(contractFixtures).withPropertyName("contractFixtures")
     inputs.dir(rustHostLib).withPropertyName("rustHostLib")
     testLogging {
         events("passed", "failed", "skipped")

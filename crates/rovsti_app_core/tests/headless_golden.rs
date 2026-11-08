@@ -1,5 +1,5 @@
 //! Byte-identical proof for the headless handlers (E2.8): the answers in
-//! `tests/fixtures/headless/<kind>.answer.json` were recorded with the code as it was in the
+//! `crates/rovsti_ffi/fixtures/headless.<kind>.answer.json` were recorded with the code as it was in the
 //! GPUI app crates, before it moved here. The request files use `$DIR` for the data dir, which
 //! is a fresh copy of `tests/fixtures/dirs/<app>/` per request. Network kinds run against a
 //! dir with no WhatsApp link, so they take their documented fallback and never connect.
@@ -10,6 +10,14 @@ use rovsti_app_core::headless::handle_any;
 
 fn root() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures"))
+}
+
+/// The contract fixtures live with the bridge (E2.7); `rovsti_ffi/tests/fixtures.rs` owns them.
+fn contract() -> &'static Path {
+    Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../rovsti_ffi/fixtures"
+    ))
 }
 
 fn copy_dir(from: &Path, to: &Path) -> io::Result<()> {
@@ -25,14 +33,14 @@ fn answer_for(app: &str, kind: &str) -> (String, String) {
     let tmp = std::env::temp_dir().join(format!("rovsti-golden-{kind}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     copy_dir(&root().join("dirs").join(app), &tmp).expect("seed dir");
-    let request = fs::read_to_string(root().join(format!("headless/{kind}.request.json")))
+    let request = fs::read_to_string(contract().join(format!("headless.{kind}.request.json")))
         .expect("request")
         .trim_end()
         .replace("$DIR", tmp.to_str().expect("utf-8 temp dir"));
     let answer = handle_any(kind, &request);
     let _ = fs::remove_dir_all(&tmp);
-    let golden =
-        fs::read_to_string(root().join(format!("headless/{kind}.answer.json"))).expect("answer");
+    let golden = fs::read_to_string(contract().join(format!("headless.{kind}.answer.json")))
+        .expect("answer");
     (answer, golden)
 }
 
@@ -60,11 +68,13 @@ golden!(trip_end, "stops", "trip_end");
 
 #[test]
 fn every_fixture_kind_is_covered_by_a_test() {
-    let mut kinds: Vec<String> = fs::read_dir(root().join("headless"))
+    let mut kinds: Vec<String> = fs::read_dir(contract())
         .expect("dir")
         .filter_map(|e| {
             let name = e.ok()?.file_name().into_string().ok()?;
-            name.strip_suffix(".answer.json").map(str::to_owned)
+            name.strip_prefix("headless.")?
+                .strip_suffix(".answer.json")
+                .map(str::to_owned)
         })
         .collect();
     kinds.sort();

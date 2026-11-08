@@ -1,5 +1,6 @@
 package dev.rovsti.core
 
+import dev.rovsti.core.model.core.VersionInfo
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -11,12 +12,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import java.io.File
-
-/** What `core.version` and `init` answer. */
-data class VersionInfo(
-    val version: String,
-    val abi: Int,
-)
 
 /**
  * The typed face of the native library. Apps and view models depend on this interface; tests use `FakeRustCore`

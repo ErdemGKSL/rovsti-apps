@@ -33,8 +33,9 @@ Branch: `ui-overhaul` (never push to `main`).
      story says otherwise, and **every new or changed PNG was opened with the Read tool and judged**
      (ARCH 9). What was seen goes in the Evidence line.
   4. `references/checklist.md` sections that apply are ticked or have a written reason.
-  5. Licence: no Convx code; glisse-derived files carry the header; `android/THIRD_PARTY_NOTICES.md` updated for
-     any new third-party code.
+  5. Licence (R3 owner decision: Rovsti is GPL-3.0-or-later): Convx code is ported close to verbatim with its original
+     header plus the "Ported from Convx" line; glisse-derived files carry the glisse header; `android/THIRD_PARTY_NOTICES.md`
+     updated for any new third-party code.
 - Screenshot names: `<story>-<what>[-dark|-light][-fs2|-rtl]`, for example `e1.9-menu-open-below-dark.png`.
 
 ---
@@ -56,7 +57,12 @@ step-back tests, `ActionSheetTest` haze patch). **R3 re-planned** -> `_bmad-outp
 (planned 2026-11-08 at base `6bebfbe`) after the owner decisions: Rovsti becomes GPL-3.0-or-later and Convx code is
 ported close to verbatim; no liquid glass shows on a real phone, so the hand-written glass engine (E1.5) is replaced by
 Convx's backdrop stack; Convx's iOS component library replaces our hand-written overlays/controls/chrome where it is
-better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 move to R4.
+better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 move to R4. R3 implemented in
+`542e271`..`d0ea763`, verified in code by the round-4 planner: everything except E1.29's facades (see E1.29).
+**R4** -> `_bmad-output/kotlin-ui/plans/round-04.md` (planned 2026-11-08 at base `d0ea763`): screenshot fixes F5 (trigger
+residue under open menus), F6 (text over text under the collapsed bar), F7 (page-sheet row inset), orphan goldens; finish
+E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `ScreenChrome`, `GlassCircleButton`,
+`IosOverscroll`) under our facades; then E1.18-E1.22 and close E1.
 
 | Story | Title | Round | Status |
 |---|---|---|---|
@@ -71,8 +77,8 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 | E1.9 | Overlay host and placement | R2 | done |
 | E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | done; rendering replaced by E1.27 (`ButtonMenuEntry` is a facade over `IosContextMenuEntry`; `MenuPanel` and the glyph morph are gone) |
 | E1.11 | Long-press context menu (simple and preview-card variants) | R2 | done; rendering replaced by E1.27 (`ContextMenuEntry` / `PreviewCardEntry` are facades over `IosContextMenuEntry` / `AppleContextMenuEntry`) |
-| E1.12 | Popover (anchored arbitrary content) | R2 | done (rendering to be replaced by E1.27) |
-| E1.13 | Sheets with detents, pushback, background interaction | R2 | done (rendering to be replaced by E1.28) |
+| E1.12 | Popover (anchored arbitrary content) | R2 | done (still our `MenuMorph` + `panelGlass` on the Convx material; not replaced by E1.27) |
+| E1.13 | Sheets with detents, pushback, background interaction | R2 | done; numbers and page sheet from Convx via E1.28 |
 | E1.14 | Alert, action sheet, confirm | R2 | done |
 | E1.15 | Toast and undo pill | R2 | done |
 | E1.16 | Text field, search field, composer field | R2 | done |
@@ -83,12 +89,12 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 | E1.27 | Convx menus and context menus (IosMenu, AppleContextMenu, IosContextMenu, OverlayMenu) in `OverlayHost` | R3 | done |
 | E1.28 | Convx sheets (IosSheet, IosPageSheet, IosSheetPresentation, BottomSheet) | R3 | done (SheetEntry facade keeps detents, stacking, non-modal; release rule, pushback, corner, grabber from Convx) |
 | E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | done |
-| E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3 | done (R3 step 8; see evidence) |
-| E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | todo |
-| E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | todo |
-| E1.20 | Image loading and the photo viewer | R4 | todo |
-| E1.21 | Performance harness and convention tests | R4 | todo |
-| E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4 | todo |
+| E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3/R4 | in-progress (swipe, IosButton, APK done in R3; facades not done: R4 Steps 2-3) |
+| E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | todo (planned, round-04) |
+| E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | todo (planned, round-04) |
+| E1.20 | Image loading and the photo viewer | R4 | todo (planned, round-04) |
+| E1.21 | Performance harness and convention tests | R4 | todo (planned, round-04) |
+| E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4 | todo (planned, round-04) |
 
 ### E1.1 Modules, convention plugins, screenshot harness, catalog shell
 - AC1 `android/build-logic` with convention plugins (`rovsti.android.library`, `rovsti.android.app`, `rovsti.compose`,
@@ -367,6 +373,14 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
   test keeps the last row above it), e1.6-rows-light (new chevron), e1.29-swipe-revealed-{light,dark} (Archive/Delete
   76 dp buttons full row height, row clipped to the card), e1.29-swipe-full-light (row dragged mostly off).
   Catalog APK: android/catalog/build/outputs/apk/debug/catalog-debug.apk (34.8 MB).
+- Verified by the round-4 planner (grep at `d0ea763`): `IosTabBar`, `IosNavigationBar`, `IosList` have no caller; `IosButton`
+  only in `SwipePage`. Convx's on-device chrome is `ui/component/floatingtabbar/**` (vendored compose-floating-tab-bar,
+  Apache-2.0, + Convx puck/fold) and `FrostedTopBar`/`ScreenChrome`/`GlassCircleButton`, not the `ios/component` catalog
+  versions, so R4 Step 2 ports the floating tab bar under `RovstiTabBar` and Step 3 the top chrome, buttons and list drawing
+  under `LargeTitleScaffold`/`Toolbar`/`Buttons`/`ListRow`. Screens judged: `e1.7-tabbar-rest-light` (row text doubled through
+  the capsule: blur too weak), `e1.8-title-collapsed-dark` (inline title over legible rows: F6), `e1.28-page-sheet-light`
+  (row at a second inset: F7), `e1.27-menu-open-light` + `e1.26-overlays-over-stripes-light` (stray square at the hidden
+  trigger: F5). Status stays in-progress until R4 Step 3.
 
 ### E1.18 Navigation scaffold
 - AC1 Navigation 3 checked at the pinned version (or the documented fallback, ARCH 5.1); `TabNavigator` with one stack

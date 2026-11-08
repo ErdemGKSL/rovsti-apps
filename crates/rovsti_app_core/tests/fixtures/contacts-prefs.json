@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "name_format": "last_first",
+  "sort_by": "last_name",
+  "save_to": "com.google|a@b.com",
+  "birthday_reminders": false,
+  "reminder_hour": 9,
+  "favorites_order": [],
+  "my_card": null,
+  "emergency": [],
+  "known_max_id": null,
+  "added": [],
+  "viewed": []
+}

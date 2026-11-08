@@ -20,7 +20,7 @@ fn path(dir: &Path) -> PathBuf {
 }
 
 /// The saved Trash, or an empty one when there is none.
-pub(crate) fn trash_load(dir: &Path) -> Trash {
+pub fn trash_load(dir: &Path) -> Trash {
     let Ok(bytes) = fs::read(path(dir)) else {
         return Trash::default();
     };
@@ -36,7 +36,7 @@ pub(crate) fn trash_load(dir: &Path) -> Trash {
 
 /// The saved Trash with the entries older than the retention period dropped
 /// (and the file rewritten when any were).
-pub(crate) fn trash_load_purged(dir: &Path, now_ms: i64) -> Trash {
+pub fn trash_load_purged(dir: &Path, now_ms: i64) -> Trash {
     let mut trash = trash_load(dir);
     if trash.purge_expired(now_ms) > 0
         && let Err(error) = trash_save(dir, &trash)
@@ -48,7 +48,7 @@ pub(crate) fn trash_load_purged(dir: &Path, now_ms: i64) -> Trash {
 
 /// Writes `trash`; the old file stays whole if this fails. A file that would
 /// be too big to read back again is refused.
-pub(crate) fn trash_save(dir: &Path, trash: &Trash) -> io::Result<()> {
+pub fn trash_save(dir: &Path, trash: &Trash) -> io::Result<()> {
     let mut copy = trash.clone();
     copy.schema_version = SCHEMA_VERSION;
     let json = serde_json::to_vec_pretty(&copy).map_err(io::Error::other)?;

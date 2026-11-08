@@ -76,12 +76,7 @@ pub mod kind {
     pub const STOPS_LOCATION: &str = "stops_location";
 }
 
-/// What the user chose on a WhatsApp incoming-call notification.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WaCallAction {
-    Answer,
-    Decline,
-}
+pub use rovsti_core::wire::WaCallAction;
 
 /// Decodes a `wa_call_action` payload into the gateway call id and the action.
 /// `None` for malformed JSON, a missing or empty id, or an unknown action.

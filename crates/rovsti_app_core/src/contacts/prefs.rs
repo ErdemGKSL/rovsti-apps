@@ -20,7 +20,7 @@ fn path(dir: &Path) -> PathBuf {
 }
 
 /// The saved preferences, or the defaults when there are none.
-pub(crate) fn load(dir: &Path) -> ContactsPrefs {
+pub fn load(dir: &Path) -> ContactsPrefs {
     let Ok(bytes) = fs::read(path(dir)) else {
         return ContactsPrefs::default();
     };
@@ -35,7 +35,7 @@ pub(crate) fn load(dir: &Path) -> ContactsPrefs {
 }
 
 /// Writes `prefs`; the old file stays whole if this fails.
-pub(crate) fn save(dir: &Path, prefs: ContactsPrefs) -> io::Result<()> {
+pub fn save(dir: &Path, prefs: ContactsPrefs) -> io::Result<()> {
     let json = serde_json::to_vec_pretty(&prefs).map_err(io::Error::other)?;
     let target = path(dir);
     let temp = dir.join(format!("{FILE}.tmp"));

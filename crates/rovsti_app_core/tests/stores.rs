@@ -154,3 +154,92 @@ fn the_drafts_fixture_loads_and_saves_byte_for_byte() {
         fs::read(fixture("drafts.json")).expect("fixture"),
     );
 }
+
+#[test]
+fn the_contacts_trash_fixture_loads_purges_and_saves_byte_for_byte() {
+    use rovsti_app_core::contacts::trash_store;
+
+    let name = "contacts-trash.json";
+    let dir = store::test_support::tmp("fx-contacts-trash");
+    fs::copy(fixture(name), dir.join(name)).expect("copy");
+    let trash = trash_store::trash_load(&dir);
+    assert_eq!(trash.entries.len(), 2);
+    assert_eq!(trash.entries[0].draft.given, "Burak");
+    trash_store::trash_save(&dir, &trash).expect("save");
+    assert_eq!(
+        fs::read(dir.join(name)).expect("read"),
+        fs::read(fixture(name)).expect("fixture"),
+    );
+    // Thirty days after the older entry only the newer one is left.
+    let day = 86_400_000;
+    let purged = trash_store::trash_load_purged(&dir, 1_700_000_050_000 + 30 * day);
+    assert_eq!(purged.entries.len(), 1);
+    assert_eq!(purged.entries[0].draft.given, "Burak");
+}
+
+#[test]
+fn the_contacts_prefs_fixture_loads_and_saves_byte_for_byte() {
+    use rovsti_app_core::contacts::prefs;
+    use rovsti_core::{settings::SortBy, wire::NameFormat};
+
+    let name = "contacts-prefs.json";
+    let dir = store::test_support::tmp("fx-contacts-prefs");
+    fs::copy(fixture(name), dir.join(name)).expect("copy");
+    let loaded = prefs::load(&dir);
+    assert_eq!(loaded.name_format, NameFormat::LastFirst);
+    assert_eq!(loaded.sort_by, SortBy::LastName);
+    assert_eq!(loaded.save_to, "com.google|a@b.com");
+    prefs::save(&dir, loaded).expect("save");
+    assert_eq!(
+        fs::read(dir.join(name)).expect("read"),
+        fs::read(fixture(name)).expect("fixture"),
+    );
+}
+
+#[test]
+fn the_call_notes_fixture_loads_and_saves_byte_for_byte() {
+    use rovsti_app_core::phone::notes::{self, NotesStore};
+
+    let name = "call-notes.json";
+    let dir = store::test_support::tmp("fx-call-notes");
+    fs::copy(fixture(name), dir.join(name)).expect("copy");
+    let stored = notes::load(&dir).expect("notes");
+    let mut store = NotesStore::default();
+    store.loaded(stored);
+    assert_eq!(store.len(), 2);
+    assert_eq!(
+        store
+            .get("0555 111 22 33", 1_700_000_000_000)
+            .map(|n| n.text.as_str()),
+        Some("call back")
+    );
+    notes::save(&dir, &store.snapshot()).expect("save");
+    assert_eq!(
+        fs::read(dir.join(name)).expect("read"),
+        fs::read(fixture(name)).expect("fixture"),
+    );
+}
+
+#[test]
+fn the_wa_calls_fixtures_load_and_save_byte_for_byte() {
+    use rovsti_app_core::phone::wa_call::{extra_calls, load_history, save_history};
+
+    let dir = store::test_support::tmp("fx-wa-calls");
+    for name in ["wa-calls.json", "wa-calls-forgotten.json"] {
+        fs::copy(fixture(name), dir.join(name)).expect("copy");
+    }
+    let history = load_history(&dir).expect("history");
+    assert_eq!(history.iter().count(), 2);
+    assert!(history.knows("c"), "the deleted call stays deleted");
+    let extras = extra_calls(&history);
+    assert_eq!(extras[0].number_raw, "+905550000000");
+    assert_eq!(extras[1].label.as_deref(), Some("Ayşe"));
+    save_history(&dir, &history);
+    for name in ["wa-calls.json", "wa-calls-forgotten.json"] {
+        assert_eq!(
+            fs::read(dir.join(name)).expect("read"),
+            fs::read(fixture(name)).expect("fixture"),
+            "{name}"
+        );
+    }
+}

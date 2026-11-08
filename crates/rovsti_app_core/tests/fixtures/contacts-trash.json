@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "key": 2,
+      "deleted_ms": 1700000100000,
+      "draft": {
+        "given": "Burak",
+        "family": "",
+        "org": "",
+        "note": "",
+        "numbers": [],
+        "emails": [],
+        "groups": [],
+        "starred": false
+      }
+    },
+    {
+      "key": 1,
+      "deleted_ms": 1700000000000,
+      "draft": {
+        "given": "Ayşe",
+        "family": "",
+        "org": "",
+        "note": "",
+        "numbers": [],
+        "emails": [],
+        "groups": [],
+        "starred": false
+      }
+    }
+  ]
+}

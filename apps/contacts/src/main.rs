@@ -24,7 +24,6 @@ mod photo_crop;
 mod photo_viewer;
 mod photos;
 mod picker;
-mod prefs;
 mod qr_sheet;
 mod quick;
 mod recent;
@@ -34,12 +33,13 @@ mod select;
 mod shots;
 mod transfer;
 mod trash;
-mod trash_store;
 mod ui;
 mod upcoming;
 mod whatsapp;
 
 use std::{iter, path::PathBuf, sync::Arc};
+
+use rovsti_app_core::contacts::{prefs, trash_store};
 
 use futures::StreamExt;
 use gpui::{

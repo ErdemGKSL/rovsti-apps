@@ -1,0 +1,1 @@
+[{"call_id":"b","peer":"905550000000@s.whatsapp.net","peer_label":"+905550000000","direction":"in","started_ms":1700000100000,"duration_s":0,"missed":false},{"call_id":"a","peer":"905551234567@s.whatsapp.net","peer_label":"Ayşe","direction":"in","started_ms":1700000000000,"duration_s":0,"missed":true}]

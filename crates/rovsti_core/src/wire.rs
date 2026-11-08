@@ -1049,6 +1049,13 @@ pub enum HandoffAction {
     Unknown,
 }
 
+/// What the user chose on a WhatsApp incoming-call notification.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaCallAction {
+    Answer,
+    Decline,
+}
+
 /// A WhatsApp action handed from one Rovsti app to another.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Handoff {

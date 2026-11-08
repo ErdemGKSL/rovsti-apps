@@ -22,4 +22,5 @@ enum class CatalogPage(
     LargeTitle("Large title"),
     Overlays("Overlay host"),
     ButtonMenu("Button menu"),
+    ContextMenu("Context menu"),
 }

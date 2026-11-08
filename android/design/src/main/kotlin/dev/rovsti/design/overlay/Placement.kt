@@ -5,8 +5,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 
 /** Which side of its anchor a panel opened on. */
 enum class Side { Below, Above }
@@ -99,5 +99,9 @@ class AnchorHolder {
     var rect: Rect = Rect.Zero
 }
 
-/** Records this element's window bounds into [holder] (a field write per layout, no recomposition). */
-fun Modifier.captureAnchor(holder: AnchorHolder): Modifier = onGloballyPositioned { holder.rect = it.boundsInWindow() }
+/** Records this element's (unclipped) window bounds into [holder] (a field write per layout, no recomposition). */
+fun Modifier.captureAnchor(holder: AnchorHolder): Modifier =
+    onGloballyPositioned {
+        // Not boundsInWindow(): that is clipped by a scrolling parent, and a half-visible row must keep its full size.
+        holder.rect = Rect(it.positionInWindow(), Size(it.size.width.toFloat(), it.size.height.toFloat()))
+    }

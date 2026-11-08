@@ -61,7 +61,7 @@ mid-scroll).
 | E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | done |
 | E1.9 | Overlay host and placement | R2 | done |
 | E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | done |
-| E1.11 | Long-press context menu (simple and preview-card variants) | R2 | in-progress |
+| E1.11 | Long-press context menu (simple and preview-card variants) | R2 | done |
 | E1.12 | Popover (anchored arbitrary content) | R2 | in-progress |
 | E1.13 | Sheets with detents, pushback, background interaction | R2 | in-progress |
 | E1.14 | Alert, action sheet, confirm | R2 | in-progress |
@@ -213,6 +213,8 @@ mid-scroll).
 - AC3 TalkBack equivalent: `onLongClick` semantics and custom actions.
 - Screenshots: `e1.11-context-row-open`, `e1.11-context-row-open-near-bottom` (panel above),
   `e1.11-context-preview-card`, `e1.11-context-preview-dragged`, `e1.11-context-open-rtl`.
+
+- Evidence (E1.11): `android/design/.../overlay/` `ContextMenuGesture.kt` (`PressRamp` 300 ms in / spring 0.7-600 out, `Modifier.contextMenu` resolving Tap/Cancel/ChildTook/Long: Main pass before the timeout, Initial pass with consume after open, `onLongClick` + `customActions`), `ContextMenuEntry.kt` (`ContextMenuTarget`, `longPressMenu`, lifted dedicated preview 1.05, scrim .28/.14, panel spring 0.78/700, per-axis scale min 0.08, 20 dp clearing blur on open only, `LongPress` haptic), `ContextMenuPanel.kt` (rows reuse `MenuRows`), `PreviewCardLayout.kt` (pure), `PreviewCardEntry.kt` (menuLift/menuLand, 30 % cross-fade, radius 22, menuGrowX/Y, rubber 0.6/0.3, dismiss 64 dp or 40 %, `previewReturn`). All ORIGINAL, no glisse header. `captureAnchor` now records the unclipped window rect (a half-visible row first lifted as a clipped strip). Tests: JVM `PreviewCardLayoutTest`; Robolectric `ContextMenuGestureTest` (tap, 500 ms hold + LongPress haptic, 20 dp move scrolls, "..." click and hold win, OnLongClick, custom actions, bounds unchanged, panel row runs, 80 dp drag dismisses, short drag returns). Opened `e1.11-context-row-open`, `-row-open-near-bottom` (panel above, row exactly in its slot), `-preview-card(-left)`, `-preview-dragged` (card follows, panel fading), `-open-rtl` (mirrored) light/dark. Known: the finger that opened the menu cannot slide onto panel rows (touch target is fixed at down); the preview card's scrim also dims the tile it grew from.
 
 ### E1.12 Popover
 - AC1 Anchored popover with arbitrary content (for example a date chooser or a small form), arrowless, placed by

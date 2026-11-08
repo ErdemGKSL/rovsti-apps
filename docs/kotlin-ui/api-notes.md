@@ -109,3 +109,12 @@ line itself, so the hairline is drawn only when no rim is.
 - `drawscope.withTransform { translate; scale }` draws the glyph copy; `Painter.draw(size, alpha, colorFilter)`.
 - Test fact: a menu opened by a touch-down (`menuTrigger`) needs two 16 ms advances before a big `advance` or its spring has
   not started when a screenshot is taken.
+
+## E1.11: context menu (overlay/ContextMenu*.kt, PreviewCard*.kt)
+
+- `AwaitPointerEventScope.withTimeoutOrNull`, `PointerEventPass.Main/Initial`, `changedToUp`, `PointerInputChange.isConsumed`,
+  `viewConfiguration.longPressTimeoutMillis/touchSlop`: verified by the passing `ContextMenuGestureTest`.
+- `semantics { onLongClick(label) }`, `customActions = listOf(CustomAccessibilityAction)`: `SemanticsActions.OnLongClick/CustomActions`.
+- `Placeable.placeWithLayer(x, y) { }` carries the per-frame scale/alpha/blur/translation of the panel and card (state read in the layer block only).
+- `LayoutCoordinates.positionInWindow()` + `size` instead of `boundsInWindow()` for anchors: the latter is clipped by a scrolling parent.
+- Test facts: `boundsInRoot` of a half-visible lazy item is clipped too; while a modal entry is open the page is hidden from the merged tree (use `useUnmergedTree = true`); the Robolectric touch slop makes a 20 dp move scroll only about 4 dp.

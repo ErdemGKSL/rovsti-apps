@@ -71,6 +71,7 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
                     CatalogPage.LargeTitle -> LargeTitlePage()
                     CatalogPage.Overlays -> OverlaysPage()
                     CatalogPage.ButtonMenu -> ButtonMenuPage()
+                    CatalogPage.ContextMenu -> ContextMenuPage()
                 }
             }
         }
@@ -133,5 +134,5 @@ internal fun SectionLabel(
 
 private val Planned =
     listOf(
-        "Menu slide, plate and keys" to "E1.10 part 2",
+        "Popover with content" to "E1.12",
     )

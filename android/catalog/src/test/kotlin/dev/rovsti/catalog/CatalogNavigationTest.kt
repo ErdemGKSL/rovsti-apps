@@ -38,4 +38,10 @@ class CatalogNavigationTest : ShotTest() {
         composeFrame { CatalogApp(initialPage = CatalogPage.ButtonMenu) }
         compose.onNodeWithText("Button menu").assertIsDisplayed()
     }
+
+    @Test
+    fun contextMenuPageOpens() {
+        composeFrame { CatalogApp(initialPage = CatalogPage.ContextMenu) }
+        compose.onNodeWithText("Context menu").assertIsDisplayed()
+    }
 }

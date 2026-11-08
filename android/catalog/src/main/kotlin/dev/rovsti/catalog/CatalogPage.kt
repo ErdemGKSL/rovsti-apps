@@ -26,4 +26,5 @@ enum class CatalogPage(
     Popover("Popover"),
     Dialogs("Alerts and sheets"),
     Sheets("Sheets"),
+    TextFields("Text fields"),
 }

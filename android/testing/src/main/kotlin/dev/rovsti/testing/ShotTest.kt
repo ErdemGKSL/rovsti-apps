@@ -53,7 +53,7 @@ import java.util.TimeZone
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [35], qualifiers = ShotTest.PORTRAIT)
+@Config(sdk = [35], qualifiers = ShotTest.PORTRAIT, shadows = [ShadowNoopMagnifier::class])
 abstract class ShotTest {
     @get:Rule
     val compose = createAndroidComposeRule<ComponentActivity>()
@@ -207,6 +207,16 @@ abstract class ShotTest {
         compose.mainClock.advanceTimeByFrame()
     }
 
+    /** Height in dp of the simulated keyboard (0 = closed). Takes effect at the next [advance] or [composeFrame]. */
+    var simulatedImeDp: Int = 0
+
+    /** Opens (or, with 0, closes) a simulated keyboard of [heightDp] and lets the layout follow. */
+    fun setSimulatedIme(heightDp: Int) {
+        simulatedImeDp = heightDp
+        advance(100)
+        advance(100)
+    }
+
     private fun settle() {
         repeat(SETTLE_FRAMES) { compose.mainClock.advanceTimeByFrame() }
         compose.waitForIdle()
@@ -231,7 +241,11 @@ abstract class ShotTest {
                 ).setInsets(
                     WindowInsets.Type.navigationBars(),
                     android.graphics.Insets.of(0, 0, 0, (NAV_BAR_DP * density).toInt()),
-                ).build()
+                ).setInsets(
+                    WindowInsets.Type.ime(),
+                    android.graphics.Insets.of(0, 0, 0, (simulatedImeDp * density).toInt()),
+                ).setVisible(WindowInsets.Type.ime(), simulatedImeDp > 0)
+                .build()
         activity.runOnUiThread {
             activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)?.dispatchApplyWindowInsets(insets)
         }

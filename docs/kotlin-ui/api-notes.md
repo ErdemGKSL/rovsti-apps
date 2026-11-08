@@ -118,3 +118,23 @@ line itself, so the hairline is drawn only when no rim is.
 - `Placeable.placeWithLayer(x, y) { }` carries the per-frame scale/alpha/blur/translation of the panel and card (state read in the layer block only).
 - `LayoutCoordinates.positionInWindow()` + `size` instead of `boundsInWindow()` for anchors: the latter is clipped by a scrolling parent.
 - Test facts: `boundsInRoot` of a half-visible lazy item is clipped too; while a modal entry is open the page is hidden from the merged tree (use `useUnmergedTree = true`); the Robolectric touch slop makes a 20 dp move scroll only about 4 dp.
+
+## E1.16: text fields (text/GlassTextField.kt, SearchField.kt, ComposerField.kt, TextSelection.kt)
+
+- `BasicTextField(state: TextFieldState, lineLimits, decorator = TextFieldDecorator, onKeyboardAction: KeyboardActionHandler, cursorBrush, interactionSource)`;
+  `TextFieldLineLimits.SingleLine` / `MultiLine(minHeightInLines, maxHeightInLines)`; `TextFieldState.clearText()`, `edit { insert(i, s) }`.
+- `LocalTextSelectionColors` is provided by `RovstiTheme` (`rovstiSelectionColors`: handles accent, highlight accent at 30 %).
+- DECISION: the platform text toolbar is kept. Neither `LocalTextToolbar` nor (foundation 1.12) `LocalTextContextMenuToolbarProvider`
+  is provided in production, so cut/copy/paste/select-all, the magnifier and handles are the system's. Tests provide a recording
+  `TextContextMenuProvider` (`catalog/src/test/.../RecordingToolbar.kt`) to assert the request and press Paste; Robolectric draws no toolbar.
+- Foundation 1.12 routes the selection toolbar through `LocalTextContextMenuToolbarProvider` (`TextContextMenuProvider.showTextContextMenu(dataProvider)`,
+  items are `TextContextMenuItem(key, label, onClick(session))`, keys in `TextContextMenuKeys`), not `TextToolbar` (a `LocalTextToolbar` fake is never called).
+- Clear and send buttons use `focusProperties { canFocus = false }` + `clickable`, so pressing them keeps focus and the caret.
+- Tapping the pill: `pointerInput { detectTapGestures { focusRequester.requestFocus(); keyboard.show() } }` on the field modifier (the decorator's padding and glyph
+  area are inside it; taps on the text itself are consumed by the field first).
+- Hardware Enter: `onPreviewKeyEvent` (Enter/NumPadEnter, KeyDown, Shift = newline) because the multi-line field would otherwise insert a newline itself.
+- Dock: `navigationBarsPadding().imePadding()` in that order (consumed insets are not added twice).
+- Placeholder and glyphs use `labelSecondary` (4.5:1), not glisse's `muted`.
+- Test facts: Robolectric's platform `Magnifier` throws in `dismiss()` during long-press selection; `ShotTest` installs `ShadowNoopMagnifier`.
+  `ShotTest.setSimulatedIme(dp)` dispatches an IME inset. A Ctrl+V key injection types a literal "v" in Robolectric; use the toolbar item or
+  `SemanticsActions.PasteText`. Caret position: click at `14 dp + layout.getCursorRect(n).left` (`SemanticsActions.GetTextLayoutResult`).

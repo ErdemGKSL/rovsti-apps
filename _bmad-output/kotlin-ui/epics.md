@@ -66,7 +66,7 @@ mid-scroll).
 | E1.13 | Sheets with detents, pushback, background interaction | R2 | done |
 | E1.14 | Alert, action sheet, confirm | R2 | done |
 | E1.15 | Toast and undo pill | R2 | in-progress |
-| E1.16 | Text field, search field, composer field | R2 | in-progress |
+| E1.16 | Text field, search field, composer field | R2 | done |
 | E1.17 | Switch, slider, segmented control | R3 | todo |
 | E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R3 | todo |
 | E1.19 | Swipe-to-reveal row and alphabet rail | R3 | todo |

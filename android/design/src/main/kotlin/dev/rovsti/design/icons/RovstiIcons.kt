@@ -51,6 +51,16 @@ object RovstiIcons {
         }
     }
 
+    val ArrowUp: ImageVector by lazy {
+        stroked("ArrowUp") {
+            moveTo(12f, 19f)
+            lineTo(12f, 5.5f)
+            moveTo(6f, 11f)
+            lineTo(12f, 5f)
+            lineTo(18f, 11f)
+        }
+    }
+
     val Checkmark: ImageVector by lazy {
         stroked("Checkmark") {
             moveTo(5f, 12.5f)

@@ -23,7 +23,7 @@ class ScreenshotsConventionPlugin : Plugin<Project> {
                 screenshots.set(layout.projectDirectory.dir("screenshots"))
                 output.set(rootProject.layout.projectDirectory.file("../docs/kotlin-ui/screenshots/design.png"))
                 include.set("-light\\.png$")
-                exclude.set("-(rtl|fs2|landscape)-light|-\\+\\d+ms-")
+                exclude.set("-(rtl|fs2|landscape|360x640|dark)-|-(rtl|fs2|landscape|360x640)-light|-\\+\\d+ms-")
                 columns.set(12)
                 tileWidth.set(150)
             }

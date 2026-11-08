@@ -52,7 +52,7 @@ verified: `android/` has no module, no `build-logic`).
 | E1.1 | Modules, convention plugins, screenshot harness, catalog shell | R1 | done |
 | E1.2 | Theme: colours, type, spacing, shapes, contrast test | R1 | done |
 | E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | done |
-| E1.4 | Press feedback, hold rule, haptics | R1 | in-progress |
+| E1.4 | Press feedback, hold rule, haptics | R1 | done |
 | E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | in-progress |
 | E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | in-progress |
 | E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | in-progress |
@@ -134,6 +134,7 @@ verified: `android/` has no module, no `build-logic`).
 - AC3 A Compose test asserts that pressing changes no layout bounds (complaint: "buttons flowed into the content").
 - AC4 `RovstiHaptics` (Off/System/Strong) with the event list of SKILL navigation-layout 8.
 - Screenshots: `e1.4-press-rest`, `e1.4-press-down-+60ms`, `e1.4-press-release-+120ms`.
+- Evidence (E1.4, uncommitted): `android/design/.../press/` `GlassPress.kt` (glisse header; pure `pressTargets`, `GlassPressNode` observing Final without consuming, four `Animatable`s, release in `finally` via shared `observePress`, `placeWithLayer`, optional 240 dp glow fading 220 ms), `ScalePress.kt` (0.96, `RovstiMotion.press`), `RowPress.kt` (`fillTertiary` behind content, optional `InteractionSource`, no ripple), `Hold.kt` (glisse header; `HOLD_MS`, `held`, `awaitHoldOrScroll`); `.../haptics/RovstiHaptics.kt` (Off/System/Strong, `HapticEvent`, `PlatformHaptics`, `LocalRovstiHaptics`), `:testing` `RecordingHaptics`, VIBRATE in catalog manifest only. Tests: `PressTargetsTest`, `HoldTest` (149/150 ms), `HapticEventTest`, Robolectric `PressNoLayoutShiftTest` (target and neighbour layout bounds identical before/during/after for glass, scale, row; inner visual does move), `HapticsTest`, `PressPageTest`. Catalog `PressPage`; `e1.4-press-{rest,down-+60ms,release-+120ms}-{light,dark}` and `e1.4-press-scale-row-held-*` opened: pressed button grows and shifts right toward the finger with a faint glow, release frame is slightly below rest size (overshoot), text below never moves; card shrinks, row shows flat grey fill.
 
 ### E1.5 Glass
 - AC1 `glassTier(GlassConditions)` exactly as SKILL glass 6, table-tested.

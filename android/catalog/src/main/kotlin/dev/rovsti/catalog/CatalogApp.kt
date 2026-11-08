@@ -65,6 +65,7 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
                     CatalogPage.Buttons -> ButtonsPage()
                     CatalogPage.Controls -> ControlsPage()
                     CatalogPage.Rows -> RowsPage()
+                    CatalogPage.Swipe -> SwipePage()
                     CatalogPage.GroupedSection -> GroupedSectionPage()
                     CatalogPage.Avatars -> AvatarsPage()
                     CatalogPage.Chips -> ChipsPage()

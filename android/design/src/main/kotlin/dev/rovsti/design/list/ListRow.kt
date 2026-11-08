@@ -158,7 +158,8 @@ fun ListRow(
 /** The disclosure chevron at the end of a row that opens something. Decorative. */
 @Composable
 fun ListRowChevron(modifier: Modifier = Modifier) {
-    RovstiIcon(RovstiIcons.ChevronRight, null, modifier, tint = RovstiTheme.colors.labelTertiary, size = Sizes.chevron)
+    dev.rovsti.design.ios.component
+        .IosChevron(modifier, RovstiTheme.colors.labelTertiary)
 }
 
 /**

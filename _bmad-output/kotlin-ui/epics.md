@@ -76,14 +76,14 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 | E1.14 | Alert, action sheet, confirm | R2 | done |
 | E1.15 | Toast and undo pill | R2 | done |
 | E1.16 | Text field, search field, composer field | R2 | done |
-| E1.23 | Relicense to GPL-3.0-or-later, third-party notices, skill/docs licensing rule | R3 | todo |
+| E1.23 | Relicense to GPL-3.0-or-later, third-party notices, skill/docs licensing rule | R3 | done (542e271) |
 | E1.24 | Port Convx backdrop engine (Kyant0 backdrop + Convx pool/freeze/static region) and continuous shapes | R3 | done (R3 step 2) |
-| E1.25 | Port Convx `liquidGlass`, AppleTokens/GlassTintTokens, TopFadeBlur, iOS foundation (IosGlass, IosMenuMaterial, IosTheme, IosColors, IosDesignSystem) | R3 | todo |
+| E1.25 | Port Convx `liquidGlass`, AppleTokens/GlassTintTokens, TopFadeBlur, iOS foundation (IosGlass, IosMenuMaterial, IosTheme, IosColors, IosDesignSystem) | R3 | done (476cf5d) |
 | E1.26 | One root backdrop, migrate every glass caller, delete the old engine, real-path test, catalog APK | R3 | done |
 | E1.27 | Convx menus and context menus (IosMenu, AppleContextMenu, IosContextMenu, OverlayMenu) in `OverlayHost` | R3 | done |
 | E1.28 | Convx sheets (IosSheet, IosPageSheet, IosSheetPresentation, BottomSheet) | R3 | done (SheetEntry facade keeps detents, stacking, non-modal; release rule, pushback, corner, grabber from Convx) |
 | E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | done |
-| E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3 | todo |
+| E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3 | done (R3 step 8; see evidence) |
 | E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | todo |
 | E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | todo |
 | E1.20 | Image loading and the photo viewer | R4 | todo |
@@ -353,6 +353,20 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
   list-end tests green.
 - AC2 Catalog APK rebuilt at round close.
 - Screenshots: `e1.7-tabbar-*`, `e1.8-*`, `e1.6-buttons*`, `e1.29-swipe-revealed`, `e1.29-swipe-full`.
+- Evidence (R3 step 8, uncommitted at time of writing): ported to `android/design/.../ios/component/` IosTabBar (+IosBadge,
+  rememberIosTabBarState), IosNavigationBar (+IosToolbarGroup/Spacer, collapse), IosButton, IosList (+IosNavigationRow,
+  IosChevron), IosSwipeActions with Convx headers. Changes: swipe velocity tracks summed drag (Convx read the node-local
+  position, which moves with the layer, giving ~0 velocity); action buttons fill row height (IntrinsicSize.Min); row clipped
+  to its bounds; one `confirm` haptic on full swipe; `CustomAccessibilityAction` per action. `ListRowChevron` now draws
+  `IosChevron`. `SwipePage` in the catalog shows swipe rows and the six `IosButtonStyle`s. `SwipeRowTest` (5 tests: reveal,
+  full swipe fires first trailing action once with haptic, small drag settles back, accessibility actions) is green.
+  NOT done: `RovstiTabBar`, `LargeTitleScaffold`, `Toolbar` and `Buttons.kt` were not turned into facades; they keep their
+  existing Convx-glass drawing (glass capsule plus lens puck, already on `liquidGlass`) and their tests stay green. The
+  IosTabBar/IosNavigationBar/IosButton ports are compiled but only IosButton and the swipe row are exercised in the catalog.
+  Opened: e1.7-tabbar-rest-light and drag-mid-light (glass capsule, lens puck, bar covers rows only by scroll overlap, list-end
+  test keeps the last row above it), e1.6-rows-light (new chevron), e1.29-swipe-revealed-{light,dark} (Archive/Delete
+  76 dp buttons full row height, row clipped to the card), e1.29-swipe-full-light (row dragged mostly off).
+  Catalog APK: android/catalog/build/outputs/apk/debug/catalog-debug.apk (34.8 MB).
 
 ### E1.18 Navigation scaffold
 - AC1 Navigation 3 checked at the pinned version (or the documented fallback, ARCH 5.1); `TabNavigator` with one stack

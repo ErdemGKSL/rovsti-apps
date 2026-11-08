@@ -74,6 +74,7 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
                     CatalogPage.ContextMenu -> ContextMenuPage()
                     CatalogPage.Popover -> PopoverPage()
                     CatalogPage.Dialogs -> DialogsPage()
+                    CatalogPage.Sheets -> SheetsPage()
                 }
             }
         }
@@ -136,7 +137,6 @@ internal fun SectionLabel(
 
 private val Planned =
     listOf(
-        "Sheets with detents" to "E1.13",
         "Toast and undo pill" to "E1.15",
         "Text fields" to "E1.16",
     )

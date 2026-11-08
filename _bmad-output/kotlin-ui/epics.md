@@ -63,7 +63,7 @@ mid-scroll).
 | E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | done |
 | E1.11 | Long-press context menu (simple and preview-card variants) | R2 | done |
 | E1.12 | Popover (anchored arbitrary content) | R2 | done |
-| E1.13 | Sheets with detents, pushback, background interaction | R2 | in-progress |
+| E1.13 | Sheets with detents, pushback, background interaction | R2 | done |
 | E1.14 | Alert, action sheet, confirm | R2 | done |
 | E1.15 | Toast and undo pill | R2 | in-progress |
 | E1.16 | Text field, search field, composer field | R2 | in-progress |

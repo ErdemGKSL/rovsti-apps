@@ -25,4 +25,5 @@ enum class CatalogPage(
     ContextMenu("Context menu"),
     Popover("Popover"),
     Dialogs("Alerts and sheets"),
+    Sheets("Sheets"),
 }

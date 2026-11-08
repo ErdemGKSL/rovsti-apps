@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -15,13 +16,16 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -39,6 +43,34 @@ import kotlinx.coroutines.flow.Flow
 @Stable
 class OverlayController {
     internal val entries = mutableStateListOf<OverlayEntry>()
+    private val pushBackSources = mutableStateMapOf<OverlayEntry, () -> Float>()
+
+    /**
+     * How many modal sheets are holding the page back. The page stays pushed back until the last one has left, so
+     * stacked sheets never let it spring forward in between.
+     */
+    val pushBackCount: Int get() = pushBackSources.size
+
+    /**
+     * 0..1 for the page behind: the most presented of the registered sheets. Call it in a layer or draw lambda; it
+     * follows a dragged sheet frame by frame and falls back to 0 only when the last sheet is gone.
+     */
+    fun pushBackProgress(): Float {
+        var best = 0f
+        for (source in pushBackSources.values) best = maxOf(best, source())
+        return best
+    }
+
+    internal fun registerPushBack(
+        entry: OverlayEntry,
+        progress: () -> Float,
+    ) {
+        pushBackSources[entry] = progress
+    }
+
+    internal fun unregisterPushBack(entry: OverlayEntry) {
+        pushBackSources.remove(entry)
+    }
 
     /** Shows [entry] on top of the others and starts its enter transition. */
     fun present(entry: OverlayEntry): OverlayEntry {
@@ -79,7 +111,7 @@ class OverlayController {
     val hasEntries: Boolean get() = entries.isNotEmpty()
 
     internal fun removeFinished() {
-        entries.removeAll { !it.state.currentState && !it.state.targetState }
+        entries.removeAll { it.isRemovable }
     }
 }
 
@@ -94,6 +126,15 @@ abstract class OverlayEntry(
     val dismissOnBack: Boolean = true,
 ) {
     val state = MutableTransitionState(false)
+
+    /**
+     * True when the entry runs Back itself (a sheet previews and settles the gesture): the host then leaves the system
+     * Back to it while it is topmost.
+     */
+    open val handlesBack: Boolean get() = false
+
+    /** Whether the host may drop the entry: its exit has finished. Entries that animate without a transition override it. */
+    open val isRemovable: Boolean get() = !state.currentState && !state.targetState
 
     /** Back was pressed while this is the topmost entry and [dismissOnBack] is set: close by default. */
     open fun onBack(controller: OverlayController) {
@@ -138,9 +179,21 @@ fun OverlayHost(
         derivedStateOf { controller.entries.any { it.modal && it.state.targetState } }
     }
     CompositionLocalProvider(LocalOverlay provides controller, LocalOverlayOrNull provides controller) {
-        Box(modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val statusBarPx = WindowInsets.statusBars.getTop(density).toFloat()
+        val cornerPx = with(density) { SheetMetrics.PushBackCorner.toPx() }
+        Box(
+            modifier.fillMaxSize().drawBehind {
+                // The black the shrunk page leaves visible around itself.
+                if (controller.pushBackProgress() > 0f) drawRect(Color.Black)
+            },
+        ) {
             // The page behind a modal entry is not reachable by a screen reader (and not by touch: the scrim eats it).
-            Box(if (anyModal) Modifier.clearAndSetSemantics { } else Modifier) { content() }
+            Box(
+                (if (anyModal) Modifier.clearAndSetSemantics { } else Modifier)
+                    .fillMaxSize()
+                    .sheetPushBack(controller::pushBackProgress, statusBarPx, cornerPx),
+            ) { content() }
             for (entry in controller.entries) {
                 key(entry) {
                     BoxWithConstraints(
@@ -180,10 +233,12 @@ fun OverlayHost(
         // Registered after the page's own handlers, and re-registered whenever the number of entries changes, so the
         // host is always asked first while an overlay is open.
         key(controller.entries.size) {
-            BackHandler(enabled = controller.entries.any { it.state.targetState }) { controller.dismissTop() }
+            BackHandler(enabled = controller.entries.lastOrNull { it.state.targetState }?.handlesBack == false) {
+                controller.dismissTop()
+            }
         }
         LaunchedEffect(controller) {
-            snapshotFlow { controller.entries.map { it.state.currentState to it.state.targetState } }
+            snapshotFlow { controller.entries.map { it.isRemovable } }
                 .collect { controller.removeFinished() }
         }
     }

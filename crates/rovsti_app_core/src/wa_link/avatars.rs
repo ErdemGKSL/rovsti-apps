@@ -1,4 +1,4 @@
-//! The pure half of the WhatsApp avatar loader ([`crate::avatars`]): which
+//! The pure half of the WhatsApp avatar loader (`rovsti_wa_ui::avatars`): which
 //! profile picture to fetch when, what a fetch result does to the cache, the
 //! 429 backoff, and how pictures are named and pruned on disk. No GPUI, no
 //! network; the image handle is a type parameter so tests use `()`.

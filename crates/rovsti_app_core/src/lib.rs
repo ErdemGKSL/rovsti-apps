@@ -2,3 +2,4 @@
 
 pub mod stops;
 pub mod storage;
+pub mod wa_link;

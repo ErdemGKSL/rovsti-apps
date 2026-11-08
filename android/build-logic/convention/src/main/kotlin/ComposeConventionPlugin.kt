@@ -35,6 +35,15 @@ class ComposeConventionPlugin : Plugin<Project> {
                 dependsOn("compileDebugKotlin")
             }
 
+            // The report destination is a compiler argument, not a tracked input, so a cached or up-to-date compile
+            // would leave compose_reports unwritten. Re-run debug compilation whenever reports are requested.
+            if (providers.gradleProperty("composeReports").isPresent) {
+                tasks.matching { it.name == "compileDebugKotlin" }.configureEach {
+                    outputs.upToDateWhen { false }
+                    outputs.cacheIf { false }
+                }
+            }
+
             dependencies {
                 add("implementation", platform(libs.findLibrary("compose-bom").get()))
                 add("androidTestImplementation", platform(libs.findLibrary("compose-bom").get()))

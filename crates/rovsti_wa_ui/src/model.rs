@@ -5,16 +5,11 @@
 //! first screen has exactly two options: [`OPTION_LINK_NEW`] and
 //! [`OPTION_CONNECT_EXISTING`].
 
-use std::fmt;
-
+pub use rovsti_app_core::wa_link::link::{LINK_FILE, StoredLink};
 use rovsti_wa_proto::{
     AppId, ConnectKey, CreateInstance, CreatedInstance, GatewayEvent, GatewayUrl, InstanceState,
     InstanceStatus, IssuedKey, KeyInfo, LinkRequest,
 };
-use serde::{Deserialize, Serialize};
-
-/// Where the link is kept, in the app's own data directory.
-pub const LINK_FILE: &str = "whatsapp-link.json";
 
 /// What a fresh install proposes: the owner's gateway behind the Cloudflare
 /// tunnel. Another address can be typed once and is remembered. (The Android
@@ -28,24 +23,6 @@ pub const ACTION_UNLINK: &str = "Unlink this app";
 
 pub const MSG_KEY_REJECTED: &str = "This key was revoked or is wrong";
 pub const MSG_BANNED: &str = "WhatsApp has banned this account from linked devices.";
-
-/// What an app keeps to reach its instance. The key is a bearer secret.
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StoredLink {
-    pub gateway_url: String,
-    pub instance_id: String,
-    pub key: String,
-}
-
-impl fmt::Debug for StoredLink {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StoredLink")
-            .field("gateway_url", &self.gateway_url)
-            .field("instance_id", &self.instance_id)
-            .field("key", &"rwk_…")
-            .finish()
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LinkMethodChoice {

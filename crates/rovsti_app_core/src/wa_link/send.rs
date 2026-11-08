@@ -17,7 +17,7 @@ use rovsti_wa_proto::{
 };
 use serde::Deserialize;
 
-use crate::model::{LINK_FILE, StoredLink};
+use super::link::{LINK_FILE, StoredLink};
 
 /// How many recent messages a digest shows.
 const DIGEST_MESSAGES: u32 = 5;
@@ -38,7 +38,7 @@ struct ReplyIn {
 /// The gateway for the link saved in `dir`; `None` when there is none or it
 /// no longer parses.
 pub fn gateway_in(dir: &str) -> Option<Gateway> {
-    let link: StoredLink = rovsti_ui::storage::load_json(Path::new(dir), LINK_FILE)?;
+    let link: StoredLink = crate::storage::load_json(Path::new(dir), LINK_FILE)?;
     let url = GatewayUrl::parse(&link.gateway_url).ok()?;
     let key = ConnectKey::parse(&link.key).ok()?;
     Some(Gateway::new(url, Some(key)))

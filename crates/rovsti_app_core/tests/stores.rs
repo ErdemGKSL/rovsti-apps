@@ -90,3 +90,20 @@ fn the_shared_backup_goldens_parse() {
         Some(storage::BackupRefusal::NotABackup)
     );
 }
+
+#[test]
+fn the_whatsapp_link_fixture_loads_and_saves_byte_for_byte() {
+    use rovsti_app_core::wa_link::link::{LINK_FILE, StoredLink};
+    let dir = tmp("fx-wa-link");
+    fs::copy(fixture("whatsapp-link.json"), dir.join(LINK_FILE)).expect("copy");
+    let link = StoredLink::load(&dir).expect("link");
+    assert_eq!(link.instance_id, "inst-7f3a");
+    assert_eq!(link.gateway_url, "https://rovsti.erdemdev.tr");
+    link.save(&dir).expect("save");
+    assert_eq!(
+        fs::read(dir.join(LINK_FILE)).expect("read"),
+        fs::read(fixture("whatsapp-link.json")).expect("fixture"),
+    );
+    StoredLink::remove(&dir).expect("remove");
+    assert!(StoredLink::load(&dir).is_none());
+}

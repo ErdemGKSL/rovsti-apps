@@ -3,9 +3,7 @@ import org.gradle.api.GradleException
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputDirectory
-import org.gradle.api.tasks.PathSensitive
-import org.gradle.api.tasks.PathSensitivity
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.TaskAction
 
 /**
@@ -17,8 +15,13 @@ import org.gradle.api.tasks.TaskAction
  * is not in the report at all fails too (so a rename cannot silently drop a composable from the gate).
  */
 abstract class CheckComposeStabilityTask : DefaultTask() {
-    @get:InputDirectory
-    @get:PathSensitive(PathSensitivity.RELATIVE)
+    init {
+        outputs.upToDateWhen { false }
+    }
+
+    // Internal, not an input directory: the directory may legitimately be missing (no -PcomposeReports compile yet),
+    // and check() then fails with an actionable message instead of a configuration-time validation error.
+    @get:Internal
     abstract val reports: DirectoryProperty
 
     @get:Input

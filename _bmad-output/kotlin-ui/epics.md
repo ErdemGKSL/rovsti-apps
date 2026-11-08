@@ -48,9 +48,15 @@ Round plans: R1 -> `_bmad-output/kotlin-ui/plans/round-01.md` (planned 2026-11-0
 verified in code by the round-2 planner). R2 -> `_bmad-output/kotlin-ui/plans/round-02.md` (planned 2026-11-08 at base
 `c46d5dc`; also fixes two R1 screenshot findings: content readable through Flat chrome, and both titles visible at
 mid-scroll). R2 implemented in `d0f16a5`..`d0dcf08`, verified in code by the round-3 planner (every file and test
-named in the E1.9-E1.16 evidence lines exists; 166 goldens). R3 -> `_bmad-output/kotlin-ui/plans/round-03.md` (planned
+named in the E1.9-E1.16 evidence lines exists; 166 goldens). R3 first plan -> `_bmad-output/kotlin-ui/plans/round-03-e1.17-e1.22.md` (planned
 2026-11-08 at base `d0dcf08`; E1.17-E1.22 plus R2 screenshot fixes F3 action-sheet shadow haze and F4 stacked sheets
-step back; Navigation 3 1.2.1 and Coil 3.6.3 checked usable with BOM 2026.09.00).
+step back; Navigation 3 1.2.1 and Coil 3.6.3 checked usable with BOM 2026.09.00). Only its Step 1 (F3/F4) was
+implemented (`6bebfbe`, verified in code: `SheetMath.kt` `stackedTopPx`/`upperDetentOffset`, `SheetGestureTest`
+step-back tests, `ActionSheetTest` haze patch). **R3 re-planned** -> `_bmad-output/kotlin-ui/plans/round-03.md`
+(planned 2026-11-08 at base `6bebfbe`) after the owner decisions: Rovsti becomes GPL-3.0-or-later and Convx code is
+ported close to verbatim; no liquid glass shows on a real phone, so the hand-written glass engine (E1.5) is replaced by
+Convx's backdrop stack; Convx's iOS component library replaces our hand-written overlays/controls/chrome where it is
+better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 move to R4.
 
 | Story | Title | Round | Status |
 |---|---|---|---|
@@ -58,24 +64,31 @@ step back; Navigation 3 1.2.1 and Coil 3.6.3 checked usable with BOM 2026.09.00)
 | E1.2 | Theme: colours, type, spacing, shapes, contrast test | R1 | done |
 | E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | done |
 | E1.4 | Press feedback, hold rule, haptics | R1 | done |
-| E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | done |
+| E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | replaced (no glass on device; superseded by E1.24-E1.26) |
 | E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | done |
 | E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | done |
 | E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | done |
 | E1.9 | Overlay host and placement | R2 | done |
-| E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | done |
-| E1.11 | Long-press context menu (simple and preview-card variants) | R2 | done |
-| E1.12 | Popover (anchored arbitrary content) | R2 | done |
-| E1.13 | Sheets with detents, pushback, background interaction | R2 | done |
+| E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | done (rendering to be replaced by E1.27) |
+| E1.11 | Long-press context menu (simple and preview-card variants) | R2 | done (rendering to be replaced by E1.27) |
+| E1.12 | Popover (anchored arbitrary content) | R2 | done (rendering to be replaced by E1.27) |
+| E1.13 | Sheets with detents, pushback, background interaction | R2 | done (rendering to be replaced by E1.28) |
 | E1.14 | Alert, action sheet, confirm | R2 | done |
 | E1.15 | Toast and undo pill | R2 | done |
 | E1.16 | Text field, search field, composer field | R2 | done |
-| E1.17 | Switch, slider, segmented control | R3 | todo |
-| E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R3 | todo |
-| E1.19 | Swipe-to-reveal row and alphabet rail | R3 | todo |
-| E1.20 | Image loading and the photo viewer | R3 | todo |
-| E1.21 | Performance harness and convention tests | R3 | todo |
-| E1.22 | Catalog complete, E1 contact sheet, checklist pass | R3 | todo |
+| E1.23 | Relicense to GPL-3.0-or-later, third-party notices, skill/docs licensing rule | R3 | todo |
+| E1.24 | Port Convx backdrop engine (Kyant0 backdrop + Convx pool/freeze/static region) and continuous shapes | R3 | todo |
+| E1.25 | Port Convx `liquidGlass`, AppleTokens/GlassTintTokens, TopFadeBlur, iOS foundation (IosGlass, IosMenuMaterial, IosTheme, IosColors, IosDesignSystem) | R3 | todo |
+| E1.26 | One root backdrop, migrate every glass caller, delete the old engine, real-path test (API >= 33), catalog APK | R3 | todo |
+| E1.27 | Convx menus and context menus (IosMenu, AppleContextMenu, IosContextMenu, OverlayMenu) in `OverlayHost` | R3 | todo |
+| E1.28 | Convx sheets (IosSheet, IosPageSheet, IosSheetPresentation, BottomSheet) | R3 | todo |
+| E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | todo |
+| E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3 | todo |
+| E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | todo |
+| E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | todo |
+| E1.20 | Image loading and the photo viewer | R4 | todo |
+| E1.21 | Performance harness and convention tests | R4 | todo |
+| E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4 | todo |
 
 ### E1.1 Modules, convention plugins, screenshot harness, catalog shell
 - AC1 `android/build-logic` with convention plugins (`rovsti.android.library`, `rovsti.android.app`, `rovsti.compose`,
@@ -152,6 +165,12 @@ step back; Navigation 3 1.2.1 and Coil 3.6.3 checked usable with BOM 2026.09.00)
 - Screenshots: `e1.5-glass-flat-over-stripes`, `e1.5-glass-frost-over-stripes` (if renderable), `e1.5-rim-cpu-twin`,
   and `e1.5-glass-liquid-over-stripes` only if the probe passed.
 - Evidence (E1.5, commit 8fe7a78): `android/design/.../glass/` `GlassTier.kt` (tier fn exactly glass.md 6, `LocalGlassConditions`, `rememberGlassConditions`), `GlassSpec.kt` (Bar/Popover/Sheet/Thumb presets, `captureScale`), `GlassSource.kt` + `GlassNode.kt` (source recording, node re-records only on offset/size/press-scale change, effects keyed on size/spec/corner, saturation as colorFilter, null effect, Flat fill 0.85 + hairline + dropShadow, `frozen` plain field, inverse-press replay), `Lens.kt`/`LensShader.kt`/`Rim.kt` (glisse headers + Aave/kube.io credit; CPU twins, pure `lensUniforms`, `RimBrush`, `rimImage`), `GlassEffect.kt` (blur then lens). `ShotTest` forces Flat. Tests: `GlassTierTest`, `CaptureScaleTest`, `LensPullTest` (incl. spectrum 1.08), `RimTwinTest`, `LensUniformsTest`, Robolectric `RuntimeShaderProbeTest` (result in api-notes.md: blur and AGSL both run), `GlassPageTest`. Catalog `GlassPage` + `RimTwinPanel`; `StripedBackdrop` moved to `:catalog`. Opened `e1.5-glass-{flat,frost,liquid}-over-stripes-{light,dark}` and `e1.5-rim-cpu-twin-{light,dark}`: Flat labels legible, shadow and hairline visible; Frost blurred with saturated tint; Liquid shows lens colour fringing at capsule ends; rim bright on top-left and bottom-right, faint at theme shine 0.13.
+
+- **Replaced (round R3 re-plan, 2026-11-08):** the owner's phone shows no liquid glass from this engine. Found in code:
+  overlays compute `sourceAvailable = source != null` and the catalog never gives them a source (`Popover.kt:80-81`,
+  `ContextMenuPanel.kt:84-85`, `ButtonMenu.kt:257-270`), so they are always Flat; most catalog pages create no source;
+  `ShotTest` forced Flat, so goldens never showed the real path (`e1.7-tabbar-rest-light` opened: opaque white bar). The
+  engine is deleted in E1.26 and replaced by the Convx port (E1.24-E1.26).
 
 ### E1.6 Rows and small components
 - AC1 Buttons: glass icon button (44 dp), capsule, text, destructive, disabled.
@@ -267,11 +286,61 @@ step back; Navigation 3 1.2.1 and Coil 3.6.3 checked usable with BOM 2026.09.00)
 - Evidence (E1.16, commit 1898350): `android/design/.../text/` `GlassTextField.kt`, `SearchField.kt` (glisse headers), `ComposerField.kt` (up to 6 lines, send, hardware Enter / Shift+Enter), `TextSelection.kt`; all over `BasicTextField(TextFieldState)`. Catalog `TextFieldsPage`. Tests: JVM `TextSelectionTest`; Robolectric `TextFieldsTest` (tap places caret, long-press selects word, selection via semantics, paste through toolbar and semantics, IME action once, clear keeps focus, composer above keyboard, font scale 2, 6-line growth, send once, blank sends nothing, platform toolbar asked on long-press). Shots `e1.16-field-empty/-focused/-focused-fs2/-with-selection/-selection-toolbar`, `-search-with-clear`, `-composer-3-lines`, `-composer-ime-open` light/dark recorded in that commit.
 
 ### E1.17 Switch, slider, segmented
+- Re-scoped (R3 re-plan, Step 7): port Convx `IosToggle`, `IosSlider` (on `LiquidToggle`/`LiquidSlider`,
+  `DampedDragAnimation`, `InteractiveHighlight`) and a segmented control on the `LiquidBottomTabs` puck; glisse rules
+  below apply only where Convx lacks them (the untracked glisse `SwitchRules.kt` WIP was moved out of the tree).
 - AC1 Ported glisse geometry and gesture rules (deadzones, rubber band /22, near = 24, drag = 6, round to slot), toggle
   spring 1.265/1000, thumb lift; haptic on commit.
 - AC2 Gesture tests from glisse tests (tap, drag off-bar selects on release, >24 px off does nothing, hold blocks scroll,
   cancel cancels).
 - Screenshots: `e1.17-switch-off-on`, `e1.17-switch-pressed`, `e1.17-slider`, `e1.17-segmented-3`, `e1.17-segmented-drag`.
+
+### E1.23 Relicense (plan round-03 Step 1)
+- AC1 `Cargo.toml` workspace `license = "GPL-3.0-or-later"` (every crate inherits); root `LICENSE` = Convx's GPL-3.0 text
+  byte for byte; README licence section.
+- AC2 `android/THIRD_PARTY_NOTICES.md` lists Convx, Kyant0 backdrop / AndroidLiquidGlass / Capsule, compose-miuix-ui,
+  compose-hig, Haze (if used), glisse, with licences, copyright lines, full MIT and Apache-2.0 texts.
+- AC3 Skill section 0 and references, `CLAUDE.md` (one line), `docs/kotlin-ui/architecture.md` section 0 say Convx code is
+  portable with the attribution header; `LicenceHeaderTest` enforces headers.
+
+### E1.24 Backdrop engine (Step 2)
+- AC1 All 42 files of Convx `ui/component/backdrop/**` and `ui/component/shapes/**` ported close to verbatim under
+  `dev.rovsti.design.backdrop` / `.shapes`, upstream headers kept + "Ported from Convx" line; `AppBackdropState`.
+- AC2 JVM freeze/static-region tests; Robolectric `BackdropEngineTest` proves blur and lens run.
+- Screenshots: `e1.24-backdrop-engine`.
+
+### E1.25 Glass layer, tokens, iOS foundation (Step 3)
+- AC1 `liquidGlass`, `GlassEffectConfig`, `glassResolutionScale`, `isGlassAllowed`, `TopFadeBlur`, `AppleTokens`,
+  `GlassTintTokens`, `IosGlass`, `IosMenuMaterial`, `IosTheme`, `IosColors`, `IosDesignSystem` ported; IosColors fed from
+  `RovstiTheme`; `GlassSettings` replaces Convx preferences.
+- AC2 Convx tests `GlassEffectTest`, `GlassTintTokensTest`, `AppleColorsTest` ported and green.
+- Screenshots: `e1.25-ios-glass-materials`.
+
+### E1.26 Root backdrop, migration, real-path proof (Step 4)
+- AC1 `RovstiBackdropRoot`: content records into one `LayerBackdrop`; chrome and `OverlayHost` are siblings after it and
+  sample it (as Convx's chrome and popups do).
+- AC2 Every former `Modifier.glass` caller migrated; `D/glass` old engine and its tests deleted; no test forces Flat.
+- AC3 `GlassRealPathTest` (API 33 and 36, default settings): every glass surface on every catalog page and overlay draws
+  through a `LayerBackdrop` with a render effect. Fallback only for reduce transparency / pre-31 / low RAM, as Convx.
+- AC4 Catalog APK rebuilt; path in the evidence.
+- Screenshots: all goldens re-recorded; `e1.26-liquid-glass-over-stripes`, `e1.26-overlays-over-stripes`.
+
+### E1.27 Menus and context menus (Step 5)
+- AC1 Convx `IosMenu`, `AppleContextMenu`, `IosContextMenu`, `OverlayMenu` ported; `Popup` replaced by `OverlayEntry`;
+  our `ButtonMenu`/`contextMenu` APIs are facades; menu tests green (numbers updated to Convx with citations).
+- Screenshots: `e1.27-menu-open`, `e1.27-context-menu-preview`, `e1.27-context-menu-submenu`.
+
+### E1.28 Sheets (Step 6)
+- AC1 Convx `IosSheet`, `IosPageSheet`, `IosSheetPresentation`, `BottomSheet` (no player code) ported; detents,
+  non-modal, predictive back, pushback and stacked step-back kept.
+- Screenshots: `e1.13-sheet-*` re-recorded, `e1.28-page-sheet`.
+
+### E1.29 Tab bar, navigation bar, buttons, list, swipe (Step 8)
+- AC1 Convx `IosTabBar` (+ `LiquidBottomTabs` puck), `IosNavigationBar`, `IosButton`, `IosList`, `IosSwipeActions`
+  ported; `RovstiTabBar`, `LargeTitleScaffold`, `Toolbar`, `Buttons`, `ListRow` are facades; inset, IME and
+  list-end tests green.
+- AC2 Catalog APK rebuilt at round close.
+- Screenshots: `e1.7-tabbar-*`, `e1.8-*`, `e1.6-buttons*`, `e1.29-swipe-revealed`, `e1.29-swipe-full`.
 
 ### E1.18 Navigation scaffold
 - AC1 Navigation 3 checked at the pinned version (or the documented fallback, ARCH 5.1); `TabNavigator` with one stack

@@ -93,3 +93,19 @@ line itself, so the hairline is drawn only when no rim is.
 - Test facts: Robolectric manual clock: after `targetState` changes, advance one small step (16 to 40 ms) before a large one, or a
   `Transition`/`Animatable` exit does not start. `clearAndSetSemantics` hides descendants from the merged tree only; use
   `useUnmergedTree = true` to read their bounds.
+
+## E1.10 part 1: button menu (overlay/MenuMorph.kt, MenuModel.kt, ButtonMenu.kt)
+
+- `androidx.compose.ui.graphics.BlurEffect(radiusX, radiusY, TileMode)` (API 31+, guarded by `Build.VERSION.SDK_INT`) set as
+  `GraphicsLayerScope.renderEffect` for the rows (6 dp to 0) and the trigger glyph copy (0 to 8 dp).
+- `GraphicsLayerScope.shape` + `clip` with a custom `Shape` (`Outline.Rounded(RoundRect)`) for the animated clips; both reset
+  (`clip = false`) once `t == 1`.
+- `Modifier.layout` places the card: the placement (`placePanel` with `gap = -anchor.height`, so the card's top or bottom edge
+  lines up with the trigger's) is computed in the layout pass and written to plain fields read in draw.
+- `Transition.animateFloat` with a per-direction spring (`GlisseSpring.spec`) is the one master `t`; a `Transition` also
+  keeps `MutableTransitionState.currentState` true until `t` is back at 0, so the entry stays composed. It retargets with the
+  current velocity on a direction change.
+- `onPreviewKeyEvent` + `Key.Escape` + `FocusRequester` close the menu from a hardware keyboard.
+- `drawscope.withTransform { translate; scale }` draws the glyph copy; `Painter.draw(size, alpha, colorFilter)`.
+- Test fact: a menu opened by a touch-down (`menuTrigger`) needs two 16 ms advances before a big `advance` or its spring has
+  not started when a screenshot is taken.

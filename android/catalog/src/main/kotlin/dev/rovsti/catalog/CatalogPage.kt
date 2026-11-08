@@ -21,4 +21,5 @@ enum class CatalogPage(
     FoldedTabBar("Tab bar: folded"),
     LargeTitle("Large title"),
     Overlays("Overlay host"),
+    ButtonMenu("Button menu"),
 }

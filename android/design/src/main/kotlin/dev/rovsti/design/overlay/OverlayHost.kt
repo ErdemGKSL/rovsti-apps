@@ -99,6 +99,9 @@ class OverlayScope(
 val LocalOverlay =
     staticCompositionLocalOf<OverlayController> { error("No OverlayHost: wrap the app root in OverlayHost") }
 
+/** The nearest host's controller, or `null` where there is none (previews, tests of a single page). */
+val LocalOverlayOrNull = staticCompositionLocalOf<OverlayController?> { null }
+
 /** Draws [content], then every entry of [controller] above it. */
 @Composable
 fun OverlayHost(
@@ -109,7 +112,7 @@ fun OverlayHost(
     val anyModal by remember(controller) {
         derivedStateOf { controller.entries.any { it.modal && it.state.targetState } }
     }
-    CompositionLocalProvider(LocalOverlay provides controller) {
+    CompositionLocalProvider(LocalOverlay provides controller, LocalOverlayOrNull provides controller) {
         Box(modifier.fillMaxSize()) {
             // The page behind a modal entry is not reachable by a screen reader (and not by touch: the scrim eats it).
             Box(if (anyModal) Modifier.clearAndSetSemantics { } else Modifier) { content() }

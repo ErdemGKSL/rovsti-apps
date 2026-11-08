@@ -7,12 +7,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.testTag
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.NavigationButton
@@ -22,6 +20,9 @@ import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.ListRowChevron
+import dev.rovsti.design.overlay.ButtonMenuEntry
+import dev.rovsti.design.overlay.LocalOverlayOrNull
+import dev.rovsti.design.overlay.MenuItem
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -42,7 +43,7 @@ internal fun LargeTitlePage(
 ) {
     val glass = rememberGlassSource()
     var pushed by rememberSaveable { mutableIntStateOf(initialPushed) }
-    var overflowAnchor by remember { mutableStateOf(Rect.Zero) }
+    val overlay = LocalOverlayOrNull.current
     if (pushed >= 0) {
         BackHandler { pushed = -1 }
         val subState = rememberLazyListState()
@@ -64,8 +65,9 @@ internal fun LargeTitlePage(
             state = listState,
             actions = actions,
             glass = glass,
-            // TODO(E1.10): open the overflow menu at this anchor.
-            onOverflow = { anchor, _ -> overflowAnchor = anchor },
+            onOverflow = { anchor, hidden ->
+                overlay?.present(ButtonMenuEntry(anchor, overflowItems(hidden), glass))
+            },
             onCollapseChanged = onCollapseChanged,
             modifier = Modifier.testTag("large-title-page"),
         ) {
@@ -82,6 +84,19 @@ internal fun LargeTitlePage(
         }
     }
 }
+
+/** The overflow menu of the page: the actions that did not fit the toolbar, then "Select", "Sort by" and "Delete all". */
+internal fun overflowItems(hidden: ImmutableList<ToolbarAction>): ImmutableList<MenuItem> =
+    persistentListOf<MenuItem>()
+        .addAll(hidden.map { MenuItem.Action(it.label, it.icon, onClick = it.onClick) })
+        .addAll(
+            listOf(
+                MenuItem.Action("Select", RovstiIcons.Checkmark, onClick = {}),
+                MenuItem.Action("Sort by", onClick = {}),
+                MenuItem.Separator,
+                MenuItem.Action("Delete all", RovstiIcons.Trash, destructive = true, onClick = {}),
+            ),
+        )
 
 @Composable
 internal fun rememberCatalogActions(): ImmutableList<ToolbarAction> =

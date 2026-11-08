@@ -32,4 +32,10 @@ class CatalogNavigationTest : ShotTest() {
         composeFrame { CatalogApp(initialPage = CatalogPage.Toolchain) }
         compose.onNodeWithText("Android API").assertIsDisplayed()
     }
+
+    @Test
+    fun buttonMenuPageOpens() {
+        composeFrame { CatalogApp(initialPage = CatalogPage.ButtonMenu) }
+        compose.onNodeWithText("Button menu").assertIsDisplayed()
+    }
 }

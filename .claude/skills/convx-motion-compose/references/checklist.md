@@ -5,12 +5,12 @@ Section numbers point into the other reference files.
 
 ## A. Licence and provenance
 
-- [ ] No code, class names, file structure or shader text taken from Convx (GPL-3.0). Numbers and techniques only.
+- [ ] Every file with Convx code keeps its upstream header and has `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`; `LicenceHeaderTest` passes.
 - [ ] Every file containing glisse-derived code starts with
       `// Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang`
       (shader files too; lens/rim shaders also keep the Aave / kube.io credit line).
-- [ ] `android/THIRD_PARTY_NOTICES.md` contains glisse's full MIT text (`references/glisse-LICENSE.txt`) and any Apache-2.0
-      upstream we depend on (Kyant0 backdrop/capsule, compose-cupertino...) with its NOTICE.
+- [ ] `android/THIRD_PARTY_NOTICES.md` contains glisse's full MIT text (`references/glisse-LICENSE.txt`) and every ported
+      source (Convx, Kyant0 backdrop/AndroidLiquidGlass/Capsule, compose-miuix-ui, compose-hig, Haze) with its licence.
 - [ ] No GPUI, no Material menus/dialogs/sheets, no font that is not redistributable (no SF Pro).
 
 ## B. Layout (owner complaints first)

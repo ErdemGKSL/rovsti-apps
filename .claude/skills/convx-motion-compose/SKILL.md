@@ -4,7 +4,7 @@ description: >-
   Fluid iOS 26 liquid-glass UI in Kotlin + Jetpack Compose (no GPUI) for Rovsti: interruptible springs, drag/fling
   with velocity hand-off, squash and stretch, shared elements, predictive back, AGSL/RenderEffect glass with
   fallbacks, popovers, context menus, sheets, dialogs, toasts, tab bar, large titles, insets, lists, text fields,
-  haptics, 120 Hz performance rules and a screen review checklist. From Convx research (GPL: techniques only) and
+  haptics, 120 Hz performance rules and a screen review checklist. From Convx (GPL-3.0, ported with attribution) and
   glisse (MIT: portable with attribution). Use for any Compose screen, animation, overlay or glass work, or when UI
   feels janky or not like iOS. Triggers: fluid animation, spring, liquid glass compose, popover, context menu,
   bottom sheet, tab bar, jank; akıcı animasyon, yay animasyonu, cam efekti, buzlu cam, açılır menü, bağlam menüsü,
@@ -13,23 +13,31 @@ description: >-
 
 # Convx-grade motion, glass and overlays in Compose (Rovsti)
 
-## 0. Licensing rule (read before writing a single line)
+## 0. Licensing rule (read before porting)
+
+Rovsti is **GPL-3.0-or-later** (root `LICENSE`). Convx is GPL-3.0, so its code is portable close to verbatim.
 
 | Source | Licence | What you may do |
 |---|---|---|
-| **Convx** (`cosmictaserdev-creator/Convx`) | **GPL-3.0** | Learn techniques, numbers, architecture. **Never** copy or lightly rename its functions, classes, shaders or file structure. Write original code. Do not open a Convx file while typing an implementation; work from this skill. |
-| **glisse** (`github.com/0kzh/glisse`) | **MIT**, Copyright (c) 2026 Kelvin Zhang | May be ported directly (TS -> Kotlin/Compose/AGSL). Every file containing ported code starts with the header below, and `android/THIRD_PARTY_NOTICES.md` carries glisse's full MIT text (copy of it: `references/glisse-LICENSE.txt`). |
-| Apache-2.0 upstreams Convx vendored (Kyant0 backdrop/capsule, compose-cupertino, compose-floating-tab-bar, compose-miuix-ui) | Apache-2.0 | Depend on the upstream artifact or port from the upstream repo (never Convx's modified copy), add a NOTICE entry, re-check the upstream LICENSE at the pinned version. |
+| **Convx** (`cosmictaserdev-creator/Convx`) | **GPL-3.0** | Port it as close to verbatim as possible (structure, algorithms, constants, shaders, names). Adapt only package names, our theme/tokens, our data models; drop music-player specifics. Keep the original header and add the line below. |
+| Apache-2.0 upstreams Convx vendored (Kyant0 backdrop, AndroidLiquidGlass kmp, Capsule, compose-miuix-ui, compose-hig/Compose Cupertino) | Apache-2.0 | Port Convx's copy; keep the original Apache header and copyright, and add the Convx line. `android/THIRD_PARTY_NOTICES.md` lists each with the full Apache text. |
+| Flamingo, MeloX, BitChord, Square (GPL-3.0, in Convx `NOTICE`) | GPL-3.0 | Music-player specific: not ported. |
+| **glisse** (`github.com/0kzh/glisse`) | **MIT**, Copyright (c) 2026 Kelvin Zhang | May be ported directly (TS -> Kotlin/Compose/AGSL) with the glisse header; `android/THIRD_PARTY_NOTICES.md` carries the full MIT text (`references/glisse-LICENSE.txt`). |
 | Public constants (UIKit 0.998 deceleration, rubber-band 0.55, cubic-bezier control points, iOS dp sizes) | facts | Free to use. |
 
-Required header for glisse-derived code (Kotlin or AGSL):
+Required header lines (Kotlin or AGSL), placed after the upstream header if there is one:
 
 ```
+// Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <original path in Convx>
 // Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
 ```
 
-Code blocks in `references/` are marked either `ORIGINAL` (Rovsti's own, written from descriptions) or
-`PORTED FROM GLISSE` (carries the header). Keep that marking when you move them into source files.
+Written as `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`. `LicenceHeaderTest`
+(`android/design/src/test/kotlin/dev/rovsti/design/LicenceHeaderTest.kt`) enforces it for every file under `backdrop/`,
+`shapes/` and `ios/`, every file naming Convx in its header, and every glisse file.
+
+Code blocks in `references/` are either Rovsti's own sketches or glisse translations (marked); for Convx features the
+references point to the Convx file to port.
 
 ## 1. Project constraints
 

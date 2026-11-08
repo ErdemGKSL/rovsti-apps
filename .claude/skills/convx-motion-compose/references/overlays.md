@@ -2,11 +2,11 @@ Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyr
 
 # Overlays: host, context menu, popover, sheet, dialog, toast, text toolbar
 
-> **Licence.** Convx's overlay files (`IosContextMenu.kt`, `AppleContextMenu.kt`, `IosMenu.kt`, `IosSheet.kt`,
-> `IosSheetPresentation.kt`, `OverlayMenu.kt`, `BottomSheetMenu.kt`, `FlingProjection.kt`) are GPL-3.0: behaviour and
-> numbers only, code here is `ORIGINAL`. The button-anchored menu morph is `PORTED FROM GLISSE` (`src/menu.tsx`, MIT) and
-> keeps the header. Convx's `hig/` module is an Apache-2.0 fork of Compose Cupertino; do not take the fork, use upstream or
-> write our own.
+> **Licence.** Rovsti is GPL-3.0-or-later: port Convx's overlay files (`ui/ios/IosContextMenu.kt`, `AppleContextMenu.kt`,
+> `IosMenu.kt`, `IosSheet.kt`, `IosSheetPresentation.kt`, `OverlayMenu.kt`, `BottomSheetMenu.kt`, `FlingProjection.kt`
+> under `app/src/main/kotlin/com/convx/music/ui/`) with the header from `SKILL.md` section 0. The button-anchored menu morph
+> is `PORTED FROM GLISSE` (`src/menu.tsx`, MIT) and keeps that header. Convx's `hig/` module is an Apache-2.0 fork of
+> Compose Cupertino; if a file is ported from it, keep its Apache header and list compose-hig in the notices.
 
 Prefixes: Convx `U/` = `app/src/main/kotlin/com/convx/music/ui/`, `H/` = `hig/src/main/kotlin/zone/ien/hig/`;
 glisse `G/` = `src/`. Detail: `_bmad-output/kotlin-ui/research/convx-overlays.md`, `glisse.md` 9.

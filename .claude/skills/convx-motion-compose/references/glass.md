@@ -2,14 +2,12 @@ Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyr
 
 # Glass: material recipe, AGSL lens and rim, tokens, fallbacks
 
-> **Licence.** Convx's glass glue (`GlassEffect.kt`, `GlassPool.kt`, freeze files, tint tokens) is GPL-3.0 and its
-> engine is a *modified* vendored copy of Kyant0/backdrop (Apache-2.0) (`app/src/main/kotlin/com/convx/music/ui/component/backdrop/internal/Shaders.kt:1-24`).
-> Neither may be copied. The capture engine below is `ORIGINAL`. The lens maths, rim light and tokens are
-> `PORTED FROM GLISSE` (MIT) and keep the header. glisse credits two sources of its maths in comments ("Aave's" web glass,
-> `src/internal/lens.ts:3-6,95`; kube.io's CSS/SVG liquid glass, `src/internal/refraction.ts:333-338`); keep those credits in
-> the shader header too. Alternative to writing the engine: depend on upstream `io.github.kyant0:backdrop` (Apache-2.0;
-> verify licence and Compose compatibility at the pinned version; Convx vendored it because the AAR broke against newer
-> Compose, `Shaders.kt:5-7`).
+> **Licence.** Rovsti is GPL-3.0-or-later, so Convx's glass stack is ported close to verbatim: the engine
+> `app/src/main/kotlin/com/convx/music/ui/component/backdrop/**` (Kyant0 backdrop v2.0.0, Apache-2.0, modified by Convx),
+> `ui/component/GlassEffect.kt`, `TopFadeBlur.kt`, `GlassPool.kt`, the freeze files, `ui/theme/AppleTokens.kt`,
+> `GlassTintTokens.kt` and `ui/ios/foundation/*`. Keep upstream headers and add the Convx line (SKILL.md section 0).
+> The lens maths, rim light and tokens below are `PORTED FROM GLISSE` (MIT) and keep that header; glisse credits "Aave's"
+> web glass (`src/internal/lens.ts:3-6,95`) and kube.io's CSS/SVG liquid glass (`src/internal/refraction.ts:333-338`).
 
 Prefixes: Convx `C/` = `app/src/main/kotlin/com/convx/music/ui/component/`, `B/` = `C/backdrop/`, `T/` = `.../ui/theme/`;
 glisse `G/` = `src/`. Deeper notes: `_bmad-output/kotlin-ui/research/convx-glass.md`, `glisse.md` sections 4-5.
@@ -34,7 +32,10 @@ API levels: `RenderEffect` blur/chain 31, `RuntimeShader`/`createRuntimeShaderEf
 
 ---
 
-## 2. Capture engine (ORIGINAL)
+## 2. Capture engine
+
+> **Superseded by the Convx backdrop port (`design/backdrop`), see `_bmad-output/kotlin-ui/plans/round-03.md`.**
+> The sketch below is the old hand-written engine; port `ui/component/backdrop/**` from Convx instead.
 
 ```kotlin
 // ORIGINAL

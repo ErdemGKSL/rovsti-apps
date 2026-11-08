@@ -1,9 +1,7 @@
 # Performance: recomposition, frame time, lists, images, tiles, ambient motion, threading
 
-> **Licence.** Convx (GPL-3.0) is described, not copied. All code here is `ORIGINAL`.
-> Evidence limits: Convx has one git commit, no committed benchmarks, no screenshot or Compose UI tests; numbers quoted
-> from its comments are the authors' own device readings (orders of magnitude, unreproducible here)
-> (`_bmad-output/kotlin-ui/research/convx-performance.md` 0, "Evidence limits").
+> **Licence.** Rovsti is GPL-3.0-or-later. Convx performance code (`GlassPool.kt`, `BackdropFreeze.kt`,
+> `NavTransitionFreeze.kt`, `BackdropStaticRegion.kt`) is ported with the header from `SKILL.md` section 0.
 
 Prefix: Convx `A/` = `app/src/main/kotlin/com/convx/music/`, `UI/` = `A/ui/`.
 

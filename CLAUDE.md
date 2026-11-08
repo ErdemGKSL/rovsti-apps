@@ -26,6 +26,9 @@
   and caches them on the device. No other backend, analytics or cloud sync.
 - Planning uses BMAD (`/bmad-help`). Its outputs go to `_bmad-output/`, and project
   knowledge goes to `docs/`.
+- Licence: GPL-3.0-or-later (`LICENSE`). Ported code keeps its upstream header and adds `Ported from Convx
+  (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>` (or the glisse line); list new sources in
+  `android/THIRD_PARTY_NOTICES.md`.
 
 Checks before you finish:
 

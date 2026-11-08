@@ -2,11 +2,9 @@ Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyr
 
 # Navigation and layout: structure, insets, tab bar, controls, lists, text fields, haptics, Stops map
 
-> **Licence.** Convx navigation/chrome code (`AppNavHost.kt`, `FoldingTabBar.kt`, `FoldGeometry.kt`, `FloatingNavBar.kt`,
-> `ScreenTitleBar.kt`, ...) is GPL-3.0: techniques only, code here is `ORIGINAL`. Its `FloatingTabBar.kt` is a modified
-> copy of Apache-2.0 compose-floating-tab-bar (`.../floatingtabbar/FloatingTabBar.kt:1-24`): use the upstream if wanted,
-> not Convx's copy. Tab bar / segmented / switch / slider / input geometry and gesture rules are `PORTED FROM GLISSE` (MIT)
-> and keep the header.
+> **Licence.** Rovsti is GPL-3.0-or-later: port Convx navigation/chrome code (`AppNavHost.kt`, `FoldingTabBar.kt`,
+> `FoldGeometry.kt`, `FloatingNavBar.kt`, `ScreenTitleBar.kt`, `ui/ios/IosTabBar.kt`, `IosNavigationBar.kt`) with the header
+> from `SKILL.md` section 0. Its `FloatingTabBar.kt` is a modified vendored Apache-2.0 file: keep its notice.
 
 Prefixes: Convx `A/` = `app/src/main/kotlin/com/convx/music/`, `C/` = `A/ui/component/`, `FT/` = `C/floatingtabbar/`,
 `I/` = `A/ui/ios/`, `U/` = `A/ui/utils/`; glisse `G/` = `src/`. Detail: `_bmad-output/kotlin-ui/research/convx-navigation.md`.

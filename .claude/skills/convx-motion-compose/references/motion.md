@@ -2,9 +2,9 @@ Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyr
 
 # Motion: springs, interruptibility, gestures, shared elements, predictive back
 
-> **Licence.** Convx (GPL-3.0) is described, never copied: every block marked `ORIGINAL` is Rovsti's own code written
-> from behaviour descriptions and public maths. Blocks marked `PORTED FROM GLISSE` are translations of glisse (MIT) and
-> must keep the header `// Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang`
+> **Licence.** Rovsti is GPL-3.0-or-later. Convx motion code is ported from the files named in each section (see
+> `SKILL.md` section 0 for the header). Blocks marked `PORTED FROM GLISSE` are translations of glisse (MIT) and must
+> keep the header `// Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang`
 > in whatever source file they land in.
 
 Citation prefixes. Convx: `U/` = `app/src/main/kotlin/com/convx/music/ui/`. glisse: `G/` = `src/`.

@@ -80,3 +80,12 @@ gpuiforge run android
 `.claude/skills/` holds `liquid-glass-gpui` (design system), `rust-best-practices`
 and the BMAD method (`bmad-*`, configured in `_bmad/`). Start planning with
 `/bmad-help`.
+
+## Licence
+
+Rovsti is licensed under the GNU General Public License, version 3 or (at your option) any later version
+(`GPL-3.0-or-later`); see [LICENSE](LICENSE). The Android UI contains code ported from
+[Convx](https://github.com/cosmictaserdev-creator/Convx) (GPL-3.0) and from Apache-2.0 and MIT projects, all listed
+in [android/THIRD_PARTY_NOTICES.md](android/THIRD_PARTY_NOTICES.md). Each ported file names its source in its header.
+Convx states "GPL-3.0" without "or later", so the combined Android apps are distributed under GPL-3.0 (version 3),
+which `GPL-3.0-or-later` permits.

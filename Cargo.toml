@@ -6,7 +6,7 @@ default-members = ["apps/*", "crates/*", "services/*"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.94"
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0-or-later"
 publish = false
 
 [workspace.lints.rust]

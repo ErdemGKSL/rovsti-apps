@@ -534,10 +534,25 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 | E2.9 | Phone domain ops | R2 | done (round-07 step 2; evidence below) |
 | E2.10 | Contacts domain ops, `qr.encode` / `qr.decode` | R2 | done (round-07 step 3; evidence below) |
 | E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | done (round-07 step 4; evidence below) |
-| E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | in-progress (round-07 step 5) |
+| E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | done (round-07 step 5; evidence below) |
 | E2.12 | Stops domain ops | R2 | in-progress (round-07 step 6) |
 | E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | in-progress (round-07 step 7) |
 | E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | in-progress (round-07 step 8) |
+
+#### Evidence, E2.11b (round-07 step 5)
+- Rust: `rovsti_ffi/src/ops/chat/{search,gallery,jump,marks,detect}.rs` (44 ops, all stateless; offsets into a body or snippet are
+  UTF-16): `chat_find.{find, cursor}`, `global_search.{search, prepare, footer, jump}`, `chat_gallery.{build, tabs}` (media / links /
+  docs with month sections), `chat_export.{text, block, notice}`, `multi_select.plan`, `date_jump.{pick, step}`,
+  `unread_jump.{state, divider, next}`, `voice_player.{speeds, toggle, view}`, `thread_marks.edit`, `mute.{choices, status}`,
+  `starred.{rows, local}`, `quick_replies.{edit, insert}`, `forward.{plan, words}`, `text_detect.detect`, `date_detect.detect`,
+  `location_link.{find, share}`, `shared_card.{read, mime}`, `message_info.rows`, `message_reminder.{make, slots, list}` and the
+  Phone app's `call_reminder.{make, list}` (the `reminder` module rows were `todo` under the messages domain). `OPS.md`: no `todo` row
+  is left in the `messages` domain (`DONE_DOMAINS` now lists it); `multi_select::Selection` is `kotlin` (per-tap set), `lru` and
+  `JumpTarget` are `none`. 138 fixture stems (`crates/rovsti_ffi/fixtures`), including the error cases (`invalid` with
+  `detail.reason` for a refused quick reply, `rekey` without a target, a blank reminder, a forward of nothing).
+- Kotlin: `ChatOps`/`NativeChatOps`, models `model.chat` (`FindModels`, `GalleryModels`, `JumpModels`, `MarksModels`,
+  `DetectModels`), contract models `ChatContracts`; `ChatModelsTest` (JVM) and `ChatOpsNativeTest` (real library, 12 cases) in
+  `testRustBridge`. No UI, so no screenshots.
 
 #### Evidence, E2.11a (round-07 step 4)
 - Rust: `rovsti_ffi/src/ops/messages/{inbox,sms,spam,schedule,backup,store}.rs` (43 ops: `inbox.{merge, preferred_channel,
@@ -548,7 +563,7 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
   load, quick_times}` (stateless `queue_json`, reason in `OPS.md`), `msg_backup.{export, parse, plan, strength}` (Kotlin supplies salt and
   nonce), `messages.{prefs_load, prefs_save, prefs_edit, drafts_load, drafts_save, drafts_put, drafts_rekey, access, tag}`). Serde
   derives added to the plain data types in `rovsti_core` / `rovsti_app_core` (no existing on-disk format changed). `OPS.md`: every
-  Messages row of these modules is op or none; the chat-tool rows stay `todo` until step 5 (`DONE_DOMAINS` does not list `messages` yet).
+  Messages row of these modules is op or none; the chat-tool rows were finished in step 5 (E2.11b).
 - Kotlin: `MessagesOps`/`NativeMessagesOps`, models `model.messages` (externally tagged `ThreadId`, `PersonKey`, `SmsKey`,
   `SpamRule`, `ScheduleTarget` via `ExternallyTagged`), contract models `MessagesContracts`; `MessagesModelsTest` (JVM) and
   `MessagesOpsNativeTest` (real library) in `testRustBridge`. No UI, so no screenshots.

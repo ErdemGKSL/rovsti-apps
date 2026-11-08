@@ -1,0 +1,1 @@
+{"display_name":"Ada","vcard":"BEGIN:VCARD\r\nVERSION:3.0\r\nN:Lovelace;Ada;;;\r\nFN:Ada Lovelace\r\nORG:Analytical\r\nTEL;TYPE=CELL:+44 20 7946 0001\r\nTEL;TYPE=WORK:+44 20 7946 0002\r\nTEL;TYPE=HOME:+44 20 7946 0003\r\nEMAIL:ada@example.com\r\nNOTE:Hello\r\nEND:VCARD\r\n"}

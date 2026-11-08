@@ -1,0 +1,1 @@
+{"ok":{"card":{"name":"","org":"","numbers":[],"emails":[],"note":""},"primary_number":null,"number_lines":[],"vcf":"BEGIN:VCARD\r\nVERSION:3.0\r\nN:;;;;\r\nFN:\r\nEND:VCARD\r\n","file_name":"contact.vcf","cache_file_name":"card-contact.vcf","share_text":"","insert_json":"{\"name\":\"\",\"org\":\"\",\"note\":\"\",\"phones\":[],\"emails\":[]}"}}

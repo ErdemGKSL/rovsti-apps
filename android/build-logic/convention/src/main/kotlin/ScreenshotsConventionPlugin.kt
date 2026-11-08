@@ -16,6 +16,18 @@ class ScreenshotsConventionPlugin : Plugin<Project> {
                 outputDir.set(layout.projectDirectory.dir("screenshots"))
             }
 
+            // `:catalog:contactSheet` writes docs/kotlin-ui/screenshots/design.png from the light goldens (E1.22).
+            tasks.register("contactSheet", ContactSheetTask::class.java) {
+                group = "documentation"
+                description = "Tiles the light goldens into docs/kotlin-ui/screenshots/design.png"
+                screenshots.set(layout.projectDirectory.dir("screenshots"))
+                output.set(rootProject.layout.projectDirectory.file("../docs/kotlin-ui/screenshots/design.png"))
+                include.set("-light\\.png$")
+                exclude.set("-(rtl|fs2|landscape)-light|-\\+\\d+ms-")
+                columns.set(12)
+                tileWidth.set(150)
+            }
+
             dependencies {
                 add("testImplementation", platform(libs.findLibrary("compose-bom").get()))
                 listOf(

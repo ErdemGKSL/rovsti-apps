@@ -104,6 +104,7 @@ private fun PageContent(page: CatalogPage) {
         CatalogPage.Sheets -> SheetsPage()
         CatalogPage.TextFields -> TextFieldsPage()
         CatalogPage.Toasts -> ToastsPage()
+        CatalogPage.OverlayStates -> OverlayStatesPage()
     }
 }
 

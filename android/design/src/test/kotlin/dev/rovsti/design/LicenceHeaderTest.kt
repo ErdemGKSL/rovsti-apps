@@ -44,7 +44,14 @@ class LicenceHeaderTest {
         val p = file.invariantSeparatorsPath
         return "/src/main/kotlin/dev/rovsti/design/backdrop/" in p ||
             "/src/main/kotlin/dev/rovsti/design/shapes/" in p ||
-            "/src/main/kotlin/dev/rovsti/design/ios/" in p
+            "/src/main/kotlin/dev/rovsti/design/ios/" in p ||
+            "/src/main/kotlin/dev/rovsti/design/chrome/floatingtabbar/" in p ||
+            p.endsWith("/design/glass/GlassEffect.kt") ||
+            p.endsWith("/design/glass/TopFadeBlur.kt") ||
+            p.endsWith("/design/list/AlphabetScrollBar.kt") ||
+            p.endsWith("/design/transition/NavTransitions.kt") ||
+            p.endsWith("/design/transition/SharedBounds.kt") ||
+            p.endsWith("/design/transition/ArtworkMotion.kt")
     }
 
     @Test
@@ -64,5 +71,41 @@ class LicenceHeaderTest {
                 f.name != "LicenceHeaderTest.kt" && "glisse" in head(f, 5) && glisseLine !in f.readText()
             }
         assertTrue("Missing glisse header: ${bad.map { it.path }}", bad.isEmpty())
+    }
+
+    /** Every source that was ported or vendored is named in `THIRD_PARTY_NOTICES.md`, with glisse's full MIT text. */
+    @Test
+    fun noticesListEverySource() {
+        val notices = File(androidRoot(), "THIRD_PARTY_NOTICES.md").readText()
+        val required =
+            listOf(
+                "## Convx",
+                "Kyant0/backdrop",
+                "Kyant0/AndroidLiquidGlass",
+                "Kyant0/Capsule",
+                "compose-miuix-ui",
+                "compose-hig",
+                "compose-floating-tab-bar",
+                "## Haze",
+                "## glisse",
+                "Navigation 3",
+                "## Coil",
+                "Permission is hereby granted, free of charge",
+                "GPL-3.0",
+                "Apache License",
+            )
+        val missing = required.filter { it !in notices }
+        assertTrue("THIRD_PARTY_NOTICES.md lacks: $missing", missing.isEmpty())
+    }
+
+    /** The relicensing of the whole project: root LICENSE is the GPL-3.0 text and the workspace declares it. */
+    @Test
+    fun projectIsGplThreeOrLater() {
+        val repo = androidRoot().parentFile
+        assertTrue("LICENSE is not GPL-3.0", File(repo, "LICENSE").readText().contains("GNU GENERAL PUBLIC LICENSE"))
+        assertTrue(
+            "Cargo.toml license",
+            File(repo, "Cargo.toml").readText().contains("license = \"GPL-3.0-or-later\""),
+        )
     }
 }

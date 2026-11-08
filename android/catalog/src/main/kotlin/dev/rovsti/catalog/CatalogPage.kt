@@ -34,4 +34,5 @@ enum class CatalogPage(
     Sheets("Sheets"),
     TextFields("Text fields"),
     Toasts("Toasts"),
+    OverlayStates("Overlay states"),
 }

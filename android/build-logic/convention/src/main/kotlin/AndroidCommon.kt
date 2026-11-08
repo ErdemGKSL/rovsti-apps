@@ -9,6 +9,8 @@ internal fun CommonExtension.configureCommon() {
     compileOptions.targetCompatibility = JavaVersion.VERSION_17
     // Compose and Roborazzi tests need merged resources and the manifest on the unit-test classpath.
     testOptions.unitTests.isIncludeAndroidResources = true
+    // Robolectric + Compose + software-rendered screenshots overflow the 512 MB default test heap.
+    testOptions.unitTests.all { it.maxHeapSize = "2g" }
     lint.abortOnError = true
     lint.warningsAsErrors = false
     lint.checkDependencies = false

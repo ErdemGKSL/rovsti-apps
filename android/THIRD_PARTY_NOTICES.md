@@ -300,3 +300,9 @@ The Apache-licensed files above keep their own copyright and licence notices in 
 - Source: https://github.com/coil-kt/coil (`io.coil-kt.coil3:coil-core`, `coil-compose`, version 3.6.3)
 - Licence: Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0). Used as a dependency only (image loading in
   `:design` `media/`); no Coil source is copied into this repository.
+
+## Navigation 3
+
+- Source: https://developer.android.com/guide/navigation/navigation-3 (`androidx.navigation3:navigation3-runtime`,
+  `navigation3-ui`). Licence: Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0). Copyright The Android Open Source Project.
+- Used as a dependency only (`design/transition/RovstiNavHost.kt`, `:catalog`); no Navigation 3 source is copied into this repository.

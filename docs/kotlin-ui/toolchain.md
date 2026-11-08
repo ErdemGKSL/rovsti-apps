@@ -28,7 +28,7 @@ compileSdk must be 37 because Compose BOM 2026.09 libraries require it.
   are the `RovstiSdk` object there. `-PcomposeReports` writes Compose compiler reports and metrics to
   `<module>/build/compose_reports` (run `./gradlew :design:compileDebugKotlin --no-build-cache --rerun -PcomposeReports`; a build-cache hit writes no reports); stability overrides go in `android/compose_stability.conf` (`//` comments only).
   Roborazzi writes goldens to `<module>/screenshots/`.
-- Modules so far: `:design` (library), `:testing` (test-only library with `ShotTest`, `FixedClock`, `StripedBackdrop`),
+- Modules so far: `:design` (library), `:testing` (test-only library with `ShotTest`, `FixedClock`),
   `:catalog` (demo app, `dev.rovsti.catalog`). Compose API checks are in [api-notes.md](api-notes.md).
 - Modules are added in `settings.gradle.kts` (`include(":phone")`, ...; the layout is in [architecture.md](architecture.md) section 2). The toolchain was proven with a
   throwaway `:sample` module (Compose + Robolectric native graphics + Roborazzi screenshot, lint, assemble),

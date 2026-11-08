@@ -57,6 +57,7 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
                 CatalogPage.ThemeType -> TypeScalePage()
                 CatalogPage.Motion -> MotionPage()
                 CatalogPage.Press -> PressPage()
+                CatalogPage.Glass -> GlassPage()
             }
         }
     }
@@ -181,7 +182,6 @@ private fun CatalogRow(
 
 private val Planned =
     listOf(
-        "Glass" to "E1.5",
         "Rows and buttons" to "E1.6",
         "Tab bar" to "E1.7",
         "Large-title scaffold" to "E1.8",

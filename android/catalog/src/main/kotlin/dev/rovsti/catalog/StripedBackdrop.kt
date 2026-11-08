@@ -1,4 +1,4 @@
-package dev.rovsti.testing
+package dev.rovsti.catalog
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxSize

@@ -53,7 +53,7 @@ verified: `android/` has no module, no `build-logic`).
 | E1.2 | Theme: colours, type, spacing, shapes, contrast test | R1 | done |
 | E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | done |
 | E1.4 | Press feedback, hold rule, haptics | R1 | done |
-| E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | in-progress |
+| E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | done |
 | E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | in-progress |
 | E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | in-progress |
 | E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | in-progress |
@@ -146,6 +146,7 @@ verified: `android/` has no module, no `build-logic`).
 - AC4 Probe test records whether Robolectric runs `RuntimeShader`; result written in `api-notes.md`; tests use Flat.
 - Screenshots: `e1.5-glass-flat-over-stripes`, `e1.5-glass-frost-over-stripes` (if renderable), `e1.5-rim-cpu-twin`,
   and `e1.5-glass-liquid-over-stripes` only if the probe passed.
+- Evidence (E1.5, uncommitted): `android/design/.../glass/` `GlassTier.kt` (tier fn exactly glass.md 6, `LocalGlassConditions`, `rememberGlassConditions`), `GlassSpec.kt` (Bar/Popover/Sheet/Thumb presets, `captureScale`), `GlassSource.kt` + `GlassNode.kt` (source recording, node re-records only on offset/size/press-scale change, effects keyed on size/spec/corner, saturation as colorFilter, null effect, Flat fill 0.85 + hairline + dropShadow, `frozen` plain field, inverse-press replay), `Lens.kt`/`LensShader.kt`/`Rim.kt` (glisse headers + Aave/kube.io credit; CPU twins, pure `lensUniforms`, `RimBrush`, `rimImage`), `GlassEffect.kt` (blur then lens). `ShotTest` forces Flat. Tests: `GlassTierTest`, `CaptureScaleTest`, `LensPullTest` (incl. spectrum 1.08), `RimTwinTest`, `LensUniformsTest`, Robolectric `RuntimeShaderProbeTest` (result in api-notes.md: blur and AGSL both run), `GlassPageTest`. Catalog `GlassPage` + `RimTwinPanel`; `StripedBackdrop` moved to `:catalog`. Opened `e1.5-glass-{flat,frost,liquid}-over-stripes-{light,dark}` and `e1.5-rim-cpu-twin-{light,dark}`: Flat labels legible, shadow and hairline visible; Frost blurred with saturated tint; Liquid shows lens colour fringing at capsule ends; rim bright on top-left and bottom-right, faint at theme shine 0.13.
 
 ### E1.6 Rows and small components
 - AC1 Buttons: glass icon button (44 dp), capsule, text, destructive, disabled.

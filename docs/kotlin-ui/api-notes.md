@@ -51,3 +51,22 @@ unzip -p <aar> classes.jar > /tmp/x.jar && javap -cp /tmp/x.jar -public <class> 
 - Lint (`NonObservableLocale`, an error under `abortOnError`) rejects `Locale.getDefault()` inside a composable. Use
   `androidx.compose.ui.platform.LocalLocale.current.platformLocale` (ui-android:1.12.1, `CompositionLocalsKt.getLocalLocale`,
   type `androidx.compose.ui.text.intl.Locale`).
+
+## Renderer probe (E1.5): can Robolectric run `RenderEffect` and `RuntimeShader`?
+
+`catalog/src/test/.../RuntimeShaderProbeTest.kt` renders a 40 x 40 dp box (left half red, right half blue) with and
+without an effect under Robolectric native graphics (sdk 35) and compares the captured pixels. Result, 2026-11-08:
+
+- `RenderEffect.createBlurEffect`: EFFECT APPLIED (3120 of 14400 px differ; seam pixel 0xff0000ff -> 0xff760089).
+- AGSL `RuntimeShader` via `createRuntimeShaderEffect` (green fill): EFFECT APPLIED (all 14400 px; 0xff0000ff -> 0xff00ff00).
+- `GlassLensShader.effect` (the real lens): EFFECT APPLIED (380 px differ, at the rim band as expected).
+
+So Frost and Liquid screenshots are real: `e1.5-glass-frost-over-stripes-*` and `e1.5-glass-liquid-over-stripes-*`.
+Normal tests still run Flat (`ShotTest` sets `GlassConditions.forTests = true`); only the glass page tests opt in.
+Not checkable on the JVM and left as a device check (E8.7): the replay staying live while a list scrolls under glass,
+inverse-press sampling on a pressed button (code path and `replayScale` are unit tested), frame cost.
+
+Other facts from E1.5: `Modifier.dropShadow(Shape, Shadow(radius, color, offset=DpOffset))` renders under Robolectric and is
+used for the glass shadow; AGSL has no `tanh` (written out); `Offset.isSpecified` is an extension in
+`androidx.compose.ui.geometry`. Flat and Frost draw no rim shader (glass.md 6); the Liquid rim shader paints the 0.5 px edge
+line itself, so the hairline is drawn only when no rim is.

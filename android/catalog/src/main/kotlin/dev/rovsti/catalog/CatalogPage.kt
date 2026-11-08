@@ -10,4 +10,5 @@ enum class CatalogPage(
     ThemeType("Theme: type scale"),
     Motion("Motion: spring curves"),
     Press("Press feedback"),
+    Glass("Glass"),
 }

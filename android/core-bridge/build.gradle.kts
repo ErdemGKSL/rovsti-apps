@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "dev.rovsti.core"
     testFixtures { enable = true }
+    defaultConfig { consumerProguardFiles("consumer-rules.pro") }
 }
 
 dependencies {

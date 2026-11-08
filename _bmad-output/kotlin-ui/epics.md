@@ -523,7 +523,7 @@ inline title judged: it slides off centre only when a centred title would run un
 | E2.3 | Contacts and Phone logic moved (trash store, prefs, WhatsApp glue, notes, WA call tracker) | R1 | in-progress (round-06) |
 | E2.4 | `wa_link` moved (link file, headless send) | R1 | in-progress (round-06) |
 | E2.5 | `rovsti_ffi`: exports, envelope, panic guard, handles, event sink, desktop build | R1 | in-progress (round-06) |
-| E2.6 | `:core-bridge`: cargo-ndk and host build tasks, `RustNative`, dispatcher, init | R1 | in-progress (round-06) |
+| E2.6 | `:core-bridge`: cargo-ndk and host build tasks, `RustNative`, dispatcher, init | R1 | done (round-06 step 7) |
 | E2.7 | Contract fixtures and Kotlin models | R1 | in-progress (round-06) |
 | E2.8 | `headless` entry compatible with today's receivers | R1 | in-progress (round-06) |
 | E2.9 | Phone domain ops | R2 | todo |

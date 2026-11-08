@@ -17,6 +17,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "rovsti-android"
 
+include(":core-bridge")
 include(":design")
 include(":catalog")
 include(":testing")

@@ -205,3 +205,19 @@ line itself, so the hairline is drawn only when no rim is.
   (-0.3 W, the mirror of the push exit).
 - Test pitfall: `NavTransitionFreeze` reads `System.nanoTime()`, so tests need real time (`Thread.sleep`) plus
   `ShadowSystemClock.advanceBy` to leave the 330 ms window; the Compose manual clock does not move it.
+
+## :core-bridge (E2.6)
+
+- cargo-ndk platform is 26, not the project's ARCH level 34 (`RovstiSdk.MIN`): a shared library linked against platform 34
+  refuses to load on API 26 to 33 (missing symbols/`DT_NEEDED` versions), and `scripts/android-env.sh` links for 26 as well.
+  Linking low costs nothing: the `.so` only uses libc/liblog/libdl symbols that exist since 26.
+- `CargoTasks.kt` (`rovsti.cargo` convention plugin): `cargoBuildAndroid` (debug) / `cargoBuildAndroid<Variant>` register through
+  `variant.sources.jniLibs.addGeneratedSourceDirectory(task, CargoBuildTask::outputDir)`, which also wires the task before
+  `merge*JniLibFolders` and `preBuild`-equivalent consumers. Typed inputs: `crates/**/*.rs|Cargo.toml|*.json`, root `Cargo.toml`
+  and `Cargo.lock`. The second run is UP-TO-DATE; the Cargo invocation after a source change is incremental.
+- `cargoBuildHost` builds with `--features test-ops` (`core.panic`, `core.emit_test`); the Android build never enables it.
+- AGP 9 built-in Kotlin: extra test sources go through `android.sourceSets.getByName("test").kotlin.directories.add(...)`;
+  `.java.directories` is not compiled by Kotlin. `variant.unitTest` is not available on the library `Variant` type.
+- `testRustBridge` reuses the `testDebugUnitTest` classpath and class dirs, filters to package `dev.rovsti.core.rust` and
+  `testDebugUnitTest` excludes that package (those tests load the real `.so`, the Robolectric JVM must not).
+- Debug `.so` files are unstripped: about 36 MB per ABI, the catalog debug APK is about 108 MB. Release builds use `--release`.

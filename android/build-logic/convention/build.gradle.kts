@@ -36,6 +36,10 @@ gradlePlugin {
             id = "rovsti.compose"
             implementationClass = "ComposeConventionPlugin"
         }
+        register("cargo") {
+            id = "rovsti.cargo"
+            implementationClass = "CargoConventionPlugin"
+        }
         register("screenshots") {
             id = "rovsti.screenshots"
             implementationClass = "ScreenshotsConventionPlugin"

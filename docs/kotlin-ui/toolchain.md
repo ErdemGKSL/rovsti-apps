@@ -9,7 +9,7 @@ scripts/android-setup.sh        # installs SDK into /opt/android-sdk, adds Rust 
 source scripts/android-env.sh   # ANDROID_HOME, ANDROID_SDK_ROOT, ANDROID_NDK_HOME, PATH, cargo linkers
 ```
 
-Installed: cmdline-tools rev 16111833, platform-tools 37.0.1, `platforms;android-37.0`,
+Installed: cargo-ndk 4.1.2 (`cargo install cargo-ndk --locked`, done by `android-setup.sh`; drives `:core-bridge:cargoBuildAndroid`), cmdline-tools rev 16111833, platform-tools 37.0.1, `platforms;android-37.0`,
 `build-tools;37.0.0`, NDK `29.0.14206865`. Licenses are accepted with `yes | sdkmanager --licenses`.
 Override with env: `ANDROID_HOME`, `PLATFORM`, `BUILD_TOOLS`, `NDK_MAJOR`, `NDK_PACKAGE`.
 compileSdk must be 37 because Compose BOM 2026.09 libraries require it.

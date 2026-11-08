@@ -52,8 +52,9 @@ if [[ -z "${SKIP_GRADLE:-}" ]]; then
   if (cd android && ./gradlew --no-daemon -q projects 2>/dev/null | grep -q "Project ':"); then
     shot=verifyRoborazziDebug
     [[ -n "${RECORD:-}" ]] && shot=recordRoborazziDebug
-    step "gradle spotlessCheck lintDebug testDebugUnitTest assembleDebug $shot" \
-      gradle spotlessCheck lintDebug testDebugUnitTest assembleDebug "$shot"
+    step "gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug $shot" \
+      gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug "$shot"
+    step "catalog APK has librovsti_ffi.so (both ABIs)" bash scripts/check-catalog-apk.sh
   else
     step "gradle spotlessCheck (no Android modules yet)" gradle spotlessCheck
   fi

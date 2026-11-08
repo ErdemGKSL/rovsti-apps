@@ -37,15 +37,24 @@ pub(super) fn run(verb: &str, request: &[u8]) -> Result<Value, FfiError> {
         }
         #[cfg(any(test, feature = "test-ops"))]
         "panic" => panic!("core.panic requested"),
-        // {"kind": "tick", "count": 3}: emits `count` events {"n": i} to the sink.
+        // {"kind": "tick", "count": 3}: a Rust thread emits `count` events {"n": i} to the sink.
         #[cfg(any(test, feature = "test-ops"))]
         "emit_test" => {
             let body = parse(request)?;
-            let kind = body.get("kind").and_then(Value::as_str).unwrap_or("test");
+            let kind = body
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("test")
+                .to_owned();
             let count = body.get("count").and_then(Value::as_u64).unwrap_or(1);
-            for n in 0..count {
-                crate::events::emit(kind, &json!({ "n": n }));
-            }
+            // From a Rust thread of its own, like real background work; joined so the answer follows the events.
+            std::thread::spawn(move || {
+                for n in 0..count {
+                    crate::events::emit(&kind, &json!({ "n": n }));
+                }
+            })
+            .join()
+            .map_err(|_| FfiError::new(ErrorKind::Panic, "emit thread panicked"))?;
             Ok(json!({ "emitted": count }))
         }
         _ => Err(FfiError::unsupported(format!("unknown op core.{verb}"))),

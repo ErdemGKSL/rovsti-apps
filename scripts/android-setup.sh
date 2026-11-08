@@ -32,4 +32,6 @@ echo "Installing platform-tools, platforms;android-$PLATFORM, build-tools;$BUILD
 yes | "$SDKMANAGER" "platform-tools" "platforms;android-$PLATFORM" "build-tools;$BUILD_TOOLS" "$NDK_PACKAGE" || true
 
 rustup target add aarch64-linux-android x86_64-linux-android
+# cargo-ndk drives the :core-bridge cargoBuildAndroid task (version recorded in docs/kotlin-ui/toolchain.md).
+command -v cargo-ndk >/dev/null 2>&1 || cargo install cargo-ndk --locked
 echo "OK. Next: source scripts/android-env.sh"

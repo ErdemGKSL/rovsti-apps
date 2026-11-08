@@ -24,6 +24,7 @@ android {
 
 dependencies {
     implementation(project(":design"))
+    implementation(project(":core-bridge"))
     implementation(libs.activity.compose)
     implementation(libs.haze)
     implementation(libs.navigation3.runtime)

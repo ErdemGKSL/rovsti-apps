@@ -1,0 +1,152 @@
+package dev.rovsti.design.list
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import dev.rovsti.design.icons.RovstiIcon
+import dev.rovsti.design.icons.RovstiIcons
+import dev.rovsti.design.press.rowPress
+import dev.rovsti.design.theme.RovstiText
+import dev.rovsti.design.theme.RovstiTheme
+import dev.rovsti.design.theme.Sizes
+import dev.rovsti.design.theme.Spacing
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
+
+/** Width of the leading slot. Every row that has a leading element gives it exactly this much, so text lines up. */
+val LeadingSlotWidth: Dp = Sizes.avatarLarge
+
+/** Where the text column starts, measured from the row's edge, when the row has a leading slot. */
+val TextStartWithLeading: Dp = Spacing.gutter + LeadingSlotWidth + Spacing.m
+
+/** Where the text column starts when there is no leading slot. */
+val TextStartPlain: Dp = Spacing.gutter
+
+/** An action a screen reader offers for a row (swipe actions, delete, mark read) as a custom accessibility action. */
+@Immutable
+class CustomAction(
+    val label: String,
+    val invoke: () -> Unit,
+)
+
+/**
+ * The one list row (ORIGINAL): [leading] in a fixed 44 dp slot and a 12 dp gap, then the [title] and at most one
+ * [secondary] line (each a single line with an ellipsis), then [meta] (a time, a count) and an optional [trailing]
+ * element (chevron, one icon). The height is a minimum (56 dp, 64 dp with a secondary line) and grows with font scale.
+ *
+ * The row is ONE accessibility node: avatar, texts and meta merge, with [actions] offered as custom actions. Pressing
+ * paints a flat fill behind the content; nothing scales and nothing moves. The row draws its own 16 dp gutters, so
+ * inside an [InsetGroupedSection] the text starts at [TextStartWithLeading] or [TextStartPlain] from the card edge.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ListRow(
+    title: String,
+    modifier: Modifier = Modifier,
+    secondary: String? = null,
+    leading: (@Composable () -> Unit)? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    meta: String? = null,
+    onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    actions: ImmutableList<CustomAction> = persistentListOf(),
+    titleColor: Color = Color.Unspecified,
+) {
+    val colors = RovstiTheme.colors
+    val type = RovstiTheme.type
+    val interactive = onClick != null || onLongClick != null
+    val source = remember { MutableInteractionSource() }
+    val accessibilityActions =
+        remember(actions) {
+            actions.map { action ->
+                CustomAccessibilityAction(action.label) {
+                    action.invoke()
+                    true
+                }
+            }
+        }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .heightIn(min = if (secondary != null) Sizes.rowMinTwoLine else Sizes.rowMin)
+            .then(
+                if (interactive) {
+                    Modifier
+                        .rowPress(source)
+                        .combinedClickable(
+                            interactionSource = source,
+                            indication = null,
+                            role = Role.Button,
+                            onClick = onClick ?: {},
+                            onLongClick = onLongClick,
+                        )
+                } else {
+                    Modifier
+                },
+            ).semantics(mergeDescendants = true) {
+                if (accessibilityActions.isNotEmpty()) customActions = accessibilityActions
+            }.padding(horizontal = Spacing.gutter, vertical = Spacing.s),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (leading != null) {
+            Box(Modifier.width(LeadingSlotWidth), contentAlignment = Alignment.Center) { leading() }
+            Box(Modifier.width(Spacing.m))
+        }
+        Column(Modifier.weight(1f)) {
+            RovstiText(
+                title,
+                style = type.body,
+                color = titleColor.takeIf { it != Color.Unspecified } ?: colors.labelPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (secondary != null) {
+                RovstiText(
+                    secondary,
+                    modifier = Modifier.padding(top = Spacing.textGap),
+                    style = type.subheadline,
+                    color = colors.labelSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (meta != null) {
+            RovstiText(
+                meta,
+                modifier = Modifier.padding(start = Spacing.m),
+                style = type.footnote,
+                color = colors.labelSecondary,
+                maxLines = 1,
+            )
+        }
+        if (trailing != null) {
+            Box(Modifier.padding(start = Spacing.s)) { trailing() }
+        }
+    }
+}
+
+/** The disclosure chevron at the end of a row that opens something. Decorative. */
+@Composable
+fun ListRowChevron(modifier: Modifier = Modifier) {
+    RovstiIcon(RovstiIcons.ChevronRight, null, modifier, tint = RovstiTheme.colors.labelTertiary, size = Sizes.chevron)
+}

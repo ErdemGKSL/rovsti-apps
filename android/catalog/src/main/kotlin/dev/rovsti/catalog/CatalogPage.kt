@@ -11,4 +11,10 @@ enum class CatalogPage(
     Motion("Motion: spring curves"),
     Press("Press feedback"),
     Glass("Glass"),
+    Buttons("Buttons"),
+    Rows("Rows"),
+    GroupedSection("Grouped sections"),
+    Avatars("Avatars"),
+    Chips("Chips"),
+    EmptyState("Empty states"),
 }

@@ -54,7 +54,7 @@ verified: `android/` has no module, no `build-logic`).
 | E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | done |
 | E1.4 | Press feedback, hold rule, haptics | R1 | done |
 | E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | done |
-| E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | in-progress |
+| E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | done |
 | E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | in-progress |
 | E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | in-progress |
 | E1.9 | Overlay host and placement | R2 | todo |
@@ -159,6 +159,7 @@ verified: `android/` has no module, no `build-logic`).
 - AC5 `Badge`, `EmptyState` (glyph, title, one line, optional action), source glyph (14 dp) for SMS/WhatsApp.
 - Screenshots: `e1.6-buttons`, `e1.6-rows`, `e1.6-rows-fs2`, `e1.6-grouped-section`, `e1.6-avatars`,
   `e1.6-chip-row-overflowing`, `e1.6-empty-state`.
+- Evidence (E1.6, uncommitted): `android/design/.../controls/` (`Buttons.kt` glisse header, `PressFill.kt`, `ChipRow.kt`, `Badge.kt`, `EmptyState.kt`, `SourceGlyph.kt`), `list/` (`ListRow.kt`, `SectionHeader.kt`, `InsetGroupedSection.kt`, `Avatar.kt`), `icons/` (`RovstiIcons.kt`, `RovstiIcon.kt`); `kotlinx-collections-immutable` 0.4.0 in the catalog and `api` of `:design`. Tests: JVM `AvatarColorTest` (palette >= 4.5:1 with white, stable colour, initials, badge text), Robolectric `ListRowSemanticsTest` (one merged node, custom action, >= 56/64 dp, grows at fs2), `ChipRowTest` (chips share one top, row scrolls, one selected), `GroupedSectionTest` (2 separators for 3 rows, none after the last, inset 72 dp). Catalog pages Buttons, Rows, Grouped sections, Avatars, Chips, Empty states; home and toolchain rebuilt on `ListRow` + `InsetGroupedSection`. Opened `e1.6-*` light/dark and `e1.1-catalog-home-dark`: text column aligned at 72 dp in every row, 16 dp gutters, group avatar is one split circle, chips on one line and the fifth cut by the right edge, selected chip white on accent legible in light, fs2 rows grow (titles ellipsize rather than clip), separators stop before the last row, buttons 44 dp with disabled at 35 %. Known: glass buttons render in the Flat tier in screenshots by design (JVM renderer); on a plain page they read as white discs with a hairline.
 
 ### E1.7 Tab bar and insets
 - AC1 `RovstiTabBar` geometry and puck ported from glisse (REST/DRAG springs, hold 150 ms, tap slop 24 dp, drag start

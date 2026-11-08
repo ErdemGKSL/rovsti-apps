@@ -30,6 +30,11 @@ object Sizes {
     val touch = 48.dp
     val button = 44.dp
     val sourceGlyph = 14.dp
+    val chevron = 16.dp
+    val chip = 36.dp
+    val badge = 20.dp
+    val badgeDot = 10.dp
+    val emptyGlyph = 48.dp
     val tabBarHeight = 60.dp
     val tabBarMaxWidth = 500.dp
     val contentMaxWidth = 640.dp

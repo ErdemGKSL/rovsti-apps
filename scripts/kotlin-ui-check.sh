@@ -54,5 +54,7 @@ if [[ -z "${SKIP_GRADLE:-}" ]]; then
   else
     step "gradle spotlessCheck (no Android modules yet)" gradle spotlessCheck
   fi
+  # A golden no test compares any more is dead weight that hides deletions; needs the run above.
+  step "orphan goldens" bash scripts/orphan-goldens.sh
 fi
 echo "ALL GREEN"

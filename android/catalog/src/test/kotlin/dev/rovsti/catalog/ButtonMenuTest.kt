@@ -4,7 +4,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
@@ -118,5 +120,32 @@ class ButtonMenuTest : ShotTest() {
         assertTrue("trigger hugs the edge", windowWidth - trigger.right < 12f * density)
         assertEquals(windowWidth - 12f * density, card.right, 1f)
         assertTrue(card.left >= 12f * density)
+    }
+
+    /**
+     * While the menu is open the trigger is only dimmed by the scrim. Nothing else of it may linger: the three triggers are
+     * the same element over the same flat page, so the one that opened the menu must look pixel for pixel like one that
+     * did not (a ghost of the anchor's size, e.g. a shadow outline, shows up as a difference).
+     */
+    @Test
+    fun triggerLeavesNoResidueWhileMenuIsOpen() {
+        open("menu-trigger-top")
+        compose.onNodeWithTag("menu-card").assertIsDisplayed()
+        val top = bounds("menu-trigger-top")
+        val bottom = bounds("menu-trigger-bottom")
+        val root = compose.onRoot().captureToImage()
+        val w = top.width.toInt()
+        val h = top.height.toInt()
+
+        fun crop(r: Rect) = IntArray(w * h).also { root.readPixels(it, r.left.toInt(), r.top.toInt(), w, h) }
+        val a = crop(top)
+        val b = crop(bottom)
+        var worst = 0
+        for (i in a.indices) {
+            for (shift in intArrayOf(0, 8, 16)) {
+                worst = maxOf(worst, kotlin.math.abs(((a[i] shr shift) and 0xFF) - ((b[i] shr shift) and 0xFF)))
+            }
+        }
+        assertTrue("trigger differs from an untouched one by $worst (> 6)", worst <= 6)
     }
 }

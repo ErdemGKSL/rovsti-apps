@@ -297,8 +297,11 @@ open class IosContextMenuEntry(
                     content = {
                         // The lifted copy of whatever was pressed, drawn above the scrim
                         // at the place it already occupies, so nothing appears to move.
+                        // Without a lifted copy (the button menu) this layer must draw nothing: its shadow
+                        // outline would otherwise leave a ghost the size of the anchor under the open menu.
                         Box(
                             Modifier.graphicsLayer {
+                                if (lifted == null) return@graphicsLayer
                                 scaleX = liftScale.value
                                 scaleY = liftScale.value
                                 val l = ((liftScale.value - 1f) / (AnchorLift - 1f)).coerceIn(0f, 1f)

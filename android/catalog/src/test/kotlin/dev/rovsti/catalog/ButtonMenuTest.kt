@@ -45,7 +45,7 @@ class ButtonMenuTest : ShotTest() {
         assertEquals("settled", rest, bounds("menu-trigger-top"))
         val density = compose.activity.resources.displayMetrics.density
         assertEquals("card is 220 dp wide", 220f * density, bounds("menu-card").width, 1f)
-        assertEquals("row is 44 dp tall", 44f * density, bounds("menu-row-0").height, 1f)
+        assertEquals("row is 48 dp tall", 48f * density, bounds("menu-row-0").height, 1f)
         back()
         assertEquals("after close", rest, bounds("menu-trigger-top"))
     }

@@ -3,6 +3,7 @@ package dev.rovsti.catalog
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.rovsti.testing.ShotTest
@@ -65,4 +66,38 @@ class E110ShotTest : ShotTest() {
             snap("e1.10-menu-clamped-edge", dark)
         }
     }
+
+    /** One finger down on the trigger, slid onto the second row and held: plate under it, card pressed and sheened. */
+    @Test
+    fun menuRowPressed() {
+        for (dark in listOf(false, true)) {
+            composeFrame(dark = dark) { CatalogApp(initialPage = CatalogPage.ButtonMenu) }
+            val trigger = compose.onNodeWithTag("menu-trigger-top", useUnmergedTree = true)
+            trigger.performTouchInput { down(center) }
+            settleMenu()
+            val origin = bounds("menu-trigger-top").topLeft
+            val row = bounds("menu-row-1").center
+            trigger.performTouchInput { moveTo(row - origin) }
+            advance(16)
+            advance(300)
+            snap("e1.10-menu-row-pressed", dark)
+            trigger.performTouchInput { up() }
+            advance(16)
+            advance(1500)
+        }
+    }
+
+    /** The overflow menu of the large-title page in a right-to-left layout: it grows from the leading corner. */
+    @Test
+    fun menuOpenBelowRtl() {
+        for (dark in listOf(false, true)) {
+            composeFrame(dark = dark, rtl = true) { CatalogApp(initialPage = CatalogPage.LargeTitle) }
+            compose.onNodeWithTag("toolbar-overflow").performClick()
+            settleMenu()
+            snap("e1.10-menu-open-below-rtl", dark)
+        }
+    }
+
+    private fun bounds(tag: String) =
+        compose.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
 }

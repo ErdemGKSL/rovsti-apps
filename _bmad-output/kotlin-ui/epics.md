@@ -60,7 +60,7 @@ mid-scroll).
 | E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | done |
 | E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | done |
 | E1.9 | Overlay host and placement | R2 | done |
-| E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | in-progress |
+| E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | done |
 | E1.11 | Long-press context menu (simple and preview-card variants) | R2 | in-progress |
 | E1.12 | Popover (anchored arbitrary content) | R2 | in-progress |
 | E1.13 | Sheets with detents, pushback, background interaction | R2 | in-progress |
@@ -204,6 +204,7 @@ mid-scroll).
 - AC3 `menuMorphFrame` invariants tested (t=0 surface = trigger rect; t=1 settled; clip inside card).
 - Screenshots: `e1.10-menu-closed`, `e1.10-menu-+40ms`, `e1.10-menu-+100ms`, `e1.10-menu-open-below`,
   `e1.10-menu-open-above`, `e1.10-menu-clamped-edge`, `e1.10-menu-row-pressed`.
+- Evidence (E1.10 part 2): `android/design/.../overlay/MenuPanel.kt` (glisse header; plate and card press from `menu.tsx:128-262`, `styles.css:985-1070`), `ButtonMenu.kt` (`menuTrigger` feeds the finger), `OverlayHost.kt` (`OverlayController.beginSlide(entry, Flow<Offset>)`, `SlideTarget`; no global pointer state). One non-consuming Final-pass observer on the card; row rects measured during layout into one `FloatArray` (`NaN` for separators and disabled rows); `hoveredRow(rects, y)` is a pure hit-test. Plate: `menuPlate()` 100 ms, first highlight in place, 80 ms fade out; card follows the finger with `menuResistance`, press `MenuCardPress`, release `MenuCardRelease`, 120 ms sheen. Row change gives `HapticEvent.TextHandle`, destructive commit `Confirm`. Keys: arrows wrap and skip disabled rows, Home/End, Enter commits, Escape/Tab close, first enabled row has logical focus. Semantics: Role.Button, checkmark rows Role.Checkbox + selected, disabled rows `disabled()`, rows 48 dp (`RowMinHeight` 44 -> 48). A slide that stays within 8 dp is a tap: the menu stays open and nothing commits; releasing outside the card commits nothing and leaves it open (glisse). Tests: JVM `MenuHitTest`; Robolectric `MenuSlideTest` (slide to row 3 runs it once and closes, 3 crossings give 3 ticks, release outside, tap, destructive Confirm, tap on a row, semantics click, keyboard wrap/Enter/Escape, roles and 48 dp). Opened `e1.10-menu-row-pressed-{light,dark}` (plate on the second row with rounded 14 dp corners, readable in both themes, disabled row and separator not lit, card sheen faint) and `e1.10-menu-open-below-rtl-{light,dark}` (mirrored, grows from the leading corner, rows right-aligned, check on the leading side); the other e1.10 shots were re-recorded for the 48 dp rows. Known: Compose reports a cancelled touch as a lift, so a cancel after sliding onto a row commits it (a detached trigger still cancels); the demo menu mixes rows with and without icons so labels do not align.
 
 ### E1.11 Long-press context menu
 - AC1 Gesture resolves four outcomes (tap, long-press open, scroll cancel, child click wins) (SKILL overlays 3.1).

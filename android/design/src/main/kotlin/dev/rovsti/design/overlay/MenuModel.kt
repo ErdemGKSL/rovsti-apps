@@ -32,7 +32,7 @@ object MenuMetrics {
 
     /** Distance between the card and the safe area's edge. */
     val EdgeMargin = 12.dp
-    val RowMinHeight = 44.dp
+    val RowMinHeight = 48.dp
     val RowPaddingVertical = 6.dp
     val RowPaddingHorizontal = 12.dp
     val RowGap = 10.dp

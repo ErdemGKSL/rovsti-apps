@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
@@ -28,6 +29,7 @@ import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Density
+import kotlinx.coroutines.flow.Flow
 
 /**
  * The one place overlays live (ORIGINAL): every popover, menu, sheet, alert and toast is an [OverlayEntry] presented
@@ -43,6 +45,19 @@ class OverlayController {
         entries += entry
         entry.state.targetState = true
         return entry
+    }
+
+    /**
+     * Hands a finger that is already down to [entry], so one touch can press a trigger, slide and release on a row
+     * (no global pointer state: the flow is the only link). [positions] are window pixels; the flow completes when
+     * the finger lifts, and ends with `Offset.Unspecified` when the touch was taken away instead. Positions sent
+     * before the entry has been composed are kept and replayed. Ignored by entries that are not a [SlideTarget].
+     */
+    fun beginSlide(
+        entry: OverlayEntry,
+        positions: Flow<Offset>,
+    ) {
+        (entry as? SlideTarget)?.onSlide(positions)
     }
 
     /** Starts the exit transition of [entry]; it is removed once the transition has finished. */
@@ -82,6 +97,11 @@ abstract class OverlayEntry(
 
     @Composable
     abstract fun Content(host: OverlayScope)
+}
+
+/** An entry that can take over a finger that went down elsewhere: see [OverlayController.beginSlide]. */
+interface SlideTarget {
+    fun onSlide(positions: Flow<Offset>)
 }
 
 /**

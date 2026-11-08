@@ -30,17 +30,23 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.isUnspecified
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Outline
@@ -77,6 +83,7 @@ import dev.rovsti.design.glass.LocalGlassConditions
 import dev.rovsti.design.glass.glass
 import dev.rovsti.design.glass.glassTier
 import dev.rovsti.design.glass.rememberGlassSource
+import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.motion.LocalReduceMotion
@@ -84,14 +91,24 @@ import dev.rovsti.design.motion.RovstiMotion
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import kotlinx.collections.immutable.ImmutableList
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Where the card ended up. Plain fields written during layout and read during draw: no state, no recomposition. */
-private class CardGeometry {
+internal class CardGeometry {
     var trailing = false
     var upward = false
+
+    /** The card's top-left corner in window pixels, its size, and its padding: what the finger handling maps with. */
+    var left = 0f
+    var top = 0f
+    var width = 0f
+    var height = 0f
+    var padding = 0f
 }
 
 /**
@@ -114,7 +131,14 @@ class ButtonMenuEntry(
     private val items: ImmutableList<MenuItem>,
     private val source: GlassSource? = null,
     private val triggerGlyph: ImageVector? = RovstiIcons.Ellipsis,
-) : OverlayEntry(modal = true, title = "Menu") {
+) : OverlayEntry(modal = true, title = "Menu"),
+    SlideTarget {
+    private var slide by mutableStateOf<Flow<Offset>?>(null)
+
+    override fun onSlide(positions: Flow<Offset>) {
+        slide = positions
+    }
+
     @Composable
     override fun Content(host: OverlayScope) {
         val reduceMotion = LocalReduceMotion.current
@@ -135,6 +159,51 @@ class ButtonMenuEntry(
         val focus = remember { FocusRequester() }
         val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
         val dismiss = { host.controller.dismiss(this) }
+        val haptics by rememberUpdatedState(LocalRovstiHaptics.current)
+        val reduceNow by rememberUpdatedState(reduceMotion)
+        val scope = rememberCoroutineScope()
+        val panel =
+            remember {
+                MenuPanelState(
+                    items = items,
+                    scope = scope,
+                    geometry = geometry,
+                    haptics = { haptics },
+                    reduceMotion = { reduceNow },
+                    pxPerDp = host.density.density,
+                    onCommit = { item ->
+                        host.controller.dismiss(this)
+                        item.onClick()
+                    },
+                )
+            }
+        LaunchedEffect(panel) { panel.runPlate() }
+        // A finger that went down on the trigger keeps going here: positions are window pixels, the flow completes when
+        // it lifts and ends with Offset.Unspecified when it was taken away.
+        val sliding = slide
+        LaunchedEffect(panel, sliding) {
+            if (sliding == null) return@LaunchedEffect
+            while (!panel.ready) withFrameNanos { }
+            var last = Offset.Unspecified
+            var cancelled = false
+            var first = true
+            sliding.collect { at ->
+                if (at.isUnspecified) {
+                    cancelled = true
+                    return@collect
+                }
+                last = at
+                val x = at.x - geometry.left
+                val y = at.y - geometry.top
+                if (first) {
+                    first = false
+                    panel.beginSlide(x, y)
+                } else {
+                    panel.move(x, y)
+                }
+            }
+            if (!last.isUnspecified) panel.end(last.x - geometry.left, last.y - geometry.top, lifted = !cancelled)
+        }
 
         OverlayScrim(progress = { t.value }, onTap = { dismiss() })
         Box(
@@ -159,13 +228,18 @@ class ButtonMenuEntry(
                         rtl = rtl,
                     )
                 geometry.upward = placement.side == Side.Above
+                geometry.left = placement.topLeft.x
+                geometry.top = placement.topLeft.y
+                geometry.width = placeable.width.toFloat()
+                geometry.height = placeable.height.toFloat()
+                geometry.padding = MenuMetrics.CardPadding.toPx()
                 geometry.trailing = anchor.center.x > placement.topLeft.x + placeable.width / 2f
                 layout(constraints.maxWidth, constraints.maxHeight) {
                     placeable.place(IntOffset(placement.topLeft.x.roundToInt(), placement.topLeft.y.roundToInt()))
                 }
             },
         ) {
-            MenuCard(t, geometry, focus, host, dismiss, reduceMotion)
+            MenuCard(t, geometry, focus, panel, dismiss, reduceMotion)
         }
         LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
     }
@@ -175,7 +249,7 @@ class ButtonMenuEntry(
         t: State<Float>,
         geometry: CardGeometry,
         focus: FocusRequester,
-        host: OverlayScope,
+        panel: MenuPanelState,
         dismiss: () -> Unit,
         reduceMotion: Boolean,
     ) {
@@ -198,6 +272,8 @@ class ButtonMenuEntry(
         val glyph = triggerGlyph?.let { rememberVectorPainter(it) }
         val glyphTint = colors.labelPrimary
         val leaving: () -> Boolean = { !state.targetState }
+        val scrollState = rememberScrollState()
+        panel.scrollPx = { scrollState.value }
 
         fun Density.frame(
             cardSize: Size,
@@ -220,13 +296,25 @@ class ButtonMenuEntry(
                 .focusRequester(focus)
                 .focusable()
                 .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.Escape) {
-                        dismiss()
-                        true
-                    } else {
-                        false
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (event.key) {
+                        Key.Escape, Key.Tab -> {
+                            dismiss()
+                            true
+                        }
+
+                        else -> {
+                            panel.onKey(event.key)
+                        }
                     }
-                }.pointerInput(Unit) { detectTapGestures { } }, // taps on the card's padding must not reach the scrim
+                }.menuPanelPointer(panel)
+                .graphicsLayer {
+                    // Outside the pointer observer's coordinates, so the finger's position never feeds back.
+                    scaleX = panel.scale.value
+                    scaleY = panel.scale.value
+                    translationX = panel.dx.value
+                    translationY = panel.dy.value
+                },
         ) {
             // The surface: the card's glass, clipped to the growing rect. The clip goes when the card has settled.
             Box(
@@ -252,7 +340,7 @@ class ButtonMenuEntry(
                     }.glass(glassSource, spec),
             )
             // The rows, scaled up from the trigger centre. Their layer covers the whole card (the padding is inside).
-            Column(
+            Box(
                 Modifier
                     .graphicsLayer {
                         val f = frame(size, t.value)
@@ -285,24 +373,12 @@ class ButtonMenuEntry(
                             }
                         }
                     }.padding(MenuMetrics.CardPadding)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(scrollState, enabled = scrollState.maxValue > 0),
             ) {
-                val anyChecked = items.any { it is MenuItem.Action && it.checked != null }
-                items.forEachIndexed { index, item ->
-                    when (item) {
-                        MenuItem.Separator -> {
-                            MenuSeparator()
-                        }
-
-                        is MenuItem.Action -> {
-                            MenuRow(item, index, anyChecked) {
-                                host.controller.dismiss(this@ButtonMenuEntry)
-                                item.onClick()
-                            }
-                        }
-                    }
-                }
+                MenuRows(items, panel)
             }
+            // The press sheen over the whole card.
+            Box(Modifier.matchParentSize().drawBehind { panel.drawSheen(this) })
             // The trigger's glyph: a copy at the trigger's place that drifts to the middle, swells and blurs away.
             if (glyph != null && !reduceMotion) {
                 Box(
@@ -377,76 +453,6 @@ private class SurfaceShape(
     }
 }
 
-@Composable
-private fun MenuSeparator() {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(horizontal = MenuMetrics.SeparatorMarginHorizontal, vertical = MenuMetrics.SeparatorMarginVertical)
-            .height(MenuMetrics.SeparatorThickness)
-            .background(RovstiTheme.colors.separator)
-            .testTag("menu-separator"),
-    )
-}
-
-@Composable
-private fun MenuRow(
-    item: MenuItem.Action,
-    index: Int,
-    reserveCheckSlot: Boolean,
-    onCommit: () -> Unit,
-) {
-    val colors = RovstiTheme.colors
-    val tint = if (item.destructive) colors.destructive else colors.labelPrimary
-    val commit by rememberUpdatedState(onCommit)
-    val interaction = remember { MutableInteractionSource() }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = MenuMetrics.RowMinHeight)
-            .graphicsLayer { alpha = if (item.enabled) 1f else MenuMetrics.DisabledAlpha }
-            .clickable(
-                interactionSource = interaction,
-                indication = null,
-                enabled = item.enabled,
-                role = Role.Button,
-            ) { commit() }
-            .semantics(mergeDescendants = true) { item.checked?.let { selected = it } }
-            .padding(horizontal = MenuMetrics.RowPaddingHorizontal, vertical = MenuMetrics.RowPaddingVertical)
-            .testTag("menu-row-$index"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement =
-            androidx.compose.foundation.layout.Arrangement
-                .spacedBy(MenuMetrics.RowGap),
-    ) {
-        item.icon?.let { RovstiIcon(it, contentDescription = null, tint = tint, size = MenuMetrics.IconSize) }
-        RovstiText(
-            item.label,
-            style = RovstiTheme.type.callout,
-            color = tint,
-            modifier = Modifier.weight(1f),
-        )
-        when (item.checked) {
-            true -> {
-                RovstiIcon(
-                    RovstiIcons.Checkmark,
-                    contentDescription = null,
-                    tint = tint,
-                    size = MenuMetrics.IconSize,
-                )
-            }
-
-            false -> {
-                Spacer(Modifier.size(MenuMetrics.IconSize))
-            }
-
-            null -> {
-                if (reserveCheckSlot) Spacer(Modifier.width(MenuMetrics.IconSize))
-            }
-        }
-    }
-}
-
 /**
  * Makes this element open a [ButtonMenuEntry] on *down* (not on lift), anchored to the element's bounds as they were
  * at that moment. The element keeps its size and position while the menu is open (a pressed look is the caller's
@@ -467,23 +473,45 @@ fun Modifier.menuTrigger(
     val latestSource by rememberUpdatedState(source)
     val latestGlyph by rememberUpdatedState(glyph)
 
-    fun open() {
+    /** The entry this touch opened, or `null` when it closed the menu that was already open. */
+    fun open(): ButtonMenuEntry? {
         val current = live[0]
         if (current != null && current.state.targetState) {
             controller.dismiss(current)
-            return
+            return null
         }
-        live[0] =
-            controller.present(
-                ButtonMenuEntry(holder.rect, latestItems, latestSource, latestGlyph),
-            ) as ButtonMenuEntry
+        val entry = ButtonMenuEntry(holder.rect, latestItems, latestSource, latestGlyph)
+        live[0] = entry
+        controller.present(entry)
+        return entry
     }
+
     return this
         .captureAnchor(holder)
         .pointerInput(controller) {
             awaitEachGesture {
-                awaitFirstDown(requireUnconsumed = false)
-                open()
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val entry = open() ?: return@awaitEachGesture
+                // The same finger goes on to slide over the rows: its window positions are buffered until the card
+                // is composed, then replayed in order.
+                val positions = Channel<Offset>(Channel.UNLIMITED)
+                controller.beginSlide(entry, positions.receiveAsFlow())
+                val origin = holder.rect.topLeft
+                positions.trySend(origin + down.position)
+                var lifted = false
+                try {
+                    while (true) {
+                        val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                        positions.trySend(origin + change.position)
+                        if (!change.pressed) {
+                            lifted = true
+                            break
+                        }
+                    }
+                } finally {
+                    if (!lifted) positions.trySend(Offset.Unspecified)
+                    positions.close()
+                }
             }
         }.semantics {
             role = Role.Button

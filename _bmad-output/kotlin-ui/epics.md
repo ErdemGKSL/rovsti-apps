@@ -44,16 +44,19 @@ Branch: `ui-overhaul` (never push to `main`).
 Goal: every component the apps need exists, is demonstrated in the catalog app, and is proven by screenshots,
 before any app screen is written. Spec: SKILL `references/*` (all), ARCH 4, 9.
 
+Round plans: R1 -> `_bmad-output/kotlin-ui/plans/round-01.md` (planned 2026-11-08; nothing implemented yet,
+verified: `android/` has no module, no `build-logic`).
+
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E1.1 | Modules, convention plugins, screenshot harness, catalog shell | R1 | todo |
-| E1.2 | Theme: colours, type, spacing, shapes, contrast test | R1 | todo |
-| E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | todo |
-| E1.4 | Press feedback, hold rule, haptics | R1 | todo |
-| E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | todo |
-| E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | todo |
-| E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | todo |
-| E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | todo |
+| E1.1 | Modules, convention plugins, screenshot harness, catalog shell | R1 | in-progress |
+| E1.2 | Theme: colours, type, spacing, shapes, contrast test | R1 | in-progress |
+| E1.3 | Motion tokens, spring solver, fling projection, rubber band, reduce motion, MotionGate | R1 | in-progress |
+| E1.4 | Press feedback, hold rule, haptics | R1 | in-progress |
+| E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | in-progress |
+| E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | in-progress |
+| E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | in-progress |
+| E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | in-progress |
 | E1.9 | Overlay host and placement | R2 | todo |
 | E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | todo |
 | E1.11 | Long-press context menu (simple and preview-card variants) | R2 | todo |

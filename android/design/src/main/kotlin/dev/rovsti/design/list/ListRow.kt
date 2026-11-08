@@ -18,12 +18,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import dev.rovsti.design.backdrop.Backdrop
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
+import dev.rovsti.design.ios.component.IosToggle
 import dev.rovsti.design.press.rowPress
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
@@ -70,6 +78,7 @@ fun ListRow(
     onLongClick: (() -> Unit)? = null,
     actions: ImmutableList<CustomAction> = persistentListOf(),
     titleColor: Color = Color.Unspecified,
+    extraSemantics: (SemanticsPropertyReceiver.() -> Unit)? = null,
 ) {
     val colors = RovstiTheme.colors
     val type = RovstiTheme.type
@@ -104,6 +113,7 @@ fun ListRow(
                 },
             ).semantics(mergeDescendants = true) {
                 if (accessibilityActions.isNotEmpty()) customActions = accessibilityActions
+                extraSemantics?.invoke(this)
             }.padding(horizontal = Spacing.gutter, vertical = Spacing.s),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -149,4 +159,49 @@ fun ListRow(
 @Composable
 fun ListRowChevron(modifier: Modifier = Modifier) {
     RovstiIcon(RovstiIcons.ChevronRight, null, modifier, tint = RovstiTheme.colors.labelTertiary, size = Sizes.chevron)
+}
+
+/**
+ * A row with a switch at its end (Settings-style). The row is ONE accessibility node with `Role.Switch` and the on/off
+ * state, so a screen reader toggles it from the row; the [IosToggle] inside is hidden from accessibility. The row itself
+ * does not toggle on a tap (like iOS Settings): the switch is the control, and it is a full 48 dp touch target, so the row
+ * keeps the usual height and nothing in it moves when the switch is pressed. [onCheckedChange] null shows a read-out.
+ */
+@Composable
+fun ListRowSwitch(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    secondary: String? = null,
+    leading: (@Composable () -> Unit)? = null,
+    enabled: Boolean = true,
+    backdrop: Backdrop? = null,
+) {
+    val interactive = enabled && onCheckedChange != null
+    ListRow(
+        title = title,
+        secondary = secondary,
+        leading = leading,
+        modifier = modifier,
+        trailing = {
+            IosToggle(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                enabled = enabled,
+                backdrop = backdrop,
+                exposeSemantics = false,
+            )
+        },
+        extraSemantics = {
+            role = Role.Switch
+            toggleableState = if (checked) ToggleableState.On else ToggleableState.Off
+            if (!interactive) disabled()
+            onClick("toggle") {
+                if (!interactive) return@onClick false
+                onCheckedChange?.invoke(!checked)
+                true
+            }
+        },
+    )
 }

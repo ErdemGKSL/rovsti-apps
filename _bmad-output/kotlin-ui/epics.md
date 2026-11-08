@@ -82,7 +82,7 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 | E1.26 | One root backdrop, migrate every glass caller, delete the old engine, real-path test, catalog APK | R3 | done |
 | E1.27 | Convx menus and context menus (IosMenu, AppleContextMenu, IosContextMenu, OverlayMenu) in `OverlayHost` | R3 | done |
 | E1.28 | Convx sheets (IosSheet, IosPageSheet, IosSheetPresentation, BottomSheet) | R3 | done (SheetEntry facade keeps detents, stacking, non-modal; release rule, pushback, corner, grabber from Convx) |
-| E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | todo |
+| E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | done |
 | E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3 | todo |
 | E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | todo |
 | E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | todo |
@@ -294,6 +294,7 @@ better. New stories E1.23-E1.29 below; E1.17 re-scoped to Convx; E1.18-E1.22 mov
 - AC2 Gesture tests from glisse tests (tap, drag off-bar selects on release, >24 px off does nothing, hold blocks scroll,
   cancel cancels).
 - Screenshots: `e1.17-switch-off-on`, `e1.17-switch-pressed`, `e1.17-slider`, `e1.17-segmented-3`, `e1.17-segmented-drag`.
+- Evidence (R3 Step 7): `ios/component/IosToggle.kt`, `IosSlider.kt`, `IosSwitchRules.kt` (glisse 4 dp / 24 dp rules; Convx lacks them), `controls/SegmentedControl.kt` (LiquidBottomTabs puck), `list/ListRow.kt` `ListRowSwitch`. Catalog `ControlsPage`. Tests: JVM `IosControlsRulesTest`; Robolectric `ToggleTest`, `SliderTest`, `SegmentedTest` (tap, drag, scroll does not act, cancel, semantics, 48 dp, no layout shift, real-path thumb records), shots `E117ShotTest`. Seen: held thumb/pill is lens glass bending stripes, selected label readable over the resting pill, nothing clipped.
 
 ### E1.23 Relicense (plan round-03 Step 1)
 - AC1 `Cargo.toml` workspace `license = "GPL-3.0-or-later"` (every crate inherits); root `LICENSE` = Convx's GPL-3.0 text

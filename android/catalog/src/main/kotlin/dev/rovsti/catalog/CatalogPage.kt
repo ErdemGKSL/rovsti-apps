@@ -14,6 +14,7 @@ enum class CatalogPage(
     BackdropEngine("Backdrop engine"),
     IosGlass("iOS glass materials"),
     Buttons("Buttons"),
+    Controls("Switch, slider, segmented"),
     Rows("Rows"),
     GroupedSection("Grouped sections"),
     Avatars("Avatars"),

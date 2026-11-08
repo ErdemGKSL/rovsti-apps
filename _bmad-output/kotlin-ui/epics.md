@@ -533,11 +533,25 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 | E2.8 | `headless` entry compatible with today's receivers | R1 | done (round-06 steps 5 and 8) |
 | E2.9 | Phone domain ops | R2 | done (round-07 step 2; evidence below) |
 | E2.10 | Contacts domain ops, `qr.encode` / `qr.decode` | R2 | done (round-07 step 3; evidence below) |
-| E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | in-progress (round-07 step 4) |
+| E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | done (round-07 step 4; evidence below) |
 | E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | in-progress (round-07 step 5) |
 | E2.12 | Stops domain ops | R2 | in-progress (round-07 step 6) |
 | E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | in-progress (round-07 step 7) |
 | E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | in-progress (round-07 step 8) |
+
+#### Evidence, E2.11a (round-07 step 4)
+- Rust: `rovsti_ffi/src/ops/messages/{inbox,sms,spam,schedule,backup,store}.rs` (43 ops: `inbox.{merge, preferred_channel,
+  person_for_number, person_for_jid, filter, bulk, pending_delete}` (merge and `person_for_*` take a `search.index_new` handle),
+  `sms.{segments, to_message, key}`, `sms_timeline.build` (replays page / pending / status / retry / discard / remove / adopt events),
+  `mms_pdu.{parse, build_send_req, build_notify_resp}` (base64 bytes), `otp.find` (UTF-16 offsets), `spam.{classify, add_rule,
+  insert_rule, remove_rule, links, open_links, contains_link}`, `notify.build`, `schedule.{validate, add, cancel, reconcile, due_soon,
+  load, quick_times}` (stateless `queue_json`, reason in `OPS.md`), `msg_backup.{export, parse, plan, strength}` (Kotlin supplies salt and
+  nonce), `messages.{prefs_load, prefs_save, prefs_edit, drafts_load, drafts_save, drafts_put, drafts_rekey, access, tag}`). Serde
+  derives added to the plain data types in `rovsti_core` / `rovsti_app_core` (no existing on-disk format changed). `OPS.md`: every
+  Messages row of these modules is op or none; the chat-tool rows stay `todo` until step 5 (`DONE_DOMAINS` does not list `messages` yet).
+- Kotlin: `MessagesOps`/`NativeMessagesOps`, models `model.messages` (externally tagged `ThreadId`, `PersonKey`, `SmsKey`,
+  `SpamRule`, `ScheduleTarget` via `ExternallyTagged`), contract models `MessagesContracts`; `MessagesModelsTest` (JVM) and
+  `MessagesOpsNativeTest` (real library) in `testRustBridge`. No UI, so no screenshots.
 
 #### Evidence, E2.10 (round-07 step 3)
 - Rust: `rovsti_ffi/src/ops/contacts/{draft,files,lists,store}.rs` (66 ops: `contacts.draft_*`, dates/age/event line, `card`, `dupes`,

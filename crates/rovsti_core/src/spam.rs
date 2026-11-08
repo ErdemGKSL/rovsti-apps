@@ -230,7 +230,7 @@ pub fn links(body: &str) -> Vec<String> {
 }
 
 /// One "Open link" pill: its label and the URL it opens.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OpenLink {
     pub label: String,
     pub url: String,

@@ -27,7 +27,7 @@ pub struct ScheduledSms {
 }
 
 /// What the platform reports after trying to send an item that was due.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FiredSms {
     pub id: u64,
     pub ok: bool,

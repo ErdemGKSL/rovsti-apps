@@ -1,0 +1,1 @@
+{"ok":{"actions":[{"action":"mark_unread","label":"Mark unread","destructive":false},{"action":"mute","label":"Mute","destructive":false},{"action":"pin","label":"Pin","destructive":false},{"action":"archive","label":"Archive","destructive":false}],"pin_refusal":"You can pin up to 3 WhatsApp chats","done_notice":"Pinned 2 chats","confirm":null,"partial_notice":null}}

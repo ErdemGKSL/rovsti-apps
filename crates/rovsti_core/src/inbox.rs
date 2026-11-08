@@ -9,7 +9,8 @@ use crate::sms::SmsThreadRow;
 use crate::thread::{Channel, Message, MessageDirection, ThreadId};
 
 /// Who an inbox row is about.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PersonKey {
     /// `ContactsContract.Contacts._ID`.
     Contact(i64),
@@ -20,7 +21,7 @@ pub enum PersonKey {
 }
 
 /// One conversation as the inbox sees it, whatever channel it is on.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct InboxThread {
     pub id: ThreadId,
     pub last: Message,
@@ -30,7 +31,7 @@ pub struct InboxThread {
     pub is_group: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct InboxRow {
     pub key: PersonKey,
     pub title: String,

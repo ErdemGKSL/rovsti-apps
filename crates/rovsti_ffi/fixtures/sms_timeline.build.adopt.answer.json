@@ -1,0 +1,1 @@
+{"ok":{"thread_id":12,"items":[{"key":{"local":1},"outgoing":true,"body":"First","parts":[],"at_ms":1790000000000,"state":"pending","sub_id":null,"provider_id":null}],"has_older":false,"oldest_ms":null,"results":[{"changed":true,"send":null,"text":null},{"changed":true,"send":null,"text":null}]}}

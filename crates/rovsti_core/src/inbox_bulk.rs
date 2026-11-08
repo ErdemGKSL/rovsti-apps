@@ -10,7 +10,8 @@ pub const WA_PIN_LIMIT: usize = 3;
 const WA_TOO_MANY_PINS: &str = "You can pin up to 3 WhatsApp chats";
 
 /// What the inbox knows about one selected row.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct BulkFacts {
     /// Row has unread messages.
     pub unread: bool,
@@ -29,7 +30,8 @@ pub struct BulkFacts {
 }
 
 /// An action applicable to a whole selection.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BulkAction {
     /// Mark as read.
     MarkRead,

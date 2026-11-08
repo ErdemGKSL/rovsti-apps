@@ -2,6 +2,7 @@
 
 mod contacts;
 mod core;
+mod messages;
 mod phone;
 mod qr;
 pub mod registry;

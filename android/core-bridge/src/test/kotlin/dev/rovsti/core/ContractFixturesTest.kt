@@ -3,6 +3,7 @@ package dev.rovsti.core
 import dev.rovsti.core.contracts.AllContracts
 import dev.rovsti.core.model.core.VersionInfo
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.core.ops.MessagesOps
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SearchOps
@@ -61,6 +62,7 @@ class ContractFixturesTest {
                 "PhoneOps" to PhoneOps.ops,
                 "ContactsOps" to ContactsOps.ops,
                 "QrOps" to QrOps.ops,
+                "MessagesOps" to MessagesOps.ops,
             )
         val missing =
             facades.flatMap { (facade, ops) ->

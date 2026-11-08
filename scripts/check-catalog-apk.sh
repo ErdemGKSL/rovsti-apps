@@ -7,8 +7,10 @@ cd "$ROOT"
 APK="${1:-android/catalog/build/outputs/apk/debug/catalog-debug.apk}"
 [[ -f "$APK" ]] || { echo "APK not found: $APK (run gradle :catalog:assembleDebug)" >&2; exit 1; }
 
+# Read the listing once: `unzip -l | grep -q` under pipefail fails with SIGPIPE when grep stops reading early.
+listing="$(unzip -l "$APK")"
 for abi in arm64-v8a x86_64; do
-  unzip -l "$APK" | grep -q "lib/$abi/librovsti_ffi.so" || { echo "missing lib/$abi/librovsti_ffi.so in $APK" >&2; exit 1; }
+  grep -q "lib/$abi/librovsti_ffi.so" <<<"$listing" || { echo "missing lib/$abi/librovsti_ffi.so in $APK" >&2; exit 1; }
 done
 
 tmp="$(mktemp -d)"

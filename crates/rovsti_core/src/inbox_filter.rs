@@ -2,7 +2,10 @@
 //! which chips to show, and their labels.
 
 /// One filter chip of the inbox.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum InboxFilter {
     /// Every conversation.
     #[default]
@@ -10,6 +13,7 @@ pub enum InboxFilter {
     /// Conversations with unread messages or marked unread.
     Unread,
     /// Conversations that have a WhatsApp side.
+    #[serde(rename = "whatsapp")]
     WhatsApp,
     /// Conversations that have an SMS side.
     Sms,
@@ -40,7 +44,8 @@ impl InboxFilter {
 }
 
 /// The facts about one inbox row that the filters look at.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct RowFacts {
     /// Unread count above zero, or marked unread.
     pub unread: bool,

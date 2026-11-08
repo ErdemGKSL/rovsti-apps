@@ -2,7 +2,10 @@
 //! layers (`rovsti_android`, the Kotlin `PermissionState`) convert into this.
 
 /// State of a permission group.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum Access {
     #[default]
     Denied,

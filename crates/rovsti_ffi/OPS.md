@@ -26,6 +26,31 @@ are files in the data directory: a request may name `dir`, else `core.init`'s da
 `rovsti_core::contact_edit::ContactDraft` (empty optional lists left out). The editor's per-keystroke state, the select-mode set and
 the sheet state of the screens are Kotlin (E4); the ops here run per event.
 
+Messages core (E2.11a): `inbox.merge`, `inbox.person_for_number` and `inbox.person_for_jid` take the handle of a contact index
+(`search.index_new`) as `contacts`; a released or foreign handle answers `not_found`. Every other `inbox.*`, `sms.*`,
+`sms_timeline.*`, `mms_pdu.*`, `otp.*`, `spam.*`, `schedule.*`, `notify.*` and `msg_backup.*` op is stateless. Choices worth knowing:
+
+- `sms_timeline.build` replays an ordered `events` list (`page`, `pending`, `status`, `retry`, `discard`, `remove`, `adopt_thread`;
+  the `kind` field names the event) on a fresh `SmsTimeline` and answers the ascending items plus one result per event (a retry's
+  `SmsSend`, a discarded text). No handle: a thread's events are a few hundred small values and the Kotlin ViewModel already keeps
+  them, so a replay costs less than keeping native state in step with it.
+- `schedule.*` is stateless over a `queue_json` string (the content of `scheduled.json`), not a `ScheduleQueue` handle. Nothing in
+  `rovsti_app_core` persists the queue, the alarm registration is Kotlin (`AlarmManager`), and the queue is capped at 200 small
+  items, so the string round-trips for free and survives process death without recreating a handle. Every op answers the new
+  `queue_json` (save it as is) and the parsed `items`; a corrupt or empty string reads as an empty queue.
+- `msg_backup.export` takes the `salt` (16 bytes) and `nonce` (12 bytes) as base64 from Kotlin's `SecureRandom`, because Rust has
+  no RNG dependency and a fixed pair must never reach production; `iterations` defaults to 600 000 (at least 1 000 is accepted
+  so fixtures stay fast). `msg_backup.parse` answers `auth` (`detail.reason = "wrong_passphrase"`) for a wrong passphrase and
+  `parse` (`detail.reason` = `not_a_backup` | `newer_version` | `corrupt`) for the rest. All bytes travel as standard base64.
+- `otp.find` answers UTF-16 offsets (`start`, `end`), the unit of a Kotlin `String`, not Rust byte offsets.
+- `inbox.pending_delete` rebuilds `PendingDeletes<String>` from the `pending` list (`{key, at_ms}`), applies `action` (`add`, `undo`,
+  `due`, `drain`, `none`) and answers the new list; `inbox.filter` answers the chips to show (the selected one always among them).
+- `messages.prefs_load` / `messages.prefs_save` / `messages.drafts_*` use `dir` like the other file ops; `messages.prefs_edit`
+  applies one named edit (`mute`, `unmute`, `expire_mutes`, `mark_spam`, `unmark_spam`, `allow_sender`, `unallow_sender`,
+  `remove_allowed`, `rekey`, `reset`) so the rules stay in Rust and Kotlin only saves the result. Drafts travel as a map of
+  conversation tag (`sms:7`, `wa:<jid>`) to text.
+- Chat tools (`chat_find`, `chat_gallery`, `forward`, ...) are E2.11b and keep their `todo` rows until then.
+
 QR (E2.10, AC0): `qr.encode {text, ecc: "l"|"m"|"q"|"h" (default m)}` answers `{side, modules}`: `modules` is the standard base64
 (padded) of a bitset of `side * side` bits, row-major, the first module of the first row in the most significant bit of the first
 byte, a set bit a dark module, unused trailing bits zero; the quiet zone (4 modules) is not part of the matrix. `qr.decode {w, h, luma}`
@@ -46,12 +71,12 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_app_core::contacts::prefs` | contacts | contacts | op | contacts.prefs_load, contacts.prefs_save |
 | `rovsti_app_core::contacts::trash_store` | contacts | contacts | op | contacts.trash_list, contacts.trash_push, contacts.trash_restore, contacts.trash_delete |
 | `rovsti_app_core::contacts::whatsapp` | contacts | wa | todo | - |
-| `rovsti_app_core::messages::access` | messages | messages | todo | - |
-| `rovsti_app_core::messages::drafts` | messages | messages | todo | - |
+| `rovsti_app_core::messages::access` | messages | messages | op | messages.access |
+| `rovsti_app_core::messages::drafts` | messages | messages | op | messages.drafts_load, messages.drafts_save, messages.drafts_put, messages.drafts_rekey |
 | `rovsti_app_core::messages::headless` | messages | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |
-| `rovsti_app_core::messages::prefs` | messages | messages | todo | - |
-| `rovsti_app_core::messages::tags` | messages | messages | todo | - |
-| `rovsti_app_core::permission::Access` | messages | platform | todo | - |
+| `rovsti_app_core::messages::prefs` | messages | messages | op | messages.prefs_load, messages.prefs_save, messages.prefs_edit |
+| `rovsti_app_core::messages::tags` | messages | messages | op | messages.tag |
+| `rovsti_app_core::permission::Access` | messages | platform | op | messages.access |
 | `rovsti_app_core::phone::notes` | phone | phone | op | phone.notes_load, phone.notes_save, call_notes.set, call_notes.remove, call_notes.restore |
 | `rovsti_app_core::phone::wa_call` | phone | phone | op | phone.wa_tracker_new, phone.wa_tracker_update, phone.wa_tracker_placed, phone.wa_tracker_view, phone.wa_tracker_mute, phone.wa_tracker_clear, phone.wa_tracker_can_place, phone.wa_tracker_format_elapsed |
 | `rovsti_app_core::stops::headless` | stops | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |
@@ -75,11 +100,11 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_app_core::wa_link::link` | rovsti_wa_ui | wa | todo | - |
 | `rovsti_app_core::wa_link::names` | rovsti_wa_ui | wa | todo | - |
 | `rovsti_app_core::wa_link::send` | rovsti_wa_ui | wa | todo | - |
-| `rovsti_core::Channel` | messages | messages | todo | wire types of the messages ops |
-| `rovsti_core::Message` | messages | messages | todo | wire types of the messages ops |
-| `rovsti_core::MessageDirection` | messages | messages | todo | wire types of the messages ops |
+| `rovsti_core::Channel` | messages | messages | op | inbox.preferred_channel |
+| `rovsti_core::Message` | messages | messages | op | inbox.merge, sms.to_message |
+| `rovsti_core::MessageDirection` | messages | messages | op | inbox.merge, sms.to_message |
 | `rovsti_core::PhoneNumber` | messages,phone | shared | op | phone_number.parse, phone_number.same |
-| `rovsti_core::ThreadId` | messages | messages | todo | wire types of the messages ops |
+| `rovsti_core::ThreadId` | messages | messages | op | messages.tag |
 | `rovsti_core::audio::Decision` | phone | phone | op | audio.rows, audio.diff |
 | `rovsti_core::audio::Diff` | phone | phone | op | audio.rows, audio.diff |
 | `rovsti_core::audio::EndpointList` | phone | phone | op | audio.rows, audio.diff |
@@ -279,14 +304,14 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_core::group_tools::Kind` | contacts | contacts | op | contacts.groups_recipients |
 | `rovsti_core::import_plan::number_key` | contacts | contacts | op | contacts.number_key |
 | `rovsti_core::import_plan::photo_targets` | contacts | contacts | op | contacts.import_photos |
-| `rovsti_core::inbox::InboxRow` | messages | messages | todo | - |
-| `rovsti_core::inbox::InboxThread` | messages | messages | todo | - |
-| `rovsti_core::inbox::PersonKey` | messages | messages | todo | - |
-| `rovsti_core::inbox::merge` | messages | messages | todo | - |
-| `rovsti_core::inbox_bulk::BulkAction` | messages | messages | todo | - |
-| `rovsti_core::inbox_bulk::BulkFacts` | messages | messages | todo | - |
-| `rovsti_core::inbox_filter::InboxFilter` | messages | messages | todo | - |
-| `rovsti_core::inbox_filter::RowFacts` | messages | messages | todo | - |
+| `rovsti_core::inbox::InboxRow` | messages | messages | op | inbox.merge |
+| `rovsti_core::inbox::InboxThread` | messages | messages | op | inbox.merge |
+| `rovsti_core::inbox::PersonKey` | messages | messages | op | inbox.person_for_number, inbox.person_for_jid |
+| `rovsti_core::inbox::merge` | messages | messages | op | inbox.merge |
+| `rovsti_core::inbox_bulk::BulkAction` | messages | messages | op | inbox.bulk |
+| `rovsti_core::inbox_bulk::BulkFacts` | messages | messages | op | inbox.bulk |
+| `rovsti_core::inbox_filter::InboxFilter` | messages | messages | op | inbox.filter |
+| `rovsti_core::inbox_filter::RowFacts` | messages | messages | op | inbox.filter |
 | `rovsti_core::keypad_layout::Insets` | phone | input | kotlin | :phone KeypadLayout.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::keypad_layout::KeypadInput` | phone | input | kotlin | :phone KeypadLayout.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::keypad_layout::KeypadLayout` | phone | input | kotlin | :phone KeypadLayout.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
@@ -307,20 +332,20 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_core::message_reminder::arm_json` | messages | messages | todo | - |
 | `rovsti_core::message_reminder::fired_id` | messages | messages | todo | - |
 | `rovsti_core::message_reminder::parse_list` | messages | messages | todo | - |
-| `rovsti_core::msg_backup::BackupBody` | messages | messages | todo | - |
-| `rovsti_core::msg_backup::BackupError` | messages | messages | todo | - |
-| `rovsti_core::msg_backup::RestorePlan` | messages | messages | todo | - |
-| `rovsti_core::msg_backup::Strength` | messages | messages | todo | - |
-| `rovsti_core::msg_backup::passphrase_strength` | messages | messages | todo | - |
+| `rovsti_core::msg_backup::BackupBody` | messages | messages | op | msg_backup.export, msg_backup.parse |
+| `rovsti_core::msg_backup::BackupError` | messages | messages | op | msg_backup.parse |
+| `rovsti_core::msg_backup::RestorePlan` | messages | messages | op | msg_backup.plan |
+| `rovsti_core::msg_backup::Strength` | messages | messages | op | msg_backup.strength |
+| `rovsti_core::msg_backup::passphrase_strength` | messages | messages | op | msg_backup.strength |
 | `rovsti_core::multi_select::Selection` | contacts,messages | messages | todo | - |
 | `rovsti_core::mute::MuteFor` | messages | messages | todo | - |
 | `rovsti_core::mute::header_line` | messages | messages | todo | - |
 | `rovsti_core::mute::muted_notice` | messages | messages | todo | - |
 | `rovsti_core::names::display` | phone | platform | todo | - |
-| `rovsti_core::notify::Incoming` | messages | messages | todo | - |
-| `rovsti_core::notify::MAX_LINES` | messages | messages | todo | - |
-| `rovsti_core::notify::NotificationSpec` | messages | messages | todo | - |
-| `rovsti_core::notify::build` | messages | messages | todo | - |
+| `rovsti_core::notify::Incoming` | messages | messages | op | notify.build |
+| `rovsti_core::notify::MAX_LINES` | messages | messages | op | notify.build |
+| `rovsti_core::notify::NotificationSpec` | messages | messages | op | notify.build |
+| `rovsti_core::notify::build` | messages | messages | op | notify.build |
 | `rovsti_core::number_format::NumberForm` | phone | shared | op | format.render |
 | `rovsti_core::number_format::QR_MAX_BYTES` | contacts | shared | op | format.contact_qr |
 | `rovsti_core::number_format::QrTooBig` | contacts | shared | op | format.contact_qr |
@@ -329,9 +354,9 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_core::number_format::file_slug_opt` | contacts,messages,phone,stops | shared | op | format.file_name |
 | `rovsti_core::number_format::infer_home_cc` | contacts,phone | shared | op | format.infer_home_cc |
 | `rovsti_core::number_format::qr_file_name` | phone | shared | op | format.file_name |
-| `rovsti_core::otp::detect` | messages | messages | todo | - |
-| `rovsti_core::pending_delete::PendingDeletes` | messages | messages | todo | - |
-| `rovsti_core::pending_delete::notice` | messages | messages | todo | - |
+| `rovsti_core::otp::detect` | messages | messages | op | otp.find |
+| `rovsti_core::pending_delete::PendingDeletes` | messages | messages | op | inbox.pending_delete |
+| `rovsti_core::pending_delete::notice` | messages | messages | op | inbox.pending_delete |
 | `rovsti_core::perf::FrameStats` | phone,rovsti_ui | input | kotlin | :design FramePerf.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::perf::FrameSummary` | rovsti_ui | input | kotlin | :design FramePerf.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::quick_replies::ReplyError` | messages | messages | todo | - |
@@ -355,12 +380,12 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_core::scene::Layout` | phone | phone | op | scene.of, scene.diff |
 | `rovsti_core::scene::Participants` | phone | phone | op | scene.of, scene.diff |
 | `rovsti_core::scene::SceneDiff` | phone | phone | op | scene.of, scene.diff |
-| `rovsti_core::schedule::FiredSms` | messages | messages | todo | - |
-| `rovsti_core::schedule::MIN_LEAD_MS` | messages | messages | todo | - |
-| `rovsti_core::schedule::ScheduleError` | messages | messages | todo | - |
-| `rovsti_core::schedule::ScheduleQueue` | messages | messages | todo | - |
-| `rovsti_core::schedule::ScheduleTarget` | messages | messages | todo | - |
-| `rovsti_core::schedule::ScheduledSms` | messages | messages | todo | - |
+| `rovsti_core::schedule::FiredSms` | messages | messages | op | schedule.reconcile |
+| `rovsti_core::schedule::MIN_LEAD_MS` | messages | messages | op | schedule.validate |
+| `rovsti_core::schedule::ScheduleError` | messages | messages | op | schedule.validate, schedule.add |
+| `rovsti_core::schedule::ScheduleQueue` | messages | messages | op | schedule.add, schedule.cancel, schedule.load, schedule.due_soon |
+| `rovsti_core::schedule::ScheduleTarget` | messages | messages | op | schedule.add |
+| `rovsti_core::schedule::ScheduledSms` | messages | messages | op | schedule.add |
 | `rovsti_core::search::ContactIndex` | contacts,messages,phone | search | op | search.index_new, search.index_replace, search.set_call_counts, search.query, search.query_loose, search.match_number |
 | `rovsti_core::search::fold` | contacts,phone,stops | search | op | search.fold |
 | `rovsti_core::settings::BACKUP_KIND` | phone | platform | todo | - |
@@ -400,27 +425,27 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_core::sim::argb_rgb` | phone | phone | op | sim.dot |
 | `rovsti_core::sim::clamp_dot` | phone | phone | op | sim.dot |
 | `rovsti_core::small_text::SmallText` | phone | input | kotlin | :design SmallText.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
-| `rovsti_core::sms::DeliveryState` | messages | messages | todo | - |
-| `rovsti_core::sms::MmsPart` | messages | messages | todo | - |
-| `rovsti_core::sms::MmsRow` | messages | messages | todo | - |
-| `rovsti_core::sms::SmsBox` | messages | messages | todo | - |
-| `rovsti_core::sms::SmsMessagesPayload` | messages | messages | todo | - |
-| `rovsti_core::sms::SmsRow` | messages | messages | todo | - |
-| `rovsti_core::sms::SmsSend` | messages | messages | todo | - |
-| `rovsti_core::sms::SmsSim` | messages | messages | todo | - |
-| `rovsti_core::sms::SmsSimsPayload` | messages | messages | todo | - |
-| `rovsti_core::sms::SmsStatus` | messages | messages | todo | - |
-| `rovsti_core::sms::SmsThreadRow` | messages | messages | todo | - |
-| `rovsti_core::sms::SmsThreadsPayload` | messages | messages | todo | - |
-| `rovsti_core::sms::segments` | messages | messages | todo | - |
-| `rovsti_core::sms_timeline::SmsItem` | messages | messages | todo | - |
-| `rovsti_core::sms_timeline::SmsKey` | messages | messages | todo | - |
-| `rovsti_core::sms_timeline::SmsTimeline` | messages | messages | todo | - |
-| `rovsti_core::spam::RuleError` | messages | messages | todo | - |
-| `rovsti_core::spam::SpamRule` | messages | messages | todo | - |
-| `rovsti_core::spam::SpamRules` | messages | messages | todo | - |
-| `rovsti_core::spam::contains_link` | messages | messages | todo | - |
-| `rovsti_core::spam::open_links` | messages | messages | todo | - |
+| `rovsti_core::sms::DeliveryState` | messages | messages | op | sms_timeline.build |
+| `rovsti_core::sms::MmsPart` | messages | messages | op | sms_timeline.build |
+| `rovsti_core::sms::MmsRow` | messages | messages | op | sms_timeline.build |
+| `rovsti_core::sms::SmsBox` | messages | messages | op | sms_timeline.build |
+| `rovsti_core::sms::SmsMessagesPayload` | messages | messages | op | sms_timeline.build |
+| `rovsti_core::sms::SmsRow` | messages | messages | op | sms.to_message |
+| `rovsti_core::sms::SmsSend` | messages | messages | op | sms_timeline.build |
+| `rovsti_core::sms::SmsSim` | messages | messages | none | provider payload: Kotlin reads the SIM list from SubscriptionManager; the per-thread choice is messages.prefs sim_choices |
+| `rovsti_core::sms::SmsSimsPayload` | messages | messages | none | provider payload: Kotlin reads the SIM list from SubscriptionManager; the per-thread choice is messages.prefs sim_choices |
+| `rovsti_core::sms::SmsStatus` | messages | messages | op | sms_timeline.build |
+| `rovsti_core::sms::SmsThreadRow` | messages | messages | op | inbox.merge |
+| `rovsti_core::sms::SmsThreadsPayload` | messages | messages | none | provider payload: the bridge answers a list of SmsThreadRow, which inbox.merge takes |
+| `rovsti_core::sms::segments` | messages | messages | op | sms.segments |
+| `rovsti_core::sms_timeline::SmsItem` | messages | messages | op | sms_timeline.build |
+| `rovsti_core::sms_timeline::SmsKey` | messages | messages | op | sms.key, sms_timeline.build |
+| `rovsti_core::sms_timeline::SmsTimeline` | messages | messages | op | sms_timeline.build |
+| `rovsti_core::spam::RuleError` | messages | messages | op | spam.add_rule |
+| `rovsti_core::spam::SpamRule` | messages | messages | op | spam.add_rule, spam.insert_rule |
+| `rovsti_core::spam::SpamRules` | messages | messages | op | spam.classify, spam.remove_rule |
+| `rovsti_core::spam::contains_link` | messages | messages | op | spam.contains_link |
+| `rovsti_core::spam::open_links` | messages | messages | op | spam.open_links |
 | `rovsti_core::speed_dial::HoldDigit` | phone | phone | op | speed_dial.on_hold, speed_dial.assign, speed_dial.unassign, speed_dial.free_digits, speed_dial.digit_for |
 | `rovsti_core::speed_dial::badges` | phone | phone | op | speed_dial.badges |
 | `rovsti_core::starred::LocalStar` | messages | messages | todo | - |
@@ -667,3 +692,18 @@ Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
 | `rovsti_core::blocklist::call_line` | phone | phone | op | blocklist.call_line |
 | `rovsti_core::recents::refresh_delta` | phone | phone | op | recents.refresh_delta |
 | `rovsti_core::recents::section_starts` | phone | phone | op | recents.section_starts |
+| `rovsti_core::inbox::person_for_number` | messages | messages | op | inbox.person_for_number |
+| `rovsti_core::inbox::person_for_jid` | messages | messages | op | inbox.person_for_jid |
+| `rovsti_core::inbox::preferred_channel` | messages | messages | op | inbox.preferred_channel |
+| `rovsti_core::sms_timeline::SmsKey::provider_id` | messages | messages | op | sms.key |
+| `rovsti_core::mms_pdu::decode_notification_ind` | messages | messages | op | mms_pdu.parse |
+| `rovsti_core::mms_pdu::decode_retrieve_conf` | messages | messages | op | mms_pdu.parse |
+| `rovsti_core::mms_pdu::encode_send_req` | messages | messages | op | mms_pdu.build_send_req |
+| `rovsti_core::mms_pdu::encode_notify_resp` | messages | messages | op | mms_pdu.build_notify_resp |
+| `rovsti_core::spam::classify` | messages | messages | op | spam.classify |
+| `rovsti_core::spam::links` | messages | messages | op | spam.links |
+| `rovsti_core::schedule::validate` | messages | messages | op | schedule.validate |
+| `rovsti_core::schedule::quick_times` | messages | messages | op | schedule.quick_times |
+| `rovsti_core::msg_backup::seal` | messages | messages | op | msg_backup.export |
+| `rovsti_core::msg_backup::open` | messages | messages | op | msg_backup.parse |
+| `rovsti_core::msg_backup::restore_plan` | messages | messages | op | msg_backup.plan |

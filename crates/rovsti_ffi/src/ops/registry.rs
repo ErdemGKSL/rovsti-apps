@@ -114,6 +114,11 @@ pub fn all() -> impl Iterator<Item = &'static OpSpec> {
                 .iter()
                 .flat_map(|table| table.iter()),
         )
+        .chain(
+            super::messages::TABLES
+                .iter()
+                .flat_map(|table| table.iter()),
+        )
         .chain(super::qr::OPS.iter())
 }
 

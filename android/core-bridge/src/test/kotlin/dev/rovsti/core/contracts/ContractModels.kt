@@ -18,6 +18,7 @@ object AllContracts {
             PhoneContracts,
             ContactsContracts,
             QrContracts,
+            MessagesContracts,
         )
 
     val models: Map<String, KSerializer<*>> =

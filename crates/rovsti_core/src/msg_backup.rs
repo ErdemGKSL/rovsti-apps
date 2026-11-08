@@ -58,14 +58,15 @@ pub enum BackupError {
     Corrupt,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Strength {
     Weak,
     Fair,
     Strong,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestorePlan {
     pub insert: Vec<SmsRow>,
     pub skipped_duplicates: usize,

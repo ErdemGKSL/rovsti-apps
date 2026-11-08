@@ -4,7 +4,8 @@
 use crate::permission::Access as Perm;
 
 /// How to ask for a permission.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Ask {
     /// Show the system dialog.
     Request,
@@ -36,7 +37,8 @@ pub fn notify_banner(app_switch_on: bool, state: Option<Perm>) -> Option<&'stati
 }
 
 /// The state of the thread list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Access {
     Loading,
     Ready,
@@ -46,7 +48,7 @@ pub enum Access {
 }
 
 /// What to pull again when the app returns to the foreground.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct ResumePulls {
     pub role: bool,

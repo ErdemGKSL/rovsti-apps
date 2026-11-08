@@ -1,0 +1,1 @@
+{"ok":{"rules":{"enabled":true,"rules":[{"keyword":{"text":"win"}},{"sender":{"pattern":"PROMO*"}}],"allow":["BANK"]},"removed":true}}

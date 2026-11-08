@@ -29,6 +29,11 @@ impl<K: PartialEq + Clone> PendingDeletes<K> {
         self.items.len() != before
     }
 
+    /// The waiting keys with the time each was queued, oldest first.
+    pub fn items(&self) -> &[(K, i64)] {
+        &self.items
+    }
+
     /// Whether any delete is waiting.
     pub fn has_pending(&self) -> bool {
         !self.items.is_empty()

@@ -80,6 +80,14 @@ fn with_contacts<R>(
     })
 }
 
+/// Runs `f` on the `ContactIndex` of `handle` (the inbox merges against it); a released or foreign handle is `not_found`.
+pub(super) fn with_index<R>(
+    handle: i64,
+    f: impl FnOnce(&ContactIndex) -> Result<R, FfiError>,
+) -> Result<R, FfiError> {
+    with_contacts(handle, |c| f(&c.index))
+}
+
 fn contacts_of(contacts: Vec<WireContact>, format: NameFormat) -> Contacts {
     let mut t9 = T9Scratch::new();
     t9.set_format(format);

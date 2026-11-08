@@ -1,0 +1,1 @@
+{"ok":{"rules":{"enabled":true,"rules":["unknown_with_link",{"keyword":{"text":"win"}},{"sender":{"pattern":"PROMO*"}},{"keyword":{"text":"lottery"}}],"allow":["BANK"]}}}

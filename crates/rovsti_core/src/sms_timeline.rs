@@ -6,7 +6,10 @@ use crate::sms::{
     DeliveryState, MmsPart, MmsRow, SmsBox, SmsMessagesPayload, SmsRow, SmsSend, SmsStatus,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum SmsKey {
     /// `content://sms/<id>`.
     Sms(i64),
@@ -39,7 +42,7 @@ impl SmsKey {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct SmsItem {
     pub key: SmsKey,
     pub outgoing: bool,

@@ -266,7 +266,7 @@ pub struct SmsSend {
 }
 
 /// What a body costs: number of SMS parts and room left in the last one.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SegmentInfo {
     pub parts: u32,
     pub left_in_part: u32,

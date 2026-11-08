@@ -1,0 +1,1 @@
+{"rules":{"enabled":true,"rules":["unknown_with_link",{"keyword":{"text":"win"}},{"sender":{"pattern":"PROMO*"}}],"allow":["BANK"]},"sender":"PROMO-SHOP","body":"Sale today"}

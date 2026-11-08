@@ -29,6 +29,7 @@ import dev.rovsti.design.chrome.ChromeMetrics
 import dev.rovsti.design.chrome.LocalChromeMetrics
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.RovstiTabBar
+import dev.rovsti.design.chrome.TabBarAccessoryPill
 import dev.rovsti.design.chrome.TabItem
 import dev.rovsti.design.chrome.rememberTabBarMinimizer
 import dev.rovsti.design.controls.CapsuleButton
@@ -63,6 +64,7 @@ private fun rowName(i: Int) = "Contact ${i.toString().padStart(2, '0')}"
 internal fun TabBarPage(
     listState: LazyListState = rememberLazyListState(),
     imeVisible: @Composable () -> Boolean = { WindowInsets.isImeVisible },
+    showAccessory: Boolean = false,
 ) {
     val colors = RovstiTheme.colors
     val chrome = remember { ChromeMetrics() }
@@ -108,6 +110,21 @@ internal fun TabBarPage(
                     modifier = Modifier.align(Alignment.BottomCenter).testTag("tab-bar"),
                     minimizer = minimizer,
                     imeVisible = imeVisible,
+                    accessory =
+                        if (showAccessory) {
+                            { m, inline ->
+                                TabBarAccessoryPill(
+                                    title = "On call",
+                                    detail = "02:14",
+                                    icon = RovstiIcons.Phone,
+                                    modifier = m.testTag("tab-accessory"),
+                                    isInline = inline,
+                                    onClick = {},
+                                )
+                            }
+                        } else {
+                            null
+                        },
                 )
             }
         },

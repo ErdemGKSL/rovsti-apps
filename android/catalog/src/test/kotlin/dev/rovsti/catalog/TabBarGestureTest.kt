@@ -77,8 +77,9 @@ class TabBarGestureTest : ShotTest() {
         assertEquals(0, reselected)
     }
 
+    /** Convx FoldingTabGroup.kt onDragStopped: the puck lands on round(targetValue); 1.6 slots from slot 0 is slot 2. */
     @Test
-    fun dragOfOnePointSixSlotsSelectsSlotTwoByProjection() {
+    fun dragOfOnePointSixSlotsSelectsSlotTwoByRounding() {
         show()
         val g = BarGeometry(this)
         val from = g.slotCentre(0f) - g.surface.topLeft
@@ -98,7 +99,9 @@ class TabBarGestureTest : ShotTest() {
     }
 
     @Test
-    fun aTapReleasedTwentyFourDpOrMoreOffTheBarIsIgnored() {
+    fun aPressReleasedWellOffTheBarIsIgnored() {
+        // Convx FoldingTabCell is a plain combinedClickable: a release outside the cell is no click (Convx has no
+        // 24 dp tap slop; glisse's rule it replaces did).
         show()
         val g = BarGeometry(this)
         val start = g.slotCentre(1f) - g.surface.topLeft
@@ -115,14 +118,14 @@ class TabBarGestureTest : ShotTest() {
     }
 
     @Test
-    fun aTapReleasedJustInsideTheSlopStillCounts() {
+    fun aTapReleasedInsideTheCellStillCountsAfterALittleWobble() {
         show()
         val g = BarGeometry(this)
         val start = g.slotCentre(3f) - g.surface.topLeft
         compose.onNodeWithTag("tab-surface").performTouchInput { down(start) }
         advance(200)
         compose.onNodeWithTag("tab-surface").performTouchInput {
-            moveTo(Offset(start.x, g.surface.height + g.dp(20f)))
+            moveTo(Offset(start.x - g.dp(3f), start.y + g.dp(3f)))
             up()
         }
         advance(1000)

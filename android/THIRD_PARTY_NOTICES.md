@@ -75,6 +75,13 @@ SOFTWARE.
   Copyright (c) IENGROUND of IENLAB and prior contributors.
 - Status: not used yet. Listed so that any file later ported from Convx `hig/` carries this attribution.
 
+## compose-floating-tab-bar v1.0.1
+
+- Source: https://github.com/elyesmansour/compose-floating-tab-bar (Elyes Mansour). Licence: Apache-2.0, http://www.apache.org/licenses/LICENSE-2.0
+- Vendored by Convx and ported from Convx into `design/.../chrome/floatingtabbar/` (FloatingTabBar, FloatingTabBarBars,
+  FloatingTabBarModel, FloatingTabBarMotion, FloatingTabBarTabs, AccessoryHost); the Convx modifications (Row/Column bars,
+  draggable puck, folding) are GPL-3.0 like the rest of Convx.
+
 ## Haze
 
 - Source: https://github.com/chrisbanes/haze. Licence: Apache-2.0. Copyright Chris Banes.

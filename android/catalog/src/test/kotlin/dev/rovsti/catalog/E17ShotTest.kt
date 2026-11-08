@@ -72,6 +72,21 @@ class E17ShotTest : ShotTest() {
         }
     }
 
+    /** E1.29: the accessory slot with the Phone "On call 02:14" pill, expanded (the second image folded). */
+    @Test
+    fun accessory() {
+        for (dark in listOf(false, true)) {
+            composeFrame(dark = dark) { TabBarPage(imeVisible = { false }, showAccessory = true) }
+            compose.onNodeWithTag("tabbar-list").performScrollToIndex(CatalogRowCount)
+            advance(600)
+            snap("e1.29-tabbar-accessory-${theme(dark)}")
+            composeFrame(dark = dark) { TabBarPage(imeVisible = { false }, showAccessory = true) }
+            compose.onNodeWithTag("tabbar-list").performTouchInput { swipeUp(durationMillis = 120) }
+            advance(1200)
+            snap("e1.29-tabbar-accessory-folded-${theme(dark)}")
+        }
+    }
+
     @Test
     fun fontScaleTwo() {
         for (dark in listOf(false, true)) {

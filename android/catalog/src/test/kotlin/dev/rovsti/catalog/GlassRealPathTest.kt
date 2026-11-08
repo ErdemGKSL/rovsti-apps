@@ -53,9 +53,12 @@ class GlassRealPathTest : ShotTest() {
                 records.any { it.tag?.startsWith(tag) == true },
             )
         }
+        // The puck slot (Convx FoldingTabGroup.kt) draws its lens with amount = pressProgress: at rest the lens is
+        // a no-op and the first draw goes through a wrapper backdrop. tabBarPuckLensWhenPressed proves the pressed path.
         val bad =
             records.filter {
-                !it.hasRenderEffect || it.backdropKind != BackdropDebug.Kind.Layer || !it.recorded
+                it.tag?.startsWith("tabbar.puck") != true &&
+                    (!it.hasRenderEffect || it.backdropKind != BackdropDebug.Kind.Layer || !it.recorded)
             }
         assertEquals(
             "$scenario: surfaces that did not use the backdrop effect: ${bad.distinct()}",
@@ -90,6 +93,26 @@ class GlassRealPathTest : ShotTest() {
     fun tabBar() {
         open(CatalogPage.TabBar)
         assertRealPath("tab bar", "tabbar")
+    }
+
+    @Test
+    fun tabBarPuckLensWhenPressed() {
+        open(CatalogPage.TabBar)
+        val surface = compose.onNodeWithTag("tab-surface")
+        val centre =
+            surface.bounds.let {
+                androidx.compose.ui.geometry
+                    .Offset(it.left, it.top)
+            }
+        val g = BarGeometry(this)
+        surface.performTouchInput { down(g.slotCentre(0f) - centre) }
+        advance(500)
+        BackdropDebug.clear()
+        compose.onRoot().captureToImage()
+        val puck = BackdropDebug.snapshot().filter { it.tag == "tabbar.puck" }
+        assertTrue("no puck draw while pressed", puck.isNotEmpty())
+        assertTrue("pressed puck without a lens effect: $puck", puck.all { it.hasRenderEffect })
+        surface.performTouchInput { up() }
     }
 
     @Test

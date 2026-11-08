@@ -1,6 +1,7 @@
 //! The Stops app's logic: the files in its data directory, the A/B pick state
 //! machine and the pin-drop snap decision.
 
+pub mod headless;
 pub mod pick;
 pub mod snap;
 pub mod store;

@@ -14,7 +14,9 @@ rovsti_geo.workspace = true
 rovsti_wa_client.workspace = true
 rovsti_wa_proto.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+# preserve_order: handlers answer with keys in insertion order, as the GPUI apps always did
+# (feature unification turned it on there); the golden answers are byte-identical.
+serde_json = { workspace = true, features = ["preserve_order"] }
 thiserror.workspace = true
 
 [lints]

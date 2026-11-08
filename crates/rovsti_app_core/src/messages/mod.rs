@@ -2,5 +2,6 @@
 
 pub mod access;
 pub mod drafts;
+pub mod headless;
 pub mod prefs;
 pub mod tags;

@@ -16,12 +16,14 @@ const MIN_DIALABLE: usize = 7;
 /// The longest country code.
 const MAX_CC: usize = 3;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum NumberForm {
     Display,
     E164,
     National,
     TelLink,
+    #[serde(rename = "vcard")]
     VCard,
 }
 
@@ -233,7 +235,7 @@ pub fn copied_notice(form: NumberForm) -> &'static str {
 pub const QR_MAX_BYTES: usize = 1200;
 
 /// A vCard ready to be drawn as a QR code.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ContactQr {
     pub payload: String,
     /// Numbers in the card.

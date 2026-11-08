@@ -1,5 +1,6 @@
 package dev.rovsti.core
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 
@@ -27,6 +28,30 @@ class FakeRustCore(
         answer: (JsonElement) -> Outcome<JsonElement>,
     ) {
         answers[op] = answer
+    }
+
+    /**
+     * Answers [op] from a typed lambda: the request is decoded with [reqSer], the result encoded with [ansSer]. A
+     * request that does not decode is [RustError.Parse], like the real core's.
+     */
+    fun <Req, Ans> onTyped(
+        op: String,
+        reqSer: KSerializer<Req>,
+        ansSer: KSerializer<Ans>,
+        answer: (Req) -> Outcome<Ans>,
+    ) {
+        on(op) { request ->
+            val req =
+                try {
+                    Envelope.json.decodeFromJsonElement(reqSer, request)
+                } catch (e: IllegalArgumentException) {
+                    return@on Outcome.Err(RustError.Parse("$op: bad request: ${e.message}"))
+                }
+            when (val out = answer(req)) {
+                is Outcome.Ok -> Outcome.Ok(Envelope.json.encodeToJsonElement(ansSer, out.value))
+                is Outcome.Err -> out
+            }
+        }
     }
 
     fun onHeadless(

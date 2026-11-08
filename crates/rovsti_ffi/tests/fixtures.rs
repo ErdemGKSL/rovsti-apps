@@ -1,5 +1,6 @@
-//! Contract fixtures (E2.7): one `<op>.{request,answer}.json` pair per R1 op and one
-//! `headless.<kind>.{request,answer}.json` pair per headless kind, in `crates/rovsti_ffi/fixtures`.
+//! Contract fixtures (E2.7): one `<op>.{request,answer}.json` pair per case of every registered op
+//! (`<op>.<label>.*` for extra cases) and one `headless.<kind>.{request,answer}.json` pair per headless
+//! kind, in `crates/rovsti_ffi/fixtures`. `fixtures/INDEX` lists every stem, one per line.
 //!
 //! The Kotlin side decodes every file into its model (`ContractFixturesTest`), so an op or a
 //! kind without a Kotlin model cannot be added unnoticed. Without `UPDATE_FIXTURES=1` this test
@@ -14,7 +15,11 @@ use std::{
 };
 
 use rovsti_app_core::headless::{Handler, handle_any};
-use rovsti_ffi::{envelope::ErrorKind, ops::call, state};
+use rovsti_ffi::{
+    envelope::ErrorKind,
+    ops::{call, registry},
+    state,
+};
 
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures")
@@ -48,44 +53,6 @@ fn check(name: &str, actual: &str, newline: bool, problems: &mut Vec<String>) {
     }
 }
 
-/// The R1 `core.*` ops and their requests.
-fn core_cases() -> Vec<(String, String)> {
-    let mut cases = vec![
-        ("core.version".to_owned(), "null".to_owned()),
-        (
-            "core.echo".to_owned(),
-            r#"{"text":"héllo 🌍","numbers":[1,2,3],"nested":{"flag":true,"note":null}}"#
-                .to_owned(),
-        ),
-        ("core.data_dir".to_owned(), "null".to_owned()),
-    ];
-    for kind in ErrorKind::ALL {
-        let detail = if kind == ErrorKind::Io {
-            r#","detail":{"path":"trip.json","os_error":13}"#
-        } else {
-            ""
-        };
-        cases.push((
-            format!("core.fail.{}", kind.name()),
-            format!(
-                r#"{{"kind":"{}","message":"requested {} failure"{detail}}}"#,
-                kind.name(),
-                kind.name()
-            ),
-        ));
-    }
-    cases
-}
-
-/// The op a `core.fail.<kind>` fixture stands for.
-fn op_of(name: &str) -> &str {
-    if name.starts_with("core.fail.") {
-        "core.fail"
-    } else {
-        name
-    }
-}
-
 fn table_kinds() -> Vec<(&'static str, &'static str)> {
     let tables: [(&str, &[(&str, Handler)]); 2] = [
         ("messages", rovsti_app_core::messages::headless::TABLE),
@@ -111,6 +78,7 @@ fn contract_fixtures_match() {
     fs::create_dir_all(fixtures_dir()).expect("fixtures dir");
     let mut problems = Vec::new();
     let mut expected = BTreeSet::new();
+    let mut stems = BTreeSet::new();
 
     // Fixed, host-independent init so `core.data_dir` is stable.
     state::init(
@@ -121,22 +89,42 @@ fn contract_fixtures_match() {
     )
     .expect("init");
 
-    for (name, request) in core_cases() {
-        let answer = String::from_utf8(call(op_of(&name), request.as_bytes())).expect("utf-8");
-        check(
-            &format!("{name}.request.json"),
-            &request,
-            true,
-            &mut problems,
-        );
-        check(
-            &format!("{name}.answer.json"),
-            &answer,
-            false,
-            &mut problems,
-        );
-        expected.insert(format!("{name}.request.json"));
-        expected.insert(format!("{name}.answer.json"));
+    for spec in registry::all() {
+        for case in (spec.cases)() {
+            let stem = case.stem(spec.name);
+            let text = case.request.to_string();
+            let (text, tmp) = match case.seed {
+                Some(seed) => {
+                    let tmp = std::env::temp_dir()
+                        .join(format!("rovsti-fixtures-{stem}-{}", std::process::id()));
+                    let _ = fs::remove_dir_all(&tmp);
+                    copy_dir(&app_core_dirs().join(seed), &tmp).expect("seed dir");
+                    let replaced = text.replace("$DIR", tmp.to_str().expect("utf-8 temp dir"));
+                    (replaced, Some(tmp))
+                }
+                None => (text, None),
+            };
+            let answer = String::from_utf8(call(spec.name, text.as_bytes())).expect("utf-8");
+            if let Some(tmp) = tmp {
+                let _ = fs::remove_dir_all(tmp);
+            }
+            // The request file keeps `$DIR`; only the run above sees the temp dir.
+            check(
+                &format!("{stem}.request.json"),
+                &case.request.to_string(),
+                true,
+                &mut problems,
+            );
+            check(
+                &format!("{stem}.answer.json"),
+                &answer,
+                false,
+                &mut problems,
+            );
+            expected.insert(format!("{stem}.request.json"));
+            expected.insert(format!("{stem}.answer.json"));
+            stems.insert(stem);
+        }
     }
 
     for (app, kind) in table_kinds() {
@@ -144,6 +132,7 @@ fn contract_fixtures_match() {
         let answer_name = format!("headless.{kind}.answer.json");
         expected.insert(request_name.clone());
         expected.insert(answer_name.clone());
+        stems.insert(format!("headless.{kind}"));
         // Headless requests are authored (they are inputs); `$DIR` stands for the data dir.
         let Ok(request) = fs::read_to_string(fixtures_dir().join(&request_name)) else {
             problems.push(format!("{request_name} is missing (write it by hand)"));
@@ -160,6 +149,11 @@ fn contract_fixtures_match() {
         let _ = fs::remove_dir_all(&tmp);
         check(&answer_name, &answer, false, &mut problems);
     }
+
+    // The index the Kotlin contract test reads instead of a hard-coded count.
+    let index: String = stems.iter().map(|stem| format!("{stem}\n")).collect();
+    check("INDEX", &index, false, &mut problems);
+    expected.insert("INDEX".to_owned());
 
     // No stray file: every fixture belongs to an op or a kind.
     for entry in fs::read_dir(fixtures_dir()).expect("read fixtures") {
@@ -182,8 +176,22 @@ fn contract_fixtures_match() {
 
 #[test]
 fn every_error_kind_has_a_fail_fixture() {
-    let names: BTreeSet<String> = core_cases().into_iter().map(|(n, _)| n).collect();
+    let fail = registry::find("core.fail").expect("core.fail is registered");
+    let labels: BTreeSet<&str> = (fail.cases)().iter().map(|c| c.label).collect();
     for kind in ErrorKind::ALL {
-        assert!(names.contains(&format!("core.fail.{}", kind.name())));
+        assert!(labels.contains(kind.name()), "{}", kind.name());
+    }
+}
+
+#[test]
+fn every_registered_op_has_a_main_or_named_case() {
+    for spec in registry::all() {
+        let cases = (spec.cases)();
+        let test_only = matches!(spec.name, "core.panic" | "core.emit_test");
+        assert!(
+            test_only || !cases.is_empty(),
+            "{} has no fixture case",
+            spec.name
+        );
     }
 }

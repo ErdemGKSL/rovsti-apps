@@ -1,6 +1,8 @@
 //! `call(op, request)`: `"<domain>.<verb>"` dispatch. One module per domain.
 
 mod core;
+pub mod registry;
+mod shared;
 
 use crate::envelope::FfiError;
 use crate::guard::guarded;
@@ -12,19 +14,10 @@ pub fn call(op: &str, request: &[u8]) -> Vec<u8> {
 }
 
 fn dispatch(op: &str, request: &[u8]) -> Result<Value, FfiError> {
-    let (domain, verb) = op.split_once('.').unwrap_or((op, ""));
-    match domain {
-        "core" => core::run(verb, request),
-        _ => Err(FfiError::unsupported(format!("unknown op {op:?}"))),
+    match registry::find(op) {
+        Some(spec) => (spec.run)(request),
+        None => Err(FfiError::unsupported(format!("unknown op {op:?}"))),
     }
-}
-
-/// Parses a request body; an empty body is `null`.
-pub(crate) fn parse(request: &[u8]) -> Result<Value, FfiError> {
-    if request.is_empty() {
-        return Ok(Value::Null);
-    }
-    Ok(serde_json::from_slice(request)?)
 }
 
 #[cfg(test)]

@@ -1,64 +1,119 @@
 //! `core.*`: ops about the bridge itself.
 
-use super::parse;
+use super::registry::{Case, OpSpec};
 use crate::envelope::{ErrorKind, FfiError};
+use crate::op;
 use crate::state;
 use serde_json::{Value, json};
 
-pub(super) fn run(verb: &str, request: &[u8]) -> Result<Value, FfiError> {
-    match verb {
-        "version" => Ok(state::version()),
-        "echo" => parse(request),
-        "data_dir" => {
-            let dirs = state::dirs().ok_or_else(|| FfiError::invalid("init was not called"))?;
-            Ok(json!({
-                "data_dir": dirs.data_dir,
-                "cache_dir": dirs.cache_dir,
-                "app_id": dirs.app_id,
-                "sdk": dirs.sdk,
-            }))
+pub(super) const OPS: &[OpSpec] = &[
+    op!("core.version", Value, Value, version, version_cases),
+    op!("core.echo", Value, Value, echo, echo_cases),
+    op!("core.data_dir", Value, Value, data_dir, data_dir_cases),
+    op!("core.fail", Value, Value, fail, fail_cases),
+    // Test-only ops: reachable in unit tests and with the `test-ops` feature, never fixtures.
+    #[cfg(any(test, feature = "test-ops"))]
+    op!("core.panic", Value, Value, panic_op, no_cases),
+    #[cfg(any(test, feature = "test-ops"))]
+    op!("core.emit_test", Value, Value, emit_test, no_cases),
+];
+
+fn version(_: Value) -> Result<Value, FfiError> {
+    Ok(state::version())
+}
+
+fn version_cases() -> Vec<Case> {
+    vec![Case::new(Value::Null)]
+}
+
+fn echo(body: Value) -> Result<Value, FfiError> {
+    Ok(body)
+}
+
+fn echo_cases() -> Vec<Case> {
+    vec![Case::new(json!({
+        "text": "h\u{e9}llo \u{1f30d}",
+        "numbers": [1, 2, 3],
+        "nested": {"flag": true, "note": null},
+    }))]
+}
+
+fn data_dir(_: Value) -> Result<Value, FfiError> {
+    let dirs = state::dirs().ok_or_else(|| FfiError::invalid("init was not called"))?;
+    Ok(json!({
+        "data_dir": dirs.data_dir,
+        "cache_dir": dirs.cache_dir,
+        "app_id": dirs.app_id,
+        "sdk": dirs.sdk,
+    }))
+}
+
+fn data_dir_cases() -> Vec<Case> {
+    vec![Case::new(Value::Null)]
+}
+
+/// {"kind": "io", "message": "...", "detail": {...}}: an error of the asked kind.
+fn fail(body: Value) -> Result<Value, FfiError> {
+    let name = body
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("invalid");
+    let kind = ErrorKind::from_name(name)
+        .ok_or_else(|| FfiError::invalid(format!("unknown error kind {name:?}")))?;
+    let message = body
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("requested failure");
+    let mut error = FfiError::new(kind, message);
+    error.detail = body.get("detail").cloned();
+    Err(error)
+}
+
+/// One fixture per error kind (`core.fail.<kind>`).
+fn fail_cases() -> Vec<Case> {
+    ErrorKind::ALL
+        .into_iter()
+        .map(|kind| {
+            let mut request = json!({
+                "kind": kind.name(),
+                "message": format!("requested {} failure", kind.name()),
+            });
+            if kind == ErrorKind::Io {
+                request["detail"] = json!({"path": "trip.json", "os_error": 13});
+            }
+            Case::named(kind.name(), request)
+        })
+        .collect()
+}
+
+#[cfg(any(test, feature = "test-ops"))]
+fn no_cases() -> Vec<Case> {
+    Vec::new()
+}
+
+#[cfg(any(test, feature = "test-ops"))]
+fn panic_op(_: Value) -> Result<Value, FfiError> {
+    panic!("core.panic requested")
+}
+
+// {"kind": "tick", "count": 3}: a Rust thread emits `count` events {"n": i} to the sink.
+#[cfg(any(test, feature = "test-ops"))]
+fn emit_test(body: Value) -> Result<Value, FfiError> {
+    let kind = body
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("test")
+        .to_owned();
+    let count = body.get("count").and_then(Value::as_u64).unwrap_or(1);
+    // From a Rust thread of its own, like real background work; joined so the answer follows the events.
+    std::thread::spawn(move || {
+        for n in 0..count {
+            crate::events::emit(&kind, &json!({ "n": n }));
         }
-        // {"kind": "io", "message": "...", "detail": {...}}: an error of the asked kind.
-        "fail" => {
-            let body = parse(request)?;
-            let name = body
-                .get("kind")
-                .and_then(Value::as_str)
-                .unwrap_or("invalid");
-            let kind = ErrorKind::from_name(name)
-                .ok_or_else(|| FfiError::invalid(format!("unknown error kind {name:?}")))?;
-            let message = body
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("requested failure");
-            let mut error = FfiError::new(kind, message);
-            error.detail = body.get("detail").cloned();
-            Err(error)
-        }
-        #[cfg(any(test, feature = "test-ops"))]
-        "panic" => panic!("core.panic requested"),
-        // {"kind": "tick", "count": 3}: a Rust thread emits `count` events {"n": i} to the sink.
-        #[cfg(any(test, feature = "test-ops"))]
-        "emit_test" => {
-            let body = parse(request)?;
-            let kind = body
-                .get("kind")
-                .and_then(Value::as_str)
-                .unwrap_or("test")
-                .to_owned();
-            let count = body.get("count").and_then(Value::as_u64).unwrap_or(1);
-            // From a Rust thread of its own, like real background work; joined so the answer follows the events.
-            std::thread::spawn(move || {
-                for n in 0..count {
-                    crate::events::emit(&kind, &json!({ "n": n }));
-                }
-            })
-            .join()
-            .map_err(|_| FfiError::new(ErrorKind::Panic, "emit thread panicked"))?;
-            Ok(json!({ "emitted": count }))
-        }
-        _ => Err(FfiError::unsupported(format!("unknown op core.{verb}"))),
-    }
+    })
+    .join()
+    .map_err(|_| FfiError::new(ErrorKind::Panic, "emit thread panicked"))?;
+    Ok(json!({ "emitted": count }))
 }
 
 #[cfg(test)]

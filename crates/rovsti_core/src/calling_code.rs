@@ -6,7 +6,7 @@
 use crate::PhoneNumber;
 
 /// A country (or shared zone) behind a calling code.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Country {
     pub cc: &'static str,
     pub name: &'static str,

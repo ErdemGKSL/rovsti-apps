@@ -3,7 +3,7 @@
 use crate::text_detect::same_number;
 
 /// One entry of the copy menu.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct CopyChoice {
     /// Menu label.
     pub label: &'static str,

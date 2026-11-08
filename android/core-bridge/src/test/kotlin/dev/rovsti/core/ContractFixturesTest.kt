@@ -1,31 +1,8 @@
 package dev.rovsti.core
 
-import dev.rovsti.core.model.core.DataDirInfo
-import dev.rovsti.core.model.core.EchoProbe
-import dev.rovsti.core.model.core.ErrEnvelope
-import dev.rovsti.core.model.core.FailRequest
-import dev.rovsti.core.model.core.OkEnvelope
+import dev.rovsti.core.contracts.AllContracts
 import dev.rovsti.core.model.core.VersionInfo
-import dev.rovsti.core.model.headless.MmsNotificationAnswer
-import dev.rovsti.core.model.headless.MmsNotificationRequest
-import dev.rovsti.core.model.headless.MmsRetrievedAnswer
-import dev.rovsti.core.model.headless.MmsRetrievedRequest
-import dev.rovsti.core.model.headless.MmsSendReqAnswer
-import dev.rovsti.core.model.headless.MmsSendReqRequest
-import dev.rovsti.core.model.headless.MsgRemindAnswer
-import dev.rovsti.core.model.headless.MsgRemindRequest
-import dev.rovsti.core.model.headless.SmsClassifyAnswer
-import dev.rovsti.core.model.headless.SmsClassifyRequest
-import dev.rovsti.core.model.headless.TripAlarmAnswer
-import dev.rovsti.core.model.headless.TripAlarmRequest
-import dev.rovsti.core.model.headless.TripEndAnswer
-import dev.rovsti.core.model.headless.TripEndRequest
-import dev.rovsti.core.model.headless.TripFixAnswer
-import dev.rovsti.core.model.headless.TripFixRequest
-import dev.rovsti.core.model.headless.WaDigestAnswer
-import dev.rovsti.core.model.headless.WaDigestRequest
-import dev.rovsti.core.model.headless.WaReplyAnswer
-import dev.rovsti.core.model.headless.WaReplyRequest
+import dev.rovsti.core.ops.SharedOps
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -33,7 +10,6 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.serializer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
@@ -55,42 +31,34 @@ class ContractFixturesTest {
             explicitNulls = true
         }
 
-    /** fixture stem (`core.version.request`) to the serializer of its model. */
-    private val models: Map<String, KSerializer<*>> =
-        buildMap {
-            put("core.version.request", JsonNull.serializer())
-            put("core.version.answer", OkEnvelope.serializer(VersionInfo.serializer()))
-            put("core.data_dir.request", JsonNull.serializer())
-            put("core.data_dir.answer", OkEnvelope.serializer(DataDirInfo.serializer()))
-            put("core.echo.request", EchoProbe.serializer())
-            put("core.echo.answer", OkEnvelope.serializer(EchoProbe.serializer()))
-            for (kind in RustErrorKinds.wire) {
-                put("core.fail.$kind.request", FailRequest.serializer())
-                put("core.fail.$kind.answer", ErrEnvelope.serializer())
-            }
-            pair<SmsClassifyRequest, SmsClassifyAnswer>("sms_classify")
-            pair<MmsNotificationRequest, MmsNotificationAnswer>("mms_notification")
-            pair<MmsRetrievedRequest, MmsRetrievedAnswer>("mms_retrieved")
-            pair<MmsSendReqRequest, MmsSendReqAnswer>("mms_send_req")
-            pair<WaDigestRequest, WaDigestAnswer>("wa_digest")
-            pair<WaReplyRequest, WaReplyAnswer>("wa_reply")
-            pair<MsgRemindRequest, MsgRemindAnswer>("msg_remind")
-            pair<TripFixRequest, TripFixAnswer>("trip_fix")
-            pair<TripAlarmRequest, TripAlarmAnswer>("trip_alarm")
-            pair<TripEndRequest, TripEndAnswer>("trip_end")
-        }
-
-    private inline fun <reified Req, reified Ans> MutableMap<String, KSerializer<*>>.pair(kind: String) {
-        put("headless.$kind.request", serializer<Req>())
-        put("headless.$kind.answer", serializer<Ans>())
-    }
+    /** fixture stem (`core.version.request`) to the serializer of its model, from the per-domain `ContractModels`. */
+    private val models: Map<String, KSerializer<*>> = AllContracts.models
 
     private fun fixtures(): List<File> = dir.listFiles { f -> f.name.endsWith(".json") }.orEmpty().sortedBy { it.name }
 
+    /** The stems the Rust fixture test wrote to `INDEX`, one per line (`format.render`, `format.render.bad_form`). */
+    private fun indexStems(): List<String> = File(dir, "INDEX").readLines().filter { it.isNotBlank() }
+
     @Test
     fun fixturesExist() {
-        // 3 + 8 ops and 10 headless kinds, two files each.
-        assertEquals(2 * (3 + 8 + 10), fixtures().size)
+        val stems = indexStems()
+        assertEquals("INDEX lists a stem twice", stems.size, stems.toSet().size)
+        val expected = stems.flatMap { listOf("$it.request", "$it.answer") }.sorted()
+        assertEquals(expected, fixtures().map { it.name.removeSuffix(".json") }.sorted())
+    }
+
+    /** Every op a Kotlin facade names has a contract fixture, so no facade method can exist without Rust coverage. */
+    @Test
+    fun everyFacadeOpHasAFixture() {
+        val facades = mapOf("SharedOps" to SharedOps.ops)
+        val missing =
+            facades.flatMap { (facade, ops) ->
+                ops
+                    .filter { !File(dir, "$it.request.json").isFile || !File(dir, "$it.answer.json").isFile }
+                    .map { "$facade: $it" }
+            }
+        assertEquals("facade ops without a fixture", emptyList<String>(), missing)
+        for ((facade, ops) in facades) assertEquals("$facade lists an op twice", ops.size, ops.toSet().size)
     }
 
     @Test

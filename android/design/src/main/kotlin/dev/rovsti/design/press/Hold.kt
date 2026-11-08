@@ -41,13 +41,27 @@ enum class HoldResult {
 suspend fun AwaitPointerEventScope.awaitHoldOrScroll(
     down: PointerInputChange,
     touchSlop: Float,
-): HoldResult {
+): HoldResult = awaitHold(down, touchSlop).result
+
+/** How the first [HOLD_MS] ended and where the finger was when it did (the down position if it simply rested). */
+class HoldOutcome(
+    val result: HoldResult,
+    val position: androidx.compose.ui.geometry.Offset,
+)
+
+/** Like [awaitHoldOrScroll], but also reports the last position seen, which a tap needs for its release test. */
+suspend fun AwaitPointerEventScope.awaitHold(
+    down: PointerInputChange,
+    touchSlop: Float,
+): HoldOutcome {
+    var last = down.position
     val early =
         withTimeoutOrNull(HOLD_MS) {
             var result: HoldResult? = null
             while (result == null) {
                 val event = awaitPointerEvent(PointerEventPass.Final)
                 val change = event.changes.firstOrNull { it.id == down.id }
+                if (change != null) last = change.position
                 result =
                     when {
                         change == null || !change.pressed -> {
@@ -72,5 +86,5 @@ suspend fun AwaitPointerEventScope.awaitHoldOrScroll(
             }
             result
         }
-    return early ?: HoldResult.Held
+    return HoldOutcome(early ?: HoldResult.Held, last)
 }

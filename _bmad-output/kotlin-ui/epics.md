@@ -55,7 +55,7 @@ verified: `android/` has no module, no `build-logic`).
 | E1.4 | Press feedback, hold rule, haptics | R1 | done |
 | E1.5 | Glass: tier function, capture engine, Flat/Frost/Liquid, AGSL lens and rim, renderer probe | R1 | done |
 | E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | done |
-| E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | in-progress |
+| E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | done |
 | E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | in-progress |
 | E1.9 | Overlay host and placement | R2 | todo |
 | E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | todo |
@@ -170,6 +170,8 @@ verified: `android/` has no module, no `build-logic`).
 - AC4 Puck never exceeds the bar's inner edge while pressed or stretched (fixes X4); bounds test.
 - Screenshots: `e1.7-tabbar-rest`, `e1.7-tabbar-drag-mid`, `e1.7-tabbar-minimised`, `e1.7-tabbar-folded`,
   `e1.7-list-end-above-bar`, `e1.7-tabbar-fs2`.
+
+- Evidence (E1.7, uncommitted): `android/design/.../chrome/` (`ChromeMetrics.kt`, `TabBarGeometry.kt` and `RovstiTabBar.kt` with glisse headers, `SelectionPuck.kt`, `TabBarMinimizer.kt`, `BottomScrim.kt`); `press/Hold.kt` gained `awaitHold` (also returns the release position). Tests: JVM `TabBarGeometryTest` (puck inside inner rect for lift 0..1, squash 0..0.2, positions past both ends), `TabBarMinimizerTest`, `ChromeMetricsTest`; Robolectric `ListEndAboveBarTest` (row-49 bottom <= bar top; bar 8 dp above the nav inset), `TabBarGestureTest` (tap, reselect, 1.6-slot drag lands on slot 2, release >= 24 dp off ignored, vertical move before 150 ms scrolls the parent, haptics), `TabBarSemanticsTest`, `PuckBoundsTest` (real layout bounds while flicked), `ImeHidesBarTest`. Catalog pages Tab bar and Tab bar: folded. Opened `e1.7-*` light/dark: puck inside the bar and centred in rest, mid-drag puck between two tabs inside the bar, last row fully above the bar, fs2 icons only, folded circle bottom-start. Known: glass renders Flat in screenshots (lens not visible, lifted puck is a raised fill); minimised bar translates 40 dp so it is partly cut by the screen edge (spec look); content inset keeps the expanded bar height while minimised (no relayout during scroll); the bar is a sibling above the list, so a vertical swipe on it does not scroll the list (a parent scroll container still gets it).
 
 ### E1.8 Large-title scaffold
 - AC1 `LargeTitleScaffold`: title as item 0, collapse fraction pure and tested, inline bar fades in, large title lifts

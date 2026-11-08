@@ -17,4 +17,6 @@ enum class CatalogPage(
     Avatars("Avatars"),
     Chips("Chips"),
     EmptyState("Empty states"),
+    TabBar("Tab bar"),
+    FoldedTabBar("Tab bar: folded"),
 }

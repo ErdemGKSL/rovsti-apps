@@ -61,6 +61,8 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
                 CatalogPage.Avatars -> AvatarsPage()
                 CatalogPage.Chips -> ChipsPage()
                 CatalogPage.EmptyState -> EmptyStatePage()
+                CatalogPage.TabBar -> TabBarPage()
+                CatalogPage.FoldedTabBar -> FoldedTabBarPage()
             }
         }
     }
@@ -122,6 +124,5 @@ internal fun SectionLabel(
 
 private val Planned =
     listOf(
-        "Tab bar" to "E1.7",
         "Large-title scaffold" to "E1.8",
     )

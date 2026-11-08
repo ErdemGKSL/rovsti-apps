@@ -510,16 +510,22 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 Goal: the Kotlin apps can call every domain function they need, off the main thread, with typed models, contract
 tests and the cold-path `headless` entry. Spec: ARCH 6.
 
+Round plans: **R1** -> `_bmad-output/kotlin-ui/plans/round-06.md` (planned 2026-11-08 at base `a9f189c`): E2.1-E2.8 in
+8 steps (app_core + storage + Stops store/pick/snap; wa_link; Messages prefs/drafts/access; Contacts/Phone pure halves;
+headless handlers with golden answers; `rovsti_ffi`; `:core-bridge` with `testRustBridge`; contract fixtures, Kotlin
+models and fallback, catalog APK with `librovsti_ffi.so`). E1 re-verified done by this planner (R5 review fix of the
+inline title judged: it slides off centre only when a centred title would run under a wide toolbar).
+
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E2.1 | `rovsti_app_core` crate, storage, Stops logic moved (store, pick, snap, headless) | R1 | todo |
-| E2.2 | Messages logic moved (prefs, drafts, access, headless) | R1 | todo |
-| E2.3 | Contacts and Phone logic moved (trash store, prefs, WhatsApp glue, notes, WA call tracker) | R1 | todo |
-| E2.4 | `wa_link` moved (link file, headless send) | R1 | todo |
-| E2.5 | `rovsti_ffi`: exports, envelope, panic guard, handles, event sink, desktop build | R1 | todo |
-| E2.6 | `:core-bridge`: cargo-ndk and host build tasks, `RustNative`, dispatcher, init | R1 | todo |
-| E2.7 | Contract fixtures and Kotlin models | R1 | todo |
-| E2.8 | `headless` entry compatible with today's receivers | R1 | todo |
+| E2.1 | `rovsti_app_core` crate, storage, Stops logic moved (store, pick, snap, headless) | R1 | in-progress (round-06) |
+| E2.2 | Messages logic moved (prefs, drafts, access, headless) | R1 | in-progress (round-06) |
+| E2.3 | Contacts and Phone logic moved (trash store, prefs, WhatsApp glue, notes, WA call tracker) | R1 | in-progress (round-06) |
+| E2.4 | `wa_link` moved (link file, headless send) | R1 | in-progress (round-06) |
+| E2.5 | `rovsti_ffi`: exports, envelope, panic guard, handles, event sink, desktop build | R1 | in-progress (round-06) |
+| E2.6 | `:core-bridge`: cargo-ndk and host build tasks, `RustNative`, dispatcher, init | R1 | in-progress (round-06) |
+| E2.7 | Contract fixtures and Kotlin models | R1 | in-progress (round-06) |
+| E2.8 | `headless` entry compatible with today's receivers | R1 | in-progress (round-06) |
 | E2.9 | Phone domain ops | R2 | todo |
 | E2.10 | Contacts domain ops | R2 | todo |
 | E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | todo |

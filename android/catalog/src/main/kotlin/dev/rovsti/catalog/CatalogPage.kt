@@ -17,6 +17,7 @@ enum class CatalogPage(
     Controls("Switch, slider, segmented"),
     Rows("Rows"),
     Swipe("Swipe actions, buttons"),
+    Lists("Lists, alphabet rail"),
     GroupedSection("Grouped sections"),
     Avatars("Avatars"),
     Chips("Chips"),

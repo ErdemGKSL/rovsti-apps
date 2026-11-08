@@ -91,7 +91,7 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
 | E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | done |
 | E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3/R4 | done (R3 swipe/IosButton/APK; R4 Step 2 tab bar; R4 Step 3 top chrome, glass circle button, list drawing, overscroll) |
 | E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | done (R4-4; evidence below) |
-| E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | todo (planned, round-04) |
+| E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | done (R4-5; evidence below) |
 | E1.20 | Image loading and the photo viewer | R4 | todo (planned, round-04) |
 | E1.21 | Performance harness and convention tests | R4 | todo (planned, round-04) |
 | E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4 | todo (planned, round-04) |
@@ -425,6 +425,13 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
 - AC1 Swipe-to-reveal: 76 dp per action, full-swipe threshold with haptic, settle 1.0/500, custom accessibility actions.
 - AC2 Alphabet rail: `scrollToItem` while scrubbing, letter bubble, haptic per letter.
 - Screenshots: `e1.19-swipe-revealed`, `e1.19-swipe-full`, `e1.19-alphabet-rail-scrubbing`.
+- **R4 Step 5 (done)**: `design/list/AlphabetScrollBar.kt` ported from Convx `ui/component/AlphabetScrollBar.kt` (Char sections as an
+  `ImmutableList<Char>`, `ListScrollRail` for `LazyListState`; added: bubble level with the finger, TalkBack `setProgress` +
+  `stateDescription`, hidden while the IME is up, above `LocalContentInsets.bottom`), test `AlphabetScrollBarTest` ported.
+  `design/list/SwipeRow.kt`: `SwipeRow` facade over `IosSwipeableRow`, `SwipeAction`, `SwipeRowGroup` (one open row; a tap on
+  a list with an open row only closes it; the last trailing action runs on a full swipe). Catalog `ListsPage` (120 contacts,
+  sticky headers, Pin / Mute / Delete + undo, rail). Tests: `AlphabetRailTest`, `SwipeRowTest` (group), `E119ShotTest`.
+  AC1 swipe screenshots are the `e1.29-swipe-*` goldens; rail goldens `e1.19-alphabet-rail-scrubbing-*`, `e1.19-lists-page-*`.
 
 ### E1.20 Images and photo viewer
 - AC1 Coil 3 loader factory (memory 25 %/15 % low RAM, crossfade off in rows, size from the slot).

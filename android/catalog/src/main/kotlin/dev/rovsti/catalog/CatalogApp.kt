@@ -87,6 +87,7 @@ private fun PageContent(page: CatalogPage) {
         CatalogPage.Controls -> ControlsPage()
         CatalogPage.Rows -> RowsPage()
         CatalogPage.Swipe -> SwipePage()
+        CatalogPage.Lists -> ListsPage()
         CatalogPage.GroupedSection -> GroupedSectionPage()
         CatalogPage.Avatars -> AvatarsPage()
         CatalogPage.Chips -> ChipsPage()

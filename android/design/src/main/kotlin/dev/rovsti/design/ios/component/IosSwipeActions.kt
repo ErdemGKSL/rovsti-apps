@@ -5,7 +5,8 @@
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/ios/component/IosSwipeActions.kt
  * Changes for Rovsti: package and imports; the rest of the row is Convx's (velocity now tracks summed drag, action height). Added: custom accessibility actions (one per
  * swipe action, so TalkBack users reach them without a swipe), one haptic when a full swipe fires, test tags
- * `swipe-row`, `swipe-action-<n>`, and `close()` on a semantics action.
+ * `swipe-row`, `swipe-action-<n>`, and `close()` on a semantics action. E1.19: an optional [SwipeRowGroup] keeps one row
+ * open per list and turns a tap on a resting-open list into "close".
  */
 
 package dev.rovsti.design.ios.component
@@ -14,6 +15,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +36,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onSizeChanged
@@ -45,6 +49,7 @@ import dev.rovsti.design.ios.foundation.IosTheme
 import dev.rovsti.design.ios.foundation.LocalIosContentColor
 import dev.rovsti.design.ios.foundation.nearestProjectedSnap
 import dev.rovsti.design.ios.foundation.projectedEndpoint
+import dev.rovsti.design.list.SwipeRowGroup
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -77,6 +82,8 @@ fun IosSwipeableRow(
     trailingActions: List<IosSwipeAction> = emptyList(),
     fullSwipeFraction: Float = 0.55f,
     onFullSwipe: (() -> Unit)? = trailingActions.firstOrNull()?.onClick,
+    group: SwipeRowGroup? = null,
+    rowKey: Any? = null,
     content: @Composable () -> Unit,
 ) {
     if (leadingActions.isEmpty() && trailingActions.isEmpty()) {
@@ -97,6 +104,9 @@ fun IosSwipeableRow(
         target: Float,
         velocity: Float = 0f,
     ) {
+        if (group != null && rowKey != null) {
+            if (target != 0f) group.opened(rowKey) else group.closed(rowKey)
+        }
         scope.launch {
             offset.animateTo(
                 target,
@@ -157,6 +167,7 @@ fun IosSwipeableRow(
                     var travelled = 0f
                     detectHorizontalDragGestures(
                         onDragStart = {
+                            if (group != null && rowKey != null) group.opened(rowKey)
                             tracker.resetTracking()
                             travelled = 0f
                         },
@@ -196,7 +207,15 @@ fun IosSwipeableRow(
                     }
                 },
         ) {
-            content()
+            Box(Modifier.fillMaxWidth().tapClosesGroup(group)) { content() }
+        }
+    }
+
+    // Another row of the group opened (or is being dragged): this one rests.
+    val openKey = group?.openKey
+    LaunchedEffect(openKey) {
+        if (group != null && openKey != rowKey && abs(offset.value) > 0f) {
+            offset.animateTo(0f, spring(dampingRatio = 1f, stiffness = 500f))
         }
     }
 
@@ -239,3 +258,32 @@ private fun ActionButton(
         }
     }
 }
+
+/**
+ * While some row of [group] is open, a tap on this row's content only closes the group: the tap is consumed on the
+ * initial pass before the content's own click handler sees it. A drag (past touch slop) is left alone so the open row can
+ * still be dragged shut. Nothing happens while the group rests.
+ */
+private fun Modifier.tapClosesGroup(group: SwipeRowGroup?): Modifier =
+    if (group == null) {
+        this
+    } else {
+        pointerInput(group) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                if (group.openKey == null) return@awaitEachGesture
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    val change = event.changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                    if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) {
+                        return@awaitEachGesture
+                    }
+                    if (!change.pressed) {
+                        change.consume()
+                        group.closeAll()
+                        return@awaitEachGesture
+                    }
+                }
+            }
+        }
+    }

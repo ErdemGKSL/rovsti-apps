@@ -23,7 +23,7 @@ compileSdk must be 37 because Compose BOM 2026.09 libraries require it.
   Kotlin, plus the `kotlin.plugin.compose` compiler plugin), Compose BOM 2026.09.00, coroutines 1.11.0,
   Robolectric 4.17, Roborazzi 1.77.0, Spotless 8.11.0 with ktlint 1.8.0 (`android/.editorconfig`;
   `@Composable` functions may be PascalCase).
-- Modules are added in `settings.gradle.kts` (`include(":app-phone")`, ...). The toolchain was proven with a
+- Modules are added in `settings.gradle.kts` (`include(":phone")`, ...; the layout is in [architecture.md](architecture.md) section 2). The toolchain was proven with a
   throwaway `:sample` module (Compose + Robolectric native graphics + Roborazzi screenshot, lint, assemble),
   then removed. Module recipe: apply `android.application`/`android.library`, `kotlin.compose`,
   `roborazzi`; `testOptions.unitTests.isIncludeAndroidResources = true`; tests use

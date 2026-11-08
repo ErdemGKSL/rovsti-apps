@@ -9,7 +9,7 @@ source scripts/android-env.sh
 
 # Rust crates the Kotlin apps use. The deprecated GPUI crates (apps/*, rovsti_ui,
 # rovsti_wa_ui, liquid_glass_kit) are deliberately excluded.
-RUST_PKGS=(-p rovsti_core -p rovsti_geo -p rovsti_tiles -p rovsti_wa_proto -p rovsti_wa_client -p rovsti_android)
+RUST_PKGS=(-p rovsti_core -p rovsti_app_core -p rovsti_geo -p rovsti_tiles -p rovsti_wa_proto -p rovsti_wa_client -p rovsti_android)
 
 step() {
   local name="$1"; shift

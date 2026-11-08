@@ -40,16 +40,7 @@ pub fn nearest_row_visible(has_here: bool, ends_empty: bool, trip: bool) -> bool
     has_here && ends_empty && !trip
 }
 
-/// "450 m", "1.2 km": metres to the nearest 10 below a kilometre.
-pub fn distance_text(metres: f64) -> String {
-    // Rounded first, so 995 m reads "1.0 km", never "1000 m".
-    let tens = (metres.max(0.0) / 10.0).round() as i64 * 10;
-    if tens < 1_000 {
-        format!("{tens} m")
-    } else {
-        format!("{:.1} km", metres / 1_000.0)
-    }
-}
+pub use rovsti_app_core::stops::types::distance_text;
 
 /// An arrow glyph for the compass octant of a bearing (north is up).
 pub fn octant_arrow(deg: f64) -> &'static str {

@@ -10,7 +10,7 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, div, list, px,
 };
 use rovsti_geo::{
-    Coord, Diameter, DiameterError, Feed,
+    Coord, Feed,
     coord_format::{self, CoordFormat},
     dest::parse_location,
     places_io::MergePlan,
@@ -37,128 +37,7 @@ pub fn copied_pill(format: CoordFormat) -> String {
 /// Stops listed for a search.
 const MAX_STOP_HITS: usize = 20;
 
-/// Where a trip is headed.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Destination {
-    pub label: String,
-    pub coord: Coord,
-    /// The transit stop this is, when it came from an imported feed.
-    #[serde(default)]
-    pub gtfs_stop: Option<String>,
-    /// The line it was chosen on in the stop sheet, drawn on the map.
-    #[serde(default)]
-    pub pattern: Option<u32>,
-}
-
-impl Destination {
-    pub fn new(label: impl Into<String>, coord: Coord) -> Self {
-        Self {
-            label: label.into(),
-            coord,
-            gtfs_stop: None,
-            pattern: None,
-        }
-    }
-
-    /// A raw point dropped on the map: it has no name.
-    pub fn dropped(coord: Coord) -> Self {
-        Self::new(String::new(), coord)
-    }
-
-    /// Whether the point has a name worth showing.
-    pub fn is_named(&self) -> bool {
-        !self.label.trim().is_empty()
-    }
-
-    /// The confirmation sheet's heading.
-    pub fn title(&self) -> String {
-        if self.is_named() {
-            format!("Use {}", self.label)
-        } else {
-            "Use this point".to_owned()
-        }
-    }
-}
-
-/// Which end of the diameter a point goes to.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Slot {
-    #[default]
-    A,
-    B,
-}
-
-impl Slot {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::A => "A",
-            Self::B => "B",
-        }
-    }
-
-    /// The picker sheet's heading while this end is being chosen.
-    pub fn picker_title(self) -> &'static str {
-        match self {
-            Self::A => "Choose A",
-            Self::B => "Choose B",
-        }
-    }
-}
-
-/// The two points chosen so far.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Ends {
-    pub a: Option<Destination>,
-    pub b: Option<Destination>,
-}
-
-impl Ends {
-    pub fn get(&self, slot: Slot) -> Option<&Destination> {
-        match slot {
-            Slot::A => self.a.as_ref(),
-            Slot::B => self.b.as_ref(),
-        }
-    }
-
-    pub fn set(&mut self, slot: Slot, dest: Destination) {
-        match slot {
-            Slot::A => self.a = Some(dest),
-            Slot::B => self.b = Some(dest),
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.a.is_none() && self.b.is_none()
-    }
-
-    /// Where the next picked point goes: A until it is set, then B.
-    pub fn next_slot(&self) -> Slot {
-        if self.a.is_none() { Slot::A } else { Slot::B }
-    }
-
-    /// Fills both ends at once (a recent trip).
-    pub fn set_pair(&mut self, a: Destination, b: Destination) {
-        self.a = Some(a);
-        self.b = Some(b);
-    }
-
-    /// Exchanges A and B (the left and right sides trade places).
-    pub fn swap(&mut self) {
-        std::mem::swap(&mut self.a, &mut self.b);
-    }
-
-    /// The circle on AB. `None` until both points are set; `Some(Err)` when
-    /// they cannot form a diameter.
-    pub fn diameter(&self) -> Option<Result<Diameter, DiameterError>> {
-        let (a, b) = (self.a.as_ref()?, self.b.as_ref()?);
-        Some(Diameter::new(a.coord, b.coord))
-    }
-}
-
-/// `41.0370, 28.9850`: for a details line only, never a name or a main-flow label.
-pub fn coord_text(coord: Coord) -> String {
-    format!("{:.4}, {:.4}", coord.lat, coord.lon)
-}
+pub use rovsti_app_core::stops::types::{Destination, Ends, Slot};
 
 /// What shared or pasted text leads to.
 #[derive(Clone, Debug, PartialEq)]
@@ -1371,7 +1250,9 @@ pub fn stop_subtitle(details: &str, here: Option<Coord>, stop: Coord) -> String 
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::stop_subtitle;
+    use rovsti_app_core::stops::types::coord_text;
     use rovsti_geo::Coord;
+    use rovsti_geo::DiameterError;
 
     #[test]
     fn stop_subtitle_adds_distance_only_with_a_fix() {

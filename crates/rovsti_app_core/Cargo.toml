@@ -1,0 +1,21 @@
+[package]
+name = "rovsti_app_core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "App-level logic of the four Rovsti apps without UI or JNI."
+
+[dependencies]
+base64.workspace = true
+log.workspace = true
+rovsti_core.workspace = true
+rovsti_geo.workspace = true
+rovsti_wa_client.workspace = true
+rovsti_wa_proto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

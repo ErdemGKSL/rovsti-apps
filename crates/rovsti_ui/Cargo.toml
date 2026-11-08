@@ -11,6 +11,7 @@ gpui.workspace = true
 gpui_icons.workspace = true
 liquid_glass_kit.workspace = true
 log.workspace = true
+rovsti_app_core.workspace = true
 rovsti_core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

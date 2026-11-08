@@ -484,7 +484,7 @@ mod tests {
     use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 
     use super::*;
-    use crate::store::tests::tmp;
+    use crate::store::test_support::tmp;
 
     fn stop(id: &str, name: &str, lat: f64) -> Stop {
         Stop {

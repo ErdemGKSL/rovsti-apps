@@ -600,7 +600,7 @@ pub fn read_import(path: &str) -> Result<String, String> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::store::tests::tmp;
+    use crate::store::test_support::tmp;
     use rovsti_geo::{Coord, NoticeWhen, Side, TripState};
 
     fn end(label: &str, lon: f64) -> Endpoint {

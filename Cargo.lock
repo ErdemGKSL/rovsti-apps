@@ -6111,6 +6111,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "rovsti_app_core"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "log",
+ "rovsti_core",
+ "rovsti_geo",
+ "rovsti_wa_client",
+ "rovsti_wa_proto",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "rovsti_contacts"
 version = "0.1.0"
 dependencies = [
@@ -6212,6 +6227,7 @@ dependencies = [
  "gpui_platform",
  "log",
  "rovsti_android",
+ "rovsti_app_core",
  "rovsti_core",
  "rovsti_geo",
  "rovsti_tiles",
@@ -6250,6 +6266,7 @@ dependencies = [
  "image",
  "liquid_glass_kit",
  "log",
+ "rovsti_app_core",
  "rovsti_core",
  "serde",
  "serde_json",

@@ -1,0 +1,1 @@
+{"id":1,"label":"Kadikoy","trip":{"destination":{"lat":41.0,"lon":29.0},"rule":{"Radius":{"metres":500.0}},"state":"Tracking","last_distance_m":null},"started_ms":0,"snoozes":0,"ring_at_ms":null,"track":{"last":null,"travelled_m":0.0,"fixes":0},"notice":null}

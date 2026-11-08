@@ -204,7 +204,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::store::tests::{tmp, trip};
+    use crate::store::test_support::{tmp, trip};
 
     /// Midpoint of the fixture diameter (A west, B east, left = north).
     const DEST: Coord = Coord::new(41.0, 29.0);

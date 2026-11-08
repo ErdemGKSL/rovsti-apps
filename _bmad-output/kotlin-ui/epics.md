@@ -62,9 +62,9 @@ mid-scroll).
 | E1.9 | Overlay host and placement | R2 | done |
 | E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | done |
 | E1.11 | Long-press context menu (simple and preview-card variants) | R2 | done |
-| E1.12 | Popover (anchored arbitrary content) | R2 | in-progress |
+| E1.12 | Popover (anchored arbitrary content) | R2 | done |
 | E1.13 | Sheets with detents, pushback, background interaction | R2 | in-progress |
-| E1.14 | Alert, action sheet, confirm | R2 | in-progress |
+| E1.14 | Alert, action sheet, confirm | R2 | done |
 | E1.15 | Toast and undo pill | R2 | in-progress |
 | E1.16 | Text field, search field, composer field | R2 | in-progress |
 | E1.17 | Switch, slider, segmented control | R3 | todo |
@@ -221,6 +221,9 @@ mid-scroll).
   `placePanel`, scrolls when taller than the free space.
 - AC2 Opening never moves the content under it (bounds test).
 - Screenshots: `e1.12-popover-below`, `e1.12-popover-above`, `e1.12-popover-tall-scrolling`.
+
+- Evidence (E1.12): `android/design/.../overlay/Popover.kt` (glisse header; `PopoverEntry` reuses `menuMorphFrame` without the glyph, max 320 dp, `placePanel`, height capped by `panelMaxHeight` with `verticalScroll`, transparent input-eating scrim; `Modifier.popoverTrigger`). Catalog `PopoverPage`. Tests: Robolectric `PopoverTest` (three page nodes keep bounds at +16/+100/+300/+1200 ms and after close, 320 dp cap, tall content `performScrollToNode` to the last row (needs `autoAdvance = true` while it runs: the scroll action animates), above when anchored low, scrim tap). Opened `e1.12-popover-below/-above/-tall-scrolling` light/dark: the glass grows out of its button and covers it (menu style), form rows readable, tall one fills the safe area and clips its 17th row mid-scroll.
+- Evidence (E1.14): `Alert.kt` (270 dp, min 110, row or column by `maxIntrinsicWidth`, 1.2 -> 1 + fade on `appear`, 150 ms exit, scrim .2/.4, no outside dismiss, `OverlayEntry.onBack` hook so Back runs the cancel action; `dismissOnBack` only with a cancel), `ActionSheet.kt` (max 500 dp, 56 dp rows, separate cancel group, nav inset + 8 dp, 400 ms (0.2833,0.99,0.31833,0.99) in / 150 ms EaseIn out, `confirmDestructive` + two-tap: 'Tap again' 3 s, `Confirm` on commit, `Reject` on timeout, live-region state). Tests: `AlertTest`, `ActionSheetTest`. Opened `e1.14-alert`, `-alert-fs2`, `-action-sheet`, `-confirm-destructive` light/dark. Known: the lower group's drop shadow slightly veils the last row of the upper group in the action sheet.
 
 ### E1.13 Sheets
 - AC1 Detents (peek, medium .5 H, large H - (status + 24)), settle .86/380 with release velocity, dismiss rule (+12 % H or

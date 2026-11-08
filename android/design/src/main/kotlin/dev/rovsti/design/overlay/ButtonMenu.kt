@@ -426,7 +426,7 @@ class ButtonMenuEntry(
 }
 
 /** Corner radius of the growing glass: from half the trigger's short side (a capsule) to the card's own radius. */
-private fun surfaceRadius(
+internal fun surfaceRadius(
     from: Size,
     cardCornerPx: Float,
     t: Float,
@@ -436,7 +436,7 @@ private fun surfaceRadius(
 }
 
 /** A rounded rectangle at an arbitrary rect of the layer, used as the animated clip of the surface and the rows. */
-private class SurfaceShape(
+internal class SurfaceShape(
     private val left: Float,
     private val top: Float,
     private val width: Float,

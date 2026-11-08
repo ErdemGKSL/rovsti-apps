@@ -71,7 +71,7 @@ class OverlayController {
      */
     fun dismissTop(): Boolean {
         val top = entries.lastOrNull { it.state.targetState } ?: return false
-        if (top.dismissOnBack) dismiss(top)
+        if (top.dismissOnBack) top.onBack(this)
         return true
     }
 
@@ -94,6 +94,11 @@ abstract class OverlayEntry(
     val dismissOnBack: Boolean = true,
 ) {
     val state = MutableTransitionState(false)
+
+    /** Back was pressed while this is the topmost entry and [dismissOnBack] is set: close by default. */
+    open fun onBack(controller: OverlayController) {
+        controller.dismiss(this)
+    }
 
     @Composable
     abstract fun Content(host: OverlayScope)

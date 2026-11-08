@@ -72,6 +72,8 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
                     CatalogPage.Overlays -> OverlaysPage()
                     CatalogPage.ButtonMenu -> ButtonMenuPage()
                     CatalogPage.ContextMenu -> ContextMenuPage()
+                    CatalogPage.Popover -> PopoverPage()
+                    CatalogPage.Dialogs -> DialogsPage()
                 }
             }
         }
@@ -134,5 +136,7 @@ internal fun SectionLabel(
 
 private val Planned =
     listOf(
-        "Popover with content" to "E1.12",
+        "Sheets with detents" to "E1.13",
+        "Toast and undo pill" to "E1.15",
+        "Text fields" to "E1.16",
     )

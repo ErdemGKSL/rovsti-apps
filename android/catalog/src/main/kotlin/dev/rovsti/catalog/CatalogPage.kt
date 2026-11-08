@@ -23,4 +23,6 @@ enum class CatalogPage(
     Overlays("Overlay host"),
     ButtonMenu("Button menu"),
     ContextMenu("Context menu"),
+    Popover("Popover"),
+    Dialogs("Alerts and sheets"),
 }

@@ -11,6 +11,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
 import dev.rovsti.design.chrome.ToolbarAction
+import dev.rovsti.design.chrome.inlineTitleAlpha
+import dev.rovsti.design.chrome.largeTitleAlpha
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.testing.ShotTest
 import kotlinx.collections.immutable.ImmutableList
@@ -50,8 +52,12 @@ class ScaffoldTest : ShotTest() {
         advance(300)
         assertEquals(0f, latest, 1e-3f)
 
-        scrollBy(state, titleItemHeight(state) / 2f)
-        assertTrue("collapse $latest should be strictly between 0 and 1", latest > 0.2f && latest < 0.8f)
+        // 0.8 is past the 0.65 hand-off, so the inline title is fading in while the large one is gone.
+        scrollBy(state, titleItemHeight(state) * 0.8f)
+        assertEquals(0.8f, latest, 0.03f)
+        val inline = inlineTitleAlpha(latest)
+        assertTrue("inline alpha $inline should be strictly between 0 and 1", inline > 0f && inline < 1f)
+        assertEquals("never two titles", 0f, inline * largeTitleAlpha(latest), 0f)
 
         scrollBy(state, titleItemHeight(state) * 3f)
         assertEquals(1f, latest, 1e-2f)

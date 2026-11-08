@@ -31,6 +31,20 @@ fun titleCollapseFraction(
     return (firstOffsetPx / height).coerceIn(0f, 1f)
 }
 
+private fun smoothstep(x: Float): Float {
+    val t = x.coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
+/**
+ * Opacity of the inline (bar) title for collapse fraction [f]: 0 until the large title is 65 % gone, then a smoothstep
+ * to 1 (ORIGINAL). It is 0 wherever [largeTitleAlpha] is above 0, so two titles are never readable at once.
+ */
+fun inlineTitleAlpha(f: Float): Float = smoothstep((f - 0.65f) / 0.35f)
+
+/** Opacity of the large title for collapse fraction [f]: 1 at the top, 0 from 65 % collapse on (ORIGINAL). */
+fun largeTitleAlpha(f: Float): Float = 1f - smoothstep(f / 0.65f)
+
 /**
  * The collapse fraction of this list, smoothed by the `titleCollapse` spring so the inline title never jumps when a
  * scroll position is restored or the list is flung. Read the result only inside `graphicsLayer` or draw lambdas.

@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -32,6 +33,8 @@ import androidx.compose.ui.unit.sp
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.ListRowChevron
+import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.overlay.OverlayHost
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
@@ -42,28 +45,32 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
     var page by rememberSaveable { mutableStateOf(initialPage) }
     BackHandler(enabled = page != CatalogPage.Home) { page = CatalogPage.Home }
 
-    Box(
-        modifier = Modifier.fillMaxSize().background(RovstiTheme.colors.page),
-        contentAlignment = Alignment.TopCenter,
-    ) {
-        Column(Modifier.fillMaxHeight().widthIn(max = Sizes.contentMaxWidth).fillMaxWidth()) {
-            when (page) {
-                CatalogPage.Home -> HomePage(onOpen = { page = it })
-                CatalogPage.Toolchain -> ToolchainPage()
-                CatalogPage.ThemePalette -> PalettePage()
-                CatalogPage.ThemeType -> TypeScalePage()
-                CatalogPage.Motion -> MotionPage()
-                CatalogPage.Press -> PressPage()
-                CatalogPage.Glass -> GlassPage()
-                CatalogPage.Buttons -> ButtonsPage()
-                CatalogPage.Rows -> RowsPage()
-                CatalogPage.GroupedSection -> GroupedSectionPage()
-                CatalogPage.Avatars -> AvatarsPage()
-                CatalogPage.Chips -> ChipsPage()
-                CatalogPage.EmptyState -> EmptyStatePage()
-                CatalogPage.TabBar -> TabBarPage()
-                CatalogPage.FoldedTabBar -> FoldedTabBarPage()
-                CatalogPage.LargeTitle -> LargeTitlePage()
+    val overlays = remember { OverlayController() }
+    OverlayHost(overlays) {
+        Box(
+            modifier = Modifier.fillMaxSize().background(RovstiTheme.colors.page),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            Column(Modifier.fillMaxHeight().widthIn(max = Sizes.contentMaxWidth).fillMaxWidth()) {
+                when (page) {
+                    CatalogPage.Home -> HomePage(onOpen = { page = it })
+                    CatalogPage.Toolchain -> ToolchainPage()
+                    CatalogPage.ThemePalette -> PalettePage()
+                    CatalogPage.ThemeType -> TypeScalePage()
+                    CatalogPage.Motion -> MotionPage()
+                    CatalogPage.Press -> PressPage()
+                    CatalogPage.Glass -> GlassPage()
+                    CatalogPage.Buttons -> ButtonsPage()
+                    CatalogPage.Rows -> RowsPage()
+                    CatalogPage.GroupedSection -> GroupedSectionPage()
+                    CatalogPage.Avatars -> AvatarsPage()
+                    CatalogPage.Chips -> ChipsPage()
+                    CatalogPage.EmptyState -> EmptyStatePage()
+                    CatalogPage.TabBar -> TabBarPage()
+                    CatalogPage.FoldedTabBar -> FoldedTabBarPage()
+                    CatalogPage.LargeTitle -> LargeTitlePage()
+                    CatalogPage.Overlays -> OverlaysPage()
+                }
             }
         }
     }
@@ -125,5 +132,5 @@ internal fun SectionLabel(
 
 private val Planned =
     listOf(
-        "Overlay host and placement" to "E1.9",
+        "Context menu and button menu" to "E1.10, E1.11",
     )

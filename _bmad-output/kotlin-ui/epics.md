@@ -59,7 +59,7 @@ mid-scroll).
 | E1.6 | Buttons, rows, inset-grouped sections, avatars, chip row, badges, empty state | R1 | done |
 | E1.7 | Floating tab bar with puck, ChromeMetrics and content insets | R1 | done |
 | E1.8 | Large-title scaffold, inline bar, toolbar capsules, back button | R1 | done |
-| E1.9 | Overlay host and placement | R2 | in-progress |
+| E1.9 | Overlay host and placement | R2 | done |
 | E1.10 | Button-anchored menu (glisse morph, press-slide-release) | R2 | in-progress |
 | E1.11 | Long-press context menu (simple and preview-card variants) | R2 | in-progress |
 | E1.12 | Popover (anchored arbitrary content) | R2 | in-progress |
@@ -194,6 +194,7 @@ mid-scroll).
 - AC2 `placePanel()` pure with JVM tests: each corner and centre, too tall, RTL, landscape, cutout, IME open.
 - AC3 Test: trigger bounds identical before and after `present()`.
 - Screenshots: `e1.9-host-two-entries-stacked`.
+- Evidence (E1.9 plus R1 fixes F1, F2, R2 step 1): `android/design/.../overlay/` (`OverlayHost.kt`, `Scrim.kt`, `Placement.kt`, all original); `GlassSpec.flatAlpha` (bar 0.96, popover 0.97, sheet 0.98, thumb 0.85); `chrome/TitleCollapse.kt` `inlineTitleAlpha`/`largeTitleAlpha`; Flat top band goes to 1.0 once collapsed. Tests: JVM `PlacePanelTest` (corners, centre, too tall, RTL, landscape, cutout, IME, origin), `TitleAlphaTest` (never both titles), `FlatAlphaTest`; Robolectric `OverlayHostTest` (back pops only the top entry, exit plays before removal, page semantics cleared and restored, `paneTitle`, scrim blocks the list), `TriggerBoundsTest` (identical bounds before, +16 ms, +200 ms, after dismiss), `FlatLegibilityTest` (luminance spread < 0.05 over a black/white stripe backdrop for the tab bar and the collapsed top band), `ScaffoldTest` probes f = 0.8. Opened `e1.9-host-two-entries-stacked-{light,dark}` (card 2 above card 1, page dimmed, both cards legible), `e1.7-tabbar-rest`, `e1.7-list-end-above-bar`, `e1.8-title-collapsed` (no readable row text under the chrome; a faint ghost remains only inside the translucent puck), `e1.8-title-mid-scroll` (one title, the large one half faded). Known: with the manual test clock a dismissal needs one small advance before a large one to start the spring; the page behind is not inert for touch except through the scrim.
 
 ### E1.10 Button-anchored menu
 - AC1 Menu morph ported from glisse `menu.tsx` (header), per-axis growth from the anchor, clearing blur on open, short

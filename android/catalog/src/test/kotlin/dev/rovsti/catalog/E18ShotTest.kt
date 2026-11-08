@@ -33,6 +33,8 @@ class E18ShotTest : ShotTest() {
                 .first()
                 .size
         compose.runOnIdle { runBlocking { state.scrollBy(titleHeight * factor) } }
+        // The first frame starts the collapse spring; one big step would skip straight past it.
+        advance(16)
         advance(800)
     }
 
@@ -62,7 +64,7 @@ class E18ShotTest : ShotTest() {
         for (dark in listOf(false, true)) {
             val state = LazyListState()
             composeFrame(dark = dark) { LargeTitlePage(listState = state) }
-            scroll(state, 0.5f)
+            scroll(state, 0.35f)
             snap("e1.8-title-mid-scroll-${theme(dark)}")
         }
     }

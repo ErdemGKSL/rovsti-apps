@@ -47,13 +47,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.glass.GlassSource
+import dev.rovsti.design.glass.GlassTier
 import dev.rovsti.design.glass.LocalGlassConditions
 import dev.rovsti.design.glass.glassSource
+import dev.rovsti.design.glass.glassTier
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
 import kotlinx.collections.immutable.ImmutableList
+import kotlin.math.max
 
 /** Numbers of the large-title scaffold (SKILL navigation-layout.md 10). */
 object ScaffoldSpec {
@@ -88,11 +91,13 @@ class NavigationButton(
 internal fun topScrimStops(
     barFraction: Float,
     peak: Float = ScaffoldSpec.ScrimPeak,
+    bandPeak: Float = peak,
 ): List<Pair<Float, Float>> {
     val bar = barFraction.coerceIn(0f, 1f)
     // The bottom scrim's stops (ScrimStops), walked from the far end: 1 at the bar, 0 at the end of the run.
     val run = ScrimStops.reversed().map { (at, share) -> (1f - at) to share }
-    return listOf(0f to peak) + run.map { (at, share) -> (bar + (1f - bar) * at) to (peak * share) }
+    return listOf(0f to bandPeak, bar to bandPeak) +
+        run.drop(1).map { (at, share) -> (bar + (1f - bar) * at) to (peak * share) }
 }
 
 /**
@@ -130,7 +135,10 @@ fun LargeTitleScaffold(
     val metrics = root ?: remember { ChromeMetrics() }
     val insets = if (root != null) LocalContentInsets.current else metrics.contentInsets()
     val statusTop = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
-    val reduceTransparency = LocalGlassConditions.current.reduceTransparency
+    val conditions = LocalGlassConditions.current
+    val reduceTransparency = conditions.reduceTransparency
+    // The top chrome samples `glass`, so the tier it would get decides whether rows may show through the bar band.
+    val flat = glassTier(conditions.copy(sourceAvailable = true)) == GlassTier.Flat
 
     var titleHeightPx by remember { mutableFloatStateOf(0f) }
     var toolbarWidthPx by remember { mutableIntStateOf(0) }
@@ -174,7 +182,7 @@ fun LargeTitleScaffold(
         if (reduceTransparency) {
             SolidBar(collapse, barBand)
         } else {
-            TopScrim(barBand, collapse, Modifier.align(Alignment.TopCenter))
+            TopScrim(barBand, collapse, flat, Modifier.align(Alignment.TopCenter))
         }
 
         Box(
@@ -203,7 +211,7 @@ fun LargeTitleScaffold(
                     Modifier
                         .align(Alignment.Center)
                         .padding(horizontal = side)
-                        .graphicsLayer { alpha = collapse.value }
+                        .graphicsLayer { alpha = inlineTitleAlpha(collapse.value) }
                         .clearAndSetSemantics {}
                         .testTag("inline-title"),
             )
@@ -249,7 +257,7 @@ private fun LargeTitle(
             .fillMaxWidth()
             .onSizeChanged { onHeight(it.height.toFloat()) }
             .graphicsLayer {
-                alpha = 1f - collapse.value
+                alpha = largeTitleAlpha(collapse.value)
                 translationY = -lift * collapse.value
             }.padding(start = Spacing.gutter, end = Spacing.gutter + endReserve, top = top, bottom = Spacing.s),
     ) {
@@ -268,6 +276,7 @@ private fun LargeTitle(
 private fun TopScrim(
     barBand: Dp,
     collapse: State<Float>,
+    flat: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val page = RovstiTheme.colors.page
@@ -280,11 +289,14 @@ private fun TopScrim(
             .drawBehind {
                 // The expanded title lives in the list under this scrim, so no page colour may lie over it (it would grey the
                 // title out); the scrim only firms up as the title leaves and rows start to pass under the bar.
-                val peak = ScaffoldSpec.ScrimPeakCollapsed * collapse.value
+                val c = collapse.value
+                val peak = ScaffoldSpec.ScrimPeakCollapsed * c
+                // Flat has no blur: once collapsed the bar band is fully opaque so no row text can be read through it.
+                val bandPeak = if (flat) max(peak, c * c * c) else peak
                 val brush =
                     Brush.verticalGradient(
                         colorStops =
-                            topScrimStops(fraction, peak)
+                            topScrimStops(fraction, peak, bandPeak)
                                 .map { (at, share) ->
                                     at to page.copy(alpha = share)
                                 }.toTypedArray(),

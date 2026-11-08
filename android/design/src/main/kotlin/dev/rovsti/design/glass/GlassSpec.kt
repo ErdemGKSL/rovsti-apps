@@ -35,8 +35,13 @@ data class GlassSpec(
     val lensAmount: Float,
     /** Translucent fill laid over the replay (Liquid, Frost). */
     val fill: Color,
-    /** Solid base of the Flat fallback, drawn at [FLAT_ALPHA]. */
+    /** Solid base of the Flat fallback, drawn at [flatAlpha]. */
     val flatBase: Color,
+    /**
+     * Opacity of the Flat base. Flat has no blur, so whatever is not covered shows through sharp: bars 0.96, popovers
+     * 0.97, sheets 0.98, thumbs [FLAT_ALPHA] (they sit over their own track).
+     */
+    val flatAlpha: Float = FLAT_ALPHA,
     /** Sits between the backdrop and [fill] so labels keep 4.5:1 over any backdrop. */
     val scrim: Color,
     val rimShine: Float,
@@ -53,7 +58,12 @@ data class GlassSpec(
     fun withTier(tier: GlassTier): GlassSpec = if (tier == this.tier) this else copy(tier = tier)
 
     companion object {
+        /** Default Flat opacity (thumbs). */
         const val FLAT_ALPHA = 0.85f
+
+        const val FLAT_ALPHA_BAR = 0.96f
+        const val FLAT_ALPHA_POPOVER = 0.97f
+        const val FLAT_ALPHA_SHEET = 0.98f
 
         /** Corner value meaning "capsule": clamped to half the shorter side when drawn. */
         const val CAPSULE = 10_000f
@@ -72,6 +82,7 @@ data class GlassSpec(
             lensAmount = 1f,
             fill = tokens.glass,
             flatBase = flatBase(colors),
+            flatAlpha = FLAT_ALPHA_BAR,
             scrim = colors.glassScrim,
             rimShine = tokens.rimShine,
             edge = tokens.edge,
@@ -94,6 +105,7 @@ data class GlassSpec(
             lensAmount = 0.3f,
             fill = tokens.surface,
             flatBase = flatBase(colors),
+            flatAlpha = FLAT_ALPHA_POPOVER,
             scrim = colors.glassScrim,
             rimShine = 0.2f,
             edge = tokens.surfaceEdge,
@@ -116,6 +128,7 @@ data class GlassSpec(
             lensAmount = 0f,
             fill = tokens.surface,
             flatBase = flatBase(colors),
+            flatAlpha = FLAT_ALPHA_SHEET,
             scrim = colors.glassScrim,
             rimShine = 0f,
             edge = tokens.surfaceEdge,

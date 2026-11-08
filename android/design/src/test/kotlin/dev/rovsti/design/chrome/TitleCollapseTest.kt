@@ -49,3 +49,53 @@ class TitleCollapseTest {
         assertTrue(stops.zipWithNext().all { (a, b) -> b.first >= a.first && b.second <= a.second + 1e-6f })
     }
 }
+
+class TitleAlphaTest {
+    private val fractions = (0..1000).map { it / 1000f }
+
+    @Test
+    fun bothStayInUnitRange() {
+        for (f in fractions) {
+            assertTrue(inlineTitleAlpha(f) in 0f..1f)
+            assertTrue(largeTitleAlpha(f) in 0f..1f)
+        }
+    }
+
+    @Test
+    fun endpoints() {
+        assertEquals(1f, largeTitleAlpha(0f), 0f)
+        assertEquals(0f, inlineTitleAlpha(0f), 0f)
+        assertEquals(0f, largeTitleAlpha(1f), 0f)
+        assertEquals(1f, inlineTitleAlpha(1f), 0f)
+    }
+
+    @Test
+    fun monotone() {
+        fractions.zipWithNext().forEach { (a, b) ->
+            assertTrue(inlineTitleAlpha(b) >= inlineTitleAlpha(a))
+            assertTrue(largeTitleAlpha(b) <= largeTitleAlpha(a))
+        }
+    }
+
+    @Test
+    fun neverBothVisible() {
+        for (f in fractions) {
+            assertEquals("f=$f", 0f, inlineTitleAlpha(f) * largeTitleAlpha(f), 0f)
+        }
+    }
+
+    @Test
+    fun inlineIsInvisibleBeforeSixtyFivePercentAndHalfWayAtEightyTwoAndAHalf() {
+        assertEquals(0f, inlineTitleAlpha(0.65f), 0f)
+        assertEquals(0.5f, inlineTitleAlpha(0.825f), 1e-5f)
+    }
+
+    @Test
+    fun flatTopBandIsOpaqueWhenCollapsed() {
+        val stops = topScrimStops(barFraction = 0.55f, peak = 0.94f, bandPeak = 1f)
+        assertEquals(1f, stops.first().second, 0f)
+        assertEquals(1f, stops[1].second, 0f)
+        assertEquals(0.55f, stops[1].first, 1e-6f)
+        assertEquals(0f, stops.last().second, 0f)
+    }
+}

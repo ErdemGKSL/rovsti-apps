@@ -70,3 +70,26 @@ Other facts from E1.5: `Modifier.dropShadow(Shape, Shadow(radius, color, offset=
 used for the glass shadow; AGSL has no `tanh` (written out); `Offset.isSpecified` is an extension in
 `androidx.compose.ui.geometry`. Flat and Frost draw no rim shader (glass.md 6); the Liquid rim shader paints the 0.5 px edge
 line itself, so the hairline is drawn only when no rim is.
+
+## E1.9 and R2 step 1: APIs added (all ORIGINAL, package `dev.rovsti.design`)
+
+- `glass/GlassSpec`: new field `flatAlpha: Float` (default `FLAT_ALPHA` 0.85); constants `FLAT_ALPHA_BAR` 0.96,
+  `FLAT_ALPHA_POPOVER` 0.97, `FLAT_ALPHA_SHEET` 0.98; `bar()`, `popover()`, `sheet()` set theirs, `thumb()` keeps 0.85.
+  `GlassNode` draws the Flat base at `spec.flatAlpha`.
+- `chrome/TitleCollapse.kt`: `inlineTitleAlpha(f)` = smoothstep((f - 0.65) / 0.35), `largeTitleAlpha(f)` = 1 - smoothstep(f / 0.65);
+  their product is 0 for every f. `topScrimStops(barFraction, peak, bandPeak = peak)` gained `bandPeak` (the share over the bar band).
+- `overlay/OverlayHost.kt`: `OverlayController` (`present`, `dismiss`, `dismissTop(): Boolean`, `hasEntries`, internal
+  `entries`, `removeFinished()`); `OverlayEntry(modal, title, dismissOnBack = true)` with `state: MutableTransitionState<Boolean>` and
+  `@Composable Content(host: OverlayScope)`; `OverlayScope(windowSize: Size, safe: Rect, density, controller)`;
+  `LocalOverlay`; `OverlayHost(controller, modifier, content)`. `safe` = window minus `WindowInsets.safeDrawing` (which already
+  includes the IME). The host's `BackHandler` is keyed on the entry count so it re-registers last and wins over page handlers.
+  An entry with `dismissOnBack = false` swallows Back.
+- `overlay/Scrim.kt`: `OverlayScrim(progress: () -> Float, modifier, lightAlpha = 0.20, darkAlpha = 0.40, onTap)`; alpha read in `drawBehind`,
+  eats all pointer input, a press that ends within touch slop is a tap. `ScrimAlpha` constants.
+- `overlay/Placement.kt`: `Side`, `Placement(topLeft, side, origin)`, `placePanel(anchor, panel, window, safe, gap, margin, rtl)`
+  (neither side fits: clamped below so the panel's bottom meets the margin, or its top if taller), `panelMaxHeight(safe, margin)`,
+  `AnchorHolder` (plain `rect` field), `Modifier.captureAnchor(holder)`.
+- Build: `:design` has `implementation(libs.activity.compose)` (1.13.0) for `BackHandler`.
+- Test facts: Robolectric manual clock: after `targetState` changes, advance one small step (16 to 40 ms) before a large one, or a
+  `Transition`/`Animatable` exit does not start. `clearAndSetSemantics` hides descendants from the merged tree only; use
+  `useUnmergedTree = true` to read their bounds.

@@ -232,7 +232,7 @@ private class GlassNode(
 
     private fun ContentDrawScope.drawFlat(corner: Float) {
         drawRoundRect(
-            spec.flatBase.copy(alpha = GlassSpec.FLAT_ALPHA),
+            spec.flatBase.copy(alpha = spec.flatAlpha),
             size = size,
             cornerRadius = CornerRadius(corner),
         )

@@ -241,7 +241,7 @@ internal fun Modifier.glassSurface(
             val tier = glassTier(LocalGlassConditions.current)
             Modifier.glass(source, GlassSpec.bar(tokens, colors, tier))
         } else {
-            val fill = colors.groupedSurface.copy(alpha = GlassSpec.FLAT_ALPHA)
+            val fill = colors.groupedSurface.copy(alpha = GlassSpec.FLAT_ALPHA_BAR)
             Modifier.drawBehind {
                 val radius = CornerRadius(size.height / 2f)
                 drawRoundRect(fill, cornerRadius = radius)

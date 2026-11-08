@@ -45,6 +45,14 @@ object SheetMetrics {
     val PushBackCorner = 32.dp
     const val PushBackDim = 0.22f
 
+    // A sheet presented over a sheet steps the lower one back (ORIGINAL; iOS behaviour, no source).
+    const val StackScale = 0.94f
+    val StackLift = 10.dp
+    const val StackDim = 0.12f
+
+    /** The upper sheet's top stays at least this far under the stepped-back top of the lower one. */
+    val StackMinGap = 10.dp
+
     /** How far above the top detent a drag may stretch, as a share of the window (the rubber-band scale). */
     const val RubberShare = 0.15f
 }
@@ -177,3 +185,20 @@ fun backPreviewOffset(
     val eased = 1f - (1f - p) * (1f - p)
     return start + (dismissed - start) * SheetMetrics.BackPreview * eased
 }
+
+/** Top edge in px of a sheet that has stepped back: it keeps its top centre as pivot and moves up by [stepBackPx]. */
+fun stackedTopPx(
+    lowerTopPx: Float,
+    stepBackPx: Float,
+): Float = lowerTopPx - stepBackPx
+
+/**
+ * Clamps a detent [offset] (px from the window top) of a sheet presented over another so that its top is at least
+ * [minGapPx] below the stepped-back top of the lower sheet; the lower sheet's grabber then always shows above it.
+ */
+fun upperDetentOffset(
+    offset: Float,
+    lowerTopPx: Float,
+    stepBackPx: Float,
+    minGapPx: Float,
+): Float = if (lowerTopPx.isNaN()) offset else max(offset, stackedTopPx(lowerTopPx, stepBackPx) + minGapPx)

@@ -116,4 +116,22 @@ class SheetMathTest {
         assertEquals(100f + 800f * 0.35f, backPreviewOffset(100f, 900f, 1f), 1e-3f)
         assertEquals(100f + 800f * 0.35f * 0.75f, backPreviewOffset(100f, 900f, 0.5f), 1e-3f)
     }
+
+    @Test
+    fun aSteppedBackSheetKeepsItsPivotAndMovesUp() {
+        assertEquals(190f, stackedTopPx(200f, 10f), 0.001f)
+    }
+
+    @Test
+    fun theUpperSheetStaysTenDpUnderTheSteppedBackTop() {
+        val step = 10f * density
+        val gap = 10f * density
+        val lower = 300f
+        // Already low enough: untouched.
+        assertEquals(500f, upperDetentOffset(500f, lower, step, gap), 0.001f)
+        // At the lower sheet's own top: stepped-back top + gap equals the lower top.
+        assertEquals(lower, upperDetentOffset(lower - 40f, lower, step, gap), 0.001f)
+        // No sheet below: untouched.
+        assertEquals(12f, upperDetentOffset(12f, Float.NaN, step, gap), 0.001f)
+    }
 }

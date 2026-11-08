@@ -27,6 +27,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.down
 import androidx.compose.ui.test.moveBy
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
@@ -268,6 +269,63 @@ class SheetGestureTest : ShotTest() {
         assertEquals(0, controller.pushBackCount)
         assertEquals(0f, controller.pushBackProgress(), 0.001f)
         assertFalse(controller.hasEntries)
+    }
+
+    private fun sheetWidth(index: Int) =
+        compose
+            .onAllNodesWithTag("sheet", useUnmergedTree = true)[index]
+            .fetchSemanticsNode()
+            .boundsInRoot.width
+
+    @Test
+    fun aSecondSheetStepsTheFirstBackAndClosingItRestoresScaleOne() {
+        start()
+        val pageBefore = compose.onNodeWithTag("page-button", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val first = present(Detent.Medium)
+        val page1 = compose.onNodeWithTag("page-button", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val full = sheetWidth(0)
+        val firstTop = top(first)
+        val second = present(Detent.Medium)
+        run(1500)
+        assertEquals(0.94f, sheetWidth(0) / full, 0.01f)
+        assertEquals(1f, sheetWidth(1) / full, 0.01f)
+        val page2 = compose.onNodeWithTag("page-button", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertEquals(page1.width, page2.width, 0.5f)
+        assertEquals(0.91f, page2.width / pageBefore.width, 0.01f)
+        val lowerTop =
+            compose
+                .onAllNodesWithTag("sheet", useUnmergedTree = true)[0]
+                .fetchSemanticsNode()
+                .boundsInRoot.top
+        assertEquals(firstTop - 10f * density, lowerTop, 2f)
+        compose.runOnUiThread { controller.dismiss(second) }
+        run(2000)
+        assertEquals(1f, sheetWidth(0) / full, 0.005f)
+        assertEquals(
+            firstTop,
+            compose
+                .onNodeWithTag("sheet", useUnmergedTree = true)
+                .fetchSemanticsNode()
+                .boundsInRoot.top,
+            2f,
+        )
+    }
+
+    @Test
+    fun predictiveBackOnTheTopSheetLeavesTheLowerOneAlone() {
+        start()
+        present(Detent.Medium)
+        present(Detent.Medium)
+        val lowerBefore = sheetWidth(0)
+        val dispatcher = compose.activity.onBackPressedDispatcher
+        compose.runOnUiThread { dispatcher.dispatchOnBackStarted(backEvent(0f)) }
+        advance(50)
+        compose.runOnUiThread { dispatcher.dispatchOnBackProgressed(backEvent(0.5f)) }
+        run(500)
+        assertEquals(lowerBefore, sheetWidth(0), 0.5f)
+        compose.runOnUiThread { dispatcher.dispatchOnBackCancelled() }
+        run(1500)
+        assertEquals(lowerBefore, sheetWidth(0), 0.5f)
     }
 
     @Test

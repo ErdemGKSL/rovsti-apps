@@ -37,6 +37,30 @@ import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
 import kotlinx.collections.immutable.persistentListOf
 
+private val StopNames =
+    listOf(
+        "Kadikoy Iskele",
+        "Moda Caddesi",
+        "Bahariye",
+        "Altiyol",
+        "Fenerbahce",
+        "Goztepe",
+        "Suadiye",
+        "Bostanci",
+        "Caddebostan",
+        "Acibadem",
+        "Uskudar Meydan",
+        "Besiktas Iskele",
+        "Taksim",
+        "Sisli",
+        "Levent",
+        "Maslak",
+        "Yenikapi",
+        "Sirkeci",
+        "Eminonu",
+        "Karakoy",
+    )
+
 private val Names =
     listOf(
         "Ayla Demir",
@@ -91,11 +115,13 @@ private fun SheetHeader(
 private fun ColumnScope.RecentsBody(
     title: String,
     sheet: SheetState,
+    names: List<String> = Names,
+    secondary: String = "mobile",
 ) {
     SheetHeader(title, sheet)
     LazyColumn(Modifier.fillMaxWidth().weight(1f).testTag("sheet-list")) {
-        items(Names, key = { it }) { name ->
-            ListRow(title = name, secondary = "mobile", modifier = Modifier.testTag("sheet-row-$name"))
+        items(names, key = { it }) { name ->
+            ListRow(title = name, secondary = secondary, modifier = Modifier.testTag("sheet-row-$name"))
         }
     }
 }
@@ -125,6 +151,7 @@ internal fun SheetsPage() {
             SheetEntry(
                 title = "Recents",
                 detents = persistentListOf(Detent.Medium, Detent.Large),
+                initialDetent = Detent.Large,
             ) { sheet ->
                 SheetHeader("Recents", sheet)
                 Column(
@@ -164,7 +191,7 @@ internal fun SheetsPage() {
                 detents = persistentListOf(Detent.Peek(), Detent.Medium, Detent.Large),
                 modal = false,
                 onDismissed = { striped = false },
-            ) { sheet -> RecentsBody("Nearby stops", sheet) },
+            ) { sheet -> RecentsBody("Nearby stops", sheet, StopNames, "bus stop") },
         )
     }
 

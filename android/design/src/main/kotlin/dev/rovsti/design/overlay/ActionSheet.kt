@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -30,17 +31,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -51,7 +57,9 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import dev.rovsti.design.glass.GlassShadow
 import dev.rovsti.design.glass.glass
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.motion.LocalReduceMotion
@@ -167,10 +175,32 @@ class ActionSheetEntry(
                     }
                 },
         ) {
+            // One shadow for both groups, drawn behind them as a single layer: a shadow per group let the Cancel
+            // group's shadow fall over the last action row (F3).
+            val shadow = rememberPanelGlass(ActionSheetMetrics.Radius.value, null).second.shadow
+            var cancelHeightPx by remember { mutableIntStateOf(0) }
+            val gapPx = with(LocalDensity.current) { ActionSheetMetrics.GroupGap.roundToPx() }
+            val radiusPx = with(LocalDensity.current) { ActionSheetMetrics.Radius.toPx() }
+            val groupsShape =
+                remember(cancelHeightPx, gapPx, radiusPx) {
+                    GenericShape { size, _ ->
+                        val split = (size.height - cancelHeightPx - gapPx).coerceAtLeast(0f)
+                        val r = CornerRadius(radiusPx, radiusPx)
+                        addRoundRect(RoundRect(0f, 0f, size.width, split, r))
+                        addRoundRect(RoundRect(0f, split + gapPx, size.width, size.height, r))
+                    }
+                }
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .testTag("action-sheet")
+                    .dropShadow(
+                        groupsShape,
+                        Shadow(
+                            radius = shadow.radiusDp.dp,
+                            color = shadow.color,
+                            offset = DpOffset(0.dp, shadow.yDp.dp),
+                        ),
+                    ).testTag("action-sheet")
                     .focusRequester(focus)
                     .focusable()
                     .onPreviewKeyEvent { event ->
@@ -231,7 +261,7 @@ class ActionSheetEntry(
                         }
                     }
                 }
-                SheetGroup(Modifier.testTag("action-cancel-group")) {
+                SheetGroup(Modifier.onSizeChanged { cancelHeightPx = it.height }.testTag("action-cancel-group")) {
                     SheetRow(
                         cancelLabel,
                         destructive = false,
@@ -254,7 +284,8 @@ private fun SheetGroup(
     content: @Composable () -> Unit,
 ) {
     val shape = remember { RoundedCornerShape(ActionSheetMetrics.Radius) }
-    val (source, spec) = rememberPanelGlass(ActionSheetMetrics.Radius.value, null)
+    val (source, panel) = rememberPanelGlass(ActionSheetMetrics.Radius.value, null)
+    val spec = remember(panel) { panel.copy(shadow = GlassShadow.None) }
     Box(modifier.fillMaxWidth()) {
         Box(Modifier.matchParentSize().glass(source, spec))
         Box(Modifier.clip(shape)) { content() }

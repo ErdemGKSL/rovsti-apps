@@ -1,6 +1,7 @@
 package dev.rovsti.design.overlay
 
 import androidx.activity.compose.PredictiveBackHandler
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -28,7 +29,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.layout
@@ -44,6 +48,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.haptics.LocalRovstiHaptics
+import dev.rovsti.design.motion.RovstiMotion
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import kotlinx.collections.immutable.ImmutableList
@@ -95,13 +100,25 @@ class SheetEntry(
         val focus = LocalFocusManager.current
         val density = host.density
         val height = host.windowSize.height
+        // Where the sheet below (if any) had its top when this one opened: this sheet keeps clear of it.
+        val lowerTop = remember { if (modal) host.controller.topBelow(this) else Float.NaN }
+        val stepBackPx = SheetMetrics.StackLift.value * density.density
+        val gapPx = SheetMetrics.StackMinGap.value * density.density
         val offsets =
             remember(height, host.safe.top, density.density, detents) {
                 detentOffsets(detents, height, host.safe.top, density.density)
+                    .map { upperDetentOffset(it, lowerTop, stepBackPx, gapPx) }
+                    .distinct()
+                    .toFloatArray()
             }
         val initialOffset =
             remember(height, host.safe.top, density.density, initialDetent) {
-                detentOffsets(listOf(initialDetent), height, host.safe.top, density.density)[0]
+                upperDetentOffset(
+                    detentOffsets(listOf(initialDetent), height, host.safe.top, density.density)[0],
+                    lowerTop,
+                    stepBackPx,
+                    gapPx,
+                )
             }
         val sheet =
             remember {
@@ -129,9 +146,16 @@ class SheetEntry(
         }
         if (modal) {
             DisposableEffect(sheet) {
-                host.controller.registerPushBack(this@SheetEntry, sheet::presentedFraction)
+                host.controller.registerPushBack(this@SheetEntry, sheet::presentedFraction) { sheet.offset.value }
                 onDispose { host.controller.unregisterPushBack(this@SheetEntry) }
             }
+        }
+
+        // A modal sheet over this one steps this one back (a spring, like the page); closing it brings this one forward.
+        val covered = modal && host.controller.stackDepth(this) > 0
+        val stepBack = remember { Animatable(0f) }
+        LaunchedEffect(covered) {
+            stepBack.animateTo(if (covered) 1f else 0f, RovstiMotion.pushBack(0.001f))
         }
 
         val isTop = host.controller.entries.lastOrNull { it.state.targetState } === this
@@ -157,7 +181,7 @@ class SheetEntry(
                     onTap = if (dismissible) ({ sheet.dismiss() }) else null,
                 )
             }
-            SheetSurface(sheet, host, modal) { content(sheet) }
+            SheetSurface(sheet, host, modal, stepBack::value) { content(sheet) }
         }
     }
 
@@ -166,6 +190,7 @@ class SheetEntry(
         sheet: SheetState,
         host: OverlayScope,
         elevated: Boolean,
+        stepBack: () -> Float,
         body: @Composable ColumnScope.() -> Unit,
     ) {
         val colors = RovstiTheme.colors
@@ -175,6 +200,7 @@ class SheetEntry(
         val drag = rememberDraggableState { sheet.drag(it) }
         val bottomInset = with(host.density) { (host.windowSize.height - host.safe.bottom).coerceAtLeast(0f).toDp() }
         val maxWidthPx = with(host.density) { Sizes.sheetMaxWidth.roundToPx() }
+        val liftPx = with(host.density) { SheetMetrics.StackLift.toPx() }
         Column(
             Modifier
                 .layout { measurable, constraints ->
@@ -186,10 +212,21 @@ class SheetEntry(
                             .roundToInt()
                     val placeable = measurable.measure(Constraints.fixed(w, h - top))
                     layout(constraints.maxWidth, h) { placeable.place((constraints.maxWidth - w) / 2, top) }
+                }.graphicsLayer {
+                    val p = stepBack()
+                    val s = 1f - (1f - SheetMetrics.StackScale) * p
+                    scaleX = s
+                    scaleY = s
+                    transformOrigin = TransformOrigin(0.5f, 0f)
+                    translationY = -liftPx * p
                 }.then(if (modal) Modifier else Modifier.shadow(16.dp, shape, clip = false))
                 .clip(shape)
                 .background(colors.groupedSurface)
-                .nestedScroll(connection)
+                .drawWithContent {
+                    drawContent()
+                    val p = stepBack()
+                    if (p > 0f) drawRect(Color.Black.copy(alpha = SheetMetrics.StackDim * p))
+                }.nestedScroll(connection)
                 .draggable(drag, Orientation.Vertical, onDragStopped = { sheet.release(it) })
                 .testTag("sheet"),
         ) {

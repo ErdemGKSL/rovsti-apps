@@ -1,9 +1,11 @@
 package dev.rovsti.catalog
 
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import dev.rovsti.design.haptics.HapticEvent
@@ -132,5 +134,45 @@ class ActionSheetTest : ShotTest() {
         assertEquals("8 dp between groups", 8f * density, cancel.top - group.bottom, 1f)
         val window = compose.activity.resources.displayMetrics.heightPixels
         assertTrue("above the navigation bar", cancel.bottom <= window - 24f * density - 8f * density + 1f)
+    }
+
+    @Test
+    fun noShadowHazeFallsOverTheLastActionRow() {
+        show("dialog-sheet")
+        val density = compose.activity.resources.displayMetrics.density
+        val pixels = compose.onNodeWithTag("action-sheet").captureToImage().toPixelMap()
+        val sheet = compose.onNodeWithTag("action-sheet").fetchSemanticsNode().boundsInRoot
+
+        fun patch(
+            tag: String,
+            fromBottom: Boolean,
+        ): FloatArray {
+            val b = compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+            // 4 dp square at the left of the row (clear of the label), 6 dp inside the row edge.
+            val x = (b.left - sheet.left + 24f * density).toInt()
+            val y =
+                if (fromBottom) {
+                    (b.bottom - sheet.top - 6f * density - 4f * density).toInt()
+                } else {
+                    (
+                        b.top - sheet.top +
+                            6f * density
+                    ).toInt()
+                }
+            val n = (4f * density).toInt().coerceAtLeast(1)
+            val sum = FloatArray(3)
+            for (dy in 0 until n) {
+                for (dx in 0 until n) {
+                    val c = pixels[x + dx, y + dy]
+                    sum[0] += c.red
+                    sum[1] += c.green
+                    sum[2] += c.blue
+                }
+            }
+            return FloatArray(3) { sum[it] / (n * n) }
+        }
+        val first = patch("sheet-action-0", fromBottom = false)
+        val last = patch("sheet-action-1", fromBottom = true)
+        for (c in 0..2) assertEquals("channel $c", first[c], last[c], 2f / 255f)
     }
 }

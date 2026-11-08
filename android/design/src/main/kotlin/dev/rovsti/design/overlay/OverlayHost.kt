@@ -46,7 +46,7 @@ import kotlinx.coroutines.flow.Flow
 @Stable
 class OverlayController {
     internal val entries = mutableStateListOf<OverlayEntry>()
-    private val pushBackSources = mutableStateMapOf<OverlayEntry, () -> Float>()
+    private val pushBackSources = mutableStateMapOf<OverlayEntry, StackSource>()
 
     /**
      * The floating bars of the screen on show, registered by the bar itself (see `RovstiTabBar`) so an entry that
@@ -70,15 +70,41 @@ class OverlayController {
      */
     fun pushBackProgress(): Float {
         var best = 0f
-        for (source in pushBackSources.values) best = maxOf(best, source())
+        for (source in pushBackSources.values) best = maxOf(best, source.progress())
         return best
     }
 
     internal fun registerPushBack(
         entry: OverlayEntry,
         progress: () -> Float,
+        top: () -> Float,
     ) {
-        pushBackSources[entry] = progress
+        pushBackSources[entry] = StackSource(progress, top)
+    }
+
+    /**
+     * How many modal sheets are presented (and not leaving) above [entry] (ORIGINAL). A sheet with a depth above 0
+     * steps back; read it in composition, it follows the entry list.
+     */
+    internal fun stackDepth(entry: OverlayEntry): Int {
+        val index = entries.indexOf(entry)
+        if (index < 0) return 0
+        var depth = 0
+        for (i in index + 1 until entries.size) {
+            val other = entries[i]
+            if (other.state.targetState && other in pushBackSources) depth++
+        }
+        return depth
+    }
+
+    /** Top edge in px of the nearest modal sheet below [entry] that is still open, or `NaN` when there is none. */
+    internal fun topBelow(entry: OverlayEntry): Float {
+        val index = entries.indexOf(entry)
+        for (i in index - 1 downTo 0) {
+            val other = entries[i]
+            if (other.state.targetState) pushBackSources[other]?.let { return it.top() }
+        }
+        return Float.NaN
     }
 
     internal fun unregisterPushBack(entry: OverlayEntry) {
@@ -127,6 +153,12 @@ class OverlayController {
         entries.removeAll { it.isRemovable }
     }
 }
+
+/** What a modal sheet tells the controller: how far it is presented (0..1) and where its top edge is (px). */
+internal class StackSource(
+    val progress: () -> Float,
+    val top: () -> Float,
+)
 
 /**
  * One overlay. [modal] entries take the page out of the accessibility tree; [title] becomes the entry's pane title

@@ -40,7 +40,7 @@ Branch: `ui-overhaul` (never push to `main`).
 
 ---
 
-## E1. Design system, motion, overlays, text field (`:design`, `:catalog`)
+## E1. Design system, motion, overlays, text field (`:design`, `:catalog`) - DONE (R5)
 
 Goal: every component the apps need exists, is demonstrated in the catalog app, and is proven by screenshots,
 before any app screen is written. Spec: SKILL `references/*` (all), ARCH 4, 9.
@@ -67,6 +67,9 @@ R4 implemented in `8bd4989`..`86c994f`, verified in code by the round-5 planner:
 (no `docs/kotlin-ui/screenshots/design.png`, no `e1.22-*` goldens, no checklist record), so E1 is not closed yet.
 **R5** -> `_bmad-output/kotlin-ui/plans/round-05.md` (planned 2026-11-08 at base `86c994f`): fix F9 (inline title off
 centre: asymmetric title reserve in `FrostedTopBar.kt`, Convx pads 96 dp both sides), finish E1.22, close E1.
+**E1 done (R5)**, implemented in `29c7154`..`7851cf2` plus the close commit. **Next planner: start E2 R1 (Rust bridge,
+`crates/rovsti_app_core`, `crates/rovsti_ffi`, `:core-bridge`) and E3 R1 (`:platform`, `:wa`, `:shell`; they need
+E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned in parallel.**
 
 | Story | Title | Round | Status |
 |---|---|---|---|
@@ -98,7 +101,7 @@ centre: asymmetric title reserve in `FrostedTopBar.kt`, Convx pads 96 dp both si
 | E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | done (R4-5; evidence below) |
 | E1.20 | Image loading and the photo viewer | R4 | done (R4 step 6: Coil 3.6.3 loader, slot-sized images, PhotoViewer; ZoomMathTest, PhotoViewerTest, ImageSlotTest, e1.20-* screenshots) |
 | E1.21 | Performance harness and convention tests | R4 | done (R4-7; evidence below) |
-| E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4/R5 | in-progress (R4: states page, nav test, design-system.md, notices, APK; R5: contact sheet, states goldens, checklist record, F9) |
+| E1.22 | Catalog complete, E1 contact sheet, checklist pass | R4/R5 | done (R5; evidence below) |
 
 ### E1.1 Modules, convention plugins, screenshot harness, catalog shell
 - AC1 `android/build-logic` with convention plugins (`rovsti.android.library`, `rovsti.android.app`, `rovsti.compose`,
@@ -223,6 +226,7 @@ centre: asymmetric title reserve in `FrostedTopBar.kt`, Convx pads 96 dp both si
   only the top sheet, the lower one fully hidden at the same detent (F4). Fixed in R3 step 1; E1.13/E1.14 stay `done`.
 
 - Evidence (E1.8, commit 7959075, review fixes c46d5dc): `android/design/.../chrome/` (`TitleCollapse.kt`, `LargeTitleScaffold.kt`, `Toolbar.kt`, `BackButton.kt`; `controls/Buttons.kt` `glassSurface` made internal). Tests: JVM `TitleCollapseTest` (fraction, clamps, NaN/zero height, top scrim stops); Robolectric `ScaffoldTest` (collapse fraction read through `onCollapseChanged`, which is the inline alpha by construction: strictly between 0 and 1 at half scroll, 1 when collapsed; third action goes to the overflow with its anchor rect; capsule height 44 dp and centre within 4 dp of the title's first line via `TextLayoutResult`; `topBarPx` = 80 dp; title is item 0 key "title"; back button pops the sub-page), `ScaffoldWideTest` (list and bar <= 640 dp and centred at w840). Catalog page Large title (40 rows, 2 actions + overflow, pushed sub-page; `TODO(E1.10)` for the menu). Opened `e1.8-title-expanded/collapsed/mid-scroll/fs2/landscape/w840/pushed(-rtl)/reduce-transparency` light/dark: capsules level with the title line and 44 dp; collapsed inline title centred with rows fading under a firm scrim (first pass at 0.42 left row text legible beside the title, so the scrim over the bar firms up to 0.94 as the title collapses); mid-scroll shows both titles partly; fs2 title clear of capsules (capsules stay in the 52 dp band, so at fs2 they sit above the first line centre); w840 centred 640 dp column (root now paints the page colour full width, the first landscape shot showed the sides unpainted); RTL pushed page has the mirrored chevron on the leading (right) edge; reduce transparency shows a solid bar with a 0.5 dp divider. Known: Flat glass in screenshots; no simulated display cutout in the harness (cutout handled by `safeDrawing` insets, not visually verified); inline title is hidden from accessibility (the large title carries the heading) so it is unannounced once item 0 is scrolled off; the pushed page's title sits below the button row (iOS style), so capsules only align with the title line on root pages.
+- F9 (R5, `29c7154`): the collapsed inline title was off centre because the title reserve was asymmetric; `chrome/FrostedTopBar.kt` now reserves the same width on both sides (Convx pads 96 dp both sides), so the title is centred in the bar.
 
 ### E1.9 Overlay host and placement
 - AC1 `OverlayHost`, `OverlayController`, `OverlayEntry` as SKILL overlays 1; back closes only the top entry; exit
@@ -408,6 +412,7 @@ centre: asymmetric title reserve in `FrostedTopBar.kt`, Convx pads 96 dp both si
   Opened: e1.8-title-expanded-light (crisp large title, toolbar capsules), e1.8-title-collapsed-light (rows under the bar blurred
   and faded, inline title centred and legible), e1.8-title-mid-scroll-dark, e1.28-page-sheet-light (row in a card at the paragraph's
   inset), e1.29-overscroll-top-light (see the check list below).
+- F9 (R5, `29c7154`): collapsed inline title centred (symmetric reserve in `chrome/FrostedTopBar.kt`, as Convx); see E1.8.
 
 ### E1.18 Navigation scaffold
 - AC1 Navigation 3 checked at the pinned version (or the documented fallback, ARCH 5.1); `TabNavigator` with one stack
@@ -486,6 +491,17 @@ centre: asymmetric title reserve in `FrostedTopBar.kt`, Convx pads 96 dp both si
   `CatalogNavigationTest` (every page), `build-logic/.../ContactSheetTask.kt` (`:catalog:contactSheet`, never run: the PNG
   is missing), `docs/kotlin-ui/design-system.md`, notices for Coil and Navigation 3, catalog APK (37.5 MB). R5 finishes
   AC1 goldens, AC2 sheet, AC3 checklist record (`round-05.md` Steps 2-5).
+- Evidence (R5, done): commits `29c7154` (F9), `600e781` (AC1 overlay-state goldens), `d61a709` (AC2 contact sheet),
+  `7851cf2` (AC3 checklist pass). 24 `android/catalog/screenshots/e1.22-states-*.png` goldens (12 states, light and dark).
+  Opened `e1.22-states-menu-below-light.png`: the glass menu (Select with check, Sort by, divider, red Delete all) grows
+  under the "..." button over a dimmed page; panel is near-opaque white with faint blurred page text behind it, nothing
+  clipped. Opened `e1.22-states-sheet-medium-dark.png`: medium sheet with grabber, title and body, 28 dp-class top
+  corners, page dimmed and blurred behind, no content under the sheet edge. Opened `docs/kotlin-ui/screenshots/design.png`
+  (1956x3243 contact sheet of all goldens in 8 columns, labelled by golden name, runs from catalog home to
+  `e1.29-tabbar-accessory`): every row aligned, no blank or broken tile, light and dark states visible.
+  `docs/kotlin-ui/checklist-e1.md` records sections A-H (3 defects found at font scale 2.0 and fixed). Checks:
+  `bash scripts/kotlin-ui-check.sh` = ALL GREEN (R5-5 run). Catalog APK rebuilt with `./gradlew :catalog:assembleDebug`:
+  `android/catalog/build/outputs/apk/debug/catalog-debug.apk`, 37483881 bytes (35.7 MiB).
 
 ---
 

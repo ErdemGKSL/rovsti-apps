@@ -19,6 +19,20 @@ object sends the handle back, and `RustNative.release` frees it (a released or f
 contact index owns its `T9Scratch`, so `t9.query` narrows the previous digits' candidates. Every other op is stateless: the
 request carries the data (call-log entries, notes, speed-dial map) and the answer the new data.
 
+Contacts (E2.10): `contacts.deep_index_new` answers `{"handle", "count"}`, the handle of the detail-search index (`contacts.deep_find`
+takes it back; a released or foreign handle answers `not_found`). Every other `contacts.*` op is stateless: the request carries the
+drafts, contacts or marks and the answer the new data. The trash (`contacts-trash.json`) and the preferences (`contacts-prefs.json`)
+are files in the data directory: a request may name `dir`, else `core.init`'s data dir is used. Drafts travel as
+`rovsti_core::contact_edit::ContactDraft` (empty optional lists left out). The editor's per-keystroke state, the select-mode set and
+the sheet state of the screens are Kotlin (E4); the ops here run per event.
+
+QR (E2.10, AC0): `qr.encode {text, ecc: "l"|"m"|"q"|"h" (default m)}` answers `{side, modules}`: `modules` is the standard base64
+(padded) of a bitset of `side * side` bits, row-major, the first module of the first row in the most significant bit of the first
+byte, a set bit a dark module, unused trailing bits zero; the quiet zone (4 modules) is not part of the matrix. `qr.decode {w, h, luma}`
+takes `w * h` 8-bit luma bytes (row-major, base64, at most 1600 x 1600) and answers `{texts}`, every code it reads without repeats; a
+size mismatch is `invalid`, bad base64 `parse`. The decoder is `rqrr` (through `contact_scan::decode_luma`); there is no ZXing or ML Kit.
+Kotlin: `QrMatrix` in `:core-bridge` reads the bitset (`QrMatrix.get(x, y)`).
+
 | Item | Used by | Domain | Class | Target |
 |---|---|---|---|---|
 | `(bridge) core.version` | - | bridge | op | core.version |
@@ -27,9 +41,11 @@ request carries the data (call-log entries, notes, speed-dial map) and the answe
 | `(bridge) core.fail` | - | bridge | op | core.fail |
 | `(bridge) core.panic` | - | bridge | op | core.panic |
 | `(bridge) core.emit_test` | - | bridge | op | core.emit_test |
-| `rovsti_app_core::contacts::prefs` | contacts | contacts | todo | - |
-| `rovsti_app_core::contacts::trash_store` | contacts | contacts | todo | - |
-| `rovsti_app_core::contacts::whatsapp` | contacts | contacts | todo | - |
+| `(qr) qr.encode` | contacts | qr | op | qr.encode |
+| `(qr) qr.decode` | contacts | qr | op | qr.decode |
+| `rovsti_app_core::contacts::prefs` | contacts | contacts | op | contacts.prefs_load, contacts.prefs_save |
+| `rovsti_app_core::contacts::trash_store` | contacts | contacts | op | contacts.trash_list, contacts.trash_push, contacts.trash_restore, contacts.trash_delete |
+| `rovsti_app_core::contacts::whatsapp` | contacts | wa | todo | - |
 | `rovsti_app_core::messages::access` | messages | messages | todo | - |
 | `rovsti_app_core::messages::drafts` | messages | messages | todo | - |
 | `rovsti_app_core::messages::headless` | messages | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |
@@ -70,15 +86,15 @@ request carries the data (call-log entries, notes, speed-dial map) and the answe
 | `rovsti_core::audio::MAX_ROWS` | phone | phone | op | audio.rows, audio.diff |
 | `rovsti_core::audio::Row` | phone | phone | op | audio.rows, audio.diff |
 | `rovsti_core::audio::RowKind` | phone | phone | op | audio.rows, audio.diff |
-| `rovsti_core::avatar::AvatarKey` | phone | contacts | todo | - |
-| `rovsti_core::avatar::avatar_hue` | phone | contacts | todo | - |
-| `rovsti_core::avatar::hue_index` | phone | contacts | todo | - |
-| `rovsti_core::avatar::initials` | messages | contacts | todo | - |
-| `rovsti_core::avatar::monogram` | phone | contacts | todo | - |
-| `rovsti_core::birthday_reminder::BirthdayAlarm` | contacts | contacts | todo | - |
-| `rovsti_core::birthday_reminder::DEFAULT_HOUR` | contacts | contacts | todo | - |
-| `rovsti_core::birthday_reminder::HOUR_CHOICES` | contacts | contacts | todo | - |
-| `rovsti_core::birthday_reminder::hour_label` | contacts | contacts | todo | - |
+| `rovsti_core::avatar::AvatarKey` | phone | contacts | op | contacts.avatar |
+| `rovsti_core::avatar::avatar_hue` | phone | contacts | op | contacts.avatar |
+| `rovsti_core::avatar::hue_index` | phone | contacts | op | contacts.avatar |
+| `rovsti_core::avatar::initials` | messages | contacts | op | contacts.avatar |
+| `rovsti_core::avatar::monogram` | phone | contacts | op | contacts.avatar |
+| `rovsti_core::birthday_reminder::BirthdayAlarm` | contacts | contacts | op | contacts.birthday_reminders |
+| `rovsti_core::birthday_reminder::DEFAULT_HOUR` | contacts | contacts | op | contacts.birthday_reminders |
+| `rovsti_core::birthday_reminder::HOUR_CHOICES` | contacts | contacts | op | contacts.birthday_reminders |
+| `rovsti_core::birthday_reminder::hour_label` | contacts | contacts | op | contacts.birthday_reminders |
 | `rovsti_core::blocklist::BlockInputError` | phone | phone | op | blocklist.parse_input |
 | `rovsti_core::blocklist::BlockRefusal` | messages,phone | phone | op | blocklist.check |
 | `rovsti_core::blocklist::BlockSet` | messages,phone | phone | op | blocklist.check |
@@ -141,89 +157,89 @@ request carries the data (call-log entries, notes, speed-dial map) and the answe
 | `rovsti_core::chat_gallery::LinkEntry` | messages | messages | todo | - |
 | `rovsti_core::clock::now_ms` | contacts,messages,phone,rovsti_wa_ui | platform | none | ops take now_ms; Kotlin owns the clock |
 | `rovsti_core::clock::set_fixed_now_ms` | contacts,messages,phone,stops | platform | none | ops take now_ms; Kotlin owns the clock |
-| `rovsti_core::contact_card::ContactCard` | contacts | contacts | todo | - |
-| `rovsti_core::contact_cleanup::Cleanup` | contacts | contacts | todo | - |
-| `rovsti_core::contact_csv` | contacts | contacts | todo | - |
-| `rovsti_core::contact_dates::Upcoming` | contacts | contacts | todo | - |
-| `rovsti_core::contact_dates::local_ymd` | contacts,stops | contacts | todo | - |
-| `rovsti_core::contact_dates::parse` | contacts | contacts | todo | - |
-| `rovsti_core::contact_dupes::DupGroup` | contacts | contacts | todo | - |
-| `rovsti_core::contact_dupes::find` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::Account` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::AccountsPayload` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::Addition` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::ContactDraft` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::DetailPayload` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::DraftEvent` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::DraftField` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::DraftRelation` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::EventKind` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::FieldKind` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::FullPayload` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::Group` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::GroupsPayload` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::ImportPayload` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::MAX_FIELDS` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::MembersPayload` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::RelationKind` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::RelationTap` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::SavedPayload` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::SelectionChange` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::account_label` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::default_action` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::draft_from_query` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::group_join_hint` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::group_subtitle` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::group_title` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::primary_of` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::relation_tap` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::retain_account_groups` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::set_primary` | contacts | contacts | todo | - |
-| `rovsti_core::contact_edit::web_url` | contacts | contacts | todo | - |
-| `rovsti_core::contact_find::DeepField` | contacts | contacts | todo | - |
-| `rovsti_core::contact_find::DeepHit` | contacts | contacts | todo | - |
-| `rovsti_core::contact_find::DeepIndex` | contacts | contacts | todo | - |
-| `rovsti_core::contact_frequent::Frequent` | contacts | contacts | todo | - |
-| `rovsti_core::contact_history::CARD_LIMIT` | contacts | contacts | todo | - |
-| `rovsti_core::contact_history::PULL_LIMIT` | contacts | contacts | todo | - |
-| `rovsti_core::contact_ics` | contacts | contacts | todo | - |
-| `rovsti_core::contact_intake::Intake` | contacts | contacts | todo | - |
-| `rovsti_core::contact_me` | contacts | contacts | todo | - |
-| `rovsti_core::contact_options::ContactOptions` | contacts | messages | todo | - |
-| `rovsti_core::contact_options::PinShortcut` | contacts | messages | todo | - |
-| `rovsti_core::contact_photo::CropView` | contacts | contacts | todo | - |
-| `rovsti_core::contact_photo::PhotoError` | contacts,phone | contacts | todo | - |
-| `rovsti_core::contact_photo::accepts` | phone | contacts | todo | - |
-| `rovsti_core::contact_photo::plan_for` | contacts | contacts | todo | - |
-| `rovsti_core::contact_photo::rotated_size` | contacts | contacts | todo | - |
-| `rovsti_core::contact_quick::QuickAction` | contacts | contacts | todo | - |
-| `rovsti_core::contact_recent::AddedMark` | contacts | contacts | todo | - |
-| `rovsti_core::contact_recent::CLEAR_VIEWED` | contacts | contacts | todo | - |
-| `rovsti_core::contact_recent::RecentTab` | contacts | contacts | todo | - |
-| `rovsti_core::contact_recent::VIEWED_KEEP` | contacts | contacts | todo | - |
-| `rovsti_core::contact_recent::note_created` | contacts | contacts | todo | - |
-| `rovsti_core::contact_recent::note_pull` | contacts | contacts | todo | - |
-| `rovsti_core::contact_recent::show_entry` | contacts | contacts | todo | - |
-| `rovsti_core::contact_scan::Scanned` | contacts | contacts | todo | - |
-| `rovsti_core::contact_select::GroupTarget` | contacts | contacts | todo | - |
-| `rovsti_core::contact_select::SHARE_FORMATS` | contacts | contacts | todo | - |
-| `rovsti_core::contact_select::SelectAction` | contacts | contacts | todo | - |
-| `rovsti_core::contact_select::ShareFormat` | contacts | contacts | todo | - |
-| `rovsti_core::contact_select::cap_notice` | contacts | contacts | todo | - |
-| `rovsti_core::contact_select::delete_confirm` | contacts | contacts | todo | - |
-| `rovsti_core::contact_select::export_ids` | contacts | contacts | todo | - |
-| `rovsti_core::contact_stats::Summary` | contacts | contacts | todo | - |
-| `rovsti_core::contact_trash::Trash` | contacts | contacts | todo | - |
-| `rovsti_core::contact_trash::moved_notice` | contacts | contacts | todo | - |
-| `rovsti_core::contacts_prefs::ContactsPrefs` | contacts | platform | todo | - |
-| `rovsti_core::contacts_prefs::MAX_EMERGENCY` | contacts | platform | todo | - |
-| `rovsti_core::contacts_view::CallTarget` | contacts,phone | contacts | todo | - |
-| `rovsti_core::contacts_view::ContactVm` | contacts,phone | contacts | todo | - |
-| `rovsti_core::contacts_view::NameStyle` | contacts,phone | contacts | todo | - |
-| `rovsti_core::contacts_view::NumberVm` | contacts,phone | contacts | todo | - |
-| `rovsti_core::contacts_view::build_rows_styled` | contacts | contacts | todo | - |
-| `rovsti_core::contacts_view::call_target` | phone | contacts | todo | - |
-| `rovsti_core::contacts_view::without` | contacts | contacts | todo | - |
+| `rovsti_core::contact_card::ContactCard` | contacts | contacts | op | contacts.card |
+| `rovsti_core::contact_cleanup::Cleanup` | contacts | contacts | op | contacts.cleanup |
+| `rovsti_core::contact_csv` | contacts | contacts | op | contacts.csv_export, contacts.csv_import |
+| `rovsti_core::contact_dates::Upcoming` | contacts | contacts | op | contacts.dates, contacts.event_line, contacts.maps_url |
+| `rovsti_core::contact_dates::local_ymd` | contacts,stops | contacts | op | contacts.local_ymd |
+| `rovsti_core::contact_dates::parse` | contacts | contacts | op | contacts.date_parse, contacts.age |
+| `rovsti_core::contact_dupes::DupGroup` | contacts | contacts | op | contacts.dupes, contacts.merge_plan |
+| `rovsti_core::contact_dupes::find` | contacts | contacts | op | contacts.dupes |
+| `rovsti_core::contact_edit::Account` | contacts | contacts | op | contacts.trash_restore, contacts.account_label |
+| `rovsti_core::contact_edit::AccountsPayload` | contacts | contacts | none | payload of the GPUI provider bridge; Kotlin reads ContactsContract into model.contacts.ContactDraft directly |
+| `rovsti_core::contact_edit::Addition` | contacts | contacts | op | contacts.draft_from_query, contacts.draft_add |
+| `rovsti_core::contact_edit::ContactDraft` | contacts | contacts | op | contacts.draft_validate, contacts.draft_diff, contacts.draft_edit |
+| `rovsti_core::contact_edit::DetailPayload` | contacts | contacts | none | payload of the GPUI provider bridge; Kotlin reads ContactsContract into model.contacts.ContactDraft directly |
+| `rovsti_core::contact_edit::DraftEvent` | contacts | contacts | op | contacts.draft_validate |
+| `rovsti_core::contact_edit::DraftField` | contacts | contacts | op | contacts.draft_validate |
+| `rovsti_core::contact_edit::DraftRelation` | contacts | contacts | op | contacts.draft_validate |
+| `rovsti_core::contact_edit::EventKind` | contacts | contacts | op | contacts.draft_validate |
+| `rovsti_core::contact_edit::FieldKind` | contacts | contacts | op | contacts.draft_validate |
+| `rovsti_core::contact_edit::FullPayload` | contacts | contacts | none | payload of the GPUI provider bridge; Kotlin reads ContactsContract into model.contacts.ContactDraft directly |
+| `rovsti_core::contact_edit::Group` | contacts | contacts | op | contacts.groups_title, contacts.groups_targets |
+| `rovsti_core::contact_edit::GroupsPayload` | contacts | contacts | none | payload of the GPUI provider bridge; Kotlin reads groups into model.contacts.Group directly |
+| `rovsti_core::contact_edit::ImportPayload` | contacts | contacts | none | payload of the GPUI provider bridge; Kotlin reads ContactsContract into model.contacts.ContactDraft directly |
+| `rovsti_core::contact_edit::MAX_FIELDS` | contacts | contacts | op | contacts.draft_edit |
+| `rovsti_core::contact_edit::MembersPayload` | contacts | contacts | op | contacts.groups_summary |
+| `rovsti_core::contact_edit::RelationKind` | contacts | contacts | op | contacts.draft_validate |
+| `rovsti_core::contact_edit::RelationTap` | contacts | contacts | op | contacts.relation_tap |
+| `rovsti_core::contact_edit::SavedPayload` | contacts | contacts | none | payload of the GPUI provider bridge; Kotlin reads ContactsContract into model.contacts.ContactDraft directly |
+| `rovsti_core::contact_edit::SelectionChange` | contacts | contacts | op | contacts.groups_change |
+| `rovsti_core::contact_edit::account_label` | contacts | contacts | op | contacts.account_label |
+| `rovsti_core::contact_edit::default_action` | contacts | contacts | op | contacts.field_menu |
+| `rovsti_core::contact_edit::draft_from_query` | contacts | contacts | op | contacts.draft_from_query |
+| `rovsti_core::contact_edit::group_join_hint` | contacts | contacts | op | contacts.groups_labels |
+| `rovsti_core::contact_edit::group_subtitle` | contacts | contacts | op | contacts.groups_labels |
+| `rovsti_core::contact_edit::group_title` | contacts | contacts | op | contacts.groups_title |
+| `rovsti_core::contact_edit::primary_of` | contacts | contacts | op | contacts.draft_edit |
+| `rovsti_core::contact_edit::relation_tap` | contacts | contacts | op | contacts.relation_tap |
+| `rovsti_core::contact_edit::retain_account_groups` | contacts | contacts | op | contacts.draft_edit |
+| `rovsti_core::contact_edit::set_primary` | contacts | contacts | op | contacts.draft_edit |
+| `rovsti_core::contact_edit::web_url` | contacts | contacts | op | contacts.web_url |
+| `rovsti_core::contact_find::DeepField` | contacts | contacts | op | contacts.deep_find |
+| `rovsti_core::contact_find::DeepHit` | contacts | contacts | op | contacts.deep_find |
+| `rovsti_core::contact_find::DeepIndex` | contacts | contacts | op | contacts.deep_index_new, contacts.deep_find |
+| `rovsti_core::contact_frequent::Frequent` | contacts | contacts | op | contacts.frequent |
+| `rovsti_core::contact_history::CARD_LIMIT` | contacts | contacts | op | contacts.history |
+| `rovsti_core::contact_history::PULL_LIMIT` | contacts | contacts | op | contacts.history |
+| `rovsti_core::contact_ics` | contacts | contacts | op | contacts.ics |
+| `rovsti_core::contact_intake::Intake` | contacts | contacts | op | contacts.intake |
+| `rovsti_core::contact_me` | contacts | contacts | op | contacts.me_state, contacts.me_toggle |
+| `rovsti_core::contact_options::ContactOptions` | contacts | contacts | op | contacts.options |
+| `rovsti_core::contact_options::PinShortcut` | contacts | contacts | op | contacts.pin_shortcut |
+| `rovsti_core::contact_photo::CropView` | contacts | contacts | op | contacts.photo_crop |
+| `rovsti_core::contact_photo::PhotoError` | contacts,phone | contacts | op | contacts.photo_plan |
+| `rovsti_core::contact_photo::accepts` | phone | contacts | op | contacts.photo_accepts |
+| `rovsti_core::contact_photo::plan_for` | contacts | contacts | op | contacts.photo_plan |
+| `rovsti_core::contact_photo::rotated_size` | contacts | contacts | op | contacts.photo_plan |
+| `rovsti_core::contact_quick::QuickAction` | contacts | contacts | op | contacts.quick |
+| `rovsti_core::contact_recent::AddedMark` | contacts | contacts | op | contacts.recent_note_pull, contacts.recent_note_created |
+| `rovsti_core::contact_recent::CLEAR_VIEWED` | contacts | contacts | op | contacts.recent_lists |
+| `rovsti_core::contact_recent::RecentTab` | contacts | contacts | op | contacts.recent_lists |
+| `rovsti_core::contact_recent::VIEWED_KEEP` | contacts | contacts | op | contacts.recent_viewed |
+| `rovsti_core::contact_recent::note_created` | contacts | contacts | op | contacts.recent_note_created |
+| `rovsti_core::contact_recent::note_pull` | contacts | contacts | op | contacts.recent_note_pull |
+| `rovsti_core::contact_recent::show_entry` | contacts | contacts | op | contacts.recent_lists |
+| `rovsti_core::contact_scan::Scanned` | contacts | contacts | op | contacts.scan |
+| `rovsti_core::contact_select::GroupTarget` | contacts | contacts | op | contacts.groups_targets |
+| `rovsti_core::contact_select::SHARE_FORMATS` | contacts | contacts | op | contacts.select_bar |
+| `rovsti_core::contact_select::SelectAction` | contacts | contacts | op | contacts.select_bar |
+| `rovsti_core::contact_select::ShareFormat` | contacts | contacts | op | contacts.select_export |
+| `rovsti_core::contact_select::cap_notice` | contacts | contacts | op | contacts.select_bar |
+| `rovsti_core::contact_select::delete_confirm` | contacts | contacts | op | contacts.select_bar |
+| `rovsti_core::contact_select::export_ids` | contacts | contacts | op | contacts.select_export |
+| `rovsti_core::contact_stats::Summary` | contacts | contacts | op | contacts.stats |
+| `rovsti_core::contact_trash::Trash` | contacts | contacts | op | contacts.trash_list, contacts.trash_push, contacts.trash_restore, contacts.trash_delete, contacts.trash_confirm |
+| `rovsti_core::contact_trash::moved_notice` | contacts | contacts | op | contacts.trash_push |
+| `rovsti_core::contacts_prefs::ContactsPrefs` | contacts | contacts | op | contacts.prefs_load, contacts.prefs_save |
+| `rovsti_core::contacts_prefs::MAX_EMERGENCY` | contacts | contacts | op | contacts.me_state |
+| `rovsti_core::contacts_view::CallTarget` | contacts,phone | contacts | op | contacts.card |
+| `rovsti_core::contacts_view::ContactVm` | contacts,phone | contacts | op | contacts.view |
+| `rovsti_core::contacts_view::NameStyle` | contacts,phone | contacts | op | contacts.view |
+| `rovsti_core::contacts_view::NumberVm` | contacts,phone | contacts | op | contacts.view, contacts.card |
+| `rovsti_core::contacts_view::build_rows_styled` | contacts | contacts | op | contacts.view |
+| `rovsti_core::contacts_view::call_target` | phone | contacts | op | contacts.card |
+| `rovsti_core::contacts_view::without` | contacts | contacts | op | contacts.view, contacts.favorites_move, contacts.scrubber |
 | `rovsti_core::copy_choices::CopyChoice` | messages | shared | op | copy.header_choices |
 | `rovsti_core::copy_choices::header_choices` | messages | shared | op | copy.header_choices |
 | `rovsti_core::date_detect::calendar_end_ms` | messages | messages | todo | - |
@@ -260,9 +276,9 @@ request carries the data (call-log entries, notes, speed-dial map) and the answe
 | `rovsti_core::global_search::WA_CHATS` | messages | messages | todo | - |
 | `rovsti_core::global_search::jump_notice` | messages | messages | todo | - |
 | `rovsti_core::global_search::jump_step` | messages | messages | todo | - |
-| `rovsti_core::group_tools::Kind` | contacts | contacts | todo | - |
-| `rovsti_core::import_plan::number_key` | contacts | contacts | todo | - |
-| `rovsti_core::import_plan::photo_targets` | contacts | contacts | todo | - |
+| `rovsti_core::group_tools::Kind` | contacts | contacts | op | contacts.groups_recipients |
+| `rovsti_core::import_plan::number_key` | contacts | contacts | op | contacts.number_key |
+| `rovsti_core::import_plan::photo_targets` | contacts | contacts | op | contacts.import_photos |
 | `rovsti_core::inbox::InboxRow` | messages | messages | todo | - |
 | `rovsti_core::inbox::InboxThread` | messages | messages | todo | - |
 | `rovsti_core::inbox::PersonKey` | messages | messages | todo | - |
@@ -374,10 +390,10 @@ request carries the data (call-log entries, notes, speed-dial map) and the answe
 | `rovsti_core::setup::can_confirm` | phone | phone | op | setup.xiaomi |
 | `rovsti_core::setup::changed_title` | phone | phone | op | setup.reopened |
 | `rovsti_core::setup::still_reopened` | phone | phone | op | setup.reopened |
-| `rovsti_core::shared_card::CardField` | messages | contacts | todo | - |
-| `rovsti_core::shared_card::CardView` | messages | contacts | todo | - |
-| `rovsti_core::shared_card::insert_json` | messages | contacts | todo | - |
-| `rovsti_core::shared_card::primary_number` | messages | contacts | todo | - |
+| `rovsti_core::shared_card::CardField` | messages | messages | todo | - |
+| `rovsti_core::shared_card::CardView` | messages | messages | todo | - |
+| `rovsti_core::shared_card::insert_json` | messages | messages | todo | - |
+| `rovsti_core::shared_card::primary_number` | messages | messages | todo | - |
 | `rovsti_core::sim::DOT_MIN_CONTRAST` | phone | phone | op | sim.dot |
 | `rovsti_core::sim::SimAccount` | phone | phone | op | sim.build |
 | `rovsti_core::sim::SimInfo` | phone | phone | op | sim.build |
@@ -466,8 +482,8 @@ request carries the data (call-log entries, notes, speed-dial map) and the answe
 | `rovsti_core::thread_marks::unread_notice` | messages | messages | todo | - |
 | `rovsti_core::unread_jump::JumpState` | messages | messages | todo | - |
 | `rovsti_core::unread_jump::next_unread_label` | messages | messages | todo | - |
-| `rovsti_core::vcard::CardPhoto` | contacts | contacts | todo | - |
-| `rovsti_core::vcard::PhotoFormat` | contacts | contacts | todo | - |
+| `rovsti_core::vcard::CardPhoto` | contacts | contacts | op | contacts.vcard_parse, contacts.vcard_write, contacts.import_plan |
+| `rovsti_core::vcard::PhotoFormat` | contacts | contacts | op | contacts.vcard_parse, contacts.vcard_write |
 | `rovsti_core::voice_player::PlayerState` | messages | messages | todo | - |
 | `rovsti_core::voice_player::Speed` | messages | messages | todo | - |
 | `rovsti_core::voice_player::TogglePlan` | messages | messages | todo | - |

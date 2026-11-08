@@ -109,6 +109,12 @@ pub fn all() -> impl Iterator<Item = &'static OpSpec> {
         .chain(super::shared::OPS.iter())
         .chain(super::search::OPS.iter())
         .chain(super::phone::TABLES.iter().flat_map(|table| table.iter()))
+        .chain(
+            super::contacts::TABLES
+                .iter()
+                .flat_map(|table| table.iter()),
+        )
+        .chain(super::qr::OPS.iter())
 }
 
 /// The op with this wire name.

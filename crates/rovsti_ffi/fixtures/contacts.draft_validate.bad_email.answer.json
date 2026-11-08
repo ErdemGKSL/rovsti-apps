@@ -1,0 +1,1 @@
+{"ok":{"draft":{"given":"Ada","family":"","org":"","note":"","numbers":[],"emails":[{"value":"ada-at-example","kind":"other"}],"groups":[],"starred":false},"error":{"kind":"bad_email","index":0,"message":"Email 1 needs an @ and a domain."}}}

@@ -6167,8 +6167,10 @@ dependencies = [
 name = "rovsti_ffi"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "jni",
  "log",
+ "qrcode",
  "rovsti_app_core",
  "rovsti_core",
  "rovsti_wa_proto",

@@ -1,7 +1,9 @@
 //! `call(op, request)`: `"<domain>.<verb>"` dispatch. One module per domain.
 
+mod contacts;
 mod core;
 mod phone;
+mod qr;
 pub mod registry;
 mod search;
 mod shared;

@@ -532,12 +532,24 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 | E2.7 | Contract fixtures and Kotlin models | R1 | done (round-06 step 8) |
 | E2.8 | `headless` entry compatible with today's receivers | R1 | done (round-06 steps 5 and 8) |
 | E2.9 | Phone domain ops | R2 | done (round-07 step 2; evidence below) |
-| E2.10 | Contacts domain ops | R2 | in-progress (round-07 step 3) |
+| E2.10 | Contacts domain ops, `qr.encode` / `qr.decode` | R2 | done (round-07 step 3; evidence below) |
 | E2.11a | Messages domain ops: inbox, sms, mms, notify, schedule, spam, backup | R2 | in-progress (round-07 step 4) |
 | E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | in-progress (round-07 step 5) |
 | E2.12 | Stops domain ops | R2 | in-progress (round-07 step 6) |
 | E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | in-progress (round-07 step 7) |
 | E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | in-progress (round-07 step 8) |
+
+#### Evidence, E2.10 (round-07 step 3)
+- Rust: `rovsti_ffi/src/ops/contacts/{draft,files,lists,store}.rs` (66 ops: `contacts.draft_*`, dates/age/event line, `card`, `dupes`,
+  `merge_plan`, `cleanup`, `avatar`, `stats`, `quick`, csv/ics/vcard/`import_plan`/`intake`/`scan`/`photo_*`, `view`, `select_*`,
+  `groups_*`, `recent_*`, `history`, `frequent`, `me_*`, `birthday_reminders`, `options`, `pin_shortcut`, `deep_index_new` +
+  `deep_find` (handle over `DeepIndex`), `trash_*` and `prefs_*` over `rovsti_app_core::contacts` with a `dir` or the init data dir;
+  fixture cases use the `contacts` seed dir) and `ops/qr.rs` (`qr.encode`, `qr.decode` over `qrcode` / `rqrr`; format in `OPS.md`;
+  round-trip test at 4 px per module with a quiet zone). The WhatsApp panel decisions (`contacts::whatsapp`) moved to the `wa` domain
+  (step 8). `OPS.md`: every contacts and qr row is op or none (`DONE_DOMAINS` += contacts, qr); `shared_card` rows moved to messages.
+- Kotlin: `ContactsOps`/`NativeContactsOps`, `QrOps`/`NativeQrOps`, `DeepIndexHandle : RustHandle`, models `model.contacts`,
+  `model.qr` (+ `QrMatrix`, no ZXing / ML Kit), contract models `ContactsContracts`, `QrContracts`; `QrMatrixTest` (from the fixture),
+  `ContactsOpsNativeTest`, `QrOpsNativeTest` (Kotlin draws the matrix, Rust reads it back) in `testRustBridge`.
 
 #### Evidence, E2.9 (round-07 step 2)
 - Rust: `rovsti_ffi/src/ops/search.rs` (`search.{index_new, index_replace, set_call_counts, query, query_loose, match_number, fold}`,

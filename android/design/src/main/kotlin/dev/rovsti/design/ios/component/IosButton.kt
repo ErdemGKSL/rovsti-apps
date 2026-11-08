@@ -3,7 +3,8 @@
  * Licensed under GPL-3.0 | See git history for contributors
  *
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/ios/component/IosButton.kt
- * Changes for Rovsti: package and imports only; see the story notes in epics.md (E1.29) for the facades built on it.
+ * Changes for Rovsti: package and imports only, plus debugTag (names the glass in BackdropDebug records); see the story notes in
+ * epics.md (E1.29) for the facades built on it.
  */
 
 package dev.rovsti.design.ios.component
@@ -108,6 +109,7 @@ fun IosButton(
     borderShape: IosButtonBorderShape = IosButtonBorderShape.Capsule,
     enabled: Boolean = true,
     controlSize: IosControlSize = IosTheme.controlSize,
+    debugTag: String? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val colors = IosTheme.colors
@@ -185,6 +187,7 @@ fun IosButton(
                     style = IosGlassStyle.Regular,
                     spec = IosGlassSpec.Control,
                     tint = if (tint.isSpecified) tint else Color.Unspecified,
+                    debugTag = debugTag,
                 )
             }
 
@@ -194,6 +197,7 @@ fun IosButton(
                     style = IosGlassStyle.Prominent,
                     spec = IosGlassSpec.Control,
                     tint = resolvedTint,
+                    debugTag = debugTag,
                 )
             }
         }

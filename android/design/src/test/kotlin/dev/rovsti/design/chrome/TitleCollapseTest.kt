@@ -36,18 +36,6 @@ class TitleCollapseTest {
         assertEquals(1f, titleCollapseFraction(0, 10, -40f), 0f)
         assertTrue(titleCollapseFraction(0, 0, Float.NaN).let { it in 0f..1f })
     }
-
-    @Test
-    fun topScrimPeaksAtPointFortyTwoAndFallsToZero() {
-        val stops = topScrimStops(barFraction = 0.55f)
-        assertEquals(0f, stops.first().first, 0f)
-        assertEquals(ScaffoldSpec.ScrimPeak, stops.first().second, 1e-6f)
-        assertEquals(0.42f, stops.maxOf { it.second }, 1e-6f)
-        assertEquals(1f, stops.last().first, 1e-6f)
-        assertEquals(0f, stops.last().second, 0f)
-        // Positions never go back and the share never rises after the bar.
-        assertTrue(stops.zipWithNext().all { (a, b) -> b.first >= a.first && b.second <= a.second + 1e-6f })
-    }
 }
 
 class TitleAlphaTest {
@@ -88,14 +76,5 @@ class TitleAlphaTest {
     fun inlineIsInvisibleBeforeSixtyFivePercentAndHalfWayAtEightyTwoAndAHalf() {
         assertEquals(0f, inlineTitleAlpha(0.65f), 0f)
         assertEquals(0.5f, inlineTitleAlpha(0.825f), 1e-5f)
-    }
-
-    @Test
-    fun flatTopBandIsOpaqueWhenCollapsed() {
-        val stops = topScrimStops(barFraction = 0.55f, peak = 0.94f, bandPeak = 1f)
-        assertEquals(1f, stops.first().second, 0f)
-        assertEquals(1f, stops[1].second, 0f)
-        assertEquals(0.55f, stops[1].first, 1e-6f)
-        assertEquals(0f, stops.last().second, 0f)
     }
 }

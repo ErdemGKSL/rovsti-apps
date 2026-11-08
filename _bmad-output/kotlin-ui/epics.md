@@ -89,7 +89,7 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
 | E1.27 | Convx menus and context menus (IosMenu, AppleContextMenu, IosContextMenu, OverlayMenu) in `OverlayHost` | R3 | done |
 | E1.28 | Convx sheets (IosSheet, IosPageSheet, IosSheetPresentation, BottomSheet) | R3 | done (SheetEntry facade keeps detents, stacking, non-modal; release rule, pushback, corner, grabber from Convx) |
 | E1.17 | Switch, slider, segmented control (re-scoped: Convx IosToggle/IosSlider/LiquidBottomTabs puck) | R3 | done |
-| E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3/R4 | in-progress (swipe, IosButton, APK done in R3; facades not done: R4 Steps 2-3) |
+| E1.29 | Convx tab bar, navigation bar, buttons, list, swipe actions; catalog APK | R3/R4 | done (R3 swipe/IosButton/APK; R4 Step 2 tab bar; R4 Step 3 top chrome, glass circle button, list drawing, overscroll) |
 | E1.18 | Navigation 3 scaffold: per-tab stacks, push/pop, predictive back, shared bounds | R4 | todo (planned, round-04) |
 | E1.19 | Swipe-to-reveal row and alphabet rail (swipe half delivered by E1.29) | R4 | todo (planned, round-04) |
 | E1.20 | Image loading and the photo viewer | R4 | todo (planned, round-04) |
@@ -381,6 +381,29 @@ E1.29 by porting Convx's device chrome (`floatingtabbar/**`, `FrostedTopBar`, `S
   the capsule: blur too weak), `e1.8-title-collapsed-dark` (inline title over legible rows: F6), `e1.28-page-sheet-light`
   (row at a second inset: F7), `e1.27-menu-open-light` + `e1.26-overlays-over-stripes-light` (stray square at the hidden
   trigger: F5). Status stays in-progress until R4 Step 3.
+- **R4 Step 3 (done, closes E1.29)**: ported close to verbatim into `android/design/.../chrome/`: `FrostedTopBar` (Convx
+  `ui/component/FrostedTopBar.kt`), `ScreenChrome` (+`GlassScreenChrome`, `ScreenScaffold`, `ScreenLazyPage`, `ScreenPage`,
+  `ScreenLargeTitle`, `rememberTitleCollapseProgressState`; `ScreenChrome.kt`, `GlassScreenChrome.kt`, `ScreenTitleBar.kt`),
+  `NavigationTitle`, `ChromeScrim`; `controls/GlassCircleButton.kt` (+`ContrastCircleButton`, `chromeShadow`, elastic stretch from
+  `ios/foundation/ConvxUtils.kt`); `motion/IosOverscroll.kt` (rubber band 0.55, `ui/utils/IosOverscroll.kt:47`). Material3, Coil
+  (account button) and the ambient colour were removed; the refresh line is drawn with a Canvas.
+  Facades now calling them (grep): `LargeTitleScaffold` -> `ScreenLazyPage` + `ScreenLargeTitle` + `FrostedTopBar` + `TopFadeBlur`
+  behind the inline bar, with `LocalOverscrollFactory` = `rememberIosOverscrollFactory()`; `Toolbar` capsules ->
+  `IosToolbarGroup` (now 44 dp glass in a 48 dp touch box, `debugTag`); `BackButton`/`GlassIconButton` -> `GlassCircleButton`
+  (44 dp circle, 48 dp touch target); `CapsuleButton`/`TextButton` -> `IosButton` (Glass, BorderedProminent, Borderless; flat
+  Bordered when the button sits inside recorded content); `InsetGroupedSection` -> `IosCardSection` (new, in `IosList.kt`) which
+  draws through `IosListRowContainer` (card radius 26 dp and 0.33 dp separators are Convx numbers; `GroupedSectionTest` updated);
+  `ListRowChevron` is `IosChevron`. Kept Rovsti's own `TitleCollapse` maths (spring smoothing and the cross-fade that guarantees
+  never two titles); Convx's collapse is linear and lets the inline title show over the large one. Additions beyond Convx:
+  blur and a page-colour wash (peak 0.8) over the bar band follow the collapse, since Convx blurs always, which blurred the
+  expanded large title; asymmetric title reserves centre the inline title between the back button and the toolbar.
+  Deleted: `topScrimStops`/TopScrim/SolidBar and their tests. F6 fixed, F7 fixed (page-sheet row in an `InsetGroupedSection`).
+  Tests: `CollapsedBarLegibilityTest` (variance under the bar < 0.4 of an unblurred row; title contrast >= 4.5:1, light and dark),
+  `E129ShotTest`; ScaffoldTest, ScaffoldWideTest, GroupedSectionTest, ListRowSemanticsTest, PressNoLayoutShiftTest and
+  GlassRealPathTest green.
+  Opened: e1.8-title-expanded-light (crisp large title, toolbar capsules), e1.8-title-collapsed-light (rows under the bar blurred
+  and faded, inline title centred and legible), e1.8-title-mid-scroll-dark, e1.28-page-sheet-light (row in a card at the paragraph's
+  inset), e1.29-overscroll-top-light (see the check list below).
 
 ### E1.18 Navigation scaffold
 - AC1 Navigation 3 checked at the pinned version (or the documented fallback, ARCH 5.1); `TabNavigator` with one stack

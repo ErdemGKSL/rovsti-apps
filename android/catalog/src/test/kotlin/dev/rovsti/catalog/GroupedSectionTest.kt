@@ -46,7 +46,7 @@ class GroupedSectionTest : ShotTest() {
         val expectedInset = TextStartWithLeading.value * density
         for (separator in separators) {
             assertEquals(card.left + 16f * density + expectedInset, separator.boundsInRoot.left, 1f)
-            assertEquals(0.5f * density, separator.boundsInRoot.height, 1f)
+            assertEquals(0.33f * density, separator.boundsInRoot.height, 1f) // Convx IosMetrics.SeparatorThickness
         }
     }
 }

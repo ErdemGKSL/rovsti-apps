@@ -3,7 +3,8 @@
  * Licensed under GPL-3.0 | See git history for contributors
  *
  * Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/ios/component/IosList.kt
- * Changes for Rovsti: package and imports only; see the story notes in epics.md (E1.29) for the facades built on it.
+ * Changes for Rovsti: package and imports only, plus IosCardSection and the separatorInset / separatorTag parameters of the row container,
+ * so the non-lazy InsetGroupedSection draws its card, corners and separators through the same code as IosList.
  */
 
 package dev.rovsti.design.ios.component
@@ -40,6 +41,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.isSpecified
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.ios.foundation.BottomRoundedShape
@@ -242,12 +244,15 @@ private fun IosSectionFooter(
 }
 
 @Composable
-private fun IosListRowContainer(
+internal fun IosListRowContainer(
     style: IosListStyle,
     rowStyle: IosRowStyle,
     isFirst: Boolean,
     isLast: Boolean,
     horizontalInset: Dp,
+    // Rovsti: where the separator starts (the text start of the row) and a tag to find it in tests.
+    separatorInset: Dp = IosMetrics.ListRowInset,
+    separatorTag: String? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
     val colors = IosTheme.colors
@@ -313,8 +318,9 @@ private fun IosListRowContainer(
                 Modifier
                     // The separator starts at the text, not the card edge — the inset
                     // that makes an iOS list read as a list.
-                    .padding(start = IosMetrics.ListRowInset)
+                    .padding(start = separatorInset)
                     .fillMaxWidth()
+                    .then(if (separatorTag != null) Modifier.testTag(separatorTag) else Modifier)
                     .height(IosMetrics.SeparatorThickness)
                     .background(
                         if (rowStyle.separatorTint.isSpecified) {
@@ -325,6 +331,40 @@ private fun IosListRowContainer(
                     ),
             )
         }
+    }
+}
+
+/**
+ * One inset-grouped section outside a lazy list (Rovsti): the same card, outer-corner rounding, row fill and
+ * separators as a section of [IosList], for pages that lay out their own column. [rows] are the row contents; each is
+ * wrapped in the list's row container with no padding of its own (the row brings its gutters), and the separator
+ * starts [separatorInset] from the card edge.
+ */
+@Composable
+fun IosCardSection(
+    rows: List<@Composable () -> Unit>,
+    modifier: Modifier = Modifier,
+    header: (@Composable () -> Unit)? = null,
+    footer: (@Composable () -> Unit)? = null,
+    separatorInset: Dp = IosMetrics.ListRowInset,
+    separatorTag: String? = null,
+) {
+    val inset = IosMetrics.ListRowInset
+    val rowStyle = IosRowStyle(insets = PaddingValues(0.dp), minHeight = 0.dp)
+    Column(modifier.fillMaxWidth()) {
+        if (header != null) IosSectionHeader(header, inset, grouped = true)
+        rows.forEachIndexed { index, row ->
+            IosListRowContainer(
+                style = IosListStyle.InsetGrouped,
+                rowStyle = rowStyle,
+                isFirst = index == 0,
+                isLast = index == rows.lastIndex,
+                horizontalInset = inset,
+                separatorInset = separatorInset,
+                separatorTag = separatorTag,
+            ) { row() }
+        }
+        if (footer != null) IosSectionFooter(footer, inset)
     }
 }
 

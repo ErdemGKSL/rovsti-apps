@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.ios.foundation.IosCapsule
 import dev.rovsti.design.ios.foundation.IosGlassSpec
@@ -127,25 +129,34 @@ fun IosNavigationBar(
 /**
  * A group of toolbar buttons riding in one glass capsule — SwiftUI's ToolbarItemGroup
  * as iOS 26 draws it.
+ *
+ * Rovsti: the glass capsule is 44 dp tall (Convx) inside a 48 dp layout box, so every button keeps a 48 dp tall touch
+ * target (the extra 2 dp above and below are not drawn); [debugTag] names the glass in BackdropDebug records.
  */
 @Composable
 fun IosToolbarGroup(
     modifier: Modifier = Modifier,
+    debugTag: String? = null,
     content: @Composable RowScope.() -> Unit,
 ) {
-    Row(
-        modifier =
-            modifier
-                .height(44.dp)
-                .iosGlass(IosCapsule, IosGlassStyle.Regular, IosGlassSpec.Chrome)
-                .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        CompositionLocalProvider(
-            LocalIosContentColor provides IosTheme.colors.label,
-            LocalIosTextStyle provides IosTheme.typography.body,
-        ) { content() }
+    Box(modifier.height(48.dp)) {
+        Box(
+            Modifier
+                .matchParentSize()
+                .padding(vertical = 2.dp)
+                .testTag("toolbar-capsule")
+                .iosGlass(IosCapsule, IosGlassStyle.Regular, IosGlassSpec.Chrome, debugTag = debugTag),
+        )
+        Row(
+            modifier = Modifier.fillMaxHeight().padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            CompositionLocalProvider(
+                LocalIosContentColor provides IosTheme.colors.label,
+                LocalIosTextStyle provides IosTheme.typography.body,
+            ) { content() }
+        }
     }
 }
 

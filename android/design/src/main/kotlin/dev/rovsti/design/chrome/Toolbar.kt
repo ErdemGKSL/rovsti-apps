@@ -1,5 +1,7 @@
 // Portions ported from glisse (https://github.com/0kzh/glisse), MIT License, Copyright (c) 2026 Kelvin Zhang
-// The glass capsule surface and the press fill follow glisse's glass button; the grouping rules are Rovsti's own.
+// The press fill follows glisse's glass button; the capsule is Convx's IosToolbarGroup
+// (Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, app/src/main/kotlin/com/convx/music/ui/ios/component/IosNavigationBar.kt);
+// the grouping rules are Rovsti's own.
 package dev.rovsti.design.chrome
 
 import androidx.compose.animation.core.Animatable
@@ -32,10 +34,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.controls.glassSurface
 import dev.rovsti.design.controls.rememberPressFill
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
+import dev.rovsti.design.ios.component.IosToolbarGroup
 import dev.rovsti.design.press.scalePress
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
@@ -58,25 +60,15 @@ const val MaxToolbarActions = 2
 private val IconSize = 20.dp
 
 /**
- * A glass capsule that groups 44 dp buttons. The capsule is 44 dp tall (the glass); its layout box is 48 dp so every
- * button keeps a 48 dp tall touch target, the extra 2 dp above and below being transparent. The glass is Convx liquid glass over the app backdrop.
+ * A glass capsule that groups 44 dp buttons: Convx's [IosToolbarGroup] (a 44 dp tall capsule of liquid glass over the app
+ * backdrop in a 48 dp layout box, so every button keeps a 48 dp tall touch target).
  */
 @Composable
 fun ToolbarCapsule(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val rest = remember { Animatable(0f) }
-    Box(modifier.height(Sizes.touch)) {
-        Box(
-            Modifier
-                .matchParentSize()
-                .padding(vertical = (Sizes.touch - Sizes.button) / 2)
-                .testTag("toolbar-capsule")
-                .glassSurface(rest, "toolbar.capsule"),
-        )
-        Row(Modifier.fillMaxHeight(), verticalAlignment = Alignment.CenterVertically, content = content)
-    }
+    IosToolbarGroup(modifier, debugTag = "toolbar.capsule", content = content)
 }
 
 /** The gap between two capsules: it splits one group of buttons into two capsules. */

@@ -28,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.controls.CapsuleButton
 import dev.rovsti.design.ios.component.presentPageSheet
+import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.overlay.Detent
 import dev.rovsti.design.overlay.LocalOverlay
@@ -201,9 +202,18 @@ internal fun SheetsPage() {
             RovstiText(
                 "A full-screen page sheet: edge to edge, ten points under the status bar.",
                 style = RovstiTheme.type.subheadline,
-                modifier = Modifier.padding(top = Spacing.s),
+                modifier = Modifier.padding(top = Spacing.s, start = Spacing.gutter, end = Spacing.gutter),
             )
-            ListRow(title = "Name", secondary = "Weekend stops", modifier = Modifier.testTag("page-sheet-row"))
+            // F7: the row sits in an inset-grouped card, like every other row on a page (one 16 dp gutter).
+            InsetGroupedSection(Modifier.padding(top = Spacing.m)) {
+                row {
+                    ListRow(
+                        title = "Name",
+                        secondary = "Weekend stops",
+                        modifier = Modifier.testTag("page-sheet-row"),
+                    )
+                }
+            }
         }
     }
 

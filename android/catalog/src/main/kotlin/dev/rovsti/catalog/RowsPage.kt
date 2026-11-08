@@ -115,7 +115,7 @@ internal fun GroupedSectionPage() {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(insetsOnly()),
         verticalArrangement = Arrangement.spacedBy(Spacing.sectionGap - Spacing.s),
     ) {
-        PageHeader("Grouped sections", "Radius 20, separators from the text start. Taps: $taps")
+        PageHeader("Grouped sections", "Radius 26, separators from the text start. Taps: $taps")
         InsetGroupedSection(
             header = "Account",
             separatorInset = TextStartWithLeading,

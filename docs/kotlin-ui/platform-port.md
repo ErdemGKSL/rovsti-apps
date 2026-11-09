@@ -15,9 +15,9 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 
 | Source | Destination | Step | Status |
 |---|---|---|---|
-| `AlarmActivity.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
-| `AlarmOptions.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
-| `AlarmSound.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
+| `AlarmActivity.kt` | platform.location.BridgeTripComponents (package dev.rovsti.bridge) | 7 (E3.7) | ported |
+| `AlarmOptions.kt` | platform.location.AlarmOptions (public; `REQUEST_ALARM_SOUND` const replaces `Documents.REQUEST_ALARM_SOUND`) | 7 (E3.7) | ported |
+| `AlarmSound.kt` | platform.location.AlarmSound (prefs via `PlatformPrefs.ALARM`) | 7 (E3.7) | ported |
 | `BirthdayReminders.kt` | platform.notify.BirthdayReminders | 6 (E3.6) | todo |
 | `Blocklist.kt` | platform.calllog.Blocklist (typed `BlockedNumber`/`BlockReason`; `numbers` replaces `pullJson`; `BlockGuard` comes along) + `BlocklistRepository` | 3 (E3.3) | ported |
 | `CallLogQuery.kt` | platform.calllog.CallLogQuery (typed `CallLogEntry`; `byIds` and `missedCount` added) | 3 (E3.3) | ported |
@@ -54,10 +54,10 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `SmsQuery.kt` | platform.sms.SmsQuery | 4 (E3.4) | done |
 | `SmsSend.kt` | platform.sms.SmsSend | 4 (E3.4) | done |
 | `SpikeProbes.kt` | none | 1 (E3.1) | dropped: GPUI spikes (ARCH 7.3) |
-| `StopsLocation.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
+| `StopsLocation.kt` | platform.location.LocationRepository (`lastKnown`, `fresh(timeout)`, `updates()` replace the `stops_location` emits; `Fix` model) | 7 (E3.7) | ported |
 | `SystemPages.kt` | platform.system.SystemPages | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
-| `TripAlarm.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
-| `TripService.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
+| `TripAlarm.kt` | platform.location.TripAlarm + `TripAlarmReceiver` in BridgeTripComponents (channel via `PlatformChannels`, events via `PlatformEvents`) | 7 (E3.7) | ported |
+| `TripService.kt` | platform.location.TripModel (pure helpers, `StartResult`) + `TripService`/`TripWatchdogReceiver` in BridgeTripComponents + `TripRepository` (`status`, `start`) | 7 (E3.7) | ported |
 | `VoicePlayer.kt` | platform.telephony.VoicePlayer | 5 (E3.5) | ported |
 | `WaCallAudio.kt` | platform.wa.WaCallAudio | 8 (E3.9 seams) | todo |
 | `WaIncoming.kt` | platform.wa.WaIncoming | 8 (E3.9 seams) | todo |

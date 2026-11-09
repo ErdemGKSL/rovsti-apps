@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A library manifest: no activity, service, receiver or provider (E3.1 AC4). The app manifests declare the
      components (they keep the dev.rovsti.bridge class names, ARCH 7.2). LibraryManifestTest enforces this. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Mirrored from the app manifests so lint can check the library calls that need them (E3.7). -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+</manifest>

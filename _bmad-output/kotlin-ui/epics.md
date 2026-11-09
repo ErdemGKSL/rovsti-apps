@@ -786,7 +786,7 @@ done by this planner (ops modules, fixtures incl. the headless pairs, `:core-bri
   `ContactsEdit.EDITED_MIMES`, call log delete/restore, SMS insert/read, scheduled alarm set/fire).
 - AC3 E3.5 keeps the incoming order of ARCH 8.2: notification first, UI after; `CallRegistry` tests (`MultiCallTest`,
   `IncomingCallTest`, `OngoingCallTest`) green.
-- AC4 E3.7 keeps AD-SA1 to AD-SA9; the Kotlin contract with the Rust alarm plan (`apps/stops/src/kotlin_contract.rs`) is
+- AC4 E3.7 keeps AD-SA1 to AD-SA9; the Kotlin contract with the Rust alarm plan (moved to `crates/rovsti_app_core/tests/kotlin_contract.rs`) is
   moved to `rovsti_app_core` and still checks the Kotlin defaults.
 - AC5 E3.8b `PermissionController` exposes state per group as `StateFlow` and asks through the activity result API;
   rationale and "open settings" decisions come from the pure access rules (`rovsti_app_core::messages::access` style).
@@ -1214,6 +1214,10 @@ buttons ride the sheet by translation only; camera padding follows the settled s
   History, Settings open as sheets or pushed pages over the map.
 - AC3 Migration test with fixture `stops-prefs.json`, `trip.json`, legacy trip (renamed, AD-SX8), `saved.json` v2,
   `history.json`, `gtfs.json`.
+- AC4 (E3 AC4) Re-target the manifest and `MainActivity` assertions that stayed in `apps/stops/src/kotlin_contract.rs` at
+  `android/stops/src/main/AndroidManifest.xml` and the Kotlin `MainActivity` (location FGS type and permissions, background
+  location, share provider, shortcut and `geo:` intents), in a Rust test beside
+  `crates/rovsti_app_core/tests/kotlin_contract.rs` (which already reads the `android/platform` sources).
 - Screenshots: `e7.1-home-idle`, `e7.1-home-idle-dark`, `e7.1-home-sheet-peek`, `e7.1-home-sheet-medium`,
   `e7.1-home-landscape`, `e7.1-home-fs2`.
 

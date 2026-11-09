@@ -21,6 +21,11 @@ class FqcnTest {
             "dev.rovsti.bridge.CallReminderReceiver",
             "dev.rovsti.bridge.BirthdayReminderReceiver",
             "dev.rovsti.bridge.ReplyReceiver",
+            // E3.7 (platform/location/BridgeTripComponents.kt)
+            "dev.rovsti.bridge.TripService",
+            "dev.rovsti.bridge.TripWatchdogReceiver",
+            "dev.rovsti.bridge.TripAlarmReceiver",
+            "dev.rovsti.bridge.AlarmActivity",
         )
 
     @Test fun everyPortedComponentKeepsItsBridgeName() {

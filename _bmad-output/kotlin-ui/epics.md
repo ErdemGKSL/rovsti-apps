@@ -875,6 +875,13 @@ editor; photo + Trash; favorites (Convx reorderable port) + groups; select mode 
 E3.11 goldens: `e3.11-permission-denied-row`/`-rationale` demo host double-padded the sections (32-48 dp instead of the
 16 dp gutter; `shell/src/test/.../PermissionTestSupport.kt:59-60`).
 
+**R2** -> `_bmad-output/kotlin-ui/plans/round-11.md` (planned 2026-11-09 at base `7bf317d`; E4 R1 re-verified done in
+code): E4.9-E4.16 in 8 steps (share/QR/shortcut with `QrCode` moved to `:design`; intake page, paste, file import, add
+to existing; scan QR from image and CSV; duplicates/merge/Clean up; photo viewer actions and ringtone/voicemail/block;
+My card, emergency, recently added/edited; full Settings with appearance/haptics prefs in Rust; polish and close E4).
+Also fixes from the R1 goldens: **F12** menu items without glyphs (`e4.2-row-context-menu`), **F13** settings groups
+touching (`e4.1-settings`), **F14** card numbers in mixed display formats (`e4.3-card-full`).
+
 ### Parity table (feature -> story)
 
 | Features | Story |
@@ -906,14 +913,14 @@ E3.11 goldens: `e3.11-permission-denied-row`/`-rationale` demo host double-padde
 | E4.6 | Favorites, frequent, upcoming birthdays | R1 | done (round-10) |
 | E4.7 | Groups | R1 | done (round-10) |
 | E4.8 | Select mode | R1 | done (round-10) |
-| E4.9 | Share and shortcuts | R2 | todo |
-| E4.10 | Import paths | R2 | todo |
-| E4.11 | Duplicates, merge, Clean up | R2 | todo |
-| E4.12 | Photo viewer on the card | R2 | todo |
-| E4.13 | Ringtone, voicemail, block | R2 | todo |
-| E4.14 | My card, emergency, recently added/edited | R2 | todo |
-| E4.15 | Settings | R2 | todo |
-| E4.16 | Polish | R2 | todo |
+| E4.9 | Share and shortcuts | R2 | in-progress (round-11 step 1) |
+| E4.10 | Import paths | R2 | in-progress (round-11 step 2-3) |
+| E4.11 | Duplicates, merge, Clean up | R2 | in-progress (round-11 step 4) |
+| E4.12 | Photo viewer on the card | R2 | in-progress (round-11 step 5) |
+| E4.13 | Ringtone, voicemail, block | R2 | in-progress (round-11 step 5) |
+| E4.14 | My card, emergency, recently added/edited | R2 | in-progress (round-11 step 6) |
+| E4.15 | Settings | R2 | in-progress (round-11 step 7) |
+| E4.16 | Polish | R2 | in-progress (round-11 step 8) |
 
 Shared AC for every E4 story: the GPUI behaviour named in the parity table is reproduced (same rules from Rust), every
 list ends above the tab bar, one avatar per row, chip rows never wrap, every long-press opens a context menu from the

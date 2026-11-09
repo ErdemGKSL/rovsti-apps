@@ -1034,6 +1034,13 @@ host, every destructive action confirms or offers Undo as the GPUI app does.
 
 Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56, `phone.md`), then polish.
 
+**R1** -> `_bmad-output/kotlin-ui/plans/round-12.md` (planned 2026-11-09 at base `c34b155`; E4 R2 re-verified done in
+code): E5.1-E5.7a in 8 steps (module, manifest, components, setup sheet, diagnostics, migration; data layer; keypad
+with `DialField` in `:design`; Recents; person/number/call-details sheets; Favorites and Contacts tabs; Incoming with
+the Convx-ported call aura; In-call single call and round close). **E5.8 moved to R2** (needs both call screens; the
+screens take a `CallSource` from R1). Check from the E4 goldens: **F15** strong lens blob at the tab bar's leading cap
+(`e4.15-settings-light`, `e4.14-my-card-dark`): compare lens values with Convx `IosTabBar` in Step 1.
+
 ### Parity table
 
 | Features | Story |
@@ -1056,14 +1063,14 @@ Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56,
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | todo |
-| E5.2 | Keypad | R1 | todo |
-| E5.3 | Recents | R1 | todo |
-| E5.4 | Contact, Number and Call details sheets | R1 | todo |
-| E5.5 | Favorites and Contacts tabs | R1 | todo |
-| E5.6 | Incoming call | R1 | todo |
-| E5.7a | In-call: single call | R1 | todo |
-| E5.8 | WhatsApp calls | R1 | todo |
+| E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | in-progress (round-12 step 1-2) |
+| E5.2 | Keypad | R1 | in-progress (round-12 step 3) |
+| E5.3 | Recents | R1 | in-progress (round-12 step 4) |
+| E5.4 | Contact, Number and Call details sheets | R1 | in-progress (round-12 step 5) |
+| E5.5 | Favorites and Contacts tabs | R1 | in-progress (round-12 step 6) |
+| E5.6 | Incoming call | R1 | in-progress (round-12 step 7) |
+| E5.7a | In-call: single call | R1 | in-progress (round-12 step 8) |
+| E5.8 | WhatsApp calls | R2 | todo (moved from R1 in round-12) |
 | E5.7b | In-call: multi-call, Add call, conference | R2 | todo |
 | E5.9 | Settings | R2 | todo |
 | E5.10 | Statistics | R2 | todo |
@@ -1076,7 +1083,8 @@ Goal: parity with `apps/phone` (roadmap "Rovsti Phone", `util-phone*.md` U1-U56,
 - AC1 `dev.rovsti.phone`, arm64-v8a release, every component FQCN of the GPUI manifest (`MainActivity` with DIAL/VIEW
   filters and the activity-alias, `RovstiInCallService`, `CallActionReceiver`, `VoicemailReceiver`,
   `CallReminderReceiver`, provider, firebase `RovstiMessagingService`); role request flow; manifest test.
-- AC2 Migration test with fixture `prefs.json` (PrefsV2), `wa-calls.json`, `sim-choices.json`, notes.
+- AC2 Migration test with fixture `prefs.json` (PrefsV2), `wa-calls.json`, `call-notes.json`, `whatsapp-link.json`
+  (Phone has no `sim-choices.json`: that is the Messages legacy SIM file, `rovsti_app_core/src/messages/prefs.rs:22`).
 - Screenshots: `e5.1-setup-sheet`, `e5.1-diagnostics`, `e5.1-notice-line`.
 
 ### E5.2 Keypad

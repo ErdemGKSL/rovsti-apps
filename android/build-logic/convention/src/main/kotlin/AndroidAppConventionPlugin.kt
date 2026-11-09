@@ -17,6 +17,17 @@ class AndroidAppConventionPlugin : Plugin<Project> {
                 configureCommon()
                 defaultConfig.targetSdk = RovstiSdk.TARGET
 
+                // Release: R8 shrinks, optimises and obfuscates the dex (43 MB APK without it, mostly unused library
+                // code), drops unused resources, and ships arm64-v8a only (every target phone is arm64; the debug
+                // build keeps x86_64 for emulators). Keep rules: each module's `proguard-rules.pro` plus the library
+                // consumer rules (`:core-bridge` keeps the JNI surface).
+                buildTypes.getByName("release") {
+                    isMinifyEnabled = true
+                    isShrinkResources = true
+                    proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+                    ndk.abiFilters += RELEASE_ABI
+                }
+
                 val keystore = providers.environmentVariable("ROVSTI_KEYSTORE").orNull
                 val storePassword = providers.environmentVariable("ANDROID_STORE_PASSWORD").orNull
                 val keyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
@@ -36,5 +47,6 @@ class AndroidAppConventionPlugin : Plugin<Project> {
 
     private companion object {
         const val RELEASE_KEY_ALIAS = "rovsti"
+        const val RELEASE_ABI = "arm64-v8a"
     }
 }

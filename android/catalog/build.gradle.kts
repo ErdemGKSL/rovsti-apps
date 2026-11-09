@@ -24,6 +24,7 @@ android {
         release {
             // Debug-only demo app: never shipped.
             isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

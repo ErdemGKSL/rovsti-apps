@@ -102,7 +102,7 @@ private fun Project.ndkHomeDir(): String? =
 
 /**
  * `rovsti.cargo`: `cargoBuildAndroid` (debug) and `cargoBuildAndroid<Variant>` per variant build `rovsti_ffi` for
- * arm64-v8a and x86_64 with cargo-ndk and feed the result to the variant's `jniLibs`; `cargoBuildHost` builds the
+ * arm64-v8a (plus x86_64 for debug) with cargo-ndk and feed the result to the variant's `jniLibs`; `cargoBuildHost` builds the
  * host library (with the `test-ops` feature) for the plain-JVM `testRustBridge` task.
  *
  * Platform 26 and not [RovstiSdk.MIN]: a library linked against a newer platform refuses to load on older devices,
@@ -135,7 +135,8 @@ class CargoConventionPlugin : Plugin<Project> {
                     val task =
                         tasks.register(name, CargoBuildTask::class.java) {
                             group = "rust"
-                            description = "cargo ndk build of rovsti_ffi for arm64-v8a and x86_64 (${variant.name})."
+                            description =
+                                "cargo ndk build of rovsti_ffi for arm64-v8a${if (release) "" else " and x86_64"} (${variant.name})."
                             rustSources.from(sources)
                             workspaceDir.set(root.absolutePath)
                             androidHome.set(provider { androidHomeDir() })
@@ -143,7 +144,8 @@ class CargoConventionPlugin : Plugin<Project> {
                             val out = layout.buildDirectory.dir("rustJniLibs/${variant.name}")
                             outputDir.set(out)
                             cargoArgs.set(
-                                listOf("ndk", "--platform", "26", "-t", "arm64-v8a", "-t", "x86_64") +
+                                listOf("ndk", "--platform", "26", "-t", "arm64-v8a") +
+                                    (if (release) emptyList() else listOf("-t", "x86_64")) +
                                     listOf("-o", out.get().asFile.absolutePath, "build", "-p", "rovsti_ffi") +
                                     if (release) listOf("--release") else emptyList(),
                             )

@@ -35,4 +35,5 @@ enum class CatalogPage(
     TextFields("Text fields"),
     Toasts("Toasts"),
     OverlayStates("Overlay states"),
+    WhatsAppSettings("WhatsApp settings"),
 }

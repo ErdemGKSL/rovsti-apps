@@ -14,6 +14,12 @@ android {
         versionName = "0.1"
     }
 
+    lint {
+        // :platform's TripService (linked only for the WhatsApp settings page's clipboard and files seams) posts a
+        // notification; the demo app never starts it, and real apps declare the permission (E3.8b).
+        disable += "NotificationPermission"
+    }
+
     buildTypes {
         release {
             // Debug-only demo app: never shipped.
@@ -25,6 +31,12 @@ android {
 dependencies {
     implementation(project(":design"))
     implementation(project(":core-bridge"))
+    implementation(project(":wa"))
+    implementation(project(":platform"))
+    // The WhatsApp settings page runs the real view model on scripted fakes (no gateway, no Rust).
+    implementation(testFixtures(project(":wa")))
+    implementation(testFixtures(project(":core-bridge")))
+    implementation(testFixtures(project(":platform")))
     implementation(libs.activity.compose)
     implementation(libs.haze)
     implementation(libs.navigation3.runtime)

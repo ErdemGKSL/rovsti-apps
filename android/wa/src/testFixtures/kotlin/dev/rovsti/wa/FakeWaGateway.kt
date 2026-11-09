@@ -12,10 +12,16 @@ import dev.rovsti.core.model.wa.CallIdBody
 import dev.rovsti.core.model.wa.CallMuteBody
 import dev.rovsti.core.model.wa.CallStarted
 import dev.rovsti.core.model.wa.CallSummary
+import dev.rovsti.core.model.wa.CreateInstance
+import dev.rovsti.core.model.wa.CreatedInstance
 import dev.rovsti.core.model.wa.GatewayEvent
 import dev.rovsti.core.model.wa.HandleAnswer
 import dev.rovsti.core.model.wa.InstanceStatus
+import dev.rovsti.core.model.wa.IssuedKey
 import dev.rovsti.core.model.wa.JidsBody
+import dev.rovsti.core.model.wa.KeyIdBody
+import dev.rovsti.core.model.wa.KeyInfo
+import dev.rovsti.core.model.wa.LabelBody
 import dev.rovsti.core.model.wa.LinkReadAnswer
 import dev.rovsti.core.model.wa.LinkWriteRequest
 import dev.rovsti.core.model.wa.PictureAnswer
@@ -32,6 +38,7 @@ import dev.rovsti.core.ops.AudioPort
 import dev.rovsti.core.ops.NativeWaOps
 import dev.rovsti.core.ops.WaEvents
 import dev.rovsti.core.ops.WaGateway
+import dev.rovsti.wa.settings.WaUrlOpener
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
@@ -90,6 +97,32 @@ class FakeWaGateway(
     val opener =
         WaGatewayOpener { WaGateway.open(it.gatewayUrl, it.key, null, ops, audio, release = { id -> released += id }) }
 
+    /** The gateways the settings screen opened: (url, key), in order. */
+    val opened = CopyOnWriteArrayList<Pair<String, String?>>()
+
+    /** Opens by URL and key for the settings view model. */
+    val urlOpener =
+        WaUrlOpener { url, key ->
+            opened += url to key
+            WaGateway.open(url, key, null, ops, audio, release = { id -> released += id })
+        }
+
+    /** What `wa.create_instance` answers (the first connect key). */
+    @Volatile var created: Outcome<CreatedInstance> = Outcome.Ok(CreatedInstance("inst1", NEW_KEY, "key-1"))
+
+    /** The requests `wa.create_instance` saw. */
+    val createRequests = CopyOnWriteArrayList<CreateInstance>()
+
+    /** What `wa.mint_key` answers; the label is echoed. */
+    @Volatile var mintedKey: String = MINTED_KEY
+
+    /** What `wa.keys` answers. */
+    @Volatile var keys: Outcome<List<KeyInfo>> = Outcome.Ok(emptyList())
+
+    /** The key ids `wa.revoke_key` saw, and the labels `wa.mint_key` saw. */
+    val revoked = CopyOnWriteArrayList<String>()
+    val minted = CopyOnWriteArrayList<String>()
+
     init {
         ok("wa.open", HandleAnswer.serializer()) {
             openError?.let { return@ok Outcome.Err(it) }
@@ -134,6 +167,22 @@ class FakeWaGateway(
                     "+" + it.jid.substringBefore('@'),
                 ),
             )
+        }
+        handled("wa.create_instance", CreateInstance.serializer(), CreatedInstance.serializer()) {
+            createRequests += it
+            created
+        }
+        handled("wa.mint_key", LabelBody.serializer(), IssuedKey.serializer()) {
+            minted += it.label
+            Outcome.Ok(IssuedKey("key-2", mintedKey, it.label))
+        }
+        ok("wa.keys", ListSerializer(KeyInfo.serializer())) { keys }
+        for (op in listOf("wa.delete_instance", "wa.relink")) {
+            core.on(op) { callAnswer(op) }
+        }
+        core.on("wa.revoke_key") { request ->
+            revoked += Envelope.json.decodeFromJsonElement(KeyIdBody.serializer(), request.withoutHandle()).keyId
+            callAnswer("wa.revoke_key")
         }
         core.on("wa.link_write") { request ->
             val req = Envelope.json.decodeFromJsonElement(LinkWriteRequest.serializer(), request)
@@ -197,6 +246,8 @@ class FakeWaGateway(
         const val GATEWAY = 7L
         const val STREAM = 8L
         const val AUDIO = 9L
+        const val NEW_KEY = "rwk_NEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEWNEW"
+        const val MINTED_KEY = "rwk_MINTMINTMINTMINTMINTMINTMINTMINTMINTMINTMINTMINT"
     }
 }
 

@@ -28,7 +28,19 @@ class WaRepositoryShapeTest {
     }
 
     @Test fun theFakeAddsOnlyTestControls() {
-        val controls = setOf("setState", "setChats", "setMessages", "emit", "getLog", "getLinked")
+        val controls =
+            setOf(
+                "setState",
+                "setChats",
+                "setMessages",
+                "emit",
+                "getLog",
+                "getLinked",
+                "getGatewayOpener",
+                "setGatewayOpener",
+                "getOnRelinkTo",
+                "setOnRelinkTo",
+            )
         val extra = fakeMethods.filter { signature(it) !in declared }.map { it.name }.toSet()
         assertEquals(emptySet<String>(), extra - controls)
     }

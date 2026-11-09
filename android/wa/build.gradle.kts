@@ -29,6 +29,8 @@ dependencies {
     // Seams only: WaPush events, WaCallAudio, clipboard, share, files (ARCH 7.4).
     implementation(project(":platform"))
     api(libs.coroutines.core)
+    // ViewModel, SavedStateHandle and BackHandler (activity brings the lifecycle artifacts).
+    implementation(libs.activity.compose)
     testFixturesApi(project(":core-bridge"))
     testFixturesApi(testFixtures(project(":core-bridge")))
     testFixturesApi(libs.coroutines.core)
@@ -37,9 +39,12 @@ dependencies {
     // The compose compiler plugin runs on testFixtures too and needs the runtime that WaLinkState (@Immutable) uses.
     testFixturesImplementation(platform(libs.compose.bom))
     testFixturesImplementation(libs.compose.ui)
+    testImplementation(project(":testing"))
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.coroutines.test)
     testImplementation(testFixtures(project(":core-bridge")))
+    testImplementation(testFixtures(project(":platform")))
+    testImplementation(libs.compose.ui.test.junit4)
     testImplementation(testFixtures(project))
 }

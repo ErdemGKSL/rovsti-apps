@@ -66,6 +66,7 @@ class CustomAction(
  * The row is ONE accessibility node: avatar, texts and meta merge, with [actions] offered as custom actions. Pressing
  * paints a flat fill behind the content; nothing scales and nothing moves. The row draws its own 16 dp gutters, so
  * inside an [InsetGroupedSection] the text starts at [TextStartWithLeading] or [TextStartPlain] from the card edge.
+ * [titleMaxLines] and [secondaryMaxLines] let a settings row wrap (settings rows); lists keep the default of one.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -82,6 +83,8 @@ fun ListRow(
     titleColor: Color = Color.Unspecified,
     extraSemantics: (SemanticsPropertyReceiver.() -> Unit)? = null,
     endInset: Dp = 0.dp,
+    secondaryMaxLines: Int = 1,
+    titleMaxLines: Int = 1,
 ) {
     val colors = RovstiTheme.colors
     val type = RovstiTheme.type
@@ -136,7 +139,7 @@ fun ListRow(
                 title,
                 style = type.body,
                 color = titleColor.takeIf { it != Color.Unspecified } ?: colors.labelPrimary,
-                maxLines = 1,
+                maxLines = titleMaxLines,
                 overflow = TextOverflow.Ellipsis,
             )
             if (secondary != null) {
@@ -145,7 +148,7 @@ fun ListRow(
                     modifier = Modifier.padding(top = Spacing.textGap),
                     style = type.subheadline,
                     color = colors.labelSecondary,
-                    maxLines = 1,
+                    maxLines = secondaryMaxLines,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

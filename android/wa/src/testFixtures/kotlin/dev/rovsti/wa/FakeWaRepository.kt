@@ -41,7 +41,13 @@ class FakeWaRepository(
         log += "start"
     }
 
-    override suspend fun gateway(): WaGateway? = null
+    /** Runs after each [relinkTo], so a demo can emit the QR or code the gateway would send. */
+    var onRelinkTo: (StoredLink) -> Unit = {}
+
+    /** What [gateway] opens; tests give it the fake gateway of the link they script. */
+    var gatewayOpener: suspend () -> WaGateway? = { null }
+
+    override suspend fun gateway(): WaGateway? = gatewayOpener()
 
     override suspend fun wake(): Outcome<Unit> {
         log += "wake"
@@ -55,6 +61,7 @@ class FakeWaRepository(
     override suspend fun relinkTo(link: StoredLink): Outcome<Unit> {
         log += "relinkTo"
         linked = link
+        onRelinkTo(link)
         return Outcome.Ok(Unit)
     }
 

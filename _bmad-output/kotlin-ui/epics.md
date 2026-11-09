@@ -856,6 +856,14 @@ at the end of its settings page. The apps get the whole platform through `:shell
 
 Goal: parity with `apps/contacts` (roadmap "Rovsti Contacts", `util-contacts*.md` C1-C54), then polish.
 
+Round plans: **R1** -> `_bmad-output/kotlin-ui/plans/round-10.md` (planned 2026-11-09 at base `ed92dda`; E3 R2 re-verified
+done in code, all hard dependencies `done`): E4.1-E4.8 in 8 steps (`:contacts` module, manifest parity with a reusable
+`MergedManifest` test helper, release signing from env, container/routes/migration; data layer `ContactsStore`/
+`BookRepository`/`WaMarks` with new Rust ops `contacts.wa_marks`/`wa_card`/`wa_profile_lines`; list and search; card;
+editor; photo + Trash; favorites (Convx reorderable port) + groups; select mode and close). Also fixes **F11** from the
+E3.11 goldens: `e3.11-permission-denied-row`/`-rationale` demo host double-padded the sections (32-48 dp instead of the
+16 dp gutter; `shell/src/test/.../PermissionTestSupport.kt:59-60`).
+
 ### Parity table (feature -> story)
 
 | Features | Story |
@@ -879,14 +887,14 @@ Goal: parity with `apps/contacts` (roadmap "Rovsti Contacts", `util-contacts*.md
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E4.1 | App module, manifest parity, container, tabs, routes, migration test | R1 | todo |
-| E4.2 | Contacts list and search | R1 | todo |
-| E4.3 | Contact card | R1 | todo |
-| E4.4 | Editor | R1 | todo |
-| E4.5 | Delete, Undo, Trash | R1 | todo |
-| E4.6 | Favorites, frequent, upcoming birthdays | R1 | todo |
-| E4.7 | Groups | R1 | todo |
-| E4.8 | Select mode | R1 | todo |
+| E4.1 | App module, manifest parity, container, tabs, routes, migration test | R1 | in-progress (round-10 step 1) |
+| E4.2 | Contacts list and search | R1 | in-progress (round-10 step 2-3) |
+| E4.3 | Contact card | R1 | in-progress (round-10 step 4) |
+| E4.4 | Editor | R1 | in-progress (round-10 step 5-6) |
+| E4.5 | Delete, Undo, Trash | R1 | in-progress (round-10 step 6) |
+| E4.6 | Favorites, frequent, upcoming birthdays | R1 | in-progress (round-10 step 7) |
+| E4.7 | Groups | R1 | in-progress (round-10 step 7) |
+| E4.8 | Select mode | R1 | in-progress (round-10 step 8) |
 | E4.9 | Share and shortcuts | R2 | todo |
 | E4.10 | Import paths | R2 | todo |
 | E4.11 | Duplicates, merge, Clean up | R2 | todo |

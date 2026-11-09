@@ -39,6 +39,9 @@ import dev.rovsti.design.controls.rememberPressFill
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.ios.component.IosToolbarGroup
+import dev.rovsti.design.overlay.ButtonMenuEntry
+import dev.rovsti.design.overlay.LocalOverlayOrNull
+import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.press.scalePress
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
@@ -47,12 +50,16 @@ import dev.rovsti.design.theme.Spacing
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
-/** One toolbar button. [label] is its accessibility name; [id] becomes the test tag `toolbar-<id>`. */
+/**
+ * One toolbar button. [label] is its accessibility name; [id] becomes the test tag `toolbar-<id>`. With a [menu] the tap
+ * opens that menu over the page, anchored to the button (the page does not move), and [onClick] is not called.
+ */
 @Immutable
 class ToolbarAction(
     val id: String,
     val icon: ImageVector,
     val label: String,
+    val menu: ImmutableList<MenuItem>? = null,
     val onClick: () -> Unit,
 )
 
@@ -188,12 +195,26 @@ fun Toolbar(
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
         if (shown.isNotEmpty()) {
             ToolbarCapsule {
+                val overlays = LocalOverlayOrNull.current
                 for (action in shown) {
+                    var anchor by remember { mutableStateOf(Rect.Zero) }
+                    val menu = action.menu
                     ToolbarButton(
                         icon = action.icon,
                         label = action.label,
-                        onClick = action.onClick,
-                        modifier = Modifier.testTag("toolbar-${action.id}"),
+                        onClick =
+                            if (menu != null && overlays != null) {
+                                {
+                                    overlays.present(ButtonMenuEntry(anchor, menu))
+                                    Unit
+                                }
+                            } else {
+                                { action.onClick() }
+                            },
+                        modifier =
+                            Modifier
+                                .testTag("toolbar-${action.id}")
+                                .onGloballyPositioned { anchor = it.boundsInWindow() },
                     )
                 }
             }

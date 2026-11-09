@@ -74,13 +74,8 @@ internal fun previewState(
 ) = IntakeUiState(
     phase = IntakePhase.Preview,
     countLine =
-        if (duplicates >
-            0
-        ) {
-            "$count new contacts, $duplicates already in your contacts"
-        } else {
-            "$count new contacts"
-        },
+        (if (count == 1) "1 new contact" else "$count new contacts") +
+            if (duplicates > 0) ", $duplicates already in your contacts" else "",
     rows = sampleRows(count).toImmutableList(),
     addLabel = if (count == 1) "Add 1 Contact" else "Add $count Contacts",
     canAddToExisting = single,
@@ -105,4 +100,35 @@ internal fun HostedIntake(harness: IntakeHarness) {
         entry<ContactsRoute.Settings> {}
         entry<ContactsRoute.Intake> { IntakeScreen(harness.ui, harness::on) }
     }
+}
+
+/** The mapping sheet of a six-column file (the columns of an address book export from a German phone). */
+internal fun mappingState(found: Int = 12): IntakeUiState {
+    val columns =
+        listOf(
+            Triple("Vorname", "Ada", CsvRole.FirstName),
+            Triple("Nachname", "Lovelace", CsvRole.LastName),
+            Triple("Handy", "+44 20 7946 0958", CsvRole.Phone),
+            Triple("Mail", "ada@example.org", null),
+            Triple("Firma", "Analytical Engines", null),
+            Triple("Notiz", "First programmer", CsvRole.Ignore),
+        )
+    return IntakeUiState(
+        phase = IntakePhase.Mapping,
+        mapping =
+            CsvMappingUi(
+                columns =
+                    columns
+                        .mapIndexed { i, (name, sample, role) ->
+                            CsvColumn(i, name, sample, detected = null, chosen = role)
+                        }.toImmutableList(),
+                countLine =
+                    when (found) {
+                        0 -> "No contacts found with these columns"
+                        1 -> "1 contact found"
+                        else -> "$found contacts found"
+                    },
+                canContinue = found > 0,
+            ),
+    )
 }

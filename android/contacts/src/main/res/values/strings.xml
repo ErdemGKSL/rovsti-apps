@@ -19,6 +19,10 @@
     <string name="settings_trash">Trash</string>
     <string name="settings_import_file">Import from a File</string>
     <string name="settings_paste_contact">Paste Contact</string>
+    <string name="settings_scan_qr">Scan QR Code</string>
+    <string name="settings_contacts_file">Contacts File</string>
+    <string name="settings_import_csv">Import CSV</string>
+    <string name="settings_export_csv">Export as CSV</string>
     <string name="photo_add">Add Photo</string>
     <string name="photo_edit">Edit</string>
     <string name="editor_delete_contact">Delete Contact</string>

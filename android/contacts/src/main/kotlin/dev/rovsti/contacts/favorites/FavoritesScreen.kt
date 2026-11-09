@@ -140,7 +140,7 @@ private fun rememberHeader(
                 header.map { button ->
                     when (button) {
                         FavoritesHeaderAction.Add -> {
-                            ToolbarAction("add", RovstiIcons.Plus, addLabel, onAdd)
+                            ToolbarAction("add", RovstiIcons.Plus, addLabel, onClick = onAdd)
                         }
 
                         FavoritesHeaderAction.Edit -> {

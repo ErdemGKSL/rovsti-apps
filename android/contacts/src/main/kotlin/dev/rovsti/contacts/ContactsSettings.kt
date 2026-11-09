@@ -48,6 +48,9 @@ fun ContactsSettingsPage(
     onOpenTrash: () -> Unit = {},
     onImportFile: () -> Unit = {},
     onPasteContact: () -> Unit = {},
+    onScanQr: () -> Unit = {},
+    onImportCsv: () -> Unit = {},
+    onExportCsv: () -> Unit = {},
 ) {
     SettingsPage(
         title = stringResource(R.string.tab_settings),
@@ -90,6 +93,42 @@ fun ContactsSettingsPage(
                             )
                         },
                         onClick = onPasteContact,
+                    ),
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RovstiIcons.QrCode),
+                        title = {
+                            IosText(
+                                stringResource(R.string.settings_scan_qr),
+                                Modifier.testTag(ContactsTags.ScanQr),
+                            )
+                        },
+                        onClick = onScanQr,
+                    ),
+                ),
+        )
+        IosSettingsGroup(
+            title = stringResource(R.string.settings_contacts_file),
+            items =
+                listOf(
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RovstiIcons.Download),
+                        title = {
+                            IosText(
+                                stringResource(R.string.settings_import_csv),
+                                Modifier.testTag(ContactsTags.ImportCsv),
+                            )
+                        },
+                        onClick = onImportCsv,
+                    ),
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RovstiIcons.Share),
+                        title = {
+                            IosText(
+                                stringResource(R.string.settings_export_csv),
+                                Modifier.testTag(ContactsTags.ExportCsv),
+                            )
+                        },
+                        onClick = onExportCsv,
                     ),
                 ),
         )

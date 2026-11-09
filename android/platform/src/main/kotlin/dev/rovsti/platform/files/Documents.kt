@@ -103,6 +103,9 @@ enum class ImportKind(
         ),
         true,
     ),
+
+    /** A contacts CSV (E4.10 C39): read as text, up to the size of a contacts file. */
+    ContactsCsv(arrayOf("text/csv", "text/comma-separated-values", "text/plain", "application/octet-stream"), true),
     Calls(arrayOf("text/csv", "text/comma-separated-values", "text/plain"), true),
     Attachment(null, false),
     Gtfs(null, false),
@@ -111,7 +114,7 @@ enum class ImportKind(
     /** The cap for a request of [requested] bytes (non-positive: the kind's default). */
     fun cap(requested: Int): Int =
         when {
-            this == Contacts && requested <= 0 -> Documents.MAX_CONTACTS_BYTES
+            (this == Contacts || this == ContactsCsv) && requested <= 0 -> Documents.MAX_CONTACTS_BYTES
             text && requested <= 0 -> Documents.MAX_BYTES
             text -> requested
             else -> Documents.fileCap(requested)

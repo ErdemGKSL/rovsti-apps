@@ -1,6 +1,5 @@
 package dev.rovsti.contacts
 
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -15,16 +14,12 @@ import dev.rovsti.contacts.favorites.UpcomingPage
 import dev.rovsti.contacts.groups.GroupPageDestination
 import dev.rovsti.contacts.groups.GroupsPage
 import dev.rovsti.contacts.intake.IntakePage
-import dev.rovsti.contacts.intake.IntakeViewModel
+import dev.rovsti.contacts.intake.rememberImportActions
 import dev.rovsti.contacts.list.SelectToolbar
 import dev.rovsti.contacts.list.rememberContactsListViewModel
 import dev.rovsti.contacts.trash.TrashPage
 import dev.rovsti.design.overlay.OverlayController
-import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.transition.TabNavigator
-import dev.rovsti.platform.files.FileResult
-import dev.rovsti.platform.files.ImportDocument
-import dev.rovsti.platform.files.ImportKind
 import dev.rovsti.shell.RovstiShell
 import dev.rovsti.shell.settings.CommonSettingsPage
 
@@ -71,24 +66,16 @@ fun ContactsApp(
         entry<ContactsRoute.Favorites> { FavoritesPage(container, navigator) }
         entry<ContactsRoute.Groups> { GroupsPage(container, navigator) }
         entry<ContactsRoute.Settings> {
-            // "Import from a File": the system picker, then the import page reads the picked document.
-            val picker =
-                rememberLauncherForActivityResult(ImportDocument(kind = ImportKind.Contacts)) { result ->
-                    (result as? FileResult.Ok)?.uri?.let { navigator.push(ContactsRoute.Intake(it.toString())) }
-                }
+            val import = rememberImportActions(container, navigator, overlays)
             ContactsSettingsPage(
                 settings = container.commonSettings,
                 onOpenWhatsApp = { navigator.push(ContactsRoute.WhatsAppSettings) },
                 onOpenTrash = { navigator.push(ContactsRoute.Trash) },
-                onImportFile = { picker.launch(Unit) },
-                // The clipboard is read on this tap and nowhere else; an empty one is answered here, without a page.
-                onPasteContact = {
-                    if (container.clipboard.primaryText().isNullOrBlank()) {
-                        overlays.showToast(IntakeViewModel.NOTHING_TO_PASTE)
-                    } else {
-                        navigator.push(ContactsRoute.Intake(paste = true))
-                    }
-                },
+                onImportFile = import.importFile,
+                onPasteContact = import.pasteContact,
+                onScanQr = import.scanQr,
+                onImportCsv = import.importCsv,
+                onExportCsv = import.exportCsv,
                 onOpenCommon = { page ->
                     navigator.push(
                         when (page) {

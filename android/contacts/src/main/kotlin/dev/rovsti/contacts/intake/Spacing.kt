@@ -15,3 +15,12 @@ internal object IntakeCardMetrics {
     val LineGap = 2.dp
     val LineVertical = 10.dp
 }
+
+/** The column-mapping sheet (C39). */
+internal object MappingMetrics {
+    /** The widest the role label of a row may grow, so a long header keeps its room. */
+    val RoleMaxWidth = 128.dp
+
+    /** The chevron next to the role label. */
+    val Chevron = 14.dp
+}

@@ -122,6 +122,8 @@ fun ContactsListScreen(
     modifier: Modifier = Modifier,
     gate: (@Composable () -> Unit)? = null,
     overlays: OverlayController? = LocalOverlayOrNull.current,
+    onPasteContact: () -> Unit = {},
+    onScanQr: () -> Unit = {},
 ) {
     val latestAction = rememberUpdatedState(onAction)
     LaunchedEffect(searchState) {
@@ -131,7 +133,7 @@ fun ContactsListScreen(
     val select = state.selectMode
     // Back leaves select mode first (this handler is the innermost, so it runs before the tab or the page pops).
     BackHandler(enabled = select != null) { onAction(ContactsListAction.ExitSelect) }
-    val actions = rememberToolbar(ready, state.rows.isNotEmpty(), onAction)
+    val actions = rememberToolbar(ready, state.rows.isNotEmpty(), onAction, onPasteContact, onScanQr)
     val searching = state.query.isNotBlank()
     val railShown = ready && state.showScrubber && !searching
     val endInset = if (railShown) ListScrollRailWidth else Dp(0f)
@@ -181,12 +183,23 @@ private fun rememberToolbar(
     ready: Boolean,
     hasRows: Boolean,
     onAction: (ContactsListAction) -> Unit,
+    onPasteContact: () -> Unit,
+    onScanQr: () -> Unit,
 ): ImmutableList<ToolbarAction> =
-    remember(ready, hasRows, onAction) {
+    remember(ready, hasRows, onAction, onPasteContact, onScanQr) {
         if (!ready) {
             persistentListOf()
         } else {
-            val add = ToolbarAction("add", RovstiIcons.Plus, "New contact") { onAction(ContactsListAction.NewContact) }
+            // "+" opens a menu over the page: New Contact, then the ways to bring one in (E4.10).
+            val menu =
+                persistentListOf<MenuItem>(
+                    MenuItem.Action("New Contact", RovstiIcons.PersonAdd) { onAction(ContactsListAction.NewContact) },
+                    MenuItem.Separator,
+                    MenuItem.Action("Paste Contact", RovstiIcons.Copy, onClick = onPasteContact),
+                    MenuItem.Action("Scan QR Code", RovstiIcons.QrCode, onClick = onScanQr),
+                )
+            val add =
+                ToolbarAction("add", RovstiIcons.Plus, "New contact", menu) { onAction(ContactsListAction.NewContact) }
             if (hasRows) {
                 persistentListOf(
                     ToolbarAction("select", RovstiIcons.Checkmark, "Select") {

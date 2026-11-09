@@ -59,7 +59,13 @@ fun GroupsScreen(
     val ready = state.phase == GroupsPhase.Ready
     val toolbar =
         remember(ready, onNew, newLabel) {
-            if (ready) persistentListOf(ToolbarAction("add", RovstiIcons.Plus, newLabel, onNew)) else persistentListOf()
+            if (ready) {
+                persistentListOf(
+                    ToolbarAction("add", RovstiIcons.Plus, newLabel, onClick = onNew),
+                )
+            } else {
+                persistentListOf()
+            }
         }
     LargeTitleScaffold(
         title = stringResource(R.string.tab_groups),

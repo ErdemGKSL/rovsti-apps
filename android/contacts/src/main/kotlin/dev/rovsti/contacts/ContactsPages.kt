@@ -26,6 +26,7 @@ import dev.rovsti.contacts.editor.EditorOutcome
 import dev.rovsti.contacts.editor.contactEditorExtras
 import dev.rovsti.contacts.editor.contactEditorModel
 import dev.rovsti.contacts.editor.presentContactEditor
+import dev.rovsti.contacts.intake.rememberImportActions
 import dev.rovsti.contacts.list.ContactsListEffect
 import dev.rovsti.contacts.list.ContactsListEffects
 import dev.rovsti.contacts.list.ContactsListScreen
@@ -57,6 +58,9 @@ object ContactsTags {
     const val SettingsPage = "contacts-settings-page"
     const val ImportFile = "contacts-settings-import-file"
     const val PasteContact = "contacts-settings-paste-contact"
+    const val ScanQr = "contacts-settings-scan-qr"
+    const val ImportCsv = "contacts-settings-import-csv"
+    const val ExportCsv = "contacts-settings-export-csv"
 }
 
 /**
@@ -121,11 +125,14 @@ fun ContactsListPage(
             saveVcf.launch(it.fileName)
         },
     )
+    val import = rememberImportActions(container, navigator, overlays)
     ContactsListScreen(
         state = state,
         onAction = viewModel::onAction,
         listState = listState,
         searchState = searchState,
+        onPasteContact = import.pasteContact,
+        onScanQr = import.scanQr,
         gate = {
             InsetGroupedSection(modifier = Modifier.testTag(ContactsTags.PermissionSection)) {
                 row { PermissionRow(PermissionGroup.CONTACTS) }

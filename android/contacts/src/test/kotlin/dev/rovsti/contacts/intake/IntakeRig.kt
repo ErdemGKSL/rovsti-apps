@@ -8,8 +8,11 @@ import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.Rust
 import dev.rovsti.core.model.contacts.ContactDraft
+import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.NativeContactsOps
+import dev.rovsti.core.ops.NativeQrOps
 import dev.rovsti.core.ops.NativeSearchOps
+import dev.rovsti.core.ops.QrOps
 import dev.rovsti.platform.contacts.FakeContactsRepository
 import dev.rovsti.platform.files.FakeClipboardRepository
 import dev.rovsti.platform.files.FakeFilesRepository
@@ -69,7 +72,13 @@ internal class IntakeRig(
     drafts: List<ContactDraft> = SampleCards.all,
     file: String? = null,
     clip: String? = null,
+    csv: String? = null,
+    /** The picture the picker returned, made once the core runs (a generated QR code in the tests). */
+    makePicture: (suspend (QrOps) -> Luma)? = null,
+    /** Wraps the contacts ops, to see which calls the model makes. */
+    wrap: (ContactsOps) -> ContactsOps = { it },
 ) {
+    private var picture: Luma? = null
     val scope = CoroutineScope(Dispatchers.Default)
     val repo = FakeContactsRepository(drafts, SampleCards.groups)
     val files = FakeFilesRepository()
@@ -79,6 +88,10 @@ internal class IntakeRig(
     val trash: ContactTrash
     val book: BookRepository
     val model: IntakeViewModel
+    val ops: ContactsOps
+
+    /** The pictures the model asked the reader for. */
+    val picked = mutableListOf<String>()
 
     init {
         val lib = File(System.getProperty("rovsti.hostLib").orEmpty())
@@ -99,7 +112,9 @@ internal class IntakeRig(
                     ).await()
             }
         assertTrue("Rust.init: $started", started is Outcome.Ok)
-        val ops = NativeContactsOps(Rust.core())
+        val ops = wrap(NativeContactsOps(Rust.core()))
+        this.ops = ops
+        picture = makePicture?.let { make -> runBlocking { make(NativeQrOps(Rust.core())) } }
         store = ContactsStore(ops, File(root, "store").apply { mkdirs() }.absolutePath) { SampleCards.NOW }
         trash = ContactTrash(repo, store)
         book = BookRepository(repo, MutableStateFlow(PermissionState.Granted), NativeSearchOps(Rust.core()), ops, scope)
@@ -107,6 +122,7 @@ internal class IntakeRig(
             val picked = File(staging, "picked.vcf").apply { writeText(file) }
             files.readResult = FileResult.Ok(name = "people.vcf", path = picked.absolutePath, mime = "text/x-vcard")
         }
+        if (csv != null) files.readResult = FileResult.Ok(name = "people.csv", text = csv, mime = "text/csv")
         model =
             IntakeViewModel(
                 source = source(this),
@@ -118,6 +134,11 @@ internal class IntakeRig(
                 trash = trash,
                 scope = scope,
                 stagingDir = staging,
+                qr = NativeQrOps(Rust.core()),
+                luma = { uri ->
+                    picked += uri
+                    picture
+                },
             )
     }
 
@@ -141,6 +162,10 @@ internal class IntakeRig(
         fun file(uri: String = "content://x/people.vcf") = { _: IntakeRig -> IntakeSource.File(uri) }
 
         val paste = { _: IntakeRig -> IntakeSource.Paste }
+
+        fun scan(uri: String = "content://media/picker/qr.png") = { _: IntakeRig -> IntakeSource.Scan(uri) }
+
+        fun csv(uri: String = "content://x/people.csv") = { _: IntakeRig -> IntakeSource.Csv(uri) }
     }
 }
 

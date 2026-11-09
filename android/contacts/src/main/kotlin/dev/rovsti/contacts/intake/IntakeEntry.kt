@@ -9,11 +9,15 @@ import androidx.compose.runtime.rememberUpdatedState
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.people.presentContactChooser
+import dev.rovsti.design.overlay.AlertAction
+import dev.rovsti.design.overlay.AlertEntry
+import dev.rovsti.design.overlay.AlertRole
 import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
 import dev.rovsti.design.transition.TabNavigator
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -25,7 +29,13 @@ fun rememberIntakeModel(
 ): IntakeViewModel =
     remember(container, route) {
         IntakeViewModel(
-            source = if (route.paste) IntakeSource.Paste else IntakeSource.File(route.uri),
+            source =
+                when {
+                    route.paste -> IntakeSource.Paste
+                    route.scan -> IntakeSource.Scan(route.uri)
+                    route.csv -> IntakeSource.Csv(route.uri)
+                    else -> IntakeSource.File(route.uri)
+                },
             ops = container.ops,
             repo = container.contacts,
             book = container.book,
@@ -34,6 +44,8 @@ fun rememberIntakeModel(
             trash = container.trash,
             scope = container.scope,
             stagingDir = container.context.cacheDir,
+            qr = container.qr,
+            luma = AndroidLumaReader(container.context),
         )
     }
 
@@ -71,6 +83,16 @@ fun IntakeEffects(
                     host.showUndo(
                         effect.message,
                         onUndo = { scope.launch { host.showToast(effect.undo()) } },
+                    )
+                }
+
+                is IntakeEffect.Alert -> {
+                    host.present(
+                        AlertEntry(
+                            heading = effect.title,
+                            message = effect.message,
+                            actions = persistentListOf(AlertAction("OK", AlertRole.Cancel)),
+                        ),
                     )
                 }
 

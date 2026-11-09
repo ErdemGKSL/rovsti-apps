@@ -16,11 +16,24 @@ sealed interface IntakeSource {
 
     /** "Paste Contact": the primary clip, read when the model starts. */
     data object Paste : IntakeSource
+
+    /** "Scan QR Code": a picture from the Photo Picker ([uri] as text) that may show a QR code (C19). */
+    data class Scan(
+        val uri: String,
+    ) : IntakeSource
+
+    /** "Import CSV": a CSV document ([uri] as text); the person says what the columns hold first (C39). */
+    data class Csv(
+        val uri: String,
+    ) : IntakeSource
 }
 
 enum class IntakePhase {
     /** The file is read and planned; the page shows a status line. */
     Reading,
+
+    /** A CSV was read; the mapping sheet is up and the person says what each column holds. */
+    Mapping,
 
     /** The preview sheet is up. */
     Preview,
@@ -80,6 +93,7 @@ data class IntakeUiState(
     /** A single card can also go into a contact that exists ("Add to Existing Contact"). */
     val canAddToExisting: Boolean = false,
     val preview: CardPreview? = null,
+    val mapping: CsvMappingUi? = null,
 ) {
     val canAdd: Boolean get() = phase == IntakePhase.Preview && rows.isNotEmpty()
 }
@@ -100,6 +114,15 @@ sealed interface IntakeAction {
     data class PickExisting(
         val id: Long,
     ) : IntakeAction
+
+    /** The person gave column [column] of the CSV the role [role]; the file is read again with it. */
+    data class SetRole(
+        val column: Int,
+        val role: CsvRole,
+    ) : IntakeAction
+
+    /** The mapping is done: the cards are planned against the address book and the preview opens. */
+    data object ConfirmMapping : IntakeAction
 }
 
 sealed interface IntakeEffect {
@@ -116,6 +139,12 @@ sealed interface IntakeEffect {
     /** The contacts a single card can be added to. */
     data class ChooseExisting(
         val people: ImmutableList<PersonItem>,
+    ) : IntakeEffect
+
+    /** An alert with one OK button ("No contact in this code"). The page closes with it. */
+    data class Alert(
+        val title: String,
+        val message: String,
     ) : IntakeEffect
 
     /** Plain text that is only a number or an address opens the editor with it. */

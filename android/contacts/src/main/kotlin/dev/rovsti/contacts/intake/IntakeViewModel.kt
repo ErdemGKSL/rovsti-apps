@@ -15,6 +15,7 @@ import dev.rovsti.core.model.contacts.CardPhoto
 import dev.rovsti.core.model.contacts.ContactDraft
 import dev.rovsti.core.model.contacts.DraftAddRequest
 import dev.rovsti.core.model.contacts.DraftField
+import dev.rovsti.core.model.contacts.DraftQueryRequest
 import dev.rovsti.core.model.contacts.ImportPhotosRequest
 import dev.rovsti.core.model.contacts.ImportPlanRequest
 import dev.rovsti.core.model.contacts.IntakeFormat
@@ -22,8 +23,11 @@ import dev.rovsti.core.model.contacts.IntakeKind
 import dev.rovsti.core.model.contacts.IntakeRequest
 import dev.rovsti.core.model.contacts.PhotoPlanRequest
 import dev.rovsti.core.model.contacts.ScanKind
+import dev.rovsti.core.model.contacts.ScanRequest
 import dev.rovsti.core.model.contacts.TextRequest
+import dev.rovsti.core.model.qr.QrDecodeRequest
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.core.ops.QrOps
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.files.ClipboardRepository
@@ -35,6 +39,7 @@ import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -70,6 +75,10 @@ class IntakeViewModel(
     private val scope: CoroutineScope,
     /** A cache directory for the pictures while they are written to the provider. */
     private val stagingDir: File,
+    /** `qr.decode` for "Scan QR Code". */
+    private val qr: QrOps,
+    /** The picked picture as gray values for [qr]. */
+    private val luma: LumaReader,
     private val worker: CoroutineDispatcher = Dispatchers.Default,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) {
@@ -115,12 +124,38 @@ class IntakeViewModel(
             is IntakeAction.PickExisting -> {
                 if (ui.value.phase == IntakePhase.Preview) scope.launch { addToExisting(action.id) }
             }
+
+            is IntakeAction.SetRole -> {
+                setRole(action.column, action.role)
+            }
+
+            IntakeAction.ConfirmMapping -> {
+                val ready = ui.value
+                if (ready.phase == IntakePhase.Mapping && ready.mapping?.canContinue == true) {
+                    scope.launch { confirmMapping() }
+                }
+            }
         }
     }
 
     // ---- reading ----
 
     private suspend fun load() {
+        when (source) {
+            is IntakeSource.Scan -> {
+                scan(source.uri)
+                return
+            }
+
+            is IntakeSource.Csv -> {
+                openCsv(source.uri)
+                return
+            }
+
+            else -> {
+                Unit
+            }
+        }
         val request = request() ?: return
         val answer = (ops.intake(request) as? Outcome.Ok)?.value
         if (answer == null) {
@@ -183,6 +218,10 @@ class IntakeViewModel(
                 } else {
                     IntakeRequest(source = "text", text = text)
                 }
+            }
+
+            is IntakeSource.Scan, is IntakeSource.Csv -> {
+                null
             }
 
             is IntakeSource.File -> {
@@ -290,6 +329,148 @@ class IntakeViewModel(
     ): String {
         val head = if (added == 1) "1 new contact" else "$added new contacts"
         return if (duplicates > 0) "$head, $duplicates already in your contacts" else head
+    }
+
+    // ---- scanning a picture (C19) ----
+
+    /**
+     * Picture to cards: the gray values go to `qr.decode`, each code that it reads goes to `contacts.scan`. The first
+     * code that holds something wins. A vCard opens the preview, a MECARD, a number or an address opens the editor, and
+     * anything else is the alert "No contact in this code".
+     */
+    private suspend fun scan(uri: String) {
+        val gray = luma.read(uri)
+        if (gray == null) {
+            finish("Can't read this picture")
+            return
+        }
+        val texts =
+            (
+                qr.decode(QrDecodeRequest(gray.width, gray.height, Base64.getEncoder().encodeToString(gray.bytes)))
+                    as? Outcome.Ok
+            )?.value?.texts.orEmpty()
+        for (text in texts) {
+            val found = (ops.scan(ScanRequest(text)) as? Outcome.Ok)?.value ?: continue
+            when (found.kind) {
+                ScanKind.Cards -> {
+                    if (isMecard(text) && found.cards.size == 1) {
+                        openEditor(seedOf(found.cards.first()))
+                    } else {
+                        val parsed = (ops.vcardParse(TextRequest(text)) as? Outcome.Ok)?.value
+                        if (parsed != null && parsed.contacts.isNotEmpty()) {
+                            plan(parsed.contacts, parsed.photos)
+                        } else {
+                            plan(found.cards, emptyList())
+                        }
+                    }
+                    return
+                }
+
+                ScanKind.Number, ScanKind.Email -> {
+                    val value = found.value.orEmpty()
+                    val made = (ops.draftFromQuery(DraftQueryRequest(value)) as? Outcome.Ok)?.value?.draft
+                    val plain =
+                        if (found.kind == ScanKind.Number) DraftSeed(number = value) else DraftSeed(email = value)
+                    openEditor(made?.let(::seedOf) ?: plain)
+                    return
+                }
+
+                ScanKind.Nothing -> {
+                    Unit
+                }
+            }
+        }
+        outbox.trySend(
+            IntakeEffect.Alert(
+                NO_CONTACT_IN_CODE,
+                if (texts.isEmpty()) "No QR code was found in this picture." else "This QR code holds no contact.",
+            ),
+        )
+        close()
+    }
+
+    private fun isMecard(text: String): Boolean = text.trimStart().startsWith("MECARD:", ignoreCase = true)
+
+    private fun openEditor(seed: DraftSeed) {
+        outbox.trySend(IntakeEffect.OpenEditor(seed))
+        close()
+    }
+
+    // ---- CSV (C39) ----
+
+    private var mapping: CsvMapping? = null
+    private var csvJob: Job? = null
+    private var csvCards: List<ContactDraft> = emptyList()
+
+    /** Reads the document, lets the Rust reader count what the file holds as it is, and opens the mapping sheet. */
+    private suspend fun openCsv(uri: String) {
+        val text =
+            when (val read = files.readUri(Uri.parse(uri), Documents.MAX_CONTACTS_BYTES, text = true)) {
+                is FileResult.Ok -> {
+                    read.text
+                }
+
+                FileResult.TooLarge -> {
+                    finish(TOO_BIG)
+                    return
+                }
+
+                FileResult.Cancelled -> {
+                    close()
+                    return
+                }
+
+                is FileResult.Failed -> {
+                    null
+                }
+            }
+        val map = text?.takeIf { it.isNotBlank() }?.let { CsvMapping(it) }
+        if (map == null || map.isEmpty) {
+            finish(UNREADABLE)
+            return
+        }
+        mapping = map
+        readCsv(map)
+        ui.update { it.copy(phase = IntakePhase.Mapping) }
+    }
+
+    private fun setRole(
+        column: Int,
+        role: CsvRole,
+    ) {
+        val current = mapping ?: return
+        if (ui.value.phase != IntakePhase.Mapping) return
+        if (current.columns.getOrNull(column) == null) return
+        val next = current.with(column, role)
+        mapping = next
+        // A newer choice replaces an older read that is still running; the sheet shows the columns at once.
+        csvJob?.cancel()
+        csvJob = scope.launch { readCsv(next) }
+    }
+
+    /** `contacts.csv_import` for the mapping as it stands; the sheet follows the answer. */
+    private suspend fun readCsv(map: CsvMapping) {
+        val parsed = (ops.csvImport(TextRequest(map.rewritten())) as? Outcome.Ok)?.value
+        csvCards = parsed?.contacts.orEmpty()
+        val n = csvCards.size
+        val skipped = parsed?.skipped ?: 0
+        val line =
+            when {
+                parsed == null -> "Can't read this file"
+                n == 0 -> "No contacts found with these columns"
+                n == 1 -> "1 contact found"
+                else -> "$n contacts found"
+            } + if (n > 0 && skipped > 0) ", $skipped rows left out" else ""
+        ui.update {
+            it.copy(mapping = CsvMappingUi(map.columns, line, n > 0))
+        }
+    }
+
+    private suspend fun confirmMapping() {
+        csvJob?.join()
+        val found = csvCards
+        if (found.isEmpty()) return
+        plan(found, emptyList())
     }
 
     // ---- the read-only card ----
@@ -439,6 +620,7 @@ class IntakeViewModel(
 
     companion object {
         const val NOTHING_TO_PASTE = "Nothing to paste"
+        const val NO_CONTACT_IN_CODE = "No contact in this code"
         private const val NO_CONTACTS = "This file has no contacts"
         private const val TOO_BIG = "This file is too big to open"
         private const val UNREADABLE = "Can't read this file"
@@ -466,6 +648,22 @@ class IntakeViewModel(
         }
     }
 }
+
+/** What the editor starts from for [draft]: its name and first number and address. */
+internal fun seedOf(draft: ContactDraft) =
+    DraftSeed(
+        name = listOf(draft.given, draft.family).filter { it.isNotBlank() }.joinToString(" "),
+        number =
+            draft.numbers
+                .firstOrNull { it.value.isNotBlank() }
+                ?.value
+                .orEmpty(),
+        email =
+            draft.emails
+                .firstOrNull { it.value.isNotBlank() }
+                ?.value
+                .orEmpty(),
+    )
 
 /** The name a card is listed under; a card without one is listed by what it has. */
 internal fun draftTitle(draft: ContactDraft): String =

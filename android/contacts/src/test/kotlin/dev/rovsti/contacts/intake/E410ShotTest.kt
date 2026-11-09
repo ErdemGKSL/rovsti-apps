@@ -88,6 +88,19 @@ class E410ShotTest : ShotTest() {
             advance(600)
         }
 
+    @Test fun scanResult() =
+        snap("e4.10-scan-result", {
+            IntakeHarness(previewState(count = 1, duplicates = 0, single = true))
+        })
+
+    @Test fun csvMapping() = snap("e4.10-csv-mapping", { IntakeHarness(mappingState()) })
+
+    @Test fun csvMappingMenu() =
+        snap("e4.10-csv-mapping-menu", { IntakeHarness(mappingState()) }) {
+            compose.onNodeWithTag(MappingTags.column(3)).performClick()
+            advance(1_000)
+        }
+
     @Test fun pasteNothingToast() {
         val fixture = AppFixture(granted = true)
         fixture.navigator.select(SettingsTab)

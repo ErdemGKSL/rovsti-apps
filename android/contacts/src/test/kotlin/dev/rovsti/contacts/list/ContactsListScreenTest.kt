@@ -236,7 +236,12 @@ class ContactsListScreenTest : ShotTest() {
         show(h)
         compose.onNodeWithTag("toolbar-select").performClick()
         compose.onNodeWithTag("toolbar-add").performClick()
-        advance(100)
+        advance(900)
+        // "+" opens a menu over the page (E4.10): New Contact, Paste Contact, Scan QR Code.
+        compose.onNodeWithText("Paste Contact").assertExists()
+        compose.onNodeWithText("Scan QR Code").assertExists()
+        compose.onNodeWithText("New Contact").performClick()
+        advance(600)
         assertTrue(h.actions.contains(ContactsListAction.EnterSelect(null)))
         assertTrue(h.actions.contains(ContactsListAction.NewContact))
     }

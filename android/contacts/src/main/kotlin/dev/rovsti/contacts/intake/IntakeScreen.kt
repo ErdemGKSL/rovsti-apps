@@ -86,13 +86,25 @@ fun IntakeScreen(
     val holder = rememberUpdatedState(state)
     val actions = rememberUpdatedState(onAction)
     var entry by remember { mutableStateOf<SheetEntry?>(null) }
-    val sheetWanted = state.phase == IntakePhase.Preview || state.phase == IntakePhase.Importing
-    LaunchedEffect(sheetWanted) {
-        if (sheetWanted && entry == null) {
-            entry = overlays.presentIntakeSheet(holder) { actions.value(it) }
+    var mappingEntry by remember { mutableStateOf<SheetEntry?>(null) }
+    val phase = state.phase
+    LaunchedEffect(phase) {
+        if (phase == IntakePhase.Mapping && mappingEntry == null) {
+            mappingEntry = overlays.presentMappingSheet(holder) { actions.value(it) }
+        }
+        if (phase == IntakePhase.Preview || phase == IntakePhase.Importing) {
+            // The mapping sheet gives way to the preview (its own dismissal is not a Cancel once the phase moved on).
+            mappingEntry?.let(overlays::dismiss)
+            mappingEntry = null
+            if (entry == null) entry = overlays.presentIntakeSheet(holder) { actions.value(it) }
         }
     }
-    DisposableEffect(overlays) { onDispose { entry?.let(overlays::dismiss) } }
+    DisposableEffect(overlays) {
+        onDispose {
+            entry?.let(overlays::dismiss)
+            mappingEntry?.let(overlays::dismiss)
+        }
+    }
     val listState = rememberLazyListState()
     LargeTitleScaffold(
         title = "Import",
@@ -118,6 +130,8 @@ private fun LazyListScope.statusItem(phase: IntakePhase) {
         ) {
             if (phase == IntakePhase.Reading) {
                 EmptyState(RovstiIcons.Download, "Reading Contacts", "Looking for people in the file.")
+            } else if (phase == IntakePhase.Mapping) {
+                EmptyState(RovstiIcons.Document, "Import CSV", "Match the columns in the sheet.")
             } else {
                 EmptyState(RovstiIcons.Download, "Import Contacts", "Choose what to add in the sheet.")
             }

@@ -62,12 +62,15 @@ sealed interface ContactsRoute {
 
     /**
      * The import page (E4.10): a vCard handed to the app by SEND or VIEW or picked in Settings ([uri] is the content
-     * URI as text), or [paste] for "Paste Contact", which reads the clipboard when the page opens.
+     * URI as text), or [paste] for "Paste Contact", which reads the clipboard when the page opens. With [scan] the
+     * [uri] is a picture that may show a QR code; with [csv] it is a CSV document.
      */
     @Serializable
     data class Intake(
         val uri: String = "",
         val paste: Boolean = false,
+        val scan: Boolean = false,
+        val csv: Boolean = false,
     ) : ContactsRoute
 
     // The common settings pages (shell CommonSettingsPage + the licence detail).

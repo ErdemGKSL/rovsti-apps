@@ -6,6 +6,7 @@ following projects. Files with ported code carry a header naming the source.
 ## glisse
 
 - Source: https://github.com/0kzh/glisse ("iOS 26 Liquid Glass for the web", TypeScript)
+- Licence: MIT. Copyright (c) 2026 Kelvin Zhang (full text below).
 - Used for: spring solver and constants, press/hold behaviour, refraction lens and rim-light maths, menu morph,
   tab bar / segmented control / switch / slider / input geometry and gesture rules, glass tokens.
 - glisse credits, in its own comments, Aave's web liquid glass (lens shape) and kube.io's CSS/SVG liquid glass article
@@ -45,6 +46,9 @@ SOFTWARE.
   `ios/` (foundation, menus, sheets, tab bar, navigation bar, list, swipe actions, button, toggle, slider, fields, toasts).
 - Each ported file keeps its original header and adds
   `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <original path>`.
+- Settings pages, ported into `android/shell/src/main/kotlin/dev/rovsti/shell/settings/` (E3.11): `ui/component/IosSettingsGroup.kt`
+  (`IosSettingsGroup.kt`), `ui/screens/settings/SettingsPage.kt` (`SettingsPage.kt`) and the rows of
+  `ui/screens/settings/AboutScreen.kt` (`AboutPage.kt`; the Convx links, donation rows and Discord are left out).
 - Not ported (music-player specific): code Convx itself adapted from BitChord, Flamingo, MeloX-Android and Square
   (all GPL-3.0; see Convx `NOTICE`).
 

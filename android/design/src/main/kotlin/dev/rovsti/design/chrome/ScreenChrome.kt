@@ -349,6 +349,8 @@ fun ScreenPage(
         onBack = onBack,
         onBackLongClick = onBackLongClick,
         actions = actions,
+        // The strip under the bar stays sharp while the large title is on screen, as in ScreenLazyPage.
+        collapse = { (scrollState.value / titleBlockHeight.toFloat()).coerceIn(0f, 1f) },
     ) {
         Column(
             modifier =

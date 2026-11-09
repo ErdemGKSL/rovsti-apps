@@ -47,9 +47,19 @@ class PortInventoryTest {
 
     @Test fun everyRowHasAnAllowedStatus() {
         val allowed =
-            listOf("ported", "dropped: ", "R2 E3.8a", "R2 E3.8b", "R2 E3.9", "app module")
+            listOf("ported", "dropped: ", "app module")
         val bad = bridgeRows().filter { row -> allowed.none { row[3].startsWith(it) } }.map { it[0] }
         assertEquals("status must start with one of $allowed", emptyList<String>(), bad)
+    }
+
+    /** E3 is done: no table row of the document waits for a round or a step. */
+    @Test fun noRowIsTodoOrWaitsForRoundTwo() {
+        val open =
+            doc
+                .readLines()
+                .filter { it.startsWith("| `") }
+                .filter { row -> Regex("""\bR2\b|\btodo\b""").containsMatchIn(row) }
+        assertEquals(emptyList<String>(), open)
     }
 
     @Test fun theDroppedAndDeferredFilesAreWhereThePlanPutThem() {

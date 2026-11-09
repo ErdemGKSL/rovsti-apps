@@ -744,7 +744,7 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 
 ---
 
-## E3. Platform layer (`:platform`, `:wa`, `:shell`)
+## E3. Platform layer (`:platform`, `:wa`, `:shell`) - DONE (R2)
 
 Goal: every Android capability of the GPUI apps is a Kotlin repository or service class with JVM tests, and the shared
 WhatsApp settings screen and app shell exist. Spec: ARCH 7, 5.
@@ -771,16 +771,24 @@ close E3). Haptics levels are Off/Light/Normal (`rovsti_core::wire::HapticsLevel
 | E3.5 | Telecom core: CallRegistry, audio path, proximity, call notifications | R1 | done (round-08 step 5) |
 | E3.6 | Notifications, reminders, shortcuts | R1 | done (round-08 step 6) |
 | E3.7 | Location, TripService, TripAlarm, AlarmSound, AlarmActivity | R1 | done (round-08 step 7) |
-| E3.8a | Files, media store, share, clipboard, Photo Picker, camera capture, SAF import/export | R2 | in-progress (round-09 step 1) |
+| E3.8a | Files, media store, share, clipboard, Photo Picker, camera capture, SAF import/export | R2 | done (round-09 step 1) |
 | E3.8b | Handoff, roles, `PermissionController` + `PermissionState` rules, special access, OEM settings (ARCH 7.5) | R2 | done (round-09 step 2) |
-| E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads, `WaAvatars` | R2 | in-progress (round-09 steps 3-5) |
-| E3.10 | Shared WhatsApp settings screen | R2 | in-progress (round-09 steps 3 and 6) |
-| E3.11 | `:shell`: RovstiRoot, base activity, containers, permission UI, common settings, licences | R2 | in-progress (round-09 steps 7-8) |
+| E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads, `WaAvatars` | R2 | done (round-09 steps 3-5) |
+| E3.10 | Shared WhatsApp settings screen | R2 | done (round-09 steps 3 and 6) |
+| E3.11 | `:shell`: RovstiRoot, base activity, containers, permission UI, common settings, licences | R2 | done (round-09 steps 7-8) |
 
-Next planner: **E3 R2** is E3.8a (files, media, share, `RovstiShareProvider`), E3.8b (roles, `PermissionController`, special
-access), E3.9 (`:wa`, on the `dev.rovsti.platform.wa` seams `WaPush`, `WaIncoming`, `WaCallAudio` + `CallFrames`), E3.10 and
-E3.11. It owns the round's screenshots (`e3.10-*`, `e3.11-*`). `docs/kotlin-ui/platform-port.md` lists what R1 left for it
-(rows marked `R2 E3.8a`, `R2 E3.8b`; `Mailbox` becomes intent handling in E3.11).
+Next planner: **E3 is done** (R1 and R2). Plan **E4 R1** (E4.1-E4.8, Contacts) next. E4.1's merged-manifest test uses
+`android/platform/src/test/resources/manifest/contacts.permissions.txt` (round-09 step 2); the app container implements
+`CommonSettings` (`:shell`, `dev.rovsti.shell.settings`) for its Appearance and Haptics prefs and puts `CommonSettingsGroup`
+at the end of its settings page. The apps get the whole platform through `:shell`.
+
+#### Evidence, E3 R2 (E3.8a-E3.11 done, round-09)
+
+- E3.8a (commit 6323952): `platform.files` (`Documents`, `MediaShare`, `RovstiShareProvider`, clipboard, Photo Picker, camera); `FqcnTest` (13 names), `NoMediaPermissionTest`, `PortInventoryTest`.
+- E3.8b (commit 96cc308): `PermissionState`, `PermissionController`, `SpecialAccess`; `PermissionStateTest`, `PermissionControllerTest`, `HandoffPermissionsTest`.
+- E3.9 (commits 288f0fb, c66376a): `:wa` `WaLinkStore`, `WaRepository`, `WaCalls`, `WaAvatars`; `WaRepositoryTest`, `WaCallsTest`, `WaAvatarsTest`, `WaLinkStoreTest`.
+- E3.10 (commit b299c48): `WhatsAppSettingsScreen`; `WhatsAppSettingsViewModelTest`, `WhatsAppSettingsScreenTest`, `E310ShotTest`; `android/wa/screenshots/e3.10-*` opened in that step.
+- E3.11 (commit e840c38, and round-09 step 8): `:shell` activity, container, permission UI, then `dev.rovsti.shell.settings`: `IosSettingsGroup`, `SettingsPage`, `AboutPage` (Convx ports with headers), `CommonSettings` + `FakeCommonSettings`, `AppearancePage`, `HapticsPage`, `LicencesPage`/`LicenceDetailPage`, `NoticesParser`; Gradle task `copyLicenceAssets`. Tests: `NoticesParserTest`, `CommonSettingsTest`, `SettingsPagesTest` (incl. last licence row clears the inset), `LicenceAssetsTest`, `E311SettingsShotTest`, `PermissionGateTest`, `RefreshRateTest`, `PortInventoryTest` (no `R2`/`todo` rows). PNGs opened in `android/shell/screenshots/`: `e3.11-settings-appearance` (segmented control full width in its card, footer wraps), `e3.11-settings-haptics` (radio rows, tick on the chosen one, no chevrons, Try it row with a tile), `e3.11-licences` and `e3.11-licences-fs2-light` (tiles aligned, "Kyant0/AndroidLiquidGlass (kmp branch)" wraps and the chevron stays), `e3.11-licence-detail` (glisse notice and full MIT text, clear of the bottom), `e3.11-about` (title, version pill, rows with tiles, Licences row), all light and dark. Found and fixed from the first shots: `ScreenPage` kept its large title blurred under the top fade (it did not pass `collapse` as `ScreenLazyPage` does), and radio rows showed chevrons.
 
 #### Evidence, E3 R1 (E3.1-E3.7 done, round-08)
 
@@ -838,8 +846,9 @@ E3.11. It owns the round's screenshots (`e3.10-*`, `e3.11-*`). `docs/kotlin-ui/p
 - AC1 `RovstiRoot` (content -> chrome -> overlay host), base activity (edge-to-edge, `adjustResize`, predictive back,
   highest refresh mode), `ShellContainer` base, `routeFor(intent)` pattern.
 - AC2 Permission request UI (rationale sheet, denied state row, open settings), common settings pages (Appearance
-  Auto/Light/Dark, Haptics Off/System/Strong, About with versions, Licences listing `THIRD_PARTY_NOTICES.md`).
-- Screenshots: `e3.11-permission-rationale`, `e3.11-settings-appearance`, `e3.11-licences`.
+  Auto/Light/Dark, Haptics Off/Light/Normal, About with versions, Licences listing `THIRD_PARTY_NOTICES.md`).
+- Screenshots: `e3.11-permission-rationale`, `e3.11-permission-denied-row`, `e3.11-settings-appearance`, `e3.11-settings-haptics`,
+  `e3.11-licences`, `e3.11-licence-detail`, `e3.11-about`, `e3.11-licences-fs2-light`.
 
 ---
 

@@ -252,6 +252,73 @@ object RovstiIcons {
         }
     }
 
+    /** A circle with its right half filled with hatching strokes: the light/dark glyph of Appearance. */
+    val Appearance: ImageVector by lazy {
+        stroked("Appearance") {
+            ring(12f, 12f, 8.5f)
+            moveTo(12f, 3.5f)
+            lineTo(12f, 20.5f)
+            moveTo(15f, 7f)
+            lineTo(15f, 17f)
+            moveTo(18f, 9.5f)
+            lineTo(18f, 14.5f)
+        }
+    }
+
+    /** A handset outline with a vibration arc on each side: the haptics glyph. */
+    val Haptics: ImageVector by lazy {
+        stroked("Haptics") {
+            moveTo(9.5f, 4f)
+            horizontalLineTo(14.5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 16f, 5.5f)
+            verticalLineTo(18.5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 14.5f, 20f)
+            horizontalLineTo(9.5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 8f, 18.5f)
+            verticalLineTo(5.5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 9.5f, 4f)
+            close()
+            moveTo(4.5f, 9f)
+            lineTo(4.5f, 15f)
+            moveTo(19.5f, 9f)
+            lineTo(19.5f, 15f)
+        }
+    }
+
+    /** A circle with a lower-case i: the information glyph. */
+    val Info: ImageVector by lazy {
+        stroked("Info") {
+            ring(12f, 12f, 9f)
+            moveTo(12f, 11f)
+            lineTo(12f, 16.5f)
+            moveTo(12f, 7.6f)
+            lineTo(12f, 7.7f)
+        }
+    }
+
+    /** A page with a folded corner and two text lines: the document glyph. */
+    val Document: ImageVector by lazy {
+        stroked("Document") {
+            moveTo(6.5f, 3.5f)
+            horizontalLineTo(13.5f)
+            lineTo(18.5f, 8.5f)
+            verticalLineTo(19.5f)
+            arcTo(1f, 1f, 0f, false, true, 17.5f, 20.5f)
+            horizontalLineTo(6.5f)
+            arcTo(1f, 1f, 0f, false, true, 5.5f, 19.5f)
+            verticalLineTo(4.5f)
+            arcTo(1f, 1f, 0f, false, true, 6.5f, 3.5f)
+            close()
+            moveTo(13f, 3.5f)
+            lineTo(13f, 9f)
+            lineTo(18.5f, 9f)
+            moveTo(8.5f, 13f)
+            lineTo(15.5f, 13f)
+            moveTo(8.5f, 16.5f)
+            lineTo(13f, 16.5f)
+        }
+    }
+
     /** Filled speech bubble: the SMS glyph. */
     val Sms: ImageVector by lazy { filled("Sms") { bubble() } }
 

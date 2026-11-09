@@ -53,4 +53,48 @@
     <string name="special_battery_on">Not restricted</string>
     <string name="special_battery_off">Android may stop Rovsti in the background</string>
     <string name="special_background_unknown">Allow autostart so calls and messages arrive</string>
+    <!-- Common settings pages -->
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_appearance_auto">Auto</string>
+    <string name="settings_appearance_light">Light</string>
+    <string name="settings_appearance_dark">Dark</string>
+    <string name="settings_appearance_footer">Auto follows the system setting. Light and Dark stay as chosen.</string>
+    <string name="settings_appearance_summary_auto">Follows the system</string>
+    <string name="settings_appearance_summary_light">Light</string>
+    <string name="settings_appearance_summary_dark">Dark</string>
+
+    <string name="settings_haptics">Haptics</string>
+    <string name="settings_haptics_off">Off</string>
+    <string name="settings_haptics_off_desc">No vibration anywhere in the app</string>
+    <string name="settings_haptics_light">Light</string>
+    <string name="settings_haptics_light_desc">Soft ticks, as the system allows them</string>
+    <string name="settings_haptics_normal">Normal</string>
+    <string name="settings_haptics_normal_desc">Full ticks you can feel in a pocket</string>
+    <string name="settings_haptics_level_header">Strength</string>
+    <string name="settings_haptics_try">Try it</string>
+    <string name="settings_haptics_try_desc">Plays one tap at the chosen strength</string>
+    <string name="settings_haptics_footer">Haptics only mark moments: a switch, a long press, a sheet snapping into place.</string>
+
+    <string name="settings_about">About</string>
+    <string name="settings_about_info_header">App information</string>
+    <string name="settings_about_installed">Installed</string>
+    <string name="settings_about_version">Version</string>
+    <string name="settings_about_build">Build</string>
+    <string name="settings_about_core">Rust core</string>
+    <string name="settings_about_core_unknown">Not loaded</string>
+    <string name="settings_about_unknown">Unknown</string>
+    <string name="settings_about_legal_header">Legal</string>
+    <string name="settings_about_licences_desc">GPL-3.0-or-later and third-party notices</string>
+
+    <string name="settings_licences">Licences</string>
+    <string name="settings_licences_app_header">This app</string>
+    <string name="settings_licences_third_party_header">Built with</string>
+    <string name="settings_licences_loading">Loading licences</string>
+    <string name="settings_licences_app_desc">GPL-3.0-or-later</string>
+    <string name="settings_licences_app_body">Rovsti is free software: you can redistribute it and change it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the licence or (at your option) any later version.</string>
+    <string name="settings_licences_text_header">Licence text</string>
+    <plurals name="settings_licences_sources">
+        <item quantity="one">%1$d source</item>
+        <item quantity="other">%1$d sources</item>
+    </plurals>
 </resources>

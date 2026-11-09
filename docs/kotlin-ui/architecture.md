@@ -130,7 +130,7 @@ recipes are in the reference files named in each row and are not repeated here.
 |---|---|---|
 | `theme` | `RovstiTheme` (colors light/dark, follows the system theme like `FOLLOW_SYSTEM_THEME = true` today in `crates/rovsti_ui/src/lib.rs`), typography in `sp` on the system font (no SF Pro), shapes, `Spacing` tokens (gutter 16, gaps 4/8/12/16/24, text gap 2, section gap 24), contrast test for every label on every preset | `references/navigation-layout.md` 6, 11; `references/glass.md` 4 |
 | `motion` | `RovstiMotion` spring and tween tokens with `visibilityThreshold`, the glisse spring solver (tests only), `Fling` projection (0.998), rubber band (0.55), reduce-motion gate `.gated()`, `MotionGate` freeze edges | `references/motion.md` 2-5; `references/performance.md` 5 |
-| `haptics` | `RovstiHaptics` (Off / System / Strong), fired only on the events in the table | `references/navigation-layout.md` 8 |
+| `haptics` | `RovstiHaptics` (modes Off / System / Strong; the app preference is Off / Light / Normal, `rovsti_core::wire::HapticsLevel`, mapped by `HapticsLevel.toMode()` in `:shell`), fired only on the events in the table | `references/navigation-layout.md` 8 |
 | `glass` | Convx backdrop engine (`backdrop/`), `liquidGlass`, freeze, pool; fallbacks only as Convx does them (pre-31, reduce transparency, low RAM) | `references/glass.md` 2-7 |
 | `press` | glass press node (ported from glisse `press.ts`), scale press, flat row press; all `Modifier.Node`, no `composed {}` | `references/motion.md` 7; `references/performance.md` 2 |
 | `overlay` | `OverlayHost`, `OverlayController`, `OverlayEntry`, `placePanel()`, context menu (simple and preview-card variants), button-anchored menu (glisse morph), popover, sheet with detents and pushback, alert, action sheet, confirm, toast / undo pill | `references/overlays.md` 1-10 |
@@ -474,6 +474,13 @@ Gateway URL rules come from `rovsti_wa_proto::url` through the bridge (AD-WA3). 
 `rovsti_wa_ui::avatars`: Rust decides what to fetch and when (`wa.avatars`, 429 back-off, pruning), Kotlin does the
 download and decode off the main thread and hands bitmaps to the Coil loader; it is part of `:wa` because Messages,
 Phone and Contacts all draw WhatsApp people.
+
+Common settings (`:shell`, `dev.rovsti.shell.settings`): every app's container implements `CommonSettings`, two nullable
+`StateFlow`s (`Appearance` Auto/Light/Dark; `HapticsLevel` Off/Light/Normal) over its own prefs ops. `null` hides the row and the
+page. `CommonSettingsGroup` is the row group an app's settings page ends with; `AppearancePage` (segmented control),
+`HapticsPage` (radio list and a preview tap), `AboutPage` (version name and code, Rust core version, installed date) and
+`LicencesPage` / `LicenceDetailPage` are the pages behind it. The licence pages read `THIRD_PARTY_NOTICES.md` and the repository
+`LICENSE`, copied into `:shell` assets by the `copyLicenceAssets` Gradle task and parsed by the pure `NoticesParser`.
 
 ### 7.5 Roles and permissions
 

@@ -8,6 +8,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.card.ContactCardPage
+import dev.rovsti.contacts.cleanup.CleanupPage
+import dev.rovsti.contacts.dupes.DupesPage
 import dev.rovsti.contacts.editor.ContactEditorPage
 import dev.rovsti.contacts.favorites.FavoritesPage
 import dev.rovsti.contacts.favorites.UpcomingPage
@@ -71,6 +73,8 @@ fun ContactsApp(
                 settings = container.commonSettings,
                 onOpenWhatsApp = { navigator.push(ContactsRoute.WhatsAppSettings) },
                 onOpenTrash = { navigator.push(ContactsRoute.Trash) },
+                onFindDuplicates = { navigator.push(ContactsRoute.Duplicates) },
+                onCleanUp = { navigator.push(ContactsRoute.Cleanup) },
                 onImportFile = import.importFile,
                 onPasteContact = import.pasteContact,
                 onScanQr = import.scanQr,
@@ -108,5 +112,7 @@ fun ContactsApp(
         entry<ContactsRoute.Trash> { TrashPage(container, pop) }
         entry<ContactsRoute.GroupPage> { route -> GroupPageDestination(container, route.id, navigator, pop) }
         entry<ContactsRoute.UpcomingBirthdays> { UpcomingPage(container, navigator, pop) }
+        entry<ContactsRoute.Duplicates> { DupesPage(container, pop) }
+        entry<ContactsRoute.Cleanup> { CleanupPage(container, pop) }
     }
 }

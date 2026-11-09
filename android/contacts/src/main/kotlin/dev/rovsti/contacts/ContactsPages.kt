@@ -61,6 +61,8 @@ object ContactsTags {
     const val ScanQr = "contacts-settings-scan-qr"
     const val ImportCsv = "contacts-settings-import-csv"
     const val ExportCsv = "contacts-settings-export-csv"
+    const val FindDuplicates = "contacts-settings-find-duplicates"
+    const val CleanUp = "contacts-settings-clean-up"
 }
 
 /**

@@ -57,6 +57,14 @@ sealed interface ContactsRoute {
     @Serializable
     data object UpcomingBirthdays : ContactsRoute
 
+    /** Settings "Find Duplicates" (E4.11): groups of contacts that look alike, with the merge review. */
+    @Serializable
+    data object Duplicates : ContactsRoute
+
+    /** Settings "Clean Up" (E4.11): contacts without a number, a name, a photo or a group. */
+    @Serializable
+    data object Cleanup : ContactsRoute
+
     @Serializable
     data object WhatsAppSettings : ContactsRoute
 
@@ -139,6 +147,8 @@ fun chromeFor(route: ContactsRoute): ChromeSpec =
         ContactsRoute.Trash,
         is ContactsRoute.GroupPage,
         ContactsRoute.UpcomingBirthdays,
+        ContactsRoute.Duplicates,
+        ContactsRoute.Cleanup,
         is ContactsRoute.Intake,
         -> ChromeSpec(TabBarMode.Hidden)
 

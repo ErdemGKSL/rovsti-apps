@@ -34,6 +34,7 @@ import dev.rovsti.platform.files.ClipboardRepository
 import dev.rovsti.platform.files.Documents
 import dev.rovsti.platform.files.FileResult
 import dev.rovsti.platform.files.FilesRepository
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineDispatcher
@@ -486,35 +487,7 @@ class IntakeViewModel(
         index: Int,
         draft: ContactDraft,
         photo: ImageBitmap?,
-    ): CardPreview {
-        val sections = ArrayList<PreviewSection>()
-
-        fun fields(
-            title: String,
-            list: List<DraftField>,
-        ) {
-            val lines = list.filter { it.value.isNotBlank() }.map { PreviewLine(it.label ?: it.kind.name, it.value) }
-            if (lines.isNotEmpty()) sections += PreviewSection(title, lines.toImmutableList())
-        }
-        fields("Phone", draft.numbers)
-        fields("Email", draft.emails)
-        fields("Address", draft.addresses)
-        if (draft.websites.isNotEmpty()) {
-            sections += PreviewSection("Website", draft.websites.map { PreviewLine("Website", it) }.toImmutableList())
-        }
-        if (draft.events.isNotEmpty()) {
-            sections +=
-                PreviewSection(
-                    "Dates",
-                    draft.events.map { PreviewLine(it.label ?: it.kind.name, it.date) }.toImmutableList(),
-                )
-        }
-        if (draft.note.isNotBlank()) {
-            sections += PreviewSection("Notes", persistentListOf(PreviewLine("Notes", draft.note)))
-        }
-        val subtitle = listOf(draft.title, draft.org).filter { it.isNotBlank() }.joinToString(", ").ifEmpty { null }
-        return CardPreview(index, draftTitle(draft), subtitle, photo, sections.toImmutableList())
-    }
+    ): CardPreview = CardPreview(index, draftTitle(draft), draftSubtitle(draft), photo, previewSectionsOf(draft))
 
     // ---- adding ----
 
@@ -692,3 +665,37 @@ internal fun draftSecondary(draft: ContactDraft): String? {
 
 /** The bytes of a staged copy of the picked file; the copy is deleted. Null when it cannot be read. */
 private fun takeBytes(file: File): ByteArray? = runCatching { file.readBytes() }.getOrNull().also { file.delete() }
+
+/** The read-only sections of one card (Phone, Email, Address, Website, Dates, Notes); empty ones are left out. */
+internal fun previewSectionsOf(draft: ContactDraft): ImmutableList<PreviewSection> {
+    val sections = ArrayList<PreviewSection>()
+
+    fun fields(
+        title: String,
+        list: List<DraftField>,
+    ) {
+        val lines = list.filter { it.value.isNotBlank() }.map { PreviewLine(it.label ?: it.kind.name, it.value) }
+        if (lines.isNotEmpty()) sections += PreviewSection(title, lines.toImmutableList())
+    }
+    fields("Phone", draft.numbers)
+    fields("Email", draft.emails)
+    fields("Address", draft.addresses)
+    if (draft.websites.isNotEmpty()) {
+        sections += PreviewSection("Website", draft.websites.map { PreviewLine("Website", it) }.toImmutableList())
+    }
+    if (draft.events.isNotEmpty()) {
+        sections +=
+            PreviewSection(
+                "Dates",
+                draft.events.map { PreviewLine(it.label ?: it.kind.name, it.date) }.toImmutableList(),
+            )
+    }
+    if (draft.note.isNotBlank()) {
+        sections += PreviewSection("Notes", persistentListOf(PreviewLine("Notes", draft.note)))
+    }
+    return sections.toImmutableList()
+}
+
+/** The title and the company of a card on one line ("Engineer, Acme"); null when it has neither. */
+internal fun draftSubtitle(draft: ContactDraft): String? =
+    listOf(draft.title, draft.org).filter { it.isNotBlank() }.joinToString(", ").ifEmpty { null }

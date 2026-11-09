@@ -46,6 +46,8 @@ fun ContactsSettingsPage(
     onOpenWhatsApp: () -> Unit,
     onOpenCommon: (CommonSettingsPage) -> Unit,
     onOpenTrash: () -> Unit = {},
+    onFindDuplicates: () -> Unit = {},
+    onCleanUp: () -> Unit = {},
     onImportFile: () -> Unit = {},
     onPasteContact: () -> Unit = {},
     onScanQr: () -> Unit = {},
@@ -103,6 +105,31 @@ fun ContactsSettingsPage(
                             )
                         },
                         onClick = onScanQr,
+                    ),
+                ),
+        )
+        IosSettingsGroup(
+            items =
+                listOf(
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RovstiIcons.People),
+                        title = {
+                            IosText(
+                                stringResource(R.string.settings_find_duplicates),
+                                Modifier.testTag(ContactsTags.FindDuplicates),
+                            )
+                        },
+                        onClick = onFindDuplicates,
+                    ),
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RovstiIcons.Checkmark),
+                        title = {
+                            IosText(
+                                stringResource(R.string.settings_clean_up),
+                                Modifier.testTag(ContactsTags.CleanUp),
+                            )
+                        },
+                        onClick = onCleanUp,
                     ),
                 ),
         )

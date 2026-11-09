@@ -17,6 +17,8 @@
     <string name="crop_choose">Choose</string>
     <string name="crop_rotate">Rotate</string>
     <string name="settings_trash">Trash</string>
+    <string name="settings_find_duplicates">Find Duplicates</string>
+    <string name="settings_clean_up">Clean Up</string>
     <string name="settings_import_file">Import from a File</string>
     <string name="settings_paste_contact">Paste Contact</string>
     <string name="settings_scan_qr">Scan QR Code</string>

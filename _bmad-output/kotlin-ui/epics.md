@@ -915,7 +915,7 @@ touching (`e4.1-settings`), **F14** card numbers in mixed display formats (`e4.3
 | E4.8 | Select mode | R1 | done (round-10) |
 | E4.9 | Share and shortcuts | R2 | in-progress (round-11 step 1) |
 | E4.10 | Import paths | R2 | in-progress (round-11 step 2-3) |
-| E4.11 | Duplicates, merge, Clean up | R2 | in-progress (round-11 step 4) |
+| E4.11 | Duplicates, merge, Clean up | R2 | done (round-11 step 4) |
 | E4.12 | Photo viewer on the card | R2 | in-progress (round-11 step 5) |
 | E4.13 | Ringtone, voicemail, block | R2 | in-progress (round-11 step 5) |
 | E4.14 | My card, emergency, recently added/edited | R2 | in-progress (round-11 step 6) |
@@ -990,6 +990,7 @@ host, every destructive action confirms or offers Undo as the GPUI app does.
 
 ### E4.11 Duplicates and Clean up
 - Screenshots: `e4.11-duplicates`, `e4.11-merge-preview`, `e4.11-cleanup-chips`.
+- Evidence (round 11 step 4): `dupes/DupesViewModel` + `DupesScreen` (groups from `contacts.dupes` once per book on Default, `merge_plan` preview in a Large sheet, merge saves the keeper then `ContactTrash.delete` for the losers, ONE undo pill for one group or Merge All) and `cleanup/CleanupViewModel` + `CleanupScreen` (one `ChipRow`, `SelectController` select mode and delete path of E4.8); Settings rows "Find Duplicates" / "Clean Up", routes `Duplicates` / `Cleanup`. Tests `DupesViewModelTest` (7, real core), `CleanupViewModelTest` (6), `DupesScreenTest`, `CleanupScreenTest` (chips scroll, one line at fs2). Goldens `e4.11-duplicates`, `-merge-preview`, `-cleanup-chips`, `-cleanup-chips-fs2`, `-cleanup-select` (light and dark) opened: one avatar per row, sources one text line, chips one line, title-bar buttons in ONE capsule (two capsules overlapped).
 
 ### E4.12 Photo viewer
 - Screenshots: `e4.12-viewer`, `e4.12-viewer-menu`.

@@ -1,0 +1,16 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/messages/text",
+  "body": {
+   "chat": "905321234567@s.whatsapp.net",
+   "text": "Tamam",
+   "quoted_id": "3EB0A1"
+  }
+ },
+ "status": 200,
+ "body": {
+  "message_id": "3EB0B2",
+  "timestamp_ms": 1790000000456
+ }
+}

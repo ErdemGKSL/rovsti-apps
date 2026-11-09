@@ -1,0 +1,14 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/calls",
+  "body": {
+   "to": "905321234567@s.whatsapp.net"
+  }
+ },
+ "status": 409,
+ "body": {
+  "code": "not_connected",
+  "message": "the phone is offline"
+ }
+}

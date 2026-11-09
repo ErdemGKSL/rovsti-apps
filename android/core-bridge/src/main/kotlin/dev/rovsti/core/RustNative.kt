@@ -48,13 +48,19 @@ object RustNative {
         flags: Int,
     ): ByteArray?
 
-    /** Microphone samples (16-bit PCM) for a call. */
+    /**
+     * One microphone frame for the `wa.call_audio_open` handle [call]: exactly 1 920 bytes (960 little-endian 16-bit
+     * samples, 60 ms at 16 kHz, mono). Any other size is dropped with a debug log. Use `CallAudio` instead.
+     */
     external fun audioPush(
         call: Long,
         pcm: ByteArray,
     )
 
-    /** Fills [out] with playback samples; returns the number of bytes written. */
+    /**
+     * Fills [out] (at least 1 920 bytes) with the next frame of the peer's voice and answers 1 920, `0` when no frame
+     * is ready yet, or `-1` when the call ended or the handle is gone.
+     */
     external fun audioPull(
         call: Long,
         out: ByteArray,

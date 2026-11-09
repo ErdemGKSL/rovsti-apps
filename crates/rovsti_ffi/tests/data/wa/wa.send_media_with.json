@@ -1,0 +1,12 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/messages/media?chat=905321234567%40s.whatsapp.net&kind=audio&mime=audio%2Fogg&quoted_id=3EB0A1&seconds=7&voice_note=true",
+  "body_b64": "T0dH"
+ },
+ "status": 200,
+ "body": {
+  "message_id": "3EB0B4",
+  "timestamp_ms": 1790000000999
+ }
+}

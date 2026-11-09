@@ -1,0 +1,15 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/read",
+  "body": {
+   "chat": "905321234567@s.whatsapp.net",
+   "sender": null,
+   "ids": [
+    "3EB0A1",
+    "3EB0A2"
+   ]
+  }
+ },
+ "status": 204
+}

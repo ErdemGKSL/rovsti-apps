@@ -11,8 +11,10 @@ mod search;
 mod shared;
 mod stops;
 mod tiles;
+mod wa;
 
 pub use tiles::tile_export;
+pub use wa::{audio_pull, audio_push};
 
 use crate::envelope::FfiError;
 use crate::guard::guarded;

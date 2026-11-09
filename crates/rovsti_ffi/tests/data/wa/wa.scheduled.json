@@ -1,0 +1,30 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/scheduled"
+ },
+ "status": 200,
+ "body": [
+  {
+   "id": "s1",
+   "chat": "905321234567@s.whatsapp.net",
+   "text": "Dogum gunun kutlu olsun",
+   "send_at_ms": 1790086400000,
+   "created_ms": 1790000000000,
+   "state": {
+    "status": "pending"
+   }
+  },
+  {
+   "id": "s0",
+   "chat": "905321234567@s.whatsapp.net",
+   "text": "Dogum gunun kutlu olsun",
+   "send_at_ms": 1790086400000,
+   "created_ms": 1790000000000,
+   "state": {
+    "status": "sent",
+    "message_id": "3EB0C0"
+   }
+  }
+ ]
+}

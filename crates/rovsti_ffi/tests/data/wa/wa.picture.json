@@ -1,0 +1,12 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/pictures/905321234567%40s.whatsapp.net?full=true"
+ },
+ "status": 200,
+ "headers": {
+  "Content-Type": "image/jpeg",
+  "ETag": "\"55\""
+ },
+ "body_text": "JPEG"
+}

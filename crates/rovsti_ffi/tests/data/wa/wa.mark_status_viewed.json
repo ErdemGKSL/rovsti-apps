@@ -1,0 +1,13 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/statuses/viewed",
+  "body": {
+   "ids": [
+    "st1",
+    "st2"
+   ]
+  }
+ },
+ "status": 204
+}

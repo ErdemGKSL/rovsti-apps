@@ -1,0 +1,11 @@
+{
+ "expect": {
+  "method": "PUT",
+  "path": "/v1/push",
+  "body": {
+   "app": "phone",
+   "token": "fcm-token-1"
+  }
+ },
+ "status": 204
+}

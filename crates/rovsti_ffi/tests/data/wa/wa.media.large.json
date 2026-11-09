@@ -1,0 +1,14 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/messages/3EB0A9/media"
+ },
+ "status": 200,
+ "headers": {
+  "Content-Type": "video/mp4"
+ },
+ "body_repeat": {
+  "byte": 65,
+  "len": 1100000
+ }
+}

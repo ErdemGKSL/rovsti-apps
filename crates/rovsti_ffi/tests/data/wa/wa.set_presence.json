@@ -1,0 +1,10 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/presence",
+  "body": {
+   "available": true
+  }
+ },
+ "status": 204
+}

@@ -22,6 +22,7 @@ object AllContracts {
             ChatContracts,
             StopsContracts,
             TilesContracts,
+            WaContracts,
         )
 
     val models: Map<String, KSerializer<*>> =

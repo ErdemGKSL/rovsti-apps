@@ -1,0 +1,7 @@
+{
+ "expect": {
+  "method": "DELETE",
+  "path": "/v1/scheduled/s1"
+ },
+ "status": 204
+}

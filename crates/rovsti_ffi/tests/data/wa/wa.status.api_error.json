@@ -1,0 +1,11 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/instance"
+ },
+ "status": 409,
+ "body": {
+  "code": "not_connected",
+  "message": "the phone is offline"
+ }
+}

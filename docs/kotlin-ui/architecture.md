@@ -294,7 +294,7 @@ Kotlin (dev.rovsti.core.RustNative)                          Rust (rovsti_ffi)
   external fun headless(kind: String, json: String): String      same contract as today's nativeHeadless (AD-MSG4)
   external fun tile(handle: Long, z: Int, x: Int, y: Int, flags: Int): ByteArray   binary geometry (8.4)
   external fun audioPush(call: Long, pcm: ByteArray)             960 i16 samples, 60 ms (AD-WA5), no base64
-  external fun audioPull(call: Long, out: ByteArray): Int
+  external fun audioPull(call: Long, out: ByteArray): Int          1 920 frame, 0 = none ready, -1 = call ended
   external fun setEventSink(sink: RustEvents)                    6.4
   external fun release(handle: Long)
 ```

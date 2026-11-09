@@ -1,0 +1,10 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/presence/subscribe",
+  "body": {
+   "jid": "905321234567@s.whatsapp.net"
+  }
+ },
+ "status": 204
+}

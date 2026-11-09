@@ -1,0 +1,11 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/chatstate",
+  "body": {
+   "chat": "905321234567@s.whatsapp.net",
+   "state": "typing"
+  }
+ },
+ "status": 204
+}

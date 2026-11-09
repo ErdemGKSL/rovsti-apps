@@ -8,6 +8,10 @@ import dev.rovsti.core.model.phone.AudioDiffAnswer
 import dev.rovsti.core.model.phone.AudioDiffRequest
 import dev.rovsti.core.model.phone.AudioRowsAnswer
 import dev.rovsti.core.model.phone.AudioRowsRequest
+import dev.rovsti.core.model.phone.BackupExportAnswer
+import dev.rovsti.core.model.phone.BackupExportRequest
+import dev.rovsti.core.model.phone.BackupImportAnswer
+import dev.rovsti.core.model.phone.BackupImportRequest
 import dev.rovsti.core.model.phone.BadgesAnswer
 import dev.rovsti.core.model.phone.BlockCallLineRequest
 import dev.rovsti.core.model.phone.BlockCheckAnswer
@@ -41,6 +45,8 @@ import dev.rovsti.core.model.phone.DialTextRequest
 import dev.rovsti.core.model.phone.DigitForAnswer
 import dev.rovsti.core.model.phone.DigitForRequest
 import dev.rovsti.core.model.phone.DirRequest
+import dev.rovsti.core.model.phone.DisplayNameAnswer
+import dev.rovsti.core.model.phone.DisplayNameRequest
 import dev.rovsti.core.model.phone.ElapsedAnswer
 import dev.rovsti.core.model.phone.ElapsedRequest
 import dev.rovsti.core.model.phone.FieldMenuAnswer
@@ -220,6 +226,15 @@ object PhoneContracts : ContractModels {
             op<TrackerHandleRequest, Empty>("phone.wa_tracker_clear")
             op<CanPlaceRequest, Empty>("phone.wa_tracker_can_place", err = listOf("busy", "no_number", "not_connected"))
             op<ElapsedRequest, ElapsedAnswer>("phone.wa_tracker_format_elapsed", ok = listOf("hour"))
+            op<BackupExportRequest, BackupExportAnswer>("phone.backup_export")
+            op<BackupImportRequest, BackupImportAnswer>(
+                "phone.backup_import",
+                err = listOf("not_a_backup", "newer", "empty"),
+            )
+            op<DisplayNameRequest, DisplayNameAnswer>(
+                "phone.display_name",
+                ok = listOf("first_last", "nameless"),
+            )
         }
 
     private inline fun <reified Req, reified Ans> MutableMap<String, KSerializer<*>>.op(

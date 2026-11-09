@@ -6168,6 +6168,7 @@ name = "rovsti_ffi"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "futures",
  "jni",
  "log",
  "qrcode",
@@ -6175,9 +6176,11 @@ dependencies = [
  "rovsti_core",
  "rovsti_geo",
  "rovsti_tiles",
+ "rovsti_wa_client",
  "rovsti_wa_proto",
  "serde",
  "serde_json",
+ "tokio-tungstenite 0.30.0",
 ]
 
 [[package]]

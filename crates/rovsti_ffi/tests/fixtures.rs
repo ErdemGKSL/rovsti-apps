@@ -14,6 +14,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod support;
+
 use rovsti_app_core::headless::{Handler, handle_any};
 use rovsti_ffi::{
     envelope::ErrorKind,
@@ -101,9 +103,20 @@ fn contract_fixtures_match() {
     for spec in registry::all() {
         for case in (spec.cases)() {
             let stem = case.stem(spec.name);
+            // `wa.*` cases talk to a loopback gateway that answers `tests/data/wa/<stem>.json`; `$WA` is its URL.
+            let wa_stub = (case.request.to_string().contains("$WA")
+                || case
+                    .setup
+                    .iter()
+                    .any(|(_, req)| req.to_string().contains("$WA")))
+            .then(|| support::start(support::Route::load(&data_dir().join("wa"), &stem)));
+            let wa_url = wa_stub
+                .as_ref()
+                .map_or(String::new(), |stub| stub.url.clone());
             let text = case
                 .request
                 .to_string()
+                .replace("$WA", &wa_url)
                 .replace("$DATA", data_dir().to_str().expect("utf-8 data dir"));
             let (text, tmp) = match case.seed {
                 Some(seed) => {
@@ -121,6 +134,7 @@ fn contract_fixtures_match() {
             for (setup_op, setup_req) in &case.setup {
                 let mut setup_text = setup_req
                     .to_string()
+                    .replace("$WA", &wa_url)
                     .replace("$DATA", data_dir().to_str().expect("utf-8 data dir"));
                 if let Some(dir) = &tmp {
                     setup_text = setup_text.replace("$DIR", dir.to_str().expect("utf-8 temp dir"));
@@ -151,7 +165,12 @@ fn contract_fixtures_match() {
                 answer = answer.replace(&handle.to_string(), &PLACEHOLDER_HANDLE.to_string());
                 handles::global().release(handle);
             }
+            if let Some(stub) = &wa_stub {
+                problems.extend(stub.problems(&stem));
+            }
             if let Some(tmp) = tmp {
+                // A temp file an op names in its answer is stable once the directory is `$DIR`.
+                answer = answer.replace(tmp.to_str().expect("utf-8 temp dir"), "$DIR");
                 let _ = fs::remove_dir_all(tmp);
             }
             // The request file keeps `$DIR`; only the run above sees the temp dir.

@@ -12,7 +12,7 @@ Classes:
 - `kotlin <target>`: per-keystroke or per-frame behaviour that must answer synchronously on the main thread; ported to Kotlin in
   the app epic, the Rust unit tests mirrored as JVM tests. The target names the planned module and file.
 - `none <reason>`: not needed by the Kotlin apps.
-- `todo`: not yet decided or built; allowed only for domains that are not in `DONE_DOMAINS`.
+- `todo`: not yet decided or built; allowed only for domains that are not in `DONE_DOMAINS` (every domain is done since E2.14, so no row is `todo`).
 
 Handles (E2.9): `search.index_new` and `phone.wa_tracker_new` answer `{"handle": <long>}`; every later op of that
 object sends the handle back, and `RustNative.release` frees it (a released or foreign handle answers `not_found`). The
@@ -97,6 +97,18 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 - `tiles.encode_mvt {mvt, z, x, y, flags}` is the pure half of `tile` (no cache, no network); its fixtures hold the real `.mvt` of
   `crates/rovsti_geo/src/tiles/testdata` and the buffer it becomes, which the Kotlin `TileBuffer` test decodes.
 
+WhatsApp (E2.14): `wa.open {url, key?, cache_dir?}` answers `{handle}`, a `rovsti_wa_client::Gateway`; every network op is `wa.<verb>` with `{handle, ...flat fields of the
+`rovsti_wa_proto` request}` and answers the proto type (field names are the gateway's). The client call runs outside the registry lock. Errors: `network`, `auth` (401 and 403),
+`invalid` with the gateway's own sentence (`detail.code` is its error code) and `parse`. Bytes (`wa.media`, `wa.thumbnail`, `wa.status_media`, `wa.status_thumbnail`, `wa.picture`)
+answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the handle's cache directory (Kotlin deletes it). `wa.send_media(_with)` takes `data_b64` or a `path`.
+`wa.events_start {handle, instance, after?}` answers a stream handle and emits every socket message as event `wa.event` `{instance, event}` with `event.kind` one of `connected`,
+`event` (`seq`, `at_ms`, `event` = the gateway event, tagged `type`), `disconnected {reason}`, `unauthorized`; `wa.events_reconnect_now`, `RustNative.release` stops it. `wa.call_audio_open
+{handle, call_id}` answers an audio handle for `RustNative.audioPush` / `audioPull` (frames of exactly 1 920 bytes; push drops any other size, pull answers 1 920, 0 when nothing
+is ready, -1 when the call ended). Fixtures run against a loopback stub that answers `crates/rovsti_ffi/tests/data/wa/<stem>.json` (`tests/support/mod.rs`); each file also states the request
+the client must have sent. Pure: `wa.push_parse` (FCM wake), `wa.link_read` / `wa.link_write` (`whatsapp-link.json`), `wa.avatars_plan` (picture file names and the disk prune plan; the
+`AvatarBook` fetch policy is ported to Kotlin with the Rust unit tests in `:wa`, E3), `wa.names`, `wa.target` (contact -> chat/number target and the JIDs to look up).
+Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads and writes the picked file), `phone.display_name`.
+
 | Item | Used by | Domain | Class | Target |
 |---|---|---|---|---|
 | `(bridge) core.version` | - | bridge | op | core.version |
@@ -107,9 +119,61 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 | `(bridge) core.emit_test` | - | bridge | op | core.emit_test |
 | `(qr) qr.encode` | contacts | qr | op | qr.encode |
 | `(qr) qr.decode` | contacts | qr | op | qr.decode |
+| `(wa) wa.call_audio_open` | - | wa | op | wa.call_audio_open |
+| `(wa) wa.events_reconnect_now` | - | wa | op | wa.events_reconnect_now |
+| `(wa) wa.events_start` | - | wa | op | wa.events_start |
+| `(wa) wa.media` | - | wa | op | wa.media |
+| `(wa) wa.open` | - | wa | op | wa.open |
+| `(wa) wa.picture` | - | wa | op | wa.picture |
+| `(wa) wa.push_parse` | - | wa | op | wa.push_parse |
+| `(wa) wa.send_media` | - | wa | op | wa.send_media |
+| `(wa) wa.status_media` | - | wa | op | wa.status_media |
+| `(wa) wa.status_thumbnail` | - | wa | op | wa.status_thumbnail |
+| `(wa) wa.thumbnail` | - | wa | op | wa.thumbnail |
+| `(wa) wa.accept_call` | - | wa | op | wa.accept_call |
+| `(wa) wa.calls` | - | wa | op | wa.calls |
+| `(wa) wa.cancel_scheduled` | - | wa | op | wa.cancel_scheduled |
+| `(wa) wa.chat_action` | - | wa | op | wa.chat_action |
+| `(wa) wa.chat_state` | - | wa | op | wa.chat_state |
+| `(wa) wa.chats` | - | wa | op | wa.chats |
+| `(wa) wa.chats_with_meta` | - | wa | op | wa.chats_with_meta |
+| `(wa) wa.create_instance` | - | wa | op | wa.create_instance |
+| `(wa) wa.delete_for_me` | - | wa | op | wa.delete_for_me |
+| `(wa) wa.delete_instance` | - | wa | op | wa.delete_instance |
+| `(wa) wa.edit_message` | - | wa | op | wa.edit_message |
+| `(wa) wa.end_call` | - | wa | op | wa.end_call |
+| `(wa) wa.group` | - | wa | op | wa.group |
+| `(wa) wa.groups` | - | wa | op | wa.groups |
+| `(wa) wa.keys` | - | wa | op | wa.keys |
+| `(wa) wa.lookup_users` | - | wa | op | wa.lookup_users |
+| `(wa) wa.mark_played` | - | wa | op | wa.mark_played |
+| `(wa) wa.mark_read` | - | wa | op | wa.mark_read |
+| `(wa) wa.mark_status_viewed` | - | wa | op | wa.mark_status_viewed |
+| `(wa) wa.messages` | - | wa | op | wa.messages |
+| `(wa) wa.messages_with_meta` | - | wa | op | wa.messages_with_meta |
+| `(wa) wa.mint_key` | - | wa | op | wa.mint_key |
+| `(wa) wa.place_call` | - | wa | op | wa.place_call |
+| `(wa) wa.profiles` | - | wa | op | wa.profiles |
+| `(wa) wa.react` | - | wa | op | wa.react |
+| `(wa) wa.refresh_profiles` | - | wa | op | wa.refresh_profiles |
+| `(wa) wa.register_push` | - | wa | op | wa.register_push |
+| `(wa) wa.reject_call` | - | wa | op | wa.reject_call |
+| `(wa) wa.relink` | - | wa | op | wa.relink |
+| `(wa) wa.revoke_key` | - | wa | op | wa.revoke_key |
+| `(wa) wa.revoke_message` | - | wa | op | wa.revoke_message |
+| `(wa) wa.schedule_text` | - | wa | op | wa.schedule_text |
+| `(wa) wa.scheduled` | - | wa | op | wa.scheduled |
+| `(wa) wa.send_media_with` | - | wa | op | wa.send_media_with |
+| `(wa) wa.send_text` | - | wa | op | wa.send_text |
+| `(wa) wa.set_muted` | - | wa | op | wa.set_muted |
+| `(wa) wa.set_presence` | - | wa | op | wa.set_presence |
+| `(wa) wa.star_message` | - | wa | op | wa.star_message |
+| `(wa) wa.status` | - | wa | op | wa.status |
+| `(wa) wa.statuses` | - | wa | op | wa.statuses |
+| `(wa) wa.subscribe_presence` | - | wa | op | wa.subscribe_presence |
 | `rovsti_app_core::contacts::prefs` | contacts | contacts | op | contacts.prefs_load, contacts.prefs_save |
 | `rovsti_app_core::contacts::trash_store` | contacts | contacts | op | contacts.trash_list, contacts.trash_push, contacts.trash_restore, contacts.trash_delete |
-| `rovsti_app_core::contacts::whatsapp` | contacts | wa | todo | - |
+| `rovsti_app_core::contacts::whatsapp` | contacts | wa | op | wa.target |
 | `rovsti_app_core::messages::access` | messages | messages | op | messages.access |
 | `rovsti_app_core::messages::drafts` | messages | messages | op | messages.drafts_load, messages.drafts_save, messages.drafts_put, messages.drafts_rekey |
 | `rovsti_app_core::messages::headless` | messages | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |
@@ -123,22 +187,22 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 | `rovsti_app_core::stops::snap` | stops | stops | op | stops.snap |
 | `rovsti_app_core::stops::store` | stops | stops | op | stops.store_trip_load, stops.store_trip_save, stops.store_trip_end, stops.store_read, stops.store_write |
 | `rovsti_app_core::stops::types` | stops | stops | op | stops.pick_replay, stops.pick_labels, stops.pick_save_offer |
-| `rovsti_app_core::storage::BackupRefusal` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::Loaded` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::Origin` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::PREFS_FILE` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::Prefs` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::backup_json` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::copy_aside` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::load_json` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::load_prefs` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::parse_backup` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::save_json` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::storage::save_prefs` | rovsti_ui | platform | todo | - |
-| `rovsti_app_core::wa_link::avatars` | rovsti_wa_ui | wa | todo | - |
-| `rovsti_app_core::wa_link::link` | rovsti_wa_ui | wa | todo | - |
-| `rovsti_app_core::wa_link::names` | rovsti_wa_ui | wa | todo | - |
-| `rovsti_app_core::wa_link::send` | rovsti_wa_ui | wa | todo | - |
+| `rovsti_app_core::storage::BackupRefusal` | rovsti_ui | platform | op | phone.backup_export, phone.backup_import |
+| `rovsti_app_core::storage::Loaded` | rovsti_ui | platform | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_app_core::storage::Origin` | rovsti_ui | platform | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_app_core::storage::PREFS_FILE` | rovsti_ui | platform | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_app_core::storage::Prefs` | rovsti_ui | platform | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_app_core::storage::backup_json` | rovsti_ui | platform | op | phone.backup_export, phone.backup_import |
+| `rovsti_app_core::storage::copy_aside` | rovsti_ui | platform | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_app_core::storage::load_json` | rovsti_ui | platform | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_app_core::storage::load_prefs` | rovsti_ui | platform | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_app_core::storage::parse_backup` | rovsti_ui | platform | op | phone.backup_export, phone.backup_import |
+| `rovsti_app_core::storage::save_json` | rovsti_ui | platform | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_app_core::storage::save_prefs` | rovsti_ui | platform | op | phone.prefs_load, phone.prefs_save |
+| `rovsti_app_core::wa_link::avatars` | rovsti_wa_ui | wa | op | wa.avatars_plan |
+| `rovsti_app_core::wa_link::link` | rovsti_wa_ui | wa | op | wa.link_read, wa.link_write |
+| `rovsti_app_core::wa_link::names` | rovsti_wa_ui | wa | op | wa.names |
+| `rovsti_app_core::wa_link::send` | rovsti_wa_ui | wa | none | served by the messages headless kinds wa_digest and wa_reply (E2.6, fixtures headless.*) |
 | `rovsti_core::Channel` | messages | messages | op | inbox.preferred_channel |
 | `rovsti_core::Message` | messages | messages | op | inbox.merge, sms.to_message |
 | `rovsti_core::MessageDirection` | messages | messages | op | inbox.merge, sms.to_message |
@@ -380,7 +444,7 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 | `rovsti_core::mute::MuteFor` | messages | messages | op | mute.choices |
 | `rovsti_core::mute::header_line` | messages | messages | op | mute.status |
 | `rovsti_core::mute::muted_notice` | messages | messages | op | mute.status |
-| `rovsti_core::names::display` | phone | platform | todo | - |
+| `rovsti_core::names::display` | phone | platform | op | phone.display_name |
 | `rovsti_core::notify::Incoming` | messages | messages | op | notify.build |
 | `rovsti_core::notify::MAX_LINES` | messages | messages | op | notify.build |
 | `rovsti_core::notify::NotificationSpec` | messages | messages | op | notify.build |
@@ -427,10 +491,10 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 | `rovsti_core::schedule::ScheduledSms` | messages | messages | op | schedule.add |
 | `rovsti_core::search::ContactIndex` | contacts,messages,phone | search | op | search.index_new, search.index_replace, search.set_call_counts, search.query, search.query_loose, search.match_number |
 | `rovsti_core::search::fold` | contacts,phone,stops | search | op | search.fold |
-| `rovsti_core::settings::BACKUP_KIND` | phone | platform | todo | - |
+| `rovsti_core::settings::BACKUP_KIND` | phone | platform | op | phone.backup_export, phone.backup_import |
 | `rovsti_core::settings::DEFAULT_REPLIES` | phone | phone | op | phone.reply_choices |
 | `rovsti_core::settings::HapticKind` | rovsti_ui | phone | kotlin | :design Haptics.kt (per-tap check, main thread; Rust table mirrored as a JVM test) |
-| `rovsti_core::settings::ImportPreview` | phone | platform | todo | - |
+| `rovsti_core::settings::ImportPreview` | phone | platform | op | phone.backup_import |
 | `rovsti_core::settings::MAX_REPLIES` | phone | phone | op | phone.reply_choices |
 | `rovsti_core::settings::MAX_REPLY_CHARS` | phone | phone | op | phone.reply_choices |
 | `rovsti_core::settings::PrefsV2` | phone | phone | op | phone.prefs_load, phone.prefs_save |
@@ -439,7 +503,7 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 | `rovsti_core::settings::Settings` | phone | phone | op | phone.prefs_load, phone.prefs_save |
 | `rovsti_core::settings::SortBy` | contacts,phone | phone | op | phone.prefs_load, phone.prefs_save |
 | `rovsti_core::settings::SpeedDialEntry` | phone | phone | op | phone.prefs_load, phone.prefs_save |
-| `rovsti_core::settings::backup_file_name` | phone | platform | todo | - |
+| `rovsti_core::settings::backup_file_name` | phone | platform | op | phone.backup_export |
 | `rovsti_core::settings::effective_keypad_tones` | phone | phone | op | phone.keypad_tones |
 | `rovsti_core::settings::haptic_allowed` | rovsti_ui | phone | kotlin | :design Haptics.kt (per-tap check, main thread; Rust table mirrored as a JVM test) |
 | `rovsti_core::settings::reply_choices` | phone | phone | op | phone.reply_choices |
@@ -551,47 +615,47 @@ style, bit 1 for the cache only (a tile that is not cached is `not_found` with `
 | `rovsti_core::voice_player::PlayerState` | messages | messages | op | voice_player.toggle |
 | `rovsti_core::voice_player::Speed` | messages | messages | op | voice_player.speeds |
 | `rovsti_core::voice_player::TogglePlan` | messages | messages | op | voice_player.toggle |
-| `rovsti_core::wire::AudioRoute` | phone | wa | todo | - |
-| `rovsti_core::wire::AudioState` | phone | wa | todo | - |
-| `rovsti_core::wire::BlockReason` | phone | wa | todo | - |
-| `rovsti_core::wire::BlockedNumber` | messages,phone | wa | todo | - |
-| `rovsti_core::wire::BlocklistPayload` | messages,phone | wa | todo | - |
-| `rovsti_core::wire::CallLogEntry` | contacts,phone | wa | todo | - |
-| `rovsti_core::wire::CallLogKind` | contacts,phone | wa | todo | - |
-| `rovsti_core::wire::CallLogPayload` | contacts,phone | wa | todo | - |
-| `rovsti_core::wire::CallSnapshot` | phone | wa | todo | - |
-| `rovsti_core::wire::ContactsPayload` | contacts,messages,phone | wa | todo | - |
-| `rovsti_core::wire::DisconnectCause` | phone | wa | todo | - |
-| `rovsti_core::wire::DocumentOp` | contacts,messages,phone,stops | wa | todo | - |
-| `rovsti_core::wire::DocumentResult` | contacts,messages,phone,stops | wa | todo | - |
-| `rovsti_core::wire::EmergencyList` | messages,phone | wa | todo | - |
-| `rovsti_core::wire::Endpoint` | phone | wa | todo | - |
-| `rovsti_core::wire::EndpointHint` | phone | wa | todo | - |
-| `rovsti_core::wire::EndpointType` | phone | wa | todo | - |
-| `rovsti_core::wire::Envelope` | contacts,messages,phone | wa | todo | - |
-| `rovsti_core::wire::FavoritesPayload` | phone | wa | todo | - |
-| `rovsti_core::wire::Handoff` | messages,phone | wa | todo | - |
-| `rovsti_core::wire::HandoffAction` | messages | wa | todo | - |
-| `rovsti_core::wire::HapticsLevel` | phone,rovsti_ui | wa | todo | - |
-| `rovsti_core::wire::NameFormat` | contacts,phone | wa | todo | - |
-| `rovsti_core::wire::OpenSystemResponse` | phone | wa | todo | - |
-| `rovsti_core::wire::PendingOp` | phone | wa | todo | - |
-| `rovsti_core::wire::PhoneAccountInfo` | phone | wa | todo | - |
-| `rovsti_core::wire::PhoneAccounts` | phone | wa | todo | - |
-| `rovsti_core::wire::PhoneAccountsResponse` | phone | wa | todo | - |
-| `rovsti_core::wire::SettingsSync` | phone | wa | todo | - |
-| `rovsti_core::wire::SilencedBy` | phone | wa | todo | - |
-| `rovsti_core::wire::UiRequest` | phone | wa | todo | - |
-| `rovsti_core::wire::UiRequestKind` | phone | wa | todo | - |
-| `rovsti_core::wire::WireCall` | phone | wa | todo | - |
-| `rovsti_core::wire::WireCallState` | phone | wa | todo | - |
-| `rovsti_core::wire::WireContact` | contacts,messages,phone | wa | todo | - |
-| `rovsti_core::wire::WireError` | contacts,messages,phone | wa | todo | - |
-| `rovsti_core::wire::WireNumber` | contacts,messages,phone | wa | todo | - |
-| `rovsti_core::wire::WriteError` | phone | wa | todo | - |
-| `rovsti_core::wire::caps` | phone | wa | todo | - |
-| `rovsti_core::wire::parse_handoff` | messages,phone | wa | todo | - |
-| `rovsti_core::wire::props` | phone | wa | todo | - |
+| `rovsti_core::wire::AudioRoute` | phone | wa | op | audio.rows, audio.diff |
+| `rovsti_core::wire::AudioState` | phone | wa | op | audio.rows, audio.diff |
+| `rovsti_core::wire::BlockReason` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::BlockedNumber` | messages,phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::BlocklistPayload` | messages,phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::CallLogEntry` | contacts,phone | wa | op | recents.refresh_delta, call_log.counts |
+| `rovsti_core::wire::CallLogKind` | contacts,phone | wa | op | recents.refresh_delta, call_log.counts |
+| `rovsti_core::wire::CallLogPayload` | contacts,phone | wa | op | recents.refresh_delta, call_log.counts |
+| `rovsti_core::wire::CallSnapshot` | phone | wa | op | scene.of, scene.diff |
+| `rovsti_core::wire::ContactsPayload` | contacts,messages,phone | wa | op | search.index_new |
+| `rovsti_core::wire::DisconnectCause` | phone | wa | op | scene.of, scene.diff |
+| `rovsti_core::wire::DocumentOp` | contacts,messages,phone,stops | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::DocumentResult` | contacts,messages,phone,stops | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::EmergencyList` | messages,phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::Endpoint` | phone | wa | op | scene.of, scene.diff |
+| `rovsti_core::wire::EndpointHint` | phone | wa | op | scene.of, scene.diff |
+| `rovsti_core::wire::EndpointType` | phone | wa | op | scene.of, scene.diff |
+| `rovsti_core::wire::Envelope` | contacts,messages,phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::FavoritesPayload` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::Handoff` | messages,phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::HandoffAction` | messages | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::HapticsLevel` | phone,rovsti_ui | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::NameFormat` | contacts,phone | wa | op | search.index_new |
+| `rovsti_core::wire::OpenSystemResponse` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::PendingOp` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::PhoneAccountInfo` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::PhoneAccounts` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::PhoneAccountsResponse` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::SettingsSync` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::SilencedBy` | phone | wa | op | scene.of, scene.diff |
+| `rovsti_core::wire::UiRequest` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::UiRequestKind` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::WireCall` | phone | wa | op | scene.of, scene.diff |
+| `rovsti_core::wire::WireCallState` | phone | wa | op | scene.of, scene.diff |
+| `rovsti_core::wire::WireContact` | contacts,messages,phone | wa | op | search.index_new |
+| `rovsti_core::wire::WireError` | contacts,messages,phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::WireNumber` | contacts,messages,phone | wa | op | search.index_new |
+| `rovsti_core::wire::WriteError` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::caps` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::parse_handoff` | messages,phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
+| `rovsti_core::wire::props` | phone | wa | none | GPUI-era service wire between rovsti_android and its Kotlin service; the Kotlin apps call Telecom and the providers directly in :platform (E3) |
 | `rovsti_core::zoom::Point` | contacts,messages,phone | input | kotlin | :design Zoom.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::zoom::Size` | contacts,messages,phone | input | kotlin | :design Zoom.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |
 | `rovsti_core::zoom::ZoomView` | contacts,messages,phone | input | kotlin | :design Zoom.kt (per-keystroke/per-frame, main thread; Rust tests mirrored as JVM tests) |

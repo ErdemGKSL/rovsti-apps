@@ -1,0 +1,10 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/calls/call1/mute",
+  "body": {
+   "muted": true
+  }
+ },
+ "status": 204
+}

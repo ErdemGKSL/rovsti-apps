@@ -1,0 +1,14 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/groups"
+ },
+ "status": 200,
+ "body": [
+  {
+   "jid": "120363041234567890@g.us",
+   "subject": "Aile",
+   "participants": []
+  }
+ ]
+}

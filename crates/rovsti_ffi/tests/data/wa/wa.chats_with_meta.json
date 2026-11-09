@@ -1,0 +1,41 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/chats"
+ },
+ "status": 200,
+ "body": [
+  {
+   "jid": "905321234567@s.whatsapp.net",
+   "name": "Ayse Yilmaz",
+   "last": {
+    "id": "3EB0A1",
+    "chat": "905321234567@s.whatsapp.net",
+    "sender": null,
+    "from_me": false,
+    "timestamp_ms": 1789999000000,
+    "body": {
+     "text": "Merhaba"
+    },
+    "reactions": [
+     {
+      "sender": null,
+      "from_me": true,
+      "emoji": "👍"
+     }
+    ]
+   },
+   "unread": 2,
+   "is_group": false,
+   "meta": {
+    "picture_id": "55",
+    "push_name": "ayse",
+    "pinned": true
+   },
+   "last_meta": {
+    "status": "read",
+    "sender_name": "ayse"
+   }
+  }
+ ]
+}

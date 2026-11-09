@@ -1,0 +1,11 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/pictures/120363041234567890%40g.us"
+ },
+ "status": 404,
+ "body": {
+  "code": "not_found",
+  "message": "no profile picture"
+ }
+}

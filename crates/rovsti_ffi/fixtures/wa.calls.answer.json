@@ -1,0 +1,1 @@
+{"ok":[{"call_id":"call1","peer":"905321234567@s.whatsapp.net","peer_name":"ayse","direction":"out","phase":"active","is_video":false,"started_ms":1789999000000,"ended_ms":null},{"call_id":"call0","peer":"905321234567@s.whatsapp.net","peer_name":"ayse","direction":"in","phase":{"ended":"missed"},"is_video":false,"started_ms":1789990000000,"ended_ms":1789990030000}]}

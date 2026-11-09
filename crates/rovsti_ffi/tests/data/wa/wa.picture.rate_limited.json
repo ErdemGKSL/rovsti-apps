@@ -1,0 +1,11 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/pictures/905321234567%40s.whatsapp.net"
+ },
+ "status": 429,
+ "body": {
+  "code": "rate_limited",
+  "message": "slow down"
+ }
+}

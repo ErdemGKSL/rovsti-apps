@@ -1,0 +1,7 @@
+{
+ "expect": {
+  "method": "DELETE",
+  "path": "/v1/keys/k2"
+ },
+ "status": 204
+}

@@ -101,25 +101,47 @@ pub extern "system" fn Java_dev_rovsti_core_RustNative_tile<'l>(
     })
 }
 
-/// Call audio arrives with E2.14; the push is dropped until then.
+/// One microphone frame (1 920 bytes of little-endian 16-bit PCM, 60 ms at 16 kHz) for the `wa.call_audio_open`
+/// handle `call`. Any other size, a full queue or a closed call drops the frame.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_rovsti_core_RustNative_audioPush<'l>(
-    _env: JNIEnv<'l>,
+    env: JNIEnv<'l>,
     _this: JObject<'l>,
-    _call: jlong,
-    _pcm: JByteArray<'l>,
+    call: jlong,
+    pcm: JByteArray<'l>,
 ) {
+    or_fallback((), || {
+        let pcm = read_bytes(&env, &pcm);
+        ops::audio_push(call, &pcm);
+    });
 }
 
-/// Answers 0 bytes pulled until E2.14.
+/// Fills `out` with the next frame of the peer's voice. Answers 1 920 (a frame), 0 (none ready yet) or -1 (the
+/// call ended or the handle is gone).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_rovsti_core_RustNative_audioPull<'l>(
-    _env: JNIEnv<'l>,
+    env: JNIEnv<'l>,
     _this: JObject<'l>,
-    _call: jlong,
-    _out: JByteArray<'l>,
+    call: jlong,
+    out: JByteArray<'l>,
 ) -> jint {
-    0
+    or_fallback(0, || {
+        let Ok(len) = env.get_array_length(&out) else {
+            return 0;
+        };
+        let mut frame = vec![0u8; usize::try_from(len).unwrap_or(0)];
+        let pulled = ops::audio_pull(call, &mut frame);
+        if pulled > 0 {
+            let signed: Vec<i8> = frame[..pulled as usize]
+                .iter()
+                .map(|&byte| byte as i8)
+                .collect();
+            if env.set_byte_array_region(&out, 0, &signed).is_err() {
+                return 0;
+            }
+        }
+        pulled
+    })
 }
 
 /// Registers the Kotlin `RustEvents` object (`null` clears it).

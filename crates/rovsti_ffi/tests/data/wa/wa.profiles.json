@@ -1,0 +1,25 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/contacts/profiles",
+  "body": {
+   "jids": [
+    "905321234567@s.whatsapp.net"
+   ],
+   "refresh": false
+  }
+ },
+ "status": 200,
+ "body": [
+  {
+   "jid": "905321234567@s.whatsapp.net",
+   "push_name": "ayse",
+   "contact_name": "Ayse Yilmaz",
+   "about": "Musait",
+   "picture_id": "55",
+   "business": false,
+   "verified_name": null,
+   "fetched_ms": 1789999000000
+  }
+ ]
+}

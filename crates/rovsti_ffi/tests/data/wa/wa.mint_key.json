@@ -1,0 +1,15 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/keys",
+  "body": {
+   "label": "Tablet"
+  }
+ },
+ "status": 200,
+ "body": {
+  "key_id": "k2",
+  "key": "rwk_BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
+  "label": "Tablet"
+ }
+}

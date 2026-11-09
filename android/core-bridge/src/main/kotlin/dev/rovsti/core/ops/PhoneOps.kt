@@ -10,6 +10,10 @@ import dev.rovsti.core.model.phone.AudioDiffAnswer
 import dev.rovsti.core.model.phone.AudioDiffRequest
 import dev.rovsti.core.model.phone.AudioRowsAnswer
 import dev.rovsti.core.model.phone.AudioRowsRequest
+import dev.rovsti.core.model.phone.BackupExportAnswer
+import dev.rovsti.core.model.phone.BackupExportRequest
+import dev.rovsti.core.model.phone.BackupImportAnswer
+import dev.rovsti.core.model.phone.BackupImportRequest
 import dev.rovsti.core.model.phone.BadgesAnswer
 import dev.rovsti.core.model.phone.BlockCallLineRequest
 import dev.rovsti.core.model.phone.BlockCheckAnswer
@@ -43,6 +47,8 @@ import dev.rovsti.core.model.phone.DialTextRequest
 import dev.rovsti.core.model.phone.DigitForAnswer
 import dev.rovsti.core.model.phone.DigitForRequest
 import dev.rovsti.core.model.phone.DirRequest
+import dev.rovsti.core.model.phone.DisplayNameAnswer
+import dev.rovsti.core.model.phone.DisplayNameRequest
 import dev.rovsti.core.model.phone.ElapsedAnswer
 import dev.rovsti.core.model.phone.ElapsedRequest
 import dev.rovsti.core.model.phone.FieldMenuAnswer
@@ -360,6 +366,15 @@ interface PhoneOps {
     /** `m:ss` or `h:mm:ss`. */
     suspend fun formatElapsed(req: ElapsedRequest): Outcome<ElapsedAnswer>
 
+    /** The backup file's name and text for the preferences; Kotlin writes the file. */
+    suspend fun backupExport(req: BackupExportRequest): Outcome<BackupExportAnswer>
+
+    /** Validates a picked file: the preview and the new preferences, or `RustError.Invalid` with the sentence. */
+    suspend fun backupImport(req: BackupImportRequest): Outcome<BackupImportAnswer>
+
+    /** The name a list row shows for a contact. */
+    suspend fun displayName(req: DisplayNameRequest): Outcome<DisplayNameAnswer>
+
     companion object {
         /** The Rust op behind each method. */
         val ops: List<String> =
@@ -438,6 +453,9 @@ interface PhoneOps {
                 "phone.wa_tracker_clear",
                 "phone.wa_tracker_can_place",
                 "phone.wa_tracker_format_elapsed",
+                "phone.backup_export",
+                "phone.backup_import",
+                "phone.display_name",
             )
     }
 }
@@ -665,4 +683,13 @@ class NativePhoneOps(
 
     override suspend fun formatElapsed(req: ElapsedRequest) =
         core.call("phone.wa_tracker_format_elapsed", req, ElapsedRequest.serializer(), ElapsedAnswer.serializer())
+
+    override suspend fun backupExport(req: BackupExportRequest) =
+        core.call("phone.backup_export", req, BackupExportRequest.serializer(), BackupExportAnswer.serializer())
+
+    override suspend fun backupImport(req: BackupImportRequest) =
+        core.call("phone.backup_import", req, BackupImportRequest.serializer(), BackupImportAnswer.serializer())
+
+    override suspend fun displayName(req: DisplayNameRequest) =
+        core.call("phone.display_name", req, DisplayNameRequest.serializer(), DisplayNameAnswer.serializer())
 }

@@ -15,6 +15,7 @@ test-ops = []
 
 [dependencies]
 base64.workspace = true
+futures.workspace = true
 jni.workspace = true
 log.workspace = true
 qrcode.workspace = true
@@ -22,9 +23,14 @@ rovsti_app_core.workspace = true
 rovsti_core.workspace = true
 rovsti_geo.workspace = true
 rovsti_tiles.workspace = true
+rovsti_wa_client.workspace = true
 rovsti_wa_proto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+# A throwaway WebSocket server for the event and call-audio tests (the same features rovsti_wa_client builds with).
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 
 [lints]
 workspace = true

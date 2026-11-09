@@ -1,0 +1,11 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/calls/call9/audio"
+ },
+ "status": 404,
+ "body": {
+  "code": "not_found",
+  "message": "no such call"
+ }
+}

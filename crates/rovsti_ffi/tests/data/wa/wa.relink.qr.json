@@ -1,0 +1,10 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/instance/link",
+  "body": {
+   "type": "qr"
+  }
+ },
+ "status": 204
+}

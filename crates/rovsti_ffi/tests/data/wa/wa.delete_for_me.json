@@ -1,0 +1,11 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/messages/delete",
+  "body": {
+   "chat": "905321234567@s.whatsapp.net",
+   "message_id": "3EB0A1"
+  }
+ },
+ "status": 204
+}

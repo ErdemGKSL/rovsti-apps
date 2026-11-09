@@ -1,0 +1,19 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/instances",
+  "body": {
+   "link": {
+    "type": "qr"
+   },
+   "app": "messages"
+  }
+ },
+ "status": 200,
+ "body": {
+  "instance_id": "inst1",
+  "key": "rwk_BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
+  "key_id": "k1"
+ },
+ "authed": false
+}

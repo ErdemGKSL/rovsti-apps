@@ -1,0 +1,11 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/statuses/st1/thumbnail"
+ },
+ "status": 200,
+ "headers": {
+  "Content-Type": "image/jpeg"
+ },
+ "body_text": "SMALL"
+}

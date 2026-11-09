@@ -6,6 +6,7 @@
 //! ordinary immutable models. The per-keystroke dial field (`dial::push`, long presses, font steps) is Kotlin
 //! (OPS.md); everything here is per event, not per frame.
 
+mod backup;
 mod calls;
 mod dial;
 mod log;
@@ -16,7 +17,14 @@ use super::registry::OpSpec;
 use serde_json::{Value, json};
 
 /// The op tables of the submodules, in the order the registry lists them.
-pub(super) const TABLES: &[&[OpSpec]] = &[log::OPS, people::OPS, dial::OPS, calls::OPS, store::OPS];
+pub(super) const TABLES: &[&[OpSpec]] = &[
+    log::OPS,
+    people::OPS,
+    dial::OPS,
+    calls::OPS,
+    store::OPS,
+    backup::OPS,
+];
 
 /// "now" of every fixture: 2026-09-21T17:33:20Z.
 pub(super) const NOW: i64 = 1_790_000_000_000;

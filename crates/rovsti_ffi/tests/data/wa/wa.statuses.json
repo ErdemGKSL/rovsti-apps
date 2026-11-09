@@ -1,0 +1,43 @@
+{
+ "expect": {
+  "method": "GET",
+  "path": "/v1/statuses"
+ },
+ "status": 200,
+ "body": {
+  "mine": [
+   {
+    "id": "st0",
+    "author": "905000000000@s.whatsapp.net",
+    "from_me": true,
+    "timestamp_ms": 1789980000000,
+    "kind": "text",
+    "text": "Merhaba",
+    "background_argb": 4278190080
+   }
+  ],
+  "authors": [
+   {
+    "author": "905321234567@s.whatsapp.net",
+    "name": "ayse",
+    "items": [
+     {
+      "id": "st1",
+      "author": "905321234567@s.whatsapp.net",
+      "timestamp_ms": 1789990000000,
+      "expires_ms": 1790076400000,
+      "kind": "image",
+      "media": {
+       "mime": "image/jpeg",
+       "size": 4096,
+       "width": 720,
+       "height": 1280,
+       "thumbnail": true
+      },
+      "author_name": "ayse"
+     }
+    ]
+   }
+  ]
+ }
+}

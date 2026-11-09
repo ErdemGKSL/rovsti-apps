@@ -1,0 +1,12 @@
+{
+ "expect": {
+  "method": "POST",
+  "path": "/v1/messages/media?chat=905321234567%40s.whatsapp.net&kind=image&mime=image%2Fjpeg&caption=Bak",
+  "body_b64": "SU1H"
+ },
+ "status": 200,
+ "body": {
+  "message_id": "3EB0B3",
+  "timestamp_ms": 1790000000789
+ }
+}

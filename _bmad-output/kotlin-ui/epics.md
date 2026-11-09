@@ -505,7 +505,7 @@ E1.1-E1.8 and E1.18, all done). The two epics are independent and can be planned
 
 ---
 
-## E2. Rust bridge (`crates/rovsti_app_core`, `crates/rovsti_ffi`, `:core-bridge`)
+## E2. Rust bridge (`crates/rovsti_app_core`, `crates/rovsti_ffi`, `:core-bridge`) - DONE (R2)
 
 Goal: the Kotlin apps can call every domain function they need, off the main thread, with typed models, contract
 tests and the cold-path `headless` entry. Spec: ARCH 6.
@@ -537,7 +537,42 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 | E2.11b | Messages domain ops: chat tools (find, gallery, export, search, forward, info, reminders, stars, marks, mute, quick replies, voice speeds, shared card, detection) | R2 | done (round-07 step 5; evidence below) |
 | E2.12 | Stops domain ops | R2 | done (round-07 step 6; evidence below) |
 | E2.13 | Tiles: binary geometry, cache usage, clear, offline area | R2 | done (round-07 step 7; evidence below) |
-| E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | in-progress (round-07 step 8) |
+| E2.14 | WhatsApp client ops, event stream, call audio frames, avatar plan | R2 | done (round-07 step 8; evidence below) |
+
+#### Evidence, E2.14 (round-07 step 8)
+- Rust, `rovsti_ffi/src/ops/wa/`: `mod.rs` (`wa.open {url, key?, cache_dir?}` -> a `Gateway` handle; `ClientError` -> envelope kinds in `map_error`: `network`,
+  `auth` for 401 and 403, `invalid` with the gateway's sentence and `detail.code`, `parse`), `rest.rs` (one op per `Gateway` method: instance create/status/relink/delete,
+  keys mint/list/revoke, register_push, chats(_with_meta), messages(_with_meta), send_text, schedule_text/scheduled/cancel_scheduled, send_media(_with),
+  media/thumbnail/status_media/status_thumbnail/picture as base64 or, over 1 MiB, a temp file in the handle's cache dir, react, mark_read, mark_played, presence,
+  chat_state, groups/group, lookup_users, profiles/refresh_profiles, statuses, mark_status_viewed, edit/revoke/delete_for_me/star, chat_action, calls place/list/accept/
+  reject/end/set_muted), `pure.rs` (`wa.push_parse`, `wa.link_read`, `wa.link_write`, `wa.avatars_plan`, `wa.names`, `wa.target`), `live.rs`
+  (`wa.events_start` -> a stream handle with its own thread that emits `wa.event {instance, event}`, `wa.events_reconnect_now`, release stops it; `wa.call_audio_open` ->
+  a `CallAudio` handle behind the `audioPush` / `audioPull` JNI exports: 1 920-byte frames, other sizes dropped with a debug log, pull answers 1 920 / 0 / -1 ended).
+- Inventory sweep: the 62 remaining `todo` rows are classified (`op`, or `none` for the GPUI-era service wire and the headless send path) and the two missing user-facing pieces
+  are built: `phone.backup_export`, `phone.backup_import` (`BackupFile` / `ImportPreview`), `phone.display_name`. `DONE_DOMAINS` now holds every domain (`wa`, `platform` added);
+  `OPS.md` has no `todo` row.
+- Fixtures: `tests/fixtures.rs` starts a loopback gateway per `wa.*` case that answers `tests/data/wa/<stem>.json` (71 canned files; each also states the request the client must
+  have sent, incl. bearer, method, path with query and body, and the test fails on a mismatch); `$WA` in a request is its URL, a temp-file path in an answer is `$DIR`. 57 `wa.*` ops
+  (97 fixture stems) and 3 new `phone.*` ops: INDEX now lists 978 stems (1 957 files incl. INDEX).
+- Rust tests beyond the fixtures: `tests/wa_live.rs` (a WebSocket stub: events arrive as `wa.event` in order with the `after` query and the bearer, a revoked key ends the stream
+  with `unauthorized`, release stops it; audio loopback: 6 frames pushed come back identical and in order, wrong sizes dropped, ended call -> -1), unit tests in `ops/wa/*`.
+- Gate (round-07 step 8, disk 14 GB free before; the workspace test ran with `CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0` because the debug-info build of the GPUI crates
+  fills the disk): `cargo fmt --all`, `cargo clippy --workspace --all-targets` (0 warnings), `cargo test --workspace` (3602 passed, 0 failed),
+  `cargo check -p rovsti_android --target aarch64-linux-android` ok. `cargo test -p rovsti_ffi`: 65 unit + 3 fixtures (978 stems) + 3 inventory + 2 bench (1 ignored, the release
+  bench: p95 0.74 ms `search.query` from E2.9) + 4 `wa_live`. `bash scripts/kotlin-ui-check.sh` ALL GREEN (Kotlin-facing crates 2178 Rust tests; `:core-bridge`
+  `testDebugUnitTest` 65, `testRustBridge` 73, 0 failures). No `:design` / `:catalog` UI code changed, so no screenshot is new (E2 has none).
+- Catalog APK (218 864 819 bytes, 209 MiB, debug): `android/catalog/build/outputs/apk/debug/catalog-debug.apk` carries `lib/arm64-v8a/librovsti_ffi.so` and `lib/x86_64/librovsti_ffi.so`
+  (`scripts/check-catalog-apk.sh` green).
+- Not in this story, by design: `AvatarBook` (the in-memory fetch policy of `rovsti_app_core::wa_link::avatars`) and `WaPanel` are state machines the Kotlin `:wa` module ports with their
+  Rust unit tests (E3); the ops here are the disk plan, names, target and link file. The loopback audio test lives in `rovsti_ffi/tests/wa_live.rs` (it needs the handle registry)
+  instead of `rovsti_wa_client/tests`.
+- Hand-off: next planner starts E3 R1 (`:platform`, `:wa`, `:shell`; `:shell` begins with `Rust.init` in `Application.onCreate`, `HeadlessClient` in `:platform`, `WaGateway` /
+  `WaEvents` / `CallAudio` in `:wa`) and may plan the E4-E7 app epics against the finished ops (`crates/rovsti_ffi/OPS.md` is the list of what is Rust and what is Kotlin).
+
+- Kotlin: `model.wa` (`WaModels`, `WaEventModels`: `GatewayEvent` with the gateway's `type` tag, `WaRequests`: flat `WithHandleSerializer`), `WaOps` / `NativeWaOps` (generated
+  1:1 from the op list), `WaGateway : RustHandle` (all methods, `startEvents` -> `WaEventStream`, `openCallAudio` -> `CallAudio`), `WaEvents.feed()` (sink overflow -> one
+  synthetic `WaFeed.Resync`), `model.phone.BackupModels`, `WaContracts`. Tests: `WaModelsTest`, `WaEventsTest` (JVM) and, in `testRustBridge` against a Kotlin loopback gateway with
+  a hand-written RFC 6455 peer (`FakeGateway`), `WaNativeTest` and `CallAudioTest` (through JNI).
 
 #### Evidence, E2.13 (round-07 step 7)
 - Format: `docs/kotlin-ui/tile-buffer.md` (`RVT1` v1, little-endian; header, class records, parts of tile-local f32 points; flags bit 0 dark,

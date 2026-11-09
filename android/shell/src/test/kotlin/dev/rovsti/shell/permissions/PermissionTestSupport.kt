@@ -57,9 +57,15 @@ internal fun SamplePage(content: @Composable () -> Unit = {}) {
         Modifier
             .fillMaxSize()
             .padding(WindowInsets.safeDrawing.asPaddingValues())
-            .padding(horizontal = Spacing.gutter, vertical = Spacing.gutter),
+            // No horizontal padding here: InsetGroupedSection brings the one 16 dp gutter itself (F11), so only the
+            // title, which is not in a section, takes it.
+            .padding(vertical = Spacing.gutter),
     ) {
-        RovstiText("Contacts", style = RovstiTheme.type.largeTitle, modifier = Modifier.padding(bottom = Spacing.m))
+        RovstiText(
+            "Contacts",
+            style = RovstiTheme.type.largeTitle,
+            modifier = Modifier.padding(horizontal = Spacing.gutter).padding(bottom = Spacing.m),
+        )
         content()
         InsetGroupedSection(header = "Recent") {
             for (name in listOf(

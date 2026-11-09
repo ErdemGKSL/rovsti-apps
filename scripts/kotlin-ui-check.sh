@@ -54,7 +54,7 @@ if [[ -z "${SKIP_GRADLE:-}" ]]; then
     [[ -n "${RECORD:-}" ]] && shot=recordRoborazziDebug
     step "gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug $shot" \
       gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug "$shot"
-    step "catalog APK has librovsti_ffi.so (both ABIs)" bash scripts/check-catalog-apk.sh
+    step "debug APKs have librovsti_ffi.so (both ABIs)" bash scripts/check-catalog-apk.sh
   else
     step "gradle spotlessCheck (no Android modules yet)" gradle spotlessCheck
   fi

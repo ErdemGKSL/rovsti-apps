@@ -100,8 +100,8 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/stops/.../stops/BootReceiver.kt` | app module E7 (component stays in the app; calls `:platform`) | E7 | app module E7 |
 | `apps/stops/.../stops/MainActivity.kt` | app module E7 (Application/MainActivity on `:shell`) | E7 | app module E7 |
 | `apps/stops/.../stops/RovstiStopsApp.kt` | app module E7 (Application/MainActivity on `:shell`) | E7 | app module E7 |
-| `apps/contacts/.../contacts/MainActivity.kt` | app module E4 (Application/MainActivity on `:shell`) | E4 | app module E4 |
-| `apps/contacts/.../contacts/RovstiContactsApp.kt` | app module E4 (Application/MainActivity on `:shell`) | E4 | app module E4 |
+| `apps/contacts/.../contacts/MainActivity.kt` | `:contacts` `dev.rovsti.contacts.MainActivity : RovstiShellActivity` | E4 | ported (E4.1) |
+| `apps/contacts/.../contacts/RovstiContactsApp.kt` | `:contacts` `dev.rovsti.contacts.RovstiContactsApp : HasContainer<ContactsContainer>` | E4 | ported (E4.1) |
 
 ## Tests
 

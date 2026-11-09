@@ -234,6 +234,37 @@ object RovstiIcons {
         }
     }
 
+    /** A five-point star computed on two radii: the Favorites glyph. */
+    val Star: ImageVector by lazy {
+        stroked("Star") {
+            for (i in 0 until 10) {
+                val r = if (i % 2 == 0) 9f else 4.1f
+                val angle = (-90f + i * 36f) * (Math.PI.toFloat() / 180f)
+                val x = 12f + r * cos(angle)
+                val y = 12.6f + r * sin(angle)
+                if (i == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+    }
+
+    /** A folder with its tab on the left: the Groups glyph. */
+    val Folder: ImageVector by lazy {
+        stroked("Folder") {
+            moveTo(3f, 7.5f)
+            curveTo(3f, 6.4f, 3.9f, 5.5f, 5f, 5.5f)
+            lineTo(9.2f, 5.5f)
+            lineTo(11.5f, 8f)
+            lineTo(19f, 8f)
+            curveTo(20.1f, 8f, 21f, 8.9f, 21f, 10f)
+            lineTo(21f, 17.5f)
+            curveTo(21f, 18.6f, 20.1f, 19.5f, 19f, 19.5f)
+            lineTo(5f, 19.5f)
+            curveTo(3.9f, 19.5f, 3f, 18.6f, 3f, 17.5f)
+            close()
+        }
+    }
+
     /** Eight teeth computed on a circle, with the hub. */
     val Gear: ImageVector by lazy {
         stroked("Gear") {

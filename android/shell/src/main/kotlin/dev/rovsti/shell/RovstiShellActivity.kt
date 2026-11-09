@@ -53,6 +53,12 @@ abstract class RovstiShellActivity<R : Any> : ComponentActivity() {
      */
     protected abstract fun routeFor(extras: Bundle?): Pair<Tab, List<R>>?
 
+    /**
+     * The same for a whole intent. The default looks at the extras only; an app whose deep links also carry an action
+     * or data (a vCard SEND or VIEW) overrides this and keeps its decision in a pure function.
+     */
+    protected open fun routeFor(intent: Intent): Pair<Tab, List<R>>? = routeFor(intent.extras)
+
     /** The navigator of this activity; it exists from `onCreate` on. */
     protected lateinit var navigator: TabNavigator<R>
         private set
@@ -111,7 +117,7 @@ abstract class RovstiShellActivity<R : Any> : ComponentActivity() {
     }
 
     private fun route(intent: Intent?) {
-        val (tab, routes) = routeFor(intent?.extras) ?: return
+        val (tab, routes) = intent?.let(::routeFor) ?: return
         navigator.resetTo(tab, routes)
     }
 

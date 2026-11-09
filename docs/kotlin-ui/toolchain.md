@@ -38,6 +38,14 @@ compileSdk must be 37 because Compose BOM 2026.09 libraries require it.
   `captureRoboImage("build/outputs/roborazzi/<name>.png")`; open the PNG with the Read tool.
 - Maven Central sometimes returns HTTP 429; retry (the check script does so) and keep `--max-workers=2`.
 
+## Release signing (E4.1)
+
+`rovsti.android.app` (`AndroidAppConventionPlugin`) signs the `release` build type when all three environment variables are
+set: `ROVSTI_KEYSTORE` (path of the `.jks`), `ANDROID_STORE_PASSWORD` and `ANDROID_KEY_PASSWORD`; the key alias is `rovsti`
+(the names the GPUI apps' `gpuiforge.json` `signing` block used). When one is missing, `assembleRelease` still succeeds and
+produces an unsigned APK, which is what CI and the agent machine build. Passwords are never written to the repository.
+Version: `versionCode = 100 + ROVSTI_BUILD_NUMBER` (env, default 0) in the app modules that ship.
+
 ## Check script
 
 ```

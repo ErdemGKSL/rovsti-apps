@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rebuilt from apps/contacts/platforms/android/app/src/main/AndroidManifest.xml (E4.1): same components, filters,
+     queries and flags; the dev.gpui.* pieces and the vulkan uses-feature are gone. ContactsManifestTest compares the merged
+     result with platform/src/test/resources/manifest/contacts.permissions.txt. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Chat and call on WhatsApp are handed to Rovsti Messages and Phone. Only
+         apps signed with the same key hold this (whichever installs first defines it). -->
+    <uses-permission android:name="dev.rovsti.permission.HANDOFF" />
+    <permission
+        android:name="dev.rovsti.permission.HANDOFF"
+        android:protectionLevel="signature" />
+
+    <!-- :platform mirrors the permissions of all four apps so lint can check its calls; this app does not use
+         location, full-screen intents or the vibrator permission (haptics go through the view), so the merge drops them. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" tools:node="remove" />
+    <uses-permission android:name="android.permission.VIBRATE" tools:node="remove" />
+
+    <queries>
+        <intent>
+            <action android:name="dev.rovsti.action.WA_CALL" />
+        </intent>
+        <intent>
+            <action android:name="dev.rovsti.action.WA_CHAT" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".RovstiContactsApp"
+        android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Rovsti">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/x-vcard" />
+                <data android:mimeType="text/vcard" />
+                <data android:mimeType="text/directory" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="text/x-vcard" />
+                <data android:mimeType="text/vcard" />
+                <data android:mimeType="text/directory" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name="dev.rovsti.bridge.BirthdayReminderReceiver"
+            android:exported="false" />
+
+        <!-- Images and files handed to the share sheet (cache/share only, read-only). -->
+        <provider
+            android:name="dev.rovsti.bridge.RovstiShareProvider"
+            android:authorities="${applicationId}.rovstishare"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+    </application>
+</manifest>

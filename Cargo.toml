@@ -95,7 +95,10 @@ opt-level = 1
 # Small binary first, hot paths stay fast (see the per-package overrides).
 # panic stays "unwind": gpui_android's JNI bridge catches panics with
 # catch_unwind and reports them to Java instead of killing the process.
-opt-level = "s"
+# "z" (min-sized-rust): librovsti_ffi arm64 9.9 MB vs 11.4 MB at "s"; the 5 000-contact
+# search bench stays under 1 ms p95 (budget 5 ms). Nightly build-std and
+# -Zlocation-detail=none saved only 0.4 MB more, so the build stays on stable.
+opt-level = "z"
 lto = "fat"
 codegen-units = 1
 strip = "symbols"

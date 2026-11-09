@@ -59,6 +59,8 @@ class NativeRustCore : RustCore {
     ): Outcome<JsonElement> =
         withContext(RustDispatcher) {
             RustThreading.assertNotMain()
+            val start = Rust.awaitStart()
+            if (start is Outcome.Err) return@withContext start
             val body = if (request is JsonNull) ByteArray(0) else request.toString().encodeToByteArray()
             Envelope.decode(RustNative.call(op, body))
         }
@@ -69,6 +71,7 @@ class NativeRustCore : RustCore {
     ): String =
         withContext(RustDispatcher) {
             RustThreading.assertNotMain()
+            if (Rust.awaitStart() is Outcome.Err) return@withContext ""
             RustNative.headless(kind, json).orEmpty()
         }
 }
@@ -126,6 +129,19 @@ object Rust {
             result.complete(outcome)
         }
         return result
+    }
+
+    /**
+     * Waits until [init] has loaded and initialised the library. [RustDispatcher] runs several calls at once, so a
+     * view model's first call could otherwise reach `RustNative` before `System.loadLibrary` ran and fail with
+     * `UnsatisfiedLinkError` (a start-up crash seen on device). Without [init] (the JVM bridge tests set the library
+     * up themselves) it only makes sure the library is loaded.
+     */
+    internal suspend fun awaitStart(): Outcome<VersionInfo>? {
+        val pending = synchronized(this) { started }
+        if (pending != null) return pending.await()
+        RustNative.load()
+        return null
     }
 
     private fun parseVersion(value: JsonElement): Outcome<VersionInfo> {

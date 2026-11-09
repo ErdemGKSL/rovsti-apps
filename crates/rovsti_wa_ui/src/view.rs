@@ -422,7 +422,7 @@ impl WhatsAppSettings {
                         move |()| Input::Revoked(id),
                     );
                 }
-                Effect::Relink(link, request) => self.call_quiet(cx, move || {
+                Effect::Relink { link, request } => self.call_quiet(cx, move || {
                     let (url, key) = parse_link(&link)?;
                     Gateway::new(url, Some(key)).relink(&request)
                 }),

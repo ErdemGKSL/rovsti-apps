@@ -106,7 +106,7 @@ answer `{size, data_b64}` up to 1 MiB, else `{size, path}` of a file in the hand
 {handle, call_id}` answers an audio handle for `RustNative.audioPush` / `audioPull` (frames of exactly 1 920 bytes; push drops any other size, pull answers 1 920, 0 when nothing
 is ready, -1 when the call ended). Fixtures run against a loopback stub that answers `crates/rovsti_ffi/tests/data/wa/<stem>.json` (`tests/support/mod.rs`); each file also states the request
 the client must have sent. Pure: `wa.push_parse` (FCM wake), `wa.link_read` / `wa.link_write` (`whatsapp-link.json`), `wa.avatars_plan` (picture file names and the disk prune plan; the
-`AvatarBook` fetch policy is ported to Kotlin with the Rust unit tests in `:wa`, E3), `wa.names`, `wa.target` (contact -> chat/number target and the JIDs to look up).
+`AvatarBook` fetch policy is ported to Kotlin with the Rust unit tests in `:wa`, E3), `wa.names`, `wa.target` (contact -> chat/number target and the JIDs to look up), `wa.settings_apply {model?, link?, app, now_ms, input?}` (the stateless WhatsApp settings state machine: answers `{model, effects, view}`, a render-ready page; the caller keeps `model` as JSON; the gateway URL and `rwk_` key checks run inside it).
 Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads and writes the picked file), `phone.display_name`.
 
 | Item | Used by | Domain | Class | Target |
@@ -203,6 +203,8 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `rovsti_app_core::wa_link::link` | rovsti_wa_ui | wa | op | wa.link_read, wa.link_write |
 | `rovsti_app_core::wa_link::names` | rovsti_wa_ui | wa | op | wa.names |
 | `rovsti_app_core::wa_link::send` | rovsti_wa_ui | wa | none | served by the messages headless kinds wa_digest and wa_reply (E2.6, fixtures headless.*) |
+| `rovsti_app_core::wa_link::settings` | rovsti_wa_ui | wa | op | wa.settings_apply |
+| `rovsti_app_core::wa_link::settings_view` | rovsti_wa_ui | wa | op | wa.settings_apply |
 | `rovsti_core::Channel` | messages | messages | op | inbox.preferred_channel |
 | `rovsti_core::Message` | messages | messages | op | inbox.merge, sms.to_message |
 | `rovsti_core::MessageDirection` | messages | messages | op | inbox.merge, sms.to_message |

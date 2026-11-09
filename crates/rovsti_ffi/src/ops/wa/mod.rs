@@ -40,6 +40,7 @@ macro_rules! gateway_fn {
 mod live;
 mod pure;
 mod rest;
+mod settings;
 
 pub use live::{audio_pull, audio_push};
 
@@ -54,7 +55,13 @@ use std::ops::Deref;
 use std::path::PathBuf;
 
 /// The op tables of the submodules, in the order the registry lists them.
-pub(super) const TABLES: &[&[OpSpec]] = &[rest::OPS, rest::MEDIA_OPS, pure::OPS, live::OPS];
+pub(super) const TABLES: &[&[OpSpec]] = &[
+    rest::OPS,
+    rest::MEDIA_OPS,
+    pure::OPS,
+    settings::OPS,
+    live::OPS,
+];
 
 /// Media and pictures up to this size travel inside the JSON answer; larger ones become a file.
 pub(crate) const INLINE_LIMIT: usize = 1024 * 1024;

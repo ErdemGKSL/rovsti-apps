@@ -5,3 +5,5 @@ pub mod avatars;
 pub mod link;
 pub mod names;
 pub mod send;
+pub mod settings;
+pub mod settings_view;

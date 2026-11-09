@@ -52,6 +52,8 @@ import dev.rovsti.core.model.wa.SendMediaWithBody
 import dev.rovsti.core.model.wa.SendReaction
 import dev.rovsti.core.model.wa.SendText
 import dev.rovsti.core.model.wa.Sent
+import dev.rovsti.core.model.wa.SettingsApplyAnswer
+import dev.rovsti.core.model.wa.SettingsApplyRequest
 import dev.rovsti.core.model.wa.StarMessage
 import dev.rovsti.core.model.wa.StartEventsBody
 import dev.rovsti.core.model.wa.StatusList
@@ -147,6 +149,33 @@ object WaContracts : ContractModels {
                 err = listOf("bad_key", "bad_url"),
             )
             op<AvatarsPlanRequest, AvatarsPlanAnswer>("wa.avatars_plan", ok = listOf("within_budget"))
+            op<SettingsApplyRequest, SettingsApplyAnswer>(
+                "wa.settings_apply",
+                ok =
+                    listOf(
+                        "linked_start",
+                        "enter_url",
+                        "bad_url",
+                        "link_new_qr",
+                        "link_new_code",
+                        "paste_key",
+                        "bad_key",
+                        "connecting",
+                        "show_qr",
+                        "show_code",
+                        "connected",
+                        "share_key",
+                        "keys",
+                        "keys_loaded",
+                        "confirm_revoke",
+                        "logged_out",
+                        "confirm_delete",
+                        "confirm_unlink",
+                        "confirm_unlink_back",
+                        "failed",
+                    ),
+                err = listOf("bad_model"),
+            )
             op<WaNamesRequest, WaNamesAnswer>("wa.names", ok = listOf("whatsapp_name", "number", "lid"))
             op<WaTargetRequest, WaTargetAnswer>(
                 "wa.target",

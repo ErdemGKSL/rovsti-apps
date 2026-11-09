@@ -54,6 +54,8 @@ import dev.rovsti.core.model.wa.SendMediaWithBody
 import dev.rovsti.core.model.wa.SendReaction
 import dev.rovsti.core.model.wa.SendText
 import dev.rovsti.core.model.wa.Sent
+import dev.rovsti.core.model.wa.SettingsApplyAnswer
+import dev.rovsti.core.model.wa.SettingsApplyRequest
 import dev.rovsti.core.model.wa.StarMessage
 import dev.rovsti.core.model.wa.StartEventsBody
 import dev.rovsti.core.model.wa.StatusList
@@ -723,4 +725,30 @@ class NativeWaOps(
 
     override suspend fun target(req: WaTargetRequest) =
         core.call("wa.target", req, WaTargetRequest.serializer(), WaTargetAnswer.serializer())
+}
+
+/**
+ * `wa.settings_apply` (R9-3): the WhatsApp settings state machine, pure and stateless. The caller keeps the
+ * answer's `model` and sends it back with the next input; the `view` is what the page draws and the `effects` are
+ * what the screen must run (gateway calls, save, clipboard). Failures: `Invalid` for a model or input that does not
+ * decode.
+ */
+interface WaSettingsOps {
+    suspend fun apply(req: SettingsApplyRequest): Outcome<SettingsApplyAnswer>
+
+    companion object {
+        val ops: List<String> = listOf("wa.settings_apply")
+    }
+}
+
+class NativeWaSettingsOps(
+    private val core: RustCore = NativeRustCore(),
+) : WaSettingsOps {
+    override suspend fun apply(req: SettingsApplyRequest) =
+        core.call(
+            "wa.settings_apply",
+            req,
+            SettingsApplyRequest.serializer(),
+            SettingsApplyAnswer.serializer(),
+        )
 }

@@ -916,8 +916,8 @@ touching (`e4.1-settings`), **F14** card numbers in mixed display formats (`e4.3
 | E4.9 | Share and shortcuts | R2 | in-progress (round-11 step 1) |
 | E4.10 | Import paths | R2 | in-progress (round-11 step 2-3) |
 | E4.11 | Duplicates, merge, Clean up | R2 | done (round-11 step 4) |
-| E4.12 | Photo viewer on the card | R2 | in-progress (round-11 step 5) |
-| E4.13 | Ringtone, voicemail, block | R2 | in-progress (round-11 step 5) |
+| E4.12 | Photo viewer on the card | R2 | done (round-11 step 5) |
+| E4.13 | Ringtone, voicemail, block | R2 | done (round-11 step 5) |
 | E4.14 | My card, emergency, recently added/edited | R2 | in-progress (round-11 step 6) |
 | E4.15 | Settings | R2 | in-progress (round-11 step 7) |
 | E4.16 | Polish | R2 | in-progress (round-11 step 8) |
@@ -994,9 +994,11 @@ host, every destructive action confirms or offers Undo as the GPUI app does.
 
 ### E4.12 Photo viewer
 - Screenshots: `e4.12-viewer`, `e4.12-viewer-menu`.
+- Evidence (round 11 step 5): `card/CardPhotoViewer` opens `showPhotoViewer` with `ViewerPhoto(full = display_photo, thumb = avatar uri)` (thumbnail first, full fades in; 500 ms flight from the avatar rect); `photo/PhotoViewerActions` gives Save (gallery once, toast), Share (staged JPEG) and the Edit `IosMenu` (`ViewerAction.menu`, reuses `photoMenuItems`; Remove asks first). Tests `PhotoViewerActionsTest` (10). Goldens `e4.12-viewer`, `e4.12-viewer-menu` opened.
 
 ### E4.13 Ringtone, voicemail, block
-- Screenshots: `e4.13-card-options`, `e4.13-voicemail-confirm`.
+- Screenshots: `e4.13-card-options`, `e4.13-voicemail-confirm`, `e4.13-block-confirm`, `e4.13-block-needs-role`.
+- Evidence (round 11 step 5): `card/CallOptionsViewModel` + `CallOptionsSection` (Ringtone row via `PickRingtone` result contract, voicemail `ListRowSwitch` with confirm only when turning on, Block/Unblock for every number through `BlocklistRepository`, role sentence + role settings when `canBlock` is false). Tests `CallOptionsViewModelTest` (12, real core), `CallOptionsSectionTest` (6, section never moves when the switch flips). Goldens opened.
 
 ### E4.14 My card, emergency, recent
 - Screenshots: `e4.14-my-card`, `e4.14-emergency-list`, `e4.14-added-edited-tabs`.

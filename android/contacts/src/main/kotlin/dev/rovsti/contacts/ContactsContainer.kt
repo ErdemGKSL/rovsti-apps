@@ -24,7 +24,9 @@ import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SearchOps
 import dev.rovsti.core.ops.SharedOps
+import dev.rovsti.platform.calllog.AndroidBlocklistRepository
 import dev.rovsti.platform.calllog.AndroidCallLogRepository
+import dev.rovsti.platform.calllog.BlocklistRepository
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.AndroidContactsRepository
 import dev.rovsti.platform.contacts.AndroidShortcutsRepository
@@ -49,6 +51,9 @@ open class ContactsContainer(
     val contacts: ContactsRepository by lazy { createContacts() }
 
     val callLog: CallLogRepository by lazy { createCallLog() }
+
+    /** The system blocklist, for the card's Block This Caller row (E4.13); usable only as the default phone app. */
+    val blocklist: BlocklistRepository by lazy { createBlocklist() }
 
     /** Every contacts decision the Rust core makes (ARCH 4). */
     val ops: ContactsOps by lazy { createOps() }
@@ -107,6 +112,8 @@ open class ContactsContainer(
     protected open fun createWaPhotos(): WaPhotoPort = GatewayWaPhotoPort.over(wa)
 
     protected open fun createContacts(): ContactsRepository = AndroidContactsRepository(context, Dispatchers.IO)
+
+    protected open fun createBlocklist(): BlocklistRepository = AndroidBlocklistRepository(context, Dispatchers.IO)
 
     protected open fun createCallLog(): CallLogRepository = AndroidCallLogRepository(context, Dispatchers.IO)
 

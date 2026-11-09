@@ -46,7 +46,9 @@ import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -70,6 +72,8 @@ import dev.rovsti.design.glass.TopFadeBlur
 import dev.rovsti.design.ios.foundation.LocalIosBackdrop
 import dev.rovsti.design.motion.LocalReduceMotion
 import dev.rovsti.design.motion.RovstiMotion
+import dev.rovsti.design.overlay.ButtonMenuEntry
+import dev.rovsti.design.overlay.MenuItem
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.OverlayEntry
 import dev.rovsti.design.overlay.OverlayScope
@@ -84,13 +88,28 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sign
 
-/** One button of the viewer's bottom toolbar; [onClick] gets the index of the photo on show. */
+/**
+ * One button of the viewer's bottom toolbar; [onClick] gets the index of the photo on show. With a [menu] the button
+ * opens that menu above itself (a popover that grows out of the button) instead of calling [onClick].
+ */
 @Immutable
 class ViewerAction(
     val id: String,
     val icon: ImageVector,
     val label: String,
-    val onClick: (page: Int) -> Unit,
+    val menu: ImmutableList<MenuItem>? = null,
+    val onClick: (page: Int) -> Unit = {},
+)
+
+/**
+ * A photo whose small [thumb] is already in memory (the list or card avatar) and whose [full] picture still has to
+ * load: the viewer draws the thumbnail at once and fades the full photo in over it, so the flight out of the avatar
+ * never shows an empty frame.
+ */
+@Immutable
+data class ViewerPhoto(
+    val full: Any?,
+    val thumb: Any?,
 )
 
 /**
@@ -274,12 +293,7 @@ class PhotoViewerEntry(
                                         .testTag(PhotoViewerTags.Toolbar),
                                 ) {
                                     for (action in actions) {
-                                        ToolbarButton(
-                                            icon = action.icon,
-                                            label = action.label,
-                                            onClick = { action.onClick(viewer.page) },
-                                            modifier = Modifier.testTag(PhotoViewerTags.action(action.id)),
-                                        )
+                                        ViewerActionButton(action, host.controller) { viewer.page }
                                     }
                                 }
                             }
@@ -289,6 +303,28 @@ class PhotoViewerEntry(
             }
         }
     }
+}
+
+/** A toolbar button; the one with a menu opens it above the button, anchored to the button's window rectangle. */
+@Composable
+private fun ViewerActionButton(
+    action: ViewerAction,
+    controller: OverlayController,
+    page: () -> Int,
+) {
+    var bounds by remember { mutableStateOf(Rect.Zero) }
+    ToolbarButton(
+        icon = action.icon,
+        label = action.label,
+        onClick = {
+            val menu = action.menu
+            if (menu == null) action.onClick(page()) else controller.present(ButtonMenuEntry(bounds, menu))
+        },
+        modifier =
+            Modifier
+                .onGloballyPositioned { bounds = it.boundsInWindow() }
+                .testTag(PhotoViewerTags.action(action.id)),
+    )
 }
 
 /** One photo of the strip: its box is the letterboxed photo, flying out of the thumbnail while the viewer opens. */
@@ -310,29 +346,34 @@ private fun ViewerPage(
         viewer.viewport.height
             .roundToInt()
             .coerceAtLeast(1)
+    val full = (model as? ViewerPhoto)?.full ?: model
+    val thumb = (model as? ViewerPhoto)?.thumb
     val request =
-        remember(model, vw, vh, context) {
+        remember(full, vw, vh, context) {
             ImageRequest
                 .Builder(context)
-                .data(model)
+                .data(full)
                 .size(vw, vh)
-                .crossfade(false)
+                .crossfade(thumb != null)
                 .build()
+        }
+    val thumbRequest =
+        remember(thumb, vw, vh, context) {
+            thumb?.let {
+                ImageRequest
+                    .Builder(context)
+                    .data(it)
+                    .size(vw, vh)
+                    .crossfade(false)
+                    .build()
+            }
         }
     Box(
         Modifier
             .fillMaxSize()
             .graphicsLayer { translationX = (index - viewer.page) * viewer.stride + viewer.stripX },
     ) {
-        AsyncImage(
-            model = request,
-            contentDescription = null,
-            imageLoader = loader,
-            contentScale = ContentScale.Crop,
-            onSuccess = { success ->
-                val size = success.painter.intrinsicSize
-                if (size.isSpecified && size.width > 0f && size.height > 0f) viewer.natural[index] = size
-            },
+        Box(
             modifier =
                 Modifier
                     .layout { measurable, constraints ->
@@ -372,7 +413,35 @@ private fun ViewerPage(
                             translationY = z.offset.y
                         }
                     },
-        )
+        ) {
+            if (thumbRequest != null) {
+                AsyncImage(
+                    model = thumbRequest,
+                    contentDescription = null,
+                    imageLoader = loader,
+                    contentScale = ContentScale.Crop,
+                    onSuccess = { success ->
+                        // The thumbnail sets the box until the full picture says its own size.
+                        val size = success.painter.intrinsicSize
+                        if (size.isSpecified && size.width > 0f && size.height > 0f && index !in viewer.natural) {
+                            viewer.natural[index] = size
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            AsyncImage(
+                model = request,
+                contentDescription = null,
+                imageLoader = loader,
+                contentScale = ContentScale.Crop,
+                onSuccess = { success ->
+                    val size = success.painter.intrinsicSize
+                    if (size.isSpecified && size.width > 0f && size.height > 0f) viewer.natural[index] = size
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 

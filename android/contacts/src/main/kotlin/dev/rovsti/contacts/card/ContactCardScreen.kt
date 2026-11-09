@@ -125,6 +125,9 @@ fun ContactCardScreen(
     listState: LazyListState = rememberLazyListState(),
     gate: (@Composable () -> Unit)? = null,
     overlays: OverlayController? = LocalOverlayOrNull.current,
+    calls: CallOptionsUiState? = null,
+    onCalls: (CallOptionsAction) -> Unit = {},
+    photoViewer: PhotoViewerLauncher? = null,
 ) {
     val header = state.header
     val colors = RovstiTheme.colors
@@ -181,7 +184,9 @@ fun ContactCardScreen(
                         onBounds = { avatarBounds = it },
                         onPhoto = {
                             val uri = header.photoUri
-                            if (uri != null && overlays != null) {
+                            if (uri != null && photoViewer != null) {
+                                photoViewer.open(header) { avatarBounds }
+                            } else if (uri != null && overlays != null) {
                                 overlays.showPhotoViewer(
                                     photos = persistentListOf(uri),
                                     initialPage = 0,
@@ -200,6 +205,7 @@ fun ContactCardScreen(
                         FieldSection(section, overlays, onAction)
                     }
                 }
+                callOptionsItem(calls, onCalls)
                 recentItem(state.recent, gate)
                 item(key = "open-in-contacts", contentType = "section") {
                     SectionSpacing {
@@ -226,6 +232,14 @@ fun ContactCardScreen(
             }
         }
     }
+}
+
+/** Opens the photo viewer of the card: the page decides which actions the toolbar has. [anchorFor] is the avatar's rect. */
+fun interface PhotoViewerLauncher {
+    fun open(
+        header: CardHeader,
+        anchorFor: () -> Rect?,
+    )
 }
 
 private const val TITLE_FADE_FROM = 0.45f

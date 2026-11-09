@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
@@ -23,19 +24,34 @@ import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.editor.contactEditorExtras
 import dev.rovsti.contacts.editor.contactEditorModel
 import dev.rovsti.contacts.editor.presentContactEditor
+import dev.rovsti.contacts.photo.ContactPhotoModel
+import dev.rovsti.contacts.photo.PhotoEffect
+import dev.rovsti.contacts.photo.PhotoMenuActions
+import dev.rovsti.contacts.photo.PhotoViewerActions
+import dev.rovsti.contacts.photo.fullPhotoUri
+import dev.rovsti.contacts.photo.showPhotoCrop
+import dev.rovsti.design.media.ViewerPhoto
+import dev.rovsti.design.media.showPhotoViewer
 import dev.rovsti.design.overlay.ActionSheetAction
 import dev.rovsti.design.overlay.ActionSheetEntry
+import dev.rovsti.design.overlay.AlertAction
+import dev.rovsti.design.overlay.AlertEntry
+import dev.rovsti.design.overlay.AlertRole
 import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.OverlayController
+import dev.rovsti.design.overlay.OverlayEntry
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.transition.TabNavigator
+import dev.rovsti.platform.files.CapturePhoto
 import dev.rovsti.platform.files.ExportDocument
 import dev.rovsti.platform.files.FileResult
+import dev.rovsti.platform.files.PickPhoto
 import dev.rovsti.platform.files.ShareIntents
 import dev.rovsti.platform.system.Handoff
 import dev.rovsti.platform.system.permissions.PermissionGroup
 import dev.rovsti.shell.permissions.PermissionGate
 import dev.rovsti.shell.permissions.PermissionRow
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -113,13 +129,175 @@ fun ContactCardPage(
         },
         onDelete = { deleteId -> container.deletion.ask(overlays, deleteId) {} },
     ) { query -> container.pendingSearch.value = query }
+    val calls = rememberCallOptionsModel(container, id, state.header?.name.orEmpty())
+    val callsState by calls.state.collectAsState()
+    CallOptionsEffects(calls, overlays, context)
+    val viewer = rememberCardPhotoViewer(container, id, overlays, context)
     ContactCardScreen(
         state = state,
         onAction = model::onAction,
         onBack = onBack,
         listState = rememberLazyListState(),
         gate = { PermissionRow(PermissionGroup.CALL_LOG) },
+        calls = callsState,
+        onCalls = calls::onAction,
+        photoViewer = viewer,
     )
+}
+
+/** The "Calls" section's model for one open of the card; [name] is read when it asks a question. */
+@Composable
+fun rememberCallOptionsModel(
+    container: ContactsContainer,
+    id: Long,
+    name: String,
+    scope: CoroutineScope = rememberCoroutineScope(),
+): CallOptionsViewModel {
+    val latestName = rememberUpdatedState(name)
+    return remember(container, id, scope) {
+        CallOptionsViewModel(
+            id = id,
+            repo = container.contacts,
+            ops = container.ops,
+            blocklist = container.blocklist,
+            name = { latestName.value },
+            scope = scope,
+        )
+    }
+}
+
+/** Runs the effects of the "Calls" section: the ringtone picker, the two questions, the role settings and the toasts. */
+@Composable
+fun CallOptionsEffects(
+    model: CallOptionsViewModel,
+    overlays: OverlayController,
+    context: Context,
+) {
+    val picker =
+        rememberLauncherForActivityResult(
+            remember { PickRingtone() },
+        ) { model.onAction(CallOptionsAction.RingtonePicked(it)) }
+    val latestOverlays = rememberUpdatedState(overlays)
+    LaunchedEffect(model) {
+        model.effects.collect { effect ->
+            when (effect) {
+                is CallOptionsEffect.PickRingtone -> {
+                    picker.launch(RingtoneRequest(effect.current))
+                }
+
+                is CallOptionsEffect.AskVoicemail -> {
+                    latestOverlays.value.present(
+                        AlertEntry(
+                            heading = effect.confirm.title,
+                            message = effect.confirm.body,
+                            actions =
+                                persistentListOf(
+                                    AlertAction("Cancel", AlertRole.Cancel),
+                                    AlertAction(
+                                        "Send to Voicemail",
+                                    ) { model.onAction(CallOptionsAction.ConfirmVoicemail) },
+                                ),
+                        ),
+                    )
+                }
+
+                is CallOptionsEffect.AskBlock -> {
+                    latestOverlays.value.present(
+                        AlertEntry(
+                            heading = effect.title,
+                            message = effect.message,
+                            actions =
+                                persistentListOf(
+                                    AlertAction("Cancel", AlertRole.Cancel),
+                                    AlertAction(effect.actionLabel, AlertRole.Destructive) {
+                                        model.onAction(CallOptionsAction.ConfirmBlock)
+                                    },
+                                ),
+                        ),
+                    )
+                }
+
+                CallOptionsEffect.OpenRoleSettings -> {
+                    start(
+                        context,
+                        Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
+                    ) { latestOverlays.value.showToast(it) }
+                }
+
+                is CallOptionsEffect.Toast -> {
+                    latestOverlays.value.showToast(effect.text)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The launcher of the card's photo viewer (E4.12): Save, Share and the Edit menu. Choose Photo and Take Photo run the
+ * system picker and camera, Use WhatsApp Photo fetches the large picture, and all three end in the crop page; Remove Photo
+ * asks first. The viewer closes once the photo has changed, so the card behind shows the new one.
+ */
+@Composable
+fun rememberCardPhotoViewer(
+    container: ContactsContainer,
+    id: Long,
+    overlays: OverlayController,
+    context: Context,
+): PhotoViewerLauncher {
+    val photo =
+        remember(container, id) {
+            ContactPhotoModel(
+                contactId = id,
+                repo = container.contacts,
+                ops = container.ops,
+                files = container.files,
+                waPhotos = container.waPhotos,
+                cacheDir = container.context.cacheDir,
+                scope = container.scope,
+            )
+        }
+    val ui by photo.state.collectAsState()
+    val marks by container.waMarks.marks.collectAsState()
+    val jid = marks[id]
+    val pick = rememberLauncherForActivityResult(remember { PickPhoto() }) { photo.picked(it) }
+    val capture = rememberLauncherForActivityResult(remember { CapturePhoto() }) { photo.picked(it) }
+    val latestJid = rememberUpdatedState(jid)
+    val latestOverlays = rememberUpdatedState(overlays)
+    val open = remember { arrayOfNulls<OverlayEntry>(1) }
+    LaunchedEffect(photo) {
+        photo.effects.collect { effect ->
+            when (effect) {
+                is PhotoEffect.Toast -> latestOverlays.value.showToast(effect.text)
+                PhotoEffect.Changed -> open[0]?.let { latestOverlays.value.dismiss(it) }.also { open[0] = null }
+            }
+        }
+    }
+    LaunchedEffect(ui.crop) {
+        ui.crop?.let { session ->
+            overlays.showPhotoCrop(session, onChosen = photo::cropChosen, onCancel = photo::cropCancelled)
+        }
+    }
+    val scope = rememberCoroutineScope()
+    return remember(container, id, pick, capture) {
+        cardPhotoViewer(
+            id = id,
+            files = container.files,
+            scope = scope,
+            overlays = { latestOverlays.value },
+            jid = { latestJid.value },
+            menu =
+                PhotoMenuActions(
+                    choose = { pick.launch(Unit) },
+                    take = { capture.launch(Unit) },
+                    whatsApp = { latestJid.value?.let(photo::useWhatsApp) },
+                    remove = photo::remove,
+                ),
+            share = { uri, mime, name ->
+                start(context, ShareIntents.image(uri, mime, name)) { latestOverlays.value.showToast(it) }
+            },
+            onOpened = { open[0] = it },
+        )
+    }
 }
 
 /** Runs the model's effects: intents, navigation, toasts and the number chooser. */

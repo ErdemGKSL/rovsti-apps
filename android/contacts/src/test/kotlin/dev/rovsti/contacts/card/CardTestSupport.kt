@@ -23,6 +23,7 @@ import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.design.transition.rovstiSharedBounds
 import dev.rovsti.shell.RovstiShell
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /** Holds the page state the way the view model would and records what the screen asks for. */
 internal class CardHarness(
@@ -48,6 +49,8 @@ internal fun HostedCard(
     gate: (@Composable () -> Unit)? = null,
     startOnCard: Boolean = true,
     list: (@Composable () -> Unit)? = null,
+    callsModel: CallOptionsViewModel? = null,
+    photoViewer: PhotoViewerLauncher? = null,
 ) {
     val tabs = contactsTabItems("Contacts", "Favorites", "Groups", "Settings")
     val navigator = harness.navigator
@@ -69,12 +72,17 @@ internal fun HostedCard(
                 val context: Context = LocalContext.current
                 ContactCardEffects(live, navigator, harness.overlays, context) {}
                 val state by live.state.collectAsState()
+                val calls by (callsModel?.state ?: MutableStateFlow<CallOptionsUiState?>(null)).collectAsState()
+                if (callsModel != null) CallOptionsEffects(callsModel, harness.overlays, context)
                 ContactCardScreen(
                     state,
                     live::onAction,
                     { harness.backs++ },
                     listState = harness.listState,
                     gate = gate,
+                    calls = calls,
+                    onCalls = { callsModel?.onAction(it) },
+                    photoViewer = photoViewer,
                 )
             } else {
                 ContactCardScreen(

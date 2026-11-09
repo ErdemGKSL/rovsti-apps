@@ -26,6 +26,7 @@ import dev.rovsti.core.ops.NativePhoneOps
 import dev.rovsti.core.ops.NativeQrOps
 import dev.rovsti.core.ops.NativeSearchOps
 import dev.rovsti.core.ops.NativeSharedOps
+import dev.rovsti.platform.calllog.FakeBlocklistRepository
 import dev.rovsti.platform.calllog.FakeCallLogRepository
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.contacts.FakeContactsRepository
@@ -182,6 +183,8 @@ internal class CardRig(
     val permission: MutableStateFlow<PermissionState> = MutableStateFlow(PermissionState.Granted),
     calls: List<CallLogEntry> = emptyList(),
     val wa: FakeCardWa = FakeCardWa(linked = false),
+    /** False: this app is not the default phone app and the system blocklist answers "unavailable". */
+    canBlock: Boolean = true,
 ) {
     val scope = CoroutineScope(Dispatchers.Default)
     val repo = FakeContactsRepository(drafts, SampleCards.groups)
@@ -190,7 +193,9 @@ internal class CardRig(
     val files = FakeFilesRepository()
     val pins = mutableListOf<PinShortcut>()
     val staging: File = Files.createTempDirectory("rovsti-card-staging").toFile().apply { deleteOnExit() }
+    val blocklist = FakeBlocklistRepository(allowed = canBlock)
     val model: ContactCardViewModel
+    val callOptions: CallOptionsViewModel
 
     init {
         val lib = File(System.getProperty("rovsti.hostLib").orEmpty())
@@ -250,6 +255,8 @@ internal class CardRig(
                 clock = { SampleCards.NOW },
                 scope = scope,
             )
+        val name = drafts.firstOrNull { it.id == id }?.let { "${it.given} ${it.family}".trim() }.orEmpty()
+        callOptions = CallOptionsViewModel(id, provider, ops, blocklist, { name }, scope)
     }
 
     /** The first state that satisfies [predicate]; fails after [TIMEOUT_MS]. */
@@ -257,6 +264,12 @@ internal class CardRig(
         runBlocking { withTimeout(TIMEOUT_MS) { model.state.first(predicate) } }
 
     fun ready(): ContactCardUiState = stateWhere { it.phase == CardPhase.Ready }
+
+    /** The first state of the "Calls" section that satisfies [predicate]. */
+    fun callsWhere(predicate: (CallOptionsUiState) -> Boolean): CallOptionsUiState =
+        runBlocking { withTimeout(TIMEOUT_MS) { callOptions.state.first(predicate) } }
+
+    fun callEffect(): CallOptionsEffect = runBlocking { withTimeout(TIMEOUT_MS) { callOptions.effects.first() } }
 
     fun effect(): ContactCardEffect = runBlocking { withTimeout(TIMEOUT_MS) { model.effects.first() } }
 

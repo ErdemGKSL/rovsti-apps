@@ -166,6 +166,14 @@ class FakeContactsRepository(
             )
         }
 
+    /** Sets the call options a contact starts with (a ringtone with a real title, voicemail on). */
+    fun seedOptions(
+        id: Long,
+        options: ContactOptions,
+    ) {
+        optionsById.update { it + (id to options) }
+    }
+
     private fun change(
         id: Long,
         edit: (ContactOptions) -> ContactOptions,

@@ -69,6 +69,7 @@ dependencies {
     implementation(project(":core-bridge"))
     implementation(libs.activity.compose)
     implementation(libs.coroutines.core)
+    implementation(libs.collections.immutable)
     implementation(libs.navigation3.runtime)
 
     testImplementation(project(":testing"))

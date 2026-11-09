@@ -4,6 +4,7 @@ import dev.rovsti.core.contracts.AllContracts
 import dev.rovsti.core.model.core.VersionInfo
 import dev.rovsti.core.ops.ChatOps
 import dev.rovsti.core.ops.ContactsOps
+import dev.rovsti.core.ops.ContactsWaOps
 import dev.rovsti.core.ops.MessagesOps
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.QrOps
@@ -66,6 +67,7 @@ class ContractFixturesTest {
                 "SearchOps" to SearchOps.ops,
                 "PhoneOps" to PhoneOps.ops,
                 "ContactsOps" to ContactsOps.ops,
+                "ContactsWaOps" to ContactsWaOps.ops,
                 "QrOps" to QrOps.ops,
                 "MessagesOps" to MessagesOps.ops,
                 "ChatOps" to ChatOps.ops,

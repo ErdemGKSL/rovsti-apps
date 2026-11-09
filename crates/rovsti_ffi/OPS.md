@@ -173,7 +173,7 @@ Phone backup: `phone.backup_export` / `phone.backup_import` (pure; Kotlin reads 
 | `(wa) wa.subscribe_presence` | - | wa | op | wa.subscribe_presence |
 | `rovsti_app_core::contacts::prefs` | contacts | contacts | op | contacts.prefs_load, contacts.prefs_save |
 | `rovsti_app_core::contacts::trash_store` | contacts | contacts | op | contacts.trash_list, contacts.trash_push, contacts.trash_restore, contacts.trash_delete |
-| `rovsti_app_core::contacts::whatsapp` | contacts | wa | op | wa.target |
+| `rovsti_app_core::contacts::whatsapp` | contacts | wa | op | wa.target, contacts.wa_marks, contacts.wa_card, contacts.wa_profile_lines |
 | `rovsti_app_core::messages::access` | messages | messages | op | messages.access |
 | `rovsti_app_core::messages::drafts` | messages | messages | op | messages.drafts_load, messages.drafts_save, messages.drafts_put, messages.drafts_rekey |
 | `rovsti_app_core::messages::headless` | messages | platform | none | served by the headless kinds (E2.6, fixtures headless.*) |

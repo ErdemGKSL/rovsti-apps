@@ -1,5 +1,6 @@
 package dev.rovsti.contacts
 
+import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.Rust
 import dev.rovsti.core.model.contacts.DirRequest
@@ -79,6 +80,17 @@ class ContactsMigrationTest {
             assertEquals("k-ayse", prefs.prefs.myCard)
             assertEquals(listOf("k-mehmet"), prefs.emergency)
             assertEquals(listOf("k-cem"), prefs.prefs.viewed)
+
+            // The store reads the same file and a write survives a restart (a second store on the same directory).
+            val store = ContactsStore(ops, dir) { now }
+            assertEquals("k-ayse", ok(store.load()).myCard)
+            assertEquals(listOf("k-zeynep"), store.favoritesOrder.value)
+            ok(store.update { it.copy(emergency = it.emergency + "k-new") })
+            assertEquals(
+                listOf("k-mehmet", "k-new"),
+                ContactsStore(ops, dir) { now }.also { ok(it.load()) }.emergency.value,
+            )
+            assertEquals(listOf(1L, 2L), ok(store.trash()).entries.map { it.key })
 
             val trash = ok(ops.trashList(TrashListRequest(dir, now)))
             assertEquals(listOf(1L, 2L), trash.entries.map { it.key })

@@ -125,6 +125,12 @@ import dev.rovsti.core.model.contacts.ValidateAnswer
 import dev.rovsti.core.model.contacts.VcardWriteRequest
 import dev.rovsti.core.model.contacts.ViewAnswer
 import dev.rovsti.core.model.contacts.ViewRequest
+import dev.rovsti.core.model.contacts.WaCardAnswer
+import dev.rovsti.core.model.contacts.WaCardRequest
+import dev.rovsti.core.model.contacts.WaMarksAnswer
+import dev.rovsti.core.model.contacts.WaMarksRequest
+import dev.rovsti.core.model.contacts.WaProfileLinesAnswer
+import dev.rovsti.core.model.contacts.WaProfileLinesRequest
 import dev.rovsti.core.model.contacts.WebUrlAnswer
 import dev.rovsti.core.model.contacts.WebUrlRequest
 import dev.rovsti.core.model.core.Empty
@@ -380,6 +386,30 @@ object ContactsContracts : ContractModels {
                 ok = listOf("missing"),
             )
             op<PrefsSaveRequest, Empty>("contacts.prefs_save")
+            op<WaMarksRequest, WaMarksAnswer>(
+                "contacts.wa_marks",
+                ok = listOf("no_chats", "local_number_ignored"),
+            )
+            op<WaCardRequest, WaCardAnswer>(
+                "contacts.wa_card",
+                ok =
+                    listOf(
+                        "chat",
+                        "chat_online",
+                        "chat_last_seen",
+                        "lookup_checking",
+                        "lookup_done",
+                        "lookup_not_on_whatsapp",
+                        "lookup_failed",
+                        "local_number",
+                        "no_number",
+                    ),
+                err = listOf("bad_lookup_state"),
+            )
+            op<WaProfileLinesRequest, WaProfileLinesAnswer>(
+                "contacts.wa_profile_lines",
+                ok = listOf("same_name", "empty"),
+            )
         }
 
     private inline fun <reified Req, reified Ans> MutableMap<String, KSerializer<*>>.op(

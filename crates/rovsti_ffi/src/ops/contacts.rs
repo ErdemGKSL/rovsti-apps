@@ -11,6 +11,7 @@ mod draft;
 mod files;
 mod lists;
 mod store;
+mod wa;
 
 use super::registry::OpSpec;
 use crate::envelope::FfiError;
@@ -22,7 +23,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 
 /// The op tables of the submodules, in the order the registry lists them.
-pub(super) const TABLES: &[&[OpSpec]] = &[draft::OPS, files::OPS, lists::OPS, store::OPS];
+pub(super) const TABLES: &[&[OpSpec]] = &[draft::OPS, files::OPS, lists::OPS, store::OPS, wa::OPS];
 
 /// "now" of every fixture: 2026-09-21T17:33:20Z.
 pub(super) const NOW: i64 = 1_790_000_000_000;

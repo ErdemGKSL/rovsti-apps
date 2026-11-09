@@ -19,9 +19,9 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `AlarmOptions.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
 | `AlarmSound.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
 | `BirthdayReminders.kt` | platform.notify.BirthdayReminders | 6 (E3.6) | todo |
-| `Blocklist.kt` | platform.calllog / platform.telephony | 3 (E3.3) | todo |
-| `CallLogQuery.kt` | platform.calllog / platform.telephony | 3 (E3.3) | todo |
-| `CallLogWrite.kt` | platform.calllog / platform.telephony | 3 (E3.3) | todo |
+| `Blocklist.kt` | platform.calllog.Blocklist (typed `BlockedNumber`/`BlockReason`; `numbers` replaces `pullJson`; `BlockGuard` comes along) + `BlocklistRepository` | 3 (E3.3) | ported |
+| `CallLogQuery.kt` | platform.calllog.CallLogQuery (typed `CallLogEntry`; `byIds` and `missedCount` added) | 3 (E3.3) | ported |
+| `CallLogWrite.kt` | platform.calllog.CallLogWrite (typed rows; restore also writes name, label, contact and block reason) | 3 (E3.3) | ported |
 | `CallReminders.kt` | platform.notify.CallReminders | 6 (E3.6) | todo |
 | `CallsApi.kt` | platform.telephony.CallsApi | 5 (E3.5) | todo |
 | `ContactOptions.kt` | platform.contacts.ContactCallOptions (renamed: `ContactOptions` is the `:core-bridge` model it returns; the picker is an intent plus `parsePicked`, no `startActivityForResult`) | 2 (E3.2) | ported |
@@ -38,19 +38,19 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `MediaShare.kt` | platform.files (E3.8a) | R2 E3.8a | R2 E3.8a |
 | `MessageNotifications.kt` | platform.notify.MessageNotifications | 6 (E3.6) | todo |
 | `MessageReminders.kt` | platform.notify.MessageReminders | 6 (E3.6) | todo |
-| `MissedCalls.kt` | platform.calllog.MissedCalls; LocaleTimeInfo is ported to platform.system.LocaleTimeInfo | 3 (E3.3), LocaleTimeInfo in 1 | partly ported |
+| `MissedCalls.kt` | platform.calllog.MissedCalls; LocaleTimeInfo is platform.system.LocaleTimeInfo | 3 (E3.3), LocaleTimeInfo in 1 | ported |
 | `MmsCodec.kt` | platform.sms.MmsCodec | 4 (E3.4) | todo |
 | `MultiCall.kt` | platform.telephony.MultiCall | 5 (E3.5) | todo |
 | `NotificationIcon.kt` | platform.notify.NotificationIcon | 6 (E3.6) | todo |
 | `ProviderObservers.kt` | platform.ProviderChanges (callbackFlow) | 1 (E3.1) | ported, rewritten |
-| `RejectPolicy.kt` | platform.calllog / platform.telephony | 3 (E3.3) | todo |
+| `RejectPolicy.kt` | platform.telephony.RejectPolicy; `FlipRule` (same file) goes to platform.telephony.FlipDetector | 3 (E3.3), FlipRule in 5 | partly ported |
 | `ReplyReceiver.kt` | platform.notify.ReplyReceiver | 6 (E3.6) | todo |
 | `RovstiBridge.kt` | none: the Rust-calls-Kotlin methods become repositories; emit becomes PlatformEvents | 1 (E3.1) | dropped: replaced by seams |
 | `ScheduledSms.kt` | platform.sms.ScheduledSms | 4 (E3.4) | todo |
 | `SettingsMirror.kt` | platform.system.SettingsMirror | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `Shortcuts.kt` | platform.contacts.Shortcuts + `ShortcutsRepository` (target activity from `PlatformComponents`; `EXTRA_CONTACT_ID` is now owned here, `BirthdayReminders` in step 6 reads it) | 2 (E3.2) | ported |
-| `SimAccounts.kt` | platform.calllog / platform.telephony | 3 (E3.3) | todo |
-| `SimProbe.kt` | platform.calllog / platform.telephony | 3 (E3.3) | todo |
+| `SimAccounts.kt` | platform.telephony.SimAccounts (returns `PhoneAccounts`; the JSON envelope is dropped) + `SimRepository` | 3 (E3.3) | ported |
+| `SimProbe.kt` | platform.telephony.SimProbe (S5 lines only; the S14 vibration half went with the spikes) | 3 (E3.3) | ported |
 | `SmsQuery.kt` | platform.sms.SmsQuery | 4 (E3.4) | todo |
 | `SmsSend.kt` | platform.sms.SmsSend | 4 (E3.4) | todo |
 | `SpikeProbes.kt` | none | 1 (E3.1) | dropped: GPUI spikes (ARCH 7.3) |
@@ -117,8 +117,31 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/ContactPhotosTest.kt` | `:platform` test `contacts.ContactPhotosTest` (plan cases now on `PhotoPlan`) | 2 | moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/MultiCallTest.kt` | E3.5 | 5 | todo |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/WaIncomingTest.kt` | E3.9 seams | 8 | todo |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic17Test.kt` | blocklist and SIM cases to E3.3; the Epic17Probes half is dropped | 3 | partly todo |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/SpikeProbesTest.kt` | dropped with its GPUI spike | 1 | dropped |
+| `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic17Test.kt` | BlocklistTest (blocklist, reason and BlockGuard cases), RejectPolicyTest (reject cases); the FlipRule cases go to E3.5; the Epic17Probes cases (blocking, reject, silence probes) are dropped with the GPUI spikes | 3, 5 | partly moved; probe cases dropped |
+| `apps/phone/.../src/test/java/dev/rovsti/bridge/SpikeProbesTest.kt` | dropped with its GPUI spike (recorded again in step 3: nothing of it is ported) | 1 | dropped |
+
+## Call log, blocklist, SIM repositories (E3.3, step 3)
+
+`dev.rovsti.platform.calllog`: `CallLogRepository` (`entries(limit)`, `blocked(limit)`, `missedCount()` are cold `Flow`s
+that query on collect and again after a `CallLog.Calls.CONTENT_URI` change through the shared `liveQuery` helper: debounced
+by `CHANGE_DEBOUNCE_MS`, so a burst is one re-query; `delete(ids)` reads the rows first and answers a `Restorable`,
+`restore(rows)` puts them back as read, `deleteAll()`, `markMissedRead()`; writes answer a sealed `CallLogResult`),
+`AndroidCallLogRepository(context, io)`, `FakeCallLogRepository`. `BlocklistRepository` (`numbers()` flow of the
+`:core-bridge` `BlockedNumber`, `block` keeps the emergency/blank refusal and answers `Blocklist.Result`, `unblock`,
+`canBlock`, `isBlocked`), `AndroidBlocklistRepository(context, io, provider, isEmergency)`, `FakeBlocklistRepository`.
+`dev.rovsti.platform.telephony`: `SimRepository` (`accounts()` flow of `PhoneAccounts`, re-read on a
+`SubscriptionManager` listener or default-subscription broadcast, empty without `READ_PHONE_STATE`; `probe(placed, log)`),
+`AndroidSimRepository(context, io, changes, collect)`, `FakeSimRepository`.
+
+- The plan said `accounts(): Flow<List<SimAccount>>`; `SimAccount` in `:core-bridge` is the chip Rust builds from the
+  accounts (`sim.build`), so the repository emits the input of that op, `PhoneAccounts` (accounts, default, ask).
+- `missedCount()` is a flow (the tab badge is live); `markMissedRead()` is the old `MissedCalls.markRead`.
+- Restore round trip: a deleted row restores with its number, kind, date, duration, cached name and label, contact,
+  account and block reason, so it reads back equal except for `_id`. `CallLogKind.Unknown` is written as type 0 (the GPUI
+  build wrote 1 and turned it into an incoming call).
+- Dropped on purpose: `Epic17Probes`/`SpikeProbes` and their tests (GPUI spikes, ARCH 7.3); `pullJson`/`json` JSON
+  envelopes (typed models instead). `ProviderJson.callLog`/`kindCode` stay for the golden-fixture tests.
+- `RecordingProvider.failWith` makes the fake provider throw, for the denied-app cases.
 
 ## Contacts repository (E3.2, step 2)
 

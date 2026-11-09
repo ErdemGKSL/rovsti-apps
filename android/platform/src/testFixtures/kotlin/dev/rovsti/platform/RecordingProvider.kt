@@ -45,6 +45,9 @@ class RecordingProvider : ContentProvider() {
     private val tables = HashMap<String, (QueryCall) -> List<Map<String, Any?>>>()
     private var nextId = 100L
 
+    /** When set, every `query`, `insert`, `update` and `delete` throws it (a `SecurityException` for a denied app). */
+    var failWith: RuntimeException? = null
+
     val queries = ArrayList<QueryCall>()
 
     /** Every `applyBatch`, in order, each with its operations. */
@@ -94,6 +97,7 @@ class RecordingProvider : ContentProvider() {
         selectionArgs: Array<out String>?,
         sortOrder: String?,
     ): Cursor {
+        failWith?.let { throw it }
         val call = QueryCall(uri, projection?.toList(), selection, selectionArgs?.toList(), sortOrder)
         queries += call
         val rows = tables[key(uri)]?.invoke(call).orEmpty()
@@ -109,6 +113,7 @@ class RecordingProvider : ContentProvider() {
         uri: Uri,
         values: ContentValues?,
     ): Uri {
+        failWith?.let { throw it }
         inserts += Op(Kind.Insert, uri, ContentValues(values ?: ContentValues()), null, null)
         return ContentUris.withAppendedId(uri, nextId++)
     }
@@ -119,6 +124,7 @@ class RecordingProvider : ContentProvider() {
         selection: String?,
         selectionArgs: Array<out String>?,
     ): Int {
+        failWith?.let { throw it }
         updates += Op(Kind.Update, uri, ContentValues(values ?: ContentValues()), selection, selectionArgs?.toList())
         return 1
     }
@@ -128,6 +134,7 @@ class RecordingProvider : ContentProvider() {
         selection: String?,
         selectionArgs: Array<out String>?,
     ): Int {
+        failWith?.let { throw it }
         deletes += Op(Kind.Delete, uri, ContentValues(), selection, selectionArgs?.toList())
         return 1
     }

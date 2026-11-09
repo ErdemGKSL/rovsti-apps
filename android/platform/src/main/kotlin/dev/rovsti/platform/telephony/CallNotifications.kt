@@ -4,7 +4,6 @@ package dev.rovsti.platform.telephony
 
 import android.annotation.SuppressLint
 import android.app.Notification
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Person
@@ -12,12 +11,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import dev.rovsti.platform.PlatformComponents
+import dev.rovsti.platform.notify.PlatformChannels
 
 /** Builds the call notifications. Kotlin only: nothing here touches GPUI (AD-17). */
 @SuppressLint("MissingPermission") // the permissions are declared by the app manifests
 object CallNotifications {
-    const val CHANNEL_ONGOING = "ongoing"
-    const val CHANNEL_INCOMING = "incoming"
+    const val CHANNEL_ONGOING = PlatformChannels.ONGOING_CALL
+    const val CHANNEL_INCOMING = PlatformChannels.INCOMING_CALL
     const val ONGOING_ID = 1001
     const val INCOMING_ID = 1002
     const val ACTION_END = "dev.rovsti.phone.END_CALL"
@@ -51,29 +51,8 @@ object CallNotifications {
         checkNotNull(PlatformComponents.get().callAction) { "PlatformComponents.callAction was not installed" }
 
     fun ensureChannels(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        if (manager.getNotificationChannel(CHANNEL_ONGOING) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_ONGOING, "Ongoing call", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Shows the call in progress with an End button"
-                    setShowBadge(false)
-                },
-            )
-        }
-        if (manager.getNotificationChannel(CHANNEL_INCOMING) == null) {
-            manager.createNotificationChannel(
-                NotificationChannel(CHANNEL_INCOMING, "Incoming calls", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "Shows a ringing call with Answer and Decline"
-                    setShowBadge(false)
-                    // Telecom rings and vibrates (IN_CALL_SERVICE_RINGING is not set, AD-2):
-                    // the channel stays silent so nothing rings twice.
-                    setSound(null, null)
-                    enableVibration(false)
-                    enableLights(false)
-                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
-                },
-            )
-        }
+        PlatformChannels.ensure(context, CHANNEL_ONGOING)
+        PlatformChannels.ensure(context, CHANNEL_INCOMING)
     }
 
     /** The intent that brings the Incoming Call screen up: the full-screen intent and the body tap. */

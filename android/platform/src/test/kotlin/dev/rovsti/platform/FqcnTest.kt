@@ -16,6 +16,11 @@ class FqcnTest {
             "dev.rovsti.bridge.MmsFileProvider",
             "dev.rovsti.bridge.MmsResultReceiver",
             "dev.rovsti.bridge.ScheduledSmsReceiver",
+            // E3.6 (platform/notify/NotifyReceivers.kt)
+            "dev.rovsti.bridge.MessageReminderReceiver",
+            "dev.rovsti.bridge.CallReminderReceiver",
+            "dev.rovsti.bridge.BirthdayReminderReceiver",
+            "dev.rovsti.bridge.ReplyReceiver",
         )
 
     @Test fun everyPortedComponentKeepsItsBridgeName() {

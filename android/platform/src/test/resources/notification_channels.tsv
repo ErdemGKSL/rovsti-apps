@@ -1,0 +1,14 @@
+# id<TAB>importance<TAB>name. The committed table of every channel id and importance (E3.6): an id or an importance that
+# changes loses the user's own channel settings after an update, so changing a line here needs a reason in the commit.
+# Importance: 2 LOW, 3 DEFAULT, 4 HIGH (NotificationManager.IMPORTANCE_*).
+messages	4	Messages
+birthdays	3	Birthdays
+reminders	3	Call reminders
+message_reminders	3	Message reminders
+wa_calls	4	WhatsApp calls
+wa_missed	3	Missed WhatsApp call
+trip_problem	4	Trip paused
+trip	2	Trip in progress
+trip_alarm_v2	4	Destination alarm
+ongoing	2	Ongoing call
+incoming	4	Incoming calls

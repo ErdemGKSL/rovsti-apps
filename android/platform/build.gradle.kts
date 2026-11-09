@@ -22,6 +22,10 @@ android {
                     .dir(
                         rootProject.projectDir.parentFile.resolve("crates/rovsti_core/tests/fixtures"),
                     ).withPropertyName("wireFixtures")
+                // The headless goldens shared with Rust (HeadlessFixturesTest).
+                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rovsti_ffi/fixtures")
+                it.systemProperty("rovsti.ffi.fixtures", ffiFixtures.absolutePath)
+                it.inputs.dir(ffiFixtures).withPropertyName("ffiFixtures")
             }
         }
     }

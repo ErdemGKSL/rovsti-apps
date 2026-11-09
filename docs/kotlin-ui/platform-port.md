@@ -193,3 +193,20 @@ Seams:
 - Unchanged on purpose: the per-process `answerToken`, the intent action strings (`dev.rovsti.phone.ANSWER_CALL` etc.) and extras, the
   "Answer is honoured once" rule (`AnswerOnce`), channel ids `ongoing` (LOW) and `incoming` (HIGH, silent), notification ids 1001/1002.
   `PlatformConventionTest` now allows only ALL_CAPS action tokens after `dev.rovsti.phone.` and forbids any phone import or class.
+
+## Notifications and reminders (E3.6, step 6)
+
+`dev.rovsti.platform.notify`: `PlatformChannels` (every channel id and importance as constants plus `ensure`, pinned by
+`NotificationChannelsTest` against `src/test/resources/notification_channels.tsv`; `CallNotifications` now uses it),
+`MessageNotifications` (+ `NotificationSpec`, `notifier` seam for `MmsInbox`), `NotificationIcon`, `ReplyActions`,
+`MessageReminders`, `CallReminders`, `BirthdayReminders`, `ReminderStore`, `ReminderRepositories` (`RemindersRepository`: `arm`,
+`disarm`, `armed(): Flow`, `rearmAll`).
+
+- The four receivers (`MessageReminderReceiver`, `CallReminderReceiver`, `BirthdayReminderReceiver`, `ReplyReceiver`) are in
+  `notify/NotifyReceivers.kt` under `package dev.rovsti.bridge`; the logic is in `platform.notify`.
+- `PlatformEvents.uiAttached` replaces `RovstiBridge.uiReady`; `msg_reply`, `reminder_fired`, `message_reminder_fired`,
+  `message_reminders_changed` go to `PlatformEvents`. New and additive: `birthday_reminder_fired`, `reminders_changed`,
+  `birthday_reminders_changed` (the `armed()` flows refresh on them).
+- Changed on purpose: a failed or undecided cold reply (`wa_reply` with no answer) re-posts the notification unchanged instead of
+  cancelling it, so the message is not lost. Everything else (request codes, extras, actions, prefs files) is as before.
+- `BirthdayReminders.EXTRA_CONTACT_ID` is `Shortcuts.EXTRA_CONTACT_ID`.

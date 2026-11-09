@@ -14,8 +14,10 @@ for dir in */screenshots; do
   # Roborazzi creates an empty screenshots/ for a module whose tests record nothing yet (:wa before its screens).
   compgen -G "$dir/*.png" > /dev/null || continue
   summary="$module/build/test-results/roborazzi/debug/results-summary.json"
-  if [[ ! -f "$summary" ]]; then
-    echo "orphan-goldens: $summary is missing; run the Roborazzi task first" >&2
+  # A module with product flavors (:phone) writes <flavor>Debug instead of debug.
+  [[ -f "$summary" ]] || summary="$(ls "$module"/build/test-results/roborazzi/plainDebug/results-summary.json 2>/dev/null | head -1)"
+  if [[ -z "$summary" || ! -f "$summary" ]]; then
+    echo "orphan-goldens: $module roborazzi summary is missing; run the Roborazzi task first" >&2
     status=1
     continue
   fi

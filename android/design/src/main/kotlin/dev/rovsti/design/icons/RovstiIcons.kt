@@ -619,6 +619,57 @@ object RovstiIcons {
         }
     }
 
+    /** Nine dots in a 3 x 3 grid: the Keypad tab (Phone). */
+    val Keypad: ImageVector by lazy {
+        filled("Keypad") {
+            for (row in 0..2) for (col in 0..2) disc(5.5f + col * 6.5f, 5.5f + row * 6.5f, 1.8f)
+        }
+    }
+
+    /** A shield: the Setup button and the "not your phone app" line. */
+    val Shield: ImageVector by lazy {
+        stroked("Shield") {
+            moveTo(12f, 3f)
+            lineTo(19.5f, 5.8f)
+            verticalLineTo(11.5f)
+            curveTo(19.5f, 16f, 16.4f, 19.4f, 12f, 21f)
+            curveTo(7.6f, 19.4f, 4.5f, 16f, 4.5f, 11.5f)
+            verticalLineTo(5.8f)
+            close()
+        }
+    }
+
+    /** A shield with a tick: setup is complete. */
+    val ShieldCheck: ImageVector by lazy {
+        stroked("ShieldCheck") {
+            moveTo(12f, 3f)
+            lineTo(19.5f, 5.8f)
+            verticalLineTo(11.5f)
+            curveTo(19.5f, 16f, 16.4f, 19.4f, 12f, 21f)
+            curveTo(7.6f, 19.4f, 4.5f, 16f, 4.5f, 11.5f)
+            verticalLineTo(5.8f)
+            close()
+            moveTo(8.8f, 12.2f)
+            lineTo(11.2f, 14.6f)
+            lineTo(15.4f, 9.8f)
+        }
+    }
+
+    /** An empty circle: a checklist row that is not done. */
+    val Circle: ImageVector by lazy {
+        stroked("Circle") { ring(12f, 12f, 8.5f) }
+    }
+
+    /** A circle with a tick: a checklist row that is done. */
+    val CircleCheck: ImageVector by lazy {
+        stroked("CircleCheck") {
+            ring(12f, 12f, 8.5f)
+            moveTo(8.3f, 12.3f)
+            lineTo(10.9f, 14.9f)
+            lineTo(15.8f, 9.4f)
+        }
+    }
+
     /** A medical cross in a rounded square: the emergency list. */
     val MedicalCross: ImageVector by lazy {
         stroked("MedicalCross") {

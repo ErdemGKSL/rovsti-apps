@@ -1040,6 +1040,12 @@ with `DialField` in `:design`; Recents; person/number/call-details sheets; Favor
 the Convx-ported call aura; In-call single call and round close). **E5.8 moved to R2** (needs both call screens; the
 screens take a `CallSource` from R1). Check from the E4 goldens: **F15** strong lens blob at the tab bar's leading cap
 (`e4.15-settings-light`, `e4.14-my-card-dark`): compare lens values with Convx `IosTabBar` in Step 1.
+**F15 closed (round-12 step 1):** Convx's `ui/ios/component/IosTabBar.kt` has no lens (it is the plain bar); the lens lives in
+Convx's `ui/component/floatingtabbar/FloatingTabBarTabs.kt` (bar `lens(24dp, 24dp)` with `blur(4dp)`; pressed puck
+`lens(10dp x progress, 14dp x progress)`, `chromaticAberrationAmount 0.5`) and `FoldingTabGroup.kt` (`lens(10dp x
+progress, 14dp x progress, chromaticAberration)`). Ours (`chrome/floatingtabbar/FloatingTabBarTabs.kt` lines 429 and
+492-494, `FoldingTabGroup.kt` line 261) carry the same numbers, so nothing changed and no golden was re-recorded: the blob
+is the real backdrop path, Convx's own look.
 
 ### Parity table
 
@@ -1063,7 +1069,7 @@ screens take a `CallSource` from R1). Check from the E4 goldens: **F15** strong 
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | in-progress (round-12 step 1-2) |
+| E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | in-progress (round-12 step 1 done: module, manifest, components, container, routes, setup sheet, diagnostics, migration; step 2 data layer) |
 | E5.2 | Keypad | R1 | in-progress (round-12 step 3) |
 | E5.3 | Recents | R1 | in-progress (round-12 step 4) |
 | E5.4 | Contact, Number and Call details sheets | R1 | in-progress (round-12 step 5) |
@@ -1085,7 +1091,8 @@ screens take a `CallSource` from R1). Check from the E4 goldens: **F15** strong 
   `CallReminderReceiver`, provider, firebase `RovstiMessagingService`); role request flow; manifest test.
 - AC2 Migration test with fixture `prefs.json` (PrefsV2), `wa-calls.json`, `call-notes.json`, `whatsapp-link.json`
   (Phone has no `sim-choices.json`: that is the Messages legacy SIM file, `rovsti_app_core/src/messages/prefs.rs:22`).
-- Screenshots: `e5.1-setup-sheet`, `e5.1-diagnostics`, `e5.1-notice-line`.
+- Screenshots: `e5.1-setup-sheet`, `e5.1-diagnostics`, `e5.1-notice-line`, `e5.1-tabs` (+ `e5.1-settings`, `e5.1-setup-sheet-fs2`).
+- Evidence (step 1): `PhoneManifestTest` (both flavors), `PhoneRoutesTest`, `PhoneMigrationTest`, `InCallServiceTest`, `SetupSheetViewModelTest` (real core) pass. Setup sheet scrolls and stacks buttons at 2x font; notice line sits in its own card under the Recents title. Open item: WA hand-off JID to number needs a `rovsti_ffi` op (`wa_call::handoff_number`); until E5.8 the hand-off opens the Keypad and shows the "later update" toast.
 
 ### E5.2 Keypad
 - AC1 Keypad layout from Kotlin pure layout maths (not `rovsti_core::keypad_layout`), sized to the viewport; digits are

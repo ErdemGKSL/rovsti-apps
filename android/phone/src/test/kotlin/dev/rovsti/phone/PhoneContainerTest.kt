@@ -1,0 +1,76 @@
+package dev.rovsti.phone
+
+import dev.rovsti.core.FakeRustCore
+import dev.rovsti.core.Outcome
+import dev.rovsti.core.RustCore
+import dev.rovsti.core.model.phone.DialTextAnswer
+import dev.rovsti.core.model.phone.TelUriRequest
+import dev.rovsti.core.ops.NativePhoneOps
+import dev.rovsti.core.ops.PhoneOps
+import dev.rovsti.platform.system.permissions.AppPermissions
+import dev.rovsti.platform.telephony.CallRegistry
+import dev.rovsti.platform.telephony.CallsApi
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
+/** E5.1: the container is lazy, uses the call registry and the Phone permission table, and decodes `tel:` links. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+class PhoneContainerTest {
+    private class Fakes(
+        val core: FakeRustCore = FakeRustCore(),
+    ) : PhoneContainer(RuntimeEnvironment.getApplication()) {
+        var opsBuilt = 0
+
+        override fun createRust(): RustCore = core
+
+        override fun createOps(): PhoneOps {
+            opsBuilt++
+            return NativePhoneOps(core)
+        }
+    }
+
+    @Test fun nothingIsBuiltUntilItIsAsked() {
+        val container = Fakes()
+        assertEquals(0, container.opsBuilt)
+        assertEquals(AppPermissions.phone.app, container.appPermissions.app)
+    }
+
+    @Test fun theCallOwnerIsTheRegistry() {
+        val container = Fakes()
+        val calls: CallsApi = container.calls
+        assertSame(CallRegistry, calls)
+    }
+
+    @Test fun aTelLinkIsDecodedByTheCoreAndOfferedToTheKeypad() {
+        val container = Fakes()
+        container.core.onTyped("dial.from_tel_uri", TelUriRequest.serializer(), DialTextAnswer.serializer()) {
+            Outcome.Ok(DialTextAnswer(if (it.uri == "tel:%2A21%23") "*21#" else ""))
+        }
+        assertNull(container.pendingDial.value)
+        container.openTelUri("tel:%2A21%23")
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (container.pendingDial.value == null && System.nanoTime() < deadline) Thread.sleep(10)
+        assertEquals("*21#", container.pendingDial.value?.text)
+        assertEquals(false, container.pendingDial.value?.fromHandoff)
+    }
+
+    @Test fun twoLinksForTheSameNumberAreTwoRequests() {
+        val container = Fakes()
+        container.offerDial("123")
+        val first = container.pendingDial.value
+        container.offerDial("123")
+        val second = container.pendingDial.value
+        assertEquals(first?.text, second?.text)
+        assertEquals(false, first == second)
+    }
+}

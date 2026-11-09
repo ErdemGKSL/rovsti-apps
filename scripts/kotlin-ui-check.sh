@@ -52,8 +52,10 @@ if [[ -z "${SKIP_GRADLE:-}" ]]; then
   if (cd android && ./gradlew --no-daemon -q projects 2>/dev/null | grep -q "Project ':"); then
     shot=verifyRoborazziDebug
     [[ -n "${RECORD:-}" ]] && shot=recordRoborazziDebug
-    step "gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug $shot" \
-      gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug "$shot"
+    # :phone has product flavors (plain, firebase): its tasks carry the flavor, and the firebase flavor's own tests run too.
+    phone_shot="${shot/Debug/PlainDebug}"
+    step "gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug $shot :phone:$phone_shot :phone:testFirebaseDebugUnitTest" \
+      gradle spotlessCheck lintDebug testDebugUnitTest :core-bridge:testRustBridge assembleDebug "$shot" ":phone:$phone_shot" :phone:testFirebaseDebugUnitTest
     step "debug APKs have librovsti_ffi.so (both ABIs)" bash scripts/check-catalog-apk.sh
   else
     step "gradle spotlessCheck (no Android modules yet)" gradle spotlessCheck

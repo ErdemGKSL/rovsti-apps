@@ -1,0 +1,59 @@
+<resources>
+    <string name="app_name">Rovsti Phone</string>
+    <string name="tab_favorites">Favorites</string>
+    <string name="tab_recents">Recents</string>
+    <string name="tab_contacts">Contacts</string>
+    <string name="tab_keypad">Keypad</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_open">Settings</string>
+    <string name="coming_title">Coming soon</string>
+    <string name="coming_message">This screen arrives in a later update.</string>
+    <string name="keypad_coming_message">The number field and the keys arrive with the next update.</string>
+
+    <!-- Setup sheet and the notice line (apps/phone/src/setup_ui.rs) -->
+    <string name="setup_open">Setup</string>
+    <string name="setup_title">Finish setup</string>
+    <string name="setup_all_set">You\'re all set</string>
+    <string name="setup_subtitle">So every call rings, even when the phone is locked.</string>
+    <string name="setup_note_could_not_open">Couldn\'t open settings</string>
+    <string name="setup_row_done">done</string>
+    <string name="setup_row_not_done">not done</string>
+    <string name="setup_row_confirm">needs confirmation</string>
+    <string name="setup_act_app_info">Open App info</string>
+    <string name="setup_act_role">Set as default</string>
+    <string name="setup_act_default_apps">Open default apps</string>
+    <string name="setup_act_allow">Allow access</string>
+    <string name="setup_act_open_settings">Open settings</string>
+    <string name="setup_act_quick_allow">Quick allow</string>
+    <string name="setup_act_confirm">I did it</string>
+    <string name="setup_act_unconfirm">Mark as not done</string>
+    <string name="setup_steps_restricted">Android 15 and later blocks apps installed from a file from becoming the default phone app. Open App info, tap the three-dot menu, then Allow restricted settings (Kısıtlı ayarlara izin ver), and come back. The menu item shows up only after one blocked attempt, so tap Set as default once first if you do not see it.</string>
+    <string name="setup_steps_lock_screen">In Other permissions, turn on Show on lock screen.</string>
+    <string name="setup_steps_popups">In Other permissions, turn on Display pop-up windows while running in the background.</string>
+    <string name="setup_steps_battery">Choose No restrictions.</string>
+    <string name="setup_steps_autostart">Switch Rovsti Phone on.</string>
+    <string name="setup_tail_fell_back"> This phone opened App info instead; look for Other permissions, Autostart or Battery saver there.</string>
+    <string name="setup_tail_open_first"> Open settings first, then confirm here.</string>
+    <string name="notice_not_default">Rovsti is not your phone app</string>
+    <string name="notice_not_default_action">Tap to finish setup</string>
+
+    <!-- Settings and Diagnostics -->
+    <string name="settings_group_setup">Setup</string>
+    <string name="settings_setup_row">Finish setup</string>
+    <string name="settings_setup_done">All set</string>
+    <string name="settings_whatsapp">WhatsApp</string>
+    <string name="settings_version">Version</string>
+    <string name="diag_title">Diagnostics</string>
+    <string name="diag_copy_all">Copy all</string>
+    <string name="diag_copied">Report copied</string>
+    <string name="diag_copy_failed">Couldn\'t copy the report</string>
+    <string name="diag_none">Nothing recorded yet</string>
+    <string name="fallback_stopped">Rovsti Phone\'s screen stopped.\nYour call is not affected.</string>
+    <string name="fallback_end_call">End call</string>
+    <string name="native_incoming">Incoming call</string>
+    <string name="native_incoming_locked">Incoming call (locked)</string>
+    <string name="native_incoming_from">Incoming call from %1$s</string>
+    <string name="native_answer">Answer</string>
+    <string name="native_decline">Decline</string>
+    <string name="wa_handoff_toast">WhatsApp calls arrive in a later update</string>
+</resources>

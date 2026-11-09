@@ -27,6 +27,8 @@ class MergedManifest private constructor(
         val name: String,
         val attributes: Map<String, String>,
         val filters: List<IntentSpec>,
+        /** The `<meta-data>` entries of the component: name to value. */
+        val metaData: Map<String, String> = emptyMap(),
     ) {
         val exported: Boolean? get() = attributes["exported"]?.toBooleanStrictOrNull()
         val launchMode: String? get() = attributes["launchMode"]
@@ -61,6 +63,14 @@ class MergedManifest private constructor(
                 name = e.android("name").orEmpty(),
                 attributes = attributesOf(e),
                 filters = children(e, "intent-filter").map(::intentSpec),
+                metaData =
+                    children(e, "meta-data")
+                        .mapNotNull { m ->
+                            m.android("name")?.let {
+                                it to
+                                    (m.android("value") ?: m.android("resource").orEmpty())
+                            }
+                        }.toMap(),
             )
         }
     }

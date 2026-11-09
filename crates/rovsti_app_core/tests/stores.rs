@@ -259,3 +259,17 @@ fn the_wa_calls_fixtures_load_and_save_byte_for_byte() {
         );
     }
 }
+
+#[test]
+fn the_phone_dir_holds_the_same_wa_call_files_as_the_loader_fixtures() {
+    // The Kotlin migration test (`:phone` PhoneMigrationTest) copies `dirs/phone` into the app's data directory; the
+    // WhatsApp call history there must stay the file the loader test above reads.
+    let dirs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/dirs/phone");
+    for name in ["wa-calls.json", "wa-calls-forgotten.json"] {
+        assert_eq!(
+            fs::read(dirs.join(name)).expect("dirs copy"),
+            fs::read(fixture(name)).expect("fixture"),
+            "{name}"
+        );
+    }
+}

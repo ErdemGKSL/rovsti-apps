@@ -70,7 +70,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | Source | Destination | Step | Status |
 |---|---|---|---|
 | `apps/phone/.../phone/AudioPath.kt` | platform.telephony.AudioPath | 5 (E3.5) | ported |
-| `apps/phone/.../phone/CallActionReceiver.kt` | app module E5 (component stays in the app; calls `:platform`) | E5 | app module E5 |
+| `apps/phone/.../phone/CallActionReceiver.kt` | `:phone` `dev.rovsti.phone.CallActionReceiver` (calls `CallRegistry`) | E5 | ported (E5.1) |
 | `apps/phone/.../phone/CallEventRing.kt` | platform.telephony.CallEventRing | 5 (E3.5) | ported |
 | `apps/phone/.../phone/CallNotifications.kt` | platform.telephony.CallNotifications | 5 (E3.5) | ported |
 | `apps/phone/.../phone/CallRegistry.kt` | platform.telephony.CallRegistry | 5 (E3.5) | ported |
@@ -79,15 +79,16 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/phone/.../phone/DialIntents.kt` | platform.telephony.DialIntents | 5 (E3.5) | ported |
 | `apps/phone/.../phone/FlipDetector.kt` | platform.telephony.FlipDetector | 5 (E3.5) | ported |
 | `apps/phone/.../phone/IncomingCall.kt` | platform.telephony.IncomingCall | 5 (E3.5) | ported |
-| `apps/phone/.../phone/IncomingPerf.kt` | stays in `:phone` (E5); `:platform` only has the `IncomingTiming` seam that `CallRegistry.timing` calls | E5 | app module E5 |
-| `apps/phone/.../phone/MainActivity.kt` | app module E5 (Application/MainActivity on `:shell`) | E5 | app module E5 |
-| `apps/phone/.../phone/NativeIncoming.kt` | stays in `:phone` (E5); GPUI-era native incoming-screen hand-off | E5 | app module E5 |
+| `apps/phone/.../phone/IncomingPerf.kt` | `:phone` `IncomingPerf : IncomingTiming` (installed in `CallRegistry.timing`; the Diagnostics page reads its timeline) | E5 | ported (E5.1) |
+| `apps/phone/.../phone/MainActivity.kt` | `:phone` `dev.rovsti.phone.MainActivity : RovstiShellActivity<PhoneRoute>` (lock-screen flags only while a call is live, Answer once, dial links, native fallback) | E5 | ported (E5.1) |
+| `apps/phone/.../phone/NativeIncoming.kt` | `:phone` `NativeIncoming` (the error view when the Compose UI cannot start; the GPUI curtain is dropped) | E5 | ported (E5.1) |
 | `apps/phone/.../phone/OngoingCall.kt` | platform.telephony.OngoingCall | 5 (E3.5) | ported |
 | `apps/phone/.../phone/ProximityController.kt` | platform.telephony.ProximityController | 5 (E3.5) | ported |
 | `apps/phone/.../phone/RebuildCoalescer.kt` | platform.telephony.RebuildCoalescer | 5 (E3.5) | ported |
-| `apps/phone/.../phone/RovstiInCallService.kt` | app module E5 (component stays in the app; calls `:platform`) | E5 | app module E5 |
-| `apps/phone/.../phone/RovstiPhoneApp.kt` | app module E5 (Application/MainActivity on `:shell`) | E5 | app module E5 |
-| `apps/phone/.../phone/VoicemailReceiver.kt` | app module E5 (component stays in the app; calls `:platform`) | E5 | app module E5 |
+| `apps/phone/.../phone/RovstiInCallService.kt` | `:phone` `RovstiInCallService : InCallService, InCallHost` (forwards to `CallRegistry`) | E5 | ported (E5.1) |
+| `apps/phone/.../phone/RovstiPhoneApp.kt` | `:phone` `RovstiPhoneApp : HasContainer<PhoneContainer>` | E5 | ported (E5.1) |
+| `apps/phone/.../phone/VoicemailReceiver.kt` | `:phone` `VoicemailReceiver` (disabled in the manifest; empty until spike S9) | E5 | ported (E5.1) |
+| `apps/phone/platforms/android/app/src/firebase/.../RovstiMessagingService.kt` | `:phone` `src/firebase` (the `firebase` flavor; calls `WaPush.onMessage`) | E5 | ported (E5.1) |
 | `apps/messages/.../messages/BootReceiver.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
 | `apps/messages/.../messages/ComposeRequest.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
 | `apps/messages/.../messages/HeadlessSmsSendService.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |

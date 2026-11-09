@@ -9,8 +9,14 @@ import org.junit.Test
  * (E3.2-E3.7) and is complete when every `dev.rovsti.bridge.*` component is ported.
  */
 class FqcnTest {
-    /** Components ported so far. Step 1 ports none: its files are helpers (`dev.rovsti.platform.*`). */
-    private val ported = emptyList<String>()
+    /** Components ported so far. E3.4 ports the SMS side (`platform/sms/BridgeComponents.kt`, package `dev.rovsti.bridge`). */
+    private val ported =
+        listOf(
+            "dev.rovsti.bridge.SmsStatusReceiver",
+            "dev.rovsti.bridge.MmsFileProvider",
+            "dev.rovsti.bridge.MmsResultReceiver",
+            "dev.rovsti.bridge.ScheduledSmsReceiver",
+        )
 
     @Test fun everyPortedComponentKeepsItsBridgeName() {
         val missing = ported.filter { name -> runCatching { Class.forName(name) }.isFailure }

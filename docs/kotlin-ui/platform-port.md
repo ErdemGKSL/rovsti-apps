@@ -39,20 +39,20 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `MessageNotifications.kt` | platform.notify.MessageNotifications | 6 (E3.6) | todo |
 | `MessageReminders.kt` | platform.notify.MessageReminders | 6 (E3.6) | todo |
 | `MissedCalls.kt` | platform.calllog.MissedCalls; LocaleTimeInfo is platform.system.LocaleTimeInfo | 3 (E3.3), LocaleTimeInfo in 1 | ported |
-| `MmsCodec.kt` | platform.sms.MmsCodec | 4 (E3.4) | todo |
+| `MmsCodec.kt` | platform.sms.MmsCodec | 4 (E3.4) | done |
 | `MultiCall.kt` | platform.telephony.MultiCall | 5 (E3.5) | todo |
 | `NotificationIcon.kt` | platform.notify.NotificationIcon | 6 (E3.6) | todo |
 | `ProviderObservers.kt` | platform.ProviderChanges (callbackFlow) | 1 (E3.1) | ported, rewritten |
 | `RejectPolicy.kt` | platform.telephony.RejectPolicy; `FlipRule` (same file) goes to platform.telephony.FlipDetector | 3 (E3.3), FlipRule in 5 | partly ported |
 | `ReplyReceiver.kt` | platform.notify.ReplyReceiver | 6 (E3.6) | todo |
 | `RovstiBridge.kt` | none: the Rust-calls-Kotlin methods become repositories; emit becomes PlatformEvents | 1 (E3.1) | dropped: replaced by seams |
-| `ScheduledSms.kt` | platform.sms.ScheduledSms | 4 (E3.4) | todo |
+| `ScheduledSms.kt` | platform.sms.ScheduledSms | 4 (E3.4) | done |
 | `SettingsMirror.kt` | platform.system.SettingsMirror | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `Shortcuts.kt` | platform.contacts.Shortcuts + `ShortcutsRepository` (target activity from `PlatformComponents`; `EXTRA_CONTACT_ID` is now owned here, `BirthdayReminders` in step 6 reads it) | 2 (E3.2) | ported |
 | `SimAccounts.kt` | platform.telephony.SimAccounts (returns `PhoneAccounts`; the JSON envelope is dropped) + `SimRepository` | 3 (E3.3) | ported |
 | `SimProbe.kt` | platform.telephony.SimProbe (S5 lines only; the S14 vibration half went with the spikes) | 3 (E3.3) | ported |
-| `SmsQuery.kt` | platform.sms.SmsQuery | 4 (E3.4) | todo |
-| `SmsSend.kt` | platform.sms.SmsSend | 4 (E3.4) | todo |
+| `SmsQuery.kt` | platform.sms.SmsQuery | 4 (E3.4) | done |
+| `SmsSend.kt` | platform.sms.SmsSend | 4 (E3.4) | done |
 | `SpikeProbes.kt` | none | 1 (E3.1) | dropped: GPUI spikes (ARCH 7.3) |
 | `StopsLocation.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
 | `SystemPages.kt` | platform.system.SystemPages | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
@@ -91,9 +91,9 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/messages/.../messages/BootReceiver.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
 | `apps/messages/.../messages/ComposeRequest.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
 | `apps/messages/.../messages/HeadlessSmsSendService.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
-| `apps/messages/.../messages/IncomingNotice.kt` | platform.sms.IncomingNotice | 4 (E3.4) | todo |
+| `apps/messages/.../messages/IncomingNotice.kt` | platform.sms.IncomingNotice | 4 (E3.4) | done |
 | `apps/messages/.../messages/MainActivity.kt` | app module E6 (Application/MainActivity on `:shell`) | E6 | app module E6 |
-| `apps/messages/.../messages/MmsInbox.kt` | platform.sms.MmsInbox | 4 (E3.4) | todo |
+| `apps/messages/.../messages/MmsInbox.kt` | platform.sms.MmsInbox | 4 (E3.4) | done |
 | `apps/messages/.../messages/MmsWapPushReceiver.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
 | `apps/messages/.../messages/RovstiMessagesApp.kt` | app module E6 (Application/MainActivity on `:shell`) | E6 | app module E6 |
 | `apps/messages/.../messages/SmsDeliverReceiver.kt` | app module E6 (component stays in the app; calls `:platform`) | E6 | app module E6 |
@@ -156,3 +156,15 @@ by `CHANGE_DEBOUNCE_MS`, so a burst is one re-query; `delete(ids)` reads the row
   `GroupMembersResult`, `ImportResult`, `PhotoSize` (the `contacts.*` wildcard in `compose_stability.conf` covers them).
 - `import(drafts)` takes the drafts the Rust `contacts.import_plan` op returns, not a JSON string.
 - The tests use `runCurrent()`, not `advanceUntilIdle()`, to run `backgroundScope` collectors (the latter does not run them).
+
+## E3.4 notes (SMS/MMS)
+
+- `SmsQuery` returns typed rows (`SmsThreadRow`, `SmsRow`, `MmsRow`, `SmsMessagesPayload`), not envelopes; the old
+  `SmsJson` builders became `SmsRules` (delivery mapping, paging, extensions).
+- The four manifest components (`SmsStatusReceiver`, `MmsFileProvider`, `MmsResultReceiver`, `ScheduledSmsReceiver`) live
+  in `platform/sms/BridgeComponents.kt` under `package dev.rovsti.bridge`. Their receivers do blocking work through
+  `ReceiverWork` (tests run it inline).
+- `MmsInbox` posts its notification through the `MessageNotifier` seam; E3.6 installs `MessageNotifications` there. The
+  app installs `MmsCodec.downloadedHandler = MmsCodec.DownloadedHandler(MmsInbox::onDownloaded)` in `Application.onCreate`.
+- `scheduled_fired` now also carries `at_ms` (additive; Rust reads the kind only).
+- `ComposeRequest` and `MmsAnnouncement` cases of the old `MessagesHostTest` stay with the Messages app (E6).

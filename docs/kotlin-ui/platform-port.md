@@ -23,7 +23,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `CallLogQuery.kt` | platform.calllog.CallLogQuery (typed `CallLogEntry`; `byIds` and `missedCount` added) | 3 (E3.3) | ported |
 | `CallLogWrite.kt` | platform.calllog.CallLogWrite (typed rows; restore also writes name, label, contact and block reason) | 3 (E3.3) | ported |
 | `CallReminders.kt` | platform.notify.CallReminders | 6 (E3.6) | todo |
-| `CallsApi.kt` | platform.telephony.CallsApi | 5 (E3.5) | todo |
+| `CallsApi.kt` | platform.telephony.CallsApi | 5 (E3.5) | ported |
 | `ContactOptions.kt` | platform.contacts.ContactCallOptions (renamed: `ContactOptions` is the `:core-bridge` model it returns; the picker is an intent plus `parsePicked`, no `startActivityForResult`) | 2 (E3.2) | ported |
 | `ContactPhotos.kt` | platform.contacts.ContactPhotos (typed `PhotoPlan`, `ContactResult`) | 2 (E3.2) | ported |
 | `ContactsEdit.kt` | platform.contacts.ContactsEdit (typed `ContactDraft`, `EDITED_MIMES` kept, JSON envelope dropped) | 2 (E3.2) | ported |
@@ -33,17 +33,17 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `Handoff.kt` | platform.system.Handoff | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `Haptics.kt` | platform.system.Haptics | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `Headless.kt` | platform.Headless (blocking wrapper over Rust.core().headless) | 1 (E3.1) | ported, rewritten |
-| `KeypadTone.kt` | platform.telephony.KeypadTone | 5 (E3.5) | todo |
+| `KeypadTone.kt` | platform.telephony.KeypadTone | 5 (E3.5) | ported |
 | `Mailbox.kt` | none: one-shots become intent handling in the activity | R2 E3.11 | dropped: see ARCH 7.3 |
 | `MediaShare.kt` | platform.files (E3.8a) | R2 E3.8a | R2 E3.8a |
 | `MessageNotifications.kt` | platform.notify.MessageNotifications | 6 (E3.6) | todo |
 | `MessageReminders.kt` | platform.notify.MessageReminders | 6 (E3.6) | todo |
 | `MissedCalls.kt` | platform.calllog.MissedCalls; LocaleTimeInfo is platform.system.LocaleTimeInfo | 3 (E3.3), LocaleTimeInfo in 1 | ported |
 | `MmsCodec.kt` | platform.sms.MmsCodec | 4 (E3.4) | done |
-| `MultiCall.kt` | platform.telephony.MultiCall | 5 (E3.5) | todo |
+| `MultiCall.kt` | platform.telephony.MultiCall | 5 (E3.5) | ported |
 | `NotificationIcon.kt` | platform.notify.NotificationIcon | 6 (E3.6) | todo |
 | `ProviderObservers.kt` | platform.ProviderChanges (callbackFlow) | 1 (E3.1) | ported, rewritten |
-| `RejectPolicy.kt` | platform.telephony.RejectPolicy; `FlipRule` (same file) goes to platform.telephony.FlipDetector | 3 (E3.3), FlipRule in 5 | partly ported |
+| `RejectPolicy.kt` | platform.telephony.RejectPolicy; `FlipRule` (same file) goes to platform.telephony.FlipDetector | 3 (E3.3), FlipRule in 5 | ported (`FlipRule` lives in FlipDetector.kt) |
 | `ReplyReceiver.kt` | platform.notify.ReplyReceiver | 6 (E3.6) | todo |
 | `RovstiBridge.kt` | none: the Rust-calls-Kotlin methods become repositories; emit becomes PlatformEvents | 1 (E3.1) | dropped: replaced by seams |
 | `ScheduledSms.kt` | platform.sms.ScheduledSms | 4 (E3.4) | done |
@@ -58,7 +58,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `SystemPages.kt` | platform.system.SystemPages | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `TripAlarm.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
 | `TripService.kt` | platform.location / platform.trip | 7 (E3.7) | todo |
-| `VoicePlayer.kt` | platform.telephony.VoicePlayer | 5 (E3.5) | todo |
+| `VoicePlayer.kt` | platform.telephony.VoicePlayer | 5 (E3.5) | ported |
 | `WaCallAudio.kt` | platform.wa.WaCallAudio | 8 (E3.9 seams) | todo |
 | `WaIncoming.kt` | platform.wa.WaIncoming | 8 (E3.9 seams) | todo |
 | `WaPush.kt` | platform.wa.WaPush | 8 (E3.9 seams) | todo |
@@ -69,22 +69,22 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 
 | Source | Destination | Step | Status |
 |---|---|---|---|
-| `apps/phone/.../phone/AudioPath.kt` | platform.telephony.AudioPath | 5 (E3.5) | todo |
+| `apps/phone/.../phone/AudioPath.kt` | platform.telephony.AudioPath | 5 (E3.5) | ported |
 | `apps/phone/.../phone/CallActionReceiver.kt` | app module E5 (component stays in the app; calls `:platform`) | E5 | app module E5 |
-| `apps/phone/.../phone/CallEventRing.kt` | platform.telephony.CallEventRing | 5 (E3.5) | todo |
-| `apps/phone/.../phone/CallNotifications.kt` | platform.telephony.CallNotifications | 5 (E3.5) | todo |
-| `apps/phone/.../phone/CallRegistry.kt` | platform.telephony.CallRegistry | 5 (E3.5) | todo |
-| `apps/phone/.../phone/CallSurface.kt` | platform.telephony.CallSurface | 5 (E3.5) | todo |
-| `apps/phone/.../phone/Caps.kt` | platform.telephony.Caps | 5 (E3.5) | todo |
-| `apps/phone/.../phone/DialIntents.kt` | platform.telephony.DialIntents | 5 (E3.5) | todo |
-| `apps/phone/.../phone/FlipDetector.kt` | platform.telephony.FlipDetector | 5 (E3.5) | todo |
-| `apps/phone/.../phone/IncomingCall.kt` | platform.telephony.IncomingCall | 5 (E3.5) | todo |
-| `apps/phone/.../phone/IncomingPerf.kt` | platform.telephony.IncomingPerf | 5 (E3.5) | todo |
+| `apps/phone/.../phone/CallEventRing.kt` | platform.telephony.CallEventRing | 5 (E3.5) | ported |
+| `apps/phone/.../phone/CallNotifications.kt` | platform.telephony.CallNotifications | 5 (E3.5) | ported |
+| `apps/phone/.../phone/CallRegistry.kt` | platform.telephony.CallRegistry | 5 (E3.5) | ported |
+| `apps/phone/.../phone/CallSurface.kt` | platform.telephony.CallSurface | 5 (E3.5) | ported |
+| `apps/phone/.../phone/Caps.kt` | platform.telephony.Caps | 5 (E3.5) | ported |
+| `apps/phone/.../phone/DialIntents.kt` | platform.telephony.DialIntents | 5 (E3.5) | ported |
+| `apps/phone/.../phone/FlipDetector.kt` | platform.telephony.FlipDetector | 5 (E3.5) | ported |
+| `apps/phone/.../phone/IncomingCall.kt` | platform.telephony.IncomingCall | 5 (E3.5) | ported |
+| `apps/phone/.../phone/IncomingPerf.kt` | stays in `:phone` (E5); `:platform` only has the `IncomingTiming` seam that `CallRegistry.timing` calls | E5 | app module E5 |
 | `apps/phone/.../phone/MainActivity.kt` | app module E5 (Application/MainActivity on `:shell`) | E5 | app module E5 |
-| `apps/phone/.../phone/NativeIncoming.kt` | platform.telephony.NativeIncoming | 5 (E3.5) | todo |
-| `apps/phone/.../phone/OngoingCall.kt` | platform.telephony.OngoingCall | 5 (E3.5) | todo |
-| `apps/phone/.../phone/ProximityController.kt` | platform.telephony.ProximityController | 5 (E3.5) | todo |
-| `apps/phone/.../phone/RebuildCoalescer.kt` | platform.telephony.RebuildCoalescer | 5 (E3.5) | todo |
+| `apps/phone/.../phone/NativeIncoming.kt` | stays in `:phone` (E5); GPUI-era native incoming-screen hand-off | E5 | app module E5 |
+| `apps/phone/.../phone/OngoingCall.kt` | platform.telephony.OngoingCall | 5 (E3.5) | ported |
+| `apps/phone/.../phone/ProximityController.kt` | platform.telephony.ProximityController | 5 (E3.5) | ported |
+| `apps/phone/.../phone/RebuildCoalescer.kt` | platform.telephony.RebuildCoalescer | 5 (E3.5) | ported |
 | `apps/phone/.../phone/RovstiInCallService.kt` | app module E5 (component stays in the app; calls `:platform`) | E5 | app module E5 |
 | `apps/phone/.../phone/RovstiPhoneApp.kt` | app module E5 (Application/MainActivity on `:shell`) | E5 | app module E5 |
 | `apps/phone/.../phone/VoicemailReceiver.kt` | app module E5 (component stays in the app; calls `:platform`) | E5 | app module E5 |
@@ -107,6 +107,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 
 | Source | Destination | Step | Status |
 |---|---|---|---|
+| `apps/phone/.../src/test/java/dev/rovsti/phone/{IncomingCall,OngoingCall,AudioPath,ProximityPolicy,CallEventRing,DialIntents,RebuildCoalescer}Test.kt` | `:platform` test `telephony.<same name>` (the `IncomingTimeline` case stays with `IncomingPerf` in `:phone`) | 5 | moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/WireFixturesTest.kt` | `:platform` test, same name | 1 | moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/WireV2Test.kt` | `:platform` test, same name | 1 | moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/LocaleTimeInfoTest.kt` | `:platform` test, same name | 1 | moved |
@@ -115,9 +116,9 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic16Test.kt` | SettingsMirrorTest (mirror and system-page cases); the Mailbox, tone, SIM and document cases go with their classes | 1, 3, 5 | partly moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/MessagesSeamTest.kt` | MessagesSeamTest (Headless cases, FakeRustCore); SMS/MMS/notification/scheduled cases go with E3.4/E3.6 | 1, 4, 6 | partly moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/ContactPhotosTest.kt` | `:platform` test `contacts.ContactPhotosTest` (plan cases now on `PhotoPlan`) | 2 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/MultiCallTest.kt` | E3.5 | 5 | todo |
+| `apps/phone/.../src/test/java/dev/rovsti/bridge/MultiCallTest.kt` | `:platform` test `telephony.MultiCallTest` | 5 | moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/WaIncomingTest.kt` | E3.9 seams | 8 | todo |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic17Test.kt` | BlocklistTest (blocklist, reason and BlockGuard cases), RejectPolicyTest (reject cases); the FlipRule cases go to E3.5; the Epic17Probes cases (blocking, reject, silence probes) are dropped with the GPUI spikes | 3, 5 | partly moved; probe cases dropped |
+| `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic17Test.kt` | BlocklistTest (blocklist, reason and BlockGuard cases), RejectPolicyTest (reject cases); the FlipRule cases are `telephony.FlipRuleTest` (step 5); the Epic17Probes cases (blocking, reject, silence probes) are dropped with the GPUI spikes | 3, 5 | moved; probe cases dropped |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/SpikeProbesTest.kt` | dropped with its GPUI spike (recorded again in step 3: nothing of it is ported) | 1 | dropped |
 
 ## Call log, blocklist, SIM repositories (E3.3, step 3)
@@ -168,3 +169,27 @@ by `CHANGE_DEBOUNCE_MS`, so a burst is one re-query; `delete(ids)` reads the row
   app installs `MmsCodec.downloadedHandler = MmsCodec.DownloadedHandler(MmsInbox::onDownloaded)` in `Application.onCreate`.
 - `scheduled_fired` now also carries `at_ms` (additive; Rust reads the kind only).
 - `ComposeRequest` and `MmsAnnouncement` cases of the old `MessagesHostTest` stay with the Messages app (E6).
+
+## Telecom core (E3.5, step 5)
+
+`dev.rovsti.platform.telephony`: `CallRegistry` (same state machine, same rebuild order), `CallsApi`, `MultiCall` (+ `PendingMachine`,
+`MultiCallFacts`), `AudioPath`, `ProximityController` + `ProximityPolicy`, `CallNotifications`, `IncomingCall` (+ `AnswerOnce`),
+`OngoingCall`, `CallSurface`, `CallEventRing`, `FlipDetector` (+ `FlipRule`), `RebuildCoalescer`, `DialIntents`, `Caps`, `KeypadTone`,
+`VoicePlayer`. Resource: `ic_stat_call` (the notification small icon) now lives in `:platform`.
+
+Seams:
+
+- `InCallHost` replaces the `RovstiInCallService` field: the app's `InCallService` (or an adapter around it) passes itself to
+  `CallRegistry.onServiceBound(host)`; the registry asks it for `setMuted`, `setAudioRoute`, `requestEndpoint`, `legacyAudioState` and
+  `startForeground`/`stopForegroundRemove`.
+- `PlatformComponents.mainActivity` / `callAction` replace `MainActivity::class.java` / `CallActionReceiver::class.java` in
+  `CallNotifications` and `CallSurface`. `callAction` is required for call notifications (a missing one fails loudly).
+- `CallRegistry.state: StateFlow<List<WireCall>>` (`phone.WireCall`, decoded from the same `calls` JSON the Rust side gets) is set
+  last in a rebuild, after the notifications. `PlatformEvents.emit("calls", json)` replaces `RovstiBridge.emit` and
+  `PlatformEvents.uiAttached` replaces `RovstiBridge.uiReady`.
+- `IncomingPerf.kt` and `NativeIncoming.kt` stay in `:phone` (E5). The registry calls `CallRegistry.timing: IncomingTiming?`
+  (`onCallAdded`, `mark("notify")`, `frame`, `clear`); `:phone` installs an `IncomingPerf` adapter there.
+- Dropped: `probeRejectText` and the `rejectPathOverride` (spike S7, GPUI spikes), `Epic17Probes` use.
+- Unchanged on purpose: the per-process `answerToken`, the intent action strings (`dev.rovsti.phone.ANSWER_CALL` etc.) and extras, the
+  "Answer is honoured once" rule (`AnswerOnce`), channel ids `ongoing` (LOW) and `incoming` (HIGH, silent), notification ids 1001/1002.
+  `PlatformConventionTest` now allows only ALL_CAPS action tokens after `dev.rovsti.phone.` and forbids any phone import or class.

@@ -762,7 +762,7 @@ done by this planner (ops modules, fixtures incl. the headless pairs, `:core-bri
 | E3.2 | Contacts provider repository (read, write, groups, accounts, photos, options, observer) | R1 | in-progress (round-08) |
 | E3.3 | Call log, blocklist, blocked calls, SIM accounts | R1 | done (round-08 step 3) |
 | E3.4 | SMS/MMS provider, send, scheduled SMS | R1 | done (round-08 step 4) |
-| E3.5 | Telecom core: CallRegistry, audio path, proximity, call notifications | R1 | in-progress (round-08) |
+| E3.5 | Telecom core: CallRegistry, audio path, proximity, call notifications | R1 | done (round-08 step 5) |
 | E3.6 | Notifications, reminders, shortcuts | R1 | in-progress (round-08) |
 | E3.7 | Location, TripService, TripAlarm, AlarmSound, AlarmActivity | R1 | in-progress (round-08) |
 | E3.8a | Files, media store, share, clipboard, Photo Picker, camera capture, SAF import/export | R2 | todo |

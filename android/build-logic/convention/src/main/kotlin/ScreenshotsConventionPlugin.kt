@@ -16,12 +16,14 @@ class ScreenshotsConventionPlugin : Plugin<Project> {
                 outputDir.set(layout.projectDirectory.dir("screenshots"))
             }
 
-            // `:catalog:contactSheet` writes docs/kotlin-ui/screenshots/design.png from the light goldens (E1.22).
+            // `:catalog:contactSheet` writes docs/kotlin-ui/screenshots/design.png from the light goldens (E1.22). Every
+            // other module that applies the plugin (:wa, :shell, ...) writes <module>.png, so two sheets never share a file.
+            val sheetName = if (name == "catalog") "design" else name
             tasks.register("contactSheet", ContactSheetTask::class.java) {
                 group = "documentation"
                 description = "Tiles the light goldens into docs/kotlin-ui/screenshots/design.png"
                 screenshots.set(layout.projectDirectory.dir("screenshots"))
-                output.set(rootProject.layout.projectDirectory.file("../docs/kotlin-ui/screenshots/design.png"))
+                output.set(rootProject.layout.projectDirectory.file("../docs/kotlin-ui/screenshots/$sheetName.png"))
                 include.set("-light\\.png$")
                 exclude.set("-(rtl|fs2|landscape|360x640|dark)-|-(rtl|fs2|landscape|360x640)-light|-\\+\\d+ms-")
                 columns.set(12)

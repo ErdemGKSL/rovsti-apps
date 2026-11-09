@@ -6,9 +6,13 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/android"
 status=0
+# Every module with goldens is found by the glob (catalog, design, :wa, :shell, ...); a module that applies
+# rovsti.screenshots but has no screenshots/ directory yet (no UI, e.g. :wa before its screens) is skipped.
 for dir in */screenshots; do
   [[ -d "$dir" ]] || continue
   module="${dir%/screenshots}"
+  # Roborazzi creates an empty screenshots/ for a module whose tests record nothing yet (:wa before its screens).
+  compgen -G "$dir/*.png" > /dev/null || continue
   summary="$module/build/test-results/roborazzi/debug/results-summary.json"
   if [[ ! -f "$summary" ]]; then
     echo "orphan-goldens: $summary is missing; run the Roborazzi task first" >&2

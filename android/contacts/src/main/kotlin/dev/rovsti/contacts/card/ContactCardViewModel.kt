@@ -3,6 +3,7 @@ package dev.rovsti.contacts.card
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
+import dev.rovsti.contacts.pinContactToHome
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.AccountLabelRequest
 import dev.rovsti.core.model.contacts.AgeRequest
@@ -22,12 +23,15 @@ import dev.rovsti.core.model.contacts.FieldKind
 import dev.rovsti.core.model.contacts.FieldList
 import dev.rovsti.core.model.contacts.FieldMenuRequest
 import dev.rovsti.core.model.contacts.Group
+import dev.rovsti.core.model.contacts.LocalYmdRequest
 import dev.rovsti.core.model.contacts.MapsUrlRequest
 import dev.rovsti.core.model.contacts.NumberKeyRequest
 import dev.rovsti.core.model.contacts.RelationAction
 import dev.rovsti.core.model.contacts.RelationKind
 import dev.rovsti.core.model.contacts.RelationTapRequest
+import dev.rovsti.core.model.contacts.TextFileAnswer
 import dev.rovsti.core.model.contacts.TitleDetail
+import dev.rovsti.core.model.contacts.VcardWriteRequest
 import dev.rovsti.core.model.contacts.WaCardAnswer
 import dev.rovsti.core.model.contacts.WaCardRequest
 import dev.rovsti.core.model.contacts.WaLookup
@@ -40,19 +44,27 @@ import dev.rovsti.core.model.phone.DateOrder
 import dev.rovsti.core.model.phone.HistoryRequest
 import dev.rovsti.core.model.phone.LocaleTime
 import dev.rovsti.core.model.phone.TimeFormat
+import dev.rovsti.core.model.qr.QrEncodeRequest
+import dev.rovsti.core.model.qr.QrMatrix
 import dev.rovsti.core.model.search.WireContact
+import dev.rovsti.core.model.shared.ContactQrRequest
 import dev.rovsti.core.model.shared.CopiedNoticeRequest
 import dev.rovsti.core.model.shared.CountryLineRequest
+import dev.rovsti.core.model.shared.FileNameRequest
 import dev.rovsti.core.model.shared.FormsRequest
 import dev.rovsti.core.model.shared.InferHomeCcRequest
+import dev.rovsti.core.model.shared.QrNumber
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.ContactsWaOps
 import dev.rovsti.core.ops.PhoneOps
+import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SharedOps
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.ContactResult
 import dev.rovsti.platform.contacts.ContactsRepository
+import dev.rovsti.platform.contacts.ShortcutsRepository
 import dev.rovsti.platform.files.ClipboardRepository
+import dev.rovsti.platform.files.FilesRepository
 import dev.rovsti.platform.system.permissions.PermissionState
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -80,6 +92,8 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.TimeZone
 
 /**
@@ -108,6 +122,11 @@ class ContactCardViewModel(
     private val callLogPermission: Flow<PermissionState>,
     private val store: ContactsStore,
     private val clipboard: ClipboardRepository,
+    private val files: FilesRepository,
+    private val qr: QrOps,
+    private val shortcuts: ShortcutsRepository,
+    /** A cache directory the vCard is written to before it is staged for sharing. */
+    private val stagingDir: File,
     private val clock: () -> Long = System::currentTimeMillis,
     private val locale: (Long) -> LocaleTime = ::defaultLocale,
     private val scope: CoroutineScope,
@@ -259,6 +278,34 @@ class ContactCardViewModel(
             is ContactCardAction.Wish -> {
                 send(ContactCardEffect.Sms(action.number, action.text))
             }
+
+            ContactCardAction.ShareText -> {
+                base()?.let { send(ContactCardEffect.Share(it.card.shareText)) }
+            }
+
+            ContactCardAction.ShareFile -> {
+                scope.launch { shareFile() }
+            }
+
+            ContactCardAction.ShowQr -> {
+                scope.launch { showQr() }
+            }
+
+            ContactCardAction.ExportVcf -> {
+                scope.launch { vcard()?.let { send(ContactCardEffect.ExportVcf(it.fileName, it.text)) } }
+            }
+
+            ContactCardAction.CopyContact -> {
+                base()?.let { copyText(it.card.shareText, "Contact copied") }
+            }
+
+            ContactCardAction.CopyVcard -> {
+                scope.launch { vcard()?.let { copyText(it.text, "vCard copied") } }
+            }
+
+            ContactCardAction.AddToHome -> {
+                scope.launch { pinToHome() }
+            }
         }
     }
 
@@ -327,6 +374,66 @@ class ContactCardViewModel(
         if (repo.setStarred(id, !b.draft.starred) is ContactResult.Failed) {
             send(ContactCardEffect.Toast("Can't change the favorite."))
         }
+    }
+
+    private fun base(): Base? = base.value?.getOrNull()
+
+    private fun copyText(
+        text: String,
+        notice: String,
+    ) {
+        if (clipboard.copy(text)) send(ContactCardEffect.Toast(notice))
+    }
+
+    /** `contacts.vcard_write` for this one contact; the file name is the op's own (`<Name>.vcf`). */
+    private suspend fun vcard(): TextFileAnswer? {
+        val b = base() ?: return null
+        val now = clock()
+        val day =
+            ok(ops.localYmd(LocalYmdRequest(now, TimeZone.getDefault().getOffset(now) / MS_PER_S))) ?: return null
+        val file = ok(ops.vcardWrite(VcardWriteRequest(listOf(b.draft), day)))
+        if (file == null) send(ContactCardEffect.Toast("Can't make the file."))
+        return file
+    }
+
+    /** Writes the vCard under its own name, stages it for the share provider and hands the URI to the entry. */
+    private suspend fun shareFile() {
+        val file = vcard() ?: return
+        val uri =
+            withContext(worker) {
+                val source = File(stagingDir, "vcard-source.tmp")
+                source.writeText(file.text)
+                files.stageForShare(source.absolutePath, file.fileName)
+            }
+        if (uri == null) {
+            send(ContactCardEffect.Toast("Can't share the file."))
+        } else {
+            send(ContactCardEffect.ShareFile(uri, file.fileName))
+        }
+    }
+
+    /** The QR sheet: `format.contact_qr` fits the vCard into a code, `qr.encode` makes the modules. */
+    private suspend fun showQr() {
+        val b = base() ?: return
+        val name = b.card.name
+        val numbers =
+            b.draft.numbers
+                .filter { it.value.isNotBlank() }
+                .map { QrNumber(it.value, it.label) }
+        val payload = ok(shared.contactQr(ContactQrRequest(name, numbers, b.homeCc)))?.payload
+        val matrix = payload?.let { ok(qr.encode(QrEncodeRequest(it))) }?.let(QrMatrix::fromAnswer)
+        if (matrix == null) {
+            send(ContactCardEffect.Toast("This contact is too big for a QR code."))
+            return
+        }
+        val fileName = ok(shared.fileName(FileNameRequest(name)))?.qrFileName ?: "contact-qr.png"
+        send(ContactCardEffect.ShowQr(QrSheetModel(name, matrix, fileName, files, stagingDir)))
+    }
+
+    private suspend fun pinToHome() {
+        val b = base() ?: return
+        val toast = pinContactToHome(ops, shortcuts, id, b.wire.lookupKey, b.card.name) ?: return
+        send(ContactCardEffect.Toast(toast))
     }
 
     private suspend fun relation(name: String) {

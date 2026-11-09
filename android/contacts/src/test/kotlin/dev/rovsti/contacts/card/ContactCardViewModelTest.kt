@@ -182,7 +182,7 @@ class ContactCardViewModelTest {
         val wa = FakeCardWa(linked = true, chatUsers = listOf("905337654321"))
         val r = rig(3) { CardRig(3, wa = wa) }
         wa.updates.tryEmit(WaPresence(available = true))
-        val state = r.stateWhere { it.header?.presence != null }
+        val state = r.stateWhere { it.header?.presence == "Online" }
         assertEquals("Online", state.header?.presence)
         assertTrue("no lookup when a chat already matches", wa.lookups.isEmpty())
         assertEquals(listOf("905337654321@s.whatsapp.net"), wa.subscriptions.distinct())

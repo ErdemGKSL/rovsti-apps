@@ -30,7 +30,16 @@ pub struct NumberVm {
 impl NumberVm {
     pub(crate) fn from_wire(n: &WireNumber) -> Self {
         let display = PhoneNumber::parse(&n.raw)
-            .map(|p| format_number(&p))
+            .map(|p| {
+                let grouped = format_number(&p);
+                // Layouts we cannot group by rule keep the grouping the owner typed, so one card never mixes
+                // `+90 532 111 22 33` with `+49301234567`.
+                if grouped == p.as_str() {
+                    typed_grouping(&n.raw).unwrap_or(grouped)
+                } else {
+                    grouped
+                }
+            })
             .unwrap_or_else(|_| n.raw.clone());
         Self {
             raw: n.raw.clone(),
@@ -44,6 +53,15 @@ impl NumberVm {
             default: n.default,
         }
     }
+}
+
+/// The raw number with its separators reduced to single spaces, when it was typed with spaces at all.
+fn typed_grouping(raw: &str) -> Option<String> {
+    let parts: Vec<&str> = raw
+        .split(|c: char| c.is_whitespace() || matches!(c, '-' | '.' | '(' | ')'))
+        .filter(|p| !p.is_empty())
+        .collect();
+    (parts.len() > 1).then(|| parts.join(" "))
 }
 
 fn capitalised(label: &str) -> String {
@@ -401,6 +419,21 @@ pub fn recent_when(updated_ms: i64, now_ms: i64, tz_offset_s: i32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn unruled_numbers_keep_their_typed_grouping() {
+        let n = |raw: &str| {
+            NumberVm::from_wire(&WireNumber {
+                raw: raw.into(),
+                label: None,
+                default: false,
+            })
+        };
+        assert_eq!(n("+49 30 1234567").display, "+49 30 1234567");
+        assert_eq!(n("+49-30-1234567").display, "+49 30 1234567");
+        assert_eq!(n("+49301234567").display, "+49301234567");
+        assert_eq!(n("+90 532 111 22 33").display, "+90 532 111 22 33");
+    }
+
     fn vm(label: &str, display: &str) -> super::NumberVm {
         super::NumberVm {
             raw: display.replace(' ', ""),

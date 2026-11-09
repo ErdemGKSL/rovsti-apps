@@ -11,6 +11,7 @@ import dev.rovsti.core.model.contacts.DraftRelation
 import dev.rovsti.core.model.contacts.EventKind
 import dev.rovsti.core.model.contacts.FieldKind
 import dev.rovsti.core.model.contacts.Group
+import dev.rovsti.core.model.contacts.PinShortcut
 import dev.rovsti.core.model.contacts.RelationKind
 import dev.rovsti.core.model.contacts.WaLookup
 import dev.rovsti.core.model.contacts.WaLookupUser
@@ -22,12 +23,15 @@ import dev.rovsti.core.model.search.WireContact
 import dev.rovsti.core.ops.NativeContactsOps
 import dev.rovsti.core.ops.NativeContactsWaOps
 import dev.rovsti.core.ops.NativePhoneOps
+import dev.rovsti.core.ops.NativeQrOps
 import dev.rovsti.core.ops.NativeSearchOps
 import dev.rovsti.core.ops.NativeSharedOps
 import dev.rovsti.platform.calllog.FakeCallLogRepository
 import dev.rovsti.platform.contacts.ContactsRepository
 import dev.rovsti.platform.contacts.FakeContactsRepository
+import dev.rovsti.platform.contacts.ShortcutsRepository
 import dev.rovsti.platform.files.FakeClipboardRepository
+import dev.rovsti.platform.files.FakeFilesRepository
 import dev.rovsti.platform.system.permissions.PermissionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -183,6 +187,9 @@ internal class CardRig(
     val repo = FakeContactsRepository(drafts, SampleCards.groups)
     val callLog = FakeCallLogRepository(calls)
     val clipboard = FakeClipboardRepository()
+    val files = FakeFilesRepository()
+    val pins = mutableListOf<PinShortcut>()
+    val staging: File = Files.createTempDirectory("rovsti-card-staging").toFile().apply { deleteOnExit() }
     val model: ContactCardViewModel
 
     init {
@@ -229,6 +236,17 @@ internal class CardRig(
                 callLogPermission = permission,
                 store = store,
                 clipboard = clipboard,
+                files = files,
+                qr = NativeQrOps(Rust.core()),
+                shortcuts =
+                    object : ShortcutsRepository {
+                        override fun canPin() = true
+
+                        override fun pinContact(spec: PinShortcut): Boolean = pins.add(spec)
+
+                        override fun pinStop(spec: dev.rovsti.core.model.stops.ShortcutAnswer) = false
+                    },
+                stagingDir = staging,
                 clock = { SampleCards.NOW },
                 scope = scope,
             )

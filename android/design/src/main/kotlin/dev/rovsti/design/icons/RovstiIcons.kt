@@ -362,6 +362,56 @@ object RovstiIcons {
         }
     }
 
+    /** A rounded square with a plus: Add to Home Screen. */
+    val AddToHome: ImageVector by lazy {
+        stroked("AddToHome") {
+            moveTo(5f, 4.5f)
+            lineTo(19f, 4.5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 20.5f, 6f)
+            lineTo(20.5f, 18f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 19f, 19.5f)
+            lineTo(5f, 19.5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 3.5f, 18f)
+            lineTo(3.5f, 6f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 5f, 4.5f)
+            close()
+            moveTo(12f, 8.5f)
+            lineTo(12f, 15.5f)
+            moveTo(8.5f, 12f)
+            lineTo(15.5f, 12f)
+        }
+    }
+
+    /** Three finder squares: a QR code. */
+    val QrCode: ImageVector by lazy {
+        stroked("QrCode") {
+            moveTo(4f, 4f)
+            lineTo(10f, 4f)
+            lineTo(10f, 10f)
+            lineTo(4f, 10f)
+            close()
+            moveTo(14f, 4f)
+            lineTo(20f, 4f)
+            lineTo(20f, 10f)
+            lineTo(14f, 10f)
+            close()
+            moveTo(4f, 14f)
+            lineTo(10f, 14f)
+            lineTo(10f, 20f)
+            lineTo(4f, 20f)
+            close()
+            moveTo(14f, 14f)
+            lineTo(14f, 14.5f)
+            moveTo(17f, 14f)
+            lineTo(20f, 14f)
+            moveTo(14f, 17.5f)
+            lineTo(17.5f, 17.5f)
+            lineTo(17.5f, 20f)
+            moveTo(20f, 17f)
+            lineTo(20f, 20f)
+        }
+    }
+
     /** A globe: a website. */
     val Globe: ImageVector by lazy {
         stroked("Globe") {

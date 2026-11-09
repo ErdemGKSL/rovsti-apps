@@ -195,6 +195,23 @@ sealed interface ContactCardAction {
         val number: String,
         val text: String,
     ) : ContactCardAction
+
+    /** The "..." menu: Share as Text, Share as File, Show QR Code. */
+    data object ShareText : ContactCardAction
+
+    data object ShareFile : ContactCardAction
+
+    data object ShowQr : ContactCardAction
+
+    /** Export .vcf: asks where to save the file. */
+    data object ExportVcf : ContactCardAction
+
+    /** Copy Contact (the card text) and Copy as vCard. */
+    data object CopyContact : ContactCardAction
+
+    data object CopyVcard : ContactCardAction
+
+    data object AddToHome : ContactCardAction
 }
 
 /** One-shot results of the card; the entry turns them into intents, navigation and toasts. */
@@ -254,6 +271,23 @@ sealed interface ContactCardEffect {
 
     data class Toast(
         val text: String,
+    ) : ContactCardEffect
+
+    /** The staged vCard file to send with `text/x-vcard`. */
+    data class ShareFile(
+        val uri: android.net.Uri,
+        val fileName: String,
+    ) : ContactCardEffect
+
+    /** Choose where to write the .vcf ([ExportVcf]); the entry writes [text] to the chosen document. */
+    data class ExportVcf(
+        val fileName: String,
+        val text: String,
+    ) : ContactCardEffect
+
+    /** Open the QR sheet for [model]. */
+    data class ShowQr(
+        val model: QrSheetModel,
     ) : ContactCardEffect
 
     /** The contact is gone: leave the page. */

@@ -386,6 +386,8 @@ private fun iconOf(id: String): ImageVector? =
         "message" -> RovstiIcons.Message
         "whatsapp" -> RovstiIcons.WhatsApp
         "share" -> RovstiIcons.Share
+        "copy_number" -> RovstiIcons.Copy
+        "add_to_home" -> RovstiIcons.AddToHome
         "star", "unstar" -> RovstiIcons.Star
         else -> null
     }

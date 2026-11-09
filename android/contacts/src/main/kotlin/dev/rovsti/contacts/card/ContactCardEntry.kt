@@ -6,14 +6,17 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
@@ -26,6 +29,8 @@ import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.transition.TabNavigator
+import dev.rovsti.platform.files.ExportDocument
+import dev.rovsti.platform.files.FileResult
 import dev.rovsti.platform.files.ShareIntents
 import dev.rovsti.platform.system.Handoff
 import dev.rovsti.platform.system.permissions.PermissionGroup
@@ -33,6 +38,7 @@ import dev.rovsti.shell.permissions.PermissionGate
 import dev.rovsti.shell.permissions.PermissionRow
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 
 /** The card's model for one open: it lives as long as the page is composed, so every open asks WhatsApp once. */
 @Composable
@@ -55,6 +61,10 @@ fun rememberContactCardModel(
             callLogPermission = container.permissions.state(PermissionGroup.CALL_LOG),
             store = container.store,
             clipboard = container.clipboard,
+            files = container.files,
+            qr = container.qr,
+            shortcuts = container.shortcuts,
+            stagingDir = container.context.cacheDir,
             scope = scope,
         )
     }
@@ -72,11 +82,27 @@ fun ContactCardPage(
     val state by model.state.collectAsState()
     val overlays = LocalOverlay.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var pendingExport by remember { mutableStateOf<ContactCardEffect.ExportVcf?>(null) }
+    val exporter =
+        rememberLauncherForActivityResult(ExportDocument("text/x-vcard")) { result ->
+            val file = pendingExport ?: return@rememberLauncherForActivityResult
+            pendingExport = null
+            val uri = (result as? FileResult.Ok)?.uri ?: return@rememberLauncherForActivityResult
+            scope.launch {
+                val written = container.files.writeExport(uri, text = file.text)
+                overlays.showToast(if (written is FileResult.Ok) "Saved ${file.fileName}" else "Can't save the file.")
+            }
+        }
     ContactCardEffects(
         model,
         navigator,
         overlays,
         context,
+        onExport = { effect ->
+            pendingExport = effect
+            exporter.launch(effect.fileName)
+        },
         onEdit = { editId ->
             presentContactEditor(
                 contactEditorModel(container, editId, null),
@@ -105,12 +131,14 @@ fun ContactCardEffects(
     context: Context,
     onEdit: ((Long) -> Unit)? = null,
     onDelete: ((Long) -> Unit)? = null,
+    onExport: ((ContactCardEffect.ExportVcf) -> Unit)? = null,
     onSearch: (String) -> Unit,
 ) {
     val latestOverlays = rememberUpdatedState(overlays)
     val latestDelete = rememberUpdatedState(onDelete)
     val latestEdit = rememberUpdatedState(onEdit)
     val latestSearch = rememberUpdatedState(onSearch)
+    val latestExport = rememberUpdatedState(onExport)
     LaunchedEffect(model, navigator) {
         model.effects.collect { effect ->
             val toast: (String) -> Unit = { text -> latestOverlays.value.showToast(text) }
@@ -182,6 +210,20 @@ fun ContactCardEffects(
                     toast(effect.text)
                 }
 
+                is ContactCardEffect.ShareFile -> {
+                    start(context, ShareIntents.file(effect.uri, VCARD_MIME, effect.fileName), toast)
+                }
+
+                is ContactCardEffect.ExportVcf -> {
+                    latestExport.value?.invoke(effect)
+                }
+
+                is ContactCardEffect.ShowQr -> {
+                    latestOverlays.value.presentQrSheet(effect.model) { uri ->
+                        start(context, ShareIntents.image(uri, QrSheetModel.MIME, effect.model.name), toast)
+                    }
+                }
+
                 ContactCardEffect.Close -> {
                     navigator.pop()
                 }
@@ -189,6 +231,8 @@ fun ContactCardEffects(
         }
     }
 }
+
+private const val VCARD_MIME = "text/x-vcard"
 
 /** `content://com.android.contacts/contacts/lookup/<key>/<id>` when the key is known, else the plain contact id. */
 internal fun androidContactIntent(effect: ContactCardEffect.OpenAndroidContact): Intent {

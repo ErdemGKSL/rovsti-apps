@@ -7,6 +7,7 @@ import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.data.WaMarks
+import dev.rovsti.contacts.pinContactToHome
 import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.CallTarget
@@ -418,17 +419,8 @@ class ContactsListViewModel(
     }
 
     private suspend fun pin(contact: WireContact) {
-        val spec =
-            (
-                ops.pinShortcut(
-                    PinShortcutRequest(contact.id, contact.lookupKey, contact.displayName),
-                ) as? Outcome.Ok
-            )?.value
-                ?: return
-        val done = shortcuts.pinContact(spec.shortcut)
-        outbox.trySend(
-            ContactsListEffect.Toast(if (done) "Added to Home screen" else "Your launcher can't add shortcuts"),
-        )
+        val toast = pinContactToHome(ops, shortcuts, contact.id, contact.lookupKey, contact.displayName) ?: return
+        outbox.trySend(ContactsListEffect.Toast(toast))
     }
 
     private fun createFromQuery() {

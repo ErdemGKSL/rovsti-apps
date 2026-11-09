@@ -62,7 +62,9 @@ fun IosSettingsGroup(
     Column(
         Modifier
             .fillMaxWidth()
-            .animateContentSize(animationSpec = tween(durationMillis = 220)),
+            .animateContentSize(animationSpec = tween(durationMillis = 220))
+            // Inset-grouped sections are 35 pt apart on iOS: this 24 dp plus the next header's 12 dp top padding.
+            .padding(bottom = SettingsMetrics.S24),
     ) {
         title?.let {
             IosText(

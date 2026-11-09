@@ -66,6 +66,8 @@ import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.ListRowChevron
+import dev.rovsti.design.media.QrCode
+import dev.rovsti.design.media.QrModules
 import dev.rovsti.design.overlay.AlertAction
 import dev.rovsti.design.overlay.AlertEntry
 import dev.rovsti.design.overlay.AlertRole
@@ -93,8 +95,6 @@ private val BlockGap = Spacing.sectionGap - Spacing.s
 private val NoteInset = Spacing.gutter + Spacing.gutter
 
 private val QrSide = 240.dp
-private val QrCardPadding = Spacing.l
-private const val QR_QUIET_MODULES = 2
 private const val LARGE_FONT = 1.3f
 private val StatusDot = 10.dp
 private val GatewayValueMax = 200.dp
@@ -249,62 +249,16 @@ private fun StatusValue(row: SettingsRow) {
     }
 }
 
-/** A square white card with the code in it; the quiet zone is part of the card, so cameras read it on any theme. */
+/** The code on its white card, centred under the steps; the card keeps its colours in both themes. */
 @Composable
 private fun QrCard(matrix: QrMatrix?) {
     Box(Modifier.fillMaxWidth().padding(top = BlockGap), contentAlignment = Alignment.Center) {
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(QrCardPadding + Spacing.xs))
-                .background(Color.White)
-                .padding(QrCardPadding)
-                .size(QrSide)
-                .testTag("wa-qr"),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (matrix != null) QrImage(matrix, Modifier.size(QrSide))
-        }
+        QrCode(matrix?.toModules(), Modifier.size(QrSide).testTag("wa-qr"))
     }
 }
 
-/** Draws [matrix] square, with whole pixels per module so the edges stay sharp. */
-@Composable
-internal fun QrImage(
-    matrix: QrMatrix,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier
-            .semantics { contentDescription = "QR code" }
-            .drawWithCache {
-                val cells = matrix.side + 2 * QR_QUIET_MODULES
-                val cell = floor(size.minDimension / cells)
-                val origin = (size.minDimension - cell * cells) / 2f
-                val dark = Path()
-                for (y in 0 until matrix.side) {
-                    var x = 0
-                    while (x < matrix.side) {
-                        if (!matrix[x, y]) {
-                            x++
-                            continue
-                        }
-                        val start = x
-                        while (x < matrix.side && matrix[x, y]) x++
-                        dark.addRect(
-                            Rect(
-                                Offset(
-                                    origin + (start + QR_QUIET_MODULES) * cell,
-                                    origin + (y + QR_QUIET_MODULES) * cell,
-                                ),
-                                Size((x - start) * cell, cell),
-                            ),
-                        )
-                    }
-                }
-                onDrawBehind { drawPath(dark, Color.Black) }
-            },
-    )
-}
+/** The bridge's matrix as the design system's modules. */
+fun QrMatrix.toModules(): QrModules = QrModules(side) { x, y -> this[x, y] }
 
 /** "ABCD-1234" in two groups of four, monospaced and large; at a very large font size the groups stack. */
 @Composable

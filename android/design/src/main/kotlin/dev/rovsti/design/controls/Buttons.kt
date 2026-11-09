@@ -19,6 +19,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.ios.component.IosButton
+import dev.rovsti.design.ios.component.IosButtonSizing
 import dev.rovsti.design.ios.component.IosButtonStyle
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.ios.foundation.IosControlSize
@@ -64,7 +65,7 @@ fun GlassIconButton(
 }
 
 /**
- * A 44 dp tall capsule with a [text] label (17 sp) and an optional leading [icon]: Convx's [IosButton] with the Glass
+ * A 44 dp tall capsule with a [text] label (17 sp) and an optional leading [icon] (a [fillWidth] capsule takes the width its parent offers, for side-by-side pairs): Convx's [IosButton] with the Glass
  * style (clear glass; the label takes [tint] when given) or, for [CapsuleStyle.Filled], BorderedProminent filled with
  * [tint] (default the accent) under an on-accent label. The visual is 44 dp; the touch target is at least 48 dp.
  */
@@ -77,6 +78,7 @@ fun CapsuleButton(
     style: CapsuleStyle = CapsuleStyle.Glass,
     enabled: Boolean = true,
     tint: Color = Color.Unspecified,
+    fillWidth: Boolean = false,
 ) {
     val colors = RovstiTheme.colors
     val filled = style == CapsuleStyle.Filled
@@ -104,6 +106,7 @@ fun CapsuleButton(
                     else -> tint.takeOrElse { colors.labelPrimary }
                 },
             enabled = enabled,
+            sizing = if (fillWidth) IosButtonSizing.Flexible else IosButtonSizing.Fitted,
             controlSize = IosControlSize.Large,
             debugTag = "button.capsule",
         ) {

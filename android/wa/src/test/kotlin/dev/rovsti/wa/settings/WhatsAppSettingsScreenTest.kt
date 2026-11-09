@@ -107,7 +107,7 @@ class WhatsAppSettingsScreenTest : ShotTest() {
     }
 
     @Test
-    fun theQrIsASquareOf240DpInsideAWhiteCard() {
+    fun theQrIsASquareOf240DpWhiteCard() {
         show(fixtureView("show_qr"))
         val qr = bounds("wa-qr")
         val dp = compose.activity.resources.displayMetrics.density

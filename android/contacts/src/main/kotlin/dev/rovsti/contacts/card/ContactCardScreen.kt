@@ -167,18 +167,7 @@ fun ContactCardScreen(
                     Toolbar(
                         actions = toolbar,
                         onOverflow = { anchor, _ ->
-                            overlays?.present(
-                                ButtonMenuEntry(
-                                    anchor,
-                                    persistentListOf(
-                                        MenuItem.Action(
-                                            "Delete Contact",
-                                            RovstiIcons.Trash,
-                                            destructive = true,
-                                        ) { onAction(ContactCardAction.Delete) },
-                                    ),
-                                ),
-                            )
+                            overlays?.present(ButtonMenuEntry(anchor, overflowMenu(anchor, overlays, onAction)))
                         },
                     )
                 }
@@ -660,4 +649,37 @@ private fun Tag(text: String) {
     ) {
         RovstiText(text, style = RovstiTheme.type.caption1, color = colors.labelSecondary, maxLines = 1)
     }
+}
+
+/**
+ * The "..." menu of the card (E4.9): Share and Copy open a second menu from the same button, Export .vcf asks where to
+ * save the file, Add to Home Screen pins the shortcut and Delete Contact asks first.
+ */
+private fun overflowMenu(
+    anchor: Rect,
+    overlays: OverlayController,
+    onAction: (ContactCardAction) -> Unit,
+): ImmutableList<MenuItem> {
+    fun submenu(items: ImmutableList<MenuItem>) = { overlays.present(ButtonMenuEntry(anchor, items)) }
+    val share =
+        persistentListOf<MenuItem>(
+            MenuItem.Action("Share as Text", RovstiIcons.Share) { onAction(ContactCardAction.ShareText) },
+            MenuItem.Action("Share as File", RovstiIcons.Document) { onAction(ContactCardAction.ShareFile) },
+            MenuItem.Action("Show QR Code", RovstiIcons.QrCode) { onAction(ContactCardAction.ShowQr) },
+        )
+    val copy =
+        persistentListOf<MenuItem>(
+            MenuItem.Action("Copy Contact", RovstiIcons.Copy) { onAction(ContactCardAction.CopyContact) },
+            MenuItem.Action("Copy as vCard", RovstiIcons.Document) { onAction(ContactCardAction.CopyVcard) },
+        )
+    return persistentListOf(
+        MenuItem.Action("Share", RovstiIcons.Share) { submenu(share)() },
+        MenuItem.Action("Copy", RovstiIcons.Copy) { submenu(copy)() },
+        MenuItem.Action("Export .vcf", RovstiIcons.Download) { onAction(ContactCardAction.ExportVcf) },
+        MenuItem.Action("Add to Home Screen", RovstiIcons.AddToHome) { onAction(ContactCardAction.AddToHome) },
+        MenuItem.Separator,
+        MenuItem.Action("Delete Contact", RovstiIcons.Trash, destructive = true) {
+            onAction(ContactCardAction.Delete)
+        },
+    )
 }

@@ -30,8 +30,8 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `ContactsQuery.kt` | platform.contacts.ContactsQuery (rows grouped into `WireContact`) | 2 (E3.2) | ported |
 | `Documents.kt` | platform.files.Documents (limits and pure helpers kept) plus `Contracts.kt` (`ExportDocument`, `ImportDocument`, `PickPhoto`, `CapturePhoto`) and `FilesRepository`; `Documents.start*`, request codes and the JSON result are replaced by `FileResult` | R2 E3.8a | ported |
 | `Epic17Probes.kt` | none | 1 (E3.1) | dropped: GPUI spikes (ARCH 7.3) |
-| `Handoff.kt` | platform.system.Handoff | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
-| `Haptics.kt` | platform.system.Haptics | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
+| `Handoff.kt` | platform.system.Handoff | 1 (E3.1) | ported |
+| `Haptics.kt` | platform.system.Haptics | 1 (E3.1) | ported |
 | `Headless.kt` | platform.Headless (blocking wrapper over Rust.core().headless) | 1 (E3.1) | ported, rewritten |
 | `KeypadTone.kt` | platform.telephony.KeypadTone | 5 (E3.5) | ported |
 | `Mailbox.kt` | none: one-shots become intent handling in the activity | R2 E3.11 | dropped: one-shots become intent handling in the activity (ARCH 7.3, E3.11) |
@@ -47,7 +47,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `ReplyReceiver.kt` | platform.notify.ReplyReceiver | 6 (E3.6) | ported |
 | `RovstiBridge.kt` | none: the Rust-calls-Kotlin methods become repositories; emit becomes PlatformEvents | 1 (E3.1) | dropped: replaced by seams |
 | `ScheduledSms.kt` | platform.sms.ScheduledSms | 4 (E3.4) | ported |
-| `SettingsMirror.kt` | platform.system.SettingsMirror | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
+| `SettingsMirror.kt` | platform.system.SettingsMirror | 1 (E3.1) | ported |
 | `Shortcuts.kt` | platform.contacts.Shortcuts + `ShortcutsRepository` (target activity from `PlatformComponents`; `EXTRA_CONTACT_ID` is now owned here, `BirthdayReminders` in step 6 reads it) | 2 (E3.2) | ported |
 | `SimAccounts.kt` | platform.telephony.SimAccounts (returns `PhoneAccounts`; the JSON envelope is dropped) + `SimRepository` | 3 (E3.3) | ported |
 | `SimProbe.kt` | platform.telephony.SimProbe (S5 lines only; the S14 vibration half went with the spikes) | 3 (E3.3) | ported |
@@ -55,7 +55,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `SmsSend.kt` | platform.sms.SmsSend | 4 (E3.4) | ported |
 | `SpikeProbes.kt` | none | 1 (E3.1) | dropped: GPUI spikes (ARCH 7.3) |
 | `StopsLocation.kt` | platform.location.LocationRepository (`lastKnown`, `fresh(timeout)`, `updates()` replace the `stops_location` emits; `Fix` model) | 7 (E3.7) | ported |
-| `SystemPages.kt` | platform.system.SystemPages | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
+| `SystemPages.kt` | platform.system.SystemPages | 1 (E3.1) | ported |
 | `TripAlarm.kt` | platform.location.TripAlarm + `TripAlarmReceiver` in BridgeTripComponents (channel via `PlatformChannels`, events via `PlatformEvents`) | 7 (E3.7) | ported |
 | `TripService.kt` | platform.location.TripModel (pure helpers, `StartResult`) + `TripService`/`TripWatchdogReceiver` in BridgeTripComponents + `TripRepository` (`status`, `start`) | 7 (E3.7) | ported |
 | `VoicePlayer.kt` | platform.telephony.VoicePlayer | 5 (E3.5) | ported |
@@ -63,7 +63,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `WaIncoming.kt` | platform.wa.WaIncoming (channels via `PlatformChannels`; `takeAction(context, intent)` replaces `RovstiBridge.deliverWaCallAction`) | 8 (E3.9 seams) | ported |
 | `WaPush.kt` | platform.wa.WaPush (`onMessage(context, data)` emits `wa_push` on `PlatformEvents`; `:wa` calls `reconnectNow`) | 8 (E3.9 seams) | ported |
 | `WireJson.kt` | platform.wire.WireJson | 1 (E3.1) | ported |
-| `XiaomiOps.kt` | platform.system.XiaomiOps | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
+| `XiaomiOps.kt` | platform.system.XiaomiOps | 1 (E3.1) | ported |
 
 ## App host files (`apps/<app>/platforms/android/app/src/main/kotlin/dev/rovsti/<app>/`)
 
@@ -227,5 +227,5 @@ Summary of what does not move in R1:
 
 - dropped: `SpikeProbes`, `Epic17Probes`, `Mailbox`, the `RovstiBridge` statics (replaced by repositories and `PlatformEvents`);
 - R2 E3.8a (done): `Documents`, `MediaShare`, `RovstiShareProvider`, plus `ClipboardRepository` and `ShareIntents`;
-- R2 E3.8b: roles and permissions (the roles half of `Handoff`/`SystemPages`, the permission helpers of `RovstiBridge`);
+- R2 E3.8b (done): roles and permissions in `platform.system.permissions`: `PermissionGroup`, `AppPermissions`, `PermissionState` (`decide`, `nextAction`), `PermissionController`, `SpecialAccess` (+ `FakeSpecialAccess`), `ForegroundStart`; the `RovstiBridge` permission, role, special-access and battery helpers are replaced by them, and `HandoffPermissionsTest` pins the manifest lists;
 - app module: `IncomingPerf`, `NativeIncoming`, the manifest components and the Application/MainActivity classes.

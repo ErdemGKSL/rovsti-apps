@@ -498,6 +498,7 @@ Rules the code follows:
   `ON_RESUME`, and a process that is killed by a revocation restarts into the same route (`routeFor`).
 - A missing permission degrades one feature and never blocks the app: no call-log permission means Recents shows
   the setup row, no contacts permission means names stay numbers.
+- Code: `dev.rovsti.platform.system.permissions` holds `PermissionState` (`decide`, `nextAction`), `PermissionController` (one `StateFlow` per group, refreshed on `ON_RESUME`), `SpecialAccess` (exact alarms, full-screen intent, battery, roles, Settings intents) and `AppPermissions`, one table per app; `HandoffPermissionsTest` compares the committed `manifest/<app>.permissions.txt` lists with the GPUI manifests.
 - OEM: Xiaomi/MIUI background and lock-screen-display pages are opened by `XiaomiOps` with a fallback to the generic
   app-details page; any `ActivityNotFoundException` is caught.
 

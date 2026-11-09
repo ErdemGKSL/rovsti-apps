@@ -772,7 +772,7 @@ close E3). Haptics levels are Off/Light/Normal (`rovsti_core::wire::HapticsLevel
 | E3.6 | Notifications, reminders, shortcuts | R1 | done (round-08 step 6) |
 | E3.7 | Location, TripService, TripAlarm, AlarmSound, AlarmActivity | R1 | done (round-08 step 7) |
 | E3.8a | Files, media store, share, clipboard, Photo Picker, camera capture, SAF import/export | R2 | in-progress (round-09 step 1) |
-| E3.8b | Handoff, roles, `PermissionController` + `PermissionState` rules, special access, OEM settings (ARCH 7.5) | R2 | in-progress (round-09 step 2) |
+| E3.8b | Handoff, roles, `PermissionController` + `PermissionState` rules, special access, OEM settings (ARCH 7.5) | R2 | done (round-09 step 2) |
 | E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads, `WaAvatars` | R2 | in-progress (round-09 steps 3-5) |
 | E3.10 | Shared WhatsApp settings screen | R2 | in-progress (round-09 steps 3 and 6) |
 | E3.11 | `:shell`: RovstiRoot, base activity, containers, permission UI, common settings, licences | R2 | in-progress (round-09 steps 7-8) |

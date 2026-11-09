@@ -1,8 +1,11 @@
 package dev.rovsti.platform.system
 
 import android.app.AppOpsManager
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.os.Process
+import android.provider.Settings
 
 /**
  * Reads MIUI / HyperOS per-app permissions that live in AppOps under private
@@ -76,5 +79,65 @@ object XiaomiOps {
     ): Int {
         val op = opFor(key) ?: return UNKNOWN
         return classify(mode(context, op))
+    }
+
+    /**
+     * The pages to try for [key] (`autostart`, `battery` or `permissions`), best first; empty for an unknown key. MIUI and
+     * HyperOS may mark an activity non-exported, so the caller walks the list and finally falls back to App info.
+     */
+    fun settingsCandidates(
+        key: String,
+        packageName: String,
+        label: String,
+    ): List<Intent> {
+        fun action(name: String) = Intent(name).addCategory(Intent.CATEGORY_DEFAULT)
+
+        fun component(
+            pkg: String,
+            cls: String,
+        ) = Intent().setComponent(ComponentName(pkg, cls))
+        return when (key) {
+            "autostart" -> {
+                listOf(
+                    action("miui.intent.action.OP_AUTO_START"),
+                    component("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+                    component("com.miui.securitycenter", "com.miui.appmanager.ApplicationsDetailsActivity")
+                        .putExtra("package_name", packageName)
+                        .putExtra("package_label", label),
+                )
+            }
+
+            "battery" -> {
+                listOf(
+                    component("com.miui.powerkeeper", "com.miui.powerkeeper.ui.HiddenAppsConfigActivity")
+                        .putExtra("package_name", packageName)
+                        .putExtra("package_label", label),
+                    action("miui.intent.action.POWER_HIDE_MODE_APP_LIST"),
+                    Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                )
+            }
+
+            "permissions" -> {
+                listOf(
+                    action("miui.intent.action.APP_PERM_EDITOR")
+                        .setClassName(
+                            "com.miui.securitycenter",
+                            "com.miui.permcenter.permissions.PermissionsEditorActivity",
+                        ).putExtra("extra_pkgname", packageName),
+                    action("miui.intent.action.APP_PERM_EDITOR")
+                        .setClassName(
+                            "com.miui.securitycenter",
+                            "com.miui.permcenter.permissions.AppPermissionsEditorActivity",
+                        ).putExtra("extra_pkgname", packageName),
+                    action("miui.intent.action.APP_PERM_EDITOR").putExtra("extra_pkgname", packageName),
+                    component("com.miui.securitycenter", "com.miui.permcenter.permissions.PermissionsEditorActivity")
+                        .putExtra("extra_pkgname", packageName),
+                )
+            }
+
+            else -> {
+                emptyList()
+            }
+        }
     }
 }

@@ -1,0 +1,14 @@
+uses-permission android.permission.ACCESS_BACKGROUND_LOCATION
+uses-permission android.permission.ACCESS_COARSE_LOCATION
+uses-permission android.permission.ACCESS_FINE_LOCATION
+uses-permission android.permission.ACCESS_NETWORK_STATE
+uses-permission android.permission.FOREGROUND_SERVICE
+uses-permission android.permission.FOREGROUND_SERVICE_LOCATION
+uses-permission android.permission.INTERNET
+uses-permission android.permission.POST_NOTIFICATIONS
+uses-permission android.permission.RECEIVE_BOOT_COMPLETED
+uses-permission android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+uses-permission android.permission.USE_EXACT_ALARM
+uses-permission android.permission.USE_FULL_SCREEN_INTENT
+uses-permission android.permission.VIBRATE
+uses-permission android.permission.WAKE_LOCK

@@ -54,6 +54,7 @@ import dev.rovsti.design.controls.SourceGlyph
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.Avatar
+import dev.rovsti.design.list.CustomAction
 import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.list.ListRowChevron
@@ -79,6 +80,7 @@ import dev.rovsti.design.theme.Spacing
 import dev.rovsti.design.transition.rovstiSharedBounds
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 
 /** Test tags of the list. */
 object ListTags {
@@ -299,6 +301,7 @@ private fun ContactRowItem(
     SideEffect { ListProbe.onRowComposed?.invoke(item.id) }
     val menu = remember(item.id, quick, onAction) { menuFor(item.id, quick, onAction) }
     val open = remember(item.id, onAction) { { onAction(ContactsListAction.Open(item.id)) } }
+    val rowActions = remember(menu) { accessibilityActionsOf(menu) }
     val toggle = remember(item.id, onAction) { { onAction(ContactsListAction.ToggleSelected(item.id)) } }
     val slot by animateDpAsState(
         targetValue = if (checked != null) SelectSlotWidth else SelectMetrics.None,
@@ -306,7 +309,13 @@ private fun ContactRowItem(
         label = "select-slot",
     )
     Column {
-        if (separated) RowSeparator(Modifier.padding(end = endInset), inset = TextStartWithLeading + slot)
+        // Stops a gap before the rail column so the hairline never runs toward the letters.
+        if (separated) {
+            RowSeparator(
+                Modifier.padding(end = if (endInset > Dp(0f)) endInset + Spacing.s else endInset),
+                inset = TextStartWithLeading + slot,
+            )
+        }
         val body =
             Modifier.testTag(ListTags.row(item.id)).semantics {
                 if (checked != null) selected = checked
@@ -322,10 +331,10 @@ private fun ContactRowItem(
                     onTap = open,
                 ),
             ) {
-                RowBody(item, endInset, null, shared = true, slot = slot)
+                RowBody(item, endInset, null, shared = true, slot = slot, actions = rowActions)
             }
         } else {
-            Box(body) { RowBody(item, endInset, open, shared = true, slot = slot) }
+            Box(body) { RowBody(item, endInset, open, shared = true, slot = slot, actions = rowActions) }
         }
     }
 }
@@ -346,6 +355,7 @@ private fun RowBody(
     // The animated width of the select slot (0 while not selecting) and whether the row is selected.
     slot: Dp = SelectMetrics.None,
     checked: Boolean? = null,
+    actions: ImmutableList<CustomAction> = persistentListOf(),
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (slot > SelectMetrics.None) {
@@ -353,7 +363,7 @@ private fun RowBody(
                 SelectCheck(checked == true, Modifier.padding(start = Spacing.gutter).requiredWidth(SelectCheckSize))
             }
         }
-        Box(Modifier.weight(1f)) { RowListRow(item, endInset, onClick, avatarSize, shared) }
+        Box(Modifier.weight(1f)) { RowListRow(item, endInset, onClick, avatarSize, shared, actions) }
     }
 }
 
@@ -364,8 +374,10 @@ private fun RowListRow(
     onClick: (() -> Unit)?,
     avatarSize: Dp,
     shared: Boolean,
+    actions: ImmutableList<CustomAction>,
 ) {
     ListRow(
+        actions = actions,
         title = item.name,
         secondary = item.secondary,
         leading = {
@@ -436,6 +448,14 @@ private fun menuFor(
         .persistentListOf<MenuItem>()
         .addAll(items)
 }
+
+/** The row menu mirrored as TalkBack custom actions (the long press itself is not reachable by a screen reader). */
+internal fun accessibilityActionsOf(menu: ImmutableList<MenuItem>): ImmutableList<CustomAction> =
+    menu
+        .filterIsInstance<MenuItem.Action>()
+        .filter { it.enabled }
+        .map { CustomAction(it.label, it.onClick) }
+        .toImmutableList()
 
 @Composable
 private fun MyCardSection(

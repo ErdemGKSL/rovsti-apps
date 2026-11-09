@@ -102,6 +102,8 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/stops/.../stops/RovstiStopsApp.kt` | app module E7 (Application/MainActivity on `:shell`) | E7 | app module E7 |
 | `apps/contacts/.../contacts/MainActivity.kt` | `:contacts` `dev.rovsti.contacts.MainActivity : RovstiShellActivity` | E4 | ported (E4.1) |
 | `apps/contacts/.../contacts/RovstiContactsApp.kt` | `:contacts` `dev.rovsti.contacts.RovstiContactsApp : HasContainer<ContactsContainer>` | E4 | ported (E4.1) |
+| `apps/contacts/src/**` GPUI screens (list, card, editor, groups, favorites, settings) | `:contacts` packages `list`, `card`, `editor`, `groups`, `favorites`, `settings`, `trash` | E4 | ported (E4.2-E4.8, E4.15) |
+| GPUI contact features: share, import, duplicates, photo viewer, call options, My card, emergency, recent | `:contacts` packages `intake`, `dupes`, `cleanup`, `photo`, `card`, `me`, `emergency`, `recent` | E4 | ported (E4.9-E4.14) |
 
 ## Tests
 

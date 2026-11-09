@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
@@ -274,5 +275,44 @@ class ContactsListScreenTest : ShotTest() {
         assertEquals(ContactsListAction.QueryChanged("ab"), h.actions.last())
         // The second letter narrows the list: the rows that stay are not drawn again.
         assertEquals("rows that were already there do not recompose: $counts", emptyMap<Long, Int>(), counts)
+    }
+
+    @Test fun scrollingRecomposesEachRowAtMostOnceAndNeverTheOnesThatStay() {
+        val h = harness()
+        show(h)
+        val counts = HashMap<Long, Int>()
+        ListProbe.onRowComposed = { counts.merge(it, 1, Int::plus) }
+        val before =
+            h.listState.layoutInfo.visibleItemsInfo
+                .map { it.key }
+                .toSet()
+        // A small scroll: rows already on screen stay composed, only the rows entering the viewport compose.
+        compose.onNodeWithTag("contacts-list-page").performTouchInput {
+            swipeUp(
+                startY = bottom * 0.7f,
+                endY =
+                    bottom * 0.7f - 120f,
+                durationMillis = 200,
+            )
+        }
+        advance(100)
+        assertTrue("each row at most once while scrolling: $counts", counts.values.all { it <= 1 })
+        val stayed = counts.keys.filter { "$it" in before.map { k -> "$k" } }
+        assertEquals("rows that were on screen do not recompose: $counts", emptyList<Long>(), stayed)
+    }
+
+    @Test fun everyRowOffersItsMenuAsAccessibilityActions() {
+        val h = harness()
+        show(h)
+        val nodes =
+            compose
+                .onAllNodes(
+                    androidx.compose.ui.test.SemanticsMatcher
+                        .keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.CustomActions),
+                ).fetchSemanticsNodes()
+        assertTrue("rows expose custom actions", nodes.isNotEmpty())
+        val labels =
+            nodes.first().config[androidx.compose.ui.semantics.SemanticsActions.CustomActions].map { it.label }
+        assertTrue("the menu's Select row is reachable by TalkBack: $labels", "Select" in labels)
     }
 }

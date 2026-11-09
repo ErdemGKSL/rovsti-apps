@@ -44,7 +44,7 @@ Method: grep of `android/contacts/src/main` for the rule, the test that proves i
   `ContactsListScreen`), then the tab/page; `SelectModeScreenTest.backLeavesSelectModeBeforeAnythingElse`.
 - pass: long-press menus: the row menu has the "Select" row as the TalkBack-reachable way into select mode; rows in
   select mode expose `selected` state and a click action.
-- deviation: the row's long-press menu has no separate custom accessibility actions list yet (E4.16 polish).
+- fixed (E4.16, see R2 below): list rows now carry the row menu as `semantics { customActions }`.
 
 ## E. Glass
 - pass: glass only on chrome: tab bar, its accessory (the select toolbar), top-bar capsules, menus. Rows are flat.
@@ -74,5 +74,64 @@ Method: grep of `android/contacts/src/main` for the rule, the test that proves i
   folded tab-bar circle with the five-button glass toolbar beside it, last rows sliding under it) and
   `e4.8-select-actions-menu-dark` (the "..." menu above its button: Export .vcf, hairline, Copy Numbers, Copy Emails,
   glass card clear of the rail).
-- seen, not fixed (pre-existing since E4.2): row separators run under the alphabet rail letters; the rail sits over the
-  trailing 24 dp but the hairline is full width. Logged for E4.16.
+- fixed (E4.16): row separators now stop 8 dp before the alphabet rail column (was: ran to the rail edge).
+
+# E4 R2 checklist record (Contacts, round-11 step 8)
+
+Same sections A-H over the screens of E4.9-E4.16: share and QR sheet (E4.9), intake / paste / import / add to existing /
+scan QR / CSV mapping (E4.10), duplicates, merge preview, Clean up (E4.11), photo viewer (E4.12), call options, block,
+voicemail confirm (E4.13), My card, emergency contacts, recently added / edited (E4.14), settings, accounts summary, name
+format, WhatsApp (E4.15). Method: grep of `android/contacts/src/main` plus the test that proves each rule; goldens in
+`android/contacts/screenshots/` (`e4.9-*` .. `e4.15-*`, each opened in its step; the sheet `docs/kotlin-ui/screenshots/
+contacts.png` opened again in E4.16).
+
+## A. Licence and provenance
+- pass: no GPUI, no Material, no `Popup(`/`Dialog(` in `:contacts` (grep finds nothing). `QrCode` is own code in `:design`.
+- pass: no ported file was added in R2; the E4 R1 ported file (favorites reorder) keeps its header.
+
+## B. Layout
+- pass: every R2 page is a `LargeTitleScaffold` or sheet that takes `LocalContentInsets`; nothing ends under the tab bar
+  (`e4.15-settings-end`, `e4.2-list-end-above-bar`).
+- pass: no two grouped cards touch (F13 section gaps; seen in `e4.15-settings`, `e4.14-my-card`, `e4.11-duplicates`).
+- pass: fs2 goldens exist for the list, card, cleanup chips, added/edited, emergency, my card, settings, accounts; no
+  clipping, rows grow (`heightIn(min)`).
+- pass: RTL goldens `e4.2-list-rtl`, `e4.14-emergency-list-rtl` mirror avatar, text and rail.
+- fixed (E4.16): list separators stop 8 dp before the alphabet rail.
+
+## C. Motion
+- pass: all specs come from `RovstiMotion`; no `tween` for position or size, no `animateContentSize`/`AnimatedVisibility`
+  in `:contacts` (grep).
+- pass (springs retarget mid-flight): select slot, select check, favorites/emergency reorder and sheet detents are springs
+  that retarget from current value and velocity (`SelectModeScreenTest`, `FavoritesScreenTest`, sheet tests in `:design`).
+- pass (no layout shift on press): press only changes draw-phase properties (`rowPress`, `scalePress`); `ContactsListScreenTest`
+  (the row-menu test compares `bounds(id)` before and after) asserts row bounds unchanged while the menu opens.
+- pass (menus and sheets never push content): every menu, sheet, alert, toast is an `OverlayHost` entry, so the page below
+  keeps its bounds; E4.9 share menu, E4.10 CSV mapping menu, E4.12 viewer menu, E4.14 row/badge menus are overlays.
+
+## D. Overlays
+- pass: share submenu, QR sheet, intake preview sheet, add-to-existing picker, CSV mapping sheet/menu, merge preview, block
+  / voicemail / clear alerts, photo viewer and its menu, emergency row menu, My card badge menu are all overlay entries.
+- pass: back order (top overlay, select mode, page) unchanged; pages added in R2 pop one level.
+- fixed (E4.16): the row long-press menu is also reachable without a long press through custom accessibility actions
+  (`ContactsListScreenTest.everyRowOffersItsMenuAsAccessibilityActions`).
+
+## E. Glass
+- pass: glass only on chrome (tab bar, capsules, menus, sheets); rows and grouped cards are flat. `GlassRealPathTest`
+  (API 33+ default settings use the backdrop path) stays green in `:design`.
+
+## F. Controls and input
+- pass: text input is `GlassTextField`/`SearchField` (CSV mapping, intake, editor); the ringtone/voicemail/block rows
+  have 56 dp targets; haptics via `RovstiHaptics` (settings toggle `contacts.haptics` respected).
+- pass: settings Appearance and Haptics rows write `ContactsPrefs` through the Rust core.
+
+## G. Performance
+- pass: `contentType` and `key` on every lazy item in the list, duplicates, cleanup, emergency, recent.
+- pass (E4.16): `ContactsListScreenTest.scrollingRecomposesEachRowAtMostOnceAndNeverTheOnesThatStay` and
+  `.typingReportsTheQueryAndOnlyTheChangedRowsRecompose` count row compositions with `ListProbe`.
+- pass: JNI/Rust work (import, merge, cleanup, export) runs in suspend ops off the main thread.
+
+## H. Tests and evidence
+- pass: view-model tests on the real Rust core for every R2 page (see the plan's verification summary), Compose tests with a
+  manual clock, goldens light and dark, fs2/rtl variants listed above.
+- pass: contact sheet `docs/kotlin-ui/screenshots/contacts.png` built by `:contacts:contactSheet`, opened and judged (see
+  epics.md E4.16 Evidence).

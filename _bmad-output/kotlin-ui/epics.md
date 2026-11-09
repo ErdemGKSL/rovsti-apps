@@ -793,6 +793,24 @@ at the end of its settings page. The apps get the whole platform through `:shell
 
 Next planner: **E4 R2** (E4.9-E4.16: share and shortcuts, import paths, duplicates and Clean up, photo viewer on the card, ringtone/voicemail/block, My card/emergency/recent, settings, polish). Known carry-overs: share as a staged .vcf file in the share sheet (E4.9), row separators under the alphabet rail (E4.16), custom accessibility actions on the row menu (E4.16).
 
+#### Evidence, E4 R2 (E4.9-E4.16 done, round-11)
+
+- E4.9 (commit 4aa2099): `ContactShareTest`, `QrSheetTest`, `QrCodeTest` (`QrCode` in `:design`); `e4.9-share-menu`, `e4.9-qr-sheet` opened.
+- E4.10 (commits 9208cb8, 6ef4753): `IntakeViewModelTest`, `IntakeScreenTest`, `ScanQrTest`, `CsvImportViewModelTest`, `CsvMappingTest`; `e4.10-*` opened.
+- E4.11 (commit ffcc478): `DuplicatesViewModelTest`, `CleanupViewModelTest`, `DupesScreenTest`, `CleanupScreenTest`; `e4.11-*` (incl. fs2 chips) opened.
+- E4.12, E4.13 (commit 35fae2d): `PhotoViewerActionsTest`, `CallOptionsViewModelTest`, `CallOptionsSectionTest`; `e4.12-*`, `e4.13-*` opened.
+- E4.14 (commit 7e28c7a): `MeViewModelTest`, `EmergencyViewModelTest`, `RecentListsViewModelTest`; `e4.14-*` (fs2, `e4.14-emergency-list-rtl`) opened.
+- E4.15 (commit 91d95d6): `ContactsSettingsViewModelTest`, `SettingsScreenTest`; `e4.15-*` opened.
+- E4.16 (round-11 step 8): row separators stop 8 dp before the alphabet rail (`e4.2-list-*` re-recorded and opened: hairlines end
+  clear of the letters); the row menu is mirrored as `customActions` (`ContactsListScreenTest.everyRowOffersItsMenuAsAccessibilityActions`);
+  `scrollingRecomposesEachRowAtMostOnceAndNeverTheOnesThatStay` and the typing test count row compositions; motion audit and
+  checklist A-H for every R2 screen in `docs/kotlin-ui/checklist-e4.md`; contact sheet `docs/kotlin-ui/screenshots/contacts.png`
+  (`:contacts:contactSheet`, 12 columns of the light goldens, opened: consistent chrome, no overlap, nothing under the floating
+  bars). Gate: cargo fmt/clippy/test --workspace, `cargo check -p rovsti_android --target aarch64-linux-android`, `scripts/kotlin-ui-check.sh`
+  green. APKs: `android/contacts/build/outputs/apk/debug/contacts-debug.apk`, `android/catalog/build/outputs/apk/debug/catalog-debug.apk`.
+
+Next planner: **E5 R1** (Phone, E5.1-E5.8). E4 is done.
+
 #### Evidence, E3 R2 (E3.8a-E3.11 done, round-09)
 
 - E3.8a (commit 6323952): `platform.files` (`Documents`, `MediaShare`, `RovstiShareProvider`, clipboard, Photo Picker, camera); `FqcnTest` (13 names), `NoMediaPermissionTest`, `PortInventoryTest`.
@@ -863,7 +881,7 @@ Next planner: **E4 R2** (E4.9-E4.16: share and shortcuts, import paths, duplicat
 
 ---
 
-## E4. Contacts (`:contacts`)
+## E4. Contacts (`:contacts`) - DONE (R2)
 
 Goal: parity with `apps/contacts` (roadmap "Rovsti Contacts", `util-contacts*.md` C1-C54), then polish.
 
@@ -913,14 +931,14 @@ touching (`e4.1-settings`), **F14** card numbers in mixed display formats (`e4.3
 | E4.6 | Favorites, frequent, upcoming birthdays | R1 | done (round-10) |
 | E4.7 | Groups | R1 | done (round-10) |
 | E4.8 | Select mode | R1 | done (round-10) |
-| E4.9 | Share and shortcuts | R2 | in-progress (round-11 step 1) |
-| E4.10 | Import paths | R2 | in-progress (round-11 step 2-3) |
+| E4.9 | Share and shortcuts | R2 | done (round-11 step 1) |
+| E4.10 | Import paths | R2 | done (round-11 step 2-3) |
 | E4.11 | Duplicates, merge, Clean up | R2 | done (round-11 step 4) |
 | E4.12 | Photo viewer on the card | R2 | done (round-11 step 5) |
 | E4.13 | Ringtone, voicemail, block | R2 | done (round-11 step 5) |
-| E4.14 | My card, emergency, recently added/edited | R2 | in-progress (round-11 step 6) |
-| E4.15 | Settings | R2 | in-progress (round-11 step 7) |
-| E4.16 | Polish | R2 | in-progress (round-11 step 8) |
+| E4.14 | My card, emergency, recently added/edited | R2 | done (round-11 step 6) |
+| E4.15 | Settings | R2 | done (round-11 step 7) |
+| E4.16 | Polish | R2 | done (round-11 step 8) |
 
 Shared AC for every E4 story: the GPUI behaviour named in the parity table is reproduced (same rules from Rust), every
 list ends above the tab bar, one avatar per row, chip rows never wrap, every long-press opens a context menu from the

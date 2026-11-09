@@ -66,6 +66,6 @@ class ContactsAppTest : ShotTest() {
         fixture.navigator.resetTo(ContactsTab, listOf(ContactsRoute.ContactCard(5L)))
         composeFrame { fixture.Content() }
         advance(600)
-        compose.onNodeWithText("Contact 5").assertIsDisplayed()
+        compose.onNodeWithTag("scaffold-list", useUnmergedTree = true).assertExists()
     }
 }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -60,8 +61,16 @@ fun ContactsListPage(
     }
     PermissionGate(PermissionGroup.CONTACTS)
     val viewModel = rememberContactsListViewModel(container)
+    val pending by container.pendingSearch.collectAsState()
     val state by viewModel.state.collectAsState()
     val searchState = rememberTextFieldState()
+    // A relation the card could not open: its name lands in the search field (C46).
+    LaunchedEffect(pending) {
+        pending?.let {
+            searchState.setTextAndPlaceCursorAtEnd(it)
+            container.pendingSearch.value = null
+        }
+    }
     val overlays = LocalOverlay.current
     val context = LocalContext.current
     ContactsListEffects(viewModel, navigator, overlays, context)

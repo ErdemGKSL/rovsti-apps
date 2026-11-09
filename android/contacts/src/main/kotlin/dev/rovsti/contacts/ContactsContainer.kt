@@ -1,6 +1,8 @@
 package dev.rovsti.contacts
 
 import android.content.Context
+import dev.rovsti.contacts.card.CardWaPort
+import dev.rovsti.contacts.card.RepositoryCardWaPort
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.data.WaMarks
@@ -10,10 +12,14 @@ import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.ContactsWaOps
 import dev.rovsti.core.ops.NativeContactsOps
 import dev.rovsti.core.ops.NativeContactsWaOps
+import dev.rovsti.core.ops.NativePhoneOps
 import dev.rovsti.core.ops.NativeQrOps
 import dev.rovsti.core.ops.NativeSearchOps
+import dev.rovsti.core.ops.NativeSharedOps
+import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SearchOps
+import dev.rovsti.core.ops.SharedOps
 import dev.rovsti.platform.calllog.AndroidCallLogRepository
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.AndroidContactsRepository
@@ -48,6 +54,18 @@ open class ContactsContainer(
     /** The WhatsApp decisions of the list and the card (AD-CT6). */
     val waCard: ContactsWaOps by lazy { createWaCard() }
 
+    /** A name the card asked the Contacts list to search for (a relation nobody is called); the list consumes it. */
+    val pendingSearch: MutableStateFlow<String?> = MutableStateFlow(null)
+
+    /** Call-log matching for the card's Recent section. */
+    val phoneOps: PhoneOps by lazy { createPhoneOps() }
+
+    /** Number formats and countries. */
+    val sharedOps: SharedOps by lazy { createSharedOps() }
+
+    /** What the card needs from WhatsApp; the lookups go through the linked instance only. */
+    val cardWa: CardWaPort by lazy { createCardWa() }
+
     /** The preferences and the Trash, files in the data directory. */
     val store: ContactsStore by lazy { ContactsStore(ops) }
 
@@ -78,6 +96,12 @@ open class ContactsContainer(
     protected open fun createCallLog(): CallLogRepository = AndroidCallLogRepository(context, Dispatchers.IO)
 
     protected open fun createOps(): ContactsOps = NativeContactsOps(rust)
+
+    protected open fun createPhoneOps(): PhoneOps = NativePhoneOps(rust)
+
+    protected open fun createSharedOps(): SharedOps = NativeSharedOps(rust)
+
+    protected open fun createCardWa(): CardWaPort = RepositoryCardWaPort(wa)
 
     protected open fun createWaCard(): ContactsWaOps = NativeContactsWaOps(rust)
 

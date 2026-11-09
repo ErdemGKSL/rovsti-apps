@@ -60,6 +60,7 @@ import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
+import dev.rovsti.design.transition.rovstiSharedBounds
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
@@ -252,10 +253,10 @@ private fun ContactRowItem(
                     onTap = open,
                 ),
             ) {
-                RowBody(item, endInset, null)
+                RowBody(item, endInset, null, shared = true)
             }
         } else {
-            Box(body) { RowBody(item, endInset, open) }
+            Box(body) { RowBody(item, endInset, open, shared = true) }
         }
     }
 }
@@ -267,11 +268,22 @@ private fun RowBody(
     endInset: Dp,
     onClick: (() -> Unit)?,
     avatarSize: Dp = Sizes.avatar,
+    // The avatar of a list row is the source of the shared flight to the card (`avatar-<id>`, E4.3); the lifted copy of
+    // the context menu and the "Recently viewed" strip are not, so the key is never on two nodes at once.
+    shared: Boolean = false,
 ) {
     ListRow(
         title = item.name,
         secondary = item.secondary,
-        leading = { Avatar(item.name, size = avatarSize, photoModel = item.photoUri, colorKey = item.id.toString()) },
+        leading = {
+            Avatar(
+                item.name,
+                modifier = if (shared) Modifier.rovstiSharedBounds("avatar-${item.id}") else Modifier,
+                size = avatarSize,
+                photoModel = item.photoUri,
+                colorKey = item.id.toString(),
+            )
+        },
         trailing = if (item.starred || item.whatsapp) ({ Marks(item) }) else null,
         onClick = onClick,
         endInset = endInset,

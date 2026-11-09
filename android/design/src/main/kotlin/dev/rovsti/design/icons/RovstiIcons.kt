@@ -248,6 +248,72 @@ object RovstiIcons {
         }
     }
 
+    /** The Star filled: a favorite contact (the outline is [Star]). */
+    val StarFilled: ImageVector by lazy {
+        filled("StarFilled") {
+            for (i in 0 until 10) {
+                val r = if (i % 2 == 0) 9.5f else 4.4f
+                val angle = (-90f + i * 36f) * (Math.PI.toFloat() / 180f)
+                val x = 12f + r * cos(angle)
+                val y = 12.6f + r * sin(angle)
+                if (i == 0) moveTo(x, y) else lineTo(x, y)
+            }
+            close()
+        }
+    }
+
+    /** An envelope: the Email glyph. */
+    val Mail: ImageVector by lazy {
+        stroked("Mail") {
+            moveTo(5f, 5.5f)
+            lineTo(19f, 5.5f)
+            arcTo(2f, 2f, 0f, false, true, 21f, 7.5f)
+            lineTo(21f, 16.5f)
+            arcTo(2f, 2f, 0f, false, true, 19f, 18.5f)
+            lineTo(5f, 18.5f)
+            arcTo(2f, 2f, 0f, false, true, 3f, 16.5f)
+            lineTo(3f, 7.5f)
+            arcTo(2f, 2f, 0f, false, true, 5f, 5.5f)
+            close()
+            moveTo(3.6f, 7.2f)
+            lineTo(12f, 13f)
+            lineTo(20.4f, 7.2f)
+        }
+    }
+
+    /** Two overlapping sheets: Copy. */
+    val Copy: ImageVector by lazy {
+        stroked("Copy") {
+            moveTo(9f, 8f)
+            lineTo(18f, 8f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 19.5f, 9.5f)
+            lineTo(19.5f, 19f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 18f, 20.5f)
+            lineTo(9f, 20.5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 7.5f, 19f)
+            lineTo(7.5f, 9.5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 9f, 8f)
+            close()
+            moveTo(4.5f, 15f)
+            lineTo(4.5f, 5f)
+            arcTo(1.5f, 1.5f, 0f, false, true, 6f, 3.5f)
+            lineTo(14f, 3.5f)
+        }
+    }
+
+    /** A globe: a website. */
+    val Globe: ImageVector by lazy {
+        stroked("Globe") {
+            ring(12f, 12f, 8.5f)
+            moveTo(3.5f, 12f)
+            lineTo(20.5f, 12f)
+            moveTo(12f, 3.5f)
+            curveTo(8.5f, 7.5f, 8.5f, 16.5f, 12f, 20.5f)
+            moveTo(12f, 3.5f)
+            curveTo(15.5f, 7.5f, 15.5f, 16.5f, 12f, 20.5f)
+        }
+    }
+
     /** A folder with its tab on the left: the Groups glyph. */
     val Folder: ImageVector by lazy {
         stroked("Folder") {

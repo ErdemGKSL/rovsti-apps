@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.card.ContactCardPage
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
@@ -78,7 +79,7 @@ fun ContactsApp(
         entry<ContactsRoute.Intake> { IntakePlaceholderPage(pop) }
         // The pages below arrive with E4.2-E4.9; until then a route that a link or a later screen can reach still shows
         // an honest placeholder instead of nothing.
-        entry<ContactsRoute.ContactCard> { route -> ComingPage("Contact ${route.id}", pop) }
+        entry<ContactsRoute.ContactCard> { route -> ContactCardPage(container, route.id, navigator, pop) }
         entry<ContactsRoute.ContactEditor> { ComingPage("Edit contact", pop) }
         entry<ContactsRoute.Trash> { ComingPage("Trash", pop) }
         entry<ContactsRoute.GroupPage> { route -> ComingPage("Group ${route.id}", pop) }

@@ -11,4 +11,6 @@
     <string name="settings_whatsapp">WhatsApp</string>
     <string name="coming_title">Coming soon</string>
     <string name="coming_message">This screen arrives in a later update.</string>
+    <string name="card_wish">Wish</string>
+    <string name="card_chat_whatsapp">Chat on WhatsApp</string>
 </resources>

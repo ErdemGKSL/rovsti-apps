@@ -27,6 +27,9 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             all {
+                // librovsti_ffi can be loaded into one class loader per JVM; the plain and the Robolectric tests that
+                // run the real Rust core would otherwise fight over it depending on their order (E4.3).
+                it.forkEvery = 1
                 // The merged manifest of the debug variant is a test input (ContactsManifestTest, E4.1).
                 val merged =
                     layout.buildDirectory.dir("intermediates/merged_manifests/debug/processDebugManifest")

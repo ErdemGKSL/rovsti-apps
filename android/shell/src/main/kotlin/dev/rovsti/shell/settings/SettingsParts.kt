@@ -21,7 +21,7 @@ internal fun GroupGap() {
 
 /** The sentence under a group that explains it, in the same left inset as the group header. */
 @Composable
-internal fun SettingsFooter(text: String) {
+fun SettingsFooter(text: String) {
     IosText(
         text = text,
         style = IosTheme.typography.footnote,

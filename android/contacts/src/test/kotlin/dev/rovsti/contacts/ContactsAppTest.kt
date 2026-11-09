@@ -49,16 +49,17 @@ class ContactsAppTest : ShotTest() {
         advance(600)
         assertEquals(SettingsTab, fixture.navigator.currentTab)
         compose.onNodeWithTag(ContactsTags.SettingsPage).assertIsDisplayed()
-        compose.onNodeWithText("WhatsApp").assertIsDisplayed()
+        compose.onNodeWithText("Display").assertIsDisplayed()
     }
 
-    @Test fun contactsKeepsNoAppearanceOrHapticsRow() {
+    @Test fun contactsShowsTheAppearanceHapticsAndAboutRows() {
         val fixture = AppFixture(granted = true)
         fixture.navigator.select(SettingsTab)
         composeFrame { fixture.Content() }
-        compose.onNodeWithText("About").assertIsDisplayed()
-        assertEquals(0, compose.onAllNodes(hasText("Appearance")).fetchSemanticsNodes().size)
-        assertEquals(0, compose.onAllNodes(hasText("Haptics")).fetchSemanticsNodes().size)
+        // The rows sit at the end of a long page, below the fold: they exist, the page scrolls to them.
+        for (row in listOf("Appearance", "Haptics", "About")) {
+            assertEquals(row, 1, compose.onAllNodes(hasText(row)).fetchSemanticsNodes().size)
+        }
     }
 
     @Test fun aRestoredCardRouteHasAPage() {

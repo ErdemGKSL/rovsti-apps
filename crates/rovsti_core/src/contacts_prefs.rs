@@ -6,7 +6,10 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    contact_recent::AddedMark, contacts_view::NameStyle, settings::SortBy, wire::NameFormat,
+    contact_recent::AddedMark,
+    contacts_view::NameStyle,
+    settings::SortBy,
+    wire::{Appearance, HapticsLevel, NameFormat},
 };
 
 /// The schema this build writes.
@@ -61,6 +64,12 @@ pub struct ContactsPrefs {
     /// Lookup keys of the recently viewed contacts, newest first.
     #[serde(default)]
     pub viewed: Vec<String>,
+    /// Light, dark or follow the system (a file without it follows the system).
+    #[serde(default)]
+    pub appearance: Appearance,
+    /// How strong the haptics are (a file without it plays Normal).
+    #[serde(default)]
+    pub haptics: HapticsLevel,
 }
 
 fn default_hour() -> u8 {
@@ -113,6 +122,8 @@ impl Default for ContactsPrefs {
             known_max_id: None,
             added: Vec::new(),
             viewed: Vec::new(),
+            appearance: Appearance::default(),
+            haptics: HapticsLevel::default(),
         }
     }
 }
@@ -141,6 +152,8 @@ impl ContactsPrefs {
             known_max_id: None,
             added: Vec::new(),
             viewed: Vec::new(),
+            appearance: Appearance::default(),
+            haptics: HapticsLevel::default(),
         }
     }
 }
@@ -156,6 +169,24 @@ mod tests {
         assert_eq!(p.favorites_order, vec!["a".to_owned()]);
         assert_eq!(p.known_max_id, None);
         assert!(p.added.is_empty() && p.viewed.is_empty());
+    }
+
+    #[test]
+    fn appearance_and_haptics_default_and_round_trip() {
+        let old: ContactsPrefs = serde_json::from_str(r#"{"save_to":"x"}"#).expect("ok");
+        assert_eq!(old.appearance, Appearance::Auto);
+        assert_eq!(old.haptics, HapticsLevel::Normal);
+        let p = ContactsPrefs {
+            appearance: Appearance::Dark,
+            haptics: HapticsLevel::Light,
+            ..ContactsPrefs::default()
+        };
+        let json = serde_json::to_string(&p).expect("serialises");
+        assert!(json.contains(r#""appearance":"dark""#) && json.contains(r#""haptics":"light""#));
+        let back: ContactsPrefs = serde_json::from_str(&json).expect("parses");
+        assert_eq!(back, p);
+        let odd: ContactsPrefs = serde_json::from_str(r#"{"appearance":"sepia"}"#).expect("ok");
+        assert_eq!(odd.appearance, Appearance::Auto);
     }
 
     #[test]

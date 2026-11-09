@@ -189,11 +189,27 @@ fn the_contacts_prefs_fixture_loads_and_saves_byte_for_byte() {
     assert_eq!(loaded.name_format, NameFormat::LastFirst);
     assert_eq!(loaded.sort_by, SortBy::LastName);
     assert_eq!(loaded.save_to, "com.google|a@b.com");
+    assert_eq!(loaded.appearance, rovsti_core::wire::Appearance::Dark);
+    assert_eq!(loaded.haptics, rovsti_core::wire::HapticsLevel::Light);
     prefs::save(&dir, loaded).expect("save");
     assert_eq!(
         fs::read(dir.join(name)).expect("read"),
         fs::read(fixture(name)).expect("fixture"),
     );
+}
+
+#[test]
+fn an_old_contacts_prefs_file_loads_with_the_appearance_and_haptics_defaults() {
+    use rovsti_app_core::contacts::prefs;
+    use rovsti_core::wire::{Appearance, HapticsLevel};
+
+    let name = "contacts-prefs.json";
+    let dir = store::test_support::tmp("fx-contacts-prefs-old");
+    fs::copy(fixture("dirs/contacts").join(name), dir.join(name)).expect("copy");
+    let loaded = prefs::load(&dir);
+    assert!(loaded.birthday_reminders);
+    assert_eq!(loaded.appearance, Appearance::Auto);
+    assert_eq!(loaded.haptics, HapticsLevel::Normal);
 }
 
 #[test]

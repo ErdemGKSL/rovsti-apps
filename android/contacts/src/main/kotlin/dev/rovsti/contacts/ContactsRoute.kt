@@ -76,6 +76,22 @@ sealed interface ContactsRoute {
     @Serializable
     data object WhatsAppSettings : ContactsRoute
 
+    /** The Settings choice pages and the summary (E4.15). */
+    @Serializable
+    data object SettingsNameFormat : ContactsRoute
+
+    @Serializable
+    data object SettingsSortBy : ContactsRoute
+
+    @Serializable
+    data object SettingsSaveTo : ContactsRoute
+
+    @Serializable
+    data object SettingsSummary : ContactsRoute
+
+    @Serializable
+    data object SettingsReminderTime : ContactsRoute
+
     /**
      * The import page (E4.10): a vCard handed to the app by SEND or VIEW or picked in Settings ([uri] is the content
      * URI as text), or [paste] for "Paste Contact", which reads the clipboard when the page opens. With [scan] the
@@ -163,6 +179,16 @@ fun chromeFor(route: ContactsRoute): ChromeSpec =
         -> ChromeSpec(TabBarMode.Hidden)
 
         ContactsRoute.WhatsAppSettings -> ChromeSpec(TabBarMode.Folded, largeTitle = "WhatsApp")
+
+        ContactsRoute.SettingsNameFormat -> ChromeSpec(TabBarMode.Folded, largeTitle = "Name Format")
+
+        ContactsRoute.SettingsSortBy -> ChromeSpec(TabBarMode.Folded, largeTitle = "Sort By")
+
+        ContactsRoute.SettingsSaveTo -> ChromeSpec(TabBarMode.Folded, largeTitle = "Save To")
+
+        ContactsRoute.SettingsSummary -> ChromeSpec(TabBarMode.Folded, largeTitle = "Summary")
+
+        ContactsRoute.SettingsReminderTime -> ChromeSpec(TabBarMode.Folded, largeTitle = "Time")
 
         ContactsRoute.Appearance -> ChromeSpec(TabBarMode.Folded, largeTitle = "Appearance")
 

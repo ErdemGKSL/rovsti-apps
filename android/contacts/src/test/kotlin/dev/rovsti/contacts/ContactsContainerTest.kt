@@ -12,7 +12,6 @@ import dev.rovsti.platform.system.FakeSpecialAccess
 import dev.rovsti.platform.system.permissions.SpecialAccess
 import dev.rovsti.shell.HasContainer
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -78,9 +77,10 @@ class ContactsContainerTest {
         assertEquals("the three ops and rust itself share one core", 1, c.rustInits)
     }
 
-    @Test fun contactsKeepsNeitherAppearanceNorHaptics() {
-        assertNull(container.commonSettings.appearance.value)
-        assertNull(container.commonSettings.haptics.value)
+    @Test fun contactsKeepsAppearanceAndHapticsInItsPreferences() {
+        // Before the stored file is read the flows hold the defaults, never null: the rows are shown.
+        assertEquals(dev.rovsti.core.model.stops.Appearance.Auto, container.commonSettings.appearance.value)
+        assertEquals(dev.rovsti.core.model.phone.HapticsLevel.Normal, container.commonSettings.haptics.value)
     }
 
     @Test fun permissionsAreTheContactsOnes() {

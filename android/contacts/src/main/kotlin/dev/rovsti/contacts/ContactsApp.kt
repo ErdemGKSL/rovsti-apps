@@ -21,6 +21,14 @@ import dev.rovsti.contacts.intake.rememberImportActions
 import dev.rovsti.contacts.list.SelectToolbar
 import dev.rovsti.contacts.list.rememberContactsListViewModel
 import dev.rovsti.contacts.recent.RecentPage
+import dev.rovsti.contacts.settings.ContactsSettingsEntry
+import dev.rovsti.contacts.settings.NameFormatEntry
+import dev.rovsti.contacts.settings.ReminderTimeEntry
+import dev.rovsti.contacts.settings.SaveToEntry
+import dev.rovsti.contacts.settings.SettingsLinks
+import dev.rovsti.contacts.settings.SortByEntry
+import dev.rovsti.contacts.settings.SummaryEntry
+import dev.rovsti.contacts.settings.rememberContactsSettingsViewModel
 import dev.rovsti.contacts.trash.TrashPage
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.transition.TabNavigator
@@ -52,6 +60,8 @@ fun ContactsApp(
     val popToRoot: () -> Unit = remember(navigator) { { navigator.select(navigator.currentTab) } }
     // "Recently added" (C15) is marked on every pull of the book, whichever page is open.
     remember(container) { container.recentTracker }
+    // Birthday alarms follow the book, the switch and the hour (C22).
+    remember(container) { container.birthdays }
     // Select mode (E4.8) folds the tab bar and puts its toolbar beside the circle.
     val list = rememberContactsListViewModel(container)
     val select by list.selectToolbar.collectAsState()
@@ -73,28 +83,64 @@ fun ContactsApp(
         entry<ContactsRoute.Groups> { GroupsPage(container, navigator) }
         entry<ContactsRoute.Settings> {
             val import = rememberImportActions(container, navigator, overlays)
-            ContactsSettingsPage(
-                settings = container.commonSettings,
-                onOpenWhatsApp = { navigator.push(ContactsRoute.WhatsAppSettings) },
-                onOpenTrash = { navigator.push(ContactsRoute.Trash) },
-                onFindDuplicates = { navigator.push(ContactsRoute.Duplicates) },
-                onCleanUp = { navigator.push(ContactsRoute.Cleanup) },
-                onImportFile = import.importFile,
-                onPasteContact = import.pasteContact,
-                onScanQr = import.scanQr,
-                onImportCsv = import.importCsv,
-                onExportCsv = import.exportCsv,
-                onOpenCommon = { page ->
-                    navigator.push(
-                        when (page) {
-                            CommonSettingsPage.Appearance -> ContactsRoute.Appearance
-                            CommonSettingsPage.Haptics -> ContactsRoute.Haptics
-                            CommonSettingsPage.About -> ContactsRoute.About
-                            CommonSettingsPage.Licences -> ContactsRoute.Licences
-                        },
-                    )
-                },
+            ContactsSettingsEntry(
+                container,
+                SettingsLinks(
+                    openNameFormat = { navigator.push(ContactsRoute.SettingsNameFormat) },
+                    openSortBy = { navigator.push(ContactsRoute.SettingsSortBy) },
+                    openSaveTo = { navigator.push(ContactsRoute.SettingsSaveTo) },
+                    openSummary = { navigator.push(ContactsRoute.SettingsSummary) },
+                    openReminderTime = { navigator.push(ContactsRoute.SettingsReminderTime) },
+                    importFile = import.importFile,
+                    exportVcf = import.exportVcf,
+                    exportCsv = import.exportCsv,
+                    importCsv = import.importCsv,
+                    findDuplicates = { navigator.push(ContactsRoute.Duplicates) },
+                    cleanUp = { navigator.push(ContactsRoute.Cleanup) },
+                    scanQr = import.scanQr,
+                    pasteContact = import.pasteContact,
+                    emergency = { navigator.push(ContactsRoute.Emergency) },
+                    trash = { navigator.push(ContactsRoute.Trash) },
+                    whatsApp = { navigator.push(ContactsRoute.WhatsAppSettings) },
+                    openCommon = { page ->
+                        navigator.push(
+                            when (page) {
+                                CommonSettingsPage.Appearance -> ContactsRoute.Appearance
+                                CommonSettingsPage.Haptics -> ContactsRoute.Haptics
+                                CommonSettingsPage.About -> ContactsRoute.About
+                                CommonSettingsPage.Licences -> ContactsRoute.Licences
+                            },
+                        )
+                    },
+                ),
             )
+        }
+        entry<ContactsRoute.SettingsNameFormat> {
+            NameFormatEntry(rememberContactsSettingsViewModel(container), pop, popToRoot)
+        }
+        entry<ContactsRoute.SettingsSortBy> {
+            SortByEntry(
+                rememberContactsSettingsViewModel(container),
+                pop,
+                popToRoot,
+            )
+        }
+        entry<ContactsRoute.SettingsSaveTo> {
+            SaveToEntry(
+                rememberContactsSettingsViewModel(container),
+                pop,
+                popToRoot,
+            )
+        }
+        entry<ContactsRoute.SettingsSummary> {
+            SummaryEntry(
+                rememberContactsSettingsViewModel(container),
+                pop,
+                popToRoot,
+            )
+        }
+        entry<ContactsRoute.SettingsReminderTime> {
+            ReminderTimeEntry(rememberContactsSettingsViewModel(container), pop, popToRoot)
         }
         entry<ContactsRoute.WhatsAppSettings> { WhatsAppSettingsEntry(container) }
         entry<ContactsRoute.Appearance> { AppearanceEntry(container.commonSettings, pop, popToRoot) }

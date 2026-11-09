@@ -916,6 +916,17 @@ pub enum HapticsLevel {
     Normal,
 }
 
+/// App appearance setting: follow the system theme or force light or dark.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Appearance {
+    Light,
+    Dark,
+    #[default]
+    #[serde(other)]
+    Auto,
+}
+
 /// `voicemail_info` provider payload (AD-33).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VoicemailInfo {

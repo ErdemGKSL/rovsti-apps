@@ -8,7 +8,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.SaverScope
+import dev.rovsti.core.model.phone.HapticsLevel
 import dev.rovsti.design.haptics.LocalRovstiHaptics
 import dev.rovsti.design.media.LocalRovstiImageLoader
 import dev.rovsti.design.theme.RovstiTheme
@@ -16,6 +21,8 @@ import dev.rovsti.design.transition.Tab
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.permissions.LocalPermissionController
 import dev.rovsti.shell.permissions.LocalSpecialAccess
+import dev.rovsti.shell.settings.rememberDarkTheme
+import dev.rovsti.shell.settings.toMode
 import kotlinx.serialization.KSerializer
 
 /** The tabs of an app, the root route of each, and how routes are saved: what a [TabNavigator] is made of. */
@@ -75,7 +82,20 @@ abstract class RovstiShellActivity<R : Any> : ComponentActivity() {
         navigator = restoreNavigator(savedInstanceState)
         if (savedInstanceState == null) route(intent)
         setContent {
-            RovstiTheme {
+            val settings = container.commonSettings
+            val dark = settings.rememberDarkTheme()
+            // The window's bar icons follow the app's theme, not the system's, when the person forced one.
+            LaunchedEffect(dark) {
+                val bars =
+                    SystemBarStyle.auto(
+                        android.graphics.Color.TRANSPARENT,
+                        android.graphics.Color.TRANSPARENT,
+                    ) { dark }
+                enableEdgeToEdge(bars, bars)
+            }
+            val level by settings.haptics.collectAsState()
+            SideEffect { container.haptics.mode = (level ?: HapticsLevel.Light).toMode() }
+            RovstiTheme(darkTheme = dark) {
                 CompositionLocalProvider(
                     LocalRovstiHaptics provides container.haptics,
                     LocalRovstiImageLoader provides container.imageLoader,

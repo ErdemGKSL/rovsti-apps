@@ -3,16 +3,18 @@ package dev.rovsti.contacts
 import android.content.Context
 import dev.rovsti.contacts.card.CardWaPort
 import dev.rovsti.contacts.card.RepositoryCardWaPort
+import dev.rovsti.contacts.data.AndroidReminderPort
+import dev.rovsti.contacts.data.BirthdayAlarms
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.data.RecentTracker
+import dev.rovsti.contacts.data.ReminderPort
+import dev.rovsti.contacts.data.StoreCommonSettings
 import dev.rovsti.contacts.data.WaMarks
 import dev.rovsti.contacts.photo.GatewayWaPhotoPort
 import dev.rovsti.contacts.photo.WaPhotoPort
 import dev.rovsti.contacts.trash.ContactDeletion
 import dev.rovsti.contacts.trash.ContactTrash
-import dev.rovsti.core.model.phone.HapticsLevel
-import dev.rovsti.core.model.stops.Appearance
 import dev.rovsti.core.ops.ContactsOps
 import dev.rovsti.core.ops.ContactsWaOps
 import dev.rovsti.core.ops.NativeContactsOps
@@ -39,7 +41,6 @@ import dev.rovsti.shell.ShellContainer
 import dev.rovsti.shell.settings.CommonSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 
 /**
  * What Rovsti Contacts adds to the shared [ShellContainer] (ARCH 5.3). Every member is lazy and built by a `create*`
@@ -110,8 +111,15 @@ open class ContactsContainer(
 
     val shortcuts: ShortcutsRepository by lazy { createShortcuts() }
 
-    /** Contacts keeps no appearance and no haptics preference yet (E4.15), so both rows are hidden. */
-    val commonSettings: CommonSettings by lazy { NoCommonPreferences }
+    /** Appearance and haptics live in `contacts-prefs.json` (E4.15); the activity follows them. */
+    override val commonSettings: CommonSettings by lazy { StoreCommonSettings(store, scope) }
+
+    /** Keeps the birthday alarms in line with the book, the switch and the hour (C22); started once. */
+    val birthdays: BirthdayAlarms by lazy {
+        BirthdayAlarms(book, store, ops, createReminderPort(), scope).also { it.start() }
+    }
+
+    protected open fun createReminderPort(): ReminderPort = AndroidReminderPort(context)
 
     protected open fun createWaPhotos(): WaPhotoPort = GatewayWaPhotoPort.over(wa)
 
@@ -136,17 +144,4 @@ open class ContactsContainer(
     protected open fun createQr(): QrOps = NativeQrOps(rust)
 
     protected open fun createShortcuts(): ShortcutsRepository = AndroidShortcutsRepository(context)
-}
-
-/**
- * [CommonSettings] of an app without either preference: both flows hold null (the rows and pages are hidden, see
- * `CommonSettings`) and the setters have nothing to store.
- */
-internal object NoCommonPreferences : CommonSettings {
-    override val appearance: StateFlow<Appearance?> = MutableStateFlow(null)
-    override val haptics: StateFlow<HapticsLevel?> = MutableStateFlow(null)
-
-    override fun setAppearance(value: Appearance) = Unit
-
-    override fun setHaptics(value: HapticsLevel) = Unit
 }

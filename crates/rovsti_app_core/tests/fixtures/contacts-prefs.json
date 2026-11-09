@@ -10,5 +10,7 @@
   "emergency": [],
   "known_max_id": null,
   "added": [],
-  "viewed": []
+  "viewed": [],
+  "appearance": "dark",
+  "haptics": "light"
 }

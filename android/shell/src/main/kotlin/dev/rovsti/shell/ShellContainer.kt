@@ -22,6 +22,8 @@ import dev.rovsti.platform.system.permissions.AndroidSpecialAccess
 import dev.rovsti.platform.system.permissions.AppPermissions
 import dev.rovsti.platform.system.permissions.PermissionController
 import dev.rovsti.platform.system.permissions.SpecialAccess
+import dev.rovsti.shell.settings.CommonSettings
+import dev.rovsti.shell.settings.NoCommonSettings
 import dev.rovsti.wa.DefaultWaRepository
 import dev.rovsti.wa.WaLinkStore
 import dev.rovsti.wa.WaRepository
@@ -69,6 +71,12 @@ abstract class ShellContainer(
     val imageLoader: ImageLoader get() = imageLoaderLazy.value
 
     val specialAccess: SpecialAccess by lazy { createSpecialAccess() }
+
+    /**
+     * The appearance and haptics preferences of the app. The activity follows them: the theme and the haptics mode
+     * change as soon as a flow does. An app without the preferences keeps this default (both flows hold null).
+     */
+    open val commonSettings: CommonSettings by lazy { NoCommonSettings }
 
     val permissions: PermissionController by lazy { PermissionController(context, appPermissions, specialAccess) }
 

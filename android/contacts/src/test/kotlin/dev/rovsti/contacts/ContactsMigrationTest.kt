@@ -75,6 +75,9 @@ class ContactsMigrationTest {
             assertEquals(SortBy.LastName, prefs.prefs.sortBy)
             assertEquals("com.google|ayse@example.org", prefs.prefs.saveTo)
             assertEquals(true, prefs.prefs.birthdayReminders)
+            // The old file has no appearance and no haptics: the defaults apply (R11-7).
+            assertEquals(dev.rovsti.core.model.stops.Appearance.Auto, prefs.prefs.appearance)
+            assertEquals(dev.rovsti.core.model.phone.HapticsLevel.Normal, prefs.prefs.haptics)
             assertEquals(8, prefs.reminderHour)
             assertEquals("blank and repeated keys are dropped", listOf("k-zeynep"), prefs.favoritesOrder)
             assertEquals("k-ayse", prefs.prefs.myCard)

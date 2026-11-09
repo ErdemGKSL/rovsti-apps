@@ -52,6 +52,10 @@ android {
                     )
                 it.systemProperty("rovsti.rustFixtureDirs", rustFixtures.absolutePath)
                 it.inputs.dir(rustFixtures).withPropertyName("rustFixtureDirs")
+                // The WhatsApp settings screenshot (e4.15-whatsapp) draws the views Rust wrote for E3.10.
+                val ffiFixtures = rootProject.projectDir.parentFile.resolve("crates/rovsti_ffi/fixtures")
+                it.systemProperty("rovsti.ffi.fixtures", ffiFixtures.absolutePath)
+                it.inputs.dir(ffiFixtures).withPropertyName("ffiFixtures")
                 it.inputs.files(fileTree("src/main")).withPropertyName("mainSources")
                 // ContactsMigrationTest runs the real Rust core on the host library that :core-bridge builds (E2.6).
                 val hostLib = coreBridge.tasks.named("cargoBuildHost").flatMap { (it as CargoBuildTask).outputDir }

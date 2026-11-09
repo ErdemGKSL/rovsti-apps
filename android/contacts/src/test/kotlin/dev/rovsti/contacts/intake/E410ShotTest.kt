@@ -3,6 +3,8 @@ package dev.rovsti.contacts.intake
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.rovsti.contacts.AppFixture
@@ -107,6 +109,15 @@ class E410ShotTest : ShotTest() {
         for (dark in listOf(false, true)) {
             composeFrame(dark = dark) { fixture.Content() }
             advance(900)
+            // Paste Contact is under Tools, below the fold of the longer Settings page.
+            repeat(2) {
+                compose
+                    .onNode(
+                        androidx.compose.ui.test
+                            .hasScrollAction(),
+                    ).performTouchInput { swipeUp() }
+                advance(600)
+            }
             compose.onNodeWithTag(ContactsTags.PasteContact, useUnmergedTree = true).performClick()
             advance(900)
             compose.onRoot().captureRoboImage(

@@ -17,8 +17,10 @@ import dev.rovsti.core.model.contacts.TrashPushAnswer
 import dev.rovsti.core.model.contacts.TrashPushRequest
 import dev.rovsti.core.model.contacts.TrashRestoreAnswer
 import dev.rovsti.core.model.contacts.TrashRestoreRequest
+import dev.rovsti.core.model.phone.HapticsLevel
 import dev.rovsti.core.model.phone.SortBy
 import dev.rovsti.core.model.search.NameFormat
+import dev.rovsti.core.model.stops.Appearance
 import dev.rovsti.core.ops.ContactsOps
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -161,6 +163,8 @@ class ContactsStore(
                 knownMaxId = null,
                 added = emptyList(),
                 viewed = emptyList(),
+                appearance = Appearance.Auto,
+                haptics = HapticsLevel.Normal,
             )
     }
 }

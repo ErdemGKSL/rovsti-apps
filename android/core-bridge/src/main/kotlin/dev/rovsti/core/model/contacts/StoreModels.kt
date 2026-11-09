@@ -2,8 +2,10 @@
 
 package dev.rovsti.core.model.contacts
 
+import dev.rovsti.core.model.phone.HapticsLevel
 import dev.rovsti.core.model.phone.SortBy
 import dev.rovsti.core.model.search.NameFormat
+import dev.rovsti.core.model.stops.Appearance
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.EncodeDefault.Mode.NEVER
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -112,6 +114,10 @@ data class ContactsPrefs(
     @SerialName("known_max_id") val knownMaxId: Long?,
     val added: List<AddedMark>,
     val viewed: List<String>,
+    /** Light, dark or follow the system; a file without it follows the system. */
+    val appearance: Appearance = Appearance.Auto,
+    /** How strong the haptics are; a file without it plays Normal. */
+    val haptics: HapticsLevel = HapticsLevel.Normal,
 )
 
 /** The preferences plus the lists as the screens use them (no blanks or repeats) and the clamped reminder hour. */

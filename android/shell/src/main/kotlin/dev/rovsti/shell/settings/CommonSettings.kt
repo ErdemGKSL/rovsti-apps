@@ -7,6 +7,7 @@ import androidx.compose.runtime.getValue
 import dev.rovsti.core.model.phone.HapticsLevel
 import dev.rovsti.core.model.stops.Appearance
 import dev.rovsti.design.haptics.HapticMode
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -50,3 +51,13 @@ fun HapticsLevel.toMode(): HapticMode =
         HapticsLevel.Light -> HapticMode.System
         HapticsLevel.Normal -> HapticMode.Strong
     }
+
+/** [CommonSettings] of an app without either preference: both flows hold null (rows and pages hidden); the setters do nothing. */
+object NoCommonSettings : CommonSettings {
+    override val appearance: StateFlow<Appearance?> = MutableStateFlow(null)
+    override val haptics: StateFlow<HapticsLevel?> = MutableStateFlow(null)
+
+    override fun setAppearance(value: Appearance) = Unit
+
+    override fun setHaptics(value: HapticsLevel) = Unit
+}

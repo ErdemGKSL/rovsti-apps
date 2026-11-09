@@ -1,0 +1,174 @@
+package dev.rovsti.contacts.list
+
+import androidx.compose.runtime.Immutable
+import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.core.model.contacts.Addition
+import dev.rovsti.core.model.contacts.Confirm
+import dev.rovsti.core.model.contacts.QuickAction
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.persistentMapOf
+
+/** What the list shows while the book is not ready. */
+enum class ListPhase { Loading, NoPermission, Ready }
+
+/** Why the list has no rows. */
+enum class EmptyKind { None, NoContacts, NoResults }
+
+/**
+ * One contact row. Everything the row draws is here, already decided: [name] follows the Name format, [secondary] is
+ * the one line under it, [header] starts the section of [letter] (never while searching), [whatsapp] says the contact
+ * has a chat on the linked instance (shown once, as the small glyph after the name).
+ */
+@Immutable
+data class ContactItem(
+    val id: Long,
+    val name: String,
+    val secondary: String?,
+    val letter: String,
+    val header: Boolean,
+    val starred: Boolean,
+    val whatsapp: Boolean,
+    val hasNumber: Boolean,
+    val photoUri: String?,
+) {
+    /** Which long-press menu the row gets: the quick actions only depend on these three facts. */
+    val menuKey: MenuKey get() = MenuKey(hasNumber, whatsapp, starred)
+}
+
+/** The three facts `contacts.quick` answers from. */
+@Immutable
+data class MenuKey(
+    val hasNumber: Boolean,
+    val onWhatsapp: Boolean,
+    val starred: Boolean,
+)
+
+/** The "My card" row at the top of the list. */
+@Immutable
+data class MyCardItem(
+    val contactId: Long,
+    val title: String,
+    val detail: String,
+)
+
+/** The "Recent" row ("1 added - 2 edited"); the Recents page is a later story, so the row is not drawn yet. */
+@Immutable
+data class RecentEntry(
+    val title: String,
+    val detail: String,
+)
+
+/** Select mode (E4.8 draws it); the list only records that it was asked for and from which row. */
+@Immutable
+data class SelectMode(
+    val first: Long?,
+)
+
+/** What "Create Contact" and "Add to a Contact" carry from a query that found nothing. */
+@Immutable
+data class SearchOffer(
+    val create: DraftSeed? = null,
+    val addition: Addition? = null,
+)
+
+/** The whole list screen as one value (ARCH 5.2). */
+@Immutable
+data class ContactsListUiState(
+    val phase: ListPhase = ListPhase.Loading,
+    val rows: ImmutableList<ContactItem> = persistentListOf(),
+    /** The "In details" rows under a search, each with "Company - Acme" as its [ContactItem.secondary]. */
+    val deepRows: ImmutableList<ContactItem> = persistentListOf(),
+    val deepTitle: String = "In details",
+    val scrubberLetters: ImmutableList<Char> = persistentListOf(),
+    val showScrubber: Boolean = false,
+    /** Letter to the index of its header among the scrubbable items (headers and rows, in list order). */
+    val sectionIndex: ImmutableMap<Char, Int> = persistentMapOf(),
+    /** Headers plus rows: what the rail scrubs over. */
+    val scrubItems: Int = 0,
+    val query: String = "",
+    val queryEcho: String = "",
+    val emptyKind: EmptyKind = EmptyKind.None,
+    val offer: SearchOffer = SearchOffer(),
+    /** Contacts the "Add to a Contact" sheet offers. */
+    val pickables: ImmutableList<ContactItem> = persistentListOf(),
+    val viewed: ImmutableList<ContactItem> = persistentListOf(),
+    val viewedClear: Confirm = Confirm("Clear Recently Viewed?", ""),
+    val myCard: MyCardItem? = null,
+    val recentEntry: RecentEntry? = null,
+    /** `contacts.quick` per [MenuKey]; the row menus are built from it. */
+    val quick: ImmutableMap<MenuKey, ImmutableList<QuickAction>> = persistentMapOf(),
+    val selectMode: SelectMode? = null,
+)
+
+/** What the screen asks of the model. */
+sealed interface ContactsListAction {
+    data class QueryChanged(
+        val text: String,
+    ) : ContactsListAction
+
+    data class Open(
+        val id: Long,
+    ) : ContactsListAction
+
+    data class Quick(
+        val id: Long,
+        val action: String,
+    ) : ContactsListAction
+
+    data class EnterSelect(
+        val first: Long?,
+    ) : ContactsListAction
+
+    data object NewContact : ContactsListAction
+
+    data object CreateFromQuery : ContactsListAction
+
+    data class AddToContact(
+        val id: Long,
+    ) : ContactsListAction
+
+    data object AskClearViewed : ContactsListAction
+
+    data object ClearViewed : ContactsListAction
+
+    data object OpenMyCard : ContactsListAction
+}
+
+/** One-shot results: navigation, toasts, system intents, a confirmation. Delivered once, through a channel. */
+sealed interface ContactsListEffect {
+    data class OpenCard(
+        val id: Long,
+    ) : ContactsListEffect
+
+    data class OpenEditor(
+        val id: Long?,
+        val seed: DraftSeed?,
+    ) : ContactsListEffect
+
+    data class Dial(
+        val number: String,
+    ) : ContactsListEffect
+
+    data class Sms(
+        val number: String,
+    ) : ContactsListEffect
+
+    data class WhatsApp(
+        val jid: String,
+        val name: String,
+    ) : ContactsListEffect
+
+    data class Share(
+        val text: String,
+    ) : ContactsListEffect
+
+    data class Toast(
+        val text: String,
+    ) : ContactsListEffect
+
+    data class ConfirmClearViewed(
+        val confirm: Confirm,
+    ) : ContactsListEffect
+}

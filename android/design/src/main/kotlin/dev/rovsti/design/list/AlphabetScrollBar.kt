@@ -31,12 +31,14 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
@@ -430,14 +432,27 @@ fun BoxScope.ListScrollRail(
     val headerOffset = {
         (lazyListState.layoutInfo.totalItemsCount - itemCount).coerceAtLeast(0)
     }
+    // The list pads its top by the status inset only; the frosted bar covers the next stretch. A jump lands the section
+    // below the bar (Rovsti), not under it.
+    val density = LocalDensity.current
+    val barExtraPx =
+        with(density) {
+            (insets.calculateTopPadding() - WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding())
+                .coerceAtLeast(0.dp)
+                .roundToPx()
+        }
     ListScrollRail(
         sectionIndexMap = sectionIndexMap,
         itemCount = itemCount,
-        isAtTarget = { lazyListState.firstVisibleItemIndex == it + headerOffset() },
+        // updateSelection already skips an unchanged rail stop; a scroll to the same place costs nothing.
+        isAtTarget = { false },
         // Not animateScrollToItem: a scrub samples many sections per second and each
         // animation would be cancelled by the next, so the list would crawl behind the
         // thumb instead of tracking it.
-        scrollToItem = { lazyListState.scrollToItem(it + headerOffset()) },
+        scrollToItem = {
+            val index = it + headerOffset()
+            lazyListState.scrollToItem(index, if (index == 0) 0 else -barExtraPx)
+        },
         modifier =
             modifier
                 .align(Alignment.CenterEnd)

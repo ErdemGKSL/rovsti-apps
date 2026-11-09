@@ -5,19 +5,27 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.list.ContactsListEffects
+import dev.rovsti.contacts.list.ContactsListScreen
+import dev.rovsti.contacts.list.rememberContactsListViewModel
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.NavigationButton
 import dev.rovsti.design.controls.EmptyState
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.InsetGroupedSection
+import dev.rovsti.design.overlay.LocalOverlay
 import dev.rovsti.design.transition.Tab
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.system.permissions.PermissionGroup
@@ -37,39 +45,37 @@ object ContactsTags {
 }
 
 /**
- * The Contacts tab root of E4.1: the large title, the permission gate and, when the book may be read, the empty state.
- * Nothing is asked at launch: the gate explains first (a sheet) and the system dialog only follows "Continue"; a
- * refusal leaves a [PermissionRow] on the page. The list itself arrives with E4.2.
+ * The Contacts tab root (E4.2): the [ContactsListScreen] over its view model. Nothing is asked at launch: while the book
+ * may not be read the screen shows the [PermissionRow] (the gate explains first, in a sheet, and the system dialog only
+ * follows "Continue"). Effects of the view model become navigation, toasts and system intents here.
  */
 @Composable
-fun ContactsListPage(navigator: TabNavigator<ContactsRoute>) {
+fun ContactsListPage(
+    container: ContactsContainer,
+    navigator: TabNavigator<ContactsRoute>,
+) {
     val listState = rememberLazyListState()
     LaunchedEffect(navigator, listState) {
         navigator.scrollToTop.collect { if (it.tab == ContactsTab) listState.animateScrollToItem(0) }
     }
-    val permission = PermissionGate(PermissionGroup.CONTACTS)
-    LargeTitleScaffold(
-        title = stringResource(R.string.tab_contacts),
-        state = listState,
-        actions = persistentListOf(),
-        modifier = Modifier.testTag(ContactsTags.ListPage),
-    ) {
-        if (permission == PermissionState.Granted) {
-            emptyItem(
-                key = "empty",
-                icon = RovstiIcons.People,
-                title = R.string.empty_contacts_title,
-                message = R.string.empty_contacts_message,
-                tag = ContactsTags.EmptyBook,
-            )
-        } else {
-            item(key = "permission", contentType = "permission") {
-                InsetGroupedSection(modifier = Modifier.testTag(ContactsTags.PermissionSection)) {
-                    row { PermissionRow(PermissionGroup.CONTACTS) }
-                }
+    PermissionGate(PermissionGroup.CONTACTS)
+    val viewModel = rememberContactsListViewModel(container)
+    val state by viewModel.state.collectAsState()
+    val searchState = rememberTextFieldState()
+    val overlays = LocalOverlay.current
+    val context = LocalContext.current
+    ContactsListEffects(viewModel, navigator, overlays, context)
+    ContactsListScreen(
+        state = state,
+        onAction = viewModel::onAction,
+        listState = listState,
+        searchState = searchState,
+        gate = {
+            InsetGroupedSection(modifier = Modifier.testTag(ContactsTags.PermissionSection)) {
+                row { PermissionRow(PermissionGroup.CONTACTS) }
             }
-        }
-    }
+        },
+    )
 }
 
 /** An empty state that fills the page below the title and ends above the tab bar, so nothing sits under the bar. */

@@ -40,7 +40,7 @@ fun ContactsApp(
         overlays = overlays,
         modifier = Modifier.fillMaxSize(),
     ) {
-        entry<ContactsRoute.ContactsList> { ContactsListPage(navigator) }
+        entry<ContactsRoute.ContactsList> { ContactsListPage(container, navigator) }
         entry<ContactsRoute.Favorites> {
             TabPlaceholderPage(
                 stringResource(R.string.tab_favorites),

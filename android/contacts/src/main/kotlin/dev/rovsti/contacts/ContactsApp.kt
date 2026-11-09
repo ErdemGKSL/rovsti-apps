@@ -7,6 +7,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.card.ContactCardPage
 import dev.rovsti.contacts.editor.ContactEditorPage
+import dev.rovsti.contacts.favorites.FavoritesPage
+import dev.rovsti.contacts.favorites.UpcomingPage
+import dev.rovsti.contacts.groups.GroupPageDestination
+import dev.rovsti.contacts.groups.GroupsPage
 import dev.rovsti.contacts.trash.TrashPage
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.transition.TabNavigator
@@ -44,14 +48,8 @@ fun ContactsApp(
         modifier = Modifier.fillMaxSize(),
     ) {
         entry<ContactsRoute.ContactsList> { ContactsListPage(container, navigator) }
-        entry<ContactsRoute.Favorites> {
-            TabPlaceholderPage(
-                stringResource(R.string.tab_favorites),
-                navigator,
-                FavoritesTab,
-            )
-        }
-        entry<ContactsRoute.Groups> { TabPlaceholderPage(stringResource(R.string.tab_groups), navigator, GroupsTab) }
+        entry<ContactsRoute.Favorites> { FavoritesPage(container, navigator) }
+        entry<ContactsRoute.Groups> { GroupsPage(container, navigator) }
         entry<ContactsRoute.Settings> {
             ContactsSettingsPage(
                 settings = container.commonSettings,
@@ -87,7 +85,7 @@ fun ContactsApp(
             ContactEditorPage(container, route, outcome = { _, _ -> }, onClosed = pop)
         }
         entry<ContactsRoute.Trash> { TrashPage(container, pop) }
-        entry<ContactsRoute.GroupPage> { route -> ComingPage("Group ${route.id}", pop) }
-        entry<ContactsRoute.UpcomingBirthdays> { ComingPage("Upcoming Birthdays", pop) }
+        entry<ContactsRoute.GroupPage> { route -> GroupPageDestination(container, route.id, navigator, pop) }
+        entry<ContactsRoute.UpcomingBirthdays> { UpcomingPage(container, navigator, pop) }
     }
 }

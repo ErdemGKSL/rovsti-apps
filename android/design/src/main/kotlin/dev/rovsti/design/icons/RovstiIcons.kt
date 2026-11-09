@@ -42,6 +42,67 @@ object RovstiIcons {
         }
     }
 
+    val ArrowDown: ImageVector by lazy {
+        stroked("ArrowDown") {
+            moveTo(12f, 5f)
+            lineTo(12f, 18.5f)
+            moveTo(6f, 13f)
+            lineTo(12f, 19f)
+            lineTo(18f, 13f)
+        }
+    }
+
+    /** Three bars: the drag handle of a row that can be reordered. */
+    val Reorder: ImageVector by lazy {
+        stroked("Reorder") {
+            moveTo(5f, 8f)
+            lineTo(19f, 8f)
+            moveTo(5f, 12f)
+            lineTo(19f, 12f)
+            moveTo(5f, 16f)
+            lineTo(19f, 16f)
+        }
+    }
+
+    /** A calendar page with a plus: Add to Calendar. */
+    val CalendarPlus: ImageVector by lazy {
+        stroked("CalendarPlus") {
+            moveTo(6.5f, 4.5f)
+            lineTo(17.5f, 4.5f)
+            arcTo(2.5f, 2.5f, 0f, false, true, 20f, 7f)
+            lineTo(20f, 17.5f)
+            arcTo(2.5f, 2.5f, 0f, false, true, 17.5f, 20f)
+            lineTo(6.5f, 20f)
+            arcTo(2.5f, 2.5f, 0f, false, true, 4f, 17.5f)
+            lineTo(4f, 7f)
+            arcTo(2.5f, 2.5f, 0f, false, true, 6.5f, 4.5f)
+            close()
+            moveTo(4f, 9.5f)
+            lineTo(20f, 9.5f)
+            moveTo(8f, 2.5f)
+            lineTo(8f, 6.5f)
+            moveTo(16f, 2.5f)
+            lineTo(16f, 6.5f)
+            moveTo(12f, 12.5f)
+            lineTo(12f, 17f)
+            moveTo(9.75f, 14.75f)
+            lineTo(14.25f, 14.75f)
+        }
+    }
+
+    /** A person with a plus: Add Members. */
+    val PersonAdd: ImageVector by lazy {
+        stroked("PersonAdd") {
+            ring(9.5f, 8f, 3.5f)
+            moveTo(3f, 20f)
+            arcTo(6.5f, 6.5f, 0f, false, true, 13f, 15.5f)
+            moveTo(18f, 9f)
+            lineTo(18f, 15f)
+            moveTo(15f, 12f)
+            lineTo(21f, 12f)
+        }
+    }
+
     val Xmark: ImageVector by lazy {
         stroked("Xmark") {
             moveTo(6f, 6f)

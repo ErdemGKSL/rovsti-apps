@@ -310,3 +310,10 @@ The Apache-licensed files above keep their own copyright and licence notices in 
 - Source: https://developer.android.com/guide/navigation/navigation-3 (`androidx.navigation3:navigation3-runtime`,
   `navigation3-ui`). Licence: Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0). Copyright The Android Open Source Project.
 - Used as a dependency only (`design/transition/RovstiNavHost.kt`, `:catalog`); no Navigation 3 source is copied into this repository.
+
+## Compose Reorderable
+
+- Source: https://github.com/Calvin-LL/Reorderable (`sh.calvin.reorderable:reorderable`, version 3.0.0), the same
+  release Convx pins (`gradle/libs.versions.toml:28,80`). Copyright 2023 Calvin Liang.
+- Licence: Apache-2.0 (https://www.apache.org/licenses/LICENSE-2.0). Used as a dependency only (the drag-to-reorder of
+  the Favorites tab, `contacts/favorites/FavoritesReorder.kt`); no Reorderable source is copied into this repository.

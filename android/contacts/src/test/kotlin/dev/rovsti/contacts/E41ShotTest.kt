@@ -1,6 +1,7 @@
 package dev.rovsti.contacts
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.RoborazziOptions
@@ -14,9 +15,25 @@ import org.robolectric.annotation.Config
 class E41ShotTest : ShotTest() {
     @Test fun tabsOverAnEmptyBook() {
         val fixture = AppFixture(granted = true)
-        shot("e4.1-tabs-empty-book") { fixture.Content() }
-        advance(100)
-        compose.onNodeWithTag(ContactsTags.EmptyBook).assertIsDisplayed()
+        for (dark in listOf(false, true)) {
+            composeFrame(dark = dark) { fixture.Content() }
+            // The book loads on real dispatchers: wait for the empty state instead of counting frames (a busy
+            // machine made the capture race it).
+            var tries = 0
+            while (compose.onAllNodesWithTag(ContactsTags.EmptyBook).fetchSemanticsNodes().isEmpty() && tries++ < 100) {
+                Thread.sleep(50)
+                advance(100)
+            }
+            advance(600)
+            compose.onNodeWithTag(ContactsTags.EmptyBook).assertIsDisplayed()
+            compose.onRoot().captureRoboImage(
+                filePath = "screenshots/e4.1-tabs-empty-book-${if (dark) "dark" else "light"}.png",
+                roborazziOptions =
+                    RoborazziOptions(
+                        compareOptions = RoborazziOptions.CompareOptions(changeThreshold = CHANGE_THRESHOLD),
+                    ),
+            )
+        }
     }
 
     @Test fun settingsTab() {

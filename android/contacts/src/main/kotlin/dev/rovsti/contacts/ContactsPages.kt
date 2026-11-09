@@ -122,51 +122,6 @@ private fun LazyListScope.emptyItem(
     }
 }
 
-/** Favorites and Groups roots until E4.5 and E4.7: the title over an empty page. */
-@Composable
-fun TabPlaceholderPage(
-    title: String,
-    navigator: TabNavigator<ContactsRoute>,
-    tab: Tab,
-) {
-    val listState = rememberLazyListState()
-    LaunchedEffect(navigator, listState) {
-        navigator.scrollToTop.collect { if (it.tab == tab) listState.animateScrollToItem(0) }
-    }
-    LargeTitleScaffold(title = title, state = listState, actions = persistentListOf()) {
-        emptyItem(
-            key = "empty",
-            icon = if (tab == FavoritesTab) RovstiIcons.Star else RovstiIcons.Folder,
-            title = R.string.coming_title,
-            message = R.string.coming_message,
-            tag = ContactsTags.ComingPage,
-        )
-    }
-}
-
-/** A pushed page whose screen is a later story: the route works (links, restore, back), the body says so. */
-@Composable
-fun ComingPage(
-    title: String,
-    onBack: () -> Unit,
-) {
-    val listState = rememberLazyListState()
-    LargeTitleScaffold(
-        title = title,
-        state = listState,
-        actions = persistentListOf(),
-        navigation = NavigationButton(onClick = onBack),
-    ) {
-        emptyItem(
-            key = "empty",
-            icon = RovstiIcons.Document,
-            title = R.string.coming_title,
-            message = R.string.coming_message,
-            tag = ContactsTags.ComingPage,
-        )
-    }
-}
-
 /** The page SEND and VIEW of a vCard land on until the import screen (E4.10) exists. */
 @Composable
 fun IntakePlaceholderPage(onBack: () -> Unit) {

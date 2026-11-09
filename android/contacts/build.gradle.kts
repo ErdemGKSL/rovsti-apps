@@ -73,6 +73,7 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.coroutines.core)
     implementation(libs.collections.immutable)
+    implementation(libs.compose.reorderable)
     implementation(libs.navigation3.runtime)
 
     testImplementation(project(":testing"))

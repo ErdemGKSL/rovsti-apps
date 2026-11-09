@@ -8,6 +8,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -97,6 +98,8 @@ class AlertEntry(
     private val heading: String,
     private val message: String? = null,
     private val actions: ImmutableList<AlertAction>,
+    /** An optional body between the message and the buttons (the name field of "New Group"). */
+    private val body: (@Composable ColumnScope.() -> Unit)? = null,
 ) : OverlayEntry(
         modal = true,
         title = heading,
@@ -193,6 +196,17 @@ class AlertEntry(
                                 style = RovstiTheme.type.footnote,
                                 textAlign = TextAlign.Center,
                             )
+                        }
+                    }
+                    if (body != null) {
+                        Column(
+                            Modifier.padding(
+                                start = AlertMetrics.Padding,
+                                end = AlertMetrics.Padding,
+                                bottom = AlertMetrics.Padding,
+                            ),
+                        ) {
+                            body.invoke(this)
                         }
                     }
                     AlertButtons(actions, close)

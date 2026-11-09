@@ -164,7 +164,7 @@ fun LicenceDetailEntry(
     data?.let { LicenceDetailPage(id, it, onBack = onBack, onBackLongClick = onBackLongClick) }
 }
 
-private fun Context.findComponentActivity(): ComponentActivity {
+internal fun Context.findComponentActivity(): ComponentActivity {
     var current = this
     while (current is android.content.ContextWrapper) {
         if (current is ComponentActivity) return current

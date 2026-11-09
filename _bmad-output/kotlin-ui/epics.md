@@ -749,15 +749,22 @@ fixtures, 8 exports, `testRustBridge`); found that most `rovsti_core` types lack
 Goal: every Android capability of the GPUI apps is a Kotlin repository or service class with JVM tests, and the shared
 WhatsApp settings screen and app shell exist. Spec: ARCH 7, 5.
 
+Round plans: **R1** -> `_bmad-output/kotlin-ui/plans/round-08.md` (planned 2026-11-09 at base `115be3b`): E3.1-E3.7 in
+8 steps (`:platform` module + seams `PlatformEvents`/`Headless`/`PlatformComponents`/`ProviderChanges`, system helpers
+and convention tests; contacts; call log/blocklist/SIM; SMS/MMS/scheduled; telecom core with the incoming-order test;
+notifications/reminders; location/trip/alarm and `kotlin_contract.rs` moved to `rovsti_app_core`; WhatsApp seams,
+FQCN and PendingIntent contract, port inventory `docs/kotlin-ui/platform-port.md`). No screenshots in R1. E2 re-verified
+done by this planner (ops modules, fixtures incl. the headless pairs, `:core-bridge` facades and wire models).
+
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E3.1 | `:platform` module, port of the bridge files, tests moved | R1 | todo |
-| E3.2 | Contacts provider repository (read, write, groups, accounts, photos, options, observer) | R1 | todo |
-| E3.3 | Call log, blocklist, blocked calls, SIM accounts | R1 | todo |
-| E3.4 | SMS/MMS provider, send, scheduled SMS | R1 | todo |
-| E3.5 | Telecom core: CallRegistry, audio path, proximity, call notifications | R1 | todo |
-| E3.6 | Notifications, reminders, shortcuts | R1 | todo |
-| E3.7 | Location, TripService, TripAlarm, AlarmSound, AlarmActivity | R1 | todo |
+| E3.1 | `:platform` module, port of the bridge files, tests moved | R1 | in-progress (round-08) |
+| E3.2 | Contacts provider repository (read, write, groups, accounts, photos, options, observer) | R1 | in-progress (round-08) |
+| E3.3 | Call log, blocklist, blocked calls, SIM accounts | R1 | in-progress (round-08) |
+| E3.4 | SMS/MMS provider, send, scheduled SMS | R1 | in-progress (round-08) |
+| E3.5 | Telecom core: CallRegistry, audio path, proximity, call notifications | R1 | in-progress (round-08) |
+| E3.6 | Notifications, reminders, shortcuts | R1 | in-progress (round-08) |
+| E3.7 | Location, TripService, TripAlarm, AlarmSound, AlarmActivity | R1 | in-progress (round-08) |
 | E3.8a | Files, media store, share, clipboard, Photo Picker, camera capture, SAF import/export | R2 | todo |
 | E3.8b | Handoff, roles, `PermissionController` + `PermissionState` rules, special access, OEM settings (ARCH 7.5) | R2 | todo |
 | E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads, `WaAvatars` | R2 | todo |

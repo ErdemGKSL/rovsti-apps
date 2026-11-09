@@ -982,6 +982,11 @@ host, every destructive action confirms or offers Undo as the GPUI app does.
 - AC1 Intake decides through `rovsti_core::contact_intake`; preview sheet "Add these contacts?" with counts and dedup;
   CSV mapping via `rovsti_core::contact_csv`; Add to existing contact picker with Undo.
 - Screenshots: `e4.10-import-preview`, `e4.10-scan-result`, `e4.10-add-to-existing-picker`.
+- Evidence (round 11 step 2): `intake/IntakeViewModel` + `IntakeScreen` replace the placeholder; sources are the VIEW/SEND
+  `Intake(uri)` route, Settings "Import from a File" and "Paste Contact" (clipboard read on tap, "Nothing to paste" toast).
+  `IntakeViewModelTest` (13, real core), `IntakeScreenTest`, `ContactsRoutesTest` (VIEW). Goldens `e4.10-import-preview`,
+  `e4.10-add-to-existing-picker`, `e4.10-card-preview`, `e4.10-paste-nothing-toast` (light and dark) opened: one avatar per
+  row, sheet floats, last row above the buttons, Cancel is plain accent text (a glass capsule at the sheet bottom smeared).
 
 ### E4.11 Duplicates and Clean up
 - Screenshots: `e4.11-duplicates`, `e4.11-merge-preview`, `e4.11-cleanup-chips`.

@@ -29,7 +29,7 @@ class ContactsRoutesTest {
         assertEquals(ContactsTab to listOf<ContactsRoute>(ContactsRoute.ContactCard(7L)), route)
     }
 
-    @Test fun aVcardSendOrViewOpensTheIntakePlaceholder() {
+    @Test fun aVcardSendOrViewOpensTheImportPage() {
         assertEquals(
             ContactsTab to listOf<ContactsRoute>(ContactsRoute.Intake("content://x/a.vcf")),
             contactsRouteFor(Intent.ACTION_SEND, null, "content://x/a.vcf", null),
@@ -38,6 +38,19 @@ class ContactsRoutesTest {
             ContactsTab to listOf<ContactsRoute>(ContactsRoute.Intake("content://x/b.vcf")),
             contactsRouteFor(Intent.ACTION_VIEW, "content://x/b.vcf", null, null),
         )
+    }
+
+    @Test fun aViewedVcardIsAFileSourceNotAPaste() {
+        val (tab, routes) = contactsRouteFor(Intent.ACTION_VIEW, "content://x/c.vcf", null, null)!!
+        val route = routes.single() as ContactsRoute.Intake
+        assertEquals(ContactsTab, tab)
+        assertEquals("content://x/c.vcf", route.uri)
+        assertEquals("a link is never the paste source", false, route.paste)
+        val nav = TabNavigator(ContactsTabs, ContactsRoots)
+        nav.resetTo(tab, routes)
+        assertEquals(listOf(ContactsRoute.ContactsList, route), nav.stack(ContactsTab))
+        assertEquals(TabBarMode.Hidden, chromeFor(route).tabBar)
+        assertEquals(TabBarMode.Hidden, chromeFor(ContactsRoute.Intake(paste = true)).tabBar)
     }
 
     @Test fun aContactLinkBeatsAVcard() {

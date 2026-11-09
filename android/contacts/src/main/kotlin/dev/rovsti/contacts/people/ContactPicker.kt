@@ -7,10 +7,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -84,6 +86,22 @@ fun OverlayController.presentContactPicker(
     )
 }
 
+/**
+ * One contact out of the book in a large sheet (E4.10 "Add to Existing Contact"): the same bar and search field as
+ * [presentContactPicker], but a tap on a row is the answer, so there are no check circles and no confirm button.
+ */
+fun OverlayController.presentContactChooser(
+    title: String,
+    rows: ImmutableList<PersonItem>,
+    onPick: (Long) -> Unit,
+) {
+    present(
+        SheetEntry(title = title, detents = persistentListOf(Detent.Large)) { sheet ->
+            ContactPickerContent(title, "", rows, emptySet(), sheet, { it.firstOrNull()?.let(onPick) }, single = true)
+        },
+    )
+}
+
 @Composable
 internal fun ColumnScope.ContactPickerContent(
     title: String,
@@ -92,6 +110,7 @@ internal fun ColumnScope.ContactPickerContent(
     initial: Set<Long>,
     sheet: SheetState?,
     onDone: (Set<Long>) -> Unit,
+    single: Boolean = false,
 ) {
     var chosen by remember { mutableStateOf(initial) }
     val search = rememberTextFieldState()
@@ -125,18 +144,22 @@ internal fun ColumnScope.ContactPickerContent(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            RovstiText(
-                confirmLabel,
-                Modifier
-                    .heightIn(min = PickerMetrics.ButtonHeight)
-                    .clickable(enabled = changed, role = Role.Button) {
-                        sheet?.dismiss()
-                        onDone(chosen)
-                    }.padding(vertical = Spacing.m)
-                    .testTag(PickerTags.Confirm),
-                style = RovstiTheme.type.headline,
-                color = if (changed) colors.accent else colors.labelTertiary,
-            )
+            if (single) {
+                Spacer(Modifier.width(PickerMetrics.CancelWidth))
+            } else {
+                RovstiText(
+                    confirmLabel,
+                    Modifier
+                        .heightIn(min = PickerMetrics.ButtonHeight)
+                        .clickable(enabled = changed, role = Role.Button) {
+                            sheet?.dismiss()
+                            onDone(chosen)
+                        }.padding(vertical = Spacing.m)
+                        .testTag(PickerTags.Confirm),
+                    style = RovstiTheme.type.headline,
+                    color = if (changed) colors.accent else colors.labelTertiary,
+                )
+            }
         }
         SearchField(
             search,
@@ -172,13 +195,26 @@ internal fun ColumnScope.ContactPickerContent(
                                 colorKey = person.colorKey,
                             )
                         },
-                        trailing = { CheckCircle(on) },
-                        onClick = { chosen = if (on) chosen - person.id else chosen + person.id },
-                        extraSemantics = {
-                            role = Role.Checkbox
-                            selected = on
-                            toggleableState = if (on) ToggleableState.On else ToggleableState.Off
-                        },
+                        trailing = if (single) null else ({ CheckCircle(on) }),
+                        onClick =
+                            if (single) {
+                                {
+                                    sheet?.dismiss()
+                                    onDone(setOf(person.id))
+                                }
+                            } else {
+                                { chosen = if (on) chosen - person.id else chosen + person.id }
+                            },
+                        extraSemantics =
+                            if (single) {
+                                null
+                            } else {
+                                {
+                                    role = Role.Checkbox
+                                    selected = on
+                                    toggleableState = if (on) ToggleableState.On else ToggleableState.Off
+                                }
+                            },
                         modifier = Modifier.testTag(PickerTags.row(person.id)),
                     )
                     RowSeparator(inset = TextStartWithLeading)

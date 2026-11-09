@@ -12,4 +12,7 @@ internal object PeopleMetrics {
 /** The bar of the picker sheet. */
 internal object PickerMetrics {
     val ButtonHeight = 44.dp
+
+    /** The width the Cancel text takes, kept as an empty slot where the chooser has no confirm button. */
+    val CancelWidth = 56.dp
 }

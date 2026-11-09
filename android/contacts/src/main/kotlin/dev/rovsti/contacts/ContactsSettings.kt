@@ -46,6 +46,8 @@ fun ContactsSettingsPage(
     onOpenWhatsApp: () -> Unit,
     onOpenCommon: (CommonSettingsPage) -> Unit,
     onOpenTrash: () -> Unit = {},
+    onImportFile: () -> Unit = {},
+    onPasteContact: () -> Unit = {},
 ) {
     SettingsPage(
         title = stringResource(R.string.tab_settings),
@@ -63,6 +65,31 @@ fun ContactsSettingsPage(
                         icon = rememberVectorPainter(RovstiIcons.Trash),
                         title = { IosText(stringResource(R.string.settings_trash)) },
                         onClick = onOpenTrash,
+                    ),
+                ),
+        )
+        IosSettingsGroup(
+            items =
+                listOf(
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RovstiIcons.Download),
+                        title = {
+                            IosText(
+                                stringResource(R.string.settings_import_file),
+                                Modifier.testTag(ContactsTags.ImportFile),
+                            )
+                        },
+                        onClick = onImportFile,
+                    ),
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RovstiIcons.Copy),
+                        title = {
+                            IosText(
+                                stringResource(R.string.settings_paste_contact),
+                                Modifier.testTag(ContactsTags.PasteContact),
+                            )
+                        },
+                        onClick = onPasteContact,
                     ),
                 ),
         )

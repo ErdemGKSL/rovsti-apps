@@ -54,9 +54,9 @@ object ContactsTags {
     const val ListPage = "contacts-list-page"
     const val EmptyBook = "contacts-empty-book"
     const val PermissionSection = "contacts-permission"
-    const val ComingPage = "contacts-coming-page"
     const val SettingsPage = "contacts-settings-page"
-    const val IntakePage = "contacts-intake-page"
+    const val ImportFile = "contacts-settings-import-file"
+    const val PasteContact = "contacts-settings-paste-contact"
 }
 
 /**
@@ -132,48 +132,4 @@ fun ContactsListPage(
             }
         },
     )
-}
-
-/** An empty state that fills the page below the title and ends above the tab bar, so nothing sits under the bar. */
-private fun LazyListScope.emptyItem(
-    key: String,
-    icon: ImageVector,
-    title: Int,
-    message: Int,
-    tag: String,
-) {
-    item(key = key, contentType = "empty") {
-        val bottom = LocalContentInsets.current.calculateBottomPadding()
-        Box(
-            Modifier
-                .fillParentMaxHeight()
-                .fillMaxWidth()
-                .padding(bottom = bottom)
-                .testTag(tag),
-            contentAlignment = Alignment.Center,
-        ) {
-            EmptyState(icon = icon, title = stringResource(title), message = stringResource(message))
-        }
-    }
-}
-
-/** The page SEND and VIEW of a vCard land on until the import screen (E4.10) exists. */
-@Composable
-fun IntakePlaceholderPage(onBack: () -> Unit) {
-    val listState = rememberLazyListState()
-    LargeTitleScaffold(
-        title = stringResource(R.string.intake_placeholder_title),
-        state = listState,
-        actions = persistentListOf(),
-        navigation = NavigationButton(onClick = onBack),
-        modifier = Modifier.testTag(ContactsTags.IntakePage),
-    ) {
-        emptyItem(
-            key = "empty",
-            icon = RovstiIcons.Download,
-            title = R.string.intake_placeholder_title,
-            message = R.string.intake_placeholder_message,
-            tag = ContactsTags.ComingPage,
-        )
-    }
 }

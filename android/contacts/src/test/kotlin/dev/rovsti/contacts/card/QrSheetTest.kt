@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -73,7 +74,12 @@ class QrSheetTest {
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag(QrSheetTags.Save).performClick()
         compose.waitUntil(WAIT_MS) { files.gallery.isNotEmpty() }
-        repeat(6) { compose.mainClock.advanceTimeBy(100) }
+        // The toast follows the write on the main thread: advance the clock until it is on show, not a fixed count.
+        var tries = 0
+        while (compose.onAllNodesWithText("Saved to Photos").fetchSemanticsNodes().isEmpty() && tries++ < 100) {
+            Thread.sleep(20)
+            compose.mainClock.advanceTimeBy(100)
+        }
         assertEquals(1, files.gallery.size)
         val (path, name, mime) = files.gallery.single()
         assertEquals("ayse-qr.png", name)

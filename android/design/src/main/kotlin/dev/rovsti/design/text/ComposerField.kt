@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -77,8 +76,9 @@ private const val FILL_MS = 200
  *
  * - One to [COMPOSER_MAX_LINES] lines, then the text scrolls; the pill's corners stay 22 dp, a capsule while it is a single
  *   line.
- * - The dock pads itself by the navigation bar and the keyboard (`navigationBarsPadding().imePadding()`, in that order so
- *   the two do not add up), so the field rides above the keyboard.
+ * - The dock pads itself by the navigation bar, then by the part of it the keyboard really covers
+ *   ([imeOverlapPadding], so a vendor build that also resizes the window does not lift it by a second keyboard
+ *   height), so the field rides above the keyboard.
  * - The send button appears with text, pops in on a spring, and never takes focus: sending keeps the keyboard open and
  *   the caret in place. [onSend] gets the trimmed text once per send and the field is cleared afterwards; a blank
  *   composer sends nothing.
@@ -126,7 +126,7 @@ fun ComposerField(
         modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .imePadding()
+            .imeOverlapPadding(excludeNavigationBar = false)
             .padding(horizontal = Spacing.gutter, vertical = Spacing.s),
     ) {
         BasicTextField(

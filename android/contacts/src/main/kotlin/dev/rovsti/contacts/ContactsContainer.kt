@@ -6,6 +6,10 @@ import dev.rovsti.contacts.card.RepositoryCardWaPort
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.data.WaMarks
+import dev.rovsti.contacts.photo.GatewayWaPhotoPort
+import dev.rovsti.contacts.photo.WaPhotoPort
+import dev.rovsti.contacts.trash.ContactDeletion
+import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.model.phone.HapticsLevel
 import dev.rovsti.core.model.stops.Appearance
 import dev.rovsti.core.ops.ContactsOps
@@ -69,6 +73,15 @@ open class ContactsContainer(
     /** The preferences and the Trash, files in the data directory. */
     val store: ContactsStore by lazy { ContactsStore(ops) }
 
+    /** Delete and restore with the Trash (E4.5). */
+    val trash: ContactTrash by lazy { ContactTrash(contacts, store) }
+
+    /** Deleting one contact from the card or the editor: ask, Trash, delete, Undo pill. */
+    val deletion: ContactDeletion by lazy { ContactDeletion(trash, ops, scope) }
+
+    /** "Use WhatsApp Photo": the large picture of one JID from the owner's gateway. */
+    val waPhotos: WaPhotoPort by lazy { createWaPhotos() }
+
     /** The address book and its search indexes; follows READ_CONTACTS. */
     val book: BookRepository by lazy {
         BookRepository(
@@ -90,6 +103,8 @@ open class ContactsContainer(
 
     /** Contacts keeps no appearance and no haptics preference yet (E4.15), so both rows are hidden. */
     val commonSettings: CommonSettings by lazy { NoCommonPreferences }
+
+    protected open fun createWaPhotos(): WaPhotoPort = GatewayWaPhotoPort.over(wa)
 
     protected open fun createContacts(): ContactsRepository = AndroidContactsRepository(context, Dispatchers.IO)
 

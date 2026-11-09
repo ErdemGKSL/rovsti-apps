@@ -15,6 +15,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +59,32 @@ class OverlayController {
 
     /** The toast on show or leaving (see `showToast`); a new toast replaces it. */
     internal var toast: ToastEntry? = null
+
+    private var clearanceOwner: Any? = null
+
+    /**
+     * Pixels a page must leave free at the end of its scrolling content while a toast or the undo pill is on show, so
+     * the last row can be scrolled clear of it. Written by the toast (its height plus the gap above the bar), 0 while
+     * there is none; [dev.rovsti.design.transition.RovstiNavHost] adds it to the content insets.
+     */
+    var toastClearancePx: Int by mutableIntStateOf(0)
+        private set
+
+    internal fun setToastClearance(
+        owner: Any,
+        px: Int,
+    ) {
+        clearanceOwner = owner
+        toastClearancePx = px
+    }
+
+    /** Clears the clearance, unless a newer toast has taken it over meanwhile. */
+    internal fun clearToastClearance(owner: Any) {
+        if (clearanceOwner === owner) {
+            clearanceOwner = null
+            toastClearancePx = 0
+        }
+    }
 
     /**
      * How many modal sheets are holding the page back. The page stays pushed back until the last one has left, so

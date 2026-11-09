@@ -17,6 +17,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
+import dev.rovsti.contacts.editor.contactEditorExtras
 import dev.rovsti.contacts.editor.contactEditorModel
 import dev.rovsti.contacts.editor.presentContactEditor
 import dev.rovsti.design.overlay.ActionSheetAction
@@ -77,8 +78,14 @@ fun ContactCardPage(
         overlays,
         context,
         onEdit = { editId ->
-            presentContactEditor(contactEditorModel(container, editId, null), overlays, container.scope)
+            presentContactEditor(
+                contactEditorModel(container, editId, null),
+                overlays,
+                container.scope,
+                extras = contactEditorExtras(container, editId),
+            )
         },
+        onDelete = { deleteId -> container.deletion.ask(overlays, deleteId) {} },
     ) { query -> container.pendingSearch.value = query }
     ContactCardScreen(
         state = state,
@@ -97,9 +104,11 @@ fun ContactCardEffects(
     overlays: OverlayController,
     context: Context,
     onEdit: ((Long) -> Unit)? = null,
+    onDelete: ((Long) -> Unit)? = null,
     onSearch: (String) -> Unit,
 ) {
     val latestOverlays = rememberUpdatedState(overlays)
+    val latestDelete = rememberUpdatedState(onDelete)
     val latestEdit = rememberUpdatedState(onEdit)
     val latestSearch = rememberUpdatedState(onSearch)
     LaunchedEffect(model, navigator) {
@@ -142,6 +151,10 @@ fun ContactCardEffects(
                 is ContactCardEffect.OpenEditor -> {
                     latestEdit.value?.invoke(effect.id)
                         ?: navigator.push(ContactsRoute.ContactEditor(effect.id, null))
+                }
+
+                is ContactCardEffect.AskDelete -> {
+                    latestDelete.value?.invoke(effect.id)
                 }
 
                 is ContactCardEffect.OpenCard -> {

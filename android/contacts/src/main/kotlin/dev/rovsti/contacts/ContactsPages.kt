@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.editor.EditorOutcome
+import dev.rovsti.contacts.editor.contactEditorExtras
 import dev.rovsti.contacts.editor.contactEditorModel
 import dev.rovsti.contacts.editor.presentContactEditor
 import dev.rovsti.contacts.list.ContactsListEffects
@@ -82,6 +83,7 @@ fun ContactsListPage(
             overlays,
             container.scope,
             outcome = EditorOutcome { saved, created -> if (created) navigator.push(ContactsRoute.ContactCard(saved)) },
+            extras = contactEditorExtras(container, id),
         )
     }
     ContactsListScreen(

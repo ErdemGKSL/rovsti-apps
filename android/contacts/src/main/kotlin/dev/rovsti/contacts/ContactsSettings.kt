@@ -39,12 +39,13 @@ import dev.rovsti.wa.WaLinkStore
 import dev.rovsti.wa.settings.WhatsAppSettingsRoute
 import dev.rovsti.wa.settings.WhatsAppSettingsViewModel
 
-/** The Settings tab root: the WhatsApp row (the E3.10 screen) and the rows every app shares. */
+/** The Settings tab root: the WhatsApp row (the E3.10 screen), the Trash and the rows every app shares. */
 @Composable
 fun ContactsSettingsPage(
     settings: CommonSettings,
     onOpenWhatsApp: () -> Unit,
     onOpenCommon: (CommonSettingsPage) -> Unit,
+    onOpenTrash: () -> Unit = {},
 ) {
     SettingsPage(
         title = stringResource(R.string.tab_settings),
@@ -57,6 +58,11 @@ fun ContactsSettingsPage(
                         icon = rememberVectorPainter(RovstiIcons.WhatsApp),
                         title = { IosText(stringResource(R.string.settings_whatsapp)) },
                         onClick = onOpenWhatsApp,
+                    ),
+                    IosSettingsItem(
+                        icon = rememberVectorPainter(RovstiIcons.Trash),
+                        title = { IosText(stringResource(R.string.settings_trash)) },
+                        onClick = onOpenTrash,
                     ),
                 ),
         )

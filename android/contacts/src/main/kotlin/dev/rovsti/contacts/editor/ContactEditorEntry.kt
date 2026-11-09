@@ -1,5 +1,6 @@
 package dev.rovsti.contacts.editor
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
@@ -14,6 +15,12 @@ import androidx.lifecycle.SavedStateHandle
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.contacts.data.Book
+import dev.rovsti.contacts.photo.ContactPhotoModel
+import dev.rovsti.contacts.photo.PhotoEffect
+import dev.rovsti.contacts.photo.PhotoMenuActions
+import dev.rovsti.contacts.photo.showPhotoCrop
+import dev.rovsti.contacts.trash.ContactDeletion
 import dev.rovsti.design.overlay.ActionSheetAction
 import dev.rovsti.design.overlay.ActionSheetEntry
 import dev.rovsti.design.overlay.Detent
@@ -23,9 +30,16 @@ import dev.rovsti.design.overlay.SheetEntry
 import dev.rovsti.design.overlay.SheetState
 import dev.rovsti.design.overlay.showToast
 import dev.rovsti.design.overlay.showUndo
+import dev.rovsti.platform.files.CapturePhoto
+import dev.rovsti.platform.files.PickPhoto
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** What the editor tells the page that opened it. */
@@ -35,6 +49,52 @@ fun interface EditorOutcome {
         id: Long,
         created: Boolean,
     )
+}
+
+/**
+ * What the editor needs besides its model: the photo of the contact ([photo], with the stored photo [photoUri] and the
+ * WhatsApp [waJid] it may take a picture from) and the Delete Contact flow ([deletion], for contact [id]).
+ */
+class EditorExtras(
+    val id: Long?,
+    val photo: ContactPhotoModel,
+    val photoUri: StateFlow<String?>,
+    val waJid: StateFlow<String?>,
+    val deletion: ContactDeletion?,
+)
+
+/** The extras of contact [id] (null: a new contact) over [container]. */
+fun contactEditorExtras(
+    container: ContactsContainer,
+    id: Long?,
+): EditorExtras {
+    val photo =
+        ContactPhotoModel(
+            contactId = id,
+            repo = container.contacts,
+            ops = container.ops,
+            files = container.files,
+            waPhotos = container.waPhotos,
+            cacheDir = container.context.cacheDir,
+            scope = container.scope,
+        )
+    val photoUri: StateFlow<String?> =
+        if (id == null) {
+            MutableStateFlow(null)
+        } else {
+            container.book.book
+                .map { book -> (book as? Book.Ready)?.contacts?.firstOrNull { it.id == id }?.photoUri }
+                .stateIn(container.scope, SharingStarted.Eagerly, null)
+        }
+    val waJid: StateFlow<String?> =
+        if (id == null) {
+            MutableStateFlow(null)
+        } else {
+            container.waMarks.marks
+                .map { it[id] }
+                .stateIn(container.scope, SharingStarted.Eagerly, null)
+        }
+    return EditorExtras(id, photo, photoUri, waJid, container.deletion)
 }
 
 /** The model of one open of the editor over [container]; [saved] keeps the draft across a process death. */
@@ -65,6 +125,7 @@ fun presentContactEditor(
     undoScope: CoroutineScope,
     outcome: EditorOutcome = EditorOutcome { _, _ -> },
     onClosed: () -> Unit = {},
+    extras: EditorExtras? = null,
 ): SheetEntry {
     val entry =
         SheetEntry(
@@ -75,7 +136,7 @@ fun presentContactEditor(
             canDismiss = { !model.state.value.dirty },
             onDismissBlocked = { model.onAction(EditorAction.RequestClose) },
         ) { sheet ->
-            ContactEditorSheet(model, sheet, undoScope, outcome)
+            ContactEditorSheet(model, sheet, undoScope, outcome, extras)
         }
     overlays.present(entry)
     return entry
@@ -88,6 +149,7 @@ private fun ContactEditorSheet(
     sheet: SheetState,
     undoScope: CoroutineScope,
     outcome: EditorOutcome,
+    extras: EditorExtras?,
 ) {
     val state by model.state.collectAsState()
     val overlays = LocalOverlay.current
@@ -119,6 +181,8 @@ private fun ContactEditorSheet(
                 }
 
                 is EditorEffect.Saved -> {
+                    // A picture a new contact was holding becomes its photo now that it has an id.
+                    extras?.let { held -> undoScope.launch { held.photo.applyPending(effect.id) } }
                     latestOutcome.value.saved(effect.id, created = model.state.value.isNew)
                     if (effect.undoable) {
                         overlays.showUndo(effect.notice, onUndo = {
@@ -142,9 +206,55 @@ private fun ContactEditorSheet(
             }
         }
     }
+    val photo = extras?.let { rememberEditorPhoto(it, overlays) }
+    val deleteId = extras?.id
+    val onDelete: (() -> Unit)? =
+        if (extras?.deletion != null && deleteId != null) {
+            { extras.deletion.ask(overlays, deleteId) { sheet.dismiss() } }
+        } else {
+            null
+        }
     Column(Modifier.fillMaxSize()) {
-        ContactEditorScreen(state, model::onAction, invalid = invalid)
+        ContactEditorScreen(state, model::onAction, invalid = invalid, photo = photo, onDelete = onDelete)
     }
+}
+
+/**
+ * The editor's photo head: launchers for the picker and the camera (neither needs a permission), the menu actions, the
+ * crop page while the model has a picture open, and the model's notices as toasts.
+ */
+@Composable
+private fun rememberEditorPhoto(
+    extras: EditorExtras,
+    overlays: OverlayController,
+): EditorPhoto {
+    val photo = extras.photo
+    val ui by photo.state.collectAsState()
+    val stored by extras.photoUri.collectAsState()
+    val jid by extras.waJid.collectAsState()
+    val pick = rememberLauncherForActivityResult(remember { PickPhoto() }) { photo.picked(it) }
+    val capture = rememberLauncherForActivityResult(remember { CapturePhoto() }) { photo.picked(it) }
+    val latestJid = rememberUpdatedState(jid)
+    val actions =
+        remember(photo) {
+            PhotoMenuActions(
+                choose = { pick.launch(Unit) },
+                take = { capture.launch(Unit) },
+                whatsApp = { latestJid.value?.let(photo::useWhatsApp) },
+                remove = photo::remove,
+            )
+        }
+    LaunchedEffect(photo) {
+        photo.effects.collect { effect ->
+            if (effect is PhotoEffect.Toast) overlays.showToast(effect.text)
+        }
+    }
+    LaunchedEffect(ui.crop) {
+        ui.crop?.let { session ->
+            overlays.showPhotoCrop(session, onChosen = photo::cropChosen, onCancel = photo::cropCancelled)
+        }
+    }
+    return EditorPhoto(stored, ui.pendingPath, jid, ui.busy, actions)
 }
 
 /**
@@ -162,6 +272,13 @@ fun ContactEditorPage(
     val overlays = LocalOverlay.current
     val model = remember(route) { contactEditorModel(container, route.id, route.seed) }
     LaunchedEffect(model) {
-        presentContactEditor(model, overlays, container.scope, outcome, onClosed)
+        presentContactEditor(
+            model,
+            overlays,
+            container.scope,
+            outcome,
+            onClosed,
+            extras = contactEditorExtras(container, route.id),
+        )
     }
 }

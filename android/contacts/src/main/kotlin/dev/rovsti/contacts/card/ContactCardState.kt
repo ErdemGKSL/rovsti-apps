@@ -168,6 +168,9 @@ sealed interface ContactCardAction {
 
     data object Edit : ContactCardAction
 
+    /** "Delete Contact" of the top-bar menu: asks first (E4.5). */
+    data object Delete : ContactCardAction
+
     data object ToggleStar : ContactCardAction
 
     data object OpenInContacts : ContactCardAction
@@ -219,6 +222,11 @@ sealed interface ContactCardEffect {
     ) : ContactCardEffect
 
     data class OpenEditor(
+        val id: Long,
+    ) : ContactCardEffect
+
+    /** Ask whether to delete the contact; the entry runs the Trash flow (the page closes when the contact is gone). */
+    data class AskDelete(
         val id: Long,
     ) : ContactCardEffect
 

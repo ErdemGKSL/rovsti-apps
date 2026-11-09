@@ -3,6 +3,7 @@ package dev.rovsti.design.transition
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -10,6 +11,7 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +28,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
@@ -41,6 +44,7 @@ import dev.rovsti.design.chrome.TabItem
 import dev.rovsti.design.chrome.contentInsetsOf
 import dev.rovsti.design.chrome.rememberTabBarMinimizer
 import dev.rovsti.design.motion.RovstiMotion
+import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.theme.RovstiTheme
 import kotlinx.collections.immutable.ImmutableList
@@ -210,12 +214,30 @@ private fun <R : Any> RovstiPage(
         } else {
             with(density) { hostMetrics.bottomBarPx.toDp() }
         }
-    val insets =
+    // A toast or the undo pill floats over the end of the page: the list gets room to scroll its last row clear of it.
+    val toastPx = LocalOverlayOrNull.current?.toastClearancePx ?: 0
+    val toastRoom by animateDpAsState(
+        targetValue = with(density) { toastPx.toDp() },
+        animationSpec = RovstiMotion.bottomSheetMount(),
+        label = "toast-room",
+    )
+    val base =
         contentInsetsOf(
             system = SystemInsets.of(WindowInsets.safeDrawing.asPaddingValues(), direction),
             topBar = with(density) { pageMetrics.topBarPx.toDp() },
             bottomBar = bottomBar,
         )
+    val insets =
+        if (toastRoom > 0.dp) {
+            PaddingValues.Absolute(
+                left = base.calculateLeftPadding(LayoutDirection.Ltr),
+                right = base.calculateRightPadding(LayoutDirection.Ltr),
+                top = base.calculateTopPadding(),
+                bottom = base.calculateBottomPadding() + toastRoom,
+            )
+        } else {
+            base
+        }
     val scopes = SharedScopes(sharedTransition, LocalNavAnimatedContentScope.current)
     CompositionLocalProvider(
         LocalSharedScopes provides scopes,

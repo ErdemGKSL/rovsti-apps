@@ -444,6 +444,60 @@ object RovstiIcons {
         }
     }
 
+    /** A picture frame with a hill and a sun: choose a photo. */
+    val Photo: ImageVector by lazy {
+        stroked("Photo") {
+            moveTo(6.5f, 4.5f)
+            lineTo(17.5f, 4.5f)
+            quadTo(20f, 4.5f, 20f, 7f)
+            lineTo(20f, 17f)
+            quadTo(20f, 19.5f, 17.5f, 19.5f)
+            lineTo(6.5f, 19.5f)
+            quadTo(4f, 19.5f, 4f, 17f)
+            lineTo(4f, 7f)
+            quadTo(4f, 4.5f, 6.5f, 4.5f)
+            close()
+            moveTo(4.5f, 16.5f)
+            lineTo(9f, 12f)
+            lineTo(13f, 16f)
+            lineTo(15.5f, 13.5f)
+            lineTo(19.5f, 17.5f)
+            ring(15.5f, 9f, 1.4f)
+        }
+    }
+
+    /** A camera body with a lens: take a photo. */
+    val Camera: ImageVector by lazy {
+        stroked("Camera") {
+            moveTo(5f, 8f)
+            lineTo(8f, 8f)
+            lineTo(9.5f, 5.5f)
+            lineTo(14.5f, 5.5f)
+            lineTo(16f, 8f)
+            lineTo(19f, 8f)
+            quadTo(21f, 8f, 21f, 10f)
+            lineTo(21f, 17f)
+            quadTo(21f, 19f, 19f, 19f)
+            lineTo(5f, 19f)
+            quadTo(3f, 19f, 3f, 17f)
+            lineTo(3f, 10f)
+            quadTo(3f, 8f, 5f, 8f)
+            close()
+            ring(12f, 13f, 3.4f)
+        }
+    }
+
+    /** An arrow bending round a quarter circle: rotate a quarter turn clockwise. */
+    val Rotate: ImageVector by lazy {
+        stroked("Rotate") {
+            moveTo(19.5f, 12f)
+            arcToRelative(7.5f, 7.5f, 0f, true, true, -2.2f, -5.3f)
+            moveTo(17.5f, 3.5f)
+            lineTo(17.3f, 6.7f)
+            lineTo(20.5f, 7f)
+        }
+    }
+
     private fun PathBuilder.bubble() {
         moveTo(6f, 4f)
         horizontalLineToRelative(12f)

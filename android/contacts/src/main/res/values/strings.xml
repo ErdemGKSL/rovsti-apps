@@ -14,4 +14,14 @@
     <string name="card_wish">Wish</string>
     <string name="card_chat_whatsapp">Chat on WhatsApp</string>
     <string name="editor_delete">Delete</string>
+    <string name="crop_title">Move and Scale</string>
+    <string name="crop_cancel">Cancel</string>
+    <string name="crop_choose">Choose</string>
+    <string name="crop_rotate">Rotate</string>
+    <string name="settings_trash">Trash</string>
+    <string name="photo_add">Add Photo</string>
+    <string name="photo_edit">Edit</string>
+    <string name="editor_delete_contact">Delete Contact</string>
+    <string name="photo_busy">Fetching photo…</string>
+    <string name="photo_menu">Photo options</string>
 </resources>

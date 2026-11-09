@@ -216,6 +216,10 @@ class ContactCardViewModel(
                 scope.launch { firstEmail()?.let { send(ContactCardEffect.Email(it)) } }
             }
 
+            ContactCardAction.Delete -> {
+                send(ContactCardEffect.AskDelete(id))
+            }
+
             ContactCardAction.Edit -> {
                 send(ContactCardEffect.OpenEditor(id))
             }

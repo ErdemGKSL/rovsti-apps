@@ -20,9 +20,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -42,6 +44,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.testTag
@@ -142,6 +145,17 @@ class ToastEntry internal constructor(
         var holding by remember { mutableStateOf(false) }
         var fired by remember { mutableStateOf(false) }
         val entry = this
+        var heightPx by remember { mutableIntStateOf(0) }
+        val gapPx = with(density) { ToastMetrics.Gap.roundToPx() }
+        // Pages end their scrolling content above the pill while it is on show (see OverlayController.toastClearancePx).
+        LaunchedEffect(heightPx, state.targetState) {
+            if (state.targetState && heightPx > 0) {
+                host.controller.setToastClearance(entry, heightPx + gapPx)
+            } else {
+                host.controller.clearToastClearance(entry)
+            }
+        }
+        DisposableEffect(entry) { onDispose { host.controller.clearToastClearance(entry) } }
 
         // Frame-clock timer: independent of animator scale, held while a finger is down.
         LaunchedEffect(Unit) {
@@ -225,6 +239,7 @@ class ToastEntry internal constructor(
                 Modifier
                     .iosGlass(shape, IosGlassStyle.Regular, IosGlassSpec.Chrome, wash = wash, debugTag = "toast")
                     .testTag("toast")
+                    .onSizeChanged { heightPx = it.height }
                     .pointerInput(Unit) {
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)

@@ -32,6 +32,7 @@ internal class EditorSession(
                 rig.scope,
                 outcome = { id, _ -> savedIds += id },
                 onClosed = { closed++ },
+                extras = rig.extras,
             )
         }
         until("the editor form is on screen") { exists(EditorTags.Scroll) }

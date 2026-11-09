@@ -14,6 +14,10 @@ import dev.rovsti.contacts.card.SampleCards
 import dev.rovsti.contacts.chromeFor
 import dev.rovsti.contacts.contactsTabItems
 import dev.rovsti.contacts.data.ContactsStore
+import dev.rovsti.contacts.photo.ContactPhotoModel
+import dev.rovsti.contacts.photo.WaPhotoResult
+import dev.rovsti.contacts.trash.ContactDeletion
+import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.Rust
 import dev.rovsti.core.model.contacts.Account
@@ -24,9 +28,11 @@ import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.contacts.FakeContactsRepository
+import dev.rovsti.platform.files.FakeFilesRepository
 import dev.rovsti.shell.RovstiShell
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -48,6 +54,8 @@ internal class EditorRig(
     val saved: SavedStateHandle = SavedStateHandle(),
     accounts: List<Account> = listOf(Account(), GOOGLE),
     saveTo: String = "",
+    storedPhoto: String? = null,
+    whatsAppJid: String? = null,
 ) {
     val scope = CoroutineScope(Dispatchers.Default)
     val repo =
@@ -58,6 +66,15 @@ internal class EditorRig(
         )
     val store: ContactsStore
     val model: ContactEditorViewModel
+
+    /** The stored photo and the WhatsApp JID the editor sees (the book and the marks in the app). */
+    val photoUri = MutableStateFlow(storedPhoto)
+    val waJid = MutableStateFlow(whatsAppJid)
+    val files = FakeFilesRepository()
+
+    /** What "Use WhatsApp Photo" fetches. */
+    var waPhoto: WaPhotoResult = WaPhotoResult.NoPicture
+    val extras: EditorExtras
 
     init {
         val lib = File(System.getProperty("rovsti.hostLib").orEmpty())
@@ -82,6 +99,18 @@ internal class EditorRig(
         store = ContactsStore(ops, File(root, "store").apply { mkdirs() }.absolutePath) { SampleCards.NOW }
         if (saveTo.isNotEmpty()) runBlocking { store.update { it.copy(saveTo = saveTo) } }
         model = ContactEditorViewModel(id, seed, saved, repo, ops, store, scope, clock = { SampleCards.NOW })
+        val photo =
+            ContactPhotoModel(
+                contactId = id,
+                repo = repo,
+                ops = ops,
+                files = files,
+                waPhotos = { _, _ -> waPhoto },
+                cacheDir = File(root, "cache"),
+                clock = { SampleCards.NOW },
+                scope = scope,
+            )
+        extras = EditorExtras(id, photo, photoUri, waJid, ContactDeletion(ContactTrash(repo, store), ops, scope))
     }
 
     fun stop() {

@@ -146,6 +146,38 @@ fun RowImage(
 }
 
 /**
+ * An image decoded at [widthPx] x [heightPx] (for a picture that is zoomed and panned: the crop page decodes at the
+ * picture's own size, capped by the caller), drawn into whatever box [modifier] gives it. The layout is the caller's.
+ */
+@Composable
+fun SizedImage(
+    model: Any?,
+    widthPx: Int,
+    heightPx: Int,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.FillBounds,
+    contentDescription: String? = null,
+) {
+    val context = LocalContext.current
+    val request =
+        remember(model, widthPx, heightPx, context) {
+            ImageRequest
+                .Builder(context)
+                .data(model)
+                .size(widthPx.coerceAtLeast(1), heightPx.coerceAtLeast(1))
+                .crossfade(false)
+                .build()
+        }
+    AsyncImage(
+        model = request,
+        contentDescription = contentDescription,
+        imageLoader = currentRovstiImageLoader(),
+        contentScale = contentScale,
+        modifier = modifier,
+    )
+}
+
+/**
  * A loader that draws every image itself instead of reading it: [producer] gets the data of the request and the pixel
  * size asked for and returns the bitmap (or `null` for a failure). It serves the catalog's generated photos and the
  * fake loader of the screenshot tests; [onRequest] sees every request with its resolved size.

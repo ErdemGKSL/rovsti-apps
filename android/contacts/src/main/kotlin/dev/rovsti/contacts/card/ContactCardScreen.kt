@@ -71,6 +71,7 @@ import dev.rovsti.design.list.InsetGroupedSection
 import dev.rovsti.design.list.ListRow
 import dev.rovsti.design.media.showPhotoViewer
 import dev.rovsti.design.motion.rememberIosOverscrollFactory
+import dev.rovsti.design.overlay.ButtonMenuEntry
 import dev.rovsti.design.overlay.ContextMenuStyle
 import dev.rovsti.design.overlay.LocalOverlayOrNull
 import dev.rovsti.design.overlay.MenuItem
@@ -163,7 +164,23 @@ fun ContactCardScreen(
                                 ) { onAction(ContactCardAction.ToggleStar) },
                             )
                         }
-                    Toolbar(actions = toolbar)
+                    Toolbar(
+                        actions = toolbar,
+                        onOverflow = { anchor, _ ->
+                            overlays?.present(
+                                ButtonMenuEntry(
+                                    anchor,
+                                    persistentListOf(
+                                        MenuItem.Action(
+                                            "Delete Contact",
+                                            RovstiIcons.Trash,
+                                            destructive = true,
+                                        ) { onAction(ContactCardAction.Delete) },
+                                    ),
+                                ),
+                            )
+                        },
+                    )
                 }
             },
             largeTitle = {

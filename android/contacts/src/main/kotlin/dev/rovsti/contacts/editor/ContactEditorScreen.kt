@@ -33,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
@@ -69,6 +70,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import dev.rovsti.contacts.R
+import dev.rovsti.contacts.photo.PhotoMenuActions
+import dev.rovsti.contacts.photo.photoMenuItems
 import dev.rovsti.core.model.contacts.ContactDraft
 import dev.rovsti.core.model.contacts.EventKind
 import dev.rovsti.core.model.contacts.FieldKind
@@ -100,6 +103,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emptyFlow
+import java.io.File
 import kotlin.math.roundToInt
 
 /** Test tags of the editor. */
@@ -140,6 +144,25 @@ object EditorTags {
 
     const val LabelPopover = "editor-label-popover"
     const val GroupsSheet = "editor-groups-sheet"
+    const val Photo = "editor-photo"
+    const val PhotoCaption = "editor-photo-caption"
+    const val Delete = "editor-delete-contact"
+}
+
+/**
+ * What the editor's photo head needs besides the draft (E4.4 AC2): the stored photo ([photoModel], a content URI), a
+ * picture held for a new contact ([pendingPath]), the WhatsApp [waJid] when the contact has one, whether a WhatsApp
+ * picture is being [busy] fetched, and the menu's [actions]. `null` leaves the avatar as a plain picture.
+ */
+@Immutable
+class EditorPhoto(
+    val photoModel: String?,
+    val pendingPath: String?,
+    val waJid: String?,
+    val busy: Boolean,
+    val actions: PhotoMenuActions,
+) {
+    val hasPhoto: Boolean get() = photoModel != null || pendingPath != null
 }
 
 /** Where a focused field may be asked to scroll into view by its issue key (see [EditorEffect.Invalid]). */
@@ -160,6 +183,8 @@ fun ContactEditorScreen(
     modifier: Modifier = Modifier,
     overlays: OverlayController = LocalOverlay.current,
     invalid: Flow<String> = emptyFlow(),
+    photo: EditorPhoto? = null,
+    onDelete: (() -> Unit)? = null,
 ) {
     val targets = remember { mutableMapOf<String, BringIntoViewRequester>() }
     LaunchedEffect(invalid, targets) {
@@ -169,7 +194,7 @@ fun ContactEditorScreen(
         Column(modifier.fillMaxSize().testTag(EditorTags.Screen)) {
             Header(state, onAction)
             if (state.phase == EditorPhase.Ready) {
-                Form(state, onAction, overlays)
+                Form(state, onAction, overlays, photo, onDelete)
             } else {
                 Box(Modifier.weight(1f))
             }
@@ -213,6 +238,8 @@ private fun ColumnScope.Form(
     state: EditorUiState,
     onAction: (EditorAction) -> Unit,
     overlays: OverlayController,
+    photo: EditorPhoto?,
+    onDelete: (() -> Unit)?,
 ) {
     val draft = state.draft
     val initialKeys = remember { state.keys }
@@ -230,14 +257,7 @@ private fun ColumnScope.Form(
             Modifier.widthIn(max = Sizes.contentMaxWidth).fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(Spacing.sectionGap),
         ) {
-            Box(Modifier.fillMaxWidth().padding(top = Spacing.s), contentAlignment = Alignment.Center) {
-                Avatar(
-                    draft.displayName(),
-                    size = EditorMetrics.Avatar,
-                    colorKey =
-                        draft.id?.toString() ?: draft.displayName(),
-                )
-            }
+            PhotoHead(draft, photo, overlays)
             NameSection(state, onAction)
             CompanySection(state, onAction)
             RepeatSection(EditorList.Numbers, "Phone", "add phone", state, onAction, initialKeys, Phone)
@@ -275,7 +295,75 @@ private fun ColumnScope.Form(
                 }
             }
             AccountAndGroups(state, onAction, overlays, latest)
+            if (!state.isNew && onDelete != null) {
+                InsetGroupedSection {
+                    row {
+                        ListRow(
+                            title = stringResource(R.string.editor_delete_contact),
+                            titleColor = RovstiTheme.colors.destructive,
+                            onClick = onDelete,
+                            modifier = Modifier.testTag(EditorTags.Delete),
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(Spacing.xl))
+        }
+    }
+}
+
+/**
+ * The avatar and, under it, "Add Photo" or "Edit". A tap opens the photo menu over the form (press, slide, release;
+ * nothing moves). Without [photo] it is only the picture.
+ */
+@Composable
+private fun PhotoHead(
+    draft: ContactDraft,
+    photo: EditorPhoto?,
+    overlays: OverlayController,
+) {
+    val name = draft.displayName()
+    val model = photo?.pendingPath?.let { File(it) } ?: photo?.photoModel
+    val items =
+        remember(photo?.hasPhoto, photo?.waJid, photo?.actions) {
+            if (photo == null) persistentListOf() else photoMenuItems(photo.hasPhoto, photo.waJid, photo.actions)
+        }
+    Column(
+        Modifier.fillMaxWidth().padding(top = Spacing.s),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier =
+                if (photo == null) {
+                    Modifier
+                } else {
+                    Modifier
+                        .heightIn(min = Sizes.touch)
+                        .menuTrigger(overlays, items, stringResource(R.string.photo_menu))
+                        .testTag(EditorTags.Photo)
+                },
+        ) {
+            Avatar(
+                name,
+                size = EditorMetrics.Avatar,
+                colorKey = draft.id?.toString() ?: name,
+                photoModel = model,
+            )
+            if (photo != null) {
+                RovstiText(
+                    stringResource(
+                        when {
+                            photo.busy -> R.string.photo_busy
+                            photo.hasPhoto -> R.string.photo_edit
+                            else -> R.string.photo_add
+                        },
+                    ),
+                    Modifier.padding(top = Spacing.s).testTag(EditorTags.PhotoCaption),
+                    style = RovstiTheme.type.subheadline,
+                    color = RovstiTheme.colors.accent,
+                )
+            }
         }
     }
 }

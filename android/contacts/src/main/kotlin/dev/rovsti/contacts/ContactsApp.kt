@@ -7,6 +7,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import dev.rovsti.contacts.card.ContactCardPage
 import dev.rovsti.contacts.editor.ContactEditorPage
+import dev.rovsti.contacts.trash.TrashPage
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.shell.RovstiShell
@@ -55,6 +56,7 @@ fun ContactsApp(
             ContactsSettingsPage(
                 settings = container.commonSettings,
                 onOpenWhatsApp = { navigator.push(ContactsRoute.WhatsAppSettings) },
+                onOpenTrash = { navigator.push(ContactsRoute.Trash) },
                 onOpenCommon = { page ->
                     navigator.push(
                         when (page) {
@@ -84,7 +86,7 @@ fun ContactsApp(
         entry<ContactsRoute.ContactEditor> { route ->
             ContactEditorPage(container, route, outcome = { _, _ -> }, onClosed = pop)
         }
-        entry<ContactsRoute.Trash> { ComingPage("Trash", pop) }
+        entry<ContactsRoute.Trash> { TrashPage(container, pop) }
         entry<ContactsRoute.GroupPage> { route -> ComingPage("Group ${route.id}", pop) }
         entry<ContactsRoute.UpcomingBirthdays> { ComingPage("Upcoming Birthdays", pop) }
     }

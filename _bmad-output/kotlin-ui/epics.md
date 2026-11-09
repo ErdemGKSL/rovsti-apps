@@ -937,7 +937,7 @@ touching (`e4.1-settings`), **F14** card numbers in mixed display formats (`e4.3
 | E4.12 | Photo viewer on the card | R2 | done (round-11 step 5) |
 | E4.13 | Ringtone, voicemail, block | R2 | done (round-11 step 5) |
 | E4.14 | My card, emergency, recently added/edited | R2 | done (round-11 step 6) |
-| E4.15 | Settings | R2 | done (round-11 step 7) |
+| E4.15 | Settings | R2 | done (round-11 step 7; owner fix (a) / F16: sub-pages without back button and with the bar folded to a lone gear, fixed by round-12 rev-2 step 1) |
 | E4.16 | Polish | R2 | done (round-11 step 8) |
 
 Shared AC for every E4 story: the GPUI behaviour named in the parity table is reproduced (same rules from Rust), every
@@ -1046,6 +1046,15 @@ Convx's `ui/component/floatingtabbar/FloatingTabBarTabs.kt` (bar `lens(24dp, 24d
 progress, 14dp x progress, chromaticAberration)`). Ours (`chrome/floatingtabbar/FloatingTabBarTabs.kt` lines 429 and
 492-494, `FoldingTabGroup.kt` line 261) carry the same numbers, so nothing changed and no golden was re-recorded: the blob
 is the real backdrop path, Convx's own look.
+**Round-12 revision 2** (re-planned at base `36760c7`, same file `plans/round-12.md`): Step 1 is **F16** (owner fix (a)):
+the pushed settings pages of Contacts (`e4.15-name-format-*`, `e4.15-accounts-summary-*`) and Phone (`e5.1-settings-*`,
+`e5.1-diagnostics-*`) show no back button and the tab bar folded into a lone circle. Causes: `chromeFor` maps pushed
+pages to `TabBarMode.Folded` (`ContactsRoute.kt:179-199`, `PhoneRoute.kt:112-119`), and the back button depends on each
+caller passing `onBack`, which the screenshot hosts do not (`E415ShotTest.kt:51-68`, `PhoneHost.kt:219-226`). Fix: the
+nav host provides `LocalPageBack` to every entry with depth > 0, `FrostedTopBar` falls back to it, pushed pages keep the
+full bar (Convx keeps `AppFloatingNavBar` on pushed routes, `AppRootContent.kt:1172-1180`), guarded by
+`PushedPagesBackTest` and a Folded-only-on-roots invariant. Step 2 finishes the uncommitted data layer; Steps 3-8 are
+unchanged (E5.2-E5.7a).
 
 ### Parity table
 
@@ -1069,7 +1078,7 @@ is the real backdrop path, Convx's own look.
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | in-progress (round-12 step 1 done: module, manifest, components, container, routes, setup sheet, diagnostics, migration; step 2 data layer) |
+| E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | in-progress (rev-1 step 1 done `36760c7`: module, manifest, components, container, routes, setup sheet, diagnostics, migration; open: F16 back button/full bar on Settings and Diagnostics = rev-2 step 1; data layer (uncommitted, kept) = rev-2 step 2) |
 | E5.2 | Keypad | R1 | in-progress (round-12 step 3) |
 | E5.3 | Recents | R1 | in-progress (round-12 step 4) |
 | E5.4 | Contact, Number and Call details sheets | R1 | in-progress (round-12 step 5) |

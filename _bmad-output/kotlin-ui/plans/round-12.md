@@ -1,94 +1,62 @@
-# Round 12 plan: E5 R1 = Phone app module, data layer, keypad, Recents, sheets, Favorites/Contacts tabs, Incoming, In-call (E5.1-E5.7a)
+# Round 12 plan (revision 2): E5 R1 = F16 pushed-page chrome fix, data layer, keypad, Recents, sheets, Favorites/Contacts tabs, Incoming, In-call (E5.1-E5.7a)
 
-Planned 2026-11-09 at base `c34b155` (branch `ui-overhaul`). Epic: **E5 Phone**, round R1. E1-E4 are done (E4 R2
-re-verified in code below). E5's hard dependencies (E1 done; E2.9, E2.10 `ContactIndex`, E2.14; E3.2, E3.3, E3.5,
-E3.8a/b, E3.9, E3.10, E3.11) are all `done`.
+Revised 2026-11-09 at base `36760c7` (branch `ui-overhaul`). The first revision of this file (commit `bfe9f6b`, base
+`c34b155`) planned E5 R1 in 8 steps; its Step 1 landed as `36760c7` (module, manifest, components, container, routes,
+setup sheet, diagnostics, migration, F15 check). This revision re-plans the rest after a re-check of the tree and the
+goldens. It puts the owner fix (a) first as **Step 1 (F16)**, keeps the uncommitted data-layer work as **Step 2**, and
+leaves Steps 3-8 as they were (copied unchanged below). Epic: **E5 Phone**, round R1. E1-E4 are done; E5.8 stays moved
+to R2 (scope change of revision 1).
 
-Owner decisions still in force: Rovsti is GPL-3.0-or-later (E1.23, `542e271`; re-checked: `LICENSE`, root
-`Cargo.toml` `license = "GPL-3.0-or-later"`, `CLAUDE.md` GPL line, `android/THIRD_PARTY_NOTICES.md` with Convx,
-Kyant0 backdrop / AndroidLiquidGlass, compose-hig, glisse, reorderable). The glass bug is closed by the Convx backdrop
-port (E1.24-E1.26, `GlassRealPathTest`). **Where a Convx file fits, port it close to verbatim** with the original
-header plus `Ported from Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`; glisse-derived
-code keeps the glisse MIT header. In this round that applies to the call aura (Convx
-`app/src/main/kotlin/com/convx/music/ui/component/ArtworkMeshBackground.kt` + `AnimatedChromeMesh.kt`, lifecycle- and
-`MotionDurationScale`-aware) and the in-call expand/collapse (Convx `ui/player/PlayerSheetMotion*` numbers, see
-`app/src/test/kotlin/com/convx/music/ui/player/PlayerSheetMotionTest.kt`). The GPUI app (`apps/phone/src/*.rs`,
-45 604 lines) is a **feature inventory only**, never a design reference.
+Owner decisions still in force: Rovsti is GPL-3.0-or-later (E1.23, `542e271`: `LICENSE`, root `Cargo.toml`, `CLAUDE.md`
+GPL line, `android/THIRD_PARTY_NOTICES.md`). The glass bug is closed by the Convx backdrop port (E1.24-E1.26,
+`GlassRealPathTest`). Where a Convx file fits, port it close to verbatim with the original header plus `Ported from
+Convx (https://github.com/cosmictaserdev-creator/Convx), GPL-3.0, <path>`; glisse-derived code keeps the glisse MIT
+header. The GPUI app (`apps/phone/src/*.rs`) is a feature inventory only.
 
-**Scope change:** E5.8 (WhatsApp calls) moves from R1 to R2. R1 already carries eight big stories (E5.1-E5.7a) and
-E5.8 needs both call screens finished; R2 is now E5.7b, E5.8, E5.9-E5.14 (8 stories). The In-call and Incoming screens
-of this round take a `CallSource` parameter from day one (`Cellular` only wired) so E5.8 only adds the WhatsApp source.
+## State found at `36760c7` (verified in code, not trusted)
 
-## State found (verified in code, not trusted)
-
-- `git status` clean, HEAD `c34b155` ("Polish and close E4 (E4.16)"); `ce32f09` ("Fix start-up crash: native calls
-  wait for Rust.init") landed after the round-11 plan and stays. `stash@{0}` is the deprecated GPUI layout WIP: never pop.
-- **E4 R2 done**, checked file by file: every test class the round-11 evidence names exists under
-  `android/contacts/src/test/kotlin/dev/rovsti/contacts/**` (`ContactShareTest`, `QrSheetTest`, `IntakeViewModelTest`,
-  `IntakeScreenTest`, `ScanQrTest`, `CsvImportViewModelTest`, `CsvMappingTest`, `DupesViewModelTest` (named
-  `Duplicates...` in the evidence; the class is `DupesViewModelTest`), `CleanupViewModelTest`, `DupesScreenTest`,
-  `CleanupScreenTest`, `PhotoViewerActionsTest`, `CallOptionsViewModelTest`, `CallOptionsSectionTest`, `MeViewModelTest`,
-  `EmergencyViewModelTest`, `RecentListsViewModelTest`, `ContactsSettingsViewModelTest`, `SettingsScreenTest`);
-  `QrCodeTest` in `:design`; 164 goldens in `android/contacts/screenshots/` incl. every `e4.9-*`..`e4.15-*` name;
-  `IntakePlaceholderPage` is gone; `docs/kotlin-ui/screenshots/contacts.png` exists. E4 stays `done`.
-- **Screenshots of the previous round, opened and judged:**
-  - `docs/kotlin-ui/screenshots/contacts.png` (contact sheet, 84 light goldens): consistent chrome, one avatar per row,
-    menus float, last rows clear the bar. Correct.
-  - `android/contacts/screenshots/e4.15-settings-light.png`: groups with section gap (F13 fixed), values trailing,
-    footer wraps. Correct. **F15 (check, not a known bug):** at the leading end of the floating tab bar a large blue
-    blob (about 45 dp wide, the full cap height) is the lens refraction of the blue "Import from a File" tile scrolled
-    under the bar; the same happens in `e4.14-my-card-dark.png` (teal/orange from avatars under the Contacts tab). It
-    stays inside the capsule, so it is the real backdrop path, but it is much stronger than the thin edge band of iOS 26.
-    Step 1 compares our tab-bar lens parameters (`ios/component/IosTabBar.kt`, `chrome/floatingtabbar/*`) with
-    Convx's (`app/src/main/kotlin/com/convx/music/ui/ios/component/IosTabBar.kt` / its `lens(...)` call: refraction
-    height and amount) and restores Convx's values if ours differ; if they are equal, nothing changes and the finding is
-    closed with that note.
-  - `e4.14-my-card-dark.png`: My card row, Emergency/Recent card, rail, WA glyph once per row, list continues under the
-    bar. Correct.
-- What E5 starts from:
-  - **Platform (E3.3/E3.5)**: `android/platform/.../telephony/`: `CallRegistry : CallsApi` (answer, reject,
-    disconnect, hold, mute, route, routeEndpoint, dtmf, swap/merge/split, answerReplacing/Holding/EndingHeld,
-    rejectWithMessage, silenceRinger, selectAccount, `snapshot()`, `multiCallFacts()`), `InCallHost` seam (the service
-    implements it; `:platform` names no app class), `CallNotifications` (CallStyle first), `CallSurface`,
-    `IncomingCall`/`AnswerOnce`, `IncomingTiming` seam, `AudioPath`, `ProximityController`, `KeypadTone`,
-    `SimRepository` (+ `FakeSimRepository` in testFixtures), `DialIntents`, `RejectPolicy`, `MultiCall`, `VoicePlayer`.
-    `FakeCalls` lives in `platform/src/test` (not testFixtures): Step 2 moves it to `testFixtures` so `:phone` tests can
-    use it. `calllog/`: `CallLogRepository` (+ fake), `BlocklistRepository` (+ fake), `MissedCalls`. `notify/`:
-    `CallReminders`, `Reminders`. `:wa`: `WaCalls` (place/accept/reject/end/mute/speaker, audio pump).
-  - **Stays in the app** (`docs/kotlin-ui/platform-port.md:73-90`): `RovstiPhoneApp`, `MainActivity`,
-    `RovstiInCallService`, `CallActionReceiver`, `VoicemailReceiver`, `IncomingPerf` (implements `IncomingTiming`),
-    `NativeIncoming` (fallback curtain) from `apps/phone/platforms/android/app/src/main/kotlin/dev/rovsti/phone/*.kt`.
-  - **Rust ops**: `PhoneOps.kt` (`core-bridge/.../ops/PhoneOps.kt`, 76 ops): `recents.*` (group, build, refreshDelta,
-    mergeExtras, missedExtras, history, historyText, sectionStarts, callLogQuery, frequent, callCounts, idsForNumbers,
-    csv, prunePlan), notes (set/remove/restore/rows/forCalls/callDetails/export), stats (overview/person/bucket),
-    speed dial (onHold/assign/unassign/freeDigits/digitFor/badges), block (check/parse/parseMany/parseFile/lines/
-    callLine), `dial.*` (normalisePaste, fromTelUri, validate, fieldMenu, extractNumbers, pastePlan, redialTarget,
-    tonePlan, tonesText, tonePreview, pasteTonesLabel, isEmergency), `sim.build`/`sim.dot`, `setup.*` (steps,
-    checklist, xiaomi, reopened), `audio.rows`/`audio.diff`, `scene.of`/`diff`/`texts`, prefs/notes load/save,
-    `replyChoices`, `keypadTones`, WA tracker ops, `backup*`, `displayName`. `SearchOps` (ContactIndex, T9 through
-    `query` with the keypad digits; verify the T9 mode exists in `crates/rovsti_ffi/src/ops/search.rs`, else add
-    `search.t9` over `rovsti_core::t9` with fixtures, Rule 2).
-  - **Migration fixtures**: `crates/rovsti_app_core/tests/fixtures/dirs/phone/{prefs.json,call-notes.json}` and
-    `dirs/wa/whatsapp-link.json`. There is **no `wa-calls.json` fixture** (file name `HISTORY_FILE` in
-    `crates/rovsti_app_core/src/phone/wa_call.rs:23`): Step 1 adds one from that module's own test data. Phone keeps no
-    `sim-choices.json` (that file is the Messages legacy SIM file, `crates/rovsti_app_core/src/messages/prefs.rs:22`;
-    Phone decides "ask every time" from the system default, `apps/phone/src/sim_ui.rs:191-215`): E5.1 AC2 is corrected
-    in epics.md.
-  - **Manifest**: `apps/phone/platforms/android/app/src/main/AndroidManifest.xml` (+ `src/firebase/` with
-    `.RovstiMessagingService`); expected permission set `android/platform/src/test/resources/manifest/phone.permissions.txt`.
-    `<queries>` for EMERGENCY_ASSISTANCE, HEARING_DEVICES_SETTINGS, SHOW_CALL_SETTINGS; `.MainActivity` with MAIN,
-    two DIAL filters, VIEW `tel:`; `activity-alias .WaHandoff` (`dev.rovsti.action.WA_CALL`, HANDOFF permission);
-    `.RovstiInCallService` (permission, `IN_CALL_SERVICE_UI` meta-data and filter exactly as in the GPUI file); `.CallActionReceiver`,
-    `.VoicemailReceiver` (`SHOW_VOICEMAIL_NOTIFICATION`), `dev.rovsti.bridge.CallReminderReceiver`,
-    `dev.rovsti.bridge.RovstiShareProvider`. GPUI `versionName` `0.1.0`.
-  - **`:design` gap**: no dial field. `GlassTextField` (`text/GlassTextField.kt:88`) always raises the IME. The keypad
-    needs a `BasicTextField(TextFieldState)` with caret, selection, the host text toolbar (`text/TextSelection.kt`) and
-    **no soft keyboard** (Step 3 adds `DialField`).
-  - Templates to copy structure from: `android/contacts` (container, routes, `ContactsManifestTest`,
-    `ContactsMigrationTest`, ViewModel/Screen/ShotTest split, `contactSheet` task from `ScreenshotsConventionPlugin`).
-- **Disk: 4.2 GB free, below the 6 GB limit.** Biggest: `target` 5.6 GB, `~/.gradle/caches` 7.3 GB,
-  `android/core-bridge/build` 1.3 GB, `android/contacts/build` 687 MB, `android/catalog/build` 672 MB. Step 1 starts
-  with the deep clean (Rule 1) before anything else.
+- `git log`: `36760c7` = revision-1 Step 1 (E5.1). `stash@{0}` is the deprecated GPUI layout WIP: never pop.
+- **Uncommitted work (interrupted revision-1 Step 2), inspected and kept:**
+  - `R  platform/src/test/.../telephony/FakeCalls.kt -> platform/src/testFixtures/...` (staged rename, as planned) and
+    `platform/build.gradle.kts` `testFixturesImplementation(libs.robolectric)` (FakeCalls needs it).
+  - `phone/src/main/kotlin/dev/rovsti/phone/data/`: `PhoneStore` (187 lines: `load`, `updatePrefs`, `updateNotes`,
+    `flush`, debounced `schedule`, `Mutex` `disk`, `prefsLoad/Save` + `notesLoad/Save` on IO), `RecentsRepository`
+    (`recentsGroup` -> `mergeExtras` -> `recentsBuild` -> `refreshDelta` -> `missedExtras`, `extraCalls(WaCalls)`),
+    `PeopleIndex` (`SearchOps` handle, `t9`, `matchNumber`, `displayName`, `idsForNumbers`, `rankByCalls`), `SimState`
+    (`simBuild`/`simDot`), `BlockRepo` (`blockCheck`/`blockLines`, `BlockUndo`), `SpeedDial`
+    (`speedDialOnHold`/`Assign`), `CallPlacer` + `CallLauncher`/`AndroidCallLauncher`, `DeviceLocaleTime`.
+  - `phone/src/test/kotlin/dev/rovsti/phone/data/`: `PhoneStoreTest`, `RecentsRepositoryTest`, `PeopleIndexTest`,
+    `SimStateTest`, `CallPlacerTest`, `SpeedDialTest`, `BlockRepoTest`, `DataRig`.
+  - `PhoneContainer.kt` wires them lazily (`store`, `recents`, `people`, `simState`, `block`, `speedDial`, `placer`,
+    `clock` seam). No TODO/FIXME. Whether it compiles and its tests pass is **not known** (not run by this planner):
+    Step 2 runs them first.
+  - Owner rule (b) holds: `PeopleIndex` uses `RustNative::release` only on a handle that `SearchOps.indexNew` returned
+    (so after `Rust.init`), the same pattern as `contacts/.../BookRepository.kt:69`; no other `RustNative` call in
+    `:phone`. Rule (c): no `imePadding`/`windowInsetsPadding(WindowInsets.ime)` in `:phone`/`:contacts`/`:design`
+    (`ContactEditorScreen.kt:1001` reads `WindowInsets.ime` only to trigger `bringIntoView`; padding is
+    `imeOverlapPadding`). Rule (d): `phone/proguard-rules.pro` relies on `:core-bridge` consumer rules for JNI; no class
+    of `:phone` is reached by name besides manifest components (kept by AAPT).
+- **Screenshots opened and judged:**
+  - `android/contacts/screenshots/e4.15-name-format-light.png` and `e4.15-accounts-summary-dark.png`: **owner fix (a)
+    confirmed open**: no back button at the top-left, the tab bar folded into a lone gear circle bottom-left.
+  - `android/phone/screenshots/e5.1-settings-light.png` and `e5.1-diagnostics-dark.png`: **the same bug in Phone**:
+    pushed Settings/Diagnostics show no back button and a lone clock circle bottom-left.
+  - `e5.1-tabs-light.png`: four-tab bar, Keypad selected with the puck, gear capsule top-right, placeholder centred.
+    Correct.
+- **F16 root cause (two parts):**
+  1. `chromeFor` gives every pushed settings page `TabBarMode.Folded`
+     (`contacts/.../ContactsRoute.kt:179-199`, `phone/.../PhoneRoute.kt:112-119`), and `RovstiNavHost.kt:161` draws
+     Folded as the selected tab's circle. Convx keeps its full floating bar on pushed routes
+     (`ref/Convx/app/src/main/kotlin/com/convx/music/AppRootContent.kt:1172-1180`: album/artist routes keep
+     `AppFloatingNavBar`); folding is Convx's scroll-minimise / Stops-map behaviour
+     (`references/navigation-layout.md:189-190`), never a pushed-page state.
+  2. The back button depends on every caller passing `onBack` (`FrostedTopBar.kt:205`, `onBack: (() -> Unit)? = null`
+     defaults through `ScreenPage`/`SettingsPage`/`ChoicePage`/`SummaryPage`/`PhoneSettingsPage`). The apps pass
+     `pop` (`ContactsApp.kt:118-120`, `PhoneApp.kt:205`), but the screenshot hosts rebuild the entries without it
+     (`contacts/src/test/.../settings/E415ShotTest.kt:51-68`, `phone/src/test/.../PhoneHost.kt:219-226`): the goldens
+     show a different page from the app and hide missing-back bugs (the same "tests mask the real path" failure as the
+     glass bug). Any future page that forgets `onBack` would ship without one.
+- Disk: 12 GB free (above the 8 GB comfort level; Rule 1 still applies before builds).
 
 ## Rules for this round
 
@@ -131,69 +99,76 @@ of this round take a `CallSource` parameter from day one (`Cellular` only wired)
 8. **Commits:** one per step, `Kotlin UI (E5 Phone, round R1 (E5.1-E5.7a)): <step title>`, ending with the session
    attribution lines. Never push to `main`.
 
+
 ## Steps
 
-### Step 1. Disk, F15 check, `:phone` module, manifest parity, components, container, tabs, setup sheet, diagnostics, migration (E5.1)
+### Step 1. F16: every pushed page gets the glass back button and keeps the full tab bar (owner fix (a); Contacts + Phone)
 
-- Disk clean to >= 8 GB (Rule 1, 7 GB level). F15 check as written in State found (lens values vs Convx; re-record and
-  open `e4.15-settings-*`, `e4.14-my-card-*` only if values change).
-- `android/phone`: plugins `rovsti.android.app`, `rovsti.compose`, `rovsti.screenshots`, `kotlin.serialization`;
-  namespace/`applicationId` `dev.rovsti.phone`, `versionCode = 100 + ROVSTI_BUILD_NUMBER`, `versionName "0.1.0"`;
-  product flavors `plain` and `firebase` (only `:phone` has them so far; the FCM dependency and
-  `src/firebase/AndroidManifest.xml` in the `firebase` source set, as the GPUI Gradle file did); depends on `:shell` (+ `:wa`); tests on
-  `:testing` and testFixtures of `:platform`, `:wa`, `:core-bridge`, `:shell`. `include(":phone")`. App icon from
-  `apps/phone/assets/app.png`. Release signing already in the convention plugin.
-- Manifest rebuilt from the GPUI one (State found), drop `dev.gpui.android.*` and the vulkan `uses-feature`.
-  App classes (FQCN kept, ARCH 7.2), ported from `apps/phone/platforms/android/app/src/main/kotlin/dev/rovsti/phone/`
-  onto `:platform`: `RovstiPhoneApp : Application, HasContainer<PhoneContainer>`; `MainActivity : RovstiShellActivity`
-  (`setShowWhenLocked`/`setTurnScreenOn` only while `CallRegistry` reports a live call, cleared on idle);
-  `RovstiInCallService : InCallService, InCallHost` (forwards to `CallRegistry.onServiceBound/onCallAdded/...`);
-  `CallActionReceiver`, `VoicemailReceiver` (calls `VoicePlayer`/notify), `IncomingPerf : IncomingTiming`,
-  `NativeIncoming` (kept as the error view); `RovstiMessagingService` in `src/firebase` (calls `WaPush`).
-- `PhoneContainer : ShellContainer`: lazily `calls: CallsApi = CallRegistry`, `callLog`, `blocklist`, `contacts`,
-  `sims: SimRepository`, `ops: PhoneOps`, `search: SearchOps`, `qr: QrOps`, `wa: WaRepository`, `waCalls: WaCalls`,
-  `clipboard`, `specialAccess`, `store: PhoneStore` (Step 2), `commonSettings` (appearance/haptics from `PrefsV2`
-  settings if the fields exist, else `null` as E4 R1 did).
-- Navigation: `@Serializable sealed interface PhoneRoute`: tab roots `Favorites`, `Recents`, `Contacts`, `Keypad`
-  (titles/icons from `apps/phone/src/main.rs:90-96`: star / clock / person.2 / circle.grid.3x3 in `RovstiIcons`),
-  `Settings` (pushed from a toolbar gear on each root, as the GPUI app), `Diagnostics` (hidden: 7 taps on the Settings
-  version row, as `apps/phone/src/devtools.rs`), `Incoming(callId)`, `InCall`, `WhatsAppSettings`, common settings
-  routes. `chromeFor`: roots Visible + large title (Keypad: no large title, tab bar visible); Incoming/InCall Hidden
-  and full-screen (no tab bar, no nav chrome). `routeFor(intent)`: DIAL / VIEW `tel:` -> Keypad prefilled via
-  `dial.fromTelUri`; `CallNotifications` content intents -> Incoming/InCall; `WA_CALL` handoff -> Keypad (WA place
-  is E5.8, R2: show the number with the WhatsApp chip disabled and a toast "WhatsApp calls arrive in a later update").
-- Setup sheet (`apps/phone/src/setup_ui.rs`): `SetupSheet` (`SheetEntry` medium/large) listing `setup.steps` +
-  `setup.checklist(facts)` rows (default dialer role -> `RoleManager.createRequestRoleIntent(ROLE_DIALER)`, contacts,
-  call log, notifications, full-screen intent, battery; each row's next action from `PermissionState`); shown on first
-  launch while the role is missing and re-checked on every `ON_RESUME` (`setup.reopened`). Notice line under the Recents
-  title ("Rovsti is not your phone app", tap opens the sheet).
-- Diagnostics page: `ScreenPage` with `CallsApi.eventDump()`, `blockGuardHits`, `silenceCallbacks`, route latency,
-  `IncomingPerf` timeline, Rust core version; Copy all (toast).
-- Tests: `PhoneManifestTest` (merged manifest vs `phone.permissions.txt` and the GPUI component/filter set, both
-  flavors), `PhoneRoutesTest` (DIAL, VIEW tel with `#`/`,`, notification intents, one-shot extras), `PhoneMigrationTest`
-  (fixture dir `dirs/phone` + new `wa-calls.json` + `dirs/wa/whatsapp-link.json` copied into `noBackupFilesDir`:
-  prefs load keeps quick replies and speed dial 2, notes load, WA history load), `InCallServiceTest` (Robolectric:
-  bound service hands an `InCallHost` to `CallRegistry`), `SetupSheetViewModelTest` (rows from the checklist fixture,
-  role row action, resume re-check).
-- Screenshots: `e5.1-setup-sheet`, `e5.1-diagnostics`, `e5.1-notice-line`, `e5.1-tabs` (light/dark). Open each.
+- `:design` `transition/RovstiNavHost.kt` + `TabNavigator.kt`: new `@Immutable data class PageBack(val onBack: () ->
+  Unit, val onLongClick: () -> Unit)` and `val LocalPageBack = compositionLocalOf<PageBack?> { null }` in
+  `transition/PageBack.kt`. The host provides it around every entry whose `StackKey.depth > 0` (`onBack =
+  navigator.pop()`, `onLongClick = navigator.select(navigator.currentTab)`, the same pair the apps build today) and
+  `null` around tab roots.
+- `:design` `chrome/FrostedTopBar.kt` (and through it `ScreenChromeBox`, `ScreenPage`, `ScreenLazyPage`,
+  `LargeTitleScaffold`): `val back = onBack ?: LocalPageBack.current?.onBack` (same for the long press) before the
+  `if (onBack != null) BackButton(...)` branch at line 205. An explicit `onBack` still wins (sheets, editor Cancel).
+  Pages that must have no back (full-screen Incoming/InCall, editor with its own Cancel/Done) opt out with a new
+  `showBack: Boolean = true` parameter on `ScreenPage`/`ScreenLazyPage`/`ScreenChromeBox`; grep every caller of
+  `ScreenChromeBox`/`FrostedTopBar` and decide per page (cards and pages in `TabBarMode.Hidden` that already draw their
+  own back keep it once: no double button).
+- `ChromeSpec.kt` KDoc: `Folded` is for a tab ROOT only (Stops map, Contacts select mode); a pushed page keeps
+  `Visible` (Convx `AppRootContent.kt:1172-1180`) or `Hidden` (full-screen pages). `contacts/.../ContactsRoute.kt`
+  lines 179-199 and `phone/.../PhoneRoute.kt` lines 112-119: every `TabBarMode.Folded` -> `TabBarMode.Visible` (keep
+  the large titles). Contacts select mode (`chromeFor(route, selecting)`) keeps Folded: it is a root.
+  `RovstiNavHost`: in debug builds `check(spec.tabBar != Folded || depth == 0)` with a message naming the route.
+- Pushed pages leave room for the full bar: they already read `LocalContentInsets.bottom`; verify the last row of
+  `e4.15-settings-end` / `e5.1-diagnostics` ends above the bar after the change (Visible bar is taller than the circle).
+- Remove the now-redundant `onBack = pop, onBackLongClick = popToRoot` plumbing only where it is pure duplication
+  (leave the parameters; they stay the override).
+- Tests:
+  - `:design` `PageBackTest` (Compose): root entry has no `back-button`; a pushed `ScreenPage` without `onBack` shows
+    it; clicking pops; long press selects the tab root; explicit `onBack` wins; `showBack = false` hides it.
+  - `ContactsRoutesTest` / `PhoneRoutesTest`: new invariant "no route other than a tab root maps to Folded" over every
+    route object (sealed subclasses, sample args for data classes), plus the select-mode case.
+  - `PushedPagesBackTest` in `:contacts` and in `:phone` (Robolectric, real `RovstiShell` through the existing
+    `HostedSettings`/`HostedPhone` hosts): for every pushed settings route (Contacts: WhatsAppSettings, NameFormat,
+    SortBy, SaveTo, Summary, ReminderTime, Appearance, Haptics, About, Licences, LicenceDetail; Phone: Settings,
+    Diagnostics, WhatsAppSettings, Appearance, Haptics, About, Licences, LicenceDetail) assert one `back-button` node and
+    a `tab-bar` showing all four tab labels (not folded). This test makes the hosts unable to mask the app again.
+  - `catalog` `ChromeSpecTest` updated for the KDoc rule if it asserts Folded on a pushed page.
+- Screenshots re-recorded and OPENED (light + dark): every `android/contacts/screenshots/e4.15-*` (name-format,
+  accounts-summary incl. fs2, whatsapp, settings, settings-end) and any other contacts golden of a page that was Folded
+  (`e4.1-settings*` if it shows a pushed page, appearance/haptics/about/licences if recorded); Phone `e5.1-settings`,
+  `e5.1-diagnostics`. The re-recorded goldens must show: glass back circle
+  top-left at the 16 dp gutter, large title under it, full four-tab bar with the selected tab's puck at the bottom,
+  last row above the bar. Also `e4.15-name-format-rtl` (back chevron mirrored, at the right). Regenerate
+  `docs/kotlin-ui/screenshots/contacts.png` (`:contacts:contactSheet`) and open it.
+- Check: `bash scripts/kotlin-ui-check.sh` -> `ALL GREEN`. Commit `Kotlin UI (E5 Phone, round R1 (E5.1-E5.7a)): F16
+  pushed pages get the back button and the full tab bar (owner fix a)`; epics.md: F16 Evidence under E5 and a note on
+  E4.15 ("F16 fixed in round-12 rev 2 step 1").
 
-### Step 2. Data layer: `PhoneStore`, `RecentsRepository`, people index, SIMs, block (no new screen)
+### Step 2. Data layer: finish and verify the uncommitted work (no new screen)
 
-- Move `FakeCalls` from `platform/src/test` to `platform/src/testFixtures` (same package).
-- `dev.rovsti.phone.data`: `PhoneStore` (one `StateFlow<PrefsV2>` + notes; `prefsLoad/Save`, `notesLoad/Save` on IO,
-  writes serialised by a `Mutex`, debounced 300 ms); `RecentsRepository` (call-log observer + `WaCalls` history ->
-  `recents.build`/`refreshDelta`/`mergeExtras`/`missedExtras` -> `StateFlow<RecentsModel>`; Rust decides grouping,
-  sections and labels; refresh coalesced with `RebuildCoalescer`); `PeopleIndex` (book pull -> `SearchOps.indexNew`,
-  handle kept, `query` for search and T9, `displayName`, `idsForNumbers`); `SimState` (`SimRepository` ->
-  `sim.build`/`sim.dot`, exposes `ask`, default, dot colours); `BlockRepo` (`BlocklistRepository` + `block.check`/
-  `blockLines`, Undo snapshots); `SpeedDial` (`speedDialBadges/digitFor/onHold/assign/unassign` over `PhoneStore`).
-- Effects helper `CallPlacer`: validate (`dial.validate`, `dial.isEmergency`) -> SIM choice needed? (Rule:
-  `apps/phone/src/sim_ui.rs:191-215`) -> `CallsApi`/`DialIntents.place(number, account)`; emits
-  `NeedsSim(number, choices)` or `Placed`.
-- Tests: `PhoneStoreTest` (round-trip, debounce, concurrent writes), `RecentsRepositoryTest` (fixture call log + WA
-  history -> rows from the `recents.build` fixture; delta refresh keeps ids), `PeopleIndexTest`, `SimStateTest`,
-  `CallPlacerTest` (emergency never asks for a SIM; two SIMs + ask -> NeedsSim; default SIM -> placed with its handle),
-  `SpeedDialTest`.
+- Start from the tree as found (State found): keep every file; do not rewrite what works. Compile first:
+  `cd android && ./gradlew :platform:compileDebugUnitTestKotlin :phone:testPlainDebugUnitTest --tests 'dev.rovsti.phone.data.*'`;
+  fix what fails. `:platform` tests that used `FakeCalls` from `src/test` must still pass from `testFixtures`
+  (`./gradlew :platform:testDebugUnitTest`).
+- Gaps against revision-1 Step 2 to close: `RecentsRepository` refresh coalesced with the existing `RebuildCoalescer`
+  (verify it is used; `refreshNow` exists) and the `Main`-free build (all ops on `RustDispatcher`/IO); `PhoneStore`
+  test for concurrent writes (two `updatePrefs` in parallel, one disk write after the 300 ms debounce, nothing lost)
+  and `flush` on `ON_STOP` wired in `MainActivity` (process death keeps the last change); `PeopleIndex` releases the
+  old handle when a new index replaces it and on READ_CONTACTS revoke (`drop`), tested; `CallPlacer` rules:
+  emergency never asks for a SIM, two SIMs + no default -> `NeedsSim`, default SIM -> `Placed` with its
+  `PhoneAccountHandle`, invalid -> `Invalid` with the core's sentence (all in `CallPlacerTest`). Every op result that
+  is `Outcome.Err` is logged once and surfaced as state (no silent `?: return` that freezes the model): add an `error`
+  field to `RecentsModel` and a test.
+- Owner rule (b): add `PhoneContainerTest` case "constructing the container and touching `store`/`recents`/`people`
+  before `Rust.init` completes issues no native call" (fake core that fails if called before init is signalled).
+- Tests (must all exist and pass): `PhoneStoreTest`, `RecentsRepositoryTest`, `PeopleIndexTest`, `SimStateTest`,
+  `CallPlacerTest`, `SpeedDialTest`, `BlockRepoTest`, `PhoneContainerTest` (extended).
+- No screenshots (no UI). Check: `bash scripts/kotlin-ui-check.sh`. Commit `... : Data layer: PhoneStore,
+  RecentsRepository, PeopleIndex, SimState, BlockRepo, SpeedDial, CallPlacer (E5.1 step 2)`; epics E5.1 -> `done` with
+  an Evidence line naming the test classes.
 
 ### Step 3. Keypad (E5.2) and `DialField` in `:design`
 
@@ -335,3 +310,7 @@ Goldens: every `e5.1-*`..`e5.7-*` name above in `android/phone/screenshots/`, li
 `android/phone/src/main/AndroidManifest.xml`, `design/.../text/DialField.kt`, `design/.../media/CallAura.kt` (Convx
 header), `crates/rovsti_app_core/tests/fixtures/dirs/phone/wa-calls.json`, `docs/kotlin-ui/checklist-e5.md`,
 `docs/kotlin-ui/screenshots/phone.png`.
+
+Added by revision 2: `PageBackTest` (`:design`), `PushedPagesBackTest` (`:contacts` and `:phone`), the Folded invariant in
+`ContactsRoutesTest`/`PhoneRoutesTest`, `BlockRepoTest`; re-recorded `e4.15-*` and `e5.1-settings`/`e5.1-diagnostics` goldens
+show the back button and the full tab bar (open them).

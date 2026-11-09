@@ -285,7 +285,7 @@ private fun ContactRowItem(
         label = "select-slot",
     )
     Column {
-        if (separated) RowSeparator(inset = TextStartWithLeading + slot)
+        if (separated) RowSeparator(Modifier.padding(end = endInset), inset = TextStartWithLeading + slot)
         val body =
             Modifier.testTag(ListTags.row(item.id)).semantics {
                 if (checked != null) selected = checked

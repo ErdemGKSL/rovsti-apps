@@ -1,12 +1,23 @@
-package dev.rovsti.bridge
+package dev.rovsti.platform.wa
 
+import android.content.Intent
 import android.media.AudioDeviceInfo
+import dev.rovsti.core.ops.CallAudio
+import dev.rovsti.platform.PlatformEvents
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class WaIncomingTest {
     private fun call(vararg pairs: Pair<String, String>) = mapOf("kind" to "call", "call_id" to "c1") + pairs
 
@@ -17,7 +28,10 @@ class WaIncomingTest {
 
     @Test fun fallsBackToTheUserPartOfFrom() {
         assertEquals("905551234567", WaIncomingNotice.of(call("from" to "905551234567@s.whatsapp.net"))?.title)
-        assertEquals("905551234567", WaIncomingNotice.of(call("from" to "905551234567:4@s.whatsapp.net", "name" to " "))?.title)
+        assertEquals(
+            "905551234567",
+            WaIncomingNotice.of(call("from" to "905551234567:4@s.whatsapp.net", "name" to " "))?.title,
+        )
     }
 
     @Test fun fallsBackToTheGenericTitle() {
@@ -61,10 +75,60 @@ class WaIncomingTest {
     }
 
     @Test fun pickDeviceChoosesSpeakerOrEarpiece() {
-        val types = listOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
+        val types =
+            listOf(
+                AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
+                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+            )
         assertEquals(2, WaCallAudio.pickDevice(types, true))
         assertEquals(1, WaCallAudio.pickDevice(types, false))
         assertEquals(-1, WaCallAudio.pickDevice(listOf(AudioDeviceInfo.TYPE_BLUETOOTH_SCO), true))
         assertEquals(-1, WaCallAudio.pickDevice(emptyList(), false))
+    }
+
+    @Test fun frameSizeMatchesTheCoreBridgeHandle() {
+        assertEquals(CallAudio.FRAME_BYTES, WaCallAudio.FRAME_BYTES)
+        assertEquals(WaCallAudio.FRAME_SAMPLES * 2, CallAudio.FRAME_BYTES)
+    }
+
+    @Test fun speakerBufferHoldsAtLeastFourFrames() {
+        assertEquals(WaCallAudio.FRAME_BYTES * 4, WaCallAudio.bufferBytes(100))
+        assertEquals(50_000, WaCallAudio.bufferBytes(50_000))
+    }
+
+    @Test fun channelIdsAreTheGpuiOnes() {
+        assertEquals("wa_calls", WaIncoming.CHANNEL)
+        assertEquals("wa_missed", WaIncoming.MISSED_CHANNEL)
+    }
+
+    @Test fun takeActionReturnsThePayloadOnceAndStripsTheExtra() {
+        val context = RuntimeEnvironment.getApplication()
+        val intent =
+            Intent()
+                .putExtra(
+                    WaIncoming.EXTRA_CALL_ID,
+                    "c1",
+                ).putExtra(WaIncoming.EXTRA_ACTION, WaIncoming.ANSWER)
+        val first = WaIncoming.takeAction(context, intent)
+        assertEquals("answer", JSONObject(first!!).getString("action"))
+        assertNull(WaIncoming.takeAction(context, intent))
+        assertNull(WaIncoming.takeAction(context, Intent()))
+        assertNull(WaIncoming.takeAction(context, null))
+    }
+
+    @Test fun pushEmitsTheWakeEventWithTheDataAsJson() {
+        val context = RuntimeEnvironment.getApplication()
+        val seen = mutableListOf<dev.rovsti.platform.PlatformEvent>()
+        val job =
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined).launch {
+                PlatformEvents.events.collect { seen += it }
+            }
+        WaPush.onMessage(context, mapOf("kind" to "message", "chat" to "x"))
+        job.cancel()
+        val event = seen.single { it.kind == WaPush.EVENT }
+        assertEquals("x", JSONObject(event.json).getString("chat"))
+        assertEquals("", WaPush.token())
+        assertTrue(WaPush.payload(emptyMap()) == "{}")
     }
 }

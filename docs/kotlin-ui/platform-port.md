@@ -18,11 +18,11 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `AlarmActivity.kt` | platform.location.BridgeTripComponents (package dev.rovsti.bridge) | 7 (E3.7) | ported |
 | `AlarmOptions.kt` | platform.location.AlarmOptions (public; `REQUEST_ALARM_SOUND` const replaces `Documents.REQUEST_ALARM_SOUND`) | 7 (E3.7) | ported |
 | `AlarmSound.kt` | platform.location.AlarmSound (prefs via `PlatformPrefs.ALARM`) | 7 (E3.7) | ported |
-| `BirthdayReminders.kt` | platform.notify.BirthdayReminders | 6 (E3.6) | todo |
+| `BirthdayReminders.kt` | platform.notify.BirthdayReminders | 6 (E3.6) | ported |
 | `Blocklist.kt` | platform.calllog.Blocklist (typed `BlockedNumber`/`BlockReason`; `numbers` replaces `pullJson`; `BlockGuard` comes along) + `BlocklistRepository` | 3 (E3.3) | ported |
 | `CallLogQuery.kt` | platform.calllog.CallLogQuery (typed `CallLogEntry`; `byIds` and `missedCount` added) | 3 (E3.3) | ported |
 | `CallLogWrite.kt` | platform.calllog.CallLogWrite (typed rows; restore also writes name, label, contact and block reason) | 3 (E3.3) | ported |
-| `CallReminders.kt` | platform.notify.CallReminders | 6 (E3.6) | todo |
+| `CallReminders.kt` | platform.notify.CallReminders | 6 (E3.6) | ported |
 | `CallsApi.kt` | platform.telephony.CallsApi | 5 (E3.5) | ported |
 | `ContactOptions.kt` | platform.contacts.ContactCallOptions (renamed: `ContactOptions` is the `:core-bridge` model it returns; the picker is an intent plus `parsePicked`, no `startActivityForResult`) | 2 (E3.2) | ported |
 | `ContactPhotos.kt` | platform.contacts.ContactPhotos (typed `PhotoPlan`, `ContactResult`) | 2 (E3.2) | ported |
@@ -34,34 +34,34 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `Haptics.kt` | platform.system.Haptics | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `Headless.kt` | platform.Headless (blocking wrapper over Rust.core().headless) | 1 (E3.1) | ported, rewritten |
 | `KeypadTone.kt` | platform.telephony.KeypadTone | 5 (E3.5) | ported |
-| `Mailbox.kt` | none: one-shots become intent handling in the activity | R2 E3.11 | dropped: see ARCH 7.3 |
+| `Mailbox.kt` | none: one-shots become intent handling in the activity | R2 E3.11 | dropped: one-shots become intent handling in the activity (ARCH 7.3, E3.11) |
 | `MediaShare.kt` | platform.files (E3.8a) | R2 E3.8a | R2 E3.8a |
-| `MessageNotifications.kt` | platform.notify.MessageNotifications | 6 (E3.6) | todo |
-| `MessageReminders.kt` | platform.notify.MessageReminders | 6 (E3.6) | todo |
+| `MessageNotifications.kt` | platform.notify.MessageNotifications | 6 (E3.6) | ported |
+| `MessageReminders.kt` | platform.notify.MessageReminders | 6 (E3.6) | ported |
 | `MissedCalls.kt` | platform.calllog.MissedCalls; LocaleTimeInfo is platform.system.LocaleTimeInfo | 3 (E3.3), LocaleTimeInfo in 1 | ported |
-| `MmsCodec.kt` | platform.sms.MmsCodec | 4 (E3.4) | done |
+| `MmsCodec.kt` | platform.sms.MmsCodec | 4 (E3.4) | ported |
 | `MultiCall.kt` | platform.telephony.MultiCall | 5 (E3.5) | ported |
-| `NotificationIcon.kt` | platform.notify.NotificationIcon | 6 (E3.6) | todo |
+| `NotificationIcon.kt` | platform.notify.NotificationIcon | 6 (E3.6) | ported |
 | `ProviderObservers.kt` | platform.ProviderChanges (callbackFlow) | 1 (E3.1) | ported, rewritten |
 | `RejectPolicy.kt` | platform.telephony.RejectPolicy; `FlipRule` (same file) goes to platform.telephony.FlipDetector | 3 (E3.3), FlipRule in 5 | ported (`FlipRule` lives in FlipDetector.kt) |
-| `ReplyReceiver.kt` | platform.notify.ReplyReceiver | 6 (E3.6) | todo |
+| `ReplyReceiver.kt` | platform.notify.ReplyReceiver | 6 (E3.6) | ported |
 | `RovstiBridge.kt` | none: the Rust-calls-Kotlin methods become repositories; emit becomes PlatformEvents | 1 (E3.1) | dropped: replaced by seams |
-| `ScheduledSms.kt` | platform.sms.ScheduledSms | 4 (E3.4) | done |
+| `ScheduledSms.kt` | platform.sms.ScheduledSms | 4 (E3.4) | ported |
 | `SettingsMirror.kt` | platform.system.SettingsMirror | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `Shortcuts.kt` | platform.contacts.Shortcuts + `ShortcutsRepository` (target activity from `PlatformComponents`; `EXTRA_CONTACT_ID` is now owned here, `BirthdayReminders` in step 6 reads it) | 2 (E3.2) | ported |
 | `SimAccounts.kt` | platform.telephony.SimAccounts (returns `PhoneAccounts`; the JSON envelope is dropped) + `SimRepository` | 3 (E3.3) | ported |
 | `SimProbe.kt` | platform.telephony.SimProbe (S5 lines only; the S14 vibration half went with the spikes) | 3 (E3.3) | ported |
-| `SmsQuery.kt` | platform.sms.SmsQuery | 4 (E3.4) | done |
-| `SmsSend.kt` | platform.sms.SmsSend | 4 (E3.4) | done |
+| `SmsQuery.kt` | platform.sms.SmsQuery | 4 (E3.4) | ported |
+| `SmsSend.kt` | platform.sms.SmsSend | 4 (E3.4) | ported |
 | `SpikeProbes.kt` | none | 1 (E3.1) | dropped: GPUI spikes (ARCH 7.3) |
 | `StopsLocation.kt` | platform.location.LocationRepository (`lastKnown`, `fresh(timeout)`, `updates()` replace the `stops_location` emits; `Fix` model) | 7 (E3.7) | ported |
 | `SystemPages.kt` | platform.system.SystemPages | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `TripAlarm.kt` | platform.location.TripAlarm + `TripAlarmReceiver` in BridgeTripComponents (channel via `PlatformChannels`, events via `PlatformEvents`) | 7 (E3.7) | ported |
 | `TripService.kt` | platform.location.TripModel (pure helpers, `StartResult`) + `TripService`/`TripWatchdogReceiver` in BridgeTripComponents + `TripRepository` (`status`, `start`) | 7 (E3.7) | ported |
 | `VoicePlayer.kt` | platform.telephony.VoicePlayer | 5 (E3.5) | ported |
-| `WaCallAudio.kt` | platform.wa.WaCallAudio | 8 (E3.9 seams) | todo |
-| `WaIncoming.kt` | platform.wa.WaIncoming | 8 (E3.9 seams) | todo |
-| `WaPush.kt` | platform.wa.WaPush | 8 (E3.9 seams) | todo |
+| `WaCallAudio.kt` | platform.wa.WaCallAudio (+ `CallFrames`/`CallAudio.asFrames()`: frames go to the core-bridge handle `audioPush`/`audioPull` as `ByteArray`, no base64; a `wa-mic` and a `wa-speaker` thread) | 8 (E3.9 seams) | ported |
+| `WaIncoming.kt` | platform.wa.WaIncoming (channels via `PlatformChannels`; `takeAction(context, intent)` replaces `RovstiBridge.deliverWaCallAction`) | 8 (E3.9 seams) | ported |
+| `WaPush.kt` | platform.wa.WaPush (`onMessage(context, data)` emits `wa_push` on `PlatformEvents`; `:wa` calls `reconnectNow`) | 8 (E3.9 seams) | ported |
 | `WireJson.kt` | platform.wire.WireJson | 1 (E3.1) | ported |
 | `XiaomiOps.kt` | platform.system.XiaomiOps | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 
@@ -117,7 +117,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/MessagesSeamTest.kt` | MessagesSeamTest (Headless cases, FakeRustCore); SMS/MMS/notification/scheduled cases go with E3.4/E3.6 | 1, 4, 6 | partly moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/ContactPhotosTest.kt` | `:platform` test `contacts.ContactPhotosTest` (plan cases now on `PhotoPlan`) | 2 | moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/MultiCallTest.kt` | `:platform` test `telephony.MultiCallTest` | 5 | moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/WaIncomingTest.kt` | E3.9 seams | 8 | todo |
+| `apps/phone/.../src/test/java/dev/rovsti/bridge/WaIncomingTest.kt` | `:platform` test `wa.WaIncomingTest` (plus frame-size, takeAction and wake-event cases) | 8 | moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic17Test.kt` | BlocklistTest (blocklist, reason and BlockGuard cases), RejectPolicyTest (reject cases); the FlipRule cases are `telephony.FlipRuleTest` (step 5); the Epic17Probes cases (blocking, reject, silence probes) are dropped with the GPUI spikes | 3, 5 | moved; probe cases dropped |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/SpikeProbesTest.kt` | dropped with its GPUI spike (recorded again in step 3: nothing of it is ported) | 1 | dropped |
 
@@ -210,3 +210,22 @@ Seams:
 - Changed on purpose: a failed or undecided cold reply (`wa_reply` with no answer) re-posts the notification unchanged instead of
   cancelling it, so the message is not lost. Everything else (request codes, extras, actions, prefs files) is as before.
 - `BirthdayReminders.EXTRA_CONTACT_ID` is `Shortcuts.EXTRA_CONTACT_ID`.
+
+## WhatsApp seams, FQCN and PendingIntent contract (E3 R1, step 8)
+
+`dev.rovsti.platform.wa`: `WaPush` (token by reflection; `onMessage(context, data)` shows or cancels the call notification
+and emits `wa_push` on `PlatformEvents`, which `:wa` (E3.9, R2) turns into `reconnectNow()`), `WaIncoming` (+ `WaIncomingNotice`,
+`WaMissedNotice`; channels `wa_calls` and `wa_missed` come from `PlatformChannels`), `WaCallAudio` (`start(context, CallFrames)`;
+`CallAudio.asFrames()` binds the `:core-bridge` handle, so the microphone thread calls `audioPush` and the speaker thread
+`audioPull`; frame size equals `CallAudio.FRAME_BYTES`, pinned by a test).
+
+Tests that guard the whole round: `FqcnTest` (12 components load by their `dev.rovsti.bridge` names; `RovstiShareProvider` is the
+13th, R2 E3.8a), `PendingIntentContractTest` (action and extra strings of reminders, scheduled SMS, reply actions, trip alarm and
+watchdog equal the GPUI source constants, read as text), `PortInventoryTest` (every bridge `.kt` has a row with an allowed status).
+
+Summary of what does not move in R1:
+
+- dropped: `SpikeProbes`, `Epic17Probes`, `Mailbox`, the `RovstiBridge` statics (replaced by repositories and `PlatformEvents`);
+- R2 E3.8a: `Documents`, `MediaShare`, `RovstiShareProvider`;
+- R2 E3.8b: roles and permissions (the roles half of `Handoff`/`SystemPages`, the permission helpers of `RovstiBridge`);
+- app module: `IncomingPerf`, `NativeIncoming`, the manifest components and the Application/MainActivity classes.

@@ -758,18 +758,34 @@ done by this planner (ops modules, fixtures incl. the headless pairs, `:core-bri
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E3.1 | `:platform` module, port of the bridge files, tests moved | R1 | in-progress (round-08) |
-| E3.2 | Contacts provider repository (read, write, groups, accounts, photos, options, observer) | R1 | in-progress (round-08) |
+| E3.1 | `:platform` module, port of the bridge files, tests moved | R1 | done (round-08 steps 1 and 8) |
+| E3.2 | Contacts provider repository (read, write, groups, accounts, photos, options, observer) | R1 | done (round-08 step 2) |
 | E3.3 | Call log, blocklist, blocked calls, SIM accounts | R1 | done (round-08 step 3) |
 | E3.4 | SMS/MMS provider, send, scheduled SMS | R1 | done (round-08 step 4) |
 | E3.5 | Telecom core: CallRegistry, audio path, proximity, call notifications | R1 | done (round-08 step 5) |
-| E3.6 | Notifications, reminders, shortcuts | R1 | in-progress (round-08) |
-| E3.7 | Location, TripService, TripAlarm, AlarmSound, AlarmActivity | R1 | in-progress (round-08) |
+| E3.6 | Notifications, reminders, shortcuts | R1 | done (round-08 step 6) |
+| E3.7 | Location, TripService, TripAlarm, AlarmSound, AlarmActivity | R1 | done (round-08 step 7) |
 | E3.8a | Files, media store, share, clipboard, Photo Picker, camera capture, SAF import/export | R2 | todo |
 | E3.8b | Handoff, roles, `PermissionController` + `PermissionState` rules, special access, OEM settings (ARCH 7.5) | R2 | todo |
 | E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads, `WaAvatars` | R2 | todo |
 | E3.10 | Shared WhatsApp settings screen | R2 | todo |
 | E3.11 | `:shell`: RovstiRoot, base activity, containers, permission UI, common settings, licences | R2 | todo |
+
+Next planner: **E3 R2** is E3.8a (files, media, share, `RovstiShareProvider`), E3.8b (roles, `PermissionController`, special
+access), E3.9 (`:wa`, on the `dev.rovsti.platform.wa` seams `WaPush`, `WaIncoming`, `WaCallAudio` + `CallFrames`), E3.10 and
+E3.11. It owns the round's screenshots (`e3.10-*`, `e3.11-*`). `docs/kotlin-ui/platform-port.md` lists what R1 left for it
+(rows marked `R2 E3.8a`, `R2 E3.8b`; `Mailbox` becomes intent handling in E3.11).
+
+#### Evidence, E3 R1 (E3.1-E3.7 done, round-08)
+
+- E3.1 (commits 974206c, step 8): `android/platform`, `PlatformEvents`, `Headless`, `PlatformComponents`, `ProviderChanges`, system helpers; tests `LibraryManifestTest`, `PrefsNamesTest`, `PlatformConventionTest`, `WireModelsTest`, `WireFixturesTest`, `WireV2Test`, `SettingsMirrorTest`, `SystemPagesTest`, `XiaomiOpsTest`, `LocaleTimeInfoTest`, `MessagesSeamTest`; step 8 adds `PortInventoryTest` (every bridge file has a row), `FqcnTest` (12 components, `RovstiShareProvider` is R2 E3.8a) and `PendingIntentContractTest`.
+- E3.2 (commit 983b09e): `ContactsRepository`, `ShortcutsRepository`, `ContactsEdit`; tests `AndroidContactsRepositoryTest` (every `EDITED_MIMES` row), `FakeContactsRepositoryTest`, `ContactPhotosTest`, `ShortcutsTest`, `ContactCallOptionsTest`.
+- E3.3 (commit e69063c): `CallLogRepository`, `BlocklistRepository`, `SimRepository`; tests `AndroidCallLogRepositoryTest`, `BlocklistTest`, `RejectPolicyTest`, `SimRepositoryTest`.
+- E3.4 (commit 395589e): SMS/MMS provider, send, `ScheduledSms`; tests `AndroidSmsRepositoryTest`, `SmsSendTest`, `MmsCodecTest`, `MmsInboxTest`, `ScheduledSmsTest`, `SmsRulesTest`, `MessagesHostTest`.
+- E3.5 (commit bf0d946): telecom core; tests `IncomingOrderTest`, `IncomingCallTest`, `OngoingCallTest`, `MultiCallTest`, `AudioPathTest`, `ProximityPolicyTest`, `CallEventRingTest`, `RebuildCoalescerTest`, `FlipRuleTest`, `DialIntentsTest`, `CallNotificationsChannelsTest`.
+- E3.6 (commit 157b05c): notifications, reminders, reply receiver; tests `NotificationChannelsTest`, `MessageRemindersTest`, `CallRemindersTest`, `BirthdayRemindersTest`, `ReplyReceiverTest`, `HeadlessFixturesTest`.
+- E3.7 (commit 72d4345): location, `TripService`, `TripAlarm`, `AlarmActivity`; tests `LocationRepositoryTest`, `TripServiceTest`, `TripAlarmTest`, `TripStatusTest`, `AlarmOptionsTest`, `TripStartResultTest`, and `kotlin_contract.rs` in `rovsti_app_core`.
+- Step 8 also ports the WhatsApp seams (`WaIncomingTest` moved, plus frame-size, `takeAction` and wake-event cases).
 
 ### E3.1 Port
 - AC1 Files ported per ARCH 7.3; classes named by any manifest, PendingIntent or shortcut keep their FQCN.

@@ -32,6 +32,8 @@ dependencies {
     testFixturesApi(project(":core-bridge"))
     testFixturesApi(testFixtures(project(":core-bridge")))
     testFixturesApi(libs.coroutines.core)
+    testFixturesImplementation(project(":platform"))
+    testFixturesImplementation(project(":design"))
     // The compose compiler plugin runs on testFixtures too and needs the runtime that WaLinkState (@Immutable) uses.
     testFixturesImplementation(platform(libs.compose.bom))
     testFixturesImplementation(libs.compose.ui)

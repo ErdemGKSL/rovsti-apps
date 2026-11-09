@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import coil3.ComponentRegistry
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.asImage
@@ -50,9 +51,12 @@ object ImageCacheShare {
 fun rovstiImageLoader(
     context: Context,
     lowRam: Boolean,
+    /** Extra fetchers, keyers and decoders; `:wa` adds the profile picture fetcher here (`waAvatars(avatars)`). */
+    components: ComponentRegistry.Builder.() -> Unit = {},
 ): ImageLoader =
     ImageLoader
         .Builder(context)
+        .components(components)
         .memoryCache {
             MemoryCache
                 .Builder()

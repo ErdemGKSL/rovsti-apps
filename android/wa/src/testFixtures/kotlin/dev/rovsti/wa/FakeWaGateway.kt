@@ -6,16 +6,29 @@ import dev.rovsti.core.Outcome
 import dev.rovsti.core.RustError
 import dev.rovsti.core.RustEvents
 import dev.rovsti.core.model.core.Empty
+import dev.rovsti.core.model.wa.AvatarsPlanAnswer
+import dev.rovsti.core.model.wa.AvatarsPlanRequest
+import dev.rovsti.core.model.wa.CallIdBody
+import dev.rovsti.core.model.wa.CallMuteBody
+import dev.rovsti.core.model.wa.CallStarted
+import dev.rovsti.core.model.wa.CallSummary
 import dev.rovsti.core.model.wa.GatewayEvent
 import dev.rovsti.core.model.wa.HandleAnswer
 import dev.rovsti.core.model.wa.InstanceStatus
+import dev.rovsti.core.model.wa.JidsBody
 import dev.rovsti.core.model.wa.LinkReadAnswer
 import dev.rovsti.core.model.wa.LinkWriteRequest
+import dev.rovsti.core.model.wa.PictureAnswer
+import dev.rovsti.core.model.wa.PictureBody
 import dev.rovsti.core.model.wa.RichChat
 import dev.rovsti.core.model.wa.RichMessage
 import dev.rovsti.core.model.wa.StoredLink
 import dev.rovsti.core.model.wa.WaEventPayload
+import dev.rovsti.core.model.wa.WaNamesAnswer
+import dev.rovsti.core.model.wa.WaNamesRequest
+import dev.rovsti.core.model.wa.WaProfile
 import dev.rovsti.core.model.wa.WaStreamEvent
+import dev.rovsti.core.ops.AudioPort
 import dev.rovsti.core.ops.NativeWaOps
 import dev.rovsti.core.ops.WaEvents
 import dev.rovsti.core.ops.WaGateway
@@ -36,6 +49,8 @@ import java.util.concurrent.CopyOnWriteArrayList
 class FakeWaGateway(
     val core: FakeRustCore = FakeRustCore(),
     link: StoredLink? = null,
+    /** Where the PCM of `openCallAudio` handles goes; the native port would need the library. */
+    val audio: AudioPort = SilentAudioPort,
 ) {
     /** The event feed the repository under test listens to; feed it with [emit] and [emitEvent]. */
     val rustEvents = RustEvents()
@@ -57,8 +72,23 @@ class FakeWaGateway(
     /** Makes `wa.open` fail with this error when set. */
     @Volatile var openError: RustError? = null
 
+    /** The recent calls `wa.calls` answers. */
+    @Volatile var calls: List<CallSummary> = emptyList()
+
+    /** The call id `wa.place_call` answers, or an error. */
+    @Volatile var placed: Outcome<CallStarted> = Outcome.Ok(CallStarted("call-1"))
+
+    /** Answers of the call ops by name (`wa.accept_call`, ...); default `Ok`. */
+    val callErrors = java.util.concurrent.ConcurrentHashMap<String, RustError>()
+
+    /** What `wa.picture` answers for a request; the default is `none`. */
+    @Volatile var picture: (PictureBody) -> Outcome<PictureAnswer> = { Outcome.Ok(PictureAnswer("none")) }
+
+    /** What `wa.profiles` answers for the asked jids. */
+    @Volatile var profiles: (List<String>) -> Outcome<List<WaProfile>> = { Outcome.Ok(emptyList()) }
+
     val opener =
-        WaGatewayOpener { WaGateway.open(it.gatewayUrl, it.key, null, ops, release = { id -> released += id }) }
+        WaGatewayOpener { WaGateway.open(it.gatewayUrl, it.key, null, ops, audio, release = { id -> released += id }) }
 
     init {
         ok("wa.open", HandleAnswer.serializer()) {
@@ -81,6 +111,30 @@ class FakeWaGateway(
             )
         }
         ok("wa.link_read", LinkReadAnswer.serializer()) { Outcome.Ok(LinkReadAnswer(this.link)) }
+        ok("wa.place_call", CallStarted.serializer()) { placed }
+        ok("wa.calls", ListSerializer(CallSummary.serializer())) { Outcome.Ok(calls) }
+        for (op in listOf("wa.accept_call", "wa.reject_call", "wa.end_call")) {
+            core.on(op) { callAnswer(op) }
+        }
+        core.on("wa.set_muted") { request ->
+            // The body must decode: a wrong shape is the test's bug, not a silent pass.
+            Envelope.json.decodeFromJsonElement(CallMuteBody.serializer(), request.withoutHandle())
+            callAnswer("wa.set_muted")
+        }
+        ok("wa.call_audio_open", HandleAnswer.serializer()) { Outcome.Ok(HandleAnswer(AUDIO)) }
+        handled("wa.picture", PictureBody.serializer(), PictureAnswer.serializer()) { picture(it) }
+        handled("wa.profiles", JidsBody.serializer(), ListSerializer(WaProfile.serializer())) { profiles(it.jids) }
+        core.onTyped("wa.avatars_plan", AvatarsPlanRequest.serializer(), AvatarsPlanAnswer.serializer()) {
+            Outcome.Ok(FakeAvatarsPlan.answer(it))
+        }
+        core.onTyped("wa.names", WaNamesRequest.serializer(), WaNamesAnswer.serializer()) {
+            Outcome.Ok(
+                WaNamesAnswer(
+                    it.contact ?: it.waName ?: it.jid.substringBefore('@'),
+                    "+" + it.jid.substringBefore('@'),
+                ),
+            )
+        }
         core.on("wa.link_write") { request ->
             val req = Envelope.json.decodeFromJsonElement(LinkWriteRequest.serializer(), request)
             this.link = req.link
@@ -107,6 +161,27 @@ class FakeWaGateway(
     /** How often [op] was called. */
     fun count(op: String): Int = core.calls.count { it.op == op }
 
+    /** A gateway op: the request carries `handle` next to the body fields; the body is decoded without it. */
+    private fun <Req, Ans> handled(
+        op: String,
+        reqSer: KSerializer<Req>,
+        ansSer: KSerializer<Ans>,
+        answer: (Req) -> Outcome<Ans>,
+    ) = core.on(op) { request ->
+        val req = Envelope.json.decodeFromJsonElement(reqSer, request.withoutHandle())
+        when (val out = answer(req)) {
+            is Outcome.Ok -> Outcome.Ok(Envelope.json.encodeToJsonElement(ansSer, out.value))
+            is Outcome.Err -> out
+        }
+    }
+
+    private fun callAnswer(op: String): Outcome<kotlinx.serialization.json.JsonElement> =
+        callErrors[op]?.let { Outcome.Err(it) }
+            ?: Outcome.Ok(Envelope.json.encodeToJsonElement(Empty.serializer(), Empty))
+
+    private fun kotlinx.serialization.json.JsonElement.withoutHandle() =
+        JsonObject((this as JsonObject).filterKeys { it != "handle" })
+
     private fun <T> ok(
         op: String,
         ser: KSerializer<T>,
@@ -121,5 +196,19 @@ class FakeWaGateway(
     companion object {
         const val GATEWAY = 7L
         const val STREAM = 8L
+        const val AUDIO = 9L
     }
+}
+
+/** Swallows the PCM: the pump threads of a test run against [FakeCallFrames] instead. */
+object SilentAudioPort : AudioPort {
+    override fun push(
+        handle: Long,
+        pcm: ByteArray,
+    ) = Unit
+
+    override fun pull(
+        handle: Long,
+        out: ByteArray,
+    ): Int = 0
 }

@@ -229,3 +229,27 @@ Summary of what does not move in R1:
 - R2 E3.8a (done): `Documents`, `MediaShare`, `RovstiShareProvider`, plus `ClipboardRepository` and `ShareIntents`;
 - R2 E3.8b (done): roles and permissions in `platform.system.permissions`: `PermissionGroup`, `AppPermissions`, `PermissionState` (`decide`, `nextAction`), `PermissionController`, `SpecialAccess` (+ `FakeSpecialAccess`), `ForegroundStart`; the `RovstiBridge` permission, role, special-access and battery helpers are replaced by them, and `HandoffPermissionsTest` pins the manifest lists;
 - app module: `IncomingPerf`, `NativeIncoming`, the manifest components and the Application/MainActivity classes.
+
+## `:wa` module (E3.9, R9)
+
+`:wa` holds the WhatsApp state of one app; it depends on `:core-bridge` and `:platform` (seams only) and on `:design` (Coil).
+
+| GPUI / bridge source | Kotlin | Notes |
+|---|---|---|
+| `rovsti_wa_ui::settings` link state, `Gateway` handling | `WaLinkStore`, `WaRepository` / `DefaultWaRepository` (R9-4) | link state, events, resync, wake |
+| call handling in `apps/messages` + `WaCallAudio.kt` | `dev.rovsti.wa.calls.WaCalls` (R9-5) | `calls: StateFlow<List<CallSummary>>`, `place`, `accept`, `reject`, `end`, `mute`, `speaker` |
+| `rovsti_wa_ui::avatars` (`WaAvatars`, `fetch`, `decode_image`) | `dev.rovsti.wa.avatars.WaAvatars`, `AvatarBook`, `AvatarCodec`, `WaAvatarFetcher` (R9-5) | `want`, `wantAll`, `wantProfile`, `profile`, `name` |
+| `rovsti_app_core::wa_link::avatars` (`AvatarBook`, `Backoff`) | `AvatarBook` (Kotlin twin, same constants) | `wa.avatars_plan` only names and prunes files (the op is stateless); dedup, parallelism and back-off live in the Kotlin book, as the GPUI client had them in its own book |
+
+Calls:
+
+- `place` and `accept` check `PermissionController.state(PermissionGroup.MICROPHONE)` first. Not granted: `CallResult.NeedsMicrophone`, no gateway call, no `AudioRecord`. `WaCallAudio.start` checks `RECORD_AUDIO` again (defence in depth).
+- The pump runs behind `CallAudioPump` (`AndroidCallAudioPump` = `WaCallAudio`). It starts after `accept` succeeds, or when an outgoing call's `call` event reaches `Active`; it opens `gateway.openCallAudio(id)` and hands `asFrames()` to `WaCallAudio.start`. It stops (and the handle closes) on `end`, `reject`, an `Ended` call event or `close()`. Hanging up silences the audio even when the gateway call fails.
+- Speaker: `speaker(on)` goes to `WaCallAudio.setSpeaker` (API 31+ `setCommunicationDevice`, else `isSpeakerphoneOn`). `platform.telephony.AudioPath` is the Telecom endpoint registry for SIM calls (it needs `CallEndpoint`s that a gateway call never has), so it is not used for WhatsApp calls.
+
+Avatars:
+
+- One fetch per jid at a time, 3 at once, none while a 429 back-off holds (5 s doubling to 5 min, reset by a good answer). A 429 is `RustError.Invalid` with detail `{"code":"rate_limited"}` (`map_error` in `ops/wa/mod.rs`).
+- Files: `filesDir/wa-avatars/<clean jid>~<id>.jpg`, written as a `.part` then renamed, stored already decoded down to 128 px with `BitmapFactory.Options.inSampleSize` (`BitmapAvatarCodec`), 8 MiB budget, pruned oldest first from the `remove` list of `wa.avatars_plan` after every write and at start.
+- Coil: image model `WaAvatar(jid)` (key `wa-avatar:<jid>`), registered with `rovstiImageLoader(context, lowRam) { waAvatars(avatars) }`. `WaAvatars` calls its `invalidate(jid)` when a stored picture changed, so the host removes `MemoryCache.Key("wa-avatar:<jid>")`. Rows call `want(jid, pictureId)` in a `LaunchedEffect(avatars.revision)`.
+- Tests: `WaCallsTest`, `WaAvatarsTest` (virtual time), fixtures `FakeWaGateway` (calls, picture, profiles, plan, names), `FakeAvatarsPlan`, `FakeCallPump`.

@@ -404,7 +404,7 @@ upgrade a release install; acceptance on the owner's phone uses release builds.
 | Messages files | `messages-prefs.json`, `drafts.json`, `scheduled.json`, starred/marks files, `whatsapp-link.json` | same | none |
 | Contacts files | `contacts-prefs.json`, `contacts-trash.json`, `whatsapp-link.json` | same | none |
 | Stops files | `stops-prefs.json`, `trip.json` (+ `trip.legacy.json`), `saved.json` (v2), `places.json`, `history.json`, `gtfs.json`, `next-trip.json`, `tiles/<server key>/` | same | none |
-| Kotlin `SharedPreferences` | `rovsti_bridge`, `rovsti_scheduled_sms`, `rovsti_birthday_reminders`, `rovsti_alarm`, `rovsti_call_reminders`, `rovsti_message_reminders` (`crates/rovsti_android/kotlin/dev/rovsti/bridge/*.kt`) | same names and keys in the ported classes | keep names; a JVM test lists them |
+| Kotlin `SharedPreferences` | `rovsti_bridge`, `rovsti_scheduled_sms`, `rovsti_birthday_reminders`, `rovsti_alarm`, `rovsti_call_reminders`, `rovsti_message_reminders`, `rovsti_phone_settings` (`SettingsMirror.kt`), `rovsti_trip` (`TripService.kt`) (`crates/rovsti_android/kotlin/dev/rovsti/bridge/*.kt`) | same names and keys in the ported classes | keep names; `PrefsNamesTest` pins the eight (`PlatformPrefs.ALL`) |
 | Notification channels | ids created by the bridge (`trip_alarm_v2`, `trip_problem`, message, call channels) | same ids, same importance | keep ids (changing one would reset the user's channel settings) |
 | Pending alarms, pinned shortcuts, launcher | `PendingIntent`s and shortcuts name component classes | same fully qualified class names | 7.2 |
 | FCM token | registered per instance (`WaPush`) | same flavor `firebase`, same service class | token stays valid across the update |

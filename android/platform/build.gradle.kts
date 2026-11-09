@@ -34,6 +34,7 @@ android {
 dependencies {
     api(project(":core-bridge"))
     implementation(project(":design"))
+    api(libs.androidx.activity)
     testFixturesApi(project(":core-bridge"))
     testFixturesApi(libs.coroutines.core)
     testImplementation(libs.junit)

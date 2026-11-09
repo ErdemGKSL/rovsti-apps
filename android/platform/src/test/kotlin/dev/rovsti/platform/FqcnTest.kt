@@ -10,7 +10,7 @@ import org.junit.Test
  * (E3.2-E3.7) and is complete when every `dev.rovsti.bridge.*` component is ported.
  */
 class FqcnTest {
-    /** The 13 `dev.rovsti.bridge` manifest components, minus `RovstiShareProvider` (R2 E3.8a). E3.4 ports the SMS side (`platform/sms/BridgeComponents.kt`, package `dev.rovsti.bridge`). */
+    /** The 13 `dev.rovsti.bridge` manifest components (`RovstiShareProvider` came with R2 E3.8a). E3.4 ports the SMS side (`platform/sms/BridgeComponents.kt`, package `dev.rovsti.bridge`). */
     private val ported =
         listOf(
             "dev.rovsti.bridge.SmsStatusReceiver",
@@ -27,7 +27,8 @@ class FqcnTest {
             "dev.rovsti.bridge.TripWatchdogReceiver",
             "dev.rovsti.bridge.TripAlarmReceiver",
             "dev.rovsti.bridge.AlarmActivity",
-            // E3.8a (R2): dev.rovsti.bridge.RovstiShareProvider comes with Documents and MediaShare.
+            // E3.8a (R2): platform/files/RovstiShareProvider.kt, with Documents and MediaShare.
+            "dev.rovsti.bridge.RovstiShareProvider",
         )
 
     @Test fun everyPortedComponentKeepsItsBridgeName() {
@@ -35,11 +36,11 @@ class FqcnTest {
         assertEquals(emptyList<String>(), missing)
     }
 
-    @Test fun twelveComponentsArePortedAndTheThirteenthIsPlanned() {
-        assertEquals(12, ported.size)
+    @Test fun allThirteenComponentsArePorted() {
+        assertEquals(13, ported.size)
         assertEquals(ported.size, ported.toSet().size)
         val plan = java.io.File("../../docs/kotlin-ui/platform-port.md").readText()
-        assertTrue(plan.contains("RovstiShareProvider") && plan.contains("R2 E3.8a"))
+        assertTrue(plan.contains("RovstiShareProvider") && plan.contains("platform.files"))
     }
 
     @Test fun theManifestNamesAreAllInThePortPlan() {

@@ -26,6 +26,7 @@ compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 compose-animation = { module = "androidx.compose.animation:animation" }
 compose-foundation = { module = "androidx.compose.foundation:foundation" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-activity = { module = "androidx.activity:activity", version.ref = "activityCompose" }
 activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }

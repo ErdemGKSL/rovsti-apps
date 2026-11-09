@@ -9,7 +9,7 @@ Rules: `:platform` keeps each file's logic, constants, intent actions, extras, p
 keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so far:
 `CallReminderReceiver`, `RovstiShareProvider`, `MessageReminderReceiver`, `MmsFileProvider`, `MmsResultReceiver`, `ReplyReceiver`,
 `ScheduledSmsReceiver`, `SmsStatusReceiver`, `BirthdayReminderReceiver`, `AlarmActivity`, `TripAlarmReceiver`, `TripService`,
-`TripWatchdogReceiver`. `RovstiShareProvider` is the E3.8a share provider (R2).
+`TripWatchdogReceiver`. `RovstiShareProvider` is the E3.8a share provider (R2, ported to `platform/files/RovstiShareProvider.kt`).
 
 ## Bridge files (`crates/rovsti_android/kotlin/dev/rovsti/bridge/`)
 
@@ -28,14 +28,14 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `ContactPhotos.kt` | platform.contacts.ContactPhotos (typed `PhotoPlan`, `ContactResult`) | 2 (E3.2) | ported |
 | `ContactsEdit.kt` | platform.contacts.ContactsEdit (typed `ContactDraft`, `EDITED_MIMES` kept, JSON envelope dropped) | 2 (E3.2) | ported |
 | `ContactsQuery.kt` | platform.contacts.ContactsQuery (rows grouped into `WireContact`) | 2 (E3.2) | ported |
-| `Documents.kt` | platform.files (E3.8a) | R2 E3.8a | R2 E3.8a |
+| `Documents.kt` | platform.files.Documents (limits and pure helpers kept) plus `Contracts.kt` (`ExportDocument`, `ImportDocument`, `PickPhoto`, `CapturePhoto`) and `FilesRepository`; `Documents.start*`, request codes and the JSON result are replaced by `FileResult` | R2 E3.8a | ported |
 | `Epic17Probes.kt` | none | 1 (E3.1) | dropped: GPUI spikes (ARCH 7.3) |
 | `Handoff.kt` | platform.system.Handoff | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `Haptics.kt` | platform.system.Haptics | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
 | `Headless.kt` | platform.Headless (blocking wrapper over Rust.core().headless) | 1 (E3.1) | ported, rewritten |
 | `KeypadTone.kt` | platform.telephony.KeypadTone | 5 (E3.5) | ported |
 | `Mailbox.kt` | none: one-shots become intent handling in the activity | R2 E3.11 | dropped: one-shots become intent handling in the activity (ARCH 7.3, E3.11) |
-| `MediaShare.kt` | platform.files (E3.8a) | R2 E3.8a | R2 E3.8a |
+| `MediaShare.kt` | platform.files.MediaShare (names, share dir, `mimeFor`, gallery save, staging) plus `ShareIntents`; `RovstiShareProvider` (package `dev.rovsti.bridge`) is `files/RovstiShareProvider.kt` | R2 E3.8a | ported |
 | `MessageNotifications.kt` | platform.notify.MessageNotifications | 6 (E3.6) | ported |
 | `MessageReminders.kt` | platform.notify.MessageReminders | 6 (E3.6) | ported |
 | `MissedCalls.kt` | platform.calllog.MissedCalls; LocaleTimeInfo is platform.system.LocaleTimeInfo | 3 (E3.3), LocaleTimeInfo in 1 | ported |
@@ -219,13 +219,13 @@ and emits `wa_push` on `PlatformEvents`, which `:wa` (E3.9, R2) turns into `reco
 `CallAudio.asFrames()` binds the `:core-bridge` handle, so the microphone thread calls `audioPush` and the speaker thread
 `audioPull`; frame size equals `CallAudio.FRAME_BYTES`, pinned by a test).
 
-Tests that guard the whole round: `FqcnTest` (12 components load by their `dev.rovsti.bridge` names; `RovstiShareProvider` is the
-13th, R2 E3.8a), `PendingIntentContractTest` (action and extra strings of reminders, scheduled SMS, reply actions, trip alarm and
+Tests that guard the whole round: `FqcnTest` (all 13 components load by their `dev.rovsti.bridge` names, `RovstiShareProvider`
+being the 13th, R2 E3.8a), `PendingIntentContractTest` (action and extra strings of reminders, scheduled SMS, reply actions, trip alarm and
 watchdog equal the GPUI source constants, read as text), `PortInventoryTest` (every bridge `.kt` has a row with an allowed status).
 
 Summary of what does not move in R1:
 
 - dropped: `SpikeProbes`, `Epic17Probes`, `Mailbox`, the `RovstiBridge` statics (replaced by repositories and `PlatformEvents`);
-- R2 E3.8a: `Documents`, `MediaShare`, `RovstiShareProvider`;
+- R2 E3.8a (done): `Documents`, `MediaShare`, `RovstiShareProvider`, plus `ClipboardRepository` and `ShareIntents`;
 - R2 E3.8b: roles and permissions (the roles half of `Handoff`/`SystemPages`, the permission helpers of `RovstiBridge`);
 - app module: `IncomingPerf`, `NativeIncoming`, the manifest components and the Application/MainActivity classes.

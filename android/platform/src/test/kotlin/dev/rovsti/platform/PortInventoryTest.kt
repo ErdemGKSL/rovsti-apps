@@ -57,6 +57,6 @@ class PortInventoryTest {
         for (f in listOf("SpikeProbes.kt", "Epic17Probes.kt", "Mailbox.kt", "RovstiBridge.kt")) {
             assertTrue("$f: ${status[f]}", status[f]!!.startsWith("dropped: "))
         }
-        for (f in listOf("Documents.kt", "MediaShare.kt")) assertTrue(f, status[f]!!.startsWith("R2 E3.8a"))
+        for (f in listOf("Documents.kt", "MediaShare.kt")) assertTrue(f, status[f]!!.startsWith("ported"))
     }
 }

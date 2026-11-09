@@ -755,6 +755,12 @@ and convention tests; contacts; call log/blocklist/SIM; SMS/MMS/scheduled; telec
 notifications/reminders; location/trip/alarm and `kotlin_contract.rs` moved to `rovsti_app_core`; WhatsApp seams,
 FQCN and PendingIntent contract, port inventory `docs/kotlin-ui/platform-port.md`). No screenshots in R1. E2 re-verified
 done by this planner (ops modules, fixtures incl. the headless pairs, `:core-bridge` facades and wire models).
+**R2** -> `_bmad-output/kotlin-ui/plans/round-09.md` (planned 2026-11-09 at base `840588c`; E3 R1 re-verified done in code):
+E3.8a-E3.11 in 8 steps (`platform.files` + `RovstiShareProvider`; `PermissionState`/`PermissionController`/`SpecialAccess` and
+the HANDOFF permission lists; the WhatsApp settings machine moved from `rovsti_wa_ui::model` to `rovsti_app_core::wa_link::settings`
+with the stateless op `wa.settings_apply`; `:wa` repository, calls, avatars; the settings screen with `e3.10-*` goldens; `:shell`
+activity/container/permission UI; common settings pages ported from Convx `IosSettingsGroup`/`SettingsPage`/`AboutScreen`, licences,
+close E3). Haptics levels are Off/Light/Normal (`rovsti_core::wire::HapticsLevel`), not Off/System/Strong.
 
 | Story | Title | Round | Status |
 |---|---|---|---|
@@ -765,11 +771,11 @@ done by this planner (ops modules, fixtures incl. the headless pairs, `:core-bri
 | E3.5 | Telecom core: CallRegistry, audio path, proximity, call notifications | R1 | done (round-08 step 5) |
 | E3.6 | Notifications, reminders, shortcuts | R1 | done (round-08 step 6) |
 | E3.7 | Location, TripService, TripAlarm, AlarmSound, AlarmActivity | R1 | done (round-08 step 7) |
-| E3.8a | Files, media store, share, clipboard, Photo Picker, camera capture, SAF import/export | R2 | todo |
-| E3.8b | Handoff, roles, `PermissionController` + `PermissionState` rules, special access, OEM settings (ARCH 7.5) | R2 | todo |
-| E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads, `WaAvatars` | R2 | todo |
-| E3.10 | Shared WhatsApp settings screen | R2 | todo |
-| E3.11 | `:shell`: RovstiRoot, base activity, containers, permission UI, common settings, licences | R2 | todo |
+| E3.8a | Files, media store, share, clipboard, Photo Picker, camera capture, SAF import/export | R2 | in-progress (round-09 step 1) |
+| E3.8b | Handoff, roles, `PermissionController` + `PermissionState` rules, special access, OEM settings (ARCH 7.5) | R2 | in-progress (round-09 step 2) |
+| E3.9 | `:wa`: WaRepository, events, wake, calls and audio threads, `WaAvatars` | R2 | in-progress (round-09 steps 3-5) |
+| E3.10 | Shared WhatsApp settings screen | R2 | in-progress (round-09 steps 3 and 6) |
+| E3.11 | `:shell`: RovstiRoot, base activity, containers, permission UI, common settings, licences | R2 | in-progress (round-09 steps 7-8) |
 
 Next planner: **E3 R2** is E3.8a (files, media, share, `RovstiShareProvider`), E3.8b (roles, `PermissionController`, special
 access), E3.9 (`:wa`, on the `dev.rovsti.platform.wa` seams `WaPush`, `WaIncoming`, `WaCallAudio` + `CallFrames`), E3.10 and

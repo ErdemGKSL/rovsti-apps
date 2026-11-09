@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldDecorator
@@ -94,7 +95,10 @@ fun GlassTextField(
     imeAction: ImeAction = if (search) ImeAction.Search else ImeAction.Done,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     onSubmit: () -> Unit = {},
+    maxLines: Int = 1,
+    minLines: Int = 1,
 ) {
+    val multiline = maxLines > 1
     val tokens = RovstiTheme.glass
     val colors = RovstiTheme.colors
     val interaction = remember { MutableInteractionSource() }
@@ -112,9 +116,18 @@ fun GlassTextField(
             modifier
                 .heightIn(min = FieldMinHeight)
                 .alpha(if (enabled) 1f else DISABLED_ALPHA)
-                .rovstiGlass(GlassPreset.Bar, RovstiShapes.capsule, "field", outerShadow = false)
-                .drawBehind { drawPill(fill, tokens.edge) }
-                .pointerInput(enabled) {
+                .rovstiGlass(
+                    GlassPreset.Bar,
+                    if (multiline) RoundedCornerShape(FieldMinHeight / 2) else RovstiShapes.capsule,
+                    "field",
+                    outerShadow = false,
+                ).drawBehind {
+                    drawPill(
+                        fill,
+                        tokens.edge,
+                        if (multiline) FieldMinHeight.toPx() / 2f else Float.MAX_VALUE,
+                    )
+                }.pointerInput(enabled) {
                     detectTapGestures {
                         if (enabled) {
                             focus.requestFocus()
@@ -124,7 +137,12 @@ fun GlassTextField(
                 }.focusRequester(focus),
         enabled = enabled,
         textStyle = RovstiTheme.type.body.copy(color = tokens.foreground),
-        lineLimits = TextFieldLineLimits.SingleLine,
+        lineLimits =
+            if (multiline) {
+                TextFieldLineLimits.MultiLine(minHeightInLines = minLines, maxHeightInLines = maxLines)
+            } else {
+                TextFieldLineLimits.SingleLine
+            },
         keyboardOptions = keyboardOptions.copy(imeAction = imeAction),
         onKeyboardAction = { onSubmit() },
         interactionSource = interaction,
@@ -166,14 +184,16 @@ fun GlassTextField(
 private fun DrawScope.drawPill(
     fill: Color,
     edge: Color,
+    maxRadius: Float,
 ) {
-    drawRoundRect(fill, cornerRadius = CornerRadius(size.height / 2f))
+    val radius = minOf(size.height / 2f, maxRadius)
+    drawRoundRect(fill, cornerRadius = CornerRadius(radius))
     val hairline = 0.5.dp.toPx()
     drawRoundRect(
         edge,
         topLeft = Offset(hairline / 2f, hairline / 2f),
         size = Size(size.width - hairline, size.height - hairline),
-        cornerRadius = CornerRadius((size.height - hairline) / 2f),
+        cornerRadius = CornerRadius(radius - hairline / 2f),
         style = Stroke(hairline),
     )
 }

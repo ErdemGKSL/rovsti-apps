@@ -52,6 +52,16 @@ class SheetState(
 
     private var leaving = false
 
+    /**
+     * Asked before a finger, a back gesture or a tap on the scrim closes the sheet; `false` keeps it open (it rubber
+     * bands back) and runs [onDismissBlocked]. A programmatic [dismiss] is never asked (a form that saved closes itself).
+     */
+    var canDismiss: () -> Boolean = { true }
+    var onDismissBlocked: () -> Unit = {}
+
+    /** True when a user gesture may close the sheet now. */
+    fun mayDismiss(): Boolean = dismissible && canDismiss()
+
     /** Tallest offset (smallest value). */
     val topOffset: Float get() = offsets.firstOrNull() ?: 0f
 
@@ -86,7 +96,7 @@ class SheetState(
     fun drag(dy: Float) {
         if (leaving) return
         isDragging = true
-        val next = sheetDragOffset(offset.value + dy, topOffset, bottomOffset, containerHeight, dismissible)
+        val next = sheetDragOffset(offset.value + dy, topOffset, bottomOffset, containerHeight, mayDismiss())
         scope.launch(start = CoroutineStart.UNDISPATCHED) { offset.snapTo(next) }
     }
 
@@ -95,9 +105,20 @@ class SheetState(
         scope.launch {
             isDragging = false
             if (leaving) return@launch
-            when (val target = sheetReleaseTarget(offset.value, velocity, offsets, containerHeight, dismissible)) {
-                SheetTarget.Dismiss -> exit(velocity)
-                is SheetTarget.Snap -> settleTo(target.offset, velocity)
+            val asked = dismissible
+            when (val target = sheetReleaseTarget(offset.value, velocity, offsets, containerHeight, asked)) {
+                SheetTarget.Dismiss -> {
+                    if (canDismiss()) {
+                        exit(velocity)
+                    } else {
+                        settleTo(settledOffset, velocity)
+                        onDismissBlocked()
+                    }
+                }
+
+                is SheetTarget.Snap -> {
+                    settleTo(target.offset, velocity)
+                }
             }
         }
 

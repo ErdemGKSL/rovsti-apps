@@ -15,6 +15,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
+import dev.rovsti.contacts.DraftSeed
 import dev.rovsti.design.overlay.AlertAction
 import dev.rovsti.design.overlay.AlertEntry
 import dev.rovsti.design.overlay.AlertRole
@@ -56,8 +57,10 @@ fun ContactsListEffects(
     navigator: TabNavigator<ContactsRoute>,
     overlays: OverlayController,
     context: Context,
+    onEdit: ((id: Long?, seed: DraftSeed?) -> Unit)? = null,
 ) {
     val latestOverlays = rememberUpdatedState(overlays)
+    val latestEdit = rememberUpdatedState(onEdit)
     LaunchedEffect(viewModel, navigator) {
         viewModel.effects.collect { effect ->
             val toast = { text: String -> latestOverlays.value.showToast(text) }
@@ -67,7 +70,8 @@ fun ContactsListEffects(
                 }
 
                 is ContactsListEffect.OpenEditor -> {
-                    navigator.push(ContactsRoute.ContactEditor(effect.id, effect.seed))
+                    latestEdit.value?.invoke(effect.id, effect.seed)
+                        ?: navigator.push(ContactsRoute.ContactEditor(effect.id, effect.seed))
                 }
 
                 is ContactsListEffect.Dial -> {

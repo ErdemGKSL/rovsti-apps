@@ -17,6 +17,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import dev.rovsti.contacts.editor.EditorOutcome
+import dev.rovsti.contacts.editor.contactEditorModel
+import dev.rovsti.contacts.editor.presentContactEditor
 import dev.rovsti.contacts.list.ContactsListEffects
 import dev.rovsti.contacts.list.ContactsListScreen
 import dev.rovsti.contacts.list.rememberContactsListViewModel
@@ -73,7 +76,14 @@ fun ContactsListPage(
     }
     val overlays = LocalOverlay.current
     val context = LocalContext.current
-    ContactsListEffects(viewModel, navigator, overlays, context)
+    ContactsListEffects(viewModel, navigator, overlays, context) { id, seed ->
+        presentContactEditor(
+            contactEditorModel(container, id, seed),
+            overlays,
+            container.scope,
+            outcome = EditorOutcome { saved, created -> if (created) navigator.push(ContactsRoute.ContactCard(saved)) },
+        )
+    }
     ContactsListScreen(
         state = state,
         onAction = viewModel::onAction,

@@ -13,4 +13,5 @@
     <string name="coming_message">This screen arrives in a later update.</string>
     <string name="card_wish">Wish</string>
     <string name="card_chat_whatsapp">Chat on WhatsApp</string>
+    <string name="editor_delete">Delete</string>
 </resources>

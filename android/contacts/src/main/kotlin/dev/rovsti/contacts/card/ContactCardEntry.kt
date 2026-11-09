@@ -17,6 +17,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalContext
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
+import dev.rovsti.contacts.editor.contactEditorModel
+import dev.rovsti.contacts.editor.presentContactEditor
 import dev.rovsti.design.overlay.ActionSheetAction
 import dev.rovsti.design.overlay.ActionSheetEntry
 import dev.rovsti.design.overlay.LocalOverlay
@@ -69,7 +71,15 @@ fun ContactCardPage(
     val state by model.state.collectAsState()
     val overlays = LocalOverlay.current
     val context = LocalContext.current
-    ContactCardEffects(model, navigator, overlays, context) { query -> container.pendingSearch.value = query }
+    ContactCardEffects(
+        model,
+        navigator,
+        overlays,
+        context,
+        onEdit = { editId ->
+            presentContactEditor(contactEditorModel(container, editId, null), overlays, container.scope)
+        },
+    ) { query -> container.pendingSearch.value = query }
     ContactCardScreen(
         state = state,
         onAction = model::onAction,
@@ -86,9 +96,11 @@ fun ContactCardEffects(
     navigator: TabNavigator<ContactsRoute>,
     overlays: OverlayController,
     context: Context,
+    onEdit: ((Long) -> Unit)? = null,
     onSearch: (String) -> Unit,
 ) {
     val latestOverlays = rememberUpdatedState(overlays)
+    val latestEdit = rememberUpdatedState(onEdit)
     val latestSearch = rememberUpdatedState(onSearch)
     LaunchedEffect(model, navigator) {
         model.effects.collect { effect ->
@@ -128,7 +140,8 @@ fun ContactCardEffects(
                 }
 
                 is ContactCardEffect.OpenEditor -> {
-                    navigator.push(ContactsRoute.ContactEditor(effect.id, null))
+                    latestEdit.value?.invoke(effect.id)
+                        ?: navigator.push(ContactsRoute.ContactEditor(effect.id, null))
                 }
 
                 is ContactCardEffect.OpenCard -> {

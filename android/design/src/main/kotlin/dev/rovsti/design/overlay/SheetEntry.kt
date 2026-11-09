@@ -82,6 +82,8 @@ class SheetEntry(
     modal: Boolean = true,
     private val dismissible: Boolean = modal,
     private val onDismissed: () -> Unit = {},
+    private val canDismiss: () -> Boolean = { true },
+    private val onDismissBlocked: () -> Unit = {},
     private val content: @Composable ColumnScope.(SheetState) -> Unit,
 ) : OverlayEntry(modal = modal, title = title) {
     private var sheetRef by mutableStateOf<SheetState?>(null)
@@ -133,7 +135,11 @@ class SheetEntry(
                     },
                 )
             }
+        val latestCanDismiss by rememberUpdatedState(canDismiss)
+        val latestBlocked by rememberUpdatedState(onDismissBlocked)
         SideEffect {
+            sheet.canDismiss = { latestCanDismiss() }
+            sheet.onDismissBlocked = { latestBlocked() }
             sheet.configure(height, offsets)
             if (sheetRef !== sheet) sheetRef = sheet
         }
@@ -166,7 +172,14 @@ class SheetEntry(
             val away = if (dismissible) sheet.containerHeight else sheet.bottomOffset
             try {
                 events.collect { sheet.preview(backPreviewOffset(start, away, it.progress)) }
-                if (dismissible) sheet.dismiss() else sheet.animateToDetent(sheet.detentOffsets.lastIndex)
+                if (dismissible && !sheet.canDismiss()) {
+                    sheet.settleBack()
+                    sheet.onDismissBlocked()
+                } else if (dismissible) {
+                    sheet.dismiss()
+                } else {
+                    sheet.animateToDetent(sheet.detentOffsets.lastIndex)
+                }
             } catch (c: CancellationException) {
                 sheet.settleBack()
                 throw c
@@ -179,7 +192,12 @@ class SheetEntry(
                     progress = { sheet.presentedFraction() },
                     lightAlpha = SheetMetrics.ScrimAlpha,
                     darkAlpha = SheetMetrics.ScrimAlpha,
-                    onTap = if (dismissible) ({ sheet.dismiss() }) else null,
+                    onTap =
+                        if (dismissible) {
+                            { if (sheet.canDismiss()) sheet.dismiss() else sheet.onDismissBlocked() }
+                        } else {
+                            null
+                        },
                 )
             }
             SheetSurface(sheet, host, modal, stepBack::value) { content(sheet) }

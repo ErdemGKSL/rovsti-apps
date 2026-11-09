@@ -24,10 +24,10 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `CallLogWrite.kt` | platform.calllog / platform.telephony | 3 (E3.3) | todo |
 | `CallReminders.kt` | platform.notify.CallReminders | 6 (E3.6) | todo |
 | `CallsApi.kt` | platform.telephony.CallsApi | 5 (E3.5) | todo |
-| `ContactOptions.kt` | platform.contacts.ContactOptions | 2 (E3.2) | todo |
-| `ContactPhotos.kt` | platform.contacts.ContactPhotos | 2 (E3.2) | todo |
-| `ContactsEdit.kt` | platform.contacts.ContactsEdit | 2 (E3.2) | todo |
-| `ContactsQuery.kt` | platform.contacts.ContactsQuery | 2 (E3.2) | todo |
+| `ContactOptions.kt` | platform.contacts.ContactCallOptions (renamed: `ContactOptions` is the `:core-bridge` model it returns; the picker is an intent plus `parsePicked`, no `startActivityForResult`) | 2 (E3.2) | ported |
+| `ContactPhotos.kt` | platform.contacts.ContactPhotos (typed `PhotoPlan`, `ContactResult`) | 2 (E3.2) | ported |
+| `ContactsEdit.kt` | platform.contacts.ContactsEdit (typed `ContactDraft`, `EDITED_MIMES` kept, JSON envelope dropped) | 2 (E3.2) | ported |
+| `ContactsQuery.kt` | platform.contacts.ContactsQuery (rows grouped into `WireContact`) | 2 (E3.2) | ported |
 | `Documents.kt` | platform.files (E3.8a) | R2 E3.8a | R2 E3.8a |
 | `Epic17Probes.kt` | none | 1 (E3.1) | dropped: GPUI spikes (ARCH 7.3) |
 | `Handoff.kt` | platform.system.Handoff | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
@@ -48,7 +48,7 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `RovstiBridge.kt` | none: the Rust-calls-Kotlin methods become repositories; emit becomes PlatformEvents | 1 (E3.1) | dropped: replaced by seams |
 | `ScheduledSms.kt` | platform.sms.ScheduledSms | 4 (E3.4) | todo |
 | `SettingsMirror.kt` | platform.system.SettingsMirror | 1 (E3.1) | ported (Handoff and the roles half revisited in R2 E3.8b) |
-| `Shortcuts.kt` | platform.contacts.Shortcuts | 2 (E3.2) | todo |
+| `Shortcuts.kt` | platform.contacts.Shortcuts + `ShortcutsRepository` (target activity from `PlatformComponents`; `EXTRA_CONTACT_ID` is now owned here, `BirthdayReminders` in step 6 reads it) | 2 (E3.2) | ported |
 | `SimAccounts.kt` | platform.calllog / platform.telephony | 3 (E3.3) | todo |
 | `SimProbe.kt` | platform.calllog / platform.telephony | 3 (E3.3) | todo |
 | `SmsQuery.kt` | platform.sms.SmsQuery | 4 (E3.4) | todo |
@@ -114,8 +114,22 @@ keep `dev.rovsti.bridge.<Name>` (ARCH 7.2); `FqcnTest` lists the ones ported so 
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/XiaomiOpsTest.kt` | `:platform` test, same name | 1 | moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic16Test.kt` | SettingsMirrorTest (mirror and system-page cases); the Mailbox, tone, SIM and document cases go with their classes | 1, 3, 5 | partly moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/MessagesSeamTest.kt` | MessagesSeamTest (Headless cases, FakeRustCore); SMS/MMS/notification/scheduled cases go with E3.4/E3.6 | 1, 4, 6 | partly moved |
-| `apps/phone/.../src/test/java/dev/rovsti/bridge/ContactPhotosTest.kt` | E3.2 | 2 | todo |
+| `apps/phone/.../src/test/java/dev/rovsti/bridge/ContactPhotosTest.kt` | `:platform` test `contacts.ContactPhotosTest` (plan cases now on `PhotoPlan`) | 2 | moved |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/MultiCallTest.kt` | E3.5 | 5 | todo |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/WaIncomingTest.kt` | E3.9 seams | 8 | todo |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/Epic17Test.kt` | blocklist and SIM cases to E3.3; the Epic17Probes half is dropped | 3 | partly todo |
 | `apps/phone/.../src/test/java/dev/rovsti/bridge/SpikeProbesTest.kt` | dropped with its GPUI spike | 1 | dropped |
+
+## Contacts repository (E3.2, step 2)
+
+`dev.rovsti.platform.contacts`: `ContactsRepository` (reads are cold `Flow`s that query on collect and again after a
+`ContactsContract.AUTHORITY_URI` change, debounced by `CHANGE_DEBOUNCE_MS` so a burst is one re-query, `mapLatest`,
+`flowOn(io)`; writes are `suspend` and answer a sealed `ContactResult`), `AndroidContactsRepository(context, io)`,
+`FakeContactsRepository` and `RecordingProvider` in `:platform` testFixtures.
+
+- Models are the `:core-bridge` ones: `search.WireContact` for list rows, `ContactDraft` for `full()`/`detail()`/`save()`
+  (the plan's "FullContact" is `ContactDraft`, the shape Rust already owns), `Group`, `Account`, `PhotoPlan`,
+  `ContactOptions`, `PinShortcut`, stops `ShortcutAnswer`. New in `model.contacts/ProviderModels.kt`:
+  `GroupMembersResult`, `ImportResult`, `PhotoSize` (the `contacts.*` wildcard in `compose_stability.conf` covers them).
+- `import(drafts)` takes the drafts the Rust `contacts.import_plan` op returns, not a JSON string.
+- The tests use `runCurrent()`, not `advanceUntilIdle()`, to run `backgroundScope` collectors (the latter does not run them).

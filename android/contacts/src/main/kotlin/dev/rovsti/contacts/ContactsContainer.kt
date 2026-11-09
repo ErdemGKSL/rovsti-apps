@@ -5,6 +5,7 @@ import dev.rovsti.contacts.card.CardWaPort
 import dev.rovsti.contacts.card.RepositoryCardWaPort
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
+import dev.rovsti.contacts.data.RecentTracker
 import dev.rovsti.contacts.data.WaMarks
 import dev.rovsti.contacts.photo.GatewayWaPhotoPort
 import dev.rovsti.contacts.photo.WaPhotoPort
@@ -98,6 +99,9 @@ open class ContactsContainer(
             nameFormat = { store.prefs.value.nameFormat },
         )
     }
+
+    /** Marks the contacts added since the last pull ("Recently added"); started once, follows the book. */
+    val recentTracker: RecentTracker by lazy { RecentTracker(book, store, ops, scope).also { it.start() } }
 
     /** The list's WhatsApp marks, from the chats the instance already has. */
     val waMarks: WaMarks by lazy { WaMarks(wa, book.book, waCard, scope) }

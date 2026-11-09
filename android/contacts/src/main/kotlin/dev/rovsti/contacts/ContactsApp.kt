@@ -11,6 +11,7 @@ import dev.rovsti.contacts.card.ContactCardPage
 import dev.rovsti.contacts.cleanup.CleanupPage
 import dev.rovsti.contacts.dupes.DupesPage
 import dev.rovsti.contacts.editor.ContactEditorPage
+import dev.rovsti.contacts.emergency.EmergencyPage
 import dev.rovsti.contacts.favorites.FavoritesPage
 import dev.rovsti.contacts.favorites.UpcomingPage
 import dev.rovsti.contacts.groups.GroupPageDestination
@@ -19,6 +20,7 @@ import dev.rovsti.contacts.intake.IntakePage
 import dev.rovsti.contacts.intake.rememberImportActions
 import dev.rovsti.contacts.list.SelectToolbar
 import dev.rovsti.contacts.list.rememberContactsListViewModel
+import dev.rovsti.contacts.recent.RecentPage
 import dev.rovsti.contacts.trash.TrashPage
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.transition.TabNavigator
@@ -48,6 +50,8 @@ fun ContactsApp(
         }
     // A long press on a back button jumps to the root of the tab: selecting the current tab does that.
     val popToRoot: () -> Unit = remember(navigator) { { navigator.select(navigator.currentTab) } }
+    // "Recently added" (C15) is marked on every pull of the book, whichever page is open.
+    remember(container) { container.recentTracker }
     // Select mode (E4.8) folds the tab bar and puts its toolbar beside the circle.
     val list = rememberContactsListViewModel(container)
     val select by list.selectToolbar.collectAsState()
@@ -114,5 +118,7 @@ fun ContactsApp(
         entry<ContactsRoute.UpcomingBirthdays> { UpcomingPage(container, navigator, pop) }
         entry<ContactsRoute.Duplicates> { DupesPage(container, pop) }
         entry<ContactsRoute.Cleanup> { CleanupPage(container, pop) }
+        entry<ContactsRoute.Emergency> { EmergencyPage(container, navigator, pop) }
+        entry<ContactsRoute.Recent> { RecentPage(container, navigator, pop) }
     }
 }

@@ -195,6 +195,9 @@ internal class CardRig(
     val staging: File = Files.createTempDirectory("rovsti-card-staging").toFile().apply { deleteOnExit() }
     val blocklist = FakeBlocklistRepository(allowed = canBlock)
     val model: ContactCardViewModel
+
+    /** The preferences of this rig (My card, emergency). */
+    val store: ContactsStore
     val callOptions: CallOptionsViewModel
 
     init {
@@ -217,7 +220,7 @@ internal class CardRig(
             }
         assertTrue("Rust.init: $started", started is Outcome.Ok)
         val ops = NativeContactsOps(Rust.core())
-        val store = ContactsStore(ops, File(root, "store").apply { mkdirs() }.absolutePath) { SampleCards.NOW }
+        store = ContactsStore(ops, File(root, "store").apply { mkdirs() }.absolutePath) { SampleCards.NOW }
         val provider = SampleCards.Keyed(repo)
         val book =
             BookRepository(

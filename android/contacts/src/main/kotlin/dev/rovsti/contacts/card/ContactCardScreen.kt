@@ -170,7 +170,7 @@ fun ContactCardScreen(
                     Toolbar(
                         actions = toolbar,
                         onOverflow = { anchor, _ ->
-                            overlays?.present(ButtonMenuEntry(anchor, overflowMenu(anchor, overlays, onAction)))
+                            overlays?.present(ButtonMenuEntry(anchor, overflowMenu(anchor, overlays, header, onAction)))
                         },
                     )
                 }
@@ -672,6 +672,7 @@ private fun Tag(text: String) {
 private fun overflowMenu(
     anchor: Rect,
     overlays: OverlayController,
+    header: CardHeader,
     onAction: (ContactCardAction) -> Unit,
 ): ImmutableList<MenuItem> {
     fun submenu(items: ImmutableList<MenuItem>) = { overlays.present(ButtonMenuEntry(anchor, items)) }
@@ -691,6 +692,15 @@ private fun overflowMenu(
         MenuItem.Action("Copy", RovstiIcons.Copy) { submenu(copy)() },
         MenuItem.Action("Export .vcf", RovstiIcons.Download) { onAction(ContactCardAction.ExportVcf) },
         MenuItem.Action("Add to Home Screen", RovstiIcons.AddToHome) { onAction(ContactCardAction.AddToHome) },
+        MenuItem.Separator,
+        MenuItem.Action(
+            if (header.isMyCard) "Not Me" else "This Is Me",
+            RovstiIcons.Person,
+        ) { onAction(ContactCardAction.ToggleMyCard) },
+        MenuItem.Action(
+            if (header.isEmergency) "Remove from Emergency Contacts" else "Add to Emergency Contacts",
+            RovstiIcons.MedicalCross,
+        ) { onAction(ContactCardAction.ToggleEmergency) },
         MenuItem.Separator,
         MenuItem.Action("Delete Contact", RovstiIcons.Trash, destructive = true) {
             onAction(ContactCardAction.Delete)

@@ -609,6 +609,36 @@ object RovstiIcons {
         }
     }
 
+    /** A clock face: "Recently Added" and other time rows. */
+    val Clock: ImageVector by lazy {
+        stroked("Clock") {
+            ring(12f, 12f, 8.5f)
+            moveTo(12f, 7.5f)
+            verticalLineTo(12f)
+            lineTo(15f, 14f)
+        }
+    }
+
+    /** A medical cross in a rounded square: the emergency list. */
+    val MedicalCross: ImageVector by lazy {
+        stroked("MedicalCross") {
+            moveTo(12f, 6.5f)
+            verticalLineTo(17.5f)
+            moveTo(6.5f, 12f)
+            horizontalLineTo(17.5f)
+            moveTo(7f, 3.5f)
+            horizontalLineTo(17f)
+            arcTo(3.5f, 3.5f, 0f, false, true, 20.5f, 7f)
+            verticalLineTo(17f)
+            arcTo(3.5f, 3.5f, 0f, false, true, 17f, 20.5f)
+            horizontalLineTo(7f)
+            arcTo(3.5f, 3.5f, 0f, false, true, 3.5f, 17f)
+            verticalLineTo(7f)
+            arcTo(3.5f, 3.5f, 0f, false, true, 7f, 3.5f)
+            close()
+        }
+    }
+
     private fun PathBuilder.bubble() {
         moveTo(6f, 4f)
         horizontalLineToRelative(12f)

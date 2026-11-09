@@ -48,15 +48,18 @@ data class MenuKey(
     val starred: Boolean,
 )
 
-/** The "My card" row at the top of the list. */
+/**
+ * The "My card" row at the top of the list (`contacts.me_state`): [contactId] null is "Set up my card", the row that
+ * asks which contact is you.
+ */
 @Immutable
 data class MyCardItem(
-    val contactId: Long,
+    val contactId: Long?,
     val title: String,
     val detail: String,
 )
 
-/** The "Recent" row ("1 added - 2 edited"); the Recents page is a later story, so the row is not drawn yet. */
+/** The "Recent" row ("1 added - 2 edited") that opens the Recently Added / Edited page (E4.14). */
 @Immutable
 data class RecentEntry(
     val title: String,
@@ -114,6 +117,8 @@ data class ContactsListUiState(
     val viewedClear: Confirm = Confirm("Clear Recently Viewed?", ""),
     val myCard: MyCardItem? = null,
     val recentEntry: RecentEntry? = null,
+    /** The detail of the "Emergency Contacts" row ("2 of 5", "Not set up"); null hides the row (the model has not answered). */
+    val emergencyDetail: String? = null,
     /** `contacts.quick` per [MenuKey]; the row menus are built from it. */
     val quick: ImmutableMap<MenuKey, ImmutableList<QuickAction>> = persistentMapOf(),
     val selectMode: SelectMode? = null,
@@ -186,6 +191,11 @@ sealed interface ContactsListAction {
     data object ClearViewed : ContactsListAction
 
     data object OpenMyCard : ContactsListAction
+
+    /** The "Emergency Contacts" row and the "Recent" row: the page opens the route. */
+    data object OpenEmergency : ContactsListAction
+
+    data object OpenRecent : ContactsListAction
 }
 
 /** One-shot results: navigation, toasts, system intents, a confirmation. Delivered once, through a channel. */

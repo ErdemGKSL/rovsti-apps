@@ -116,6 +116,8 @@ data class CardHeader(
     val presence: String?,
     val starred: Boolean,
     val isMyCard: Boolean = false,
+    /** On the emergency list: the "..." menu offers Remove instead of Add. */
+    val isEmergency: Boolean = false,
 )
 
 /** The "Recent" section: hidden, asking for the call log, or the newest calls. */
@@ -212,6 +214,12 @@ sealed interface ContactCardAction {
     data object CopyVcard : ContactCardAction
 
     data object AddToHome : ContactCardAction
+
+    /** "This Is Me" / "Not Me" of the "..." menu (C38). */
+    data object ToggleMyCard : ContactCardAction
+
+    /** "Add to / Remove from Emergency Contacts" of the "..." menu (C43). */
+    data object ToggleEmergency : ContactCardAction
 }
 
 /** One-shot results of the card; the entry turns them into intents, navigation and toasts. */

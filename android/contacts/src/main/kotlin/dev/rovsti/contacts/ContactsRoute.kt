@@ -65,6 +65,14 @@ sealed interface ContactsRoute {
     @Serializable
     data object Cleanup : ContactsRoute
 
+    /** The Emergency Contacts page (E4.14, C43): up to five people in the user's order, each with a Call button. */
+    @Serializable
+    data object Emergency : ContactsRoute
+
+    /** The Recently Added / Edited page (E4.14, C15, C45). */
+    @Serializable
+    data object Recent : ContactsRoute
+
     @Serializable
     data object WhatsAppSettings : ContactsRoute
 
@@ -149,6 +157,8 @@ fun chromeFor(route: ContactsRoute): ChromeSpec =
         ContactsRoute.UpcomingBirthdays,
         ContactsRoute.Duplicates,
         ContactsRoute.Cleanup,
+        ContactsRoute.Emergency,
+        ContactsRoute.Recent,
         is ContactsRoute.Intake,
         -> ChromeSpec(TabBarMode.Hidden)
 

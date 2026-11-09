@@ -17,7 +17,6 @@ import dev.rovsti.core.model.contacts.ContactRow
 import dev.rovsti.core.model.contacts.ContactsPrefs
 import dev.rovsti.core.model.contacts.DraftAddRequest
 import dev.rovsti.core.model.contacts.DraftQueryRequest
-import dev.rovsti.core.model.contacts.MeStateRequest
 import dev.rovsti.core.model.contacts.PinShortcutRequest
 import dev.rovsti.core.model.contacts.QuickAction
 import dev.rovsti.core.model.contacts.QuickRequest
@@ -55,7 +54,7 @@ import java.util.TimeZone
 
 /**
  * The Contacts tab (E4.2). Rows, sections, the scrubber letters and the empty-state offers come from Rust
- * (`contacts.view`, `contacts.quick`, `contacts.recent_lists`, `contacts.me_state`, `contacts.draft_from_query`); the
+ * (`contacts.view`, `contacts.quick`, `contacts.recent_lists`, `contacts.draft_from_query`); the
  * search uses the name index (`search.query_loose`: names, numbers, initials) and, for the "In details" section, the
  * detail index (`contacts.deep_find`). This class orders those calls and maps their answers to one [ContactsListUiState].
  *
@@ -132,28 +131,51 @@ class ContactsListViewModel(
     fun onAction(action: ContactsListAction) {
         when (action) {
             is ContactsListAction.QueryChanged -> query.value = action.text
+
             is ContactsListAction.Open -> viewModelScope.launch { open(action.id) }
+
             is ContactsListAction.Quick -> viewModelScope.launch { quick(action.id, action.action) }
+
             is ContactsListAction.EnterSelect -> select.enter(action.first)
+
             ContactsListAction.ExitSelect -> select.exit()
+
             is ContactsListAction.ToggleSelected -> select.toggle(action.id)
+
             ContactsListAction.ToggleSelectAll -> select.toggleAll(state.value.rows.map { it.id })
+
             ContactsListAction.ShareSelected -> viewModelScope.launch { select.share() }
+
             ContactsListAction.ExportSelected -> viewModelScope.launch { select.exportVcf() }
+
             ContactsListAction.CopySelectedNumbers -> viewModelScope.launch { select.copyAddresses("sms") }
+
             ContactsListAction.CopySelectedEmails -> viewModelScope.launch { select.copyAddresses("email") }
+
             ContactsListAction.StarSelected -> viewModelScope.launch { select.star() }
+
             ContactsListAction.AskDeleteSelected -> viewModelScope.launch { select.askDelete() }
+
             ContactsListAction.DeleteSelected -> viewModelScope.launch { select.delete() }
+
             ContactsListAction.AskAddToGroup -> viewModelScope.launch { select.askGroup() }
+
             is ContactsListAction.AddSelectedToGroup -> viewModelScope.launch { select.addToGroup(action.groupId) }
+
             is ContactsListAction.UndoDelete -> viewModelScope.launch { select.undo(action.keys) }
+
             ContactsListAction.NewContact -> outbox.trySend(ContactsListEffect.OpenEditor(null, null))
+
             ContactsListAction.CreateFromQuery -> createFromQuery()
+
             is ContactsListAction.AddToContact -> viewModelScope.launch { addTo(action.id) }
+
             ContactsListAction.AskClearViewed -> askClear()
+
             ContactsListAction.ClearViewed -> viewModelScope.launch { clearViewed() }
-            ContactsListAction.OpenMyCard -> openMyCard()
+
+            // The page opens these three (the model of My card is `MeViewModel`).
+            ContactsListAction.OpenMyCard, ContactsListAction.OpenEmergency, ContactsListAction.OpenRecent -> Unit
         }
     }
 
@@ -210,7 +232,6 @@ class ContactsListViewModel(
         var viewed: ImmutableList<ContactItem> = persistentListOf()
         var viewedClear = ContactsListUiState().viewedClear
         var recent: RecentEntry? = null
-        var myCard: MyCardItem? = null
         if (!searching) {
             val lists = (ops.recentLists(recentRequest(b, i)) as? Outcome.Ok)?.value
             if (lists != null) {
@@ -219,8 +240,6 @@ class ContactsListViewModel(
                 val byId = b.contacts.associateBy { it.id }
                 viewed = itemsOf(lists.viewed.mapNotNull { byId[it] }, i.prefs, i.order, i.marks, lists.viewed)
             }
-            val me = (ops.meState(MeStateRequest(i.prefs.myCard, b.contacts, i.prefs.emergency)) as? Outcome.Ok)?.value
-            if (me?.myCardContact != null) myCard = MyCardItem(me.myCardContact!!, me.myCard.title, me.myCard.detail)
         }
         val keys = (rows + deep + viewed + pickables).map { it.menuKey }.toSet()
         return ContactsListUiState(
@@ -238,7 +257,6 @@ class ContactsListViewModel(
             pickables = pickables,
             viewed = viewed,
             viewedClear = viewedClear,
-            myCard = myCard,
             recentEntry = recent,
             quick = quickFor(keys),
         )
@@ -451,10 +469,6 @@ class ContactsListViewModel(
     private suspend fun clearViewed() {
         store.update { it.copy(viewed = emptyList()) }
         outbox.trySend(ContactsListEffect.Toast("Recently viewed cleared"))
-    }
-
-    private fun openMyCard() {
-        state.value.myCard?.let { outbox.trySend(ContactsListEffect.OpenCard(it.contactId)) }
     }
 
     private fun contactOf(id: Long): WireContact? =

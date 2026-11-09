@@ -3,6 +3,7 @@ package dev.rovsti.contacts.list
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -88,6 +90,9 @@ object ListTags {
     const val Viewed = "contacts-viewed"
     const val ViewedClear = "contacts-viewed-clear"
     const val MyCard = "contacts-my-card"
+    const val TopLinks = "contacts-top-links"
+    const val EmergencyRow = "contacts-emergency-row"
+    const val RecentRow = "contacts-recent-row"
     const val DeepTitle = "contacts-deep-title"
     const val WaGlyph = "contact-wa-glyph"
     const val Star = "contact-star"
@@ -225,6 +230,9 @@ private fun LazyListScope.readyItems(
     if (!searching && select == null) {
         state.myCard?.let { card ->
             item(key = "my-card", contentType = "group") { MyCardSection(card, endInset, onAction) }
+        }
+        if (state.emergencyDetail != null || state.recentEntry != null) {
+            item(key = "top-links", contentType = "group") { TopLinksSection(state, endInset, onAction) }
         }
         if (state.viewed.isNotEmpty()) {
             item(key = "viewed", contentType = "group") { ViewedSection(state, endInset, overlays, onAction) }
@@ -441,12 +449,67 @@ private fun MyCardSection(
                 ListRow(
                     title = card.title,
                     secondary = card.detail,
-                    leading = { Avatar(card.title, size = Sizes.avatar, colorKey = card.contactId.toString()) },
+                    leading = {
+                        if (card.contactId != null) {
+                            Avatar(card.detail, size = Sizes.avatar, colorKey = card.contactId.toString())
+                        } else {
+                            TileIcon(RovstiIcons.Person)
+                        }
+                    },
                     trailing = { ListRowChevron() },
                     onClick = { onAction(ContactsListAction.OpenMyCard) },
                 )
             }
         }
+    }
+}
+
+/** "Emergency Contacts" and the "Recent" row (Recently Added / Edited) in one group under My Card. */
+@Composable
+private fun TopLinksSection(
+    state: ContactsListUiState,
+    endInset: Dp,
+    onAction: (ContactsListAction) -> Unit,
+) {
+    Box(Modifier.padding(bottom = Spacing.s, end = endInset).testTag(ListTags.TopLinks)) {
+        InsetGroupedSection {
+            state.emergencyDetail?.let { detail ->
+                row {
+                    ListRow(
+                        title = "Emergency Contacts",
+                        secondary = detail,
+                        leading = { TileIcon(RovstiIcons.MedicalCross) },
+                        trailing = { ListRowChevron() },
+                        onClick = { onAction(ContactsListAction.OpenEmergency) },
+                        modifier = Modifier.testTag(ListTags.EmergencyRow),
+                    )
+                }
+            }
+            state.recentEntry?.let { entry ->
+                row {
+                    ListRow(
+                        title = entry.title,
+                        secondary = entry.detail,
+                        leading = { TileIcon(RovstiIcons.Clock) },
+                        trailing = { ListRowChevron() },
+                        onClick = { onAction(ContactsListAction.OpenRecent) },
+                        modifier = Modifier.testTag(ListTags.RecentRow),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The round glyph at the start of a row that has no person: the avatar's size, a quiet fill. */
+@Composable
+private fun TileIcon(icon: ImageVector) {
+    val colors = RovstiTheme.colors
+    Box(
+        Modifier.size(Sizes.avatar).background(colors.fillTertiary, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        RovstiIcon(icon, null, tint = colors.accent, size = ListMetrics.TileGlyph)
     }
 }
 

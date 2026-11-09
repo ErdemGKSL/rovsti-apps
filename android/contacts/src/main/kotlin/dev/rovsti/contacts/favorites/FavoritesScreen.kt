@@ -314,10 +314,11 @@ private fun stepActions(
 }
 
 @Composable
-private fun DragHandle(
+internal fun DragHandle(
     id: Long,
     scope: ReorderableCollectionItemScope,
     haptics: () -> Unit,
+    tag: String = FavTags.handle(id),
 ) {
     val label = stringResource(R.string.favorites_reorder)
     with(scope) {
@@ -326,7 +327,7 @@ private fun DragHandle(
                 .size(Sizes.touch)
                 .semantics { contentDescription = label }
                 .draggableHandle(onDragStarted = { haptics() })
-                .testTag(FavTags.handle(id)),
+                .testTag(tag),
             contentAlignment = Alignment.Center,
         ) {
             RovstiIcon(

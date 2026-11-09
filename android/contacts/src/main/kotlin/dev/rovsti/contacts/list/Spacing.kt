@@ -15,3 +15,9 @@ internal object SelectMetrics {
     /** No width: the select slot of a row while not selecting. */
     val None = 0.dp
 }
+
+/** Sizes of the list's top rows (E4.14). */
+internal object ListMetrics {
+    /** The glyph in the round tile of the Emergency Contacts and Recent rows. */
+    val TileGlyph = 20.dp
+}

@@ -27,10 +27,15 @@ import dev.rovsti.contacts.editor.contactEditorExtras
 import dev.rovsti.contacts.editor.contactEditorModel
 import dev.rovsti.contacts.editor.presentContactEditor
 import dev.rovsti.contacts.intake.rememberImportActions
+import dev.rovsti.contacts.list.ContactsListAction
 import dev.rovsti.contacts.list.ContactsListEffect
 import dev.rovsti.contacts.list.ContactsListEffects
 import dev.rovsti.contacts.list.ContactsListScreen
 import dev.rovsti.contacts.list.rememberContactsListViewModel
+import dev.rovsti.contacts.me.MeAction
+import dev.rovsti.contacts.me.MeEffect
+import dev.rovsti.contacts.me.rememberMeViewModel
+import dev.rovsti.contacts.people.presentContactChooser
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.LocalContentInsets
 import dev.rovsti.design.chrome.NavigationButton
@@ -128,9 +133,52 @@ fun ContactsListPage(
         },
     )
     val import = rememberImportActions(container, navigator, overlays)
+    // My card and the emergency row come from the Me model (E4.14); a book without contacts has nothing to point at.
+    val me = rememberMeViewModel(container)
+    val meState by me.state.collectAsState()
+    LaunchedEffect(me) { me.effects.collect { if (it is MeEffect.Toast) overlays.showToast(it.text) } }
+    val shown =
+        remember(state, meState) {
+            if (state.rows.isEmpty()) {
+                state
+            } else {
+                state.copy(
+                    myCard = meState.myCard,
+                    emergencyDetail = meState.myCard?.let { meState.emergencyDetail },
+                )
+            }
+        }
+    val onAction: (ContactsListAction) -> Unit = { action ->
+        when (action) {
+            ContactsListAction.OpenMyCard -> {
+                val mine = meState.myCard?.contactId
+                if (mine != null) {
+                    navigator.push(ContactsRoute.ContactCard(mine))
+                } else {
+                    scope.launch {
+                        overlays.presentContactChooser("Set My Card", me.choices()) { id ->
+                            me.onAction(MeAction.SetMyCard(id))
+                        }
+                    }
+                }
+            }
+
+            ContactsListAction.OpenEmergency -> {
+                navigator.push(ContactsRoute.Emergency)
+            }
+
+            ContactsListAction.OpenRecent -> {
+                navigator.push(ContactsRoute.Recent)
+            }
+
+            else -> {
+                viewModel.onAction(action)
+            }
+        }
+    }
     ContactsListScreen(
-        state = state,
-        onAction = viewModel::onAction,
+        state = shown,
+        onAction = onAction,
         listState = listState,
         searchState = searchState,
         onPasteContact = import.pasteContact,

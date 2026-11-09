@@ -3,6 +3,7 @@ package dev.rovsti.contacts.card
 import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
+import dev.rovsti.contacts.me.MeOps
 import dev.rovsti.contacts.pinContactToHome
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.AccountLabelRequest
@@ -133,6 +134,7 @@ class ContactCardViewModel(
     private val worker: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val outbox = Channel<ContactCardEffect>(Channel.UNLIMITED)
+    private val me = MeOps(store, ops)
 
     /** One-shot results. */
     val effects: Flow<ContactCardEffect> = outbox.receiveAsFlow()
@@ -143,6 +145,7 @@ class ContactCardViewModel(
         val card: CardAnswer,
         val homeCc: String?,
         val myCard: Boolean,
+        val emergency: Boolean,
     ) {
         val numbers: List<String> get() = card.numbers.map { it.raw }
     }
@@ -181,7 +184,7 @@ class ContactCardViewModel(
                     b is Book.Loading -> null
                     draft == null -> Result.success(null)
                     b !is Book.Ready -> null
-                    else -> Result.success(baseOf(draft, b, prefs.nameFormat, prefs.myCard))
+                    else -> Result.success(baseOf(draft, b, prefs.nameFormat, prefs.myCard, prefs.emergency))
                 }
             }.flowOn(worker)
             .stateIn(scope, SharingStarted.Eagerly, null)
@@ -306,6 +309,14 @@ class ContactCardViewModel(
             ContactCardAction.AddToHome -> {
                 scope.launch { pinToHome() }
             }
+
+            ContactCardAction.ToggleMyCard -> {
+                scope.launch { toggleMyCard() }
+            }
+
+            ContactCardAction.ToggleEmergency -> {
+                scope.launch { toggleEmergency() }
+            }
         }
     }
 
@@ -374,6 +385,19 @@ class ContactCardViewModel(
         if (repo.setStarred(id, !b.draft.starred) is ContactResult.Failed) {
             send(ContactCardEffect.Toast("Can't change the favorite."))
         }
+    }
+
+    /** "This Is Me" / "Not Me" (C38): Rust says what was done. */
+    private suspend fun toggleMyCard() {
+        val b = base() ?: return
+        val ready = book.book.value as? Book.Ready ?: return
+        send(ContactCardEffect.Toast(me.setMyCard(b.wire, on = !b.myCard, ready.contacts).notice))
+    }
+
+    /** "Add to / Remove from Emergency Contacts" (C43): the limit and the missing number are Rust's refusals. */
+    private suspend fun toggleEmergency() {
+        val b = base() ?: return
+        send(ContactCardEffect.Toast(me.toggleEmergency(b.wire).notice))
     }
 
     private fun base(): Base? = base.value?.getOrNull()
@@ -539,6 +563,7 @@ class ContactCardViewModel(
         b: Book.Ready,
         format: dev.rovsti.core.model.search.NameFormat,
         myCard: String?,
+        emergency: List<String>,
     ): Base? {
         val wire = b.contacts.firstOrNull { it.id == id } ?: return null
         val card = ok(ops.card(CardRequest(wire, format))) ?: return null
@@ -547,7 +572,8 @@ class ContactCardViewModel(
             homeCcCache = ok(shared.inferHomeCc(InferHomeCcRequest(numbers)))?.homeCc
             homeCcFor = b.contacts.size
         }
-        return Base(draft, wire, card, homeCcCache, myCard != null && myCard == wire.lookupKey)
+        val key = wire.lookupKey?.takeIf { it.isNotEmpty() }
+        return Base(draft, wire, card, homeCcCache, key != null && myCard == key, key != null && key in emergency)
     }
 
     // ---- WhatsApp
@@ -750,6 +776,7 @@ class ContactCardViewModel(
                     presence = if (jid != null) w.answer?.statusLine?.replaceFirstChar { it.uppercase() } else null,
                     starred = draft.starred,
                     isMyCard = b.myCard,
+                    isEmergency = b.emergency,
                 ),
             capsules = capsules.toImmutableList(),
             sections = sections.toImmutableList(),

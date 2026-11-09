@@ -125,7 +125,7 @@ class E42ShotTest : ShotTest() {
             }
         val state =
             SampleBook.state(items, viewed = viewed).copy(
-                myCard = MyCardItem(1, "Ayşe Yılmaz", "My Card"),
+                myCard = MyCardItem(1, "My card", "Ayşe Yılmaz"),
             )
         snap("e4.2-recently-viewed", { ListHarness(state) })
     }

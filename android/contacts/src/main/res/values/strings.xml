@@ -44,6 +44,7 @@
     <string name="favorites_move_later">Move Later</string>
     <string name="favorites_remove">Remove from Favorites</string>
     <string name="favorites_reorder">Reorder</string>
+    <string name="emergency_call">Call</string>
     <string name="favorites_add_star">Add to Favorites</string>
     <string name="favorites_see_all">See All</string>
     <string name="upcoming_title">Upcoming Birthdays</string>

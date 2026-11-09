@@ -98,6 +98,8 @@ class ContactsRoutesTest {
                 ContactsRoute.UpcomingBirthdays,
                 ContactsRoute.Duplicates,
                 ContactsRoute.Cleanup,
+                ContactsRoute.Emergency,
+                ContactsRoute.Recent,
                 ContactsRoute.Intake("content://x"),
             )
         for (route in hidden) assertEquals("$route", TabBarMode.Hidden, mode(route))

@@ -41,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1001,6 +1002,10 @@ private fun Modifier.revealWhenFocused(
     LaunchedEffect(focused) {
         if (!focused) return@LaunchedEffect
         snapshotFlow { ime.getBottom(density) }.collectLatest {
+            // The column learns how much of it the keyboard covers from its own position on screen (imeOverlapPadding),
+            // which is one layout pass after the inset changes: let that pass happen so the reveal sees the new viewport.
+            withFrameNanos { }
+            withFrameNanos { }
             requester.bringIntoView(Rect(0f, -margin, size.width.toFloat(), size.height + margin))
         }
     }

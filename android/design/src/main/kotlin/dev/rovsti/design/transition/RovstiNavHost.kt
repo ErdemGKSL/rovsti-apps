@@ -103,6 +103,9 @@ fun <R : Any> RovstiNavHost(
     modifier: Modifier = Modifier,
     isMorphRoute: (R) -> Boolean = { false },
     chrome: @Composable BoxScope.() -> Unit = {},
+    // The pill that rides on the tab bar (folded: beside the circle). Null: none. The bar's measured height includes it,
+    // so pages leave room for it through `LocalContentInsets`.
+    accessory: (@Composable (modifier: Modifier, isInline: Boolean) -> Unit)? = null,
     entries: RovstiEntries<R>.() -> Unit,
 ) {
     val keys = navigator.keys()
@@ -158,6 +161,7 @@ fun <R : Any> RovstiNavHost(
                             folded = barMode == TabBarMode.Folded,
                             onFoldedClick = { navigator.select(navigator.currentTab) },
                             chrome = hostMetrics,
+                            accessory = accessory,
                         )
                     }
                 }

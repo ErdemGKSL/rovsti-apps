@@ -54,6 +54,7 @@ class E44ShotTest : ShotTest() {
             compose.onNodeWithTag(EditorTags.field("note")).performClick()
             setSimulatedIme(300)
             advance(900)
+            advance(600)
         }
 
     @Test fun labelPopover() =

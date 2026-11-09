@@ -27,6 +27,7 @@ fun <R : Any> RovstiShell(
     modifier: Modifier = Modifier,
     isMorphRoute: (R) -> Boolean = { false },
     chrome: @Composable BoxScope.() -> Unit = {},
+    accessory: (@Composable (modifier: Modifier, isInline: Boolean) -> Unit)? = null,
     entries: RovstiEntries<R>.() -> Unit,
 ) {
     RovstiNavHost(
@@ -37,6 +38,7 @@ fun <R : Any> RovstiShell(
         modifier = modifier,
         isMorphRoute = isMorphRoute,
         chrome = chrome,
+        accessory = accessory,
         entries = entries,
     )
 }

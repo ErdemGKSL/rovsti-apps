@@ -5,12 +5,12 @@ import android.view.WindowManager
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -32,45 +32,45 @@ import kotlin.math.roundToInt
  * @param excludeNavigationBar true when the element keeps the navigation bar clear itself (a sheet that pads its end
  *   by it): the overlap with the bar is not padded twice. False for a dock already lifted by `navigationBarsPadding()`.
  */
-fun Modifier.imeOverlapPadding(excludeNavigationBar: Boolean = true): Modifier =
-    composed {
-        val view = LocalView.current
-        val ime = WindowInsets.ime
-        val exclude = if (excludeNavigationBar) WindowInsets.navigationBars else null
-        var bottomOnScreen by remember { mutableIntStateOf(UNKNOWN) }
-        val location = remember { IntArray(2) }
-        this
-            .onGloballyPositioned { coordinates ->
-                view.getLocationOnScreen(location)
-                bottomOnScreen = location[1] + (coordinates.positionInWindow().y + coordinates.size.height).roundToInt()
-            }.layout { measurable, constraints ->
-                val pad =
-                    if (bottomOnScreen == UNKNOWN) {
-                        0
-                    } else {
-                        imeOverlap(
-                            elementBottom = bottomOnScreen,
-                            screenBottom = screenBottom(view),
-                            imeHeight = ime.getBottom(this),
-                            excludedHeight = exclude?.getBottom(this) ?: 0,
-                        )
-                    }
-                val inner =
-                    if (constraints.hasBoundedHeight) {
-                        val maxH = (constraints.maxHeight - pad).coerceAtLeast(0)
-                        constraints.copy(minHeight = constraints.minHeight.coerceAtMost(maxH), maxHeight = maxH)
-                    } else {
-                        constraints
-                    }
-                val placeable = measurable.measure(inner)
-                val height =
-                    (placeable.height + pad).coerceIn(
-                        constraints.minHeight,
-                        if (constraints.hasBoundedHeight) constraints.maxHeight else Constraints.Infinity,
+@Composable
+fun Modifier.imeOverlapPadding(excludeNavigationBar: Boolean = true): Modifier {
+    val view = LocalView.current
+    val ime = WindowInsets.ime
+    val exclude = if (excludeNavigationBar) WindowInsets.navigationBars else null
+    var bottomOnScreen by remember { mutableIntStateOf(UNKNOWN) }
+    val location = remember { IntArray(2) }
+    return this
+        .onGloballyPositioned { coordinates ->
+            view.getLocationOnScreen(location)
+            bottomOnScreen = location[1] + (coordinates.positionInWindow().y + coordinates.size.height).roundToInt()
+        }.layout { measurable, constraints ->
+            val pad =
+                if (bottomOnScreen == UNKNOWN) {
+                    0
+                } else {
+                    imeOverlap(
+                        elementBottom = bottomOnScreen,
+                        screenBottom = screenBottom(view),
+                        imeHeight = ime.getBottom(this),
+                        excludedHeight = exclude?.getBottom(this) ?: 0,
                     )
-                layout(placeable.width, height) { placeable.place(0, 0) }
-            }
-    }
+                }
+            val inner =
+                if (constraints.hasBoundedHeight) {
+                    val maxH = (constraints.maxHeight - pad).coerceAtLeast(0)
+                    constraints.copy(minHeight = constraints.minHeight.coerceAtMost(maxH), maxHeight = maxH)
+                } else {
+                    constraints
+                }
+            val placeable = measurable.measure(inner)
+            val height =
+                (placeable.height + pad).coerceIn(
+                    constraints.minHeight,
+                    if (constraints.hasBoundedHeight) constraints.maxHeight else Constraints.Infinity,
+                )
+            layout(placeable.width, height) { placeable.place(0, 0) }
+        }
+}
 
 /**
  * Pixels of the element (bottom edge [elementBottom], screen coordinates) that the keyboard covers, less the part of
@@ -92,7 +92,12 @@ fun imeOverlap(
 
 private fun screenBottom(view: View): Int {
     val windowManager = view.context.getSystemService(WindowManager::class.java)
-    return windowManager?.currentWindowMetrics?.bounds?.bottom ?: view.rootView.height
+    return windowManager
+        ?.currentWindowMetrics
+        ?.bounds
+        ?.bottom
+        ?.coerceAtLeast(view.rootView.height)
+        ?: view.rootView.height
 }
 
 private const val UNKNOWN = Int.MIN_VALUE

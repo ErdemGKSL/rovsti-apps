@@ -16,15 +16,19 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import dev.rovsti.contacts.ContactsContainer
 import dev.rovsti.contacts.ContactsRoute
 import dev.rovsti.contacts.DraftSeed
+import dev.rovsti.design.overlay.ActionSheetAction
+import dev.rovsti.design.overlay.ActionSheetEntry
 import dev.rovsti.design.overlay.AlertAction
 import dev.rovsti.design.overlay.AlertEntry
 import dev.rovsti.design.overlay.AlertRole
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.overlay.showToast
+import dev.rovsti.design.overlay.showUndo
 import dev.rovsti.design.transition.TabNavigator
 import dev.rovsti.platform.files.ShareIntents
 import dev.rovsti.platform.system.Handoff
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 
 /** The list's view model, owned by the activity (it outlives the page being pushed over and popped back to). */
 @Composable
@@ -43,6 +47,7 @@ fun rememberContactsListViewModel(container: ContactsContainer): ContactsListVie
                         contacts = container.contacts,
                         clipboard = container.clipboard,
                         shortcuts = container.shortcuts,
+                        trash = container.trash,
                     )
                 }
             }
@@ -58,8 +63,10 @@ fun ContactsListEffects(
     overlays: OverlayController,
     context: Context,
     onEdit: ((id: Long?, seed: DraftSeed?) -> Unit)? = null,
+    onSaveVcf: ((ContactsListEffect.SaveVcf) -> Unit)? = null,
 ) {
     val latestOverlays = rememberUpdatedState(overlays)
+    val latestSave = rememberUpdatedState(onSaveVcf)
     val latestEdit = rememberUpdatedState(onEdit)
     LaunchedEffect(viewModel, navigator) {
         viewModel.effects.collect { effect ->
@@ -94,6 +101,47 @@ fun ContactsListEffects(
 
                 is ContactsListEffect.Toast -> {
                     toast(effect.text)
+                }
+
+                is ContactsListEffect.SaveVcf -> {
+                    latestSave.value?.invoke(effect) ?: toast("Can't save a file here.")
+                }
+
+                is ContactsListEffect.ConfirmDeleteSelected -> {
+                    latestOverlays.value.present(
+                        AlertEntry(
+                            heading = effect.confirm.title,
+                            message = effect.confirm.body.ifBlank { null },
+                            actions =
+                                persistentListOf(
+                                    AlertAction("Cancel", AlertRole.Cancel),
+                                    AlertAction("Delete", AlertRole.Destructive) {
+                                        viewModel.onAction(ContactsListAction.DeleteSelected)
+                                    },
+                                ),
+                        ),
+                    )
+                }
+
+                is ContactsListEffect.ChooseGroup -> {
+                    latestOverlays.value.present(
+                        ActionSheetEntry(
+                            title = "Add to Group",
+                            actions =
+                                effect.groups
+                                    .map { group ->
+                                        ActionSheetAction(group.title) {
+                                            viewModel.onAction(ContactsListAction.AddSelectedToGroup(group.id))
+                                        }
+                                    }.toImmutableList(),
+                        ),
+                    )
+                }
+
+                is ContactsListEffect.Deleted -> {
+                    latestOverlays.value.showUndo(effect.notice, onUndo = {
+                        viewModel.onAction(ContactsListAction.UndoDelete(effect.keys))
+                    })
                 }
 
                 is ContactsListEffect.ConfirmClearViewed -> {

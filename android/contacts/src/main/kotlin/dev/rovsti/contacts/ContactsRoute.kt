@@ -149,6 +149,18 @@ fun chromeFor(route: ContactsRoute): ChromeSpec =
     }
 
 /**
+ * [chromeFor] while the list may be in select mode: the Contacts tab folds the bar into its circle (the select toolbar
+ * rides beside it), every other page is unchanged.
+ */
+fun chromeFor(
+    route: ContactsRoute,
+    selecting: Boolean,
+): ChromeSpec =
+    chromeFor(route).let {
+        if (selecting && route == ContactsRoute.ContactsList) it.copy(tabBar = TabBarMode.Folded) else it
+    }
+
+/**
  * The deep link an intent carries (AD-CT8), as a pure function so it is tested without an activity. [open] is the
  * `open_contact_id` extra shared by birthday notifications and pinned shortcuts; [streamUri] is `EXTRA_STREAM` of a
  * SEND and [dataUri] the data of a VIEW. A contact link wins over a vCard. Anything else leaves the stacks alone.

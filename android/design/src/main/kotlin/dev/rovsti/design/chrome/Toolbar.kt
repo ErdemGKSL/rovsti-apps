@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -39,6 +40,7 @@ import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.ios.component.IosToolbarGroup
 import dev.rovsti.design.press.scalePress
+import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
@@ -58,6 +60,7 @@ class ToolbarAction(
 const val MaxToolbarActions = 2
 
 private val IconSize = 20.dp
+private const val DISABLED_ALPHA = 0.38f
 
 /**
  * A glass capsule that groups 44 dp buttons: Convx's [IosToolbarGroup] (a 44 dp tall capsule of liquid glass over the app
@@ -87,6 +90,7 @@ fun ToolbarButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
     val source = remember { MutableInteractionSource() }
     val press = rememberPressFill(source)
@@ -94,9 +98,16 @@ fun ToolbarButton(
     Box(
         modifier
             .size(width = Sizes.button, height = Sizes.touch)
-            .scalePress(true)
+            .graphicsLayer { alpha = if (enabled) 1f else DISABLED_ALPHA }
+            .scalePress(enabled)
             .semantics { contentDescription = label }
-            .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick),
+            .clickable(
+                interactionSource = source,
+                indication = null,
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         Box(
@@ -107,6 +118,53 @@ fun ToolbarButton(
             contentAlignment = Alignment.Center,
         ) {
             RovstiIcon(icon, null, tint = tokens.foreground, size = IconSize)
+        }
+    }
+}
+
+/**
+ * A text button for a [ToolbarCapsule] (Cancel, Select All): 48 dp tall, the accent colour, a round fill while pressed.
+ * Tagged [tag] when given.
+ */
+@Composable
+fun ToolbarTextButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    bold: Boolean = false,
+) {
+    val source = remember { MutableInteractionSource() }
+    val press = rememberPressFill(source)
+    val tokens = RovstiTheme.glass
+    Box(
+        modifier
+            .height(Sizes.touch)
+            .scalePress(true)
+            .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .height(Sizes.button)
+                .drawBehind {
+                    val amount = press.value
+                    if (amount > 0f) {
+                        drawRoundRect(
+                            tokens.glassActive.copy(alpha = tokens.glassActive.alpha * amount),
+                            cornerRadius =
+                                androidx.compose.ui.geometry
+                                    .CornerRadius(size.height / 2f),
+                        )
+                    }
+                }.padding(horizontal = Spacing.m + Spacing.xs),
+            contentAlignment = Alignment.Center,
+        ) {
+            RovstiText(
+                label,
+                style = if (bold) RovstiTheme.type.headline else RovstiTheme.type.body,
+                color = RovstiTheme.colors.accent,
+                maxLines = 1,
+            )
         }
     }
 }

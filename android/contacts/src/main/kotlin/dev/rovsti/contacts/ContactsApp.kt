@@ -2,6 +2,8 @@ package dev.rovsti.contacts
 
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -11,6 +13,8 @@ import dev.rovsti.contacts.favorites.FavoritesPage
 import dev.rovsti.contacts.favorites.UpcomingPage
 import dev.rovsti.contacts.groups.GroupPageDestination
 import dev.rovsti.contacts.groups.GroupsPage
+import dev.rovsti.contacts.list.SelectToolbar
+import dev.rovsti.contacts.list.rememberContactsListViewModel
 import dev.rovsti.contacts.trash.TrashPage
 import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.transition.TabNavigator
@@ -40,12 +44,21 @@ fun ContactsApp(
         }
     // A long press on a back button jumps to the root of the tab: selecting the current tab does that.
     val popToRoot: () -> Unit = remember(navigator) { { navigator.select(navigator.currentTab) } }
+    // Select mode (E4.8) folds the tab bar and puts its toolbar beside the circle.
+    val list = rememberContactsListViewModel(container)
+    val select by list.selectToolbar.collectAsState()
+    val selecting = select != null
+    val selectAccessory: (@Composable (Modifier, Boolean) -> Unit)? =
+        select?.let { bar ->
+            { modifier, inline -> SelectToolbar(bar, list::onAction, overlays, modifier, inline) }
+        }
     RovstiShell(
         navigator = navigator,
         tabs = tabs,
-        chromeFor = ::chromeFor,
+        chromeFor = { route -> chromeFor(route, selecting) },
         overlays = overlays,
         modifier = Modifier.fillMaxSize(),
+        accessory = selectAccessory,
     ) {
         entry<ContactsRoute.ContactsList> { ContactsListPage(container, navigator) }
         entry<ContactsRoute.Favorites> { FavoritesPage(container, navigator) }

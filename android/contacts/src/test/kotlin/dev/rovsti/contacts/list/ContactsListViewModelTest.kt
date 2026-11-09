@@ -3,6 +3,7 @@ package dev.rovsti.contacts.list
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.data.WaMarks
+import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.Rust
 import dev.rovsti.core.model.search.WireContact
@@ -117,6 +118,7 @@ class ContactsListViewModelTest {
                     contacts = Keyed(repo),
                     clipboard = clipboard,
                     shortcuts = shortcuts,
+                    trash = ContactTrash(Keyed(repo), store),
                     clock = { 1_789_600_000_000L },
                 )
             // The state only runs while somebody collects it.
@@ -266,12 +268,6 @@ class ContactsListViewModelTest {
             assertEquals(ContactsListEffect.WhatsApp("905551112233@s.whatsapp.net", "Ayşe Yılmaz"), effect())
             model.onAction(ContactsListAction.Quick(2, "whatsapp"))
             assertEquals(ContactsListEffect.Toast("This contact isn't on WhatsApp."), effect())
-        }
-
-    @Test fun selectIsRecordedForTheSelectStory() =
-        runBlocking<Unit> {
-            model.onAction(ContactsListAction.EnterSelect(7))
-            assertEquals(SelectMode(7), stateWhere { it.selectMode != null }.selectMode)
         }
 
     private companion object {

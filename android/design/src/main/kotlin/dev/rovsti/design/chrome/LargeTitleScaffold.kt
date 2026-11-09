@@ -4,6 +4,7 @@
 package dev.rovsti.design.chrome
 
 import androidx.compose.foundation.LocalOverscrollFactory
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -85,6 +86,9 @@ fun LargeTitleScaffold(
     navigation: NavigationButton? = null,
     onOverflow: ((anchor: Rect, hidden: ImmutableList<ToolbarAction>) -> Unit)? = null,
     onCollapseChanged: ((Float) -> Unit)? = null,
+    // Replaces the icon [actions] with custom content (text capsules such as Cancel / Select All); it is measured the
+    // same way, so the large title keeps clear of it.
+    actionsContent: (@Composable () -> Unit)? = null,
     content: LazyListScope.() -> Unit,
 ) {
     val colors = RovstiTheme.colors
@@ -135,11 +139,15 @@ fun LargeTitleScaffold(
                     .padding(horizontalInsets(insets)),
             listModifier = capped.fillMaxSize().testTag("scaffold-list"),
             actions = {
-                Toolbar(
-                    actions = actions,
-                    onOverflow = onOverflow,
-                    modifier = Modifier.onSizeChanged { toolbarWidthPx = it.width },
-                )
+                if (actionsContent != null) {
+                    Box(Modifier.onSizeChanged { toolbarWidthPx = it.width }) { actionsContent() }
+                } else {
+                    Toolbar(
+                        actions = actions,
+                        onOverflow = onOverflow,
+                        modifier = Modifier.onSizeChanged { toolbarWidthPx = it.width },
+                    )
+                }
             },
             largeTitle = {
                 LargeTitle(

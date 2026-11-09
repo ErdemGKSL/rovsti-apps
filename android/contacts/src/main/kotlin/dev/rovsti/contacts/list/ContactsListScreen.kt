@@ -1,5 +1,8 @@
 package dev.rovsti.contacts.list
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,7 +11,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -17,24 +22,32 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.rovsti.core.model.contacts.QuickAction
 import dev.rovsti.design.chrome.LargeTitleScaffold
 import dev.rovsti.design.chrome.ToolbarAction
+import dev.rovsti.design.chrome.ToolbarCapsule
+import dev.rovsti.design.chrome.ToolbarTextButton
 import dev.rovsti.design.controls.CapsuleButton
 import dev.rovsti.design.controls.CapsuleStyle
 import dev.rovsti.design.controls.EmptyState
 import dev.rovsti.design.controls.MessageSource
+import dev.rovsti.design.controls.SelectCheck
+import dev.rovsti.design.controls.SelectCheckSize
 import dev.rovsti.design.controls.SourceGlyph
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
@@ -47,6 +60,7 @@ import dev.rovsti.design.list.ListScrollRailWidth
 import dev.rovsti.design.list.RowSeparator
 import dev.rovsti.design.list.SectionHeader
 import dev.rovsti.design.list.TextStartWithLeading
+import dev.rovsti.design.motion.RovstiMotion
 import dev.rovsti.design.overlay.ContextMenuStyle
 import dev.rovsti.design.overlay.Detent
 import dev.rovsti.design.overlay.LocalOverlayOrNull
@@ -114,6 +128,9 @@ fun ContactsListScreen(
         snapshotFlow { searchState.text.toString() }.collect { latestAction.value(ContactsListAction.QueryChanged(it)) }
     }
     val ready = state.phase == ListPhase.Ready
+    val select = state.selectMode
+    // Back leaves select mode first (this handler is the innermost, so it runs before the tab or the page pops).
+    BackHandler(enabled = select != null) { onAction(ContactsListAction.ExitSelect) }
     val actions = rememberToolbar(ready, state.rows.isNotEmpty(), onAction)
     val searching = state.query.isNotBlank()
     val railShown = ready && state.showScrubber && !searching
@@ -123,10 +140,11 @@ fun ContactsListScreen(
     }
     Box(modifier.testTag("contacts-list-screen")) {
         LargeTitleScaffold(
-            title = "Contacts",
+            title = select?.title ?: "Contacts",
             state = listState,
             actions = actions,
             modifier = Modifier.testTag("contacts-list-page"),
+            actionsContent = select?.let { { SelectTitleButtons(it, onAction) } },
         ) {
             item(key = "search", contentType = "search") {
                 SearchField(
@@ -190,7 +208,8 @@ private fun LazyListScope.readyItems(
     onPick: () -> Unit,
 ) {
     val searching = state.query.isNotBlank()
-    if (!searching) {
+    val select = state.selectMode
+    if (!searching && select == null) {
         state.myCard?.let { card ->
             item(key = "my-card", contentType = "group") { MyCardSection(card, endInset, onAction) }
         }
@@ -211,7 +230,15 @@ private fun LazyListScope.readyItems(
         val separated = !first && !row.header
         first = false
         item(key = row.id, contentType = "contact") {
-            ContactRowItem(row, state.quick[row.menuKey], separated, endInset, overlays, onAction)
+            ContactRowItem(
+                row,
+                state.quick[row.menuKey],
+                separated,
+                endInset,
+                overlays,
+                onAction,
+                checked = select?.let { row.id in it.selected },
+            )
         }
     }
     if (state.deepRows.isNotEmpty()) {
@@ -223,7 +250,15 @@ private fun LazyListScope.readyItems(
             val separated = !firstDeep
             firstDeep = false
             item(key = "deep-${row.id}", contentType = "contact") {
-                ContactRowItem(row, state.quick[row.menuKey], separated, endInset, overlays, onAction)
+                ContactRowItem(
+                    row,
+                    state.quick[row.menuKey],
+                    separated,
+                    endInset,
+                    overlays,
+                    onAction,
+                    checked = select?.let { row.id in it.selected },
+                )
             }
         }
     }
@@ -237,14 +272,27 @@ private fun ContactRowItem(
     endInset: Dp,
     overlays: OverlayController?,
     onAction: (ContactsListAction) -> Unit,
+    // Null: not selecting. Otherwise whether this row is selected; a tap toggles it and the long press is off.
+    checked: Boolean? = null,
 ) {
     SideEffect { ListProbe.onRowComposed?.invoke(item.id) }
     val menu = remember(item.id, quick, onAction) { menuFor(item.id, quick, onAction) }
     val open = remember(item.id, onAction) { { onAction(ContactsListAction.Open(item.id)) } }
+    val toggle = remember(item.id, onAction) { { onAction(ContactsListAction.ToggleSelected(item.id)) } }
+    val slot by animateDpAsState(
+        targetValue = if (checked != null) SelectSlotWidth else SelectMetrics.None,
+        animationSpec = RovstiMotion.select(Dp.VisibilityThreshold),
+        label = "select-slot",
+    )
     Column {
-        if (separated) RowSeparator(inset = TextStartWithLeading)
-        val body = Modifier.testTag(ListTags.row(item.id))
-        if (overlays != null && menu.isNotEmpty()) {
+        if (separated) RowSeparator(inset = TextStartWithLeading + slot)
+        val body =
+            Modifier.testTag(ListTags.row(item.id)).semantics {
+                if (checked != null) selected = checked
+            }
+        if (checked != null) {
+            Box(body) { RowBody(item, endInset, toggle, shared = true, slot = slot, checked = checked) }
+        } else if (overlays != null && menu.isNotEmpty()) {
             Box(
                 body.longPressMenu(
                     controller = overlays,
@@ -253,13 +301,16 @@ private fun ContactRowItem(
                     onTap = open,
                 ),
             ) {
-                RowBody(item, endInset, null, shared = true)
+                RowBody(item, endInset, null, shared = true, slot = slot)
             }
         } else {
-            Box(body) { RowBody(item, endInset, open, shared = true) }
+            Box(body) { RowBody(item, endInset, open, shared = true, slot = slot) }
         }
     }
 }
+
+/** Width of the select circle's slot: the gutter and the circle; the row's own gutter is the gap after it. */
+private val SelectSlotWidth = Spacing.gutter + SelectCheckSize
 
 /** The row itself: avatar, name, one secondary line, then the star and the WhatsApp glyph. */
 @Composable
@@ -271,6 +322,27 @@ private fun RowBody(
     // The avatar of a list row is the source of the shared flight to the card (`avatar-<id>`, E4.3); the lifted copy of
     // the context menu and the "Recently viewed" strip are not, so the key is never on two nodes at once.
     shared: Boolean = false,
+    // The animated width of the select slot (0 while not selecting) and whether the row is selected.
+    slot: Dp = SelectMetrics.None,
+    checked: Boolean? = null,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        if (slot > SelectMetrics.None) {
+            Box(Modifier.width(slot).clipToBounds(), contentAlignment = Alignment.CenterStart) {
+                SelectCheck(checked == true, Modifier.padding(start = Spacing.gutter).requiredWidth(SelectCheckSize))
+            }
+        }
+        Box(Modifier.weight(1f)) { RowListRow(item, endInset, onClick, avatarSize, shared) }
+    }
+}
+
+@Composable
+private fun RowListRow(
+    item: ContactItem,
+    endInset: Dp,
+    onClick: (() -> Unit)?,
+    avatarSize: Dp,
+    shared: Boolean,
 ) {
     ListRow(
         title = item.name,
@@ -529,4 +601,25 @@ private fun showAddPicker(
             }
         },
     )
+}
+
+/** Select All / Deselect All and Cancel, in the title bar's capsule (they replace Select and New). */
+@Composable
+private fun SelectTitleButtons(
+    select: SelectMode,
+    onAction: (ContactsListAction) -> Unit,
+) {
+    ToolbarCapsule {
+        ToolbarTextButton(
+            if (select.allSelected) "Deselect All" else "Select All",
+            { onAction(ContactsListAction.ToggleSelectAll) },
+            Modifier.testTag(SelectTags.SelectAll),
+        )
+        ToolbarTextButton(
+            "Cancel",
+            { onAction(ContactsListAction.ExitSelect) },
+            Modifier.testTag(SelectTags.Cancel),
+            bold = true,
+        )
+    }
 }

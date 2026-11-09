@@ -7,6 +7,7 @@ import dev.rovsti.contacts.data.Book
 import dev.rovsti.contacts.data.BookRepository
 import dev.rovsti.contacts.data.ContactsStore
 import dev.rovsti.contacts.data.WaMarks
+import dev.rovsti.contacts.trash.ContactTrash
 import dev.rovsti.core.Outcome
 import dev.rovsti.core.model.contacts.CallTarget
 import dev.rovsti.core.model.contacts.CardRequest
@@ -69,14 +70,15 @@ class ContactsListViewModel(
     private val contacts: ContactsRepository,
     private val clipboard: ClipboardRepository,
     private val shortcuts: ShortcutsRepository,
+    private val trash: ContactTrash,
     private val clock: () -> Long = System::currentTimeMillis,
     private val widthDp: Double = DEFAULT_WIDTH_DP,
     private val worker: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
     private val query = MutableStateFlow("")
-    private val selecting = MutableStateFlow<SelectMode?>(null)
     private val menus = HashMap<MenuKey, ImmutableList<QuickAction>>()
     private val outbox = Channel<ContactsListEffect>(Channel.UNLIMITED)
+    private val select = SelectController(book, contacts, ops, trash, clipboard, clock) { outbox.trySend(it) }
 
     private class Inputs(
         val book: Book,
@@ -86,6 +88,7 @@ class ContactsListViewModel(
         val order: List<String>,
         val marks: Map<Long, String>,
         val query: String,
+        val hidden: Set<Long>,
     )
 
     /** The list to draw. */
@@ -93,20 +96,30 @@ class ContactsListViewModel(
         combine(
             combine(book.book, book.index, book.deep) { b, i, d -> Triple(b, i, d) },
             combine(store.prefs, store.favoritesOrder, waMarks.marks) { p, o, m -> Triple(p, o, m) },
-            query,
-        ) { (b, i, d), (p, o, m), q -> Inputs(b, i, d, p, o, m, q) }
+            combine(query, select.hidden) { q, h -> q to h },
+        ) { (b, i, d), (p, o, m), (q, h) -> Inputs(b, i, d, p, o, m, q, h) }
             .conflate()
             .mapLatest { build(it) }
-            .combine(selecting) { built, select ->
-                if (built.selectMode ==
-                    select
-                ) {
-                    built
+            .combine(select.selection) { built, chosen -> built to chosen }
+            .combine(contacts.groups()) { (built, chosen), groups -> Triple(built, chosen, groups.isNotEmpty()) }
+            .mapLatest { (built, chosen, hasGroups) ->
+                if (chosen == null) {
+                    if (built.selectMode == null) built else built.copy(selectMode = null)
                 } else {
-                    built.copy(selectMode = select)
+                    built.copy(selectMode = select.bar(chosen, built.rows.map { it.id }, hasGroups))
                 }
             }.flowOn(worker)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), ContactsListUiState())
+
+    /**
+     * The bar of select mode without the list (null while not selecting): the app shell folds the tab bar and draws the
+     * select toolbar from it, while the list page itself may not be composed.
+     */
+    val selectToolbar: StateFlow<SelectMode?> =
+        combine(select.selection, contacts.groups()) { chosen, groups -> chosen to groups.isNotEmpty() }
+            .mapLatest { (chosen, hasGroups) -> select.bar(chosen, emptyList(), hasGroups) }
+            .flowOn(worker)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /** Navigation, toasts, intents and the confirmation, each delivered once. */
     val effects: Flow<ContactsListEffect> = outbox.receiveAsFlow()
@@ -120,7 +133,20 @@ class ContactsListViewModel(
             is ContactsListAction.QueryChanged -> query.value = action.text
             is ContactsListAction.Open -> viewModelScope.launch { open(action.id) }
             is ContactsListAction.Quick -> viewModelScope.launch { quick(action.id, action.action) }
-            is ContactsListAction.EnterSelect -> selecting.value = SelectMode(action.first)
+            is ContactsListAction.EnterSelect -> select.enter(action.first)
+            ContactsListAction.ExitSelect -> select.exit()
+            is ContactsListAction.ToggleSelected -> select.toggle(action.id)
+            ContactsListAction.ToggleSelectAll -> select.toggleAll(state.value.rows.map { it.id })
+            ContactsListAction.ShareSelected -> viewModelScope.launch { select.share() }
+            ContactsListAction.ExportSelected -> viewModelScope.launch { select.exportVcf() }
+            ContactsListAction.CopySelectedNumbers -> viewModelScope.launch { select.copyAddresses("sms") }
+            ContactsListAction.CopySelectedEmails -> viewModelScope.launch { select.copyAddresses("email") }
+            ContactsListAction.StarSelected -> viewModelScope.launch { select.star() }
+            ContactsListAction.AskDeleteSelected -> viewModelScope.launch { select.askDelete() }
+            ContactsListAction.DeleteSelected -> viewModelScope.launch { select.delete() }
+            ContactsListAction.AskAddToGroup -> viewModelScope.launch { select.askGroup() }
+            is ContactsListAction.AddSelectedToGroup -> viewModelScope.launch { select.addToGroup(action.groupId) }
+            is ContactsListAction.UndoDelete -> viewModelScope.launch { select.undo(action.keys) }
             ContactsListAction.NewContact -> outbox.trySend(ContactsListEffect.OpenEditor(null, null))
             ContactsListAction.CreateFromQuery -> createFromQuery()
             is ContactsListAction.AddToContact -> viewModelScope.launch { addTo(action.id) }
@@ -228,6 +254,7 @@ class ContactsListViewModel(
         nameFormat = prefs.nameFormat,
         sortBy = prefs.sortBy,
         favoritesOrder = order,
+        hidden = select.hidden.value.toList(),
         widthDp = widthDp,
     )
 
@@ -277,7 +304,7 @@ class ContactsListViewModel(
             contacts = b.contacts,
             marks = i.prefs.added,
             viewedKeys = i.prefs.viewed,
-            hidden = emptyList(),
+            hidden = select.hidden.value.toList(),
             nowMs = now,
             tzOffsetS = TimeZone.getDefault().getOffset(now) / MS_PER_S,
             query = i.query,

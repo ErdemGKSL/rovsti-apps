@@ -782,6 +782,17 @@ Next planner: **E3 is done** (R1 and R2). Plan **E4 R1** (E4.1-E4.8, Contacts) n
 `CommonSettings` (`:shell`, `dev.rovsti.shell.settings`) for its Appearance and Haptics prefs and puts `CommonSettingsGroup`
 at the end of its settings page. The apps get the whole platform through `:shell`.
 
+#### Evidence, E4 R1 (E4.1-E4.8 done, round-10)
+
+- E4.1 (commit c7fd7d4): `:contacts` module, manifest parity (`ContactsManifestTest`), container, routes, migration; `ContactsRoutesTest`, `ContactsMigrationTest`, `E41ShotTest` (`e4.1-*` opened: tabs over an empty book, permission row, settings).
+- E4.2 (commits 9c4f8ee, 3978efb): data layer and list; `ContactsListViewModelTest`, `ContactsListScreenTest`, `E42ShotTest`; `e4.2-*` opened (sections, one avatar per row, rail, no-results offers, last row above the bar).
+- E4.3 (commit b60888b): card; `ContactCardViewModelTest`, `ContactCardScreenTest`, `E43ShotTest`; `e4.3-*` opened.
+- E4.4, E4.5 (commits 1006c5f, c5062a3): editor, photo, delete, Undo, Trash; `ContactEditor*Test`, `PhotoCropTest`, `Trash*Test`, `UndoPillTest`, shots `e4.4-*`, `e4.5-*` opened.
+- E4.6, E4.7 (commit 5c2439b): Favorites, frequent, upcoming, Groups; `FavoritesViewModelTest`, `UpcomingTest`, `GroupsViewModelTest`, `FavoritesScreenTest`, `GroupsScreenTest`; `e4.6-*`, `e4.7-*` opened.
+- E4.8 (commit: round-10 step 8, "Select mode (E4.8)"): `SelectModeViewModelTest` (10: enter from a row or the toolbar, bar words and actions from the core, toggle and select all, share text, .vcf export, Copy Numbers, Star both ways, add to group, multi-delete with ONE undo restoring all three), `SelectModeScreenTest` (8, including Back leaves select mode not the tab, last row above the toolbar), `E48ShotTest`. Opened `e4.8-select-mode-light` (title "3 selected", Select All / Cancel capsule, filled circles on Ada and Burak, the third selected row is below, folded tab-bar circle with the five-button toolbar beside it) and `e4.8-select-actions-menu-dark` (the "..." card above its button). `contacts-debug.apk`: `android/contacts/build/outputs/apk/debug/contacts-debug.apk`. Checklist A-H: `docs/kotlin-ui/checklist-e4.md`. Design additions: `RovstiNavHost`/`RovstiShell` `accessory` slot, `LargeTitleScaffold.actionsContent`, `ToolbarTextButton`, `ToolbarButton(enabled)`, `SelectCheck`.
+
+Next planner: **E4 R2** (E4.9-E4.16: share and shortcuts, import paths, duplicates and Clean up, photo viewer on the card, ringtone/voicemail/block, My card/emergency/recent, settings, polish). Known carry-overs: share as a staged .vcf file in the share sheet (E4.9), row separators under the alphabet rail (E4.16), custom accessibility actions on the row menu (E4.16).
+
 #### Evidence, E3 R2 (E3.8a-E3.11 done, round-09)
 
 - E3.8a (commit 6323952): `platform.files` (`Documents`, `MediaShare`, `RovstiShareProvider`, clipboard, Photo Picker, camera); `FqcnTest` (13 names), `NoMediaPermissionTest`, `PortInventoryTest`.
@@ -887,14 +898,14 @@ E3.11 goldens: `e3.11-permission-denied-row`/`-rationale` demo host double-padde
 
 | Story | Title | Round | Status |
 |---|---|---|---|
-| E4.1 | App module, manifest parity, container, tabs, routes, migration test | R1 | in-progress (round-10 step 1) |
-| E4.2 | Contacts list and search | R1 | in-progress (round-10 step 2-3) |
-| E4.3 | Contact card | R1 | in-progress (round-10 step 4) |
-| E4.4 | Editor | R1 | in-progress (round-10 step 5-6) |
-| E4.5 | Delete, Undo, Trash | R1 | in-progress (round-10 step 6) |
-| E4.6 | Favorites, frequent, upcoming birthdays | R1 | in-progress (round-10 step 7) |
-| E4.7 | Groups | R1 | in-progress (round-10 step 7) |
-| E4.8 | Select mode | R1 | in-progress (round-10 step 8) |
+| E4.1 | App module, manifest parity, container, tabs, routes, migration test | R1 | done (round-10) |
+| E4.2 | Contacts list and search | R1 | done (round-10) |
+| E4.3 | Contact card | R1 | done (round-10) |
+| E4.4 | Editor | R1 | done (round-10) |
+| E4.5 | Delete, Undo, Trash | R1 | done (round-10) |
+| E4.6 | Favorites, frequent, upcoming birthdays | R1 | done (round-10) |
+| E4.7 | Groups | R1 | done (round-10) |
+| E4.8 | Select mode | R1 | done (round-10) |
 | E4.9 | Share and shortcuts | R2 | todo |
 | E4.10 | Import paths | R2 | todo |
 | E4.11 | Duplicates, merge, Clean up | R2 | todo |
@@ -951,6 +962,10 @@ host, every destructive action confirms or offers Undo as the GPUI app does.
 - Screenshots: `e4.7-groups`, `e4.7-group-page`, `e4.7-member-picker`, `e4.7-group-menu-open`.
 
 ### E4.8 Select mode
+- AC1 Entered from the toolbar "Select" or a row menu; leading check circles (`select` spring); title from
+  `contacts.select_bar` ("3 selected"); Cancel and Select All / Deselect All in the title capsule.
+- AC2 Bottom glass toolbar as the folded tab bar's accessory: Share (text), Add to Group (chooser), Star, Delete
+  (confirm, hidden rows, ONE undo pill) and a "..." menu (Export .vcf, Copy Numbers, Copy Emails). Back leaves select mode first.
 - Screenshots: `e4.8-select-mode`, `e4.8-select-actions-menu`.
 
 ### E4.9 Share

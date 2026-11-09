@@ -5,10 +5,13 @@ import dev.rovsti.contacts.DraftSeed
 import dev.rovsti.core.model.contacts.Addition
 import dev.rovsti.core.model.contacts.Confirm
 import dev.rovsti.core.model.contacts.QuickAction
+import dev.rovsti.core.model.contacts.SelectAction
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.ImmutableSet
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.persistentSetOf
 
 /** What the list shows while the book is not ready. */
 enum class ListPhase { Loading, NoPermission, Ready }
@@ -60,10 +63,24 @@ data class RecentEntry(
     val detail: String,
 )
 
-/** Select mode (E4.8 draws it); the list only records that it was asked for and from which row. */
+/**
+ * Select mode (E4.8): who is selected, the title and the bulk actions `contacts.select_bar` offers for that many
+ * contacts, and whether every listed contact is selected (the toolbar then offers "Deselect All").
+ */
 @Immutable
 data class SelectMode(
-    val first: Long?,
+    val selected: ImmutableSet<Long> = persistentSetOf(),
+    val title: String = "Select contacts",
+    val actions: ImmutableList<SelectAction> = persistentListOf(),
+    val allSelected: Boolean = false,
+)
+
+/** A group the selection can join, with how many selected contacts do not fit its account. */
+@Immutable
+data class GroupChoice(
+    val id: Long,
+    val title: String,
+    val skipped: Int,
 )
 
 /** What "Create Contact" and "Add to a Contact" carry from a query that found nothing. */
@@ -123,6 +140,41 @@ sealed interface ContactsListAction {
 
     data object NewContact : ContactsListAction
 
+    // ---- select mode (E4.8)
+    data object ExitSelect : ContactsListAction
+
+    data class ToggleSelected(
+        val id: Long,
+    ) : ContactsListAction
+
+    /** Selects every listed contact, or none when all of them are selected already. */
+    data object ToggleSelectAll : ContactsListAction
+
+    data object ShareSelected : ContactsListAction
+
+    data object ExportSelected : ContactsListAction
+
+    data object CopySelectedNumbers : ContactsListAction
+
+    data object CopySelectedEmails : ContactsListAction
+
+    data object StarSelected : ContactsListAction
+
+    data object AskDeleteSelected : ContactsListAction
+
+    data object DeleteSelected : ContactsListAction
+
+    data object AskAddToGroup : ContactsListAction
+
+    data class AddSelectedToGroup(
+        val groupId: Long,
+    ) : ContactsListAction
+
+    /** Undo of the one pill after a multi-delete: [keys] are the Trash keys of the deleted contacts. */
+    data class UndoDelete(
+        val keys: List<Long>,
+    ) : ContactsListAction
+
     data object CreateFromQuery : ContactsListAction
 
     data class AddToContact(
@@ -170,5 +222,26 @@ sealed interface ContactsListEffect {
 
     data class ConfirmClearViewed(
         val confirm: Confirm,
+    ) : ContactsListEffect
+
+    data class ConfirmDeleteSelected(
+        val confirm: Confirm,
+    ) : ContactsListEffect
+
+    /** A vCard file to save ("Export .vcf"). */
+    data class SaveVcf(
+        val fileName: String,
+        val text: String,
+        val count: Int,
+    ) : ContactsListEffect
+
+    data class ChooseGroup(
+        val groups: ImmutableList<GroupChoice>,
+    ) : ContactsListEffect
+
+    /** The one pill after a multi-delete; Undo sends [ContactsListAction.UndoDelete] with [keys]. */
+    data class Deleted(
+        val notice: String,
+        val keys: List<Long>,
     ) : ContactsListEffect
 }

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Buttons -->
+    <string name="permission_continue">Continue</string>
+    <string name="permission_not_now">Not now</string>
+    <string name="permission_allow">Allow</string>
+    <string name="permission_open_settings">Open Settings</string>
+
+    <!-- Row status -->
+    <string name="permission_status_never_asked">Not allowed yet</string>
+    <string name="permission_status_denied">Not allowed</string>
+    <string name="permission_status_denied_for_good">Turned off</string>
+    <string name="permission_status_revoked">Turned off in Settings</string>
+    <string name="permission_status_granted">Allowed</string>
+
+    <!-- Group names (the row title) -->
+    <string name="permission_group_phone">Phone</string>
+    <string name="permission_group_contacts">Contacts</string>
+    <string name="permission_group_notifications">Notifications</string>
+    <string name="permission_group_call_log">Call history</string>
+    <string name="permission_group_bluetooth">Bluetooth</string>
+    <string name="permission_group_location">Location</string>
+    <string name="permission_group_background_location">Location in the background</string>
+    <string name="permission_group_microphone">Microphone</string>
+
+    <!-- Rationale sheet: title and body per group -->
+    <string name="permission_rationale_phone_title">Make calls from here</string>
+    <string name="permission_rationale_phone_body">Rovsti needs the phone permission to place calls and to know when a call starts or ends. Calls never leave your phone.</string>
+    <string name="permission_rationale_contacts_title">See your contacts</string>
+    <string name="permission_rationale_contacts_body">Contacts lets Rovsti show names and photos instead of numbers. Your contacts stay on this phone.</string>
+    <string name="permission_rationale_notifications_title">Stay in the loop</string>
+    <string name="permission_rationale_notifications_body">Notifications tell you about missed calls and new messages. You can turn them off any time.</string>
+    <string name="permission_rationale_call_log_title">Show your call history</string>
+    <string name="permission_rationale_call_log_body">Rovsti reads the call history on this phone to list recent calls. Nothing is uploaded.</string>
+    <string name="permission_rationale_bluetooth_title">Use Bluetooth audio</string>
+    <string name="permission_rationale_bluetooth_body">Bluetooth lets a call move to your headset or car. Rovsti only talks to devices you already paired.</string>
+    <string name="permission_rationale_location_title">Find where you are</string>
+    <string name="permission_rationale_location_body">Your location is used to show you on the map and to wake you before your stop. It is not shared.</string>
+    <string name="permission_rationale_background_location_title">Keep watching your trip</string>
+    <string name="permission_rationale_background_location_body">To wake you before your stop while the screen is off, Rovsti needs location access all the time during a trip.</string>
+    <string name="permission_rationale_microphone_title">Speak and send voice notes</string>
+    <string name="permission_rationale_microphone_body">The microphone is used for WhatsApp calls and voice notes, only while you use them.</string>
+
+    <!-- Special access -->
+    <string name="special_exact_alarms">Alarms and reminders</string>
+    <string name="special_full_screen">Full-screen calls</string>
+    <string name="special_battery">Battery</string>
+    <string name="special_background">Background activity</string>
+    <string name="special_exact_alarms_on">Reminders fire on time</string>
+    <string name="special_exact_alarms_off">Reminders may arrive late</string>
+    <string name="special_full_screen_on">Calls can take over the screen</string>
+    <string name="special_full_screen_off">Calls show as a banner only</string>
+    <string name="special_battery_on">Not restricted</string>
+    <string name="special_battery_off">Android may stop Rovsti in the background</string>
+    <string name="special_background_unknown">Allow autostart so calls and messages arrive</string>
+</resources>

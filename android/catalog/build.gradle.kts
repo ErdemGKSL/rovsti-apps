@@ -33,6 +33,7 @@ dependencies {
     implementation(project(":core-bridge"))
     implementation(project(":wa"))
     implementation(project(":platform"))
+    implementation(project(":shell"))
     // The WhatsApp settings page runs the real view model on scripted fakes (no gateway, no Rust).
     implementation(testFixtures(project(":wa")))
     implementation(testFixtures(project(":core-bridge")))

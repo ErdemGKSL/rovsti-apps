@@ -35,10 +35,10 @@ import dev.rovsti.design.overlay.OverlayController
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Sizes
 import dev.rovsti.design.theme.Spacing
-import dev.rovsti.design.transition.RovstiNavHost
 import dev.rovsti.design.transition.TabNavigator
+import dev.rovsti.shell.RovstiShell
 
-/** The catalog shell: [RovstiNavHost] with two tabs; Back pops, a tab keeps its own stack (see [CatalogRoute]). */
+/** The catalog shell: [RovstiShell] with two tabs; Back pops, a tab keeps its own stack (see [CatalogRoute]). */
 @Composable
 fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
     val roots = remember { mapOf(ComponentsTab to CatalogRoute.Home, DemoTab to CatalogRoute.Contacts) }
@@ -49,7 +49,7 @@ fun CatalogApp(initialPage: CatalogPage = CatalogPage.Home) {
             }
         }
     val overlays = remember { OverlayController() }
-    RovstiNavHost(
+    RovstiShell(
         navigator = navigator,
         tabs = AppTabs,
         chromeFor = ::catalogChromeFor,

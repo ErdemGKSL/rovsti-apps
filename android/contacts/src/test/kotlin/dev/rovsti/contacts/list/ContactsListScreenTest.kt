@@ -39,7 +39,8 @@ class ContactsListScreenTest : ShotTest() {
     private fun harness(
         state: ContactsListUiState = SampleBook.state(),
         onQuery: ((String) -> ContactsListUiState)? = null,
-    ) = ListHarness(state, onQuery)
+        onFocus: ((Boolean) -> ContactsListUiState)? = null,
+    ) = ListHarness(state, onQuery, onFocus)
 
     private fun show(h: ListHarness) {
         composeFrame { HostedList(h, haptics) }
@@ -87,6 +88,56 @@ class ContactsListScreenTest : ShotTest() {
         }
         advance(100)
         assertEquals(listOf(HapticEvent.Tick, HapticEvent.Tick, HapticEvent.Tick), haptics.events)
+    }
+
+    @Test fun recentlyViewedShowsOnlyWhileTheSearchIsFocusedAndEmpty() {
+        val items = SampleBook.items()
+        val viewed =
+            listOf(11L, 22L, 6L).map { id ->
+                items.first { it.id == id }.copy(header = false, secondary = null)
+            }
+        val flat = items.filter { 'a' in it.name.lowercase() }.map { it.copy(header = false) }
+        var typed = ""
+        var focused = false
+
+        fun at(): ContactsListUiState =
+            if (!focused) {
+                SampleBook.state(items, typed)
+            } else if (typed.isEmpty()) {
+                SampleBook.state(items, viewed = viewed).copy(searchFocused = true)
+            } else {
+                SampleBook.state(flat, typed).copy(searchFocused = true)
+            }
+
+        val h =
+            harness(
+                onQuery = {
+                    typed = it
+                    at()
+                },
+                onFocus = {
+                    focused = it
+                    at()
+                },
+            )
+        show(h)
+        // The main list: the alphabet rail, no Recently Viewed.
+        compose.onAllNodesWithTag(ListTags.Viewed).assertCountEquals(0)
+        compose.onAllNodesWithTag(AlphabetRailTags.Rail).assertCountEquals(1)
+        // Tapping the search field shows Recently Viewed instead of the list; the rail is hidden.
+        compose.onNodeWithTag(ListTags.Search).performClick()
+        advance(100)
+        assertEquals(ContactsListAction.SearchFocusChanged(true), h.actions.last())
+        compose.onNodeWithTag(ListTags.Viewed).assertIsDisplayed()
+        compose.onNodeWithTag(ListTags.ViewedClear).assertIsDisplayed()
+        compose.onAllNodesWithTag(AlphabetRailTags.Rail).assertCountEquals(0)
+        compose.onAllNodesWithTag(ListTags.row(items.first { it.id !in listOf(11L, 22L, 6L) }.id)).assertCountEquals(0)
+        // Typing hides it and leaves only the results.
+        compose.onNodeWithTag(ListTags.Search).performTextInput("a")
+        advance(100)
+        assertEquals(ContactsListAction.QueryChanged("a"), h.actions.last())
+        compose.onAllNodesWithTag(ListTags.Viewed).assertCountEquals(0)
+        compose.onNodeWithTag(ListTags.row(flat.first().id)).assertIsDisplayed()
     }
 
     @Test fun theRailIsGoneWhileSearching() {

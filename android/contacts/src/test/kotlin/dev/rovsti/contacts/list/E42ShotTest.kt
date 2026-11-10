@@ -6,6 +6,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -123,10 +124,11 @@ class E42ShotTest : ShotTest() {
             listOf(11L, 22L, 6L).map { id ->
                 items.first { it.id == id }.copy(header = false, secondary = null)
             }
-        val state =
-            SampleBook.state(items, viewed = viewed).copy(
-                myCard = MyCardItem(1, "My card", "Ayşe Yılmaz"),
-            )
-        snap("e4.2-recently-viewed", { ListHarness(state) })
+        // The search field focused with nothing typed: Recently Viewed stands in for the list (My Card and the rail go).
+        val focused = SampleBook.state(items, viewed = viewed).copy(searchFocused = true)
+        snap("e4.2-recently-viewed", { ListHarness(focused) }, before = {
+            compose.onNodeWithTag(ListTags.Search).performClick()
+            advance(300)
+        })
     }
 }

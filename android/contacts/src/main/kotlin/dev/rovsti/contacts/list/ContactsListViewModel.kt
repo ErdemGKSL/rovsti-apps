@@ -82,6 +82,7 @@ class ContactsListViewModel(
     private val worker: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
     private val query = MutableStateFlow("")
+    private val searchFocused = MutableStateFlow(false)
     private val menus = HashMap<MenuKey, ImmutableList<QuickAction>>()
     private val outbox = Channel<ContactsListEffect>(Channel.UNLIMITED)
     private val select = SelectController(book, contacts, ops, trash, clipboard, clock) { outbox.trySend(it) }
@@ -94,6 +95,7 @@ class ContactsListViewModel(
         val order: List<String>,
         val marks: Map<Long, String>,
         val query: String,
+        val searchFocused: Boolean,
         val hidden: Set<Long>,
     )
 
@@ -102,8 +104,8 @@ class ContactsListViewModel(
         combine(
             combine(book.book, book.index, book.deep) { b, i, d -> Triple(b, i, d) },
             combine(store.prefs, store.favoritesOrder, waMarks.marks) { p, o, m -> Triple(p, o, m) },
-            combine(query, select.hidden) { q, h -> q to h },
-        ) { (b, i, d), (p, o, m), (q, h) -> Inputs(b, i, d, p, o, m, q, h) }
+            combine(query, select.hidden, searchFocused) { q, h, f -> Triple(q, h, f) },
+        ) { (b, i, d), (p, o, m), (q, h, f) -> Inputs(b, i, d, p, o, m, q, f, h) }
             .conflate()
             .mapLatest { build(it) }
             .combine(select.selection) { built, chosen -> built to chosen }
@@ -137,6 +139,8 @@ class ContactsListViewModel(
     fun onAction(action: ContactsListAction) {
         when (action) {
             is ContactsListAction.QueryChanged -> query.value = action.text
+
+            is ContactsListAction.SearchFocusChanged -> searchFocused.value = action.focused
 
             is ContactsListAction.Open -> viewModelScope.launch { open(action.id) }
 
@@ -189,9 +193,17 @@ class ContactsListViewModel(
 
     private suspend fun build(i: Inputs): ContactsListUiState =
         when (val b = i.book) {
-            Book.Loading -> ContactsListUiState(phase = ListPhase.Loading, query = i.query)
-            Book.NoPermission -> ContactsListUiState(phase = ListPhase.NoPermission, query = i.query)
-            is Book.Ready -> buildReady(b, i)
+            Book.Loading -> {
+                ContactsListUiState(phase = ListPhase.Loading, query = i.query, searchFocused = i.searchFocused)
+            }
+
+            Book.NoPermission -> {
+                ContactsListUiState(phase = ListPhase.NoPermission, query = i.query, searchFocused = i.searchFocused)
+            }
+
+            is Book.Ready -> {
+                buildReady(b, i)
+            }
         }
 
     private suspend fun buildReady(
@@ -210,6 +222,7 @@ class ContactsListViewModel(
                 ?: return ContactsListUiState(
                     phase = ListPhase.Ready,
                     query = i.query,
+                    searchFocused = i.searchFocused,
                     emptyKind = if (searching) EmptyKind.NoResults else EmptyKind.NoContacts,
                     queryEcho = i.query.trim(),
                 )
@@ -244,7 +257,10 @@ class ContactsListViewModel(
                 viewedClear = lists.clearViewed.toUi()
                 if (lists.showEntry) recent = RecentEntry(lists.entryTitle, lists.entryDetail)
                 val byId = b.contacts.associateBy { it.id }
-                viewed = itemsOf(lists.viewed.mapNotNull { byId[it] }, i.prefs, i.order, i.marks, lists.viewed)
+                // Recently viewed belongs to the focused, still empty search; the main list does not carry it.
+                if (i.searchFocused) {
+                    viewed = itemsOf(lists.viewed.mapNotNull { byId[it] }, i.prefs, i.order, i.marks, lists.viewed)
+                }
             }
         }
         val keys = (rows + deep + viewed + pickables).map { it.menuKey }.toSet()
@@ -257,6 +273,7 @@ class ContactsListViewModel(
             sectionIndex = sectionIndex,
             scrubItems = scrubItems,
             query = i.query,
+            searchFocused = i.searchFocused,
             queryEcho = answer.queryEcho,
             emptyKind = empty,
             offer = offer,

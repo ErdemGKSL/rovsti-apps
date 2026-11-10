@@ -113,11 +113,14 @@ data class ContactsListUiState(
     /** Headers plus rows: what the rail scrubs over. */
     val scrubItems: Int = 0,
     val query: String = "",
+    /** The search field has focus (E4.2): with nothing typed the page shows only [viewed], like iOS. */
+    val searchFocused: Boolean = false,
     val queryEcho: String = "",
     val emptyKind: EmptyKind = EmptyKind.None,
     val offer: SearchOffer = SearchOffer(),
     /** Contacts the "Add to a Contact" sheet offers. */
     val pickables: ImmutableList<ContactItem> = persistentListOf(),
+    /** Recently viewed contacts; filled only while the search is focused and empty, so the main list has none. */
     val viewed: ImmutableList<ContactItem> = persistentListOf(),
     val viewedClear: UiConfirm = UiConfirm(UiText.Res(R.string.contacts_clear_recently_viewed), UiText.Literal("")),
     val myCard: MyCardItem? = null,
@@ -133,6 +136,11 @@ data class ContactsListUiState(
 sealed interface ContactsListAction {
     data class QueryChanged(
         val text: String,
+    ) : ContactsListAction
+
+    /** The search field gained or lost focus. */
+    data class SearchFocusChanged(
+        val focused: Boolean,
     ) : ContactsListAction
 
     data class Open(

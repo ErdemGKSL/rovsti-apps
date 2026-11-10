@@ -32,9 +32,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -150,10 +152,22 @@ fun ContactsListScreen(
     BackHandler(enabled = select != null) { onAction(ContactsListAction.ExitSelect) }
     val actions = rememberToolbar(ready, state.rows.isNotEmpty(), onAction, onPasteContact, onScanQr)
     val searching = state.query.isNotBlank()
-    val railShown = ready && state.showScrubber && !searching
+    // A focused, still empty search shows only "Recently viewed": no full list, so no rail either.
+    val railShown = ready && state.showScrubber && !searching && !state.searchFocused
+    val focus = LocalFocusManager.current
+    // Back (or the keyboard's dismissal) leaves the focused search before anything else pops.
+    BackHandler(enabled = state.searchFocused && select == null) { focus.clearFocus() }
+    val dispatch: (ContactsListAction) -> Unit =
+        remember(onAction, focus, searching) {
+            { action ->
+                // Opening a recent contact ends the search, so the list is back when the card closes.
+                if (action is ContactsListAction.Open && !searching) focus.clearFocus()
+                onAction(action)
+            }
+        }
     val endInset = if (railShown) ListScrollRailWidth else Dp(0f)
     val onPick: () -> Unit = {
-        showAddPicker(context, overlays, state.pickables, onAction)
+        showAddPicker(context, overlays, state.pickables, dispatch)
     }
     Box(modifier.testTag("contacts-list-screen")) {
         LargeTitleScaffold(
@@ -161,7 +175,7 @@ fun ContactsListScreen(
             state = listState,
             actions = actions,
             modifier = Modifier.testTag("contacts-list-page"),
-            actionsContent = select?.let { { SelectTitleButtons(it, onAction) } },
+            actionsContent = select?.let { { SelectTitleButtons(it, dispatch) } },
         ) {
             item(key = "search", contentType = "search") {
                 SearchField(
@@ -173,13 +187,14 @@ fun ContactsListScreen(
                                 end = Spacing.gutter + endInset,
                                 top = Spacing.s,
                                 bottom = Spacing.s,
-                            ).testTag(ListTags.Search),
+                            ).onFocusChanged { latestAction.value(ContactsListAction.SearchFocusChanged(it.hasFocus)) }
+                            .testTag(ListTags.Search),
                 )
             }
             when (state.phase) {
                 ListPhase.Loading -> Unit
                 ListPhase.NoPermission -> item(key = "gate", contentType = "gate") { gate?.invoke() }
-                ListPhase.Ready -> readyItems(state, endInset, overlays, onAction, onPick)
+                ListPhase.Ready -> readyItems(state, endInset, overlays, dispatch, onPick)
             }
         }
         if (railShown) {
@@ -251,15 +266,19 @@ private fun LazyListScope.readyItems(
 ) {
     val searching = state.query.isNotBlank()
     val select = state.selectMode
+    if (state.searchFocused && !searching && select == null) {
+        // The focused, empty search shows Recently Viewed instead of the list (E4.2).
+        if (state.viewed.isNotEmpty()) {
+            item(key = "viewed", contentType = "group") { ViewedSection(state, endInset, overlays, onAction) }
+        }
+        return
+    }
     if (!searching && select == null) {
         state.myCard?.let { card ->
             item(key = "my-card", contentType = "group") { MyCardSection(card, endInset, onAction) }
         }
         if (state.emergencyDetail != null || state.recentEntry != null) {
             item(key = "top-links", contentType = "group") { TopLinksSection(state, endInset, onAction) }
-        }
-        if (state.viewed.isNotEmpty()) {
-            item(key = "viewed", contentType = "group") { ViewedSection(state, endInset, overlays, onAction) }
         }
     }
     if (state.emptyKind != EmptyKind.None) {

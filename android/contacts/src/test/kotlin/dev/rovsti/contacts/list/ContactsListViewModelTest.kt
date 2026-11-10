@@ -207,10 +207,13 @@ class ContactsListViewModelTest {
         runBlocking<Unit> {
             model.onAction(ContactsListAction.Open(11))
             assertEquals(ContactsListEffect.OpenCard(11), effect())
-            val state = stateWhere { it.viewed.isNotEmpty() }
+            // The main list never carries the section; the focused, empty search does.
+            assertTrue(stateWhere { it.rows.size == 40 }.viewed.isEmpty())
+            model.onAction(ContactsListAction.SearchFocusChanged(true))
+            val state = stateWhere { it.searchFocused && it.viewed.isNotEmpty() }
             assertEquals(listOf("Ada Lovelace"), state.viewed.map { it.name })
             assertEquals(listOf("k-11"), store.viewed)
-            // Searching hides the section; clearing asks first, then empties it.
+            // Clearing asks first, then empties it.
             model.onAction(ContactsListAction.AskClearViewed)
             val ask = effect() as ContactsListEffect.ConfirmClearViewed
             assertTrue(
@@ -222,6 +225,30 @@ class ContactsListViewModelTest {
             assertEquals(ContactsListEffect.Toast(UiText.Res(R.string.contacts_recently_viewed_cleared)), effect())
             stateWhere { it.viewed.isEmpty() }
             assertEquals(emptyList<String>(), store.viewed)
+        }
+
+    @Test fun recentlyViewedFollowsTheSearchFocusAndTheQuery() =
+        runBlocking<Unit> {
+            model.onAction(ContactsListAction.Open(11))
+            assertEquals(ContactsListEffect.OpenCard(11), effect())
+            // Main list (not focused): no section.
+            assertTrue(stateWhere { !it.searchFocused && it.rows.size == 40 }.viewed.isEmpty())
+            // Focused with nothing typed: the section.
+            model.onAction(ContactsListAction.SearchFocusChanged(true))
+            val focused = stateWhere { it.searchFocused && it.viewed.isNotEmpty() }
+            assertEquals(listOf("Ada Lovelace"), focused.viewed.map { it.name })
+            // Typing: only results, the section goes away.
+            val typed = search("al")
+            assertTrue(typed.searchFocused)
+            assertTrue(typed.viewed.isEmpty())
+            assertTrue(typed.rows.any { it.name == "Ada Lovelace" })
+            // Erasing the text while still focused brings it back.
+            model.onAction(ContactsListAction.QueryChanged(""))
+            stateWhere { it.query.isEmpty() && it.searchFocused && it.viewed.isNotEmpty() }
+            // Unfocused with an empty query: the full list again, no section.
+            model.onAction(ContactsListAction.SearchFocusChanged(false))
+            val back = stateWhere { !it.searchFocused && it.viewed.isEmpty() && it.query.isEmpty() }
+            assertEquals(40, back.rows.size)
         }
 
     @Test fun theLongPressMenuComesFromTheQuickActions() =

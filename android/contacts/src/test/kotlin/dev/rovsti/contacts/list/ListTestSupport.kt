@@ -34,6 +34,8 @@ internal class ListHarness(
     initial: ContactsListUiState,
     /** Maps a typed query to the state to show (the view model's job); null keeps the state. */
     private val onQuery: ((String) -> ContactsListUiState)? = null,
+    /** Maps the search field's focus to the state to show (the view model's job); null only records it. */
+    private val onFocus: ((Boolean) -> ContactsListUiState)? = null,
 ) {
     var ui by mutableStateOf(initial)
     val actions = mutableListOf<ContactsListAction>()
@@ -47,6 +49,7 @@ internal class ListHarness(
     fun on(action: ContactsListAction) {
         actions += action
         if (action is ContactsListAction.QueryChanged) onQuery?.let { ui = it(action.text) }
+        if (action is ContactsListAction.SearchFocusChanged) onFocus?.let { ui = it(action.focused) }
         if (simulateSelect) applySelect(action)
     }
 

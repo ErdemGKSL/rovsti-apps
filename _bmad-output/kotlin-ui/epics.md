@@ -1089,6 +1089,15 @@ full bar (Convx keeps `AppFloatingNavBar` on pushed routes, `AppRootContent.kt:1
 `PushedPagesBackTest` and a Folded-only-on-roots invariant. Step 2 finishes the uncommitted data layer; Steps 3-8 are
 unchanged (E5.2-E5.7a).
 
+**R2 part 1** -> `_bmad-output/kotlin-ui/plans/round-13.md` (planned 2026-11-10 at base `ca993e6`; E5.1-E5.4, E5.6, E5.7a
+re-verified in code): 8 steps: recover E5.5 from `stash@{0}` + Phone Turkish (`values-tr/strings.xml` missing, Diagnostics
+labels hard-coded); **F21** the dark frame of pushed-page goldens (`e5.1-settings-dark`) draws only the selected tab cell:
+root-cause and fix, not a harness excuse; F17-F19 + F20 ringing on Incoming (still open in `e5.6-incoming-light`: raw
+`+905551112233`, stroked handsets, green-on-green avatar, discs behind the secondary actions) in the iOS 26 layout; F20
+in-call frosted controls (still dark opaque discs in `e5.7-incall-active-dark`) and the caller photo background;
+slide to answer when locked; E5.8a WhatsApp call audio loopback proof; E5.8b WhatsApp call UI; E5.7b multi-call and
+round close. E5.9-E5.14 follow in round 14.
+
 ### Parity table
 
 | Features | Story |
@@ -1115,10 +1124,10 @@ unchanged (E5.2-E5.7a).
 | E5.2 | Keypad | R1 | done (round-12 step 3; Evidence: `KeypadLayoutTest`, `KeypadViewModelTest`, `KeypadScreenTest`, `e5.2-*` goldens) |
 | E5.3 | Recents | R1 | done (round-12 step 4) |
 | E5.4 | Contact, Number and Call details sheets | R1 | done (round-12 step 5; Evidence: `PersonSheetViewModelTest`, `CallDetailsViewModelTest`, `e5.4-*` goldens) |
-| E5.5 | Favorites and Contacts tabs | R1 | in-progress (round-12 step 6 stashed, see recovery note; recover in E5 R2) |
-| E5.6 | Incoming call | R1 | done (round-12 step 7; Evidence: `IncomingViewModelTest`, `IncomingScreenTest`, `CallRegistryIncomingTest`, `e5.6-*` goldens) |
-| E5.7a | In-call: single call | R1 | done (round-12 step 8; Evidence: `InCallViewModelTest`, `RoutePickerTest`, `InCallScreenTest`, `e5.7-*` goldens, `docs/kotlin-ui/checklist-e5.md`) |
-| E5.8 | WhatsApp calls | R2 | todo (moved from R1 in round-12) |
+| E5.5 | Favorites and Contacts tabs | R1 | in-progress (round-12 step 6 stashed, see recovery note; verified absent from the tree at `ca993e6`; recovered by round-13 step 1) |
+| E5.6 | Incoming call | R1 | done (round-12 step 7; Evidence: `IncomingViewModelTest`, `IncomingScreenTest`, `CallRegistryIncomingTest`, `e5.6-*` goldens). Open owner follow-ups F17-F20, photo background, slide to answer: round-13 steps 3-5 |
+| E5.7a | In-call: single call | R1 | done (F20 in-call frosted controls and photo background: round-13 step 4; round-12 step 8; Evidence: `InCallViewModelTest`, `RoutePickerTest`, `InCallScreenTest`, `e5.7-*` goldens, `docs/kotlin-ui/checklist-e5.md`) |
+| E5.8 | WhatsApp calls | R2 | todo (moved from R1 in round-12; planned in round-13 steps 6-7) |
 
 > **Recovery note for the next planner (2026-11-10, coordinator):** round-12 step 6 (E5.4 sheets wiring / E5.5
 > Favorites and Contacts tabs) was implemented but stashed as `stash@{0}` "blocked: kotlin-ui r12 S6" (also kept as
@@ -1130,7 +1139,7 @@ unchanged (E5.2-E5.7a).
 > `android/design/build.gradle.kts`, `android/contacts/.../favorites/FavoritesReorder.kt` and
 > `android/testing/.../ComposeActivity.kt`, then run the (now release-only) checks. Phone strings also need values-tr
 > (definition of done item 6).
-| E5.7b | In-call: multi-call, Add call, conference | R2 | todo |
+| E5.7b | In-call: multi-call, Add call, conference | R2 | todo (planned in round-13 step 8) |
 | E5.9 | Settings | R2 | todo |
 | E5.10 | Statistics | R2 | todo |
 | E5.11 | Notes page | R2 | todo |

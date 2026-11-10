@@ -1177,6 +1177,13 @@ unchanged (E5.2-E5.7a).
   number format op, F14). (F18) Answer and Decline use stroked handsets; use the filled white handset the keypad call
   button uses (owner: call icons are filled), Decline rotated 135 deg. (F19) The initials avatar is green on the green
   background and nearly vanishes; give it a contrasting fill or a light ring.
+- **(F20) Owner: the round secondary buttons on the call screens look wrong.** Remind me / Message / Silence (and the
+  in-call grid of E5.7a: mute, keypad, speaker, add call, video, contacts) are a flat opaque grey in light mode and near
+  black in dark mode. Make them translucent frosted glass over the call background, as on iOS: a white tint at about
+  18-22% alpha (same in both themes, since the call background is always a deep colour), real backdrop blur of the
+  gradient behind (the `rovstiGlass` button preset with a light tint, no outer shadow), a 0.5 dp light rim, white glyphs;
+  the pressed/selected state (mute on, speaker on) becomes solid white with a dark glyph. Answer/Decline stay solid
+  green/red.
 - **Owner request (2026-11-10): slide to answer when the phone is locked.** When the incoming call shows over the lock
   screen (screen was off or keyguard locked: `KeyguardManager.isKeyguardLocked`), replace the Answer/Decline buttons
   with an iOS-style "slide to answer" track: a glass capsule with a green handle (filled white handset) that follows the

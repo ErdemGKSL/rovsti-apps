@@ -1186,6 +1186,13 @@ unchanged (E5.2-E5.7a).
     deep colour), real backdrop blur of the gradient (`rovstiGlass` button preset, light tint, no outer shadow), 0.5 dp
     light rim, white glyphs; an active toggle (mute on, speaker on) becomes solid white with a dark glyph. End call stays
     solid red.
+- **Owner request (2026-11-10): the caller's photo is the call background.** When the caller has a contact photo (or a
+  WhatsApp profile photo for WA calls), the incoming and in-call screens use it full-bleed as the background: scaled to
+  fill (centre-crop, face-aware if cheap), softly blurred (about 30-40 dp) and darkened with a vertical scrim (top 25%,
+  bottom 55% black) so white text and the frosted buttons stay readable (WCAG 4.5:1 for the name). The small avatar
+  circle is then hidden (the photo is the background). No photo: keep the current colour gradient. Load it off the main
+  thread at the right size (Coil, cached), cross-fade in, never delay showing the ringing screen for it. Screenshots:
+  `e5.6-incoming-photo` and `e5.7-incall-photo`, light and dark.
 - **Owner request (2026-11-10): slide to answer when the phone is locked.** When the incoming call shows over the lock
   screen (screen was off or keyguard locked: `KeyguardManager.isKeyguardLocked`), replace the Answer/Decline buttons
   with an iOS-style "slide to answer" track: a glass capsule with a green handle (filled white handset) that follows the

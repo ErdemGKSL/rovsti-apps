@@ -1200,6 +1200,13 @@ round close. E5.9-E5.14 follow in round 14.
   `:design` `controls/PlainIconAction.kt` (`PlainIconActionTest`, `IncomingScreenTest` no disc / 0.5 press / >= 48 dp);
   iOS 26 layout (Light 36 sp name shrinking after two lines, 96 dp avatar, discs at 1/4 and 3/4). Goldens `e5.6-*` re-recorded
   and opened.
+- **Evidence (round-13 step 5, slide to answer on the locked screen: done):** `:design` `controls/SlideToAnswer.kt`
+  (CallControl glass capsule 76 dp, 68 dp green handle, 80 % / fling answer via `Fling.restingPoint`, spring 0.75/500 back,
+  `HapticEvent.ThresholdTick` once and re-armed below 70 %, RTL mirrored, custom action + click for TalkBack;
+  `SlideToAnswerTest`). `LockScreenGate.locked` (`KeyguardManager.isKeyguardLocked`, refreshed on resume and live-call
+  change); `IncomingViewModel.onRingKey` + `MainActivity.onKeyDown` (first power/volume press silences, second declines;
+  `IncomingViewModelTest`); locked layout in `IncomingScreen` (`IncomingScreenTest`). Goldens `e5.6-locked-slide-rest`,
+  `-mid`, `-rtl`, re-recorded `e5.6-incoming-lockscreen-variant` (light + dark), opened.
 - **(F20) Owner: call-screen secondary buttons, as on iOS (revised 2026-11-10).**
   - **Ringing (incoming) screen:** Remind me / Message / Silence get **no background at all**: just the white glyph with
     its label under it, the whole icon+label area is the touch target (min 48 dp), pressed state dims to 50%. Answer and
@@ -1230,6 +1237,11 @@ round close. E5.9-E5.14 follow in round 14.
   `e5.6-waiting-call-card`.
 
 ### E5.7a In-call (single call)
+- **Coordinator screenshot fixes (2026-11-10, goldens of c0ffc3c):** (F22) the in-call screen still shows the raw
+  E.164 number (`+905559990000`) under the name; use the shared number format like the incoming screen (F17). (F23)
+  with the in-call keypad open, the name ("Mert Kaya") is clipped at the bottom by the dialled digits line; give the
+  digits line its own row under the name with the standard gap, or shrink the name to the compact style while the keypad
+  is open.
 - AC1 Aura is an ambient animation obeying ARCH 10 rule 5; route picker lists endpoints and tolerates a missing
   `BLUETOOTH_CONNECT` grant (ARCH 7.5); the screen is shown over the lock screen only while a call is live.
 - Screenshots: `e5.7-incall-active`, `e5.7-incall-keypad`, `e5.7-route-picker-popover`, `e5.7-incall-sim-chip`,

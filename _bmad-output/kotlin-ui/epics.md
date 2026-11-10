@@ -1112,12 +1112,12 @@ unchanged (E5.2-E5.7a).
 | Story | Title | Round | Status |
 |---|---|---|---|
 | E5.1 | App module, role, manifest parity, tabs, setup sheet, diagnostics, migration test | R1 | done (`36760c7` module, manifest, components, container, routes, setup sheet, diagnostics, migration; `447ee0d` F16 back button/full bar; round-12 step 2 data layer) |
-| E5.2 | Keypad | R1 | in-progress (round-12 step 3) |
+| E5.2 | Keypad | R1 | done (round-12 step 3; Evidence: `KeypadLayoutTest`, `KeypadViewModelTest`, `KeypadScreenTest`, `e5.2-*` goldens) |
 | E5.3 | Recents | R1 | done (round-12 step 4) |
-| E5.4 | Contact, Number and Call details sheets | R1 | in-progress (round-12 step 5) |
-| E5.5 | Favorites and Contacts tabs | R1 | in-progress (round-12 step 6) |
-| E5.6 | Incoming call | R1 | in-progress (round-12 step 7) |
-| E5.7a | In-call: single call | R1 | in-progress (round-12 step 8) |
+| E5.4 | Contact, Number and Call details sheets | R1 | done (round-12 step 5; Evidence: `PersonSheetViewModelTest`, `CallDetailsViewModelTest`, `e5.4-*` goldens) |
+| E5.5 | Favorites and Contacts tabs | R1 | in-progress (round-12 step 6 stashed, see recovery note; recover in E5 R2) |
+| E5.6 | Incoming call | R1 | done (round-12 step 7; Evidence: `IncomingViewModelTest`, `IncomingScreenTest`, `CallRegistryIncomingTest`, `e5.6-*` goldens) |
+| E5.7a | In-call: single call | R1 | done (round-12 step 8; Evidence: `InCallViewModelTest`, `RoutePickerTest`, `InCallScreenTest`, `e5.7-*` goldens, `docs/kotlin-ui/checklist-e5.md`) |
 | E5.8 | WhatsApp calls | R2 | todo (moved from R1 in round-12) |
 
 > **Recovery note for the next planner (2026-11-10, coordinator):** round-12 step 6 (E5.4 sheets wiring / E5.5
@@ -1172,6 +1172,11 @@ unchanged (E5.2-E5.7a).
 - Screenshots: `e5.5-favorites`, `e5.5-favorites-reorder`, `e5.5-contacts-tab`, `e5.5-contacts-search`.
 
 ### E5.6 Incoming
+- **Screenshot fixes from the coordinator (2026-11-10, e5.6 goldens of f7023e1), plan them first:** (F17) the number
+  under the name is raw E.164 (`+905551112233`); show it formatted like everywhere else (`+90 555 111 22 33`, the shared
+  number format op, F14). (F18) Answer and Decline use stroked handsets; use the filled white handset the keypad call
+  button uses (owner: call icons are filled), Decline rotated 135 deg. (F19) The initials avatar is green on the green
+  background and nearly vanishes; give it a contrasting fill or a light ring.
 - AC1 The notification path works without the UI (JVM test of `CallRegistry`); the Compose screen shows from the same
   snapshot; first-frame report logged; native fallback kept.
 - Screenshots: `e5.6-incoming`, `e5.6-incoming-lockscreen-variant`, `e5.6-decline-with-message-sheet`,
@@ -1566,3 +1571,5 @@ SMS cannot be default apps on iOS). Kept here as a future plan, not part of this
   and user-chosen tile server.
 - Open questions for then: background location limits, alarm reliability with the phone locked, App Store vs
   sideloading (personal use).
+
+**Round-12 close (step 8):** E5.1-E5.4, E5.6, E5.7a are done with the Evidence above; E5.5 (stashed step 6) is not. Next planner = **E5 R2** (E5.5 recovery, E5.7b, E5.8-E5.14). Known gaps carried to R2: avatar flight from the Keypad call button, `values-tr` for Phone, U51 persistence.

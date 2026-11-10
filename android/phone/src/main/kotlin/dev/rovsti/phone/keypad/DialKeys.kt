@@ -19,7 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -36,8 +39,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
-import dev.rovsti.design.glass.GlassPreset
-import dev.rovsti.design.glass.rovstiGlass
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.ios.component.IosText
 import dev.rovsti.design.press.glassPress
@@ -124,9 +125,8 @@ internal fun DigitKey(
         modifier
             .size(diameter)
             .glassPress()
-            // Quiet glass (the button preset: thin lens, light blur) instead of a flat grey disc; the digits stay the
-            // same, so the pad reads as glass without shouting.
-            .rovstiGlass(GlassPreset.Button, CircleShape, "dial-key", outerShadow = false)
+            .clip(CircleShape)
+            .background(if (colors.isDark) DialColors.KeyDark else DialColors.KeyLight)
             .keyGesture({ onDown(char) }, onHold?.let { h -> { h(char) } })
             .semantics(mergeDescendants = true) {
                 role = Role.Button
@@ -203,7 +203,7 @@ internal fun CallKey(
             .onGloballyPositioned { bounds = it.boundsInWindow() }
             .glassPress()
             .clip(CircleShape)
-            .background(colors.success)
+            .background(if (colors.isDark) DialColors.CallDark else DialColors.CallLight)
             .pointerInput(onCall) {
                 detectTapGestures(onTap = { onCall() }, onLongPress = { menu(bounds) })
             }.semantics {
@@ -220,12 +220,8 @@ internal fun CallKey(
             }.testTag(KeypadTags.Call),
         contentAlignment = Alignment.Center,
     ) {
-        RovstiIcon(
-            dev.rovsti.design.icons.RovstiIcons.Phone,
-            null,
-            tint = colors.onAccent,
-            size = KeypadMetrics.CallGlyph,
-        )
+        // A filled white handset in both themes, as on iOS (the theme's onAccent is dark in dark mode).
+        RovstiIcon(DialColors.FilledHandset, null, tint = Color.White, size = KeypadMetrics.CallGlyph)
     }
 }
 
@@ -289,5 +285,33 @@ internal fun DeleteKey(
             tint = colors.labelPrimary,
             size = KeypadMetrics.DeleteGlyph,
         )
+    }
+}
+
+/** Dial pad colours: iOS keypad keys and the call button's system green (light and dark appearances). */
+private object DialColors {
+    val KeyLight = Color(0xFFE5E5EA)
+    val KeyDark = Color(0xFF333336)
+    val CallLight = Color(0xFF34C759)
+    val CallDark = Color(0xFF30D158)
+
+    /** The handset glyph of `RovstiIcons.Phone`, filled instead of stroked. */
+    val FilledHandset: ImageVector by lazy {
+        ImageVector
+            .Builder("FilledHandset", 24.dp, 24.dp, 24f, 24f)
+            .path(fill = SolidColor(Color.Black)) {
+                moveTo(5f, 3.5f)
+                horizontalLineTo(9f)
+                lineTo(10.6f, 8f)
+                lineTo(8.6f, 9.6f)
+                curveTo(9.6f, 11.9f, 11.6f, 13.9f, 14.4f, 15.4f)
+                lineTo(16f, 13.4f)
+                lineTo(20.5f, 15f)
+                verticalLineTo(19f)
+                arcTo(1.5f, 1.5f, 0f, false, true, 19f, 20.5f)
+                curveTo(10.7f, 20.5f, 3.5f, 13.3f, 3.5f, 5f)
+                arcTo(1.5f, 1.5f, 0f, false, true, 5f, 3.5f)
+                close()
+            }.build()
     }
 }

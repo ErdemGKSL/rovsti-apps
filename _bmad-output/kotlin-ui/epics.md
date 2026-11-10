@@ -1127,7 +1127,7 @@ round close. E5.9-E5.14 follow in round 14.
 | E5.5 | Favorites and Contacts tabs | R1 | done (recovered from `stash@{0}` in round-13 step 1; Evidence: `FavoritesViewModelTest`, `FavoritesScreenTest`, `PhoneContactsViewModelTest`, `PhoneContactsScreenTest`, `PhoneStringsTest`, `e5.5-*` goldens incl. `e5.5-favorites-tr`) |
 | E5.6 | Incoming call | R1 | done (round-12 step 7; Evidence: `IncomingViewModelTest`, `IncomingScreenTest`, `CallRegistryIncomingTest`, `e5.6-*` goldens). Open owner follow-ups F17-F20, photo background, slide to answer: round-13 steps 3-5 |
 | E5.7a | In-call: single call | R1 | done (F20 in-call frosted controls and photo background: round-13 step 4; round-12 step 8; Evidence: `InCallViewModelTest`, `RoutePickerTest`, `InCallScreenTest`, `e5.7-*` goldens, `docs/kotlin-ui/checklist-e5.md`) |
-| E5.8 | WhatsApp calls | R2 | todo (moved from R1 in round-12; planned in round-13 steps 6-7) |
+| E5.8 | WhatsApp calls | R2 | in-progress (E5.8a audio proven in software, round-13 step 6; E5.8b call UI todo, step 7) |
 
 > **Recovery note (RECOVERED in round-13 step 1; branch `wip-r12-s6` deleted, `stash@{0}` kept until the round closes):** round-12 step 6 (E5.4 sheets wiring / E5.5
 > Favorites and Contacts tabs) was implemented but stashed as `stash@{0}` "blocked: kotlin-ui r12 S6" (also kept as
@@ -1282,6 +1282,16 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   after the call is connected), mic permission and audio focus, and that the foreground service type includes
   microphone. Acceptance: an automated loopback test with the fake gateway that pushes a tone in and gets it out on the
   far side (both directions), plus a manual check on the owner's phone listed in the evidence with gateway logs.
+- **Status: in-progress.** E5.8a (audio chain, no UI) is done in software; E5.8b (call screens) is open.
+- **Evidence (E5.8a, round-13 step 6):** `docs/kotlin-ui/wa-call-audio.md` lists every hop and format (16 kHz mono PCM16,
+  960 samples / 1 920 bytes / 60 ms; the gateway rechunks the engine's 20 ms frames). Tests: `rovsti_wa_client/tests/call_audio.rs`
+  (fake gateway WebSocket, 1 kHz tone both directions, frame size and Goertzel energy), `wa_gateway` `call_audio_rechunks_20_ms_engine_frames_into_60_ms_app_frames`,
+  `WaCallAudioTest` (Robolectric: rate, format, usage, mode, focus, service types, audio opens only after the call is connected), `WaCallsTest`,
+  `PhoneManifestTest` (service type `microphone|phoneCall`). Fixed: incoming calls opened audio at accept instead of
+  when connected; no audio focus; no Bluetooth route; no microphone foreground service (`WaCallService`).
+- **Owner item (manual, real phone):** place and answer a WhatsApp call between two accounts; check both directions
+  of audio, earpiece / speaker / Bluetooth, music pausing, background and screen-off operation, and gateway logs
+  (checklist at the end of `wa-call-audio.md`).
 - Screenshots: `e5.8-wa-incoming`, `e5.8-wa-incall-dimmed-controls`, `e5.8-wa-waiting-during-cellular`.
 
 ### E5.9 Settings
@@ -1355,10 +1365,21 @@ drives the redraw. Not harness-caused (the first composition was always fine and
   frame); (2) a specular highlight that sweeps along the panel rim as if a light source moves (`feSpecularLighting`
   light position keyframed); (3) a faint chromatic dispersion fringe that blooms at the lens edge at the loop's peak;
   (4) the panel's refraction breathing slightly (scale of the displacement eased in and out) so the frosted panel
-  looks liquid. Easing with springs/ease-in-out, seamless loops (first frame == last frame), restrained (one hero
-  effect per card, never all at full strength). Prototype the birthday GIF first, look at it frame by frame, then tune.
-- **Animated cards (owner: "design nice GIFs"):** birthday card with falling confetti and a glass shimmer sweeping
-  across the panel, candle flicker; contact card with a soft gradient drift. 2-3 s loops, 24-30 frames, 540-720 px wide,
+  looks liquid. Restrained: one hero effect per card, never all at full strength. Prototype the birthday GIF first,
+  look at it frame by frame, then tune.
+- **One-shot, not looping (owner, 2026-11-10):** every animated card plays **once** and **settles on a final still
+  frame** that is itself a complete, beautiful card (GIF loop count = 1, i.e. no repeat; the last frame is held).
+  Think of it as an entrance: e.g. the glass panel drops in and **wobbles like jelly as it settles** (spring with
+  overshoot, the refraction stretching and relaxing with the squash), a lens sweeps once across the name and leaves it
+  sharp, the specular glint travels the rim once and fades, confetti bursts and comes to rest, the photo comes into
+  focus through the glass. The owner's examples are not a limit: be creative per card (e.g. a candle that lights with a
+  little refraction shimmer, numbers of the age rolling into place behind the glass, a liquid drop that splits into the
+  initials). Use spring physics for motion (the skill's motion tokens), 1.5-3 s total, front-load the motion, at least
+  the last ~0.6 s still. Because some apps loop GIFs anyway, also export APNG/animated WebP with play-once and pick the
+  share format per target; the final still is also offered as JPEG/PNG.
+- **Animated cards (owner: "design nice GIFs"):** birthday card (confetti burst that settles, glass shimmer once,
+  candle lighting); contact card (panel settles, gradient drift easing to rest). 1.5-3 s one-shot, 24-45 frames,
+  540-720 px wide,
   palette chosen per card, target under ~3 MB; render frames in the Rust core on a background thread with progress.
   Share GIF where the target app supports it (WhatsApp sends GIFs as video: also offer MP4 only if Takumi's encoder is
   available in our build, otherwise animated WebP).

@@ -5,6 +5,8 @@ plugins {
 
 android {
     namespace = "dev.rovsti.platform"
+    // R8 rules for what this module reaches by name (WaPush reads the FCM token by reflection).
+    defaultConfig { consumerProguardFiles("consumer-rules.pro") }
     testFixtures { enable = true }
     testOptions {
         unitTests {

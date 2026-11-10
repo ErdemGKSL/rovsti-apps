@@ -5,6 +5,11 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// FCM for WhatsApp calls: the owner's google-services.json (git-ignored, never committed) sits next to this file. With
+// it the google-services plugin generates the Firebase options; without it the firebase flavor builds with no Firebase
+// app and WaPush.token() returns "".
+if (file("google-services.json").exists()) apply(plugin = "com.google.gms.google-services")
+
 val coreBridge = project(":core-bridge")
 
 android {

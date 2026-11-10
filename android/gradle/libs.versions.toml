@@ -16,6 +16,7 @@ serialization = "1.9.0"
 coil = "3.6.3"
 composeReorderable = "3.0.0"
 firebaseMessaging = "24.1.0"
+googleServices = "4.5.0"
 
 [libraries]
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
@@ -63,3 +64,4 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 roborazzi = { id = "io.github.takahirom.roborazzi", version.ref = "roborazzi" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }

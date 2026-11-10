@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher glyph: one flat white shape, 48 dp inside the 66 dp safe zone of the 108 dp adaptive icon. Also the
+     monochrome layer for themed icons (Android 13+). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2"
+        android:scaleY="2"
+        android:translateX="30"
+        android:translateY="30">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M5,3.5H9L10.6,8L8.6,9.6C9.6,11.9 11.6,13.9 14.4,15.4L16,13.4L20.5,15V19A1.5,1.5 0,0 1,19 20.5C10.7,20.5 3.5,13.3 3.5,5A1.5,1.5 0,0 1,5 3.5z" />
+    </group>
+</vector>

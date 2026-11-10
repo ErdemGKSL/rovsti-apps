@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher background: a soft top-to-bottom gradient in the app colour. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:endColor="#FF1FA344"
+        android:startColor="#FF5BE07A"
+        android:type="linear" />
+</shape>

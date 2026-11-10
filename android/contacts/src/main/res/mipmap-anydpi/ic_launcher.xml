@@ -1,7 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-    <background android:drawable="@color/icon_background" />
-    <foreground>
-        <!-- The art is a full-bleed square; the inset keeps it inside the 66 dp safe zone of the 108 dp icon. -->
-        <inset android:drawable="@drawable/ic_launcher_art" android:inset="18%" />
-    </foreground>
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
 </adaptive-icon>

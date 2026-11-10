@@ -56,4 +56,37 @@
     <string name="native_answer">Answer</string>
     <string name="native_decline">Decline</string>
     <string name="wa_handoff_toast">WhatsApp calls arrive in a later update</string>
+
+    <!-- Keypad (apps/phone/src/keypad.rs, E5.2) -->
+    <string name="keypad_field_description">Phone number</string>
+    <string name="keypad_call">Call</string>
+    <string name="keypad_delete">Delete</string>
+    <string name="keypad_add_contact">Add to Contacts</string>
+    <string name="keypad_create_contact">Create New Contact</string>
+    <string name="keypad_add_existing">Add to Existing Contact</string>
+    <string name="keypad_more">%1$d more</string>
+    <string name="keypad_matches">%1$d matches</string>
+    <string name="keypad_matches_title">Matches</string>
+    <string name="keypad_tone_hint">Pauses: %1$s</string>
+    <string name="keypad_share">Share</string>
+    <string name="keypad_copy_e164">Copy as +E.164</string>
+    <string name="keypad_undo">Undo</string>
+    <string name="keypad_cancel">Cancel</string>
+    <string name="keypad_notice_no_voicemail">No voicemail number set</string>
+    <string name="keypad_notice_dialer_opened">Opened the dialer</string>
+    <string name="keypad_notice_call_failed">Couldn\'t place the call</string>
+    <string name="keypad_notice_nothing_to_paste">No number to paste</string>
+    <string name="keypad_notice_cleared">Number cleared</string>
+    <string name="keypad_notice_copied">Copied</string>
+    <string name="keypad_notice_copied_e164">Copied as +E.164</string>
+    <string name="keypad_paste_title">Paste which number?</string>
+    <string name="keypad_paste_message">The clipboard holds several numbers.</string>
+    <string name="keypad_sim_title">Call with</string>
+    <string name="keypad_call_with">Call with %1$s</string>
+    <string name="keypad_menu_whatsapp">WhatsApp</string>
+    <string name="keypad_menu_soon">Coming soon</string>
+    <string name="keypad_menu_message">Message</string>
+    <string name="keypad_speed_title">Assign Speed Dial</string>
+    <string name="keypad_speed_message">Key %1$d has no speed dial yet.</string>
+    <string name="keypad_speed_choose">Choose a Contact</string>
 </resources>

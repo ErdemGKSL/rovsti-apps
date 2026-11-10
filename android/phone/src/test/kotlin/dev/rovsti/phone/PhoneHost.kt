@@ -171,6 +171,8 @@ internal fun HostedPhone(
     push: PhoneRoute? = null,
     // The body of the pushed pages that have no fixture of their own (WhatsApp, Appearance, About, Licences ...).
     extra: @Composable () -> Unit = {},
+    // The Keypad tab; the placeholder until a test brings the real screen.
+    keypad: @Composable () -> Unit = { KeypadPlaceholder(harness.links()) },
 ) {
     val navigator =
         remember {
@@ -218,7 +220,7 @@ internal fun HostedPhone(
                 harness.links(),
             )
         }
-        entry<PhoneRoute.Keypad> { KeypadPlaceholder(harness.links()) }
+        entry<PhoneRoute.Keypad> { keypad() }
         entry<PhoneRoute.Settings> {
             PhoneSettingsPage(setup, harness.common, "0.1.0", harness.settingsLinks())
         }

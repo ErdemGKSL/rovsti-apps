@@ -1128,6 +1128,10 @@ unchanged (E5.2-E5.7a).
   press-feedback buttons with tones; the number is a `BasicTextField` with the soft keyboard suppressed, caret and
   selection working, paste working.
 - AC2 T9 suggestion list above the keypad from the `ContactIndex` handle.
+- Built (round-12 step 3): `:design` `text/DialField.kt` (`BasicTextField(TextFieldState)` under `InterceptPlatformTextInput`,
+  36 to 24 sp fit, `DialAlphabet`, caret edit helpers), `RovstiIcons.Backspace/Voicemail`, `HapticEvent.KeyboardTap`;
+  `:phone` `keypad/` (`KeypadLayout`, `KeypadViewModel`, `KeypadScreen`, `DialKeys`, `KeypadStrings`). Tests:
+  `DialFieldTest`, `KeypadLayoutTest`, `KeypadViewModelTest` (real core), `KeypadScreenTest`, `E52ShotTest`.
 - Screenshots: `e5.2-sim-chooser-sheet`, `e5.2-keypad-empty`, `e5.2-keypad-typing-t9`, `e5.2-keypad-field-menu`, `e5.2-keypad-selection`,
   `e5.2-call-longpress-menu`, `e5.2-smart-paste-chooser`, `e5.2-keypad-fs2`, `e5.2-keypad-small-screen`.
 

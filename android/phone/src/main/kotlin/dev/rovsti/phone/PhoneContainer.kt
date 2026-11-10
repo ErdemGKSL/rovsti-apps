@@ -1,19 +1,28 @@
 package dev.rovsti.phone
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.telephony.TelephonyManager
+import dev.rovsti.core.Outcome
 import dev.rovsti.core.getOrNull
 import dev.rovsti.core.model.phone.TelUriRequest
+import dev.rovsti.core.model.shared.InferHomeCcRequest
+import dev.rovsti.core.model.shared.NumberForm
+import dev.rovsti.core.model.shared.RenderRequest
 import dev.rovsti.core.ops.NativePhoneOps
 import dev.rovsti.core.ops.NativeQrOps
 import dev.rovsti.core.ops.NativeSearchOps
+import dev.rovsti.core.ops.NativeSharedOps
 import dev.rovsti.core.ops.PhoneOps
 import dev.rovsti.core.ops.QrOps
 import dev.rovsti.core.ops.SearchOps
+import dev.rovsti.core.ops.SharedOps
 import dev.rovsti.phone.data.AndroidCallLauncher
 import dev.rovsti.phone.data.BlockRepo
 import dev.rovsti.phone.data.CallLauncher
 import dev.rovsti.phone.data.CallPlacer
 import dev.rovsti.phone.data.DeviceLocaleTime
+import dev.rovsti.phone.data.People
 import dev.rovsti.phone.data.PeopleIndex
 import dev.rovsti.phone.data.PhoneStore
 import dev.rovsti.phone.data.RecentsRepository
@@ -29,6 +38,7 @@ import dev.rovsti.platform.calllog.BlocklistRepository
 import dev.rovsti.platform.calllog.CallLogRepository
 import dev.rovsti.platform.contacts.AndroidContactsRepository
 import dev.rovsti.platform.contacts.ContactsRepository
+import dev.rovsti.platform.system.SettingsMirror
 import dev.rovsti.platform.system.permissions.AppPermissions
 import dev.rovsti.platform.system.permissions.PermissionGroup
 import dev.rovsti.platform.telephony.AndroidSimRepository
@@ -80,6 +90,9 @@ open class PhoneContainer(
     val search: SearchOps by lazy { createSearch() }
 
     val qr: QrOps by lazy { createQr() }
+
+    /** The number formats (`format.render`, `format.infer_home_cc`) for "Copy as +E.164". */
+    val sharedOps: SharedOps by lazy { createSharedOps() }
 
     /** The WhatsApp calls of the linked instance; started by the screens that show them (E5.8). */
     val waCalls: WaCalls by lazy { createWaCalls() }
@@ -158,6 +171,33 @@ open class PhoneContainer(
 
     protected open fun createQr(): QrOps = NativeQrOps(rust)
 
+    protected open fun createSharedOps(): SharedOps = NativeSharedOps(rust)
+
+    /** The voicemail number the SIM reports, null when it has none or may not be read. */
+    @SuppressLint("MissingPermission")
+    open fun voicemailNumber(): String? =
+        try {
+            context.getSystemService(TelephonyManager::class.java)?.voiceMailNumber
+        } catch (_: SecurityException) {
+            null
+        }
+
+    /** The system's "dial pad tones" setting (default on). */
+    open fun systemKeypadTones(): Boolean = SettingsMirror.systemKeypadTones(context)
+
+    /** [typed] in `+` form, null when it has none. The home country comes from the contacts' own numbers. */
+    open suspend fun e164(typed: String): String? {
+        val numbers =
+            (people.people.value as? People.Ready)?.contacts?.flatMap { c -> c.numbers.map { it.raw } }.orEmpty()
+        val home =
+            (
+                sharedOps.inferHomeCc(
+                    InferHomeCcRequest(numbers.take(HOME_CC_SAMPLE)),
+                ) as? Outcome.Ok
+            )?.value?.homeCc
+        return (sharedOps.render(RenderRequest(typed, NumberForm.E164, home)) as? Outcome.Ok)?.value?.text
+    }
+
     protected open fun createCallPump(): CallAudioPump = AndroidCallAudioPump(context)
 
     protected open fun createWaCalls(): WaCalls =
@@ -192,3 +232,6 @@ open class PhoneContainer(
 
     protected open fun createSetupMemory(): SetupMemory = InMemorySetupMemory()
 }
+
+/** How many contact numbers the home-country guess reads. */
+private const val HOME_CC_SAMPLE = 200

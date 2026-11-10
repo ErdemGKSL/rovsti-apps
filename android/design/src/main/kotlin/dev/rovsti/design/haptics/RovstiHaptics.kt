@@ -53,6 +53,9 @@ enum class HapticEvent(
 
     /** An invalid action. */
     Reject(HapticFeedbackConstants.REJECT, VibrationEffect.EFFECT_DOUBLE_CLICK),
+
+    /** A key of the dial pad going down. */
+    KeyboardTap(HapticFeedbackConstants.KEYBOARD_TAP, VibrationEffect.EFFECT_CLICK),
 }
 
 /**
@@ -75,6 +78,8 @@ interface RovstiHaptics {
     fun confirm() = play(HapticEvent.Confirm)
 
     fun reject() = play(HapticEvent.Reject)
+
+    fun keyboardTap() = play(HapticEvent.KeyboardTap)
 }
 
 /** Plays nothing. The default of [LocalRovstiHaptics] (previews, tests). */

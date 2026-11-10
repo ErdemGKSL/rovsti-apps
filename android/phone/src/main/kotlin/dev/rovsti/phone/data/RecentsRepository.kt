@@ -79,6 +79,9 @@ class RecentsRepository(
 
     @Volatile private var entries: List<CallLogEntry> = emptyList()
 
+    /** The call-log entries of the last build's source, newest first (what redial reads). */
+    val callEntries: List<CallLogEntry> get() = entries
+
     @Volatile private var wa: List<ExtraCall> = emptyList()
     private var delayed: Job? = null
 

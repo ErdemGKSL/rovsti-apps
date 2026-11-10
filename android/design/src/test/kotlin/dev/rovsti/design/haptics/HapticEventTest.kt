@@ -21,6 +21,7 @@ class HapticEventTest {
         haptics.longPress()
         haptics.confirm()
         haptics.reject()
+        haptics.keyboardTap()
         assertEquals(
             listOf(
                 HapticEvent.Tick,
@@ -31,6 +32,7 @@ class HapticEventTest {
                 HapticEvent.LongPress,
                 HapticEvent.Confirm,
                 HapticEvent.Reject,
+                HapticEvent.KeyboardTap,
             ),
             played,
         )

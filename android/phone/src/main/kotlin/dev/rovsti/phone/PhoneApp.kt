@@ -1,5 +1,8 @@
 package dev.rovsti.phone
 
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,10 +25,17 @@ import dev.rovsti.phone.diagnostics.DiagnosticsPage
 import dev.rovsti.phone.diagnostics.DiagnosticsViewModel
 import dev.rovsti.phone.diagnostics.SevenTaps
 import dev.rovsti.phone.diagnostics.versionText
+import dev.rovsti.phone.keypad.KeypadAction
+import dev.rovsti.phone.keypad.KeypadHost
+import dev.rovsti.phone.keypad.KeypadScreen
+import dev.rovsti.phone.keypad.KeypadViewModel
+import dev.rovsti.phone.keypad.addContactIntent
 import dev.rovsti.phone.setup.OnResume
 import dev.rovsti.phone.setup.SetupAction
 import dev.rovsti.phone.setup.SetupSheetContent
 import dev.rovsti.phone.setup.SetupSheetViewModel
+import dev.rovsti.platform.files.ShareIntents
+import dev.rovsti.platform.telephony.KeypadTone
 import dev.rovsti.shell.RovstiShell
 import dev.rovsti.shell.settings.CommonSettingsPage
 import dev.rovsti.shell.settings.aboutInfo
@@ -48,6 +58,72 @@ fun rememberSetupViewModel(container: PhoneContainer): SetupSheetViewModel {
                 }
             }
         ViewModelProvider(owner, factory)[SetupSheetViewModel::class.java]
+    }
+}
+
+@Composable
+private fun rememberKeypadViewModel(container: PhoneContainer): KeypadViewModel {
+    val owner = LocalContext.current.findComponentActivity()
+    return remember(owner, container) {
+        val factory =
+            viewModelFactory {
+                initializer {
+                    KeypadViewModel(
+                        ops = container.ops,
+                        people = container.people,
+                        placer = container.placer,
+                        speedDial = container.speedDial,
+                        sims = container.simState.sims,
+                        clipboard = container.clipboard,
+                        redialEntries = { container.recents.callEntries },
+                        voicemailNumber = container::voicemailNumber,
+                        toneSetting = { container.store.prefs.value.settings.keypadTones },
+                        systemTones = container::systemKeypadTones,
+                        e164 = container::e164,
+                    )
+                }
+            }
+        ViewModelProvider(owner, factory)[KeypadViewModel::class.java]
+    }
+}
+
+/** The Keypad's Android side: the DTMF tone, the contact editor, the share sheet and the SMS app. */
+private class AndroidKeypadHost(
+    private val context: Context,
+    private val openContacts: (Int) -> Unit,
+) : KeypadHost {
+    override fun tone(char: Char) {
+        val index =
+            when (char) {
+                '*' -> STAR_TONE
+                '#' -> HASH_TONE
+                else -> char - '0'
+            }
+        KeypadTone.play(index)
+    }
+
+    override fun addContact(
+        number: String,
+        create: Boolean,
+    ) = launch(addContactIntent(number, create))
+
+    override fun share(text: String) = launch(Intent.createChooser(ShareIntents.text(text), null))
+
+    override fun message(number: String) = launch(ShareIntents.sendSmsTo(number))
+
+    override fun chooseSpeedDialContact(digit: Int) = openContacts(digit)
+
+    private fun launch(intent: Intent) {
+        try {
+            context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (_: ActivityNotFoundException) {
+            // No app handles it: nothing to show.
+        }
+    }
+
+    private companion object {
+        const val STAR_TONE = 10
+        const val HASH_TONE = 11
     }
 }
 
@@ -171,7 +247,20 @@ fun PhoneApp(
                 links = links,
             )
         }
-        entry<PhoneRoute.Keypad> { KeypadPlaceholder(links) }
+        entry<PhoneRoute.Keypad> {
+            val model = rememberKeypadViewModel(container)
+            val context = LocalContext.current
+            val host = remember(context, navigator) { AndroidKeypadHost(context) { navigator.select(ContactsTab) } }
+            val dial by container.pendingDial.collectAsState()
+            LaunchedEffect(dial) {
+                // A number from a `tel:` link: it lands in the field, once.
+                dial?.let {
+                    model.onAction(KeypadAction.Restore(it.text))
+                    container.pendingDial.value = null
+                }
+            }
+            KeypadScreen(model, host, links)
+        }
         entry<PhoneRoute.Settings> {
             val context = LocalContext.current
             val version = remember(context) { context.aboutInfo(context.getString(R.string.app_name)).versionName }

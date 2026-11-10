@@ -254,6 +254,32 @@ object RovstiIcons {
 
     val Message: ImageVector by lazy { stroked("Message") { bubble() } }
 
+    /** The delete key of the dial pad: a tag pointing left with a cross in it. */
+    val Backspace: ImageVector by lazy {
+        stroked("Backspace") {
+            moveTo(21f, 6f)
+            horizontalLineTo(9f)
+            lineTo(3f, 12f)
+            lineTo(9f, 18f)
+            horizontalLineTo(21f)
+            close()
+            moveTo(12.5f, 9.5f)
+            lineTo(17.5f, 14.5f)
+            moveTo(17.5f, 9.5f)
+            lineTo(12.5f, 14.5f)
+        }
+    }
+
+    /** Voicemail: the two reels of a tape. */
+    val Voicemail: ImageVector by lazy {
+        stroked("Voicemail") {
+            ring(7f, 12f, 3.5f)
+            ring(17f, 12f, 3.5f)
+            moveTo(7f, 15.5f)
+            horizontalLineTo(17f)
+        }
+    }
+
     val Person: ImageVector by lazy {
         stroked("Person") {
             ring(12f, 8f, 3.6f)

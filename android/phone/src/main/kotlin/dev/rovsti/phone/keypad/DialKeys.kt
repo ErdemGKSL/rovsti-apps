@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import dev.rovsti.design.glass.GlassPreset
+import dev.rovsti.design.glass.rovstiGlass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -122,8 +124,9 @@ internal fun DigitKey(
         modifier
             .size(diameter)
             .glassPress()
-            .clip(CircleShape)
-            .background(colors.fillSecondary)
+            // Quiet glass (the button preset: thin lens, light blur) instead of a flat grey disc; the digits stay the
+            // same, so the pad reads as glass without shouting.
+            .rovstiGlass(GlassPreset.Button, CircleShape, "dial-key", outerShadow = false)
             .keyGesture({ onDown(char) }, onHold?.let { h -> { h(char) } })
             .semantics(mergeDescendants = true) {
                 role = Role.Button

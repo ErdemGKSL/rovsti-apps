@@ -122,6 +122,13 @@ open class PhoneContainer(
     /** The contact list view (sections, favorites order and moves) of the Favorites and Contacts tabs. */
     val contactsOps: ContactsOps by lazy { createContactsOps() }
 
+    /** The photo of a caller for the call screens' background. */
+    val callPhotos: dev.rovsti.phone.incoming.CallPhotos by lazy {
+        dev.rovsti.phone.incoming.CallPhotos { id ->
+            contacts.all().map { list -> list.firstOrNull { it.id == id }?.photoUri }
+        }
+    }
+
     /** The call-back reminders (`call_reminder.*`, `message_reminder.slots`). */
     val chat: ChatOps by lazy { createChat() }
 

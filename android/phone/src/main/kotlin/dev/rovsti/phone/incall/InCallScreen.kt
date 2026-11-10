@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -51,14 +52,18 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import dev.rovsti.core.model.phone.AudioRoute
-import dev.rovsti.design.controls.GlassCircleButton
+import dev.rovsti.design.chrome.BackdropScope
+import dev.rovsti.design.controls.CallControlButton
 import dev.rovsti.design.icons.RovstiIcon
 import dev.rovsti.design.icons.RovstiIcons
 import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.list.avatarColor
 import dev.rovsti.design.media.AnimatedChromeMesh
 import dev.rovsti.design.media.CallAura
+import dev.rovsti.design.media.CallBackdrop
+import dev.rovsti.design.media.CallPhotoState
 import dev.rovsti.design.media.rememberCallAuraPalette
+import dev.rovsti.design.media.rememberCallPhotoState
 import dev.rovsti.design.overlay.AnchorHolder
 import dev.rovsti.design.overlay.captureAnchor
 import dev.rovsti.design.theme.RovstiText
@@ -169,18 +174,46 @@ fun InCallContent(
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
     aura: AuraMode = AuraMode(),
+    /** The caller's photo model (a contacts URI); null shows the aura alone. */
+    photo: Any? = null,
 ) {
     SideEffect { InCallProbe.content.incrementAndGet() }
     val call = ui.call
     val transition by rememberUpdatedState(isTransitionActive())
     val seed = call?.let { avatarColor(it.avatarKey) } ?: Color.Black
     val palette = rememberCallAuraPalette(if (call != null) seed.toArgb() else null)
-    Box(
-        modifier
-            .fillMaxSize()
-            .background(Color.Black)
-            .testTag(InCallTags.Screen)
-            .semantics { liveRegion = LiveRegionMode.Polite },
+    val photoState = rememberCallPhotoState()
+    // The aura, the mesh and the photo are recorded into this screen's own backdrop; the frosted discs (chrome) sample it.
+    BackdropScope(
+        modifier =
+            modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .testTag(InCallTags.Screen)
+                .semantics { liveRegion = LiveRegionMode.Polite },
+        baseBg = Color.Black,
+        chrome = {
+            if (call != null) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+                        .padding(horizontal = InCallMetrics.SidePad),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    CollapseRow(strings, onCollapse)
+                    CallerBlock(ui, call, strings, timer, photoState, onAction, onTimerMenu, Modifier.weight(1f))
+                    if (ui.keypad.open) {
+                        TonePanel(ui, strings, onAction)
+                    } else {
+                        ControlGrid(ui, strings, onAction, onAudio)
+                    }
+                    Spacer(Modifier.height(InCallMetrics.EndTop))
+                    EndButton(ui, strings, onAction)
+                    Spacer(Modifier.height(InCallMetrics.BottomPad))
+                }
+            }
+        },
     ) {
         CallAura(
             palette = palette,
@@ -197,26 +230,8 @@ fun InCallContent(
             alpha = MESH_ALPHA,
             fixedPhase = aura.phase,
         )
-        if (call != null) {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
-                    .padding(horizontal = InCallMetrics.SidePad),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                CollapseRow(strings, onCollapse)
-                CallerBlock(ui, call, strings, timer, onAction, onTimerMenu, Modifier.weight(1f))
-                if (ui.keypad.open) {
-                    TonePanel(ui, strings, onAction)
-                } else {
-                    ControlGrid(ui, strings, onAction, onAudio)
-                }
-                Spacer(Modifier.height(InCallMetrics.EndTop))
-                EndButton(ui, strings, onAction)
-                Spacer(Modifier.height(InCallMetrics.BottomPad))
-            }
-        }
+        // The photo fades in over the aura once it has loaded; the first frame is the aura.
+        CallBackdrop(photo = photo, state = photoState, cacheKey = call?.contactId?.toString())
     }
 }
 
@@ -226,21 +241,22 @@ private fun CollapseRow(
     onCollapse: () -> Unit,
 ) {
     Row(Modifier.fillMaxWidth().padding(top = Spacing.s), verticalAlignment = Alignment.CenterVertically) {
-        GlassCircleButton(
+        CallControlButton(
             onClick = onCollapse,
             size = InCallMetrics.TopBar,
             touchTarget = Spacing.gutter * 3,
+            debugTag = "call.collapse",
             modifier =
                 Modifier
                     .testTag(InCallTags.Collapse)
                     .semantics(mergeDescendants = true) { contentDescription = strings.collapse },
-        ) {
+        ) { glyph ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 RovstiIcon(
                     RovstiIcons.Back,
                     null,
                     modifier = Modifier.rotate(CHEVRON_DOWN),
-                    tint = OnAura,
+                    tint = glyph,
                     size = InCallMetrics.TopIcon,
                 )
             }
@@ -254,6 +270,7 @@ private fun CallerBlock(
     call: InCallCall,
     strings: InCallStrings,
     timer: State<String>,
+    photoState: CallPhotoState,
     onAction: (InCallAction) -> Unit,
     onTimerMenu: (Rect) -> Unit,
     modifier: Modifier,
@@ -264,13 +281,23 @@ private fun CallerBlock(
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(InCallMetrics.LabelTop))
-        Avatar(
-            name = call.title,
-            modifier = Modifier.testTag(InCallTags.Avatar).rovstiSharedBounds(AvatarKey),
-            size = InCallMetrics.Avatar,
-            colorKey = call.avatarKey,
-            onAura = true,
-        )
+        // The avatar fades out as the photo fades in and is gone once the photo shows; its space stays.
+        val avatarGone by photoState.avatarGone
+        if (avatarGone) {
+            Spacer(Modifier.size(InCallMetrics.Avatar))
+        } else {
+            Avatar(
+                name = call.title,
+                modifier =
+                    Modifier
+                        .testTag(InCallTags.Avatar)
+                        .rovstiSharedBounds(AvatarKey)
+                        .graphicsLayer { alpha = 1f - photoState.alpha.value },
+                size = InCallMetrics.Avatar,
+                colorKey = call.avatarKey,
+                onAura = true,
+            )
+        }
         Spacer(Modifier.height(InCallMetrics.AvatarGap))
         // Touch and hold on the name block copies the number (U17).
         Column(
@@ -463,8 +490,8 @@ private fun audioIcon(route: AudioRoute): ImageVector =
     }
 
 /**
- * A glass circle with a caption under it. An [active] control (muted, on hold, speaker on) turns white with a dark glyph,
- * as on iOS; a disabled one dims and says why to a screen reader.
+ * A frosted circle with a caption under it. An [active] control (muted, on hold, speaker on) turns solid white with a
+ * dark glyph, as on iOS; a disabled one dims to 45 % and says why to a screen reader.
  */
 @Composable
 private fun ControlButton(
@@ -482,11 +509,12 @@ private fun ControlButton(
         modifier.width(InCallMetrics.Control + Spacing.l),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        GlassCircleButton(
+        CallControlButton(
             onClick = onClick,
             enabled = enabled,
+            active = active,
             size = InCallMetrics.Control,
-            alpha = if (enabled) 1f else DISABLED_ALPHA,
+            debugTag = "call.control",
             modifier =
                 Modifier
                     .then(if (anchor != null) Modifier.captureAnchor(anchor) else Modifier)
@@ -496,12 +524,9 @@ private fun ControlButton(
                         if (active) stateDescription = label
                         if (!enabled && disabledReason != null) stateDescription = disabledReason
                     },
-        ) {
-            Box(
-                Modifier.fillMaxSize().then(if (active) Modifier.background(ActiveFill) else Modifier),
-                contentAlignment = Alignment.Center,
-            ) {
-                RovstiIcon(icon, null, tint = if (active) Color.Black else OnAura, size = InCallMetrics.ControlIcon)
+        ) { glyph ->
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                RovstiIcon(icon, null, tint = glyph, size = InCallMetrics.ControlIcon)
             }
         }
         Spacer(Modifier.height(InCallMetrics.CaptionGap))
@@ -522,23 +547,22 @@ private fun EndButton(
     strings: InCallStrings,
     onAction: (InCallAction) -> Unit,
 ) {
-    val enabled = ui.live
-    GlassCircleButton(
+    CallControlButton(
         onClick = { onAction(InCallAction.End) },
-        enabled = enabled,
+        enabled = ui.live,
         size = InCallMetrics.End,
-        alpha = if (enabled) 1f else DISABLED_ALPHA,
+        solid = Color(DECLINE_RED),
         modifier =
             Modifier
                 .testTag(InCallTags.End)
                 .semantics(mergeDescendants = true) { contentDescription = strings.end },
-    ) {
-        Box(Modifier.fillMaxSize().background(Color(DECLINE_RED)), contentAlignment = Alignment.Center) {
+    ) { glyph ->
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             RovstiIcon(
                 RovstiIcons.PhoneFill,
                 null,
                 modifier = Modifier.rotate(HANG_UP),
-                tint = Color.White,
+                tint = glyph,
                 size = InCallMetrics.EndIcon,
             )
         }
@@ -551,8 +575,6 @@ private const val HANG_UP = 135f
 private const val INDIGO = 0xFF5E5CE6
 private const val MESH_ALPHA = 0.28f
 private const val CHIP_ALPHA = 0.18f
-private const val DISABLED_ALPHA = 0.55f
 
 internal val OnAura = Color.White
 internal val OnAuraSecondary = Color.White.copy(alpha = 0.78f)
-private val ActiveFill = Color.White.copy(alpha = 0.92f)

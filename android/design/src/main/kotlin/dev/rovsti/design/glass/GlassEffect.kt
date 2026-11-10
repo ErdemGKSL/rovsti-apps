@@ -98,6 +98,10 @@ data class GlassEffectConfig(
     val sidePanelColor: Color = Color.Unspecified,
     val sidePanelSurfaceOpacity: Float = 0.75f,
     val sidePanelTextColor: Color = Color.Unspecified,
+    /** Rovsti: width of the specular rim (Convx: fixed 0.8 dp). */
+    val highlightWidth: androidx.compose.ui.unit.Dp = EdgeHighlightWidth,
+    /** Rovsti: the normal-blend dark outer rim; the frosted call controls turn it off. */
+    val darkRim: Boolean = true,
 ) {
     /** Copies the side panel's effect settings into the shared fields. */
     fun forSidePanel(isDark: Boolean? = null): GlassEffectConfig =
@@ -533,11 +537,11 @@ fun Modifier.liquidGlass(
             label = "glassRim",
         )
     val highlightBlock: (() -> Highlight?)? =
-        remember(applyEdgeEffects, plainBlur, rimTintColor, animatedHighlightAngle) {
+        remember(applyEdgeEffects, plainBlur, rimTintColor, animatedHighlightAngle, config.highlightWidth) {
             if (applyEdgeEffects && !plainBlur) {
                 {
                     Highlight(
-                        width = EdgeHighlightWidth,
+                        width = config.highlightWidth,
                         style =
                             HighlightStyle.Default(
                                 color = animRim.value,
@@ -591,7 +595,7 @@ fun Modifier.liquidGlass(
         loopBucket = loopBucket,
         debugTag = debugTag,
     ).then(
-        if (applyEdgeEffects && !plainBlur && darkRimAlpha > 0f) {
+        if (applyEdgeEffects && !plainBlur && config.darkRim && darkRimAlpha > 0f) {
             Modifier.outerDarkRim(
                 shape = shape,
                 width = DarkRimWidth,

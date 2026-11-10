@@ -83,6 +83,9 @@ object RovstiMotion {
 
     fun <T : Any> barMinimize(t: T): SpringSpec<T> = spring(0.90f, 500f, t)
 
+    /** A call-screen toggle landing on or off: damping 0.8, stiffness 300 (scale kick when it turns solid white). */
+    fun <T : Any> callToggle(t: T): SpringSpec<T> = spring(0.8f, 300f, t)
+
     /** Decay of the velocity that drives squash and stretch after release. */
     fun <T : Any> squashDecay(t: T): SpringSpec<T> = spring(0.5f, 300f, t)
 

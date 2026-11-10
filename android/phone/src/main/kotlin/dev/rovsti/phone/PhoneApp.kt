@@ -599,9 +599,9 @@ fun PhoneApp(
         }
         entry<PhoneRoute.LicenceDetail> { route -> PhoneLicenceDetailEntry(route.id, pop, popToRoot) }
         // Incoming (E5.6): the full-screen call screen. Its sheets, toasts and leaving run in IncomingEffects above.
-        entry<PhoneRoute.Incoming> { IncomingScreen(incoming) }
+        entry<PhoneRoute.Incoming> { IncomingScreen(incoming, photos = container.callPhotos) }
         // InCall (E5.7a): the page of the single call. Back and the chevron collapse it into the mini pill.
-        entry<PhoneRoute.InCall> { InCallScreen(inCall, inCallSheets, onCollapse = pop) }
+        entry<PhoneRoute.InCall> { InCallScreen(inCall, inCallSheets, onCollapse = pop, photos = container.callPhotos) }
     }
 }
 

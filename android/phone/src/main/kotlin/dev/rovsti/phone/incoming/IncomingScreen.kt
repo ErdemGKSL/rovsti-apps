@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -53,7 +54,10 @@ import dev.rovsti.design.list.Avatar
 import dev.rovsti.design.list.avatarColor
 import dev.rovsti.design.media.AnimatedChromeMesh
 import dev.rovsti.design.media.CallAura
+import dev.rovsti.design.media.CallBackdrop
+import dev.rovsti.design.media.CallPhotoState
 import dev.rovsti.design.media.rememberCallAuraPalette
+import dev.rovsti.design.media.rememberCallPhotoState
 import dev.rovsti.design.theme.RovstiText
 import dev.rovsti.design.theme.RovstiTheme
 import dev.rovsti.design.theme.Spacing
@@ -108,9 +112,11 @@ fun IncomingScreen(
     model: IncomingViewModel,
     modifier: Modifier = Modifier,
     aura: AuraMode = AuraMode(),
+    photos: CallPhotos = CallPhotos.None,
 ) {
     val ui by model.state.collectAsState()
-    IncomingContent(ui, IncomingStrings.current(), model::onAction, modifier, aura)
+    val photo = rememberCallPhoto(photos, ui.caller?.contactId)
+    IncomingContent(ui, IncomingStrings.current(), model::onAction, modifier, aura, photo)
 }
 
 /**
@@ -126,8 +132,11 @@ fun IncomingContent(
     onAction: (IncomingAction) -> Unit,
     modifier: Modifier = Modifier,
     aura: AuraMode = AuraMode(),
+    /** The caller's photo model (a contacts URI); null shows the aura alone. */
+    photo: Any? = null,
 ) {
     val caller = ui.caller
+    val photoState = rememberCallPhotoState()
     val transition by rememberUpdatedState(isTransitionActive())
     val seed = caller?.let { avatarColor(it.avatarKey) } ?: Color.Black
     val palette = rememberCallAuraPalette(if (caller != null) seed.toArgb() else null)
@@ -163,6 +172,8 @@ fun IncomingContent(
             alpha = MESH_ALPHA,
             fixedPhase = aura.phase,
         )
+        // The photo fades in over the aura once it has loaded; the first frame is the aura (never waits for the photo).
+        CallBackdrop(photo = photo, state = photoState, cacheKey = caller?.contactId?.toString())
         if (caller != null) {
             Column(
                 Modifier
@@ -171,7 +182,7 @@ fun IncomingContent(
                     .padding(horizontal = IncomingMetrics.SidePad),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                CallerBlock(ui, caller, strings, Modifier.weight(1f))
+                CallerBlock(ui, caller, strings, photoState, Modifier.weight(1f))
                 SecondaryRow(ui, strings, onAction)
                 Spacer(Modifier.height(IncomingMetrics.SecondaryLift))
                 PrimaryRow(strings, onAction)
@@ -186,6 +197,7 @@ private fun CallerBlock(
     ui: IncomingUi,
     caller: IncomingCaller,
     strings: IncomingStrings,
+    photoState: CallPhotoState,
     modifier: Modifier,
 ) {
     Column(
@@ -215,7 +227,19 @@ private fun CallerBlock(
             )
         }
         Spacer(Modifier.height(IncomingMetrics.AvatarGap))
-        CallAvatar(caller, Modifier.rovstiSharedBounds(AvatarKey), IncomingMetrics.Avatar)
+        // The avatar fades out as the photo fades in and is gone once the photo shows; its space stays.
+        val avatarGone by photoState.avatarGone
+        if (avatarGone) {
+            Spacer(Modifier.size(IncomingMetrics.Avatar))
+        } else {
+            CallAvatar(
+                caller,
+                Modifier
+                    .rovstiSharedBounds(AvatarKey)
+                    .graphicsLayer { alpha = 1f - photoState.alpha.value },
+                IncomingMetrics.Avatar,
+            )
+        }
         Spacer(Modifier.height(IncomingMetrics.AvatarGap))
         // Light 36 sp, centred, two lines at most; a longer name shrinks to fit instead of cutting.
         BasicText(

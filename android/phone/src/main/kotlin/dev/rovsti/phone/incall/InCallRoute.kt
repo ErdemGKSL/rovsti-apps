@@ -44,6 +44,8 @@ import dev.rovsti.design.theme.Spacing
 import dev.rovsti.phone.DECLINE_RED
 import dev.rovsti.phone.InCallMetrics
 import dev.rovsti.phone.incoming.AuraMode
+import dev.rovsti.phone.incoming.CallPhotos
+import dev.rovsti.phone.incoming.rememberCallPhoto
 
 /** The In-Call page over its model: the sheets it opens come from [sheets], the timer ticks from the model's clock. */
 @Composable
@@ -53,8 +55,10 @@ fun InCallScreen(
     onCollapse: () -> Unit,
     modifier: Modifier = Modifier,
     aura: AuraMode = AuraMode(),
+    photos: CallPhotos = CallPhotos.None,
 ) {
     val ui by model.state.collectAsState()
+    val photo = rememberCallPhoto(photos, ui.call?.contactId)
     val strings = InCallStrings.current()
     val timer = rememberCallTimer(ui.call, model::now, model::elapsed)
     InCallContent(
@@ -77,6 +81,7 @@ fun InCallScreen(
         onCollapse = onCollapse,
         modifier = modifier,
         aura = aura,
+        photo = photo,
     )
 }
 

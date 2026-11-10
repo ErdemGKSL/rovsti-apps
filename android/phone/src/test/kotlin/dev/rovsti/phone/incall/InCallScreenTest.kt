@@ -4,19 +4,25 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import dev.rovsti.core.model.phone.AudioRoute
 import dev.rovsti.core.model.phone.SimAccount
 import dev.rovsti.core.model.phone.WireCallState
+import dev.rovsti.design.backdrop.BackdropDebug
+import dev.rovsti.design.controls.CallControlActiveFillTag
 import dev.rovsti.phone.LockScreenGate
 import dev.rovsti.phone.data.Sims
 import dev.rovsti.phone.incoming.AuraMode
@@ -56,6 +62,82 @@ class InCallScreenTest : ShotTest() {
             )
         }
         advance(100)
+    }
+
+    // ---- F20: the frosted controls --------------------------------------------------------------------------------------
+
+    private fun pixel(
+        tag: String,
+        fx: Float,
+        fy: Float,
+    ): Int {
+        val image = compose.onNodeWithTag(tag).captureToImage()
+        return image.toPixelMap()[(image.width * fx).toInt(), (image.height * fy).toInt()].toArgb()
+    }
+
+    private fun grey(argb: Int) = ((argb shr 16 and 0xFF) + (argb shr 8 and 0xFF) + (argb and 0xFF)) / 3
+
+    @Test fun anActiveToggleIsSolidWhiteWithADarkGlyph() {
+        show(InCallHarness(liveSnapshot(muted = true)).ui)
+        advance(600)
+        // Off the glyph, inside the disc: white.
+        assertTrue(
+            "muted disc: ${pixel(InCallTags.Mute, 0.13f, 0.5f).toString(16)}",
+            grey(pixel(InCallTags.Mute, 0.13f, 0.5f)) >= 245,
+        )
+        val image = compose.onNodeWithTag(InCallTags.Mute).captureToImage().toPixelMap()
+        val darkest =
+            (0 until image.width).minOf { x ->
+                (0 until image.height).minOf { y -> grey(image[x, y].toArgb()) }
+            }
+        assertTrue("dark glyph: $darkest", darkest < 80)
+        // An inactive toggle (Keypad) is not white.
+        assertTrue(grey(pixel(InCallTags.Keypad, 0.13f, 0.5f)) < 200)
+    }
+
+    @Test fun theActiveFillFadesInInsteadOfSnapping() {
+        show()
+        compose.onNodeWithTag(CallControlActiveFillTag).assertDoesNotExist()
+        ui = InCallHarness(liveSnapshot(muted = true)).ui
+        advance(60)
+        val early = grey(pixel(InCallTags.Mute, 0.13f, 0.5f))
+        advance(400)
+        val late = grey(pixel(InCallTags.Mute, 0.13f, 0.5f))
+        assertTrue("early $early late $late", early < late && late >= 245)
+    }
+
+    @Test fun aDisabledControlIsDimmed() {
+        show()
+        advance(300)
+        val on = grey(pixel(InCallTags.Keypad, 0.13f, 0.5f))
+        val off = grey(pixel(InCallTags.AddCall, 0.13f, 0.5f))
+        assertTrue("enabled $on, disabled $off", off < on)
+    }
+
+    @Test fun everyFrostedControlDrawsThroughTheBackdropEffect() {
+        BackdropDebug.clear()
+        BackdropDebug.enabled = true
+        try {
+            show()
+            advance(300)
+            compose.onRoot().captureToImage()
+            val records = BackdropDebug.snapshot()
+            val controls = records.filter { it.tag == "call.control" }
+            assertTrue("six grid discs drew: ${controls.size}", controls.size >= 6)
+            assertTrue(records.any { it.tag == "call.collapse" })
+            val bad = records.filter { it.tag?.startsWith("call.") == true && (!it.hasRenderEffect || !it.recorded) }
+            assertEquals(emptyList<BackdropDebug.Record>(), bad)
+        } finally {
+            BackdropDebug.enabled = false
+            BackdropDebug.clear()
+        }
+    }
+
+    @Test fun theEndButtonIsSolidRed() {
+        show()
+        advance(300)
+        val c = pixel(InCallTags.End, 0.13f, 0.5f)
+        assertTrue("red ${c.toString(16)}", (c shr 16 and 0xFF) > 200 && (c and 0xFF) < 120)
     }
 
     // ---- What shows --------------------------------------------------------------------------------------------------

@@ -298,6 +298,7 @@ internal fun HostedInCall(
     aura: AuraMode = AuraMode.Shot,
     onAudio: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     onTimerMenu: (androidx.compose.ui.geometry.Rect) -> Unit = {},
+    photo: Any? = null,
 ) {
     val navigator =
         remember {
@@ -330,6 +331,7 @@ internal fun HostedInCall(
                     onTimerMenu = onTimerMenu,
                     onCollapse = {},
                     aura = aura,
+                    photo = photo,
                 )
             }
         }

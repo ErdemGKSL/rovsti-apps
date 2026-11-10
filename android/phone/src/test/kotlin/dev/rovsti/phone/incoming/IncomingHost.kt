@@ -43,6 +43,7 @@ internal fun HostedIncoming(
     harness: IncomingShotHarness,
     inCall: Boolean = false,
     aura: AuraMode = AuraMode.Shot,
+    photo: Any? = null,
 ) {
     val navigator =
         remember {
@@ -70,7 +71,7 @@ internal fun HostedIncoming(
         entry<PhoneRoute.Contacts> {}
         entry<PhoneRoute.Keypad> {}
         entry<PhoneRoute.Incoming> {
-            IncomingContent(harness.ui, strings, { harness.actions += it }, aura = aura)
+            IncomingContent(harness.ui, strings, { harness.actions += it }, aura = aura, photo = photo)
         }
         entry<PhoneRoute.InCall> { InCallStandIn() }
     }

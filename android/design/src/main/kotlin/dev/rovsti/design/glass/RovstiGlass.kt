@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import dev.rovsti.design.backdrop.BackdropDebug
+import dev.rovsti.design.backdrop.isRenderEffectSupported
 import dev.rovsti.design.ios.foundation.IosGlassSpec
 import dev.rovsti.design.ios.foundation.IosGlassStyle
 import dev.rovsti.design.ios.foundation.IosTheme
@@ -28,6 +29,8 @@ import dev.rovsti.design.theme.RovstiTheme
  */
 enum class GlassPreset(
     internal val config: GlassEffectConfig,
+    /** Exact rim opacity; null keeps the theme's rim. */
+    internal val rimAlpha: Float? = null,
 ) {
     /** Tab bars, toolbar capsules, top chrome: Convx's nav-bar values (3 dp blur, lens 0.60 / 0.69). */
     Bar(GlassEffectConfig()),
@@ -37,6 +40,26 @@ enum class GlassPreset(
 
     /** Switch and slider thumbs, small selection pucks. */
     Thumb(GlassEffectConfig(blurRadius = 2f, lensHeight = 0.35f, lensAmount = 0.40f)),
+
+    /**
+     * The frosted discs of the call screens (Mute, Keypad, Audio ..., the collapse button): the Convx backdrop blur
+     * of the call background under a white 20 % tint in both themes (a call screen is always dark), a 0.5 dp white
+     * 35 % rim, no dark outer rim and no shadow, white glyphs.
+     */
+    CallControl(
+        GlassEffectConfig(
+            vibrancy = 1f,
+            blurRadius = 10f,
+            lensHeight = 0.35f,
+            lensAmount = 0.40f,
+            surfaceTintColor = Color.White,
+            surfaceOpacity = CallControlTint,
+            highlightColor = Color.White,
+            highlightWidth = 0.5.dp,
+            darkRim = false,
+        ),
+        rimAlpha = CallControlRim,
+    ),
 }
 
 /**
@@ -55,6 +78,18 @@ fun Modifier.rovstiGlass(
     debugTag: String,
     outerShadow: Boolean = true,
 ): Modifier {
+    if (preset == GlassPreset.CallControl) {
+        val real =
+            LocalIosBackdrop.current != null &&
+                isGlassAllowed() &&
+                !LocalGlassSettings.current.reduceTransparency &&
+                isRenderEffectSupported()
+        if (!real) {
+            // The call screen is always dark: the plain translucent white disc, never the page-coloured fallback.
+            if (LocalIosBackdrop.current != null) BackdropDebug.fallback(debugTag)
+            return clip(shape).background(Color.White.copy(alpha = CallControlFallbackFill))
+        }
+    }
     if (LocalIosBackdrop.current == null) {
         val colors = RovstiTheme.colors
         val edge = RovstiTheme.glass.edge
@@ -65,8 +100,18 @@ fun Modifier.rovstiGlass(
                 drawOutline(shape.createOutline(size, layoutDirection, this), edge, style = Stroke(0.5.dp.toPx()))
             }
     }
-    return liquidGlass(config = preset.config, shape = shape, outerShadow = outerShadow, debugTag = debugTag)
+    return liquidGlass(
+        config = preset.config,
+        shape = shape,
+        outerShadow = outerShadow && preset != GlassPreset.CallControl,
+        highlightAlpha = preset.rimAlpha ?: 0.55f,
+        debugTag = debugTag,
+    )
 }
+
+private const val CallControlTint = 0.20f
+private const val CallControlRim = 0.35f
+private const val CallControlFallbackFill = 0.24f
 
 private const val ContentLevelFill = 0.96f
 

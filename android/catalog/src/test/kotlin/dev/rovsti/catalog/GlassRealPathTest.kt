@@ -1,10 +1,14 @@
 package dev.rovsti.catalog
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import dev.rovsti.design.backdrop.BackdropDebug
 import dev.rovsti.testing.ShotTest
 import org.junit.After
@@ -196,5 +200,35 @@ class GlassRealPathTest : ShotTest() {
         compose.onNodeWithTag("composer-field").performClick()
         advance(600)
         assertRealPath("composer", "composer")
+    }
+
+    /** The frosted call discs: with default settings on API 35 (>= 33) they use the backdrop effect, not the fallback. */
+    @Test
+    fun callControlUsesTheBackdropEffect() {
+        composeFrame {
+            dev.rovsti.design.chrome.BackdropScope(
+                baseBg = androidx.compose.ui.graphics.Color.Black,
+                chrome = {
+                    dev.rovsti.design.controls.CallControlButton(onClick = {}, debugTag = "call.control") { glyph ->
+                        androidx.compose.foundation.layout.Box(
+                            androidx.compose.ui.Modifier
+                                .size(28.dp)
+                                .background(glyph),
+                        )
+                    }
+                },
+            ) {
+                androidx.compose.foundation.layout.Box(
+                    androidx.compose.ui.Modifier
+                        .fillMaxSize()
+                        .background(
+                            androidx.compose.ui.graphics
+                                .Color(0xFF3A6EA5),
+                        ),
+                )
+            }
+        }
+        advance(600)
+        assertRealPath("call control", "call.control")
     }
 }

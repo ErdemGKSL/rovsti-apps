@@ -38,6 +38,8 @@ dependencies {
     api(libs.coil.core)
     implementation(libs.coil.compose)
     testImplementation(libs.junit)
+    // TabBarCellsTest uses the ShotTest harness (the :testing module depends on :design main, not on its tests).
+    testImplementation(project(":testing"))
     testImplementation(libs.coroutines.test)
     // StaticRegionTest and NavTransitionFreezeTest compose a real LayerBackdrop under Robolectric.
     testImplementation(platform(libs.compose.bom))

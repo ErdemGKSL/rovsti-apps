@@ -1232,6 +1232,21 @@ round close. E5.9-E5.14 follow in round 14.
 - AC1 Multi-call scenes from `rovsti_core::scene` through the bridge; springs of hold-away, swap, merge.
 - Screenshots: `e5.7-incall-hold-two-calls`, `e5.7-incall-conference`, `e5.7-add-call-sheet`.
 
+**F21 Evidence (round-13 step 2):** `:design` `TabBarCellsTest` (ShotTest harness, `RovstiNavHost` with the Recents tab and a
+`ScreenPage` pushed, light then dark in one test, pixel contrast of each of the four cell label bands; `:design` now has
+`testImplementation(project(":testing"))`). It failed at `ca993e6` (favorites band contrast 0.14 = bar fill only) and passes
+now. Cause, narrowed by bisection (not by the plan's guess): not `fold`/label alpha (both read 1.0), not the glass, the
+puck or the cell draw (the cells did run their draw in the bad frame). Any `ScreenPage` whose draw-phase lambdas
+(`collapse`, `titleAlphaProvider`: TopFadeBlur and bar-scrim alpha, FrostedTopBar title alpha) read the snapshot state
+`titleBlockHeight` that `onSizeChanged` writes in the first layout made the tab bar drop its unselected cells in a later
+frame; a constant, a dummy state or a scroll-only read did not. Those layers sit inside the root's recorded backdrop, so the
+late invalidation re-records the page and the samplers over it mid-frame. Fix: `design/chrome/ScreenChrome.kt`
+`titleBlockHeight` is a plain `IntArray(1)` holder (same pattern as `BackdropFreeze.scrollClockNs`); the scroll value still
+drives the redraw. Not harness-caused (the first composition was always fine and a second one broke only with that read), so
+`ShotTest` is unchanged. Re-recorded goldens opened: `e5.1-settings-dark`, `e5.1-diagnostics-dark`, `e4.15-settings-dark`,
+`e4.15-name-format-dark` show all four labelled cells. Residual: `LargeTitleScaffold.titleHeightPx` has the same shape
+(state written on size, read in draw); not changed here, no golden shows the symptom.
+
 ### E5.8 WhatsApp calls
 - **Owner-reported bug in the GPUI app (2026-11-10), must not come back:** WhatsApp calls could be answered, declined
   and ended, but **no audio flowed either way** (the owner heard nothing and was not heard), while normal calls worked.

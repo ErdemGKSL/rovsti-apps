@@ -346,7 +346,12 @@ fun ScreenPage(
     val chrome = rememberGlassScreenChrome(background = pageColor)
     // Measured, not guessed: the title block's height is the exact distance the page has to travel before the compact
     // title should be fully in.
-    var titleBlockHeight by remember { mutableIntStateOf(1) }
+    // A plain holder, not snapshot state: the draw-phase lambdas below (title alpha, fade alpha, scrim) read it, and a
+    // snapshot read there would re-invalidate every one of those layers when the first layout writes the height. They sit
+    // inside the root's recorded backdrop, so that invalidation re-records the whole page and every glass sampler on top
+    // of it in the middle of the frame (F21: the tab bar's unselected cells dropped out of a later frame).
+    // The scroll value is state and still redraws them; the height only changes with the font scale, which recomposes.
+    val titleBlockHeight = remember { intArrayOf(1) }
 
     ScreenChromeBox(
         title = title,
@@ -354,7 +359,7 @@ fun ScreenPage(
         titleAlphaProvider = {
             // Read ScrollState in draw phase via provider chain: FrostedTopBar invokes this only inside
             // graphicsLayer/derivedStateOf.
-            (scrollState.value / titleBlockHeight.toFloat()).coerceIn(0f, 1f)
+            (scrollState.value / titleBlockHeight[0].toFloat()).coerceIn(0f, 1f)
         },
         pageColor = pageColor,
         chrome = chrome,
@@ -363,7 +368,7 @@ fun ScreenPage(
         showBack = showBack,
         actions = actions,
         // The strip under the bar stays sharp while the large title is on screen, as in ScreenLazyPage.
-        collapse = { (scrollState.value / titleBlockHeight.toFloat()).coerceIn(0f, 1f) },
+        collapse = { (scrollState.value / titleBlockHeight[0].toFloat()).coerceIn(0f, 1f) },
     ) {
         Column(
             modifier =
@@ -373,7 +378,7 @@ fun ScreenPage(
                     .padding(horizontal = horizontalPadding),
             verticalArrangement = verticalArrangement,
         ) {
-            Column(Modifier.onSizeChanged { titleBlockHeight = it.height.coerceAtLeast(1) }) {
+            Column(Modifier.onSizeChanged { titleBlockHeight[0] = it.height.coerceAtLeast(1) }) {
                 Spacer(Modifier.statusBarsPadding())
                 largeTitle()
             }

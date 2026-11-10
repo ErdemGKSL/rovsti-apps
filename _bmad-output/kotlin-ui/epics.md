@@ -1119,6 +1119,17 @@ unchanged (E5.2-E5.7a).
 | E5.6 | Incoming call | R1 | in-progress (round-12 step 7) |
 | E5.7a | In-call: single call | R1 | in-progress (round-12 step 8) |
 | E5.8 | WhatsApp calls | R2 | todo (moved from R1 in round-12) |
+
+> **Recovery note for the next planner (2026-11-10, coordinator):** round-12 step 6 (E5.4 sheets wiring / E5.5
+> Favorites and Contacts tabs) was implemented but stashed as `stash@{0}` "blocked: kotlin-ui r12 S6" (also kept as
+> local branch `wip-r12-s6`). It was blocked only because the old debug check took 40-70 min and the haiku test agents
+> returned before it finished, not because of failing code. The stash also captured another agent's edits that are
+> ALREADY COMMITTED in 5f51e2c (CLAUDE.md, Cargo.toml, build-logic, scripts/*, contacts/core-bridge/phone
+> build.gradle.kts, QrSheetTest.kt): do not re-apply those. Recover only the Phone files (android/phone/src/**,
+> android/phone/screenshots/e5.5-*, phone strings.xml), `android/design/src/main/kotlin/dev/rovsti/design/list/Reorder.kt`,
+> `android/design/build.gradle.kts`, `android/contacts/.../favorites/FavoritesReorder.kt` and
+> `android/testing/.../ComposeActivity.kt`, then run the (now release-only) checks. Phone strings also need values-tr
+> (definition of done item 6).
 | E5.7b | In-call: multi-call, Add call, conference | R2 | todo |
 | E5.9 | Settings | R2 | todo |
 | E5.10 | Statistics | R2 | todo |

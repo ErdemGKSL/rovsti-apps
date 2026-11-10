@@ -1,5 +1,6 @@
 package dev.rovsti.phone.setup
 
+import androidx.lifecycle.viewModelScope
 import dev.rovsti.core.model.phone.ItemState
 import dev.rovsti.core.model.phone.Reading
 import dev.rovsti.core.model.phone.SetupFacts
@@ -11,6 +12,7 @@ import dev.rovsti.platform.system.permissions.SettingsKind
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.job
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -49,16 +51,31 @@ class SetupSheetViewModelTest {
             fullScreenAllowed = true,
             batteryExempt = true,
         )
+    private val created = mutableListOf<SetupSheetViewModel>()
     private var permissions = mutableMapOf<PermissionGroup, PermissionState>()
 
     @Before fun mainDispatcher() = Dispatchers.setMain(Dispatchers.Unconfined)
 
-    @After fun resetMainDispatcher() = Dispatchers.resetMain()
+    @After fun resetMainDispatcher() {
+        // A refresh may still be on its way back to Main from the Rust call; let it finish before Main is reset.
+        runBlocking {
+            withTimeout(TIMEOUT_MS) {
+                created.forEach { vm ->
+                    vm.viewModelScope.coroutineContext.job.children
+                        .forEach { it.join() }
+                }
+            }
+        }
+        Dispatchers.resetMain()
+    }
 
     private fun viewModel(
         facts: FakeFacts,
         memory: SetupMemory = InMemorySetupMemory(),
-    ) = SetupSheetViewModel(host.ops, facts, memory) { permissions[it] ?: PermissionState.NeverAsked }
+    ) = SetupSheetViewModel(host.ops, facts, memory) { permissions[it] ?: PermissionState.NeverAsked }.also {
+        created +=
+            it
+    }
 
     private fun <T> wait(block: suspend () -> T): T = runBlocking { withTimeout(TIMEOUT_MS) { block() } }
 

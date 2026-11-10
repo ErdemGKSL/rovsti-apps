@@ -178,7 +178,7 @@ by `CHANGE_DEBOUNCE_MS`, so a burst is one re-query; `delete(ids)` reads the row
 `dev.rovsti.platform.telephony`: `CallRegistry` (same state machine, same rebuild order), `CallsApi`, `MultiCall` (+ `PendingMachine`,
 `MultiCallFacts`), `AudioPath`, `ProximityController` + `ProximityPolicy`, `CallNotifications`, `IncomingCall` (+ `AnswerOnce`),
 `OngoingCall`, `CallSurface`, `CallEventRing`, `FlipDetector` (+ `FlipRule`), `RebuildCoalescer`, `DialIntents`, `Caps`, `KeypadTone`,
-`VoicePlayer`. Resource: `ic_stat_call` (the notification small icon) now lives in `:platform`.
+`VoicePlayer`. Resources: the per-kind notification glyphs (`ic_notif_*`, replacing `ic_stat_call`) and glass large icons (`ic_notif_large_*`) live in `:platform` (`NotificationKind`).
 
 Seams:
 

@@ -104,6 +104,9 @@ object MessageNotifications {
         return shown
     }
 
+    private val NotificationSpec.kind: NotificationKind
+        get() = if (NotificationSpec.waChat(tag) != null) NotificationKind.WA_MESSAGE else NotificationKind.MESSAGE
+
     private fun build(
         context: Context,
         spec: NotificationSpec,
@@ -119,7 +122,7 @@ object MessageNotifications {
         val builder =
             Notification
                 .Builder(context, PlatformChannels.MESSAGES)
-                .setSmallIcon(NotificationIcon.small(context))
+                .let { NotificationIcon.apply(it, context, spec.kind) }
                 .setCategory(Notification.CATEGORY_MESSAGE)
                 .setStyle(style)
                 .setAutoCancel(true)

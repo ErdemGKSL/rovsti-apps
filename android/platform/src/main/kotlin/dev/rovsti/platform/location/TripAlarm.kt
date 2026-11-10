@@ -19,6 +19,7 @@ import dev.rovsti.bridge.TripService
 import dev.rovsti.platform.Headless
 import dev.rovsti.platform.PlatformEvents
 import dev.rovsti.platform.notify.NotificationIcon
+import dev.rovsti.platform.notify.NotificationKind
 import dev.rovsti.platform.notify.PlatformChannels
 import org.json.JSONException
 import org.json.JSONObject
@@ -391,7 +392,7 @@ object TripAlarm {
         val notification =
             Notification
                 .Builder(context, CHANNEL)
-                .setSmallIcon(NotificationIcon.small(context))
+                .let { NotificationIcon.apply(it, context, NotificationKind.ARRIVAL_ALARM) }
                 .setContentTitle(title)
                 .setContentText(text)
                 .setCategory(Notification.CATEGORY_ALARM)

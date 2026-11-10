@@ -45,6 +45,7 @@ import dev.rovsti.platform.location.tripRestartErrorJson
 import dev.rovsti.platform.location.tripStartIsBackground
 import dev.rovsti.platform.location.tripWatchdogMs
 import dev.rovsti.platform.notify.NotificationIcon
+import dev.rovsti.platform.notify.NotificationKind
 import dev.rovsti.platform.notify.PlatformChannels
 import org.json.JSONObject
 import java.util.concurrent.ExecutorService
@@ -179,7 +180,7 @@ class TripService : Service() {
             NOTIFICATION_ID + 1,
             Notification
                 .Builder(this, PlatformChannels.TRIP_PROBLEM)
-                .setSmallIcon(NotificationIcon.small(this))
+                .let { NotificationIcon.apply(it, this, NotificationKind.TRIP) }
                 .setContentTitle("Stops paused your trip")
                 .setContentText("Tap to resume tracking.")
                 .setCategory(Notification.CATEGORY_ERROR)
@@ -385,7 +386,7 @@ class TripService : Service() {
             )
         return Notification
             .Builder(this, CHANNEL)
-            .setSmallIcon(NotificationIcon.small(this))
+            .let { NotificationIcon.apply(it, this, NotificationKind.TRIP) }
             .setContentTitle(title)
             .setContentText(text)
             .setCategory(Notification.CATEGORY_NAVIGATION)

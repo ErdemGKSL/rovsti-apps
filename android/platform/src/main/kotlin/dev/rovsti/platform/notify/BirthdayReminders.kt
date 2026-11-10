@@ -143,7 +143,7 @@ object BirthdayReminders {
             val notification =
                 Notification
                     .Builder(context, PlatformChannels.BIRTHDAYS)
-                    .setSmallIcon(NotificationIcon.small(context))
+                    .let { NotificationIcon.apply(it, context, NotificationKind.BIRTHDAY) }
                     .setContentTitle(item.title)
                     .setContentText(item.body)
                     .setCategory(Notification.CATEGORY_REMINDER)

@@ -9,8 +9,9 @@ import android.app.PendingIntent
 import android.app.Person
 import android.content.Context
 import android.content.Intent
-import android.graphics.drawable.Icon
 import dev.rovsti.platform.PlatformComponents
+import dev.rovsti.platform.notify.NotificationIcon
+import dev.rovsti.platform.notify.NotificationKind
 import dev.rovsti.platform.notify.PlatformChannels
 
 /** Builds the call notifications. Kotlin only: nothing here touches GPUI (AD-17). */
@@ -99,7 +100,7 @@ object CallNotifications {
         val builder =
             Notification
                 .Builder(context, CHANNEL_INCOMING)
-                .setSmallIcon(Icon.createWithResource(context, dev.rovsti.platform.R.drawable.ic_stat_call))
+                .let { NotificationIcon.apply(it, context, NotificationKind.CALL_INCOMING) }
                 .setStyle(Notification.CallStyle.forIncomingCall(person, decline, answer))
                 .setContentIntent(show)
                 .setCategory(Notification.CATEGORY_CALL)
@@ -113,7 +114,7 @@ object CallNotifications {
             builder.addAction(
                 Notification.Action
                     .Builder(
-                        Icon.createWithResource(context, dev.rovsti.platform.R.drawable.ic_stat_call),
+                        NotificationIcon.small(context, NotificationKind.MESSAGE),
                         "Message",
                         messageIntent(context, call),
                     ).build(),
@@ -135,11 +136,11 @@ object CallNotifications {
         decline: PendingIntent = declineIntent(context, call),
     ): Notification {
         ensureChannels(context)
-        val icon = Icon.createWithResource(context, dev.rovsti.platform.R.drawable.ic_stat_call)
+        val icon = NotificationIcon.small(context, NotificationKind.CALL_INCOMING)
         val builder =
             Notification
                 .Builder(context, CHANNEL_INCOMING)
-                .setSmallIcon(icon)
+                .let { NotificationIcon.apply(it, context, NotificationKind.CALL_INCOMING) }
                 .setContentTitle(call.title)
                 .setContentText(call.subtitle ?: "Incoming call")
                 .setContentIntent(show)
@@ -234,7 +235,7 @@ object CallNotifications {
         val builder =
             Notification
                 .Builder(context, CHANNEL_ONGOING)
-                .setSmallIcon(Icon.createWithResource(context, dev.rovsti.platform.R.drawable.ic_stat_call))
+                .let { NotificationIcon.apply(it, context, NotificationKind.CALL_ONGOING) }
                 .setStyle(Notification.CallStyle.forOngoingCall(person, end))
                 .setContentIntent(open)
                 .setCategory(Notification.CATEGORY_CALL)

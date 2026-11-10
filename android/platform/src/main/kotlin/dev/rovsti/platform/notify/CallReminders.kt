@@ -144,7 +144,7 @@ object CallReminders {
             val notification =
                 Notification
                     .Builder(context, PlatformChannels.CALL_REMINDERS)
-                    .setSmallIcon(NotificationIcon.small(context))
+                    .let { NotificationIcon.apply(it, context, NotificationKind.REMINDER) }
                     .setContentTitle(item.title)
                     .setContentText(item.body)
                     .setCategory(Notification.CATEGORY_REMINDER)

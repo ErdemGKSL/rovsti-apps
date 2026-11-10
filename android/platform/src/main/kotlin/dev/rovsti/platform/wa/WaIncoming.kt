@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.drawable.Icon
 import android.os.Build
 import dev.rovsti.platform.notify.NotificationIcon
+import dev.rovsti.platform.notify.NotificationKind
 import dev.rovsti.platform.notify.PlatformChannels
 import org.json.JSONObject
 
@@ -119,7 +120,7 @@ object WaIncoming {
             val builder =
                 Notification
                     .Builder(context, CHANNEL)
-                    .setSmallIcon(NotificationIcon.small(context))
+                    .let { NotificationIcon.apply(it, context, NotificationKind.WA_CALL) }
                     .setCategory(Notification.CATEGORY_CALL)
                     .setOngoing(true)
                     // A cold process never learns that the caller hung up: do not leave an ongoing notice behind.
@@ -164,7 +165,7 @@ object WaIncoming {
             val notification =
                 Notification
                     .Builder(context, MISSED_CHANNEL)
-                    .setSmallIcon(NotificationIcon.small(context))
+                    .let { NotificationIcon.apply(it, context, NotificationKind.CALL_MISSED) }
                     .setCategory(Notification.CATEGORY_MISSED_CALL)
                     .setContentTitle(notice.title)
                     .setContentText("Missed WhatsApp call")
